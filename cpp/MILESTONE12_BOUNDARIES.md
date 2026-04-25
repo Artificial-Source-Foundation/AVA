@@ -9,13 +9,17 @@ This note records a bounded **FTXUI TUI parity validation + cleanup pass** on to
    - clearer tool-result log formatting (`tool_result[call_id]: ok|error` when call id is available)
    - improved error status readability (`Run error: <message>` when present)
 2. Added focused `AppState` coverage for M11 residual edge behavior:
-   - empty/whitespace submission rejection
-   - backspace on empty buffer safety
-   - page-up/page-down clamping behavior
-   - multiline submission + trailing newline trim behavior
-   - expanded runtime event mapping assertions beyond completion-only coverage
-3. Applied one low-risk runtime/TUI seam cleanup by moving `post_custom_event()` out of the state lock in the TUI runtime callback to reduce unnecessary lock coupling.
-4. Updated the `ava_tui` CLI description string to Milestone 12 wording.
+    - empty/whitespace submission rejection
+    - backspace on empty buffer safety
+    - UTF-8 codepoint-safe backspace behavior
+    - page-up/page-down clamping behavior
+    - multiline submission + trailing newline trim behavior
+    - expanded runtime event mapping assertions beyond completion-only coverage
+3. Tightened TUI observer-state bounds and command-line diagnostics:
+   - active/terminal child-run projection remains capped to the bounded TUI view size
+   - CLI parse failures preserve the underlying CLI11 error text before help output
+4. Applied one low-risk runtime/TUI seam cleanup by moving `post_custom_event()` out of the state lock in the TUI runtime callback to reduce unnecessary lock coupling.
+5. Updated the `ava_tui` CLI description string to version-agnostic C++ TUI wording while keeping this Milestone 12 note as the implementation record.
 
 ## Explicitly Deferred (still out of Milestone 12 scope)
 

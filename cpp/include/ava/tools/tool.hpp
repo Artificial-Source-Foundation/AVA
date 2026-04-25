@@ -57,6 +57,7 @@ class Middleware {
  public:
   virtual ~Middleware() = default;
   virtual void before(const ava::types::ToolCall& tool_call) const;
+  virtual void before_with_source(const ava::types::ToolCall& tool_call, const ToolSource& source) const;
   [[nodiscard]] virtual ava::types::ToolResult after(
       const ava::types::ToolCall& tool_call,
       const ava::types::ToolResult& result

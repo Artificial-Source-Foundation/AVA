@@ -32,7 +32,7 @@ This note records what is implemented for the C++ headless CLI proof lane and wh
    - default path remains non-hanging
    - mutating tools require approval and fail closed when no bridge exists
    - `--auto-approve` wires a scoped allow-all approval bridge for the M9 proof lane
-8. Session updates and run metadata are persisted back through `ava_session`.
+8. Session updates and run metadata are persisted back through `ava_session`; a successful rerun clears stale `headless.last_run.error` metadata from earlier failed runs in the same session.
 9. Focused C++ app tests were added for CLI parsing, session startup resolution, metadata precedence, and NDJSON tag spelling.
 
 ## Explicitly Deferred

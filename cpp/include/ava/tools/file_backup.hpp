@@ -13,6 +13,7 @@ class FileBackupSession {
   void backup_file_before_edit(const std::filesystem::path& file_path) const;
 
  private:
+  std::filesystem::path workspace_root_;
   std::filesystem::path backup_root_;
   std::string session_id_;
 };

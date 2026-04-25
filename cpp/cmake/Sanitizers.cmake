@@ -1,4 +1,8 @@
 function(ava_enable_sanitizers target_name)
+  if(NOT TARGET ${target_name})
+    message(FATAL_ERROR "ava_enable_sanitizers called with unknown target: ${target_name}")
+  endif()
+
   if(NOT AVA_ENABLE_SANITIZERS)
     return()
   endif()

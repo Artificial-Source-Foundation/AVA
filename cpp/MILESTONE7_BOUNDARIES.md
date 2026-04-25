@@ -25,6 +25,7 @@ This note records what is implemented for the C++ `ava_agent` runtime-core slice
    - provider turn execution through `ava_llm::Provider`
    - tool execution through `ava_tools::ToolRegistry`
    - session transcript mutation using existing `ava_types::SessionRecord`/`SessionMessage`
+   - active-branch prompt construction and append parenting from `SessionRecord::branch_head` when present
    - completion on assistant response, max-turn limit, provider/runtime error, or stuck condition
 7. Focused Catch2 coverage for queue behavior, response helpers, tool-call loop execution, and stuck stop behavior.
 

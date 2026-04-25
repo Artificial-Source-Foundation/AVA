@@ -76,6 +76,7 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     // Composer
     frame.render_widget(Clear, split.composer);
     if approval_active {
+        state.permission.preview_content_width = split.composer.width.saturating_sub(2) as usize;
         // Render the approval dock in place of the composer
         if let Some(request) = state.permission.queue.front() {
             let dock_bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));

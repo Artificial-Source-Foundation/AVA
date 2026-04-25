@@ -180,14 +180,6 @@ void bind_optional_text_or_throw(sqlite3_stmt* stmt, int index, const std::optio
   return nlohmann::json::array();
 }
 
-[[nodiscard]] nlohmann::json column_json_value(sqlite3_stmt* stmt, int index, nlohmann::json fallback) {
-  try {
-    return nlohmann::json::parse(column_text(stmt, index));
-  } catch(const std::exception&) {
-    return fallback;
-  }
-}
-
 [[nodiscard]] nlohmann::json column_json_object(sqlite3_stmt* stmt, int index) {
   try {
     const auto parsed = nlohmann::json::parse(column_text(stmt, index));
@@ -248,8 +240,12 @@ void bind_optional_text_or_throw(sqlite3_stmt* stmt, int index, const std::optio
 [[nodiscard]] std::optional<std::string> message_session_id(sqlite3* db, const std::string& message_id) {
   auto stmt = prepare_or_throw(db, "SELECT session_id FROM messages WHERE id = ?1");
   bind_text_or_throw(stmt.get(), 1, message_id);
-  if(sqlite3_step(stmt.get()) == SQLITE_ROW) {
+  const auto rc = sqlite3_step(stmt.get());
+  if(rc == SQLITE_ROW) {
     return column_text(stmt.get(), 0);
+  }
+  if(rc != SQLITE_DONE) {
+    throw std::runtime_error("SQLite message owner query failed: " + std::string(sqlite3_errmsg(db)));
   }
   return std::nullopt;
 }
@@ -258,8 +254,12 @@ void bind_optional_text_or_throw(sqlite3_stmt* stmt, int index, const std::optio
   auto stmt = prepare_or_throw(db, "SELECT parent_id FROM messages WHERE session_id = ?1 AND id = ?2");
   bind_text_or_throw(stmt.get(), 1, session_id);
   bind_text_or_throw(stmt.get(), 2, message_id);
-  if(sqlite3_step(stmt.get()) == SQLITE_ROW) {
+  const auto rc = sqlite3_step(stmt.get());
+  if(rc == SQLITE_ROW) {
     return column_optional_text(stmt.get(), 0);
+  }
+  if(rc != SQLITE_DONE) {
+    throw std::runtime_error("SQLite message parent query failed: " + std::string(sqlite3_errmsg(db)));
   }
   return std::nullopt;
 }
@@ -379,6 +379,23 @@ void step_done_or_throw(sqlite3_stmt* stmt, sqlite3* db) {
   }
 }
 
+void check_row_loop_finished_or_throw(int rc, sqlite3* db) {
+  if(rc != SQLITE_DONE) {
+    throw std::runtime_error("SQLite row loop terminated with error: " + std::string(sqlite3_errmsg(db)));
+  }
+}
+
+[[nodiscard]] bool row_exists_or_throw(sqlite3_stmt* stmt, sqlite3* db) {
+  const auto rc = sqlite3_step(stmt);
+  if(rc == SQLITE_ROW) {
+    return true;
+  }
+  if(rc == SQLITE_DONE) {
+    return false;
+  }
+  throw std::runtime_error("SQLite existence query failed: " + std::string(sqlite3_errmsg(db)));
+}
+
 [[nodiscard]] std::string scalar_text(sqlite3* db, const char* sql) {
   auto stmt = prepare_or_throw(db, sql);
   if(sqlite3_step(stmt.get()) != SQLITE_ROW) {
@@ -491,12 +508,14 @@ void SessionManager::save(const ava::types::SessionRecord& session) {
     bind_text_or_throw(list_message_ids.get(), 1, session.id);
 
     std::vector<std::string> delete_ids;
-    while(sqlite3_step(list_message_ids.get()) == SQLITE_ROW) {
+    int list_rc = SQLITE_OK;
+    while((list_rc = sqlite3_step(list_message_ids.get())) == SQLITE_ROW) {
       const auto id = column_text(list_message_ids.get(), 0);
       if(!retain_ids.contains(id)) {
         delete_ids.push_back(id);
       }
     }
+    check_row_loop_finished_or_throw(list_rc, db.get());
 
     auto delete_message = prepare_or_throw(db.get(), "DELETE FROM messages WHERE id = ?1");
     for(const auto& id : delete_ids) {
@@ -541,13 +560,22 @@ std::vector<ava::types::SessionRecord> SessionManager::list_recent(std::size_t l
   }
 
   std::vector<ava::types::SessionRecord> sessions;
-  while(sqlite3_step(stmt.get()) == SQLITE_ROW) {
+  int rc = SQLITE_OK;
+  while((rc = sqlite3_step(stmt.get())) == SQLITE_ROW) {
     const auto id = column_text(stmt.get(), 0);
     if(auto loaded = get_with_db(db.get(), id); loaded.has_value()) {
       sessions.push_back(std::move(*loaded));
     }
   }
+  check_row_loop_finished_or_throw(rc, db.get());
   return sessions;
+}
+
+void SessionManager::remove(const std::string& id) const {
+  auto db = open_db(db_path_);
+  auto stmt = prepare_or_throw(db.get(), "DELETE FROM sessions WHERE id = ?1");
+  bind_text_or_throw(stmt.get(), 1, id);
+  step_done_or_throw(stmt.get(), db.get());
 }
 
 void SessionManager::add_message(const std::string& session_id, const ava::types::SessionMessage& message) {
@@ -570,11 +598,13 @@ void SessionManager::add_message(const std::string& session_id, const ava::types
     if(!message.parent_id.has_value()) {
       auto root_stmt = prepare_or_throw(db.get(), "SELECT id FROM messages WHERE session_id = ?1 AND parent_id IS NULL");
       bind_text_or_throw(root_stmt.get(), 1, session_id);
-      while(sqlite3_step(root_stmt.get()) == SQLITE_ROW) {
+      int root_rc = SQLITE_OK;
+      while((root_rc = sqlite3_step(root_stmt.get())) == SQLITE_ROW) {
         if(column_text(root_stmt.get(), 0) != message.id) {
           throw std::invalid_argument("session already has a root message; new message must specify a parent");
         }
       }
+      check_row_loop_finished_or_throw(root_rc, db.get());
     }
 
     auto stmt = prepare_or_throw(
@@ -649,10 +679,12 @@ ava::types::ConversationTree SessionManager::get_tree(const std::string& session
   bind_text_or_throw(messages_stmt.get(), 1, session_id);
 
   ava::types::ConversationTree tree;
-  while(sqlite3_step(messages_stmt.get()) == SQLITE_ROW) {
+  int messages_rc = SQLITE_OK;
+  while((messages_rc = sqlite3_step(messages_stmt.get())) == SQLITE_ROW) {
     const auto message = row_to_message(messages_stmt.get());
     tree.nodes.emplace(message.id, ava::types::TreeNode{.message = message, .children = {}});
   }
+  check_row_loop_finished_or_throw(messages_rc, db.get());
 
   std::size_t root_count = 0;
   for(auto& [id, node] : tree.nodes) {
@@ -671,6 +703,9 @@ ava::types::ConversationTree SessionManager::get_tree(const std::string& session
 
   if(root_count > 1) {
     throw std::runtime_error("session tree has multiple roots: " + session_id);
+  }
+  if(!tree.nodes.empty() && root_count == 0) {
+    throw std::runtime_error("session tree has no root: " + session_id);
   }
 
   for(auto& [_, node] : tree.nodes) {
@@ -877,9 +912,11 @@ std::optional<ava::types::SessionRecord> SessionManager::get_with_db(void* db_ra
       "SELECT id, role, content, tool_calls, tool_results, tool_call_id, images, timestamp, parent_id, agent_visible, user_visible, original_content, structured_content, metadata FROM messages WHERE session_id = ?1 ORDER BY timestamp ASC, id ASC"
   );
   bind_text_or_throw(messages_stmt.get(), 1, id);
-  while(sqlite3_step(messages_stmt.get()) == SQLITE_ROW) {
+  int messages_rc = SQLITE_OK;
+  while((messages_rc = sqlite3_step(messages_stmt.get())) == SQLITE_ROW) {
     session.messages.push_back(row_to_message(messages_stmt.get()));
   }
+  check_row_loop_finished_or_throw(messages_rc, db);
 
   if(session.branch_head.has_value()) {
     const auto branch_head = *session.branch_head;
@@ -898,7 +935,7 @@ bool SessionManager::session_exists(void* db_raw, const std::string& session_id)
   auto* db = static_cast<sqlite3*>(db_raw);
   auto stmt = prepare_or_throw(db, "SELECT 1 FROM sessions WHERE id = ?1");
   bind_text_or_throw(stmt.get(), 1, session_id);
-  return sqlite3_step(stmt.get()) == SQLITE_ROW;
+  return row_exists_or_throw(stmt.get(), db);
 }
 
 bool SessionManager::message_exists(void* db_raw, const std::string& session_id, const std::string& message_id) const {
@@ -909,7 +946,7 @@ bool SessionManager::message_exists(void* db_raw, const std::string& session_id,
   );
   bind_text_or_throw(stmt.get(), 1, session_id);
   bind_text_or_throw(stmt.get(), 2, message_id);
-  return sqlite3_step(stmt.get()) == SQLITE_ROW;
+  return row_exists_or_throw(stmt.get(), db);
 }
 
 std::string SessionManager::generate_id() {
@@ -917,9 +954,9 @@ std::string SessionManager::generate_id() {
   static constexpr char kHex[] = "0123456789abcdef";
 
   std::string id(36, '0');
-  const int dash_positions[] = {8, 13, 18, 23};
-  for(int i = 0; i < 36; ++i) {
-    const auto is_dash = std::any_of(std::begin(dash_positions), std::end(dash_positions), [&](int pos) {
+  const std::size_t dash_positions[] = {8, 13, 18, 23};
+  for(std::size_t i = 0; i < id.size(); ++i) {
+    const auto is_dash = std::any_of(std::begin(dash_positions), std::end(dash_positions), [&](std::size_t pos) {
       return i == pos;
     });
     if(is_dash) {

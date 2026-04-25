@@ -30,6 +30,7 @@ This note records a bounded **shared runtime composition + native blocking subag
    - shared runtime composition behavior
    - native blocking child-session execution path
    - depth-limit enforcement
+6. Follow-up quality tightening keeps the read-only specialist tool allowlist centralized, distinguishes explicitly disabled subagents from subagents disabled by default configuration, and adds regression coverage for explicit session resume, legacy `metadata.headless.*` fallback, and the default `TaskSpawner::spawn(...)` delegation path.
 
 ## Explicitly Deferred (still out of Milestone 13 scope)
 

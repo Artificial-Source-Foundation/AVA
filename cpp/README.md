@@ -1,6 +1,6 @@
-# C++ Workspace Foundation (Milestone 16)
+# C++ Workspace Foundation
 
-This `cpp/` tree is the **Milestone 14 foundational-runtime + interactive control-plane baseline slice** for the Rust-to-C++ backend/TUI migration plan.
+This `cpp/` tree is the scoped C++ backend/TUI migration workspace for the Rust-to-C++ backend/TUI migration plan.
 
 It remains intentionally scoped and honest:
 
@@ -85,7 +85,9 @@ Tests:
     - Heuristic token/cost helpers.
     - Provider factory plumbing with explicit deferred-provider error surfacing.
     - Real `MockProvider` implementation.
-     - One real production provider implementation for this milestone: `OpenAI` (blocking HTTP + SSE chunk collection via CPR when enabled).
+     - Two scoped production providers in the current milestone lane:
+       - `OpenAI` (blocking HTTP + SSE chunk collection via CPR when enabled).
+       - `Anthropic` (blocking Messages API generation when `AVA_WITH_CPR=ON` + non-streaming response parsing; default no-CPR builds fail transport explicitly, and streaming remains explicitly deferred in this slice).
 
 7. **`ava_tools` (scoped Milestone 6 core-tool-system slice)**
      - Real tool registry with tool interface, tool metadata/schema exposure, tier/source tracking, middleware chain, and call-id normalization.
@@ -133,6 +135,7 @@ Notes:
 
 - Optional dependency reporting in `ava/core/build_config.hpp` reflects **resolved linkage** (found + linked), not just requested options.
 - Catch2 discovery/fetch is only evaluated when `AVA_BUILD_TESTS=ON`.
+- SQLite is intentionally treated as a system dependency for the active session-persistence slice. On Linux, install `libsqlite3-dev` or the distro equivalent before configuring the C++ workspace.
 
 10. **`ava_tui` (scoped Milestone 11 interactive slice + Milestone 12 bounded cleanup + Milestone 16 parity-basics seams)**
        - Real `ava_tui` executable under `cpp/apps/ava_tui/` built on FTXUI when linked.
@@ -156,6 +159,8 @@ ctest --preset cpp-debug --output-on-failure
 ```
 
 From the repository root, the equivalent helper commands are `just cpp-presets`, `just cpp-configure`, `just cpp-build`, and `just cpp-test`. Those helpers route through `scripts/dev/ensure-cmake.sh`, which uses an existing CMake 3.28+ or bootstraps the pinned CMake used by CI.
+
+Run the same lane with `cpp-release` before considering build-system milestone changes complete. Use `cpp-werror` to validate `AVA_ENABLE_WARNINGS_AS_ERRORS=ON`, and `cpp-sanitizer` for the ASan/UBSan debug lane on GCC/Clang hosts.
 
 Manual lane:
 

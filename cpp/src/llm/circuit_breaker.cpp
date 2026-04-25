@@ -17,7 +17,8 @@ bool CircuitBreaker::allow_request() {
     case State::Open: {
       std::scoped_lock lock(last_failure_mutex_);
       if(!last_failure_.has_value()) {
-        return true;
+        State expected = State::Open;
+        return state_.compare_exchange_strong(expected, State::HalfOpen, std::memory_order_acq_rel);
       }
       if(std::chrono::steady_clock::now() - *last_failure_ >= cooldown_) {
         State expected = State::Open;

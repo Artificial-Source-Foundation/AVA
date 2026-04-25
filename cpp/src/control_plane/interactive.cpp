@@ -1,6 +1,7 @@
 #include "ava/control_plane/interactive.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 
 namespace ava::control_plane {
 
@@ -13,7 +14,7 @@ std::string_view interactive_request_kind_to_string(InteractiveRequestKind kind)
     case InteractiveRequestKind::Plan:
       return "plan";
   }
-  return "approval";
+  throw std::invalid_argument("unknown interactive request kind");
 }
 
 std::string_view interactive_request_state_to_string(InteractiveRequestState state) {
@@ -27,7 +28,7 @@ std::string_view interactive_request_state_to_string(InteractiveRequestState sta
     case InteractiveRequestState::TimedOut:
       return "timeout";
   }
-  return "pending";
+  throw std::invalid_argument("unknown interactive request state");
 }
 
 InteractiveRequestStore::InteractiveRequestStore(InteractiveRequestKind kind) : kind_(kind) {}
@@ -40,9 +41,15 @@ InteractiveRequestHandle InteractiveRequestStore::register_request(std::optional
       .state = InteractiveRequestState::Pending,
       .run_id = std::move(run_id),
   };
-  pending_order_.push_back(handle.request_id);
-  pending_by_id_[handle.request_id] = handle;
-  return handle;
+  const auto emplaced = pending_by_id_.emplace(handle.request_id, handle);
+  const auto it = emplaced.first;
+  try {
+    pending_order_.push_back(it->first);
+  } catch(...) {
+    pending_by_id_.erase(it);
+    throw;
+  }
+  return it->second;
 }
 
 std::optional<InteractiveRequestHandle> InteractiveRequestStore::resolve(const std::string& request_id) {

@@ -21,6 +21,12 @@ This note records a deliberately narrow Milestone 16 slice on top of Milestone 1
    - rendered interactive pending request summary in TUI status area
 6. Added focused tests primarily in `ava_tui_state` coverage for the above seams.
 
+## Follow-up green-fix notes
+
+1. The inline interactive dock now consumes Backspace for approval/plan docks instead of letting it fall through to the hidden composer; question docks still use Backspace for answer editing and can accept `q` as answer text instead of treating it as run cancellation.
+2. Accepted adapter-action results without a terminal request now defensively clear pending interactive visibility so the UI cannot hide an unresolved stale request.
+3. Focused TUI state coverage now includes unknown slash commands, `/clear` interactive-state reset, empty message-navigation status, streamed assistant-delta newline splitting, empty request-id filtering, stale interactive metadata cleanup, and accepted-without-terminal status handling. M18 later tightened the ownership boundary so accepted adapter results do not clear backend-owned request visibility optimistically.
+
 ## Explicitly Deferred (still out of this M16 pass)
 
 1. Full FTXUI modal UX for approval/question/plan resolution.

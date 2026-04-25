@@ -1,11 +1,17 @@
 #include "events.hpp"
 
 #include <iostream>
+#include <optional>
+#include <string>
 
 #include "ava/control_plane/events.hpp"
 
 namespace ava::app {
 namespace {
+
+[[nodiscard]] bool has_text(const std::optional<std::string>& value) {
+  return value.has_value() && value->find_first_not_of(" \t\r\n") != std::string::npos;
+}
 
 [[nodiscard]] const char* completion_reason_to_string(ava::agent::AgentCompletionReason reason) {
   switch(reason) {
@@ -21,6 +27,22 @@ namespace {
       return "error";
   }
   return "error";
+}
+
+[[nodiscard]] std::optional<std::string> missing_subagent_complete_field(const ava::agent::AgentEvent& event) {
+  if(!has_text(event.run_id)) {
+    return "run_id";
+  }
+  if(!has_text(event.subagent_call_id)) {
+    return "call_id";
+  }
+  if(!has_text(event.subagent_session_id)) {
+    return "session_id";
+  }
+  if(!has_text(event.subagent_description)) {
+    return "description";
+  }
+  return std::nullopt;
 }
 
 }  // namespace
@@ -57,6 +79,29 @@ nlohmann::json headless_event_to_ndjson(const ava::agent::AgentEvent& event) {
         json["call_id"] = event.tool_result->call_id;
         json["content"] = event.tool_result->content;
         json["is_error"] = event.tool_result->is_error;
+      }
+      return json;
+    }
+    case ava::agent::AgentEventKind::SubagentComplete: {
+      if(const auto missing = missing_subagent_complete_field(event); missing.has_value()) {
+        nlohmann::json error = nlohmann::json{{"type",
+                                               std::string(ava::control_plane::canonical_event_kind_to_type_tag(
+                                                   ava::control_plane::CanonicalEventKind::Error
+                                               ))},
+                                              {"run_id", has_text(event.run_id) ? *event.run_id : std::string{"unknown"}},
+                                              {"message",
+                                               "malformed subagent_complete event: missing required canonical field: " +
+                                                   *missing}};
+        return error;
+      }
+
+      nlohmann::json json = with_run_id(nlohmann::json{{"type", std::string(ava::control_plane::canonical_event_kind_to_type_tag(
+                                              ava::control_plane::CanonicalEventKind::SubagentComplete))}});
+      json["call_id"] = *event.subagent_call_id;
+      json["session_id"] = *event.subagent_session_id;
+      json["description"] = *event.subagent_description;
+      if(event.subagent_message_count.has_value()) {
+        json["message_count"] = *event.subagent_message_count;
       }
       return json;
     }
@@ -109,6 +154,13 @@ void print_headless_event_text(const ava::agent::AgentEvent& event) {
     case ava::agent::AgentEventKind::ToolResult:
       if(event.tool_result.has_value()) {
         std::cout << "[tool_result] " << (event.tool_result->is_error ? "error" : "ok") << "\n";
+      }
+      return;
+    case ava::agent::AgentEventKind::SubagentComplete:
+      if(event.subagent_description.has_value()) {
+        std::cout << "[subagent_complete] " << *event.subagent_description << "\n";
+      } else {
+        std::cout << "[subagent_complete]\n";
       }
       return;
     case ava::agent::AgentEventKind::Completion:

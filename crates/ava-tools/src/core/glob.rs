@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -62,12 +62,25 @@ impl Tool for GlobTool {
         tracing::debug!(tool = "glob", %pattern, base = %base, "executing glob tool");
 
         let base_path = crate::core::path_guard::enforce_workspace_path(base, "glob")?;
+        if Path::new(pattern).is_absolute() {
+            return Err(AvaError::PermissionDenied(
+                "glob pattern must be relative".to_string(),
+            ));
+        }
+        if pattern.split('/').any(|part| part == "..") {
+            return Err(AvaError::PermissionDenied(
+                "glob pattern cannot contain parent-directory traversal".to_string(),
+            ));
+        }
 
         let query = base_path.join(pattern).to_string_lossy().to_string();
 
         let mut matches: Vec<PathBuf> = Vec::new();
         for entry in glob::glob(&query).map_err(|e| AvaError::ToolError(e.to_string()))? {
             let path = entry.map_err(|e| AvaError::ToolError(e.to_string()))?;
+            if crate::core::path_guard::is_backup_history_path(&path) {
+                continue;
+            }
             matches.push(path);
         }
 

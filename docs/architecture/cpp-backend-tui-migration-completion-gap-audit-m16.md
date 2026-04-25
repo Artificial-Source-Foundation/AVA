@@ -2,7 +2,7 @@
 title: "C++ Backend/TUI Migration Completion Gap Audit (Post-M16)"
 description: "Planning-only audit of remaining backend/TUI migration completion gaps after C++ Milestone 16."
 order: 13
-updated: "2026-04-23"
+updated: "2026-04-24"
 ---
 
 # C++ Backend/TUI Migration Completion Gap Audit (Post-M16)
@@ -18,14 +18,18 @@ Primary post-M16 boundary sources:
 1. `cpp/MILESTONE14_BOUNDARIES.md`
 2. `cpp/MILESTONE15_BOUNDARIES.md`
 3. `cpp/MILESTONE16_BOUNDARIES.md`
+4. `cpp/MILESTONE17_BOUNDARIES.md`
+5. `cpp/MILESTONE18_BOUNDARIES.md`
+6. `cpp/MILESTONE19_BOUNDARIES.md`
+7. `cpp/MILESTONE20_BOUNDARIES.md`
 
 Carry-forward sources referenced by this audit where applicable:
 
-4. `cpp/MILESTONE4_BOUNDARIES.md`
-5. `cpp/MILESTONE5_BOUNDARIES.md`
-6. `cpp/MILESTONE6_BOUNDARIES.md`
-7. `cpp/MILESTONE13_BOUNDARIES.md`
-8. `docs/architecture/cpp-backend-tui-migration-plan-m1.md`
+5. `cpp/MILESTONE4_BOUNDARIES.md`
+6. `cpp/MILESTONE5_BOUNDARIES.md`
+7. `cpp/MILESTONE6_BOUNDARIES.md`
+8. `cpp/MILESTONE13_BOUNDARIES.md`
+9. `docs/architecture/cpp-backend-tui-migration-plan-m1.md`
 
 ## Scope and Non-Goals
 
@@ -61,13 +65,15 @@ Non-goals:
 
 | Subsystem | Bucket | Current baseline | Remaining gap | Provenance | Priority | Evidence / test target |
 |---|---|---|---|---|---|---|
-| Interactive lifecycle (`approval`/`question`/`plan`) | completion-critical | Request-store + orchestration bridge + `run_id` correlation are implemented | Close minimal adapter-driven terminal-state flows (`pending -> resolved/cancelled/timeout`) without moving ownership into TUI. **Done when:** approval/question/plan can each enter `pending` and settle to `resolved`/`cancelled`/`timeout` with stable `run_id` + `request_id` correlation and idempotent terminal-state handling. | M1 freeze interactive semantics + M14/M15/M16 boundary docs | RP-1 | `interactive request store tracks pending and terminal lifecycle`; `interactive bridge tracks approval/question/plan request lifecycle`; `interactive bridge terminal cancelled/timedout outcomes are fail-closed` |
-| TUI workflow parity (core operator flow) | completion-critical | Slash-command/history/navigation/status/pending-summary seams are implemented | Add narrow in-TUI interactive actions and deterministic state/event transitions (not full widget/visual parity). **Done when:** existing focused `ava_tui_tests` state/event coverage for submit/slash/history/navigation/status + pending-request visibility passes, and the future adapter-action harness for in-TUI approve/reject/answer/accept-plan actions is added and passing before RP-2 can close. | M1 plan Phase 4 + M16 deferred notes | RP-2 | `tui state slash commands provide help/clear/model and unsupported compact handling`; `tui state keeps input history and restores draft with up/down`; `tui state reports message navigation status and supports top/bottom jumps`; `tui state tracks adapter-facing interactive request visibility and clearing` |
-| Runtime scheduling/cancellation semantics | completion-critical | Foreground cooperative cancellation + streaming delta seams are wired | Define minimum background arbitration/watchdog semantics needed for completion claim. **Done when:** existing cancellation/run-lease coverage (`agent runtime emits streaming assistant deltas with run_id`; `agent runtime exits cooperatively when cancelled during streaming`; `agent runtime cancels before tool execution after streamed assistant text`; `run controller issues unique run leases and cooperative cancellation state`) passes, and future targeted child-run cancellation + watchdog/arbitration harness coverage is added and passing before RP-3 can close. | M14/M15 deferred background/watchdog + async notes | RP-3 | `agent runtime emits streaming assistant deltas with run_id`; `agent runtime exits cooperatively when cancelled during streaming`; `agent runtime cancels before tool execution after streamed assistant text`; `run controller issues unique run leases and cooperative cancellation state` |
-| Orchestration/subagent lifecycle controls | completion-critical | Native blocking child-run baseline with depth/spawn-budget and metadata exists | Add externally addressable child-run cancellation/visibility seam (narrow scope). **Done when:** parent context can list active child runs, request child cancellation through orchestration-owned APIs, and surface deterministic child terminal summary metadata/events back to the parent flow, with RP-3 closure still requiring the existing cancellation/run-lease coverage plus future targeted child-run cancellation + watchdog/arbitration harness coverage to pass. | M13 deferred async/background subagent ownership + M15 child-run cancel deferral | RP-3 | `native blocking task spawner runs child sessions`; `native blocking task spawner enforces spawn budget`; `native blocking task spawner threads interactive resolvers into child composition`; `ndjson event carries run_id and streaming delta payload` |
-| Tool/runtime extension breadth (MCP/plugin/optional surfaces) | deferred inventory | Core local tool stack + permission seam are active | Keep explicit inventory/closure buckets; do not treat MCP/plugin/web-browser breadth as completion-critical by default | M1 out-of-scope + M6/M13/M14/M15 deferred MCP/plugin notes | RP-4A | `default tools registration includes milestone 6 core set`; `read/write/edit reject symlink escapes outside workspace`; `git and git_read execute read-only git commands` + deferred MCP/plugin/tool-extension inventory checklist |
-| Provider/auth/config long-tail breadth | deferred inventory | Foundational config/session + one production provider path are active | Keep keychain/OAuth/device/browser flows, YAML/TOML breadth, and long-tail provider parity in deferred inventory unless scope is promoted | M1 out-of-scope + M4/M5 deferred notes | RP-4B | `credential env overrides take precedence`; `credentials and trust stores use owner-only permissions on posix`; `factory selects openai and stubs deferred providers`; `native blocking task spawner threads credentials override into child composition` + deferred provider/auth/config inventory checklist |
+| Interactive lifecycle (`approval`/`question`/`plan`) | completion-critical | Request-store + orchestration bridge + `run_id` correlation are implemented; M17 adds explicit stale/non-existent request-store rejection coverage and M18 adds adapter-action evidence without moving lifecycle ownership into TUI | Closed for scoped backend/headless/TUI completion. Full modal/widget parity remains deferred. | M1 freeze interactive semantics + M14/M15/M16/M17/M18 boundary docs | RP-1 | `interactive request store tracks pending and terminal lifecycle`; `interactive request store rejects stale and non-existent requests`; `interactive bridge tracks approval/question/plan request lifecycle`; `interactive bridge terminal cancelled/timedout outcomes are fail-closed`; M18 adapter-action filters |
+| TUI workflow parity (core operator flow) | completion-critical | Slash-command/history/navigation/status/pending-summary seams are implemented; M18 adds request-id-bearing approve/reject/answer/accept-plan/cancel-question/reject-plan adapter-action evidence that settles through `InteractiveBridge` while `AppState` remains display-only; M26 adds a bounded inline approval/question/plan dock UX over the same adapter seam with minimal payload previews, cancellation-aware blocking resolvers, and disabled approval for truncated tool payloads | Closed for scoped backend/headless/TUI completion plus the M26 operator-flow increment. Full Rust modal/widget parity and polished request-payload rendering remain deferred. | M1 plan Phase 4 + M16/M18/M26 boundary notes | RP-2 | `tui state slash commands provide help/clear/model and unsupported compact handling`; `tui state keeps input history and restores draft with up/down`; `tui state reports message navigation status and supports top/bottom jumps`; `tui state tracks adapter-facing interactive request visibility and clearing`; `tui state opens interactive dock for pending requests by priority`; `tui state ignores terminal interactive handles and renders request details`; `tui state builds dock actions for approval question and plan`; `tui state applies dock adapter result without clearing backend-owned visibility`; `tui adapter action approve resolves pending approval via bridge`; `tui adapter action reject cancels pending approval via bridge`; `tui adapter action answer carries request_id to bridge`; `tui adapter action cancel-question cancels pending question via bridge`; `tui adapter action accept-plan delegates to orchestration bridge`; `tui adapter action reject-plan cancels pending plan via bridge`; `tui adapter action rejects stale or missing request id through bridge`; `tui adapter action rejects unknown action kind`; `tui adapter action rejects unavailable bridge` |
+| Runtime scheduling/cancellation semantics | completion-critical | Foreground cooperative cancellation + streaming delta seams are wired; M19 adds optional RunController per-run deadlines where deadline expiry participates in cooperative cancellation and produces deterministic watchdog timeout summaries; M20 adds cancellation transcript-integrity coverage; M24 adds parent-to-child cooperative cancellation propagation plus headless signal-to-cancel wiring | Closed for scoped backend/headless/TUI completion. Broad async/background scheduler parity and hard-kill provider interruption remain deferred. | M14/M15 deferred background/watchdog + async notes + M19/M20/M24 boundary docs | RP-3 | `agent runtime emits streaming assistant deltas with run_id`; `agent runtime exits cooperatively when cancelled during streaming`; `agent runtime cancels before tool execution after streamed assistant text`; `agent runtime preserves tool-call-only assistant message when cancelled before tool execution`; `agent runtime preserves tool-call-only assistant message when cancelled during streaming`; `agent runtime cancellation preserves session transcript integrity`; `run controller issues unique run leases and cooperative cancellation state`; `native blocking task spawner watchdog timeout surfaces deterministic terminal summary`; `native blocking task spawner propagates parent cancellation into child run`; `headless signal cancellation bridge records cancellation requests` |
+| Orchestration/subagent lifecycle controls | completion-critical | Native blocking child-run baseline with depth/spawn-budget and metadata exists; M19 adds active child-run listing/lookup/cancel APIs, deterministic child terminal summaries, persisted `metadata.orchestration.subagent_run`, and TUI observer projection | Closed for scoped backend/headless/TUI completion. Canonical headless `subagent_complete` NDJSON parity is tracked as `EX-004`; full async/background subagent parity remains deferred. | M13 deferred async/background subagent ownership + M15 child-run cancel deferral + M19/M20 boundary docs | RP-3 | `native blocking task spawner runs child sessions`; `native blocking task spawner enforces spawn budget`; `native blocking task spawner threads interactive resolvers into child composition`; `native blocking task spawner exposes active child runs for cancellation`; `native blocking task spawner watchdog timeout surfaces deterministic terminal summary`; `tui state projects child-run terminal metadata without owning lifecycle` |
+| Tool/runtime extension breadth (MCP/plugin/optional surfaces) | deferred inventory | Core local tool stack + permission seam are active; M25 adds a narrow `ava_mcp` protocol/config/client foundation without runtime tool registration | Keep explicit inventory/closure buckets; do not treat MCP/plugin/web-browser breadth as completion-critical by default. MCP stdio process spawning, tool-registry integration, HTTP/SSE/OAuth, custom TOML tools, and plugin runtime remain deferred. | M1 out-of-scope + M6/M13/M14/M15/M25 deferred MCP/plugin notes | RP-4A | `default tools registration includes milestone 6 core set`; `read/write/edit reject symlink escapes outside workspace`; `git and git_read execute read-only git commands`; `mcp client runs initialize list tools and call tool flow`; `mcp config parses stdio servers and rejects unsupported transports` + deferred MCP/plugin/tool-extension inventory checklist |
+| Provider/auth/config long-tail breadth | deferred inventory | Foundational config/session + two scoped production provider paths are active (`openai` + `anthropic`, both CPR-gated for live HTTP transport) | Keep keychain/OAuth/device/browser flows, YAML/TOML breadth, Anthropic streaming parity, and long-tail provider parity in deferred inventory unless scope is promoted | M1 out-of-scope + M4/M5/M23 deferred notes | RP-4B | `credential env overrides take precedence`; `credentials and trust stores use owner-only permissions on posix`; `factory selects openai + anthropic and stubs deferred providers`; `native blocking task spawner threads credentials override into child composition` + deferred provider/auth/config inventory checklist |
 | Web/Desktop parity expansion | intentional non-goal | Backend/headless/TUI migration remains the active scope | No completion dependency for current claim; revisit only if roadmap/backlog scope changes | M1 scope/out-of-scope + M4 non-expansion note | — | No backend/TUI completion gate target |
+
+M20 closes the completion-critical rows above for the scoped backend/headless/TUI claim. Deferred inventory and intentional non-goal rows remain tracked guardrails, not completion blockers.
 
 ## First Research Priorities
 
@@ -93,43 +99,62 @@ just cpp-configure cpp-debug
 just cpp-build cpp-debug
 
 # RP-1: interactive lifecycle terminal-state and correlation behavior
-ctest --preset cpp-debug -R "ava_cpp_unit|ava_orchestration_unit" --output-on-failure
+just cpp-test cpp-debug -R "ava_cpp_unit|ava_orchestration_unit" --output-on-failure
 ./build/cpp/debug/tests/ava_cpp_tests "interactive request store tracks pending and terminal lifecycle"
+./build/cpp/debug/tests/ava_cpp_tests "interactive request store rejects stale and non-existent requests"
 ./build/cpp/debug/tests/ava_orchestration_tests "interactive bridge tracks approval/question/plan request lifecycle"
 ./build/cpp/debug/tests/ava_orchestration_tests "interactive bridge terminal cancelled/timedout outcomes are fail-closed"
 
 # RP-2: TUI operator-flow parity slice
-ctest --preset cpp-debug -R "ava_tui_unit" --output-on-failure
+just cpp-test cpp-debug -R "ava_tui_unit" --output-on-failure
 ./build/cpp/debug/tests/ava_tui_tests "tui state slash commands provide help/clear/model and unsupported compact handling"
 ./build/cpp/debug/tests/ava_tui_tests "tui state keeps input history and restores draft with up/down"
 ./build/cpp/debug/tests/ava_tui_tests "tui state reports message navigation status and supports top/bottom jumps"
 ./build/cpp/debug/tests/ava_tui_tests "tui state tracks adapter-facing interactive request visibility and clearing"
-# TODO(RP-2): Future required before closing RP-2 — add a focused adapter-action harness for in-TUI approve/reject/answer/accept-plan actions.
+./build/cpp/debug/tests/ava_tui_tests "tui adapter action approve resolves pending approval via bridge"
+./build/cpp/debug/tests/ava_tui_tests "tui adapter action reject cancels pending approval via bridge"
+./build/cpp/debug/tests/ava_tui_tests "tui adapter action answer carries request_id to bridge"
+./build/cpp/debug/tests/ava_tui_tests "tui adapter action accept-plan delegates to orchestration bridge"
+./build/cpp/debug/tests/ava_tui_tests "tui adapter action rejects stale or missing request id through bridge"
+./build/cpp/debug/tests/ava_tui_tests "tui adapter action rejects unknown action kind"
+./build/cpp/debug/tests/ava_tui_tests "tui adapter action rejects unavailable bridge"
+./build/cpp/debug/tests/ava_tui_tests "tui state tracks adapter-facing interactive request visibility and clearing"
+./build/cpp/debug/tests/ava_tui_tests "tui state can dismiss interactive dock without resolving backend request"
 
 # RP-3: cancellation/run-lease and child-run lifecycle controls
-ctest --preset cpp-debug -R "ava_agent_unit|ava_orchestration_unit|ava_app_unit" --output-on-failure
+just cpp-test cpp-debug -R "ava_agent_unit|ava_orchestration_unit|ava_app_unit" --output-on-failure
 ./build/cpp/debug/tests/ava_agent_tests "agent runtime emits streaming assistant deltas with run_id"
 ./build/cpp/debug/tests/ava_agent_tests "agent runtime exits cooperatively when cancelled during streaming"
 ./build/cpp/debug/tests/ava_agent_tests "agent runtime cancels before tool execution after streamed assistant text"
+./build/cpp/debug/tests/ava_agent_tests "agent runtime preserves tool-call-only assistant message when cancelled before tool execution"
+./build/cpp/debug/tests/ava_agent_tests "agent runtime preserves tool-call-only assistant message when cancelled during streaming"
 ./build/cpp/debug/tests/ava_orchestration_tests "run controller issues unique run leases and cooperative cancellation state"
 ./build/cpp/debug/tests/ava_orchestration_tests "native blocking task spawner runs child sessions"
 ./build/cpp/debug/tests/ava_orchestration_tests "native blocking task spawner enforces spawn budget"
 ./build/cpp/debug/tests/ava_orchestration_tests "native blocking task spawner threads interactive resolvers into child composition"
+./build/cpp/debug/tests/ava_orchestration_tests "native blocking task spawner exposes active child runs for cancellation"
+./build/cpp/debug/tests/ava_orchestration_tests "native blocking task spawner watchdog timeout surfaces deterministic terminal summary"
+./build/cpp/debug/tests/ava_tui_tests "tui state projects child-run terminal metadata without owning lifecycle"
 ./build/cpp/debug/tests/ava_app_tests "ndjson event carries run_id and streaming delta payload"
-# TODO(RP-3): Future required before closing RP-3 — add targeted child-run cancellation + watchdog/arbitration harness coverage.
+./build/cpp/debug/tests/ava_app_tests "ndjson tool call and result correlate call_id"
+./build/cpp/debug/tests/ava_app_tests "resume by id preserves tool heavy message metadata"
+./build/cpp/debug/tests/ava_agent_tests "agent runtime cancellation preserves session transcript integrity"
+./build/cpp/debug/tests/ava_app_integration_tests "headless auto approve rejects dangerous mutating tool"
+./build/cpp/debug/tests/ava_app_integration_tests "headless scripted tool loop executes tool and persists transcript"
+./build/cpp/debug/tests/ava_tools_tests "edit no match returns error without mutating file"
 
 # RP-4A: deferred MCP/plugin/tool-extension inventory guardrails
-ctest --preset cpp-debug -R "ava_tools_unit" --output-on-failure
+just cpp-test cpp-debug -R "ava_tools_unit" --output-on-failure
 ./build/cpp/debug/tests/ava_tools_tests "default tools registration includes milestone 6 core set"
 ./build/cpp/debug/tests/ava_tools_tests "read/write/edit reject symlink escapes outside workspace"
 ./build/cpp/debug/tests/ava_tools_tests "git and git_read execute read-only git commands"
 # TODO(RP-4A): add an inventory consistency harness that fails when deferred MCP/plugin buckets drift undocumented.
 
 # RP-4B: deferred provider/auth/config inventory guardrails
-ctest --preset cpp-debug -R "ava_cpp_unit|ava_llm_unit|ava_orchestration_unit" --output-on-failure
+just cpp-test cpp-debug -R "ava_cpp_unit|ava_llm_unit|ava_orchestration_unit" --output-on-failure
 ./build/cpp/debug/tests/ava_cpp_tests "credential env overrides take precedence"
 ./build/cpp/debug/tests/ava_cpp_tests "credentials and trust stores use owner-only permissions on posix"
-./build/cpp/debug/tests/ava_llm_tests "factory selects openai and stubs deferred providers"
+./build/cpp/debug/tests/ava_llm_tests "factory selects openai + anthropic and stubs deferred providers"
 ./build/cpp/debug/tests/ava_orchestration_tests "native blocking task spawner threads credentials override into child composition"
 # TODO(RP-4B): add targeted keychain/OAuth/device/browser-login harness coverage when promoted from deferred inventory.
 ```

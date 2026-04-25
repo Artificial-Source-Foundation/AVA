@@ -35,3 +35,9 @@ This note records the first narrow Milestone 15 slice after accepted Milestone 1
 5. Externally addressable child-run cancellation controls for subagent task spawns.
 
 This pass is intentionally minimal and scoped to honest foreground streaming/cancellation ownership and run identity correlation.
+
+## Follow-up green-fix notes
+
+- Suppressed empty `AssistantResponse` events for streamed tool-call-only turns so headless/event consumers do not see semantically empty assistant messages before tool execution.
+- Persisted the foreground headless `run_id` under `metadata.headless.last_run.run_id` to keep durable run identity evidence aligned with emitted events.
+- Made the minimal TUI run thread explicitly clear `running` after runtime return instead of relying only on completion-event delivery.

@@ -2,8 +2,11 @@
 
 #include <chrono>
 #include <filesystem>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
@@ -132,7 +135,7 @@ TEST_CASE("session manager migrates legacy sqlite schema idempotently", "[ava_se
 
   ava::session::SessionManager manager_again(db_path);
 
-  auto session = manager.create();
+  auto session = manager_again.create();
   session.metadata["parent_id"] = "parent-session";
   session.token_usage = nlohmann::json{{"total_tokens", 3}};
   session.messages = {
@@ -235,6 +238,79 @@ TEST_CASE("session manager add_message persists child message and touches sessio
 
   const auto tree = manager.get_tree(session.id);
   REQUIRE(tree.nodes.at("m1").children == std::vector<std::string>{"m2"});
+
+  std::filesystem::remove_all(root);
+}
+
+TEST_CASE("session manager updates existing messages by id", "[ava_session]") {
+  const auto root = temp_root_for_test();
+  std::filesystem::create_directories(root);
+
+  ava::session::SessionManager manager(root / "sessions.db");
+  auto session = manager.create();
+  session.messages = {
+      ava::types::SessionMessage{
+          .id = "root",
+          .role = "user",
+          .content = "start",
+          .timestamp = "2026-01-01T00:00:00Z",
+          .parent_id = std::nullopt,
+      },
+      ava::types::SessionMessage{
+          .id = "child",
+          .role = "assistant",
+          .content = "old child",
+          .timestamp = "2026-01-01T00:00:01Z",
+          .parent_id = std::optional<std::string>{"root"},
+      },
+  };
+  session.branch_head = "child";
+  manager.save(session);
+
+  auto updated_child = session.messages.at(1);
+  updated_child.content = "new child";
+  updated_child.metadata = nlohmann::json{{"updated", true}};
+  manager.add_message(session.id, updated_child);
+
+  const auto loaded = manager.get(session.id);
+  REQUIRE(loaded.has_value());
+  REQUIRE(loaded->messages.size() == 2);
+  REQUIRE(loaded->messages.at(1).content == "new child");
+  REQUIRE(loaded->messages.at(1).metadata == nlohmann::json{{"updated", true}});
+  REQUIRE(loaded->messages.at(1).parent_id == std::optional<std::string>{"root"});
+
+  std::filesystem::remove_all(root);
+}
+
+TEST_CASE("session manager removes sessions and cascades messages", "[ava_session]") {
+  const auto root = temp_root_for_test();
+  std::filesystem::create_directories(root);
+
+  ava::session::SessionManager manager(root / "sessions.db");
+  auto session = manager.create();
+  session.messages = {
+      ava::types::SessionMessage{
+          .id = "root",
+          .role = "user",
+          .content = "start",
+          .timestamp = "2026-01-01T00:00:00Z",
+          .parent_id = std::nullopt,
+      },
+      ava::types::SessionMessage{
+          .id = "child",
+          .role = "assistant",
+          .content = "child",
+          .timestamp = "2026-01-01T00:00:01Z",
+          .parent_id = std::optional<std::string>{"root"},
+      },
+  };
+  session.branch_head = "child";
+  manager.save(session);
+
+  manager.remove(session.id);
+  REQUIRE_FALSE(manager.get(session.id).has_value());
+  REQUIRE(manager.list_recent(10).empty());
+  REQUIRE_NOTHROW(manager.remove(session.id));
 
   std::filesystem::remove_all(root);
 }
@@ -412,6 +488,60 @@ TEST_CASE("session tree branching updates active branch", "[ava_session]") {
 
   const auto leaves = manager.get_branch_leaves(session.id);
   REQUIRE(leaves.size() == 2);
+  REQUIRE(leaves.at(0).leaf_id == "m2");
+  REQUIRE(leaves.at(0).depth == 2);
+  REQUIRE(leaves.at(0).is_active);
+  REQUIRE(leaves.at(1).leaf_id == fork.id);
+  REQUIRE(leaves.at(1).depth == 2);
+  REQUIRE_FALSE(leaves.at(1).is_active);
+
+  std::filesystem::remove_all(root);
+}
+
+TEST_CASE("session manager tolerates concurrent save get and list operations", "[ava_session]") {
+  const auto root = temp_root_for_test();
+  std::filesystem::create_directories(root);
+
+  ava::session::SessionManager manager(root / "sessions.db");
+  std::mutex errors_mutex;
+  std::vector<std::exception_ptr> errors;
+  std::vector<std::thread> threads;
+
+  for(std::size_t index = 0; index < 4; ++index) {
+    threads.emplace_back([&, index]() {
+      try {
+        auto session = manager.create();
+        session.id = "concurrent-" + std::to_string(index);
+        session.created_at = "2026-01-01T00:00:00Z";
+        session.updated_at = "2026-01-01T00:00:0" + std::to_string(index) + "Z";
+        session.messages = {ava::types::SessionMessage{
+            .id = "root-" + std::to_string(index),
+            .role = "user",
+            .content = "message " + std::to_string(index),
+            .timestamp = "2026-01-01T00:00:00Z",
+            .parent_id = std::nullopt,
+        }};
+        session.branch_head = session.messages.front().id;
+
+        manager.save(session);
+        const auto loaded = manager.get(session.id);
+        if(!loaded.has_value() || loaded->messages.size() != 1) {
+          throw std::runtime_error("concurrent session load failed");
+        }
+        (void)manager.list_recent(10);
+      } catch(...) {
+        std::scoped_lock lock(errors_mutex);
+        errors.push_back(std::current_exception());
+      }
+    });
+  }
+
+  for(auto& thread : threads) {
+    thread.join();
+  }
+
+  REQUIRE(errors.empty());
+  REQUIRE(manager.list_recent(10).size() == 4);
 
   std::filesystem::remove_all(root);
 }

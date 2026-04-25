@@ -9,7 +9,7 @@ namespace ava::tui {
 TuiOptions parse_tui_options_or_throw(int argc, char** argv) {
   TuiOptions options;
 
-  CLI::App app{"AVA C++ Milestone 16 narrow TUI workflow parity basics"};
+  CLI::App app{"AVA C++ TUI"};
   app.add_option("--provider", options.provider, "Provider override");
   app.add_option("--model", options.model, "Model override");
   app.add_flag("-c,--continue", options.resume, "Continue latest session");
@@ -22,8 +22,8 @@ TuiOptions parse_tui_options_or_throw(int argc, char** argv) {
     app.parse(argc, argv);
   } catch(const CLI::CallForHelp&) {
     throw;
-  } catch(const CLI::ParseError&) {
-    throw std::invalid_argument(std::string("invalid CLI arguments: ") + app.help());
+  } catch(const CLI::ParseError& error) {
+    throw std::invalid_argument(std::string("invalid CLI arguments: ") + error.what() + "\n" + app.help());
   }
 
   options.max_turns_explicit = max_turns->count() > 0;

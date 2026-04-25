@@ -42,6 +42,7 @@ struct ParsedModelSpec {
 };
 
 [[nodiscard]] std::vector<std::string> builtin_subagent_ids();
+[[nodiscard]] std::vector<std::string> read_only_runtime_tool_names();
 [[nodiscard]] SubAgentRuntimeProfile runtime_profile_for(std::string_view agent_type);
 
 // Milestone 8 keeps this filtering non-mutating and profile-aware by producing

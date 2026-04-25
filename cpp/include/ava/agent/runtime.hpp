@@ -29,6 +29,7 @@ enum class AgentEventKind {
   AssistantResponse,
   ToolCall,
   ToolResult,
+  SubagentComplete,
   Completion,
   Error,
 };
@@ -48,6 +49,10 @@ struct AgentEvent {
   std::string message;
   std::optional<ava::types::ToolCall> tool_call;
   std::optional<ava::types::ToolResult> tool_result;
+  std::optional<std::string> subagent_call_id;
+  std::optional<std::string> subagent_session_id;
+  std::optional<std::string> subagent_description;
+  std::optional<std::size_t> subagent_message_count;
   std::optional<AgentCompletionReason> completion_reason;
 };
 

@@ -1,20 +1,9 @@
 #include "ava/llm/message_transform.hpp"
 
-#include <algorithm>
-#include <cctype>
-
 #include "ava/config/credentials.hpp"
 
 namespace ava::llm {
 namespace {
-
-[[nodiscard]] std::string to_lower_ascii(const std::string& value) {
-  std::string out = value;
-  std::transform(out.begin(), out.end(), out.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  return out;
-}
 
 [[nodiscard]] std::string strip_tag_block(const std::string& text, std::string_view tag) {
   const std::string open = "<" + std::string(tag) + ">";
@@ -47,8 +36,8 @@ namespace {
 [[nodiscard]] std::string strip_thinking_blocks(const std::string& content) {
   auto value = strip_tag_block(content, "thinking");
   value = strip_tag_block(value, "antThinking");
-  while(value.find("\n\n\n") != std::string::npos) {
-    value.replace(value.find("\n\n\n"), 3, "\n\n");
+  for(std::size_t pos = 0; (pos = value.find("\n\n\n", pos)) != std::string::npos;) {
+    value.replace(pos, 3, "\n\n");
   }
   return value;
 }

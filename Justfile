@@ -38,7 +38,7 @@ cpp-build PRESET="cpp-debug" *ARGS:
 
 # Run C++ tests from preset
 cpp-test PRESET="cpp-debug" *ARGS:
-    CMAKE="$({{cpp_cmake}})" && CTEST="$(dirname "$CMAKE")/ctest" && cd cpp && "$CTEST" --preset {{ PRESET }} --output-on-failure {{ ARGS }}
+    CMAKE="$({{cpp_cmake}})" && CTEST="$(dirname "$CMAKE")/ctest" && if [ ! -x "$CTEST" ]; then CTEST=ctest; fi && cd cpp && "$CTEST" --preset {{ PRESET }} --output-on-failure {{ ARGS }}
 
 # Clean C++ build artifacts for preset
 cpp-clean PRESET="cpp-debug":

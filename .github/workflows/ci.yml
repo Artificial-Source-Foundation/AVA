@@ -167,6 +167,37 @@ jobs:
         run: ctest --preset cpp-release --output-on-failure
         working-directory: cpp
 
+      - name: Smoke C++ apps
+        run: |
+          ../build/cpp/release/apps/ava_cli --version
+          ../build/cpp/release/apps/ava_cli --smoke
+          ../build/cpp/release/apps/ava_smoke
+        working-directory: cpp
+
+      - name: Configure C++ warnings-as-errors
+        run: cmake --preset cpp-werror
+        working-directory: cpp
+
+      - name: Build C++ warnings-as-errors
+        run: cmake --build --preset cpp-werror
+        working-directory: cpp
+
+      - name: Run C++ warnings-as-errors tests
+        run: ctest --preset cpp-werror --output-on-failure
+        working-directory: cpp
+
+      - name: Configure C++ sanitizer
+        run: cmake --preset cpp-sanitizer
+        working-directory: cpp
+
+      - name: Build C++ sanitizer
+        run: cmake --build --preset cpp-sanitizer
+        working-directory: cpp
+
+      - name: Run C++ sanitizer tests
+        run: ctest --preset cpp-sanitizer --output-on-failure
+        working-directory: cpp
+
   # ---------------------------------------------------------------------------
   # Security (lightweight, no build needed for audit)
   # ---------------------------------------------------------------------------

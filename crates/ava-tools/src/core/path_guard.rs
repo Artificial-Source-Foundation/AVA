@@ -100,8 +100,28 @@ pub fn enforce_workspace_path(input: &str, tool_name: &str) -> Result<PathBuf> {
     };
 
     check_symlink_escape(&resolved, &workspace, input, tool_name)?;
+    reject_backup_history_path(&resolved, tool_name)?;
 
     Ok(resolved)
+}
+
+pub(crate) fn is_backup_history_path(path: &Path) -> bool {
+    path.components()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .any(|window| {
+            matches!(window[0], Component::Normal(value) if value == ".ava")
+                && matches!(window[1], Component::Normal(value) if value == "file-history-m6")
+        })
+}
+
+pub(crate) fn reject_backup_history_path(path: &Path, tool_name: &str) -> Result<()> {
+    if is_backup_history_path(path) {
+        return Err(AvaError::PermissionDenied(format!(
+            "{tool_name} cannot access AVA file-history backups"
+        )));
+    }
+    Ok(())
 }
 
 /// Check if a resolved (canonicalized) path escapes the workspace boundary.

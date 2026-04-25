@@ -111,19 +111,19 @@ std::optional<std::chrono::milliseconds> RetryBudget::compute_delay(
   const std::size_t clamped_shift = attempt == 0 ? 0 : std::min<std::size_t>(attempt - 1, 30);
   const auto exponential = base_delay_ * (1U << clamped_shift);
 
-  auto base = exponential;
-  if(error.kind == ProviderErrorKind::RateLimit && error.retry_after_secs.has_value()) {
-    const auto retry_after = std::chrono::seconds(*error.retry_after_secs);
-    base = std::max(base, std::chrono::duration_cast<std::chrono::milliseconds>(retry_after));
-  }
-  if(server_hint.has_value()) {
-    base = std::max(base, *server_hint);
-  }
-
-  const auto delayed = jitter(base);
   const auto cap = (mode_ == RetryMode::Persistent)
                        ? std::chrono::duration_cast<std::chrono::milliseconds>(kPersistentMaxDelay)
                        : max_delay_;
+  auto delayed = jitter(exponential);
+
+  if(error.kind == ProviderErrorKind::RateLimit && error.retry_after_secs.has_value()) {
+    const auto retry_after = std::chrono::seconds(*error.retry_after_secs);
+    delayed = std::max(delayed, std::chrono::duration_cast<std::chrono::milliseconds>(retry_after));
+  }
+  if(server_hint.has_value()) {
+    delayed = std::max(delayed, *server_hint);
+  }
+
   return std::min(delayed, cap);
 }
 

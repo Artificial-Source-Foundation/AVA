@@ -13,6 +13,13 @@ use crate::edit::{EditEngine, EditRequest};
 use crate::git::GhostSnapshotter;
 use crate::registry::Tool;
 
+const MAX_EDIT_FILE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_EDIT_CASCADE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_EDIT_CASCADE_LINES: usize = 20_000;
+const MAX_EDIT_OLD_TEXT_BYTES: usize = 64 * 1024;
+const MAX_EDIT_REPLACE_ALL_REPLACEMENTS: usize = 100_000;
+const MAX_REPLACE_ALL_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+
 pub struct EditTool {
     platform: Arc<dyn Platform>,
     engine: EditEngine,
@@ -114,6 +121,21 @@ impl Tool for EditTool {
             .get("replace_all")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        if old_text.is_empty() {
+            return Err(AvaError::ValidationError(
+                "old_text must not be empty".to_string(),
+            ));
+        }
+        if !replace_all && old_text.len() > MAX_EDIT_OLD_TEXT_BYTES {
+            return Err(AvaError::ValidationError(
+                "old_text is too large for edit".to_string(),
+            ));
+        }
+        if new_text.len() > MAX_EDIT_FILE_BYTES {
+            return Err(AvaError::ValidationError(
+                "new_text is too large for edit".to_string(),
+            ));
+        }
 
         tracing::debug!(tool = "edit", %path, %replace_all, "executing edit tool");
 
@@ -122,6 +144,11 @@ impl Tool for EditTool {
             return Err(crate::core::path_suggest::missing_file_error(path, &file_path).await);
         }
         let original = self.platform.read_file(&file_path).await?;
+        if original.len() > MAX_EDIT_FILE_BYTES {
+            return Err(AvaError::ToolError(
+                "edit target file is too large".to_string(),
+            ));
+        }
 
         // F10 — Stale file detection: check if the file was modified since last read.
         let stale_warning = if let Some(ref cache) = self.read_state_cache {
@@ -146,11 +173,48 @@ impl Tool for EditTool {
         let resolved_old = self.try_resolve_hashline(path, old_text)?;
         let effective_old = resolved_old.as_deref().unwrap_or(old_text);
         let effective_new = hashline::strip_hashes(new_text);
+        if effective_old.is_empty() {
+            return Err(AvaError::ValidationError(
+                "old_text must not resolve to empty text".to_string(),
+            ));
+        }
+        if !replace_all && effective_old.len() > MAX_EDIT_OLD_TEXT_BYTES {
+            return Err(AvaError::ValidationError(
+                "old_text is too large for edit".to_string(),
+            ));
+        }
 
         let (updated, strategy) = if replace_all {
             let occurrences = original.matches(effective_old).count();
             if occurrences == 0 {
                 return Err(AvaError::ToolError("No matching text found".to_string()));
+            }
+            if occurrences > MAX_EDIT_REPLACE_ALL_REPLACEMENTS {
+                return Err(AvaError::ToolError(
+                    "replace_all has too many replacements".to_string(),
+                ));
+            }
+            let removed = occurrences
+                .checked_mul(effective_old.len())
+                .ok_or_else(|| {
+                    AvaError::ToolError("replace_all output is too large".to_string())
+                })?;
+            let added = occurrences
+                .checked_mul(effective_new.len())
+                .ok_or_else(|| {
+                    AvaError::ToolError("replace_all output is too large".to_string())
+                })?;
+            let projected_len = original
+                .len()
+                .checked_sub(removed)
+                .and_then(|base| base.checked_add(added))
+                .ok_or_else(|| {
+                    AvaError::ToolError("replace_all output is too large".to_string())
+                })?;
+            if projected_len > MAX_REPLACE_ALL_OUTPUT_BYTES {
+                return Err(AvaError::ToolError(
+                    "replace_all output is too large".to_string(),
+                ));
             }
             (
                 original.replace(effective_old, &effective_new),
@@ -161,6 +225,14 @@ impl Tool for EditTool {
                 },
             )
         } else {
+            if original.len() > MAX_EDIT_CASCADE_BYTES
+                || original.lines().count() > MAX_EDIT_CASCADE_LINES
+            {
+                return Err(AvaError::ToolError(
+                    "edit target is too large for fuzzy matching; use replace_all or a smaller exact edit"
+                        .to_string(),
+                ));
+            }
             let request = EditRequest::new(
                 original.clone(),
                 effective_old.to_string(),
@@ -177,6 +249,9 @@ impl Tool for EditTool {
             };
             (result.content, strategy)
         };
+        if updated.len() > MAX_EDIT_FILE_BYTES {
+            return Err(AvaError::ToolError("edit output is too large".to_string()));
+        }
 
         // Persistent backup before mutation (survives crashes).
         if let Err(e) =

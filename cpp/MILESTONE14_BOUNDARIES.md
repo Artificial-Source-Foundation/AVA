@@ -15,6 +15,12 @@ This note records the first narrow Milestone 14 slice after accepted Milestone 1
    - supports bounded resolver hooks for approval/question/plan without moving ownership into TUI
 3. Wired shared runtime composition (`compose_runtime`) to always attach this bridge and expose it on `RuntimeComposition`, keeping backend/orchestration ownership central.
 
+## Follow-up green-fix notes
+
+1. Adapter-originated interactive settlements now fail closed on stale/already-settled request IDs instead of surfacing a `logic_error` from same-request races.
+2. Canonical event inventory helpers now reject unknown enum values instead of silently mapping them to `error`/`message` fallbacks.
+3. Focused coverage now locks pending-request ordering after interleaved settlement plus question/plan resolver exception and invalid-terminal-state behavior.
+
 ## Explicitly Deferred (still out of this M14 pass)
 
 1. Streaming or async interactive behavior (M15+ scope).

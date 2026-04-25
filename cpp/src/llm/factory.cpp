@@ -1,12 +1,36 @@
 #include "ava/llm/factory.hpp"
 
 #include <algorithm>
+#include <sstream>
+#include <utility>
 
 #include "ava/llm/message_transform.hpp"
+#include "ava/llm/providers/anthropic_provider.hpp"
 #include "ava/llm/providers/mock_provider.hpp"
 #include "ava/llm/providers/openai_provider.hpp"
 
 namespace ava::llm {
+namespace {
+
+[[nodiscard]] std::string known_provider_list() {
+  auto providers = ava::config::known_providers();
+  providers.push_back("mock");
+
+  std::sort(providers.begin(), providers.end());
+  providers.erase(std::unique(providers.begin(), providers.end()), providers.end());
+
+  std::ostringstream out;
+  for(std::size_t index = 0; index < providers.size(); ++index) {
+    if(index > 0) {
+      out << ", ";
+    }
+    out << providers.at(index);
+  }
+
+  return out.str();
+}
+
+}  // namespace
 
 bool is_known_provider(std::string_view provider_name) {
   const auto normalized = normalize_provider_alias(std::string(provider_name));
@@ -40,31 +64,59 @@ ProviderPtr create_provider(
 
   if(normalized == "openai") {
     if(!credential.has_value()) {
+      std::string message = "missing api key for provider 'openai'";
+      if(normalized != provider_name) {
+        message += " (requested alias '" + provider_name + "')";
+      }
+
       throw ProviderException(ProviderError{
           .kind = ProviderErrorKind::AuthFailure,
           .provider = "openai",
-          .message = "missing api key",
+          .message = std::move(message),
       });
     }
     return std::make_shared<OpenAiProvider>(OpenAiProvider::from_credential(model, *credential));
   }
 
+  if(normalized == "anthropic") {
+    if(!credential.has_value()) {
+      std::string message = "missing api key for provider 'anthropic'";
+      if(normalized != provider_name) {
+        message += " (requested alias '" + provider_name + "')";
+      }
+
+      throw ProviderException(ProviderError{
+          .kind = ProviderErrorKind::AuthFailure,
+          .provider = "anthropic",
+          .message = std::move(message),
+      });
+    }
+
+    return std::make_shared<AnthropicProvider>(AnthropicProvider::from_credential(model, *credential));
+  }
+
   if(
-      normalized == "anthropic" || normalized == "gemini" || normalized == "openrouter" || normalized == "ollama"
-      || normalized == "copilot" || normalized == "inception" || normalized == "alibaba" || normalized == "zai"
-      || normalized == "kimi" || normalized == "minimax"
+      normalized == "gemini" || normalized == "openrouter" || normalized == "ollama" || normalized == "copilot"
+      || normalized == "inception" || normalized == "alibaba" || normalized == "zai" || normalized == "kimi"
+      || normalized == "minimax"
   ) {
     throw ProviderException(ProviderError{
         .kind = ProviderErrorKind::Unknown,
         .provider = normalized,
-        .message = "provider entrypoint exists but is not implemented in C++ Milestone 5",
+        .message = "provider '" + normalized + "' is recognized but not implemented in C++ Milestone 23 scoped provider slice",
     });
   }
+
+  std::string message = "unknown provider '" + provider_name + "'";
+  if(normalized != provider_name) {
+    message += " (normalized to '" + normalized + "')";
+  }
+  message += "; known providers: " + known_provider_list();
 
   throw ProviderException(ProviderError{
       .kind = ProviderErrorKind::Unknown,
       .provider = provider_name,
-      .message = "unknown provider",
+      .message = std::move(message),
   });
 }
 

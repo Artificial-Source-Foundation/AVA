@@ -8,7 +8,11 @@ This note records the smallest honest **headless-runtime validation slice** adde
 2. Added a narrow headless app test seam by overloading `run_headless_blocking(...)` with an optional provider override so integration tests can run the real M9 path without network.
 3. Added focused C++ integration tests for:
    - scripted tool loop (tool call -> tool execution -> completion) through the headless path
+   - multiple tool calls emitted from one assistant turn through the headless path
+   - NDJSON session context and tool call/result correlation in JSON output mode
    - mutating-tool rejection without `--auto-approve`
+   - `max_turns` terminal-state persistence and NDJSON completion reason emission
+   - stale `metadata.headless.last_run.error` cleanup after a later successful rerun
    - opt-in live OpenAI smoke through the same headless path, gated by env (`AVA_LIVE_PROVIDER_TESTS`, `OPENAI_API_KEY`, and `AVA_WITH_CPR`)
 4. Updated CMake test wiring to build/run the new integration target (`ava_app_integration_tests`).
 

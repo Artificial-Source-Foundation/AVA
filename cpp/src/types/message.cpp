@@ -3,9 +3,68 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <stdexcept>
+#include <string>
 #include <unordered_set>
+#include <utility>
 
 namespace ava::types {
+namespace {
+
+constexpr std::string_view kInterruptedToolMessageIdPrefix = "interrupted-tool-";
+constexpr std::string_view kSyntheticInterruptedToolTimestamp = "1970-01-01T00:00:00Z";
+
+std::string interrupted_tool_message_id(std::size_t index, std::string_view call_id) {
+  return std::string{kInterruptedToolMessageIdPrefix} + std::to_string(index) + "-" + std::string{call_id};
+}
+
+void merge_consecutive_user_message(Message& left, const Message& right) {
+  // Merge right into left without losing user-provided context: text and original text concatenate,
+  // collections append, missing optionals inherit from the right side, visibility flags OR together,
+  // JSON arrays concatenate, and JSON objects shallow-merge with right-side keys winning.
+  if(left.content.empty()) {
+    left.content = right.content;
+  } else if(!right.content.empty()) {
+    left.content += "\n\n" + right.content;
+  }
+
+  left.images.insert(left.images.end(), right.images.begin(), right.images.end());
+  left.tool_calls.insert(left.tool_calls.end(), right.tool_calls.begin(), right.tool_calls.end());
+  left.tool_results.insert(left.tool_results.end(), right.tool_results.begin(), right.tool_results.end());
+
+  // Preserve existing lineage when present; otherwise carry forward the merged turn's linkage.
+  if(!left.tool_call_id.has_value()) {
+    left.tool_call_id = right.tool_call_id;
+  }
+  if(!left.parent_id.has_value()) {
+    left.parent_id = right.parent_id;
+  }
+
+  left.agent_visible = left.agent_visible || right.agent_visible;
+  left.user_visible = left.user_visible || right.user_visible;
+
+  if(!left.original_content.has_value()) {
+    left.original_content = right.original_content;
+  } else if(right.original_content.has_value() && !right.original_content->empty()) {
+    *left.original_content += "\n\n" + *right.original_content;
+  }
+
+  if(left.structured_content.is_array() && right.structured_content.is_array()) {
+    for(const auto& item : right.structured_content) {
+      left.structured_content.push_back(item);
+    }
+  } else if(left.structured_content.empty() || left.structured_content.is_null()) {
+    left.structured_content = right.structured_content;
+  }
+
+  if(left.metadata.is_object() && right.metadata.is_object()) {
+    left.metadata.update(right.metadata);
+  } else if(left.metadata.empty() || left.metadata.is_null()) {
+    left.metadata = right.metadata;
+  }
+}
+
+}  // namespace
 
 std::string_view role_to_string(Role role) {
   switch(role) {
@@ -80,36 +139,40 @@ void from_json(const nlohmann::json& json, Message& value) {
 
   value.content = json.value("content", std::string{});
   value.timestamp = json.value("timestamp", std::string{});
-  value.tool_calls.clear();
+  value.tool_calls = {};
   if(json.contains("tool_calls")) {
+    if(!json.at("tool_calls").is_array()) {
+      throw std::invalid_argument("Message.tool_calls must be an array");
+    }
     for(const auto& item : json.at("tool_calls")) {
-      value.tool_calls.push_back(ToolCall{
-          .id = item.value("id", std::string{}),
-          .name = item.value("name", std::string{}),
-          .arguments = item.value("arguments", nlohmann::json::object()),
-      });
+      ToolCall call;
+      from_json(item, call);
+      value.tool_calls.push_back(std::move(call));
     }
   }
 
-  value.tool_results.clear();
+  value.tool_results = {};
   if(json.contains("tool_results")) {
+    if(!json.at("tool_results").is_array()) {
+      throw std::invalid_argument("Message.tool_results must be an array");
+    }
     for(const auto& item : json.at("tool_results")) {
-      value.tool_results.push_back(ToolResult{
-          .call_id = item.value("call_id", std::string{}),
-          .content = item.value("content", std::string{}),
-          .is_error = item.value("is_error", false),
-      });
+      ToolResult result;
+      from_json(item, result);
+      value.tool_results.push_back(std::move(result));
     }
   }
   value.tool_call_id = json.contains("tool_call_id") ? std::optional<std::string>{json.at("tool_call_id").get<std::string>()}
                                                       : std::nullopt;
-  value.images.clear();
+  value.images = {};
   if(json.contains("images")) {
+    if(!json.at("images").is_array()) {
+      throw std::invalid_argument("Message.images must be an array");
+    }
     for(const auto& item : json.at("images")) {
-      value.images.push_back(ImageContent{
-          .data = item.value("data", std::string{}),
-          .media_type = item.value("media_type", std::string{}),
-      });
+      ImageContent image;
+      from_json(item, image);
+      value.images.push_back(std::move(image));
     }
   }
   value.parent_id = json.contains("parent_id") ? std::optional<std::string>{json.at("parent_id").get<std::string>()}
@@ -181,19 +244,11 @@ void repair_conversation(std::vector<Message>& messages) {
     }
   }
 
+  // Dedupe only on user-visible turn payload. IDs, timestamps, and metadata can differ for the
+  // same repaired turn, while role/content/tool/image payload equality means the duplicate is safe to drop.
   for(std::size_t index = 0; index + 1 < messages.size();) {
     if(messages[index].role == Role::User && messages[index + 1].role == Role::User) {
-      const auto next_content = messages[index + 1].content;
-      if(messages[index].content.empty()) {
-        messages[index].content = next_content;
-      } else if(!next_content.empty()) {
-        messages[index].content += "\n\n" + next_content;
-      }
-      messages[index].images.insert(
-          messages[index].images.end(),
-          messages[index + 1].images.begin(),
-          messages[index + 1].images.end()
-      );
+      merge_consecutive_user_message(messages[index], messages[index + 1]);
       messages.erase(messages.begin() + static_cast<std::ptrdiff_t>(index + 1));
     } else {
       ++index;
@@ -202,8 +257,9 @@ void repair_conversation(std::vector<Message>& messages) {
 
   for(std::size_t index = 0; index + 1 < messages.size();) {
     if(messages[index].role == messages[index + 1].role && messages[index].content == messages[index + 1].content
-       && messages[index].tool_calls == messages[index + 1].tool_calls
-       && messages[index].tool_results == messages[index + 1].tool_results) {
+        && messages[index].tool_calls == messages[index + 1].tool_calls
+        && messages[index].tool_results == messages[index + 1].tool_results
+        && messages[index].images == messages[index + 1].images) {
       messages.erase(messages.begin() + static_cast<std::ptrdiff_t>(index + 1));
     } else {
       ++index;
@@ -220,29 +276,30 @@ void cleanup_interrupted_tools(std::vector<Message>& messages) {
     }
   }
 
-  std::vector<std::pair<std::string, std::string>> orphaned;
+  std::vector<std::string> orphaned;
   for(const auto& message : messages) {
     if(message.role != Role::Assistant) {
       continue;
     }
     for(const auto& call : message.tool_calls) {
       if(!answered.contains(call.id)) {
-        orphaned.emplace_back(call.id, call.name);
+        orphaned.push_back(call.id);
       }
     }
   }
 
-  for(const auto& [call_id, _tool_name] : orphaned) {
+  for(std::size_t index = 0; index < orphaned.size(); ++index) {
+    const auto& call_id = orphaned[index];
     ToolResult result{
         .call_id = call_id,
         .content = "[Tool execution was interrupted]",
         .is_error = true,
     };
     Message tool_message{
-        .id = "",
+        .id = interrupted_tool_message_id(index, call_id),
         .role = Role::Tool,
         .content = result.content,
-        .timestamp = "",
+        .timestamp = std::string{kSyntheticInterruptedToolTimestamp},
         .tool_calls = {},
         .tool_results = {result},
         .tool_call_id = call_id,

@@ -23,6 +23,9 @@ const MAX_IMAGE_SIZE: u64 = 5 * 1024 * 1024;
 /// Maximum pages per PDF read request.
 const MAX_PDF_PAGES: usize = 20;
 
+/// Maximum directory entries returned by a directory read.
+const MAX_DIRECTORY_ENTRIES: usize = 1000;
+
 /// Image file extensions we recognise for inline base64 encoding.
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"];
 
@@ -175,6 +178,50 @@ impl Tool for ReadTool {
 
         if !self.platform.exists(&file_path).await {
             return Err(crate::core::path_suggest::missing_file_error(path, &file_path).await);
+        }
+
+        if tokio::fs::metadata(&file_path)
+            .await
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false)
+        {
+            let mut entries = tokio::fs::read_dir(&file_path)
+                .await
+                .map_err(|e| AvaError::IoError(format!("failed to read directory {path}: {e}")))?;
+            let mut names = Vec::new();
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .map_err(|e| AvaError::IoError(format!("failed to read directory {path}: {e}")))?
+            {
+                if crate::core::path_guard::is_backup_history_path(&entry.path()) {
+                    continue;
+                }
+                let mut display = entry.file_name().to_string_lossy().to_string();
+                if entry
+                    .file_type()
+                    .await
+                    .map(|kind| kind.is_dir())
+                    .unwrap_or(false)
+                {
+                    display.push('/');
+                }
+                names.push(display);
+                if names.len() >= MAX_DIRECTORY_ENTRIES {
+                    break;
+                }
+            }
+            names.sort();
+            if names.len() >= MAX_DIRECTORY_ENTRIES {
+                names.push(format!(
+                    "(Results are truncated: showing first {MAX_DIRECTORY_ENTRIES} entries.)"
+                ));
+            }
+            return Ok(ToolResult {
+                call_id: String::new(),
+                content: names.join("\n"),
+                is_error: false,
+            });
         }
 
         // --- Image handling (F17) ---

@@ -99,9 +99,10 @@ bool is_project_trusted(const std::filesystem::path& project_root) {
 }
 
 void trust_project(const std::filesystem::path& project_root) {
+  std::scoped_lock lock(g_trust_cache_mutex);
+
   const auto trust_path = trusted_projects_path();
   const auto canonical = normalize_path(project_root);
-
   auto trusted = load_trusted_set_from_disk();
   trusted.insert(canonical);
 
@@ -117,13 +118,10 @@ void trust_project(const std::filesystem::path& project_root) {
 
   const auto temp_path = trust_path.string() + ".tmp";
   g_filesystem.write_file(temp_path, data.dump(2));
-#if !defined(_WIN32)
   enforce_owner_only_permissions(temp_path);
-#endif
   std::filesystem::rename(temp_path, trust_path);
   enforce_owner_only_permissions(trust_path);
 
-  std::scoped_lock lock(g_trust_cache_mutex);
   g_trust_cache.reset();
 }
 

@@ -6,19 +6,19 @@
 
 namespace ava::tools {
 
-namespace {
+bool is_path_within_or_equal(const std::filesystem::path& workspace_root, const std::filesystem::path& candidate) {
+  auto root_it = workspace_root.begin();
+  auto target_it = candidate.begin();
 
-[[nodiscard]] bool is_within(const std::filesystem::path& root, const std::filesystem::path& target) {
-  auto root_it = root.begin();
-  auto target_it = target.begin();
-
-  for(; root_it != root.end(); ++root_it, ++target_it) {
-    if(target_it == target.end() || *root_it != *target_it) {
+  for(; root_it != workspace_root.end(); ++root_it, ++target_it) {
+    if(target_it == candidate.end() || *root_it != *target_it) {
       return false;
     }
   }
   return true;
 }
+
+namespace {
 
 [[nodiscard]] std::filesystem::path canonical_existing_prefix_or_throw(const std::filesystem::path& path) {
   const auto absolute = std::filesystem::absolute(path).lexically_normal();
@@ -73,7 +73,7 @@ std::filesystem::path enforce_workspace_path(
 
   const auto normalized = canonical_existing_prefix_or_throw(joined);
 
-  if(!is_within(root, normalized)) {
+  if(!is_path_within_or_equal(root, normalized)) {
     std::ostringstream oss;
     oss << "Tool '" << tool_name << "' cannot access path outside workspace: " << raw_path;
     throw std::runtime_error(oss.str());

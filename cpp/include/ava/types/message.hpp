@@ -27,6 +27,10 @@ struct ImageContent {
   std::string media_type;
 };
 
+inline bool operator==(const ImageContent& lhs, const ImageContent& rhs) {
+  return lhs.data == rhs.data && lhs.media_type == rhs.media_type;
+}
+
 struct Message {
   std::string id;
   Role role{Role::User};

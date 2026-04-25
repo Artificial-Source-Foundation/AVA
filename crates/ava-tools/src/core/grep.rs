@@ -115,6 +115,9 @@ impl Tool for GrepTool {
                 }
 
                 let file_path = dent.path();
+                if crate::core::path_guard::is_backup_history_path(file_path) {
+                    return WalkState::Continue;
+                }
                 if let Some(include_glob) = &include_glob {
                     let relative = file_path.strip_prefix(&search_root).unwrap_or(file_path);
                     let file_name = relative

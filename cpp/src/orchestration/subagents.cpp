@@ -15,9 +15,9 @@
 namespace ava::orchestration {
 namespace {
 
-[[nodiscard]] const std::unordered_set<std::string>& read_only_restricted_tools() {
-  static const std::unordered_set<std::string> restricted{"write", "edit", "bash", "web_fetch", "web_search"};
-  return restricted;
+[[nodiscard]] const std::unordered_set<std::string>& read_only_allowed_tools() {
+  static const std::unordered_set<std::string> allowed{"read", "glob", "grep", "git", "git_read"};
+  return allowed;
 }
 
 [[nodiscard]] std::unordered_map<std::string, ava::config::AgentOverride> configured_overrides(const ava::config::AgentsConfig& config) {
@@ -40,6 +40,15 @@ std::vector<std::string> builtin_subagent_ids() {
   return ids;
 }
 
+std::vector<std::string> read_only_runtime_tool_names() {
+  const auto& allowed = read_only_allowed_tools();
+  std::vector<std::string> names;
+  names.reserve(allowed.size());
+  names.insert(names.end(), allowed.begin(), allowed.end());
+  std::sort(names.begin(), names.end());
+  return names;
+}
+
 SubAgentRuntimeProfile runtime_profile_for(std::string_view agent_type) {
   if(agent_type == "plan" || agent_type == "explore" || agent_type == "scout" || agent_type == "review") {
     return SubAgentRuntimeProfile::ReadOnly;
@@ -56,10 +65,10 @@ std::vector<ava::types::Tool> apply_runtime_profile_to_registry(
     return visible;
   }
 
-  const auto restricted = read_only_restricted_tools();
+  const auto& allowed = read_only_allowed_tools();
   visible.erase(
       std::remove_if(visible.begin(), visible.end(), [&](const ava::types::Tool& tool) {
-        return restricted.contains(tool.name);
+        return !allowed.contains(tool.name);
       }),
       visible.end()
   );

@@ -97,6 +97,8 @@ add_library(ava_llm STATIC
   llm/shared_provider.cpp
   llm/factory.cpp
   llm/providers/mock_provider.cpp
+  llm/providers/anthropic_protocol.cpp
+  llm/providers/anthropic_provider.cpp
   llm/providers/openai_protocol.cpp
   llm/providers/openai_provider.cpp
 )
@@ -118,7 +120,9 @@ ava_enable_sanitizers(ava_llm)
 add_library(ava_tools STATIC
   tools/registry.cpp
   tools/retry.cpp
+  tools/command_classifier.cpp
   tools/permission_middleware.cpp
+  tools/mcp_bridge.cpp
   tools/path_guard.cpp
   tools/file_backup.cpp
   tools/output_fallback.cpp
@@ -137,6 +141,30 @@ target_link_libraries(ava_tools
 ava_apply_toolchain_hygiene(ava_tools)
 ava_apply_warnings(ava_tools)
 ava_enable_sanitizers(ava_tools)
+
+add_library(ava_mcp STATIC
+  mcp/message.cpp
+  mcp/transport.cpp
+  mcp/client.cpp
+  mcp/manager.cpp
+  mcp/config.cpp
+)
+target_include_directories(ava_mcp
+  PUBLIC
+    "${AVA_CPP_INCLUDE_DIR}"
+)
+target_link_libraries(ava_mcp
+  PUBLIC
+    nlohmann_json::nlohmann_json
+)
+ava_apply_toolchain_hygiene(ava_mcp)
+ava_apply_warnings(ava_mcp)
+ava_enable_sanitizers(ava_mcp)
+
+target_link_libraries(ava_tools
+  PUBLIC
+    ava_mcp
+)
 
 add_library(ava_agent STATIC
   agent/message_queue.cpp
@@ -180,8 +208,8 @@ target_link_libraries(ava_orchestration
     ava_session
     ava_llm
     ava_tools
+    ava_mcp
     ava_agent
-  PRIVATE
 )
 ava_apply_toolchain_hygiene(ava_orchestration)
 ava_apply_warnings(ava_orchestration)
@@ -203,6 +231,7 @@ target_link_libraries(ava_runtime
     ava_session
     ava_llm
     ava_tools
+    ava_mcp
     ava_agent
     ava_orchestration
     ava_optional_ftxui

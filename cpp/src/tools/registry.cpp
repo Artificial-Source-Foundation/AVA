@@ -81,6 +81,11 @@ void Middleware::before(const ava::types::ToolCall& tool_call) const {
   (void)tool_call;
 }
 
+void Middleware::before_with_source(const ava::types::ToolCall& tool_call, const ToolSource& source) const {
+  (void)source;
+  before(tool_call);
+}
+
 ava::types::ToolResult Middleware::after(
     const ava::types::ToolCall& tool_call,
     const ava::types::ToolResult& result
@@ -98,6 +103,9 @@ void ToolRegistry::register_tool_with_tier(std::unique_ptr<Tool> tool, ToolTier 
     throw std::runtime_error("cannot register null tool");
   }
   const auto name = tool->name();
+  if(tools_.contains(name)) {
+    return;
+  }
   tiers_[name] = tier;
   sources_[name] = ToolSource::built_in();
   tools_[name] = std::move(tool);
@@ -110,9 +118,7 @@ void ToolRegistry::register_tool_with_source(std::unique_ptr<Tool> tool, ToolSou
 
   const auto name = tool->name();
   const auto existing_source = sources_.find(name);
-  if(existing_source != sources_.end() &&
-     existing_source->second.kind == ToolSourceKind::BuiltIn &&
-     source.kind != ToolSourceKind::BuiltIn) {
+  if(existing_source != sources_.end()) {
     return;
   }
 
@@ -146,9 +152,10 @@ const Tool& ToolRegistry::find_tool_or_throw(const std::string& name) const {
 ava::types::ToolResult ToolRegistry::execute(ava::types::ToolCall tool_call) const {
   const auto& tool = find_tool_or_throw(tool_call.name);
   tool.backfill_input(tool_call.arguments);
+  const auto source = sources_.contains(tool_call.name) ? sources_.at(tool_call.name) : ToolSource::built_in();
 
   for(const auto& middleware : middleware_) {
-    middleware->before(tool_call);
+    middleware->before_with_source(tool_call, source);
   }
 
   std::optional<ava::types::ToolResult> result;

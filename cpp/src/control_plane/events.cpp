@@ -1,6 +1,7 @@
 #include "ava/control_plane/events.hpp"
 
 #include <array>
+#include <stdexcept>
 
 namespace ava::control_plane {
 namespace {
@@ -107,7 +108,7 @@ std::string_view canonical_event_kind_to_type_tag(CanonicalEventKind kind) {
     case CanonicalEventKind::StreamingEditProgress:
       return "streaming_edit_progress";
   }
-  return "error";
+  throw std::invalid_argument("unknown canonical event kind");
 }
 
 std::string_view canonical_event_field_to_json_key(CanonicalEventField field) {
@@ -153,7 +154,7 @@ std::string_view canonical_event_field_to_json_key(CanonicalEventField field) {
     case CanonicalEventField::Message:
       return "message";
   }
-  return "message";
+  throw std::invalid_argument("unknown canonical event field");
 }
 
 std::span<const CanonicalEventSpec> canonical_event_specs() {

@@ -19,6 +19,30 @@ pub struct ApprovalRequest {
     pub inspection: Option<InspectionInfo>,
 }
 
+impl ApprovalRequest {
+    pub fn preview_detail_text(&self) -> String {
+        let args = self.call.arguments.to_string();
+        if args == "{}" {
+            format!("  {}", self.call.name)
+        } else {
+            format!("  {}: {}", self.call.name, args)
+        }
+    }
+
+    pub fn preview_complete(&self) -> bool {
+        const TOOL_NAME_LIMIT: usize = 120;
+        const ARGS_LIMIT: usize = 300;
+
+        self.call.name.len() <= TOOL_NAME_LIMIT
+            && self.call.arguments.to_string().len() <= ARGS_LIMIT
+    }
+
+    pub fn preview_complete_for_width(&self, width: usize) -> bool {
+        self.preview_complete()
+            && crate::text_utils::display_width(&self.preview_detail_text()) <= width
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApprovalStage {
     Preview,
@@ -64,6 +88,7 @@ pub struct PermissionState {
     pub session_approved: HashSet<String>,
     pub permission_level: PermissionLevel,
     pub rejection_input: String,
+    pub preview_content_width: usize,
 }
 
 impl Default for PermissionState {
@@ -74,6 +99,7 @@ impl Default for PermissionState {
             session_approved: HashSet::new(),
             permission_level: PermissionLevel::Standard,
             rejection_input: String::new(),
+            preview_content_width: 0,
         }
     }
 }
@@ -84,12 +110,26 @@ impl PermissionState {
     }
 
     pub fn approve_current_once(&mut self) -> Option<ApprovalRequest> {
+        if !self
+            .queue
+            .front()
+            .is_some_and(ApprovalRequest::preview_complete)
+        {
+            return None;
+        }
         let request = self.queue.pop_front();
         self.reset_modal_state();
         request
     }
 
     pub fn approve_current_for_session(&mut self) -> Option<ApprovalRequest> {
+        if !self
+            .queue
+            .front()
+            .is_some_and(ApprovalRequest::preview_complete)
+        {
+            return None;
+        }
         let request = self.queue.pop_front();
         if let Some(req) = request.as_ref() {
             self.session_approved.insert(req.call.name.clone());

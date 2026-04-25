@@ -55,6 +55,53 @@ namespace {
   return payload;
 }
 
+[[nodiscard]] std::string flatten_text_content(const nlohmann::json& content) {
+  if(content.is_string()) {
+    return content.get<std::string>();
+  }
+
+  if(content.is_array()) {
+    std::string flattened;
+    for(const auto& part : content) {
+      if(part.is_string()) {
+        flattened += part.get<std::string>();
+        continue;
+      }
+      if(part.is_object() && part.contains("text") && part.at("text").is_string()) {
+        flattened += part.at("text").get<std::string>();
+      }
+    }
+    return flattened;
+  }
+
+  if(content.is_object() && content.contains("text") && content.at("text").is_string()) {
+    return content.at("text").get<std::string>();
+  }
+
+  return {};
+}
+
+[[nodiscard]] nlohmann::json parse_tool_arguments(const nlohmann::json& function_payload) {
+  if(!function_payload.contains("arguments")) {
+    return nlohmann::json::object();
+  }
+
+  const auto& raw_arguments = function_payload.at("arguments");
+  if(raw_arguments.is_object() || raw_arguments.is_array()) {
+    return raw_arguments;
+  }
+
+  if(raw_arguments.is_string()) {
+    try {
+      return nlohmann::json::parse(raw_arguments.get<std::string>());
+    } catch(const std::exception&) {
+      return nlohmann::json::object();
+    }
+  }
+
+  return nlohmann::json::object();
+}
+
 [[nodiscard]] std::optional<types::TokenUsage> parse_usage(const nlohmann::json& payload) {
   if(!payload.contains("usage") || !payload.at("usage").is_object()) {
     return std::nullopt;
@@ -123,7 +170,9 @@ LlmResponse parse_chat_completion_response(const nlohmann::json& payload) {
   const auto& message = choice.contains("message") ? choice.at("message") : nlohmann::json::object();
 
   LlmResponse response;
-  response.content = message.value("content", "");
+  if(message.contains("content")) {
+    response.content = flatten_text_content(message.at("content"));
+  }
 
   if(message.contains("tool_calls") && message.at("tool_calls").is_array()) {
     for(const auto& tc : message.at("tool_calls")) {
@@ -131,26 +180,21 @@ LlmResponse parse_chat_completion_response(const nlohmann::json& payload) {
         continue;
       }
       const auto& function = tc.at("function");
-      const auto raw_arguments = function.value("arguments", std::string{"{}"});
-
-      nlohmann::json arguments = nlohmann::json::object();
-      try {
-        arguments = nlohmann::json::parse(raw_arguments);
-      } catch(const std::exception&) {
-        arguments = nlohmann::json::object();
-      }
 
       response.tool_calls.push_back(types::ToolCall{
           .id = tc.value("id", make_fallback_tool_call_id()),
           .name = function.value("name", std::string{}),
-          .arguments = std::move(arguments),
+          .arguments = parse_tool_arguments(function),
       });
     }
   }
 
   response.usage = parse_usage(payload);
-  if(message.contains("reasoning_content") && message.at("reasoning_content").is_string()) {
-    response.thinking = message.at("reasoning_content").get<std::string>();
+  if(message.contains("reasoning_content")) {
+    const auto thinking = flatten_text_content(message.at("reasoning_content"));
+    if(!thinking.empty()) {
+      response.thinking = thinking;
+    }
   }
 
   return response;
@@ -187,8 +231,8 @@ std::vector<types::StreamChunk> parse_stream_events(const nlohmann::json& payloa
   const auto& delta = choice.at("delta");
   bool has_data = false;
 
-  if(delta.contains("content") && delta.at("content").is_string()) {
-    const auto content = delta.at("content").get<std::string>();
+  if(delta.contains("content")) {
+    const auto content = flatten_text_content(delta.at("content"));
     if(!content.empty()) {
       types::StreamChunk chunk;
       chunk.content = content;
@@ -197,8 +241,8 @@ std::vector<types::StreamChunk> parse_stream_events(const nlohmann::json& payloa
     }
   }
 
-  if(delta.contains("reasoning_content") && delta.at("reasoning_content").is_string()) {
-    const auto thinking = delta.at("reasoning_content").get<std::string>();
+  if(delta.contains("reasoning_content")) {
+    const auto thinking = flatten_text_content(delta.at("reasoning_content"));
     if(!thinking.empty()) {
       types::StreamChunk chunk;
       chunk.thinking = thinking;
@@ -235,9 +279,10 @@ std::vector<types::StreamChunk> parse_stream_events(const nlohmann::json& payloa
     }
   }
 
-  if(choice.contains("finish_reason") && choice.at("finish_reason").is_string()) {
-    const auto reason = choice.at("finish_reason").get<std::string>();
-    if(reason == "stop" || reason == "tool_calls") {
+  if(choice.contains("finish_reason")) {
+    const auto& finish_reason = choice.at("finish_reason");
+    const bool terminal = finish_reason.is_string() && !finish_reason.get<std::string>().empty();
+    if(terminal) {
       types::StreamChunk chunk;
       chunk.done = true;
       chunks.push_back(std::move(chunk));

@@ -11,6 +11,7 @@
 #include "ava/agent/runtime.hpp"
 #include "ava/config/credentials.hpp"
 #include "ava/llm/provider.hpp"
+#include "ava/mcp/manager.hpp"
 #include "ava/orchestration/interactive.hpp"
 #include "ava/orchestration/run_controller.hpp"
 #include "ava/session/session.hpp"
@@ -69,6 +70,9 @@ struct RuntimeCompositionRequest {
   ava::llm::ProviderPtr provider_override;
   std::function<ava::llm::ProviderPtr(const ResolvedRuntimeSelection&)> provider_factory;
   std::optional<ava::config::CredentialStore> credentials_override;
+  bool load_global_mcp_config{false};
+  std::optional<ava::mcp::McpConfig> mcp_config_override;
+  ava::mcp::McpManager::TransportFactory mcp_transport_factory;
 };
 
 struct RuntimeComposition {
@@ -80,6 +84,7 @@ struct RuntimeComposition {
   std::shared_ptr<RunController> run_controller;
   std::shared_ptr<InteractiveBridge> interactive_bridge;
   std::shared_ptr<ava::tools::ToolRegistry> registry;
+  std::shared_ptr<ava::mcp::McpManager> mcp_manager;
   ava::agent::MessageQueue queue;
   std::unique_ptr<ava::agent::AgentRuntime> runtime;
 

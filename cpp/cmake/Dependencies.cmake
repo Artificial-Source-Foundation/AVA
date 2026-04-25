@@ -13,6 +13,7 @@ if(NOT fmt_FOUND)
     fmt
     GIT_REPOSITORY https://github.com/fmtlib/fmt.git
     GIT_TAG 11.0.2
+    GIT_SHALLOW TRUE
   )
   FetchContent_MakeAvailable(fmt)
 endif()
@@ -23,6 +24,7 @@ if(NOT spdlog_FOUND)
     spdlog
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
     GIT_TAG v1.14.1
+    GIT_SHALLOW TRUE
   )
   FetchContent_MakeAvailable(spdlog)
 endif()
@@ -33,6 +35,7 @@ if(NOT nlohmann_json_FOUND)
     nlohmann_json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
     GIT_TAG v3.11.3
+    GIT_SHALLOW TRUE
   )
   FetchContent_MakeAvailable(nlohmann_json)
 endif()
@@ -43,11 +46,15 @@ if(NOT CLI11_FOUND)
     CLI11
     GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
     GIT_TAG v2.4.2
+    GIT_SHALLOW TRUE
   )
   FetchContent_MakeAvailable(CLI11)
 endif()
 
-find_package(SQLite3 REQUIRED)
+find_package(SQLite3 QUIET)
+if(NOT SQLite3_FOUND)
+  message(FATAL_ERROR "SQLite3 development files are required for ava_session. Install libsqlite3-dev/sqlite-devel or provide SQLite3_ROOT.")
+endif()
 if(TARGET SQLite3::SQLite3 AND NOT TARGET SQLite::SQLite3)
   add_library(SQLite::SQLite3 ALIAS SQLite3::SQLite3)
 endif()
@@ -59,6 +66,7 @@ if(AVA_BUILD_TESTS)
       Catch2
       GIT_REPOSITORY https://github.com/catchorg/Catch2.git
       GIT_TAG v3.7.0
+      GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(Catch2)
   endif()
@@ -73,11 +81,12 @@ if(AVA_WITH_FTXUI)
       ftxui
       GIT_REPOSITORY https://github.com/ArthurSonzogni/FTXUI.git
       GIT_TAG v5.0.0
+      GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(ftxui)
     find_package(ftxui CONFIG QUIET)
   endif()
-  if(ftxui_FOUND)
+  if(TARGET ftxui::screen AND TARGET ftxui::dom AND TARGET ftxui::component)
     target_link_libraries(ava_optional_ftxui INTERFACE ftxui::screen ftxui::dom ftxui::component)
     target_compile_definitions(ava_optional_ftxui INTERFACE AVA_WITH_FTXUI=1)
     set(AVA_RESOLVED_WITH_FTXUI_VALUE 1)
@@ -99,16 +108,17 @@ if(AVA_WITH_CPR)
       cpr
       GIT_REPOSITORY https://github.com/libcpr/cpr.git
       GIT_TAG 1.11.0
+      GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(cpr)
     find_package(cpr CONFIG QUIET)
     find_package(CPR CONFIG QUIET)
   endif()
-  if(cpr_FOUND)
+  if(TARGET cpr::cpr)
     target_link_libraries(ava_optional_cpr INTERFACE cpr::cpr)
     target_compile_definitions(ava_optional_cpr INTERFACE AVA_WITH_CPR=1)
     set(AVA_RESOLVED_WITH_CPR_VALUE 1)
-  elseif(CPR_FOUND)
+  elseif(TARGET CPR::cpr)
     target_link_libraries(ava_optional_cpr INTERFACE CPR::cpr)
     target_compile_definitions(ava_optional_cpr INTERFACE AVA_WITH_CPR=1)
     set(AVA_RESOLVED_WITH_CPR_VALUE 1)

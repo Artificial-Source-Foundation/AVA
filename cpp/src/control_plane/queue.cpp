@@ -34,10 +34,12 @@ std::optional<ClearQueueTarget> parse_clear_queue_target(std::string_view target
   if(target == "steering" || target == "Steering") {
     return ClearQueueTarget::Steering;
   }
-  if(target == "followUp" || target == "follow_up" || target == "follow-up" || target == "FollowUp") {
+  if(target == "followUp" || target == "follow_up" || target == "follow-up" || target == "followup"
+     || target == "FollowUp") {
     return ClearQueueTarget::FollowUp;
   }
-  if(target == "postComplete" || target == "post_complete" || target == "post-complete" || target == "PostComplete") {
+  if(target == "postComplete" || target == "post_complete" || target == "post-complete" || target == "postcomplete"
+     || target == "PostComplete") {
     return ClearQueueTarget::PostComplete;
   }
   return std::nullopt;

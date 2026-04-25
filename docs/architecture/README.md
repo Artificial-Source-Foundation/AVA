@@ -2,17 +2,20 @@
 title: "Architecture"
 description: "Internal structure, crate boundaries, and architecture transition docs for AVA."
 order: 1
-updated: "2026-04-24"
+updated: "2026-04-25"
 ---
 
 # Architecture Docs
 
 This section explains how AVA is organized internally and keeps canonical owner docs separate from historical transition material.
 
-Milestone namespace note:
+Milestone namespace legend:
 
-1. The shared-backend contract chain uses M4-M7, plus contract-follow-up closure milestones M10-M12.
-2. The backend modularization roadmap uses separate **Track Milestone N** labels.
+1. **M4-M7** = shared-backend contract development.
+2. **M10-M12** = contract-follow-up closure sequence.
+3. **Track Milestone N** = backend modularization roadmap.
+4. **C++ Milestone N** = Rust-to-C++ migration phases.
+5. **M17-M20** = post-M16 C++ backend/headless/TUI completion roadmap slices.
 
 ## Ownership Snapshot (Authoritative)
 
@@ -44,6 +47,8 @@ These are current forward-looking planning docs that build on the canonical seam
 2. [Plugin boundary checklist](plugin-boundary.md) - future-track note for optional plugin migration work
 3. [C++ backend/TUI migration completion gap audit (Post-M16)](cpp-backend-tui-migration-completion-gap-audit-m16.md) - planning audit of completion-critical gaps, deferred inventory, and RP evidence targets after Milestone 16
 4. [C++ backend/TUI parity contract audit (Post-M16)](cpp-backend-tui-parity-contract-audit-post-m16.md) - planning checklist of scoped backend/headless/TUI contract evidence needed before claiming migration completion
+5. [C++ backend/headless/TUI migration completion roadmap (Post-M16, M17+)](cpp-backend-headless-tui-migration-completion-roadmap-post-m16-m17-plus.md) - durable execution sequence for M17-M20 (interactive terminal-state closure, TUI adapter action harness, child-run cancellation/watchdog, and evidence hardening/deferred-inventory guardrails) with acceptance gates and decision points
+6. [C++/Rust parity gap audit (Post-M26)](cpp-rust-parity-gap-audit-post-m26.md) - current non-web/non-desktop parity audit after M26, identifying remaining C++ completion blockers across tools, permissions, MCP/custom tools, runtime, sessions, providers, TUI, CLI, and config
 
 ## Historical Milestone Artifacts
 

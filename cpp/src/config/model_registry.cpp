@@ -14,20 +14,20 @@ const char* kEmbeddedRegistryJson = R"JSON(
 {
   "models": [
     {
-      "id": "claude-opus-4.6",
+      "id": "claude-opus-4-6",
       "provider": "anthropic",
       "name": "Claude Opus 4.6",
       "aliases": ["opus"],
-      "capabilities": {"tool_call": true, "vision": true, "reasoning": true, "streaming": true, "loop_prone": false},
+      "capabilities": {"tool_call": true, "vision": false, "reasoning": false, "streaming": false, "loop_prone": false},
       "limits": {"context_window": 200000, "max_output": 64000},
       "cost": {"input_per_million": 5.0, "output_per_million": 25.0}
     },
     {
-      "id": "claude-sonnet-4.5",
+      "id": "claude-sonnet-4-6",
       "provider": "anthropic",
-      "name": "Claude Sonnet 4.5",
+      "name": "Claude Sonnet 4.6",
       "aliases": ["sonnet"],
-      "capabilities": {"tool_call": true, "vision": true, "reasoning": true, "streaming": true, "loop_prone": false},
+      "capabilities": {"tool_call": true, "vision": false, "reasoning": false, "streaming": false, "loop_prone": false},
       "limits": {"context_window": 200000, "max_output": 64000},
       "cost": {"input_per_million": 3.0, "output_per_million": 15.0}
     },

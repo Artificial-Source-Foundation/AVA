@@ -10,7 +10,7 @@ This note records what is implemented for the C++ `ava_orchestration` slice and 
    - `MAX_AGENT_DEPTH`
    - `SubAgentRuntimeProfile`
    - `runtime_profile_for(...)`
-   - `apply_runtime_profile_to_registry(...)` implemented as a **non-mutating profile-aware listing filter** over the current registry snapshot
+   - `apply_runtime_profile_to_registry(...)` implemented as a **non-mutating profile-aware listing filter** over the current registry snapshot, with read-only mode fail-closed to safe investigation tools (`read`, `glob`, `grep`, `git`, `git_read`)
    - `build_subagent_system_prompt(...)` with profile-aware guidance text
 4. Effective catalog/data slice:
     - `EffectiveSubagentDefinition`

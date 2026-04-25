@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -28,6 +29,17 @@ public:
         .content = args.value("input", std::string{}),
         .is_error = false,
     };
+  }
+};
+
+class FailingTool final : public ava::tools::Tool {
+public:
+  [[nodiscard]] std::string name() const override { return "fail"; }
+  [[nodiscard]] std::string description() const override { return "Fails deterministically"; }
+  [[nodiscard]] nlohmann::json parameters() const override { return nlohmann::json{{"type", "object"}}; }
+
+  [[nodiscard]] ava::types::ToolResult execute(const nlohmann::json&) const override {
+    throw std::runtime_error("deterministic tool failure");
   }
 };
 
@@ -70,6 +82,53 @@ public:
   ) const override {
     return StreamDispatchResult::Unsupported;
   }
+
+private:
+  mutable std::deque<ava::llm::LlmResponse> scripted_;
+};
+
+class CapturingProvider final : public ava::llm::Provider {
+public:
+  explicit CapturingProvider(std::vector<ava::llm::LlmResponse> scripted)
+      : scripted_(scripted.begin(), scripted.end()) {}
+
+  [[nodiscard]] std::string model_name() const override { return "capturing"; }
+  [[nodiscard]] std::size_t estimate_tokens(std::string_view input) const override { return input.size(); }
+  [[nodiscard]] double estimate_cost(std::size_t, std::size_t) const override { return 0.0; }
+  [[nodiscard]] bool supports_tools() const override { return true; }
+
+  [[nodiscard]] ava::llm::LlmResponse generate(
+      const std::vector<ava::llm::ChatMessage>& messages,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig
+  ) const override {
+    captured_messages.push_back(messages);
+    if(scripted_.empty()) {
+      throw std::runtime_error("capturing provider exhausted");
+    }
+    auto next = scripted_.front();
+    scripted_.pop_front();
+    return next;
+  }
+
+  [[nodiscard]] std::vector<ava::types::StreamChunk> generate_stream(
+      const std::vector<ava::llm::ChatMessage>&,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig
+  ) const override {
+    return {};
+  }
+
+  [[nodiscard]] StreamDispatchResult stream_generate(
+      const std::vector<ava::llm::ChatMessage>&,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig,
+      const StreamChunkSink&
+  ) const override {
+    return StreamDispatchResult::Unsupported;
+  }
+
+  mutable std::vector<std::vector<ava::llm::ChatMessage>> captured_messages;
 
 private:
   mutable std::deque<ava::llm::LlmResponse> scripted_;
@@ -159,6 +218,101 @@ class EmptyStreamProvider final : public ava::llm::Provider {
 
   mutable int generate_calls{0};
   mutable int stream_calls{0};
+};
+
+class ToolCallThenCancelProvider final : public ava::llm::Provider {
+ public:
+  explicit ToolCallThenCancelProvider(bool& cancelled) : cancelled_(cancelled) {}
+
+  [[nodiscard]] std::string model_name() const override { return "tool-call-then-cancel"; }
+  [[nodiscard]] std::size_t estimate_tokens(std::string_view input) const override { return input.size(); }
+  [[nodiscard]] double estimate_cost(std::size_t, std::size_t) const override { return 0.0; }
+  [[nodiscard]] bool supports_tools() const override { return true; }
+
+  [[nodiscard]] ava::llm::LlmResponse generate(
+      const std::vector<ava::llm::ChatMessage>&,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig
+  ) const override {
+    throw std::runtime_error("unexpected non-stream call");
+  }
+
+  [[nodiscard]] std::vector<ava::types::StreamChunk> generate_stream(
+      const std::vector<ava::llm::ChatMessage>&,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig
+  ) const override {
+    throw std::runtime_error("unexpected materialized stream call");
+  }
+
+  [[nodiscard]] StreamDispatchResult stream_generate(
+      const std::vector<ava::llm::ChatMessage>&,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig,
+      const StreamChunkSink& on_chunk
+  ) const override {
+    if(on_chunk) {
+      (void)on_chunk(ava::types::StreamChunk{.tool_call = ava::types::StreamToolCall{
+                                                 .index = 0,
+                                                 .id = "call_empty_text",
+                                                 .name = "echo",
+                                                 .arguments_delta = "{\"input\":\"x\"}",
+                                             }});
+    }
+    cancelled_ = true;
+    return StreamDispatchResult::Completed;
+  }
+
+ private:
+  bool& cancelled_;
+};
+
+class ToolCallCancelledDuringStreamProvider final : public ava::llm::Provider {
+ public:
+  explicit ToolCallCancelledDuringStreamProvider(bool& cancelled) : cancelled_(cancelled) {}
+
+  [[nodiscard]] std::string model_name() const override { return "tool-call-cancelled-during-stream"; }
+  [[nodiscard]] std::size_t estimate_tokens(std::string_view input) const override { return input.size(); }
+  [[nodiscard]] double estimate_cost(std::size_t, std::size_t) const override { return 0.0; }
+  [[nodiscard]] bool supports_tools() const override { return true; }
+
+  [[nodiscard]] ava::llm::LlmResponse generate(
+      const std::vector<ava::llm::ChatMessage>&,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig
+  ) const override {
+    throw std::runtime_error("unexpected non-stream call");
+  }
+
+  [[nodiscard]] std::vector<ava::types::StreamChunk> generate_stream(
+      const std::vector<ava::llm::ChatMessage>&,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig
+  ) const override {
+    throw std::runtime_error("unexpected materialized stream call");
+  }
+
+  [[nodiscard]] StreamDispatchResult stream_generate(
+      const std::vector<ava::llm::ChatMessage>&,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig,
+      const StreamChunkSink& on_chunk
+  ) const override {
+    if(on_chunk) {
+      (void)on_chunk(ava::types::StreamChunk{.tool_call = ava::types::StreamToolCall{
+                                                 .index = 0,
+                                                 .id = "call_cancelled_during_stream",
+                                                 .name = "echo",
+                                                 .arguments_delta = "{\"input\":\"x\"}",
+                                             }});
+      cancelled_ = true;
+      (void)on_chunk(ava::types::StreamChunk::finished());
+    }
+    return StreamDispatchResult::Completed;
+  }
+
+ private:
+  bool& cancelled_;
 };
 
 class UnsupportedCancellableProvider final : public ava::llm::Provider {
@@ -340,7 +494,63 @@ TEST_CASE("agent runtime executes tool calls and completes", "[ava_agent]") {
   REQUIRE(session.messages.size() == 4);
   REQUIRE(session.messages.at(0).role == "user");
   REQUIRE(session.messages.at(2).role == "tool");
+  REQUIRE(session.messages.at(2).tool_call_id == std::optional<std::string>{"call_1"});
+  REQUIRE(session.messages.at(2).tool_results.at(0).at("call_id") == "call_1");
   REQUIRE(events.back() == ava::agent::AgentEventKind::Completion);
+}
+
+TEST_CASE("agent runtime records non-permission tool errors and continues", "[ava_agent]") {
+  ScriptedProvider provider({
+      ava::llm::LlmResponse{
+          .content = "I'll try a failing tool",
+          .tool_calls = {ava::types::ToolCall{.id = "call_fail_1", .name = "fail", .arguments = nlohmann::json::object()}},
+          .usage = std::nullopt,
+          .thinking = std::nullopt,
+      },
+      ava::llm::LlmResponse{
+          .content = "Recovered from the tool failure",
+          .tool_calls = {},
+          .usage = std::nullopt,
+          .thinking = std::nullopt,
+      },
+  });
+
+  ava::tools::ToolRegistry tools;
+  tools.register_tool(std::make_unique<FailingTool>());
+
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 4});
+  ava::types::SessionRecord session{
+      .id = "session_tool_error",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {},
+      .branch_head = std::nullopt,
+  };
+
+  std::vector<ava::types::ToolResult> tool_results;
+  const auto result = runtime.run(
+      session,
+      ava::agent::AgentRunInput{.goal = "try fail"},
+      [&](const ava::agent::AgentEvent& event) {
+        if(event.tool_result.has_value()) {
+          tool_results.push_back(*event.tool_result);
+        }
+      }
+  );
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Completed);
+  REQUIRE(result.final_response == "Recovered from the tool failure");
+  REQUIRE(tool_results.size() == 1);
+  REQUIRE(tool_results.front().call_id == "call_fail_1");
+  REQUIRE(tool_results.front().is_error);
+  REQUIRE(tool_results.front().content.find("deterministic tool failure") != std::string::npos);
+  REQUIRE(session.messages.size() == 4);
+  REQUIRE(session.messages.at(2).role == "tool");
+  REQUIRE(session.messages.at(2).tool_call_id == std::optional<std::string>{"call_fail_1"});
+  const auto payload = nlohmann::json::parse(session.messages.at(2).content);
+  REQUIRE(payload.at("call_id") == "call_fail_1");
+  REQUIRE(payload.at("is_error") == true);
 }
 
 TEST_CASE("agent runtime appends after sparse generated message ids", "[ava_agent]") {
@@ -386,6 +596,72 @@ TEST_CASE("agent runtime appends after sparse generated message ids", "[ava_agen
   REQUIRE(session.messages.size() == 4);
   REQUIRE(session.messages.at(2).id == "m7_msg_6");
   REQUIRE(session.messages.at(3).id == "m7_msg_7");
+}
+
+TEST_CASE("agent runtime appends and prompts from active branch head", "[ava_agent]") {
+  CapturingProvider provider({
+      ava::llm::LlmResponse{
+          .content = "active branch response",
+          .tool_calls = {},
+          .usage = std::nullopt,
+          .thinking = std::nullopt,
+      },
+  });
+
+  ava::tools::ToolRegistry tools;
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 1});
+
+  ava::types::SessionRecord session{
+      .id = "session_active_branch",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {
+          ava::types::SessionMessage{
+              .id = "m7_msg_1",
+              .role = "user",
+              .content = "root question",
+              .timestamp = "2026-01-01T00:00:00Z",
+              .parent_id = std::nullopt,
+          },
+          ava::types::SessionMessage{
+              .id = "m7_msg_2",
+              .role = "assistant",
+              .content = "active assistant",
+              .timestamp = "2026-01-01T00:00:01Z",
+              .parent_id = std::optional<std::string>{"m7_msg_1"},
+          },
+          ava::types::SessionMessage{
+              .id = "m7_msg_3",
+              .role = "user",
+              .content = "inactive fork",
+              .timestamp = "2026-01-01T00:00:02Z",
+              .parent_id = std::optional<std::string>{"m7_msg_1"},
+          },
+      },
+      .branch_head = std::optional<std::string>{"m7_msg_2"},
+  };
+
+  const auto result = runtime.run(session, ava::agent::AgentRunInput{.goal = "continue active", .stream = false});
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Completed);
+  REQUIRE(session.messages.size() == 5);
+  REQUIRE(session.messages.at(3).role == "user");
+  REQUIRE(session.messages.at(3).content == "continue active");
+  REQUIRE(session.messages.at(3).parent_id == std::optional<std::string>{"m7_msg_2"});
+  REQUIRE(session.messages.at(4).role == "assistant");
+  REQUIRE(session.messages.at(4).parent_id == std::optional<std::string>{session.messages.at(3).id});
+  REQUIRE(session.branch_head == std::optional<std::string>{session.messages.at(4).id});
+
+  REQUIRE(provider.captured_messages.size() == 1);
+  std::vector<std::string> prompt_contents;
+  for(const auto& message : provider.captured_messages.front()) {
+    prompt_contents.push_back(message.content);
+  }
+  REQUIRE(std::find(prompt_contents.begin(), prompt_contents.end(), "root question") != prompt_contents.end());
+  REQUIRE(std::find(prompt_contents.begin(), prompt_contents.end(), "active assistant") != prompt_contents.end());
+  REQUIRE(std::find(prompt_contents.begin(), prompt_contents.end(), "continue active") != prompt_contents.end());
+  REQUIRE(std::find(prompt_contents.begin(), prompt_contents.end(), "inactive fork") == prompt_contents.end());
 }
 
 TEST_CASE("agent runtime stops on simple stuck loop", "[ava_agent]") {
@@ -786,6 +1062,49 @@ TEST_CASE("agent runtime reassembles streamed tool calls and executes tools", "[
   REQUIRE(tool_messages == 1);
 }
 
+TEST_CASE("agent runtime suppresses empty assistant response for tool-call-only stream", "[ava_agent]") {
+  StreamScriptedProvider provider({
+      std::vector<ava::types::StreamChunk>{
+          ava::types::StreamChunk{.tool_call = ava::types::StreamToolCall{.index = 0, .id = "call_stream_only", .name = "echo", .arguments_delta = "{\"input\":\"hello\"}"}},
+          ava::types::StreamChunk::finished(),
+      },
+      std::vector<ava::types::StreamChunk>{
+          ava::types::StreamChunk::text("done"),
+          ava::types::StreamChunk::finished(),
+      },
+  });
+
+  ava::tools::ToolRegistry tools;
+  tools.register_tool(std::make_unique<EchoTool>());
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 3});
+
+  ava::types::SessionRecord session{
+      .id = "session_stream_tool_only",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {},
+      .branch_head = std::nullopt,
+  };
+
+  std::vector<ava::agent::AgentEvent> events;
+  const auto result = runtime.run(
+      session,
+      ava::agent::AgentRunInput{.goal = "tool only", .stream = true},
+      [&](const ava::agent::AgentEvent& event) {
+        events.push_back(event);
+      }
+  );
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Completed);
+  REQUIRE(std::none_of(events.begin(), events.end(), [](const auto& event) {
+    return event.kind == ava::agent::AgentEventKind::AssistantResponse && event.message.empty();
+  }));
+  REQUIRE(std::count_if(events.begin(), events.end(), [](const auto& event) {
+            return event.kind == ava::agent::AgentEventKind::ToolCall;
+          }) == 1);
+}
+
 TEST_CASE("agent runtime cancels before tool execution after streamed assistant text", "[ava_agent]") {
   StreamScriptedProvider provider({
       std::vector<ava::types::StreamChunk>{
@@ -832,6 +1151,140 @@ TEST_CASE("agent runtime cancels before tool execution after streamed assistant 
   REQUIRE(std::any_of(session.messages.begin(), session.messages.end(), [](const auto& message) {
     return message.role == "assistant" && message.content == "thinking";
   }));
+}
+
+TEST_CASE("agent runtime preserves tool-call-only assistant message when cancelled before tool execution", "[ava_agent]") {
+  bool cancelled = false;
+  ToolCallThenCancelProvider provider(cancelled);
+
+  ava::tools::ToolRegistry tools;
+  tools.register_tool(std::make_unique<EchoTool>());
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 2});
+
+  ava::types::SessionRecord session{
+      .id = "session_cancel_tool_call_only",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {},
+      .branch_head = std::nullopt,
+  };
+
+  const auto result = runtime.run(
+      session,
+      ava::agent::AgentRunInput{
+          .goal = "cancel before empty-text tool call",
+          .is_cancelled = [&] {
+            return cancelled;
+          },
+          .stream = true,
+      }
+  );
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Cancelled);
+  REQUIRE(std::none_of(session.messages.begin(), session.messages.end(), [](const auto& message) {
+    return message.role == "tool";
+  }));
+  const auto assistant = std::find_if(session.messages.begin(), session.messages.end(), [](const auto& message) {
+    return message.role == "assistant" && message.content.empty() && !message.tool_calls.empty();
+  });
+  REQUIRE(assistant != session.messages.end());
+  REQUIRE(assistant->tool_calls.at(0).at("id") == "call_empty_text");
+}
+
+TEST_CASE("agent runtime preserves tool-call-only assistant message when cancelled during streaming", "[ava_agent]") {
+  bool cancelled = false;
+  ToolCallCancelledDuringStreamProvider provider(cancelled);
+
+  ava::tools::ToolRegistry tools;
+  tools.register_tool(std::make_unique<EchoTool>());
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 2});
+
+  ava::types::SessionRecord session{
+      .id = "session_cancel_tool_call_during_stream",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {},
+      .branch_head = std::nullopt,
+  };
+
+  const auto result = runtime.run(
+      session,
+      ava::agent::AgentRunInput{
+          .goal = "cancel during empty-text tool call",
+          .is_cancelled = [&] {
+            return cancelled;
+          },
+          .stream = true,
+      }
+  );
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Cancelled);
+  REQUIRE(std::none_of(session.messages.begin(), session.messages.end(), [](const auto& message) {
+    return message.role == "tool";
+  }));
+  const auto assistant = std::find_if(session.messages.begin(), session.messages.end(), [](const auto& message) {
+    return message.role == "assistant" && message.content.empty() && !message.tool_calls.empty();
+  });
+  REQUIRE(assistant != session.messages.end());
+  REQUIRE(assistant->tool_calls.at(0).at("id") == "call_cancelled_during_stream");
+}
+
+TEST_CASE("agent runtime cancellation preserves session transcript integrity", "[ava_agent]") {
+  StreamScriptedProvider provider({
+      std::vector<ava::types::StreamChunk>{
+          ava::types::StreamChunk::text("partial"),
+          ava::types::StreamChunk::finished(),
+      },
+  });
+
+  ava::tools::ToolRegistry tools;
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 2});
+
+  ava::types::SessionRecord session{
+      .id = "session_cancel_integrity",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {ava::types::SessionMessage{
+          .id = "m7_msg_1",
+          .role = "user",
+          .content = "earlier",
+          .timestamp = "2026-01-01T00:00:00Z",
+          .parent_id = std::nullopt,
+      }},
+      .branch_head = std::optional<std::string>{"m7_msg_1"},
+  };
+
+  bool cancelled = false;
+  const auto result = runtime.run(
+      session,
+      ava::agent::AgentRunInput{
+          .goal = "cancel with prior transcript",
+          .is_cancelled = [&] {
+            return cancelled;
+          },
+          .stream = true,
+      },
+      [&](const ava::agent::AgentEvent& event) {
+        if(event.kind == ava::agent::AgentEventKind::AssistantResponseDelta) {
+          cancelled = true;
+        }
+      }
+  );
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Cancelled);
+  REQUIRE(session.messages.size() == 3);
+  REQUIRE(session.messages.at(0).id == "m7_msg_1");
+  REQUIRE(session.messages.at(0).role == "user");
+  REQUIRE(session.messages.at(1).role == "user");
+  REQUIRE(session.messages.at(1).content == "cancel with prior transcript");
+  REQUIRE(session.messages.at(1).parent_id == std::optional<std::string>{"m7_msg_1"});
+  REQUIRE(session.messages.at(2).role == "assistant");
+  REQUIRE(session.messages.at(2).content == "partial");
+  REQUIRE(session.messages.at(2).parent_id == std::optional<std::string>{session.messages.at(1).id});
+  REQUIRE(session.branch_head == std::optional<std::string>{session.messages.at(2).id});
 }
 
 TEST_CASE("agent runtime emits terminal completion on exception paths", "[ava_agent]") {

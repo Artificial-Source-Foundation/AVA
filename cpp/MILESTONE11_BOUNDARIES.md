@@ -10,6 +10,7 @@ This note records the smallest honest **FTXUI-based interactive TUI slice** adde
    - composer/input buffer
    - status line
    - quit request state
+   - saturating scroll-offset arithmetic for large keyboard/page-scroll deltas
 3. Added a blocking terminal event loop that supports:
    - keyboard text entry
    - Enter submit

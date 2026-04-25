@@ -58,6 +58,9 @@ ava::tools::ToolApproval InteractiveBridge::request_approval(
   }
   settle_request(*approval_requests_, handle, resolution.state);
   if(resolution.state == ava::control_plane::InteractiveRequestState::Cancelled) {
+    if(resolution.approval.kind == ava::tools::ToolApprovalKind::Rejected) {
+      return resolution.approval;
+    }
     return ava::tools::ToolApproval::rejected("tool approval request cancelled");
   }
   if(resolution.state == ava::control_plane::InteractiveRequestState::TimedOut) {
@@ -151,11 +154,162 @@ void InteractiveBridge::settle_request_for_testing(
       settle_request(*plan_requests_, handle, state);
       return;
   }
+  throw std::invalid_argument("unknown interactive request kind");
 }
 
 void InteractiveBridge::set_run_id(std::optional<std::string> run_id) {
   const std::lock_guard<std::mutex> lock(run_id_mutex_);
   run_id_ = std::move(run_id);
+}
+
+ava::control_plane::InteractiveRequestHandle InteractiveBridge::register_approval_for_adapter() const {
+  return approval_requests_->register_request(current_run_id());
+}
+
+ava::control_plane::InteractiveRequestHandle InteractiveBridge::register_question_for_adapter() const {
+  return question_requests_->register_request(current_run_id());
+}
+
+ava::control_plane::InteractiveRequestHandle InteractiveBridge::register_plan_for_adapter() const {
+  return plan_requests_->register_request(current_run_id());
+}
+
+std::optional<ava::control_plane::InteractiveRequestHandle> InteractiveBridge::approve_from_adapter(
+    const std::string& request_id,
+    ava::tools::ToolApproval approval
+) const {
+  auto handle = pending_request_for_adapter(*approval_requests_, request_id);
+  if(!handle.has_value()) {
+    return std::nullopt;
+  }
+  if(!approval_requests_->resolve(request_id).has_value()) {
+    return std::nullopt;
+  }
+  {
+    const std::lock_guard<std::mutex> lock(adapter_resolutions_mutex_);
+    adapter_resolutions_[request_id] = AdapterResolutionRecord{
+        .kind = ava::control_plane::InteractiveRequestKind::Approval,
+        .state = ava::control_plane::InteractiveRequestState::Resolved,
+        .approval = std::move(approval),
+    };
+  }
+  return approval_requests_->request_by_id(request_id);
+}
+
+std::optional<ava::control_plane::InteractiveRequestHandle> InteractiveBridge::reject_from_adapter(
+    const std::string& request_id,
+    std::string reason
+) const {
+  auto handle = pending_request_for_adapter(*approval_requests_, request_id);
+  if(!handle.has_value()) {
+    return std::nullopt;
+  }
+  if(!approval_requests_->cancel(request_id).has_value()) {
+    return std::nullopt;
+  }
+  {
+    const std::lock_guard<std::mutex> lock(adapter_resolutions_mutex_);
+    adapter_resolutions_[request_id] = AdapterResolutionRecord{
+        .kind = ava::control_plane::InteractiveRequestKind::Approval,
+        .state = ava::control_plane::InteractiveRequestState::Cancelled,
+        .approval = ava::tools::ToolApproval::rejected(std::move(reason)),
+    };
+  }
+  return approval_requests_->request_by_id(request_id);
+}
+
+std::optional<ava::control_plane::InteractiveRequestHandle> InteractiveBridge::answer_from_adapter(
+    const std::string& request_id,
+    std::string answer
+) const {
+  auto handle = pending_request_for_adapter(*question_requests_, request_id);
+  if(!handle.has_value()) {
+    return std::nullopt;
+  }
+  if(!question_requests_->resolve(request_id).has_value()) {
+    return std::nullopt;
+  }
+  {
+    const std::lock_guard<std::mutex> lock(adapter_resolutions_mutex_);
+    adapter_resolutions_[request_id] = AdapterResolutionRecord{
+        .kind = ava::control_plane::InteractiveRequestKind::Question,
+        .state = ava::control_plane::InteractiveRequestState::Resolved,
+        .answer = std::move(answer),
+    };
+  }
+  return question_requests_->request_by_id(request_id);
+}
+
+std::optional<ava::control_plane::InteractiveRequestHandle> InteractiveBridge::cancel_question_from_adapter(
+    const std::string& request_id
+) const {
+  auto handle = pending_request_for_adapter(*question_requests_, request_id);
+  if(!handle.has_value()) {
+    return std::nullopt;
+  }
+  if(!question_requests_->cancel(request_id).has_value()) {
+    return std::nullopt;
+  }
+  {
+    const std::lock_guard<std::mutex> lock(adapter_resolutions_mutex_);
+    adapter_resolutions_[request_id] = AdapterResolutionRecord{
+        .kind = ava::control_plane::InteractiveRequestKind::Question,
+        .state = ava::control_plane::InteractiveRequestState::Cancelled,
+        .answer = std::nullopt,
+    };
+  }
+  return question_requests_->request_by_id(request_id);
+}
+
+std::optional<ava::control_plane::InteractiveRequestHandle> InteractiveBridge::accept_plan_from_adapter(
+    const std::string& request_id
+) const {
+  auto handle = pending_request_for_adapter(*plan_requests_, request_id);
+  if(!handle.has_value()) {
+    return std::nullopt;
+  }
+  if(!plan_requests_->resolve(request_id).has_value()) {
+    return std::nullopt;
+  }
+  {
+    const std::lock_guard<std::mutex> lock(adapter_resolutions_mutex_);
+    adapter_resolutions_[request_id] = AdapterResolutionRecord{
+        .kind = ava::control_plane::InteractiveRequestKind::Plan,
+        .state = ava::control_plane::InteractiveRequestState::Resolved,
+        .plan_accepted = true,
+    };
+  }
+  return plan_requests_->request_by_id(request_id);
+}
+
+std::optional<ava::control_plane::InteractiveRequestHandle> InteractiveBridge::reject_plan_from_adapter(
+    const std::string& request_id
+) const {
+  auto handle = pending_request_for_adapter(*plan_requests_, request_id);
+  if(!handle.has_value()) {
+    return std::nullopt;
+  }
+  if(!plan_requests_->cancel(request_id).has_value()) {
+    return std::nullopt;
+  }
+  {
+    const std::lock_guard<std::mutex> lock(adapter_resolutions_mutex_);
+    adapter_resolutions_[request_id] = AdapterResolutionRecord{
+        .kind = ava::control_plane::InteractiveRequestKind::Plan,
+        .state = ava::control_plane::InteractiveRequestState::Cancelled,
+        .plan_accepted = false,
+    };
+  }
+  return plan_requests_->request_by_id(request_id);
+}
+
+std::optional<AdapterResolutionRecord> InteractiveBridge::adapter_resolution_for(const std::string& request_id) const {
+  const std::lock_guard<std::mutex> lock(adapter_resolutions_mutex_);
+  const auto it = adapter_resolutions_.find(request_id);
+  if(it == adapter_resolutions_.end()) {
+    return std::nullopt;
+  }
+  return it->second;
 }
 
 void InteractiveBridge::settle_request(
@@ -205,6 +359,23 @@ void InteractiveBridge::settle_request(
       }
       throw std::invalid_argument("resolver returned invalid terminal state: pending");
   }
+  throw std::invalid_argument("unknown interactive request state");
+}
+
+std::optional<ava::control_plane::InteractiveRequestHandle> InteractiveBridge::pending_request_for_adapter(
+    const ava::control_plane::InteractiveRequestStore& store,
+    const std::string& request_id
+) const {
+  const auto handle = store.request_by_id(request_id);
+  if(!handle.has_value() || handle->state != ava::control_plane::InteractiveRequestState::Pending) {
+    return std::nullopt;
+  }
+  return handle;
+}
+
+std::optional<std::string> InteractiveBridge::current_run_id() const {
+  const std::lock_guard<std::mutex> lock(run_id_mutex_);
+  return run_id_;
 }
 
 }  // namespace ava::orchestration

@@ -9,6 +9,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include <nlohmann/json.hpp>
@@ -84,22 +86,84 @@ namespace {
   return out;
 }
 
+[[nodiscard]] bool session_contains_message(const ava::types::SessionRecord& session, const std::string& id) {
+  return std::any_of(session.messages.begin(), session.messages.end(), [&](const auto& message) {
+    return message.id == id;
+  });
+}
+
+[[nodiscard]] std::optional<std::string> append_parent_id(const ava::types::SessionRecord& session) {
+  if(session.branch_head.has_value() && session_contains_message(session, *session.branch_head)) {
+    return session.branch_head;
+  }
+  if(session.messages.empty()) {
+    return std::nullopt;
+  }
+  return session.messages.back().id;
+}
+
+[[nodiscard]] std::vector<const ava::types::SessionMessage*> active_branch_messages(const ava::types::SessionRecord& session) {
+  if(!session.branch_head.has_value()) {
+    std::vector<const ava::types::SessionMessage*> all;
+    all.reserve(session.messages.size());
+    for(const auto& message : session.messages) {
+      all.push_back(&message);
+    }
+    return all;
+  }
+
+  std::unordered_map<std::string, const ava::types::SessionMessage*> by_id;
+  by_id.reserve(session.messages.size());
+  for(const auto& message : session.messages) {
+    by_id.emplace(message.id, &message);
+  }
+
+  auto current = session.branch_head;
+  std::unordered_set<std::string> visited;
+  std::vector<const ava::types::SessionMessage*> branch;
+  while(current.has_value()) {
+    if(!visited.insert(*current).second) {
+      throw std::runtime_error("cycle detected in active session branch: " + *current);
+    }
+    const auto it = by_id.find(*current);
+    if(it == by_id.end()) {
+      branch.clear();
+      break;
+    }
+    branch.push_back(it->second);
+    current = it->second->parent_id;
+  }
+
+  if(branch.empty()) {
+    branch.reserve(session.messages.size());
+    for(const auto& message : session.messages) {
+      branch.push_back(&message);
+    }
+    return branch;
+  }
+
+  std::reverse(branch.begin(), branch.end());
+  return branch;
+}
+
 void append_session_message(
     ava::types::SessionRecord& session,
     std::uint64_t& id_counter,
     const std::string& role,
     std::string content,
     nlohmann::json tool_calls = nlohmann::json::array(),
-    nlohmann::json tool_results = nlohmann::json::array()
+    nlohmann::json tool_results = nlohmann::json::array(),
+    std::optional<std::string> tool_call_id = std::nullopt
 ) {
   const auto now = now_utc_rfc3339();
-  const auto parent = session.messages.empty() ? std::optional<std::string>{} : std::optional<std::string>{session.messages.back().id};
+  const auto parent = append_parent_id(session);
   session.messages.push_back(ava::types::SessionMessage{
       .id = make_message_id(++id_counter),
       .role = role,
       .content = std::move(content),
       .tool_calls = tool_calls.is_array() ? std::move(tool_calls) : nlohmann::json::array(),
       .tool_results = tool_results.is_array() ? std::move(tool_results) : nlohmann::json::array(),
+      .tool_call_id = std::move(tool_call_id),
       .timestamp = now,
       .parent_id = parent,
   });
@@ -139,7 +203,7 @@ void append_session_message(
         if(message.tool_results.is_array() && !message.tool_results.empty()) {
           const auto& stored = message.tool_results.front();
           if(stored.is_object()) {
-            chat.tool_call_id = stored.value("call_id", *chat.tool_call_id);
+            chat.tool_call_id = stored.value("call_id", chat.tool_call_id.value_or("unknown_call"));
           }
         }
         return chat;
@@ -160,8 +224,8 @@ void append_session_message(
   std::vector<ava::llm::ChatMessage> messages;
   messages.reserve(session.messages.size() + 1);
   messages.push_back(ava::llm::ChatMessage::system(system_prompt));
-  for(const auto& message : session.messages) {
-    messages.push_back(to_chat_message(message));
+  for(const auto* message : active_branch_messages(session)) {
+    messages.push_back(to_chat_message(*message));
   }
   return messages;
 }
@@ -307,10 +371,6 @@ AgentRunResult AgentRuntime::run(
                 result.usage = chunk.usage;
               }
 
-              if(is_cancelled && is_cancelled()) {
-                cancelled_during_stream = true;
-                return false;
-              }
               return true;
             }
         );
@@ -329,8 +389,9 @@ AgentRunResult AgentRuntime::run(
           tool_calls = response::coalesce_tool_calls(response);
         } else {
           if(cancelled_during_stream) {
-            if(!assistant_text.empty()) {
-              append_session_message(session, id_counter, "assistant", assistant_text);
+            tool_calls = response::finalize_tool_calls(std::move(tool_call_accumulators));
+            if(!assistant_text.empty() || !tool_calls.empty()) {
+              append_session_message(session, id_counter, "assistant", assistant_text, nlohmann::json(tool_calls));
             }
             return completion(AgentCompletionReason::Cancelled, "agent run cancelled");
           }
@@ -347,7 +408,14 @@ AgentRunResult AgentRuntime::run(
         tool_calls = response::coalesce_tool_calls(response);
       }
 
-      if(!emitted_stream_deltas) {
+      if(is_cancelled && is_cancelled()) {
+        if(!assistant_text.empty() || !tool_calls.empty()) {
+          append_session_message(session, id_counter, "assistant", assistant_text, nlohmann::json(tool_calls));
+        }
+        return completion(AgentCompletionReason::Cancelled, "agent run cancelled");
+      }
+
+      if(!emitted_stream_deltas && !assistant_text.empty()) {
         emit(AgentEvent{.kind = AgentEventKind::AssistantResponse, .turn = turn, .message = assistant_text});
       }
 
@@ -381,14 +449,38 @@ AgentRunResult AgentRuntime::run(
             .tool_call = tool_call,
         });
 
-        const auto tool_result = tools_.execute(tool_call);
+        ava::types::ToolResult tool_result;
+        try {
+          tool_result = tools_.execute(tool_call);
+        } catch(const std::exception& ex) {
+          tool_result = ava::types::ToolResult{
+              .call_id = tool_call.id,
+              .content = ex.what(),
+              .is_error = true,
+          };
+          append_session_message(
+              session,
+              id_counter,
+              "tool",
+              encode_tool_result_message(tool_result),
+              nlohmann::json::array(),
+              nlohmann::json::array({tool_result}),
+              tool_result.call_id
+          );
+          emit(AgentEvent{.kind = AgentEventKind::ToolResult, .turn = turn, .tool_result = tool_result});
+          if(tool_result.content.starts_with("Permission denied:") || tool_result.content.starts_with("Tool not found:")) {
+            throw;
+          }
+          continue;
+        }
         append_session_message(
             session,
             id_counter,
             "tool",
             encode_tool_result_message(tool_result),
             nlohmann::json::array(),
-            nlohmann::json::array({tool_result})
+            nlohmann::json::array({tool_result}),
+            tool_result.call_id
         );
 
         emit(AgentEvent{

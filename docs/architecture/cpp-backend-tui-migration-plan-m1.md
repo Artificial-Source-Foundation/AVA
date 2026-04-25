@@ -2,7 +2,7 @@
 title: "C++ Backend/TUI Migration Plan (C++ Milestone 1)"
 description: "Planning artifact for migrating the Rust backend and terminal app to C++ with CMake."
 order: 10
-updated: "2026-04-23"
+updated: "2026-04-24"
 ---
 
 # C++ Backend/TUI Migration Plan (C++ Milestone 1)
@@ -37,9 +37,9 @@ As of 2026-04-23, `cpp/` now includes an initial real `ava_tools` Milestone 6 sl
 1. A real C++ tool registry is active with tool interface, metadata/schema listing, tier/source tracking, middleware chaining, tool-input backfill hook support, and call-id normalization to the incoming tool-call id.
 2. Retry helpers now implement the scoped Rust M6 baseline (`MAX_RETRIES=2`, `100ms/200ms` backoff, retryable read-only tool gating, transient/permanent failure heuristics).
 3. A simplified permission middleware seam is active with allow/deny/ask inspection results and fail-closed behavior when approval is required but no bridge is attached.
-4. Real core tools now exist for `read`, `write`, `edit` (narrow exact/replace-all strategy set), `bash`, `glob`, `grep`, `git`, and `git_read`.
+4. Real core tools now exist for `read`, `write`, `edit` (M22 now partially lifts the prior exact-only limitation for non-`replace_all` edits with a bounded deterministic cascade while preserving exact/replace-all compatibility), `bash`, `glob`, `grep`, `git`, and `git_read`.
 
-Milestone boundary note: plugin-manager hooks, MCP bridge integration, browser/web tool surfaces (`web_fetch`, `web_search`), full Rust edit-engine parity, and fuller `ava_platform` unification for tool-side file/process execution remain deferred (`cpp/MILESTONE6_BOUNDARIES.md`).
+Milestone boundary note: plugin-manager hooks, MCP bridge integration, browser/web tool surfaces (`web_fetch`, `web_search`), advanced Rust edit-engine parity (hashline/weighted fuzzy/merge-style recovery), and fuller `ava_platform` unification for tool-side file/process execution remain deferred (`cpp/MILESTONE6_BOUNDARIES.md`, `cpp/MILESTONE22_BOUNDARIES.md`).
 
 ## Milestone 7 Agent Runtime-Core Status
 

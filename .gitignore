@@ -5,6 +5,7 @@ node_modules/
 dist/
 build/
 target/
+Testing/
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake

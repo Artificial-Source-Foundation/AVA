@@ -2,6 +2,7 @@ add_library(ava_headless_app STATIC
   ava/cli.cpp
   ava/events.cpp
   ava/headless_run.cpp
+  ava/signal_cancel.cpp
 )
 target_include_directories(ava_headless_app
   PUBLIC
@@ -31,6 +32,8 @@ ava_apply_warnings(ava_cli)
 ava_enable_sanitizers(ava_cli)
 
 add_library(ava_tui_app STATIC
+  ava_tui/interactive_detail_projection.cpp
+  ava_tui/interactive_action_adapter.cpp
   ava_tui/options.cpp
   ava_tui/state.cpp
 )

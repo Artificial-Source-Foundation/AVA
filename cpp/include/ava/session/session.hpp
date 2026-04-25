@@ -24,6 +24,7 @@ class SessionManager {
   void save(const ava::types::SessionRecord& session);
   [[nodiscard]] std::optional<ava::types::SessionRecord> get(const std::string& id) const;
   [[nodiscard]] std::vector<ava::types::SessionRecord> list_recent(std::size_t limit) const;
+  void remove(const std::string& id) const;
 
   void add_message(const std::string& session_id, const ava::types::SessionMessage& message);
 

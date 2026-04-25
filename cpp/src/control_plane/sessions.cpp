@@ -114,13 +114,13 @@ std::optional<SessionSelection> resolve_existing_session(
     const std::optional<std::string>& requested_session_id,
     const std::optional<std::string>& last_active_session_id
 ) {
-  if(requested_session_id.has_value()) {
+  if(requested_session_id.has_value() && !requested_session_id->empty()) {
     return SessionSelection{
         .session_id = *requested_session_id,
         .source = SessionSelectionSource::Requested,
     };
   }
-  if(last_active_session_id.has_value()) {
+  if(last_active_session_id.has_value() && !last_active_session_id->empty()) {
     return SessionSelection{
         .session_id = *last_active_session_id,
         .source = SessionSelectionSource::LastActive,

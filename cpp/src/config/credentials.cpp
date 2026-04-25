@@ -38,7 +38,22 @@ ava::platform::LocalFileSystem g_filesystem;
     return false;
   }
   const std::string lowered = lowercase(key);
-  return lowered.find("your_") != std::string::npos || lowered.find("replace") != std::string::npos;
+  static const std::set<std::string> kPlaceholders{
+      "your-api-key",
+      "your_api_key",
+      "replace-me",
+      "replace_me",
+      "replace-with-api-key",
+      "replace_with_api_key",
+  };
+  return kPlaceholders.contains(lowered);
+}
+
+[[nodiscard]] bool is_provider_configured(const std::string& provider, const ProviderCredential& credential) {
+  const auto has_key = !credential.api_key.empty() && !is_placeholder_key(credential.api_key);
+  const auto has_oauth = credential.is_oauth_configured();
+  const auto has_base_url = credential.base_url.has_value();
+  return has_key || has_oauth || (provider == "ollama" && has_base_url);
 }
 
 [[nodiscard]] std::optional<std::string> env_value(const std::string& name) {
@@ -129,13 +144,19 @@ CredentialStore CredentialStore::load(const std::filesystem::path& path) {
     return {};
   }
 
-  nlohmann::json parsed;
-  parsed = nlohmann::json::parse(g_filesystem.read_file(path));
-  auto store = parsed.get<CredentialStore>();
+  CredentialStore store;
+  try {
+    const auto parsed = nlohmann::json::parse(g_filesystem.read_file(path));
+    store = parsed.get<CredentialStore>();
+  } catch(const nlohmann::json::exception&) {
+    return {};
+  }
 
-  for(const auto& [provider, credential] : store.providers) {
-    if(!credential.is_oauth_configured() && is_placeholder_key(credential.api_key)) {
-      throw std::runtime_error("Provider " + provider + " has placeholder API key");
+  for(auto it = store.providers.begin(); it != store.providers.end();) {
+    if(!it->second.is_oauth_configured() && is_placeholder_key(it->second.api_key)) {
+      it = store.providers.erase(it);
+    } else {
+      ++it;
     }
   }
 
@@ -195,10 +216,7 @@ std::vector<std::string> CredentialStore::configured_providers() const {
     if(!credential.has_value()) {
       continue;
     }
-    const auto has_key = !credential->api_key.empty();
-    const auto has_oauth = credential->is_oauth_configured();
-    const auto has_base_url = credential->base_url.has_value();
-    if(has_key || has_oauth || (provider == "ollama" && has_base_url)) {
+    if(is_provider_configured(provider, *credential)) {
       configured.insert(provider);
     }
   }
@@ -208,10 +226,7 @@ std::vector<std::string> CredentialStore::configured_providers() const {
     if(!credential.has_value()) {
       continue;
     }
-    const auto has_key = !credential->api_key.empty();
-    const auto has_oauth = credential->is_oauth_configured();
-    const auto has_base_url = credential->base_url.has_value();
-    if(has_key || has_oauth || (provider == "ollama" && has_base_url)) {
+    if(is_provider_configured(provider, *credential)) {
       configured.insert(provider);
     }
   }
@@ -230,6 +245,7 @@ const std::vector<std::string>& known_providers() {
       "alibaba",
       "zai",
       "kimi",
+      "minimax",
       "ollama",
   };
   return kProviders;

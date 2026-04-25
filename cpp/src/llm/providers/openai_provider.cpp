@@ -1,8 +1,10 @@
 #include "ava/llm/providers/openai_provider.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cctype>
-#include <sstream>
+#include <system_error>
+#include <string_view>
 #include <utility>
 
 #include "ava/llm/pricing.hpp"
@@ -24,13 +26,138 @@ namespace {
   };
 }
 
-[[nodiscard]] ProviderError classify_openai_error(long status, const std::string& body) {
+#if AVA_WITH_CPR
+[[nodiscard]] std::string_view trim_ascii(std::string_view value) {
+  while(!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
+    value.remove_prefix(1);
+  }
+  while(!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
+    value.remove_suffix(1);
+  }
+  return value;
+}
+
+[[nodiscard]] std::optional<std::uint64_t> parse_retry_after_secs(const cpr::Header& headers) {
+  for(const auto& [name, value] : headers) {
+    std::string lower_name(name);
+    std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), [](unsigned char ch) {
+      return static_cast<char>(std::tolower(ch));
+    });
+    if(lower_name != "retry-after") {
+      continue;
+    }
+
+    const auto trimmed = trim_ascii(value);
+    if(trimmed.empty()) {
+      return std::nullopt;
+    }
+
+    std::uint64_t parsed = 0;
+    const auto* begin = trimmed.data();
+    const auto* end = begin + trimmed.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, parsed);
+    if(ec == std::errc{} && ptr == end) {
+      return parsed;
+    }
+    return std::nullopt;
+  }
+
+  return std::nullopt;
+}
+
+[[nodiscard]] std::string summarize_openai_error_body(std::string_view body) {
+  const auto trimmed = trim_ascii(body);
+  if(trimmed.empty()) {
+    return "request failed";
+  }
+
+  try {
+    const auto parsed = nlohmann::json::parse(trimmed);
+    if(parsed.contains("error") && parsed.at("error").is_object()) {
+      const auto& error = parsed.at("error");
+      const auto message = error.value("message", std::string{});
+      if(!message.empty()) {
+        return message;
+      }
+    }
+
+    if(parsed.contains("message") && parsed.at("message").is_string()) {
+      const auto message = parsed.at("message").get<std::string>();
+      if(!message.empty()) {
+        return message;
+      }
+    }
+  } catch(const std::exception&) {
+    // Fall back to the raw body when the payload is not JSON.
+  }
+
+  return std::string(trimmed);
+}
+
+[[nodiscard]] ProviderError classify_openai_error(const cpr::Response& response) {
+  const auto status = response.status_code > 0
+                          ? std::optional<std::uint16_t>(static_cast<std::uint16_t>(response.status_code))
+                          : std::nullopt;
+
   return classify_provider_error(
       "openai",
-      status > 0 ? std::optional<std::uint16_t>(static_cast<std::uint16_t>(status)) : std::nullopt,
-      body
+      status,
+      summarize_openai_error_body(response.text),
+      parse_retry_after_secs(response.header)
   );
 }
+
+[[nodiscard]] std::string normalize_sse_newlines(std::string_view chunk, bool& pending_carriage_return) {
+  std::string normalized;
+  normalized.reserve(chunk.size() + (pending_carriage_return ? 1U : 0U));
+
+  std::size_t index = 0;
+  if(pending_carriage_return) {
+    pending_carriage_return = false;
+    if(!chunk.empty() && chunk.front() == '\n') {
+      normalized.push_back('\n');
+      index = 1;
+    } else {
+      normalized.push_back('\r');
+    }
+  }
+
+  for(; index < chunk.size(); ++index) {
+    const char ch = chunk.at(index);
+    if(ch == '\r') {
+      if(index + 1 < chunk.size() && chunk.at(index + 1) == '\n') {
+        ++index;
+        normalized.push_back('\n');
+      } else if(index + 1 == chunk.size()) {
+        pending_carriage_return = true;
+      } else {
+        normalized.push_back(ch);
+      }
+      continue;
+    }
+
+    normalized.push_back(ch);
+  }
+
+  return normalized;
+}
+
+[[nodiscard]] std::optional<std::string> extract_sse_data_line(std::string_view line) {
+  if(line.rfind("data:", 0) == 0) {
+    auto payload = line.substr(5);
+    while(!payload.empty() && payload.front() == ' ') {
+      payload.remove_prefix(1);
+    }
+    return std::string(payload);
+  }
+
+  if(line == "data") {
+    return std::string{};
+  }
+
+  return std::nullopt;
+}
+#endif
 
 }  // namespace
 
@@ -51,7 +178,7 @@ OpenAiProvider OpenAiProvider::from_credential(const std::string& model, const a
     throw ProviderException(ProviderError{
         .kind = ProviderErrorKind::AuthFailure,
         .provider = "openai",
-        .message = "missing api key",
+        .message = "missing api key for openai provider credential",
     });
   }
 
@@ -166,7 +293,7 @@ LlmResponse OpenAiProvider::generate(
   }
 
   if(response.status_code < 200 || response.status_code > 299) {
-    throw ProviderException(classify_openai_error(response.status_code, response.text));
+    throw ProviderException(classify_openai_error(response));
   }
 
   try {
@@ -228,67 +355,102 @@ Provider::StreamDispatchResult OpenAiProvider::stream_generate(
   bool stop_requested = false;
   std::optional<std::string> parse_failure;
   std::string pending;
+  bool pending_carriage_return = false;
+
+  auto dispatch_sse_payload = [&](std::string_view payload_view) {
+    const auto payload = trim_ascii(payload_view);
+    if(payload.empty()) {
+      return true;
+    }
+
+    if(payload == "[DONE]") {
+      emitted_done = true;
+      if(on_chunk && !on_chunk(types::StreamChunk::finished())) {
+        stop_requested = true;
+        return false;
+      }
+      return true;
+    }
+
+    try {
+      const auto event = nlohmann::json::parse(payload);
+      const auto parsed_chunks = openai::parse_stream_events(event);
+      for(const auto& parsed : parsed_chunks) {
+        emitted_done = emitted_done || parsed.done;
+        if(on_chunk && !on_chunk(parsed)) {
+          stop_requested = true;
+          return false;
+        }
+      }
+    } catch(const std::exception& ex) {
+      parse_failure = ex.what();
+      return false;
+    }
+
+    return true;
+  };
+
+  auto process_pending_events = [&](bool flush_remainder) {
+    if(flush_remainder && pending_carriage_return) {
+      pending.push_back('\n');
+      pending_carriage_return = false;
+    }
+    if(flush_remainder && !pending.empty()) {
+      // Treat a cleanly closed stream's final bytes as a complete SSE event.
+      pending.append("\n\n");
+    }
+
+    while(true) {
+      const auto event_end = pending.find("\n\n");
+      if(event_end == std::string::npos) {
+        break;
+      }
+
+      const std::string event_block = pending.substr(0, event_end);
+      pending.erase(0, event_end + 2);
+
+      bool saw_data = false;
+      std::string payload;
+      std::size_t line_start = 0;
+      while(line_start <= event_block.size()) {
+        const auto line_end = event_block.find('\n', line_start);
+        const std::string_view line = line_end == std::string::npos
+                                          ? std::string_view(event_block).substr(line_start)
+                                          : std::string_view(event_block).substr(line_start, line_end - line_start);
+        line_start = line_end == std::string::npos ? event_block.size() + 1 : line_end + 1;
+
+        if(const auto data_line = extract_sse_data_line(line); data_line.has_value()) {
+          if(saw_data) {
+            payload.push_back('\n');
+          }
+          payload += *data_line;
+          saw_data = true;
+        }
+      }
+
+      if(!saw_data) {
+        continue;
+      }
+
+      if(!dispatch_sse_payload(payload)) {
+        return false;
+      }
+    }
+
+    return true;
+  };
 
   auto write_callback = cpr::WriteCallback{
-      [&](std::string data, intptr_t /*userdata*/) {
+      [&](const std::string_view& data, intptr_t /*userdata*/) {
         try {
-          pending += data;
-          std::size_t cursor = 0;
-
-          while(true) {
-            const auto line_end = pending.find('\n', cursor);
-            if(line_end == std::string::npos) {
-              pending.erase(0, cursor);
-              break;
-            }
-
-            auto line = pending.substr(cursor, line_end - cursor);
-            cursor = line_end + 1;
-
-            if(!line.empty() && line.back() == '\r') {
-              line.pop_back();
-            }
-
-            if(line.rfind("data:", 0) != 0) {
-              continue;
-            }
-
-            auto payload = line.substr(5);
-            while(!payload.empty() && payload.front() == ' ') {
-              payload.erase(payload.begin());
-            }
-
-            if(payload == "[DONE]") {
-              emitted_done = true;
-              if(on_chunk && !on_chunk(types::StreamChunk::finished())) {
-                stop_requested = true;
-                return false;
-              }
-              continue;
-            }
-
-            try {
-              const auto event = nlohmann::json::parse(payload);
-              const auto parsed_chunks = openai::parse_stream_events(event);
-              for(const auto& parsed : parsed_chunks) {
-                emitted_done = emitted_done || parsed.done;
-                if(on_chunk && !on_chunk(parsed)) {
-                  stop_requested = true;
-                  return false;
-                }
-              }
-            } catch(const std::exception& ex) {
-              parse_failure = ex.what();
-              return false;
-            }
-          }
+          // CPR owns this view only for the callback duration; consume it immediately.
+          pending += normalize_sse_newlines(data, pending_carriage_return);
+          return process_pending_events(false);
         } catch(...) {
           return false;
         }
-
-        return true;
       },
-      nullptr
+      0
   };
 
   const auto response = cpr::Post(
@@ -298,6 +460,14 @@ Provider::StreamDispatchResult OpenAiProvider::stream_generate(
       cpr::Timeout{120000},
       write_callback
   );
+
+  if(!stop_requested && response.error.code == cpr::ErrorCode::OK && response.status_code >= 200 && response.status_code <= 299) {
+    (void)process_pending_events(true);
+  }
+
+  if(stop_requested) {
+    return StreamDispatchResult::Completed;
+  }
 
   if(parse_failure.has_value()) {
     throw ProviderException(ProviderError{
@@ -311,11 +481,7 @@ Provider::StreamDispatchResult OpenAiProvider::stream_generate(
     throw ProviderException(classify_provider_error("openai", std::nullopt, response.error.message));
   }
   if(response.status_code < 200 || response.status_code > 299) {
-    throw ProviderException(classify_openai_error(response.status_code, response.text));
-  }
-
-  if(stop_requested) {
-    return StreamDispatchResult::Completed;
+    throw ProviderException(classify_openai_error(response));
   }
 
   if(!emitted_done && on_chunk) {

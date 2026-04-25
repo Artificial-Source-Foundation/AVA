@@ -2,6 +2,7 @@
 
 #include <array>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <vector>
 
@@ -264,6 +265,15 @@ TEST_CASE("event inventory and required fields match canonical table", "[ava_con
   REQUIRE(required[2] == ava::control_plane::CanonicalEventKind::Error);
   REQUIRE(required[3] == ava::control_plane::CanonicalEventKind::SubagentComplete);
   REQUIRE(required[4] == ava::control_plane::CanonicalEventKind::StreamingEditProgress);
+
+  REQUIRE_THROWS_AS(
+      ava::control_plane::canonical_event_kind_to_type_tag(static_cast<ava::control_plane::CanonicalEventKind>(999)),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      ava::control_plane::canonical_event_field_to_json_key(static_cast<ava::control_plane::CanonicalEventField>(999)),
+      std::invalid_argument
+  );
 }
 
 TEST_CASE("queue command and tier conversion are wired", "[ava_control_plane]") {
@@ -291,7 +301,15 @@ TEST_CASE("clear queue target parsing and semantics follow contract", "[ava_cont
       == std::optional{ava::control_plane::ClearQueueTarget::FollowUp}
   );
   REQUIRE(
+      ava::control_plane::parse_clear_queue_target("followup")
+      == std::optional{ava::control_plane::ClearQueueTarget::FollowUp}
+  );
+  REQUIRE(
       ava::control_plane::parse_clear_queue_target("post_complete")
+      == std::optional{ava::control_plane::ClearQueueTarget::PostComplete}
+  );
+  REQUIRE(
+      ava::control_plane::parse_clear_queue_target("postcomplete")
       == std::optional{ava::control_plane::ClearQueueTarget::PostComplete}
   );
   REQUIRE_FALSE(ava::control_plane::parse_clear_queue_target("nope").has_value());
@@ -299,6 +317,14 @@ TEST_CASE("clear queue target parsing and semantics follow contract", "[ava_cont
   REQUIRE(
       ava::control_plane::clear_queue_semantics(ava::control_plane::ClearQueueTarget::All)
       == ava::control_plane::QueueClearSemantics::CancelRunAndClearSteering
+  );
+  REQUIRE(
+      ava::control_plane::clear_queue_semantics(ava::control_plane::ClearQueueTarget::Steering)
+      == ava::control_plane::QueueClearSemantics::CancelRunAndClearSteering
+  );
+  REQUIRE(
+      ava::control_plane::clear_queue_semantics(ava::control_plane::ClearQueueTarget::FollowUp)
+      == ava::control_plane::QueueClearSemantics::Unsupported
   );
   REQUIRE(
       ava::control_plane::clear_queue_semantics(ava::control_plane::ClearQueueTarget::PostComplete)
@@ -324,6 +350,36 @@ TEST_CASE("deferred queue session ownership checks requested and active ids", "[
           .has_value()
   );
   REQUIRE(error.kind == ava::control_plane::DeferredQueueSessionErrorKind::MissingActiveSession);
+
+  REQUIRE_FALSE(
+      ava::control_plane::resolve_deferred_queue_session(std::optional<std::string>{"session-b"}, active, nullptr)
+          .has_value()
+  );
+  REQUIRE_FALSE(ava::control_plane::resolve_deferred_queue_session(std::nullopt, std::nullopt, nullptr).has_value());
+}
+
+TEST_CASE("interactive request string conversions reject unknown values", "[ava_control_plane]") {
+  REQUIRE(ava::control_plane::interactive_request_kind_to_string(ava::control_plane::InteractiveRequestKind::Approval) == "approval");
+  REQUIRE(ava::control_plane::interactive_request_kind_to_string(ava::control_plane::InteractiveRequestKind::Question) == "question");
+  REQUIRE(ava::control_plane::interactive_request_kind_to_string(ava::control_plane::InteractiveRequestKind::Plan) == "plan");
+
+  REQUIRE(ava::control_plane::interactive_request_state_to_string(ava::control_plane::InteractiveRequestState::Pending) == "pending");
+  REQUIRE(ava::control_plane::interactive_request_state_to_string(ava::control_plane::InteractiveRequestState::Resolved) == "resolved");
+  REQUIRE(ava::control_plane::interactive_request_state_to_string(ava::control_plane::InteractiveRequestState::Cancelled) == "cancelled");
+  REQUIRE(ava::control_plane::interactive_request_state_to_string(ava::control_plane::InteractiveRequestState::TimedOut) == "timeout");
+
+  REQUIRE_THROWS_AS(
+      ava::control_plane::interactive_request_kind_to_string(
+          static_cast<ava::control_plane::InteractiveRequestKind>(999)
+      ),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      ava::control_plane::interactive_request_state_to_string(
+          static_cast<ava::control_plane::InteractiveRequestState>(999)
+      ),
+      std::invalid_argument
+  );
 }
 
 TEST_CASE("session precedence and replay payload helpers use latest user turn", "[ava_control_plane]") {
@@ -344,6 +400,16 @@ TEST_CASE("session precedence and replay payload helpers use latest user turn", 
   REQUIRE(existing.has_value());
   REQUIRE(existing->session_id == "requested");
   REQUIRE(existing->source == ava::control_plane::SessionSelectionSource::Requested);
+
+  const auto fallback_to_last = ava::control_plane::resolve_existing_session(std::optional<std::string>{""}, "last");
+  REQUIRE(fallback_to_last.has_value());
+  REQUIRE(fallback_to_last->session_id == "last");
+  REQUIRE(fallback_to_last->source == ava::control_plane::SessionSelectionSource::LastActive);
+
+  REQUIRE_FALSE(
+      ava::control_plane::resolve_existing_session(std::optional<std::string>{""}, std::optional<std::string>{""})
+          .has_value()
+  );
 
   const auto selected = ava::control_plane::resolve_session_precedence(std::nullopt, std::nullopt, "new-session");
   REQUIRE(selected.session_id == "new-session");
@@ -385,6 +451,14 @@ TEST_CASE("session replay helpers report canonical error cases", "[ava_control_p
 
   const auto non_user = ava::control_plane::build_edit_replay_payload(messages, std::optional<std::string>{"a1"}, "edited");
   REQUIRE(non_user.error == ava::control_plane::SessionReplayPayloadError::NonUserEditTarget);
+
+  const auto prompt = ava::control_plane::load_prompt_context(messages);
+  REQUIRE(prompt.goal.empty());
+  REQUIRE(prompt.history.empty());
+  REQUIRE(prompt.images.empty());
+
+  const auto history = ava::control_plane::collect_history_before_last_user(messages);
+  REQUIRE(history.empty());
 }
 
 TEST_CASE("interactive request store tracks pending and terminal lifecycle", "[ava_control_plane]") {
@@ -393,6 +467,7 @@ TEST_CASE("interactive request store tracks pending and terminal lifecycle", "[a
   const auto first = store.register_request("run-a");
   const auto second = store.register_request("run-b");
   const auto third = store.register_request("run-c");
+  const auto unscoped = store.register_request();
 
   REQUIRE(first.kind == ava::control_plane::InteractiveRequestKind::Question);
   REQUIRE(first.state == ava::control_plane::InteractiveRequestState::Pending);
@@ -400,38 +475,167 @@ TEST_CASE("interactive request store tracks pending and terminal lifecycle", "[a
   REQUIRE(first.request_id == "question-1");
   REQUIRE(second.request_id == "question-2");
   REQUIRE(third.request_id == "question-3");
+  REQUIRE(unscoped.request_id == "question-4");
+  REQUIRE_FALSE(unscoped.run_id.has_value());
 
   const auto pending = store.pending_requests();
-  REQUIRE(pending.size() == 3);
+  REQUIRE(pending.size() == 4);
   REQUIRE(pending.at(0).request_id == first.request_id);
   REQUIRE(pending.at(1).request_id == second.request_id);
   REQUIRE(pending.at(2).request_id == third.request_id);
+  REQUIRE(pending.at(3).request_id == unscoped.request_id);
 
   const auto resolved = store.resolve(first.request_id);
   REQUIRE(resolved.has_value());
   REQUIRE(resolved->state == ava::control_plane::InteractiveRequestState::Resolved);
+  REQUIRE(resolved->run_id == std::optional<std::string>{"run-a"});
 
   const auto timed_out = store.timeout(second.request_id);
   REQUIRE(timed_out.has_value());
   REQUIRE(timed_out->state == ava::control_plane::InteractiveRequestState::TimedOut);
+  REQUIRE(timed_out->run_id == std::optional<std::string>{"run-b"});
 
   const auto cancelled = store.cancel(third.request_id);
   REQUIRE(cancelled.has_value());
   REQUIRE(cancelled->state == ava::control_plane::InteractiveRequestState::Cancelled);
+  REQUIRE(cancelled->run_id == std::optional<std::string>{"run-c"});
+
+  const auto resolved_unscoped = store.resolve(unscoped.request_id);
+  REQUIRE(resolved_unscoped.has_value());
+  REQUIRE_FALSE(resolved_unscoped->run_id.has_value());
 
   REQUIRE_FALSE(store.current_pending().has_value());
 
   const auto by_id = store.request_by_id(second.request_id);
   REQUIRE(by_id.has_value());
   REQUIRE(by_id->state == ava::control_plane::InteractiveRequestState::TimedOut);
+  REQUIRE(by_id->run_id == std::optional<std::string>{"run-b"});
+}
+
+TEST_CASE("interactive request store preserves pending order after all terminal transitions", "[ava_control_plane]") {
+  auto require_middle_transition_preserves_order = [](auto transition) {
+    ava::control_plane::InteractiveRequestStore store(ava::control_plane::InteractiveRequestKind::Plan);
+
+    const auto first = store.register_request("run-a");
+    const auto second = store.register_request("run-b");
+    const auto third = store.register_request("run-c");
+
+    const auto terminal = transition(store, second.request_id);
+    REQUIRE(terminal.has_value());
+
+    const auto current = store.current_pending();
+    REQUIRE(current.has_value());
+    REQUIRE(current->request_id == first.request_id);
+
+    const auto pending = store.pending_requests();
+    REQUIRE(pending.size() == 2);
+    REQUIRE(pending.at(0).request_id == first.request_id);
+    REQUIRE(pending.at(1).request_id == third.request_id);
+  };
+
+  require_middle_transition_preserves_order(
+      [](ava::control_plane::InteractiveRequestStore& store, const std::string& id) { return store.resolve(id); }
+  );
+  require_middle_transition_preserves_order(
+      [](ava::control_plane::InteractiveRequestStore& store, const std::string& id) { return store.cancel(id); }
+  );
+  require_middle_transition_preserves_order(
+      [](ava::control_plane::InteractiveRequestStore& store, const std::string& id) { return store.timeout(id); }
+  );
+}
+
+TEST_CASE("interactive request store preserves pending order after interleaved resolution", "[ava_control_plane]") {
+  ava::control_plane::InteractiveRequestStore store(ava::control_plane::InteractiveRequestKind::Plan);
+
+  const auto first = store.register_request("run-a");
+  const auto second = store.register_request("run-b");
+  const auto third = store.register_request("run-c");
+
+  const auto resolved_middle = store.resolve(second.request_id);
+  REQUIRE(resolved_middle.has_value());
+  REQUIRE(resolved_middle->state == ava::control_plane::InteractiveRequestState::Resolved);
+
+  const auto current = store.current_pending();
+  REQUIRE(current.has_value());
+  REQUIRE(current->request_id == first.request_id);
+
+  const auto pending = store.pending_requests();
+  REQUIRE(pending.size() == 2);
+  REQUIRE(pending.at(0).request_id == first.request_id);
+  REQUIRE(pending.at(1).request_id == third.request_id);
+
+  REQUIRE(store.resolve(first.request_id).has_value());
+  const auto next = store.current_pending();
+  REQUIRE(next.has_value());
+  REQUIRE(next->request_id == third.request_id);
+}
+
+TEST_CASE("interactive request store rejects stale and non-existent requests", "[ava_control_plane]") {
+  ava::control_plane::InteractiveRequestStore store(ava::control_plane::InteractiveRequestKind::Approval);
+
+  REQUIRE_FALSE(store.resolve("approval-missing").has_value());
+  REQUIRE_FALSE(store.cancel("approval-missing").has_value());
+  REQUIRE_FALSE(store.timeout("approval-missing").has_value());
+  REQUIRE_FALSE(store.request_by_id("approval-missing").has_value());
+
+  const auto first = store.register_request("run-a");
+  const auto second = store.register_request("run-b");
+
+  REQUIRE_FALSE(store.resolve("approval-stale").has_value());
+  REQUIRE_FALSE(store.cancel("approval-stale").has_value());
+  REQUIRE_FALSE(store.timeout("approval-stale").has_value());
+  REQUIRE_FALSE(store.request_by_id("approval-stale").has_value());
+
+  const auto pending_after_stale = store.pending_requests();
+  REQUIRE(pending_after_stale.size() == 2);
+  REQUIRE(pending_after_stale.at(0).request_id == first.request_id);
+  REQUIRE(pending_after_stale.at(1).request_id == second.request_id);
+
+  const auto resolved = store.resolve(first.request_id);
+  REQUIRE(resolved.has_value());
+  REQUIRE(resolved->state == ava::control_plane::InteractiveRequestState::Resolved);
+  REQUIRE(resolved->request_id == first.request_id);
+  REQUIRE(resolved->run_id == std::optional<std::string>{"run-a"});
+
+  REQUIRE_FALSE(store.resolve(first.request_id).has_value());
+  REQUIRE_FALSE(store.cancel(first.request_id).has_value());
+  REQUIRE_FALSE(store.timeout(first.request_id).has_value());
+
+  const auto terminal = store.request_by_id(first.request_id);
+  REQUIRE(terminal.has_value());
+  REQUIRE(terminal->request_id == first.request_id);
+  REQUIRE(terminal->kind == ava::control_plane::InteractiveRequestKind::Approval);
+  REQUIRE(terminal->state == ava::control_plane::InteractiveRequestState::Resolved);
+  REQUIRE(terminal->run_id == std::optional<std::string>{"run-a"});
+
+  const auto current = store.current_pending();
+  REQUIRE(current.has_value());
+  REQUIRE(current->request_id == second.request_id);
+  REQUIRE(current->run_id == std::optional<std::string>{"run-b"});
+
+  const auto cancelled = store.cancel(second.request_id);
+  REQUIRE(cancelled.has_value());
+  REQUIRE_FALSE(store.resolve(second.request_id).has_value());
+  REQUIRE_FALSE(store.cancel(second.request_id).has_value());
+  REQUIRE_FALSE(store.timeout(second.request_id).has_value());
+
+  const auto third = store.register_request("run-c");
+  const auto timed_out = store.timeout(third.request_id);
+  REQUIRE(timed_out.has_value());
+  REQUIRE_FALSE(store.resolve(third.request_id).has_value());
+  REQUIRE_FALSE(store.cancel(third.request_id).has_value());
+  REQUIRE_FALSE(store.timeout(third.request_id).has_value());
 }
 
 TEST_CASE("interactive request store bounds terminal retention deterministically", "[ava_control_plane]") {
   ava::control_plane::InteractiveRequestStore store(ava::control_plane::InteractiveRequestKind::Question);
 
+  // Mirrors InteractiveRequestStore's private retention limit; this test locks the M3 contract.
+  constexpr int kExpectedTerminalRetention = 64;
+  constexpr int kOverflowCount = 6;
   std::vector<std::string> ids;
-  ids.reserve(70);
-  for(int i = 0; i < 70; ++i) {
+  ids.reserve(kExpectedTerminalRetention + kOverflowCount);
+  for(int i = 0; i < kExpectedTerminalRetention + kOverflowCount; ++i) {
     const auto handle = store.register_request("run");
     ids.push_back(handle.request_id);
     const auto resolved = store.resolve(handle.request_id);
@@ -439,7 +643,7 @@ TEST_CASE("interactive request store bounds terminal retention deterministically
   }
 
   REQUIRE_FALSE(store.request_by_id(ids.front()).has_value());
-  REQUIRE_FALSE(store.request_by_id(ids[5]).has_value());
-  REQUIRE(store.request_by_id(ids[6]).has_value());
+  REQUIRE_FALSE(store.request_by_id(ids[kOverflowCount - 1]).has_value());
+  REQUIRE(store.request_by_id(ids[kOverflowCount]).has_value());
   REQUIRE(store.request_by_id(ids.back()).has_value());
 }

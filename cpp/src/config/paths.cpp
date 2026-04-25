@@ -74,4 +74,22 @@ std::filesystem::path app_db_path() {
   return prefer_existing(paths.data_dir / "data.db", "data.db");
 }
 
+std::filesystem::path mcp_config_path() {
+  const auto paths = resolve_app_paths();
+  return prefer_existing(paths.config_dir / "mcp.json", "mcp.json");
+}
+
+std::filesystem::path custom_tools_dir() {
+  const auto paths = resolve_app_paths();
+  return prefer_existing(paths.config_dir / "tools", "tools");
+}
+
+std::filesystem::path project_mcp_config_path(const std::filesystem::path& workspace_root) {
+  return workspace_root / ".ava" / "mcp.json";
+}
+
+std::filesystem::path project_custom_tools_dir(const std::filesystem::path& workspace_root) {
+  return workspace_root / ".ava" / "tools";
+}
+
 }  // namespace ava::config

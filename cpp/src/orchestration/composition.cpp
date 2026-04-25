@@ -1,8 +1,11 @@
 #include "ava/orchestration/composition.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
+#include <iostream>
 #include <stdexcept>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -11,8 +14,11 @@
 #include "ava/config/model_registry.hpp"
 #include "ava/config/model_spec.hpp"
 #include "ava/config/paths.hpp"
+#include "ava/config/trust.hpp"
 #include "ava/llm/factory.hpp"
+#include "ava/mcp/config.hpp"
 #include "ava/tools/core_tools.hpp"
+#include "ava/tools/mcp_bridge.hpp"
 #include "ava/tools/permission_middleware.hpp"
 
 namespace ava::orchestration {
@@ -111,10 +117,72 @@ void apply_allowed_tools(ava::tools::ToolRegistry& registry, const std::vector<s
   }
 }
 
+[[nodiscard]] std::string lower_ascii(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+    return static_cast<char>(std::tolower(ch));
+  });
+  return value;
+}
+
+[[nodiscard]] bool is_headless_auto_approvable_risk(std::string risk_level) {
+  risk_level = lower_ascii(std::move(risk_level));
+  return risk_level == "safe" || risk_level == "low";
+}
+
 void persist_runtime_selection_metadata(ava::types::SessionRecord& session, const ResolvedRuntimeSelection& selection) {
   session.metadata[kRuntimeMetadataNamespace]["provider"] = selection.provider;
   session.metadata[kRuntimeMetadataNamespace]["model"] = selection.model;
   session.metadata[kRuntimeMetadataNamespace]["max_turns"] = selection.max_turns;
+}
+
+[[nodiscard]] ava::mcp::McpConfig merge_mcp_config(
+    ava::mcp::McpConfig global_config,
+    const ava::mcp::McpConfig& project_config
+) {
+  ava::mcp::McpConfig merged;
+  merged.servers.reserve(global_config.servers.size() + project_config.servers.size());
+
+  std::unordered_map<std::string, std::size_t> by_name;
+  const auto upsert_server = [&](ava::mcp::McpServerConfig server) {
+    if(by_name.contains(server.name)) {
+      merged.servers[by_name.at(server.name)] = std::move(server);
+      return;
+    }
+
+    by_name.insert_or_assign(server.name, merged.servers.size());
+    merged.servers.push_back(std::move(server));
+  };
+
+  for(auto& server : global_config.servers) {
+    upsert_server(std::move(server));
+  }
+  for(const auto& server : project_config.servers) {
+    upsert_server(server);
+  }
+
+  return merged;
+}
+
+[[nodiscard]] ava::mcp::McpConfig load_runtime_mcp_config(
+    const std::filesystem::path& workspace_root,
+    bool include_global_config
+) {
+  auto config = ava::mcp::McpConfig{};
+  if(include_global_config) {
+    config = ava::mcp::load_mcp_config_file(ava::config::mcp_config_path());
+  }
+
+  const auto project_config_path = ava::config::project_mcp_config_path(workspace_root);
+  if(!ava::config::is_project_trusted(workspace_root)) {
+    if(std::filesystem::exists(project_config_path)) {
+      std::cerr << "warning: skipping project-local MCP config at '" << project_config_path.string()
+                << "' because workspace is not trusted.\n";
+    }
+    return config;
+  }
+
+  const auto project_config = ava::mcp::load_mcp_config_file(project_config_path);
+  return merge_mcp_config(std::move(config), project_config);
 }
 
 }  // namespace
@@ -230,11 +298,35 @@ RuntimeComposition compose_runtime(RuntimeCompositionRequest request) {
   }
 
   auto registry = std::make_shared<ava::tools::ToolRegistry>();
-  ava::tools::register_default_tools(*registry, request.workspace_root);
+  [[maybe_unused]] const auto registration = ava::tools::register_default_tools(*registry, request.workspace_root);
+
+  auto mcp_manager = std::make_shared<ava::mcp::McpManager>(request.mcp_transport_factory);
+  auto mcp_config = ava::mcp::McpConfig{};
+  if(request.mcp_config_override.has_value()) {
+    mcp_config = *request.mcp_config_override;
+  } else {
+    try {
+      mcp_config = load_runtime_mcp_config(request.workspace_root, request.load_global_mcp_config);
+    } catch(const std::exception& e) {
+      std::cerr << "warning: disabling MCP runtime because MCP config failed to load: " << e.what() << "\n";
+      mcp_config = {};
+    } catch(...) {
+      std::cerr << "warning: disabling MCP runtime because MCP config failed with a non-standard exception\n";
+      mcp_config = {};
+    }
+  }
+  mcp_manager->initialize(mcp_config);
+  [[maybe_unused]] const auto mcp_registered = ava::tools::register_mcp_tools(*registry, mcp_manager);
 
   auto approval_resolver = request.approval_resolver;
   if(!approval_resolver && request.auto_approve) {
-    approval_resolver = [](const ava::control_plane::InteractiveRequestHandle&, const ApprovalRequestPayload&) {
+    approval_resolver = [](const ava::control_plane::InteractiveRequestHandle&, const ApprovalRequestPayload& payload) {
+      if(!is_headless_auto_approvable_risk(payload.inspection.risk_level)) {
+        return ApprovalResolution{
+            .approval = ava::tools::ToolApproval::rejected("headless auto-approve rejects high-risk tool"),
+            .state = ava::control_plane::InteractiveRequestState::Cancelled,
+        };
+      }
       return ApprovalResolution{
           .approval = ava::tools::ToolApproval{.kind = ava::tools::ToolApprovalKind::Allowed},
           .state = ava::control_plane::InteractiveRequestState::Resolved,
@@ -274,6 +366,7 @@ RuntimeComposition compose_runtime(RuntimeCompositionRequest request) {
       .run_controller = std::move(run_controller),
       .interactive_bridge = std::move(interactive_bridge),
       .registry = registry,
+      .mcp_manager = std::move(mcp_manager),
       .queue = {},
       .runtime = nullptr,
   };

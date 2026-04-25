@@ -11,9 +11,27 @@
 #include "ava/config/paths.hpp"
 #include "ava/orchestration/composition.hpp"
 #include "events.hpp"
+#include "signal_cancel.hpp"
 
 namespace ava::app {
 namespace {
+
+class HeadlessSignalCancelScope {
+ public:
+  HeadlessSignalCancelScope() {
+    reset_headless_signal_cancel();
+    install_headless_signal_cancel_handlers();
+  }
+
+  HeadlessSignalCancelScope(const HeadlessSignalCancelScope&) = delete;
+  HeadlessSignalCancelScope& operator=(const HeadlessSignalCancelScope&) = delete;
+  HeadlessSignalCancelScope(HeadlessSignalCancelScope&&) = delete;
+  HeadlessSignalCancelScope& operator=(HeadlessSignalCancelScope&&) = delete;
+
+  ~HeadlessSignalCancelScope() {
+    restore_headless_signal_cancel_handlers();
+  }
+};
 
 void populate_queue_from_cli_inputs(const CliOptions&, ava::agent::MessageQueue&) {
   // Milestone 9 intentionally does not expose follow-up/later CLI queue flags yet.
@@ -53,18 +71,23 @@ void persist_headless_metadata(
     const ava::orchestration::ResolvedRuntimeSelection& selection,
     const CliOptions& cli,
     const ava::agent::AgentRunResult& result,
+    const std::string& run_id,
     ava::orchestration::SessionStartupKind startup_kind
 ) {
   session.metadata["headless"]["provider"] = selection.provider;
   session.metadata["headless"]["model"] = selection.model;
   session.metadata["headless"]["max_turns"] = selection.max_turns;
   session.metadata["headless"]["last_startup_kind"] = startup_kind_to_string(startup_kind);
-  session.metadata["headless"]["last_run"]["reason"] = completion_reason_to_string(result.reason);
-  session.metadata["headless"]["last_run"]["turns_used"] = result.turns_used;
-  session.metadata["headless"]["last_run"]["json"] = cli.json;
-  session.metadata["headless"]["last_run"]["auto_approve"] = cli.auto_approve;
+  auto& last_run = session.metadata["headless"]["last_run"];
+  last_run["reason"] = completion_reason_to_string(result.reason);
+  last_run["run_id"] = run_id;
+  last_run["turns_used"] = result.turns_used;
+  last_run["json"] = cli.json;
+  last_run["auto_approve"] = cli.auto_approve;
   if(result.error.has_value()) {
-    session.metadata["headless"]["last_run"]["error"] = *result.error;
+    last_run["error"] = *result.error;
+  } else {
+    last_run.erase("error");
   }
 }
 
@@ -96,6 +119,7 @@ int run_headless_blocking(const CliOptions& cli, ava::llm::ProviderPtr provider_
       .provider_override = std::move(provider_override),
       .provider_factory = nullptr,
       .credentials_override = std::nullopt,
+      .load_global_mcp_config = true,
   });
 
   populate_queue_from_cli_inputs(cli, composition.queue);
@@ -116,26 +140,33 @@ int run_headless_blocking(const CliOptions& cli, ava::llm::ProviderPtr provider_
 
   const auto run_lease = composition.run_controller->begin_run();
   composition.interactive_bridge->set_run_id(run_lease.run_id);
+  const HeadlessSignalCancelScope signal_cancel_scope;
 
-  auto result = composition.runtime->run(
-      composition.session,
-      ava::agent::AgentRunInput{
-          .goal = *cli.goal,
-          .queue = &composition.queue,
-          .run_id = run_lease.run_id,
-          .is_cancelled = [&] {
-            return run_lease.token.is_cancelled();
-          },
-          .stream = true,
-      },
-      [&](const ava::agent::AgentEvent& event) {
-        if(cli.json) {
-          std::cout << headless_event_to_ndjson(event).dump() << "\n";
-          return;
+  ava::agent::AgentRunResult result;
+  try {
+    result = composition.runtime->run(
+        composition.session,
+        ava::agent::AgentRunInput{
+            .goal = *cli.goal,
+            .queue = &composition.queue,
+            .run_id = run_lease.run_id,
+            .is_cancelled = [&] {
+              return run_lease.token.is_cancelled() || headless_signal_cancel_requested();
+            },
+            .stream = true,
+        },
+        [&](const ava::agent::AgentEvent& event) {
+          if(cli.json) {
+            std::cout << headless_event_to_ndjson(event).dump() << "\n";
+            return;
+          }
+          print_headless_event_text(event);
         }
-        print_headless_event_text(event);
-      }
-  );
+    );
+  } catch(...) {
+    composition.interactive_bridge->set_run_id(std::nullopt);
+    throw;
+  }
   composition.interactive_bridge->set_run_id(std::nullopt);
 
   if(result.error.has_value() && result.error->find("requires approval") != std::string::npos) {
@@ -146,7 +177,7 @@ int run_headless_blocking(const CliOptions& cli, ava::llm::ProviderPtr provider_
     }
   }
 
-  persist_headless_metadata(composition.session, composition.selection, cli, result, composition.startup_kind);
+  persist_headless_metadata(composition.session, composition.selection, cli, result, run_lease.run_id, composition.startup_kind);
   composition.save_session();
 
   switch(result.reason) {

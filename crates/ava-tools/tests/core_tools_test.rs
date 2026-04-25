@@ -338,6 +338,78 @@ async fn glob_tool_sorts_results_lexicographically() {
 }
 
 #[tokio::test]
+async fn glob_tool_rejects_parent_directory_pattern() {
+    let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
+    let tool = GlobTool::new();
+    let error = tool
+        .execute(json!({
+            "pattern": "../*.rs",
+            "path": dir.path().to_string_lossy().to_string()
+        }))
+        .await
+        .expect_err("parent traversal pattern should fail");
+
+    assert!(error.to_string().contains("parent-directory"));
+}
+
+#[tokio::test]
+async fn glob_tool_rejects_absolute_patterns() {
+    let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
+    let tool = GlobTool::new();
+    let error = tool
+        .execute(json!({
+            "pattern": "/tmp/*",
+            "path": dir.path().to_string_lossy().to_string()
+        }))
+        .await
+        .expect_err("absolute pattern should fail");
+
+    assert!(error.to_string().contains("pattern must be relative"));
+}
+
+#[tokio::test]
+async fn read_glob_and_grep_filter_backup_history() {
+    let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
+    let backup_dir = dir.path().join(".ava/file-history-m6/session");
+    tokio::fs::create_dir_all(&backup_dir).await.expect("mkdir");
+    tokio::fs::write(backup_dir.join("secret.bak"), "old-secret-token\n")
+        .await
+        .expect("write backup");
+    tokio::fs::write(dir.path().join("visible.txt"), "old-secret-token\n")
+        .await
+        .expect("write visible");
+
+    let read_tool = ReadTool::new(Arc::new(StandardPlatform), hashline::new_cache());
+    let listing = read_tool
+        .execute(json!({"path": dir.path().join(".ava").to_string_lossy().to_string()}))
+        .await
+        .expect("read directory")
+        .content;
+    assert!(!listing.contains("file-history-m6"));
+
+    let glob_result = GlobTool::new()
+        .execute(json!({
+            "pattern": "**/*.bak",
+            "path": dir.path().to_string_lossy().to_string()
+        }))
+        .await
+        .expect("glob executes")
+        .content;
+    assert!(!glob_result.contains("secret.bak"));
+
+    let grep_result = GrepTool::new()
+        .execute(json!({
+            "pattern": "old-secret-token",
+            "path": dir.path().to_string_lossy().to_string()
+        }))
+        .await
+        .expect("grep executes")
+        .content;
+    assert!(grep_result.contains("visible.txt"));
+    assert!(!grep_result.contains("secret.bak"));
+}
+
+#[tokio::test]
 async fn grep_tool_matches_regex_and_include_filter() {
     let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
     tokio::fs::write(dir.path().join("main.rs"), "let status = \"ok\";\n")

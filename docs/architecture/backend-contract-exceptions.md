@@ -2,14 +2,14 @@
 title: "Backend Contract Exceptions"
 description: "Versioned registry of intentional adapter-specific exceptions to the canonical shared-backend contract."
 order: 11
-updated: "2026-04-22"
+updated: "2026-04-24"
 ---
 
 # Backend Contract Exceptions
 
 Purpose: record intentional, bounded exceptions to the canonical shared-backend contract so adapter-specific behavior cannot drift silently.
 
-Current status note (2026-04-16):
+Current status note (2026-04-24):
 
 1. After the desktop/web/TUI normalization work, these documented exceptions are the remaining intentional cross-surface differences still relevant at the current scope.
 2. Anything not listed here should be treated as a bug or regression rather than acceptable adapter-specific behavior.
@@ -46,9 +46,9 @@ Rules:
 - Owner: backend contract owner
 - Expiry/removal trigger: replace current headless-specific bypasses with a fully contract-owned non-interactive policy module, or explicitly ratify the long-term headless policy in a later contract revision.
 - Required tests:
-  - headless non-interactive conformance test
-  - no-TTY operation test
-  - scoped exception behavior documented and asserted
+  - `headless scripted tool loop executes tool and persists transcript` proves safe read-only headless auto-approve remains usable
+  - `headless auto approve rejects dangerous mutating tool` proves high-risk mutating actions fail closed under `--auto-approve`
+  - scoped exception behavior documented and asserted in the post-M16 C++ parity/gap audits
 
 ### EX-002 (Resolved) Desktop completion-bound command calls for run-start/replay actions
 
@@ -75,3 +75,24 @@ Rules:
   - focused web/desktop submit parity regressions proving per-run context is honored on run start
   - focused web replay regressions proving retry/edit/regenerate reuse persisted `runContext` metadata
   - TUI/headless slash-command tests that keep the current adapter-local `/compact` behavior explicit until the exception is removed
+
+### EX-004 C++ default headless delegation route does not yet produce canonical `subagent_complete`
+
+- Contract area: delegated child-run terminal event projection
+- Impacted adapters: C++ headless/TUI completion lane
+- Rationale: the current C++ backend/headless/TUI completion gate proves child-run lifecycle closure through orchestration-owned child terminal summaries, persisted `metadata.orchestration.subagent_run`, and TUI observer projection. M21 adds the canonical `SubagentComplete` event kind, headless NDJSON projection, and native blocking spawner event-sink emission primitive, but the default C++ headless tool registry still does not expose a task/subagent route that produces this event end to end for normal CLI consumers.
+- Current behavior:
+  - native blocking child runs expose active listing/cancellation through orchestration-owned APIs
+  - child terminal summaries are recorded in process and persisted into child-session metadata
+  - TUI can project child terminal metadata as observer state
+  - C++ headless NDJSON projection now emits canonical `subagent_complete` when a `SubagentComplete` event reaches the headless sink
+  - default C++ headless runs still do not expose a delegated task/subagent tool path that can trigger that event through normal CLI use
+- Risk: consumers expecting canonical delegated-run NDJSON events from the default C++ headless tool surface still cannot rely on seeing `subagent_complete` for delegated work and must use scoped C++ child terminal summary evidence until the default route is wired.
+- Owner: backend/headless/TUI migration owner
+- Expiry/removal trigger: wire a default C++ headless task/subagent tool route into the runtime so canonical `subagent_complete` is produced end to end with stable parent `run_id`, parent tool `call_id`, child `session_id`, description/agent context, and terminal metadata, then update the parity contract audit and remove this exception.
+- Required tests:
+  - `native blocking task spawner exposes active child runs for cancellation`
+  - `native blocking task spawner watchdog timeout surfaces deterministic terminal summary`
+  - `tui state projects child-run terminal metadata without owning lifecycle`
+  - `ndjson subagent complete event emits canonical fields`
+  - future removal requires an end-to-end C++ headless delegated-run NDJSON `subagent_complete` emission test through the default tool surface

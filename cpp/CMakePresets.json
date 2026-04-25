@@ -31,6 +31,34 @@
         "AVA_BUILD_TESTS": "ON",
         "AVA_BUILD_SMOKE": "ON"
       }
+    },
+    {
+      "name": "cpp-werror",
+      "displayName": "AVA C++ Warnings As Errors",
+      "description": "Debug build that treats AVA target warnings as errors",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../build/cpp/werror",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "AVA_BUILD_TESTS": "ON",
+        "AVA_BUILD_SMOKE": "ON",
+        "AVA_ENABLE_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "cpp-sanitizer",
+      "displayName": "AVA C++ Sanitizer",
+      "description": "Debug build with AddressSanitizer and UndefinedBehaviorSanitizer",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../build/cpp/sanitizer",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "AVA_BUILD_TESTS": "ON",
+        "AVA_BUILD_SMOKE": "ON",
+        "AVA_ENABLE_SANITIZERS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -41,6 +69,14 @@
     {
       "name": "cpp-release",
       "configurePreset": "cpp-release"
+    },
+    {
+      "name": "cpp-werror",
+      "configurePreset": "cpp-werror"
+    },
+    {
+      "name": "cpp-sanitizer",
+      "configurePreset": "cpp-sanitizer"
     }
   ],
   "testPresets": [
@@ -54,6 +90,20 @@
     {
       "name": "cpp-release",
       "configurePreset": "cpp-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "cpp-werror",
+      "configurePreset": "cpp-werror",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "cpp-sanitizer",
+      "configurePreset": "cpp-sanitizer",
       "output": {
         "outputOnFailure": true
       }

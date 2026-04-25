@@ -1,5 +1,6 @@
 #pragma once
 
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -8,6 +9,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "ava/tools/command_classifier.hpp"
 #include "ava/tools/tool.hpp"
 
 namespace ava::tools {
@@ -48,6 +50,12 @@ class PermissionInspector {
       const std::string& tool_name,
       const nlohmann::json& arguments
   ) const = 0;
+
+  [[nodiscard]] virtual PermissionInspection inspect(
+      const std::string& tool_name,
+      const nlohmann::json& arguments,
+      const ToolSource& source
+  ) const;
 };
 
 class ApprovalBridge {
@@ -73,6 +81,11 @@ class DefaultHeadlessPermissionInspector final : public PermissionInspector {
       const std::string& tool_name,
       const nlohmann::json& arguments
   ) const override;
+  [[nodiscard]] PermissionInspection inspect(
+      const std::string& tool_name,
+      const nlohmann::json& arguments,
+      const ToolSource& source
+  ) const override;
 };
 
 class PermissionMiddleware final : public Middleware {
@@ -83,12 +96,21 @@ class PermissionMiddleware final : public Middleware {
   );
 
   void before(const ava::types::ToolCall& tool_call) const override;
+  void before_with_source(const ava::types::ToolCall& tool_call, const ToolSource& source) const override;
 
  private:
+  [[nodiscard]] static std::string approval_subject(
+      const ava::types::ToolCall& tool_call,
+      const ToolSource& source,
+      const PermissionInspection& inspection
+  );
+
   std::shared_ptr<PermissionInspector> inspector_;
   std::shared_ptr<ApprovalBridge> approval_bridge_;
   mutable std::mutex session_approved_mutex_;
+  mutable std::condition_variable session_approved_cv_;
   mutable std::set<std::string> session_approved_;
+  mutable std::set<std::string> session_approval_inflight_;
 };
 
 }  // namespace ava::tools

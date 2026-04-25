@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -63,6 +64,26 @@ TEST_CASE("mention parsing preserves non-mention whitespace exactly", "[ava_type
   REQUIRE(cleaned == "  keep\t\nspacing  and @unknown-token  too");
 }
 
+TEST_CASE("mention parsing ignores empty and bare mention tokens", "[ava_types]") {
+  const auto [attachments, cleaned] = ava::types::parse_mentions("@ @file: @folder: @codebase: keep @file:real.txt");
+
+  REQUIRE(attachments.size() == 1);
+  REQUIRE(attachments.front().kind == ava::types::ContextAttachmentKind::File);
+  REQUIRE(attachments.front().path.string() == "real.txt");
+  REQUIRE(cleaned == "@ @file: @folder: @codebase: keep ");
+}
+
+TEST_CASE("mention parsing supports path-only file and folder mentions", "[ava_types]") {
+  const auto [attachments, cleaned] = ava::types::parse_mentions("Review @src/main.rs and @docs/ please");
+
+  REQUIRE(attachments.size() == 2);
+  REQUIRE(attachments[0].kind == ava::types::ContextAttachmentKind::File);
+  REQUIRE(attachments[0].path.string() == "src/main.rs");
+  REQUIRE(attachments[1].kind == ava::types::ContextAttachmentKind::Folder);
+  REQUIRE(attachments[1].path.string() == "docs");
+  REQUIRE(cleaned == "Review  and  please");
+}
+
 TEST_CASE("message dto round-trips rust-aligned fields", "[ava_types]") {
   const ava::types::Message message{
       .id = "msg-1",
@@ -95,6 +116,26 @@ TEST_CASE("message dto round-trips rust-aligned fields", "[ava_types]") {
   REQUIRE(parsed.metadata["k"] == "v");
 }
 
+TEST_CASE("message dto rejects malformed collection fields", "[ava_types]") {
+  nlohmann::json json{
+      {"id", "msg-1"},
+      {"role", "assistant"},
+      {"content", "response"},
+      {"timestamp", "t1"},
+      {"tool_calls", nlohmann::json::object()},
+  };
+
+  REQUIRE_THROWS_AS(json.get<ava::types::Message>(), std::invalid_argument);
+
+  json["tool_calls"] = nlohmann::json::array();
+  json["tool_results"] = "not-array";
+  REQUIRE_THROWS_AS(json.get<ava::types::Message>(), std::invalid_argument);
+
+  json["tool_results"] = nlohmann::json::array();
+  json["images"] = nlohmann::json::object();
+  REQUIRE_THROWS_AS(json.get<ava::types::Message>(), std::invalid_argument);
+}
+
 TEST_CASE("conversation repair and interrupted tool cleanup work", "[ava_types]") {
   std::vector<ava::types::Message> messages{
       ava::types::Message{.id = "u1", .role = ava::types::Role::User, .content = "first", .timestamp = "t1"},
@@ -110,6 +151,8 @@ TEST_CASE("conversation repair and interrupted tool cleanup work", "[ava_types]"
 
   ava::types::cleanup_interrupted_tools(messages);
   REQUIRE(messages.back().role == ava::types::Role::Tool);
+  REQUIRE_FALSE(messages.back().id.empty());
+  REQUIRE_FALSE(messages.back().timestamp.empty());
   REQUIRE(messages.back().tool_call_id == std::optional<std::string>{"call-2"});
   REQUIRE(messages.back().tool_results.size() == 1);
   REQUIRE(messages.back().tool_results.front().is_error);
@@ -117,6 +160,143 @@ TEST_CASE("conversation repair and interrupted tool cleanup work", "[ava_types]"
   ava::types::repair_conversation(messages);
   REQUIRE(messages.front().role == ava::types::Role::User);
   REQUIRE(messages.front().content == "first\n\nsecond");
+}
+
+TEST_CASE("interrupted tool cleanup creates unique synthetic message ids", "[ava_types]") {
+  std::vector<ava::types::Message> messages{
+      ava::types::Message{
+          .id = "a1",
+          .role = ava::types::Role::Assistant,
+          .content = "working",
+          .timestamp = "t1",
+          .tool_calls = {
+              ava::types::ToolCall{.id = "call-a", .name = "read", .arguments = nlohmann::json::object()},
+              ava::types::ToolCall{.id = "call-b", .name = "write", .arguments = nlohmann::json::object()},
+          },
+      },
+  };
+
+  ava::types::cleanup_interrupted_tools(messages);
+
+  REQUIRE(messages.size() == 3);
+  REQUIRE(messages[1].role == ava::types::Role::Tool);
+  REQUIRE(messages[2].role == ava::types::Role::Tool);
+  REQUIRE_FALSE(messages[1].id.empty());
+  REQUIRE_FALSE(messages[2].id.empty());
+  REQUIRE(messages[1].id != messages[2].id);
+  REQUIRE_FALSE(messages[1].timestamp.empty());
+  REQUIRE_FALSE(messages[2].timestamp.empty());
+}
+
+TEST_CASE("conversation repair and interrupted cleanup tolerate empty inputs", "[ava_types]") {
+  std::vector<ava::types::Message> messages;
+
+  ava::types::repair_conversation(messages);
+  ava::types::cleanup_interrupted_tools(messages);
+
+  REQUIRE(messages.empty());
+}
+
+TEST_CASE("conversation repair preserves whitespace-only assistants that requested tools", "[ava_types]") {
+  std::vector<ava::types::Message> messages{
+      ava::types::Message{
+          .id = "a1",
+          .role = ava::types::Role::Assistant,
+          .content = " \t",
+          .timestamp = "t1",
+          .tool_calls = {ava::types::ToolCall{.id = "call-a", .name = "read", .arguments = nlohmann::json::object()}},
+      },
+  };
+
+  ava::types::repair_conversation(messages);
+
+  REQUIRE(messages.size() == 1);
+  REQUIRE(messages.front().id == "a1");
+  REQUIRE(messages.front().tool_calls.size() == 1);
+}
+
+TEST_CASE("conversation repair merges consecutive user messages without losing fields", "[ava_types]") {
+  std::vector<ava::types::Message> messages{
+      ava::types::Message{
+          .id = "u1",
+          .role = ava::types::Role::User,
+          .content = "first",
+          .timestamp = "t1",
+          .tool_calls = {ava::types::ToolCall{.id = "call-a", .name = "read", .arguments = nlohmann::json::object()}},
+          .tool_results = {ava::types::ToolResult{.call_id = "call-a", .content = "ok", .is_error = false}},
+          .agent_visible = false,
+          .user_visible = true,
+          .original_content = "first original",
+          .structured_content = nlohmann::json::array({nlohmann::json{{"text", "first"}}}),
+          .metadata = nlohmann::json{{"left", 1}, {"shared", "old"}},
+      },
+      ava::types::Message{
+          .id = "u2",
+          .role = ava::types::Role::User,
+          .content = "second",
+          .timestamp = "t2",
+          .tool_calls = {ava::types::ToolCall{.id = "call-b", .name = "write", .arguments = nlohmann::json::object()}},
+          .tool_results = {ava::types::ToolResult{.call_id = "call-b", .content = "done", .is_error = false}},
+          .tool_call_id = "call-b",
+          .images = {ava::types::ImageContent{.data = "img", .media_type = "image/png"}},
+          .parent_id = "parent",
+          .agent_visible = true,
+          .user_visible = false,
+          .original_content = "second original",
+          .structured_content = nlohmann::json::array({nlohmann::json{{"text", "second"}}}),
+          .metadata = nlohmann::json{{"right", 2}, {"shared", "new"}},
+      },
+  };
+
+  ava::types::repair_conversation(messages);
+
+  REQUIRE(messages.size() == 1);
+  REQUIRE(messages.front().content == "first\n\nsecond");
+  REQUIRE(messages.front().tool_calls.size() == 2);
+  REQUIRE(messages.front().tool_results.size() == 2);
+  REQUIRE(messages.front().tool_call_id == std::optional<std::string>{"call-b"});
+  REQUIRE(messages.front().images.size() == 1);
+  REQUIRE(messages.front().parent_id == std::optional<std::string>{"parent"});
+  REQUIRE(messages.front().agent_visible);
+  REQUIRE(messages.front().user_visible);
+  REQUIRE(messages.front().original_content == std::optional<std::string>{"first original\n\nsecond original"});
+  REQUIRE(messages.front().structured_content.size() == 2);
+  REQUIRE(messages.front().metadata["left"] == 1);
+  REQUIRE(messages.front().metadata["right"] == 2);
+  REQUIRE(messages.front().metadata["shared"] == "new");
+}
+
+TEST_CASE("conversation repair keeps same-content user messages with different images", "[ava_types]") {
+  std::vector<ava::types::Message> messages{
+      ava::types::Message{
+          .id = "a1",
+          .role = ava::types::Role::Assistant,
+          .content = "done",
+          .timestamp = "t0",
+      },
+      ava::types::Message{
+          .id = "u1",
+          .role = ava::types::Role::User,
+          .content = "inspect",
+          .timestamp = "t1",
+          .images = {ava::types::ImageContent{.data = "img-a", .media_type = "image/png"}},
+      },
+      ava::types::Message{
+          .id = "u2",
+          .role = ava::types::Role::User,
+          .content = "inspect",
+          .timestamp = "t2",
+          .images = {ava::types::ImageContent{.data = "img-b", .media_type = "image/png"}},
+      },
+  };
+
+  ava::types::repair_conversation(messages);
+
+  REQUIRE(messages.size() == 2);
+  REQUIRE(messages[1].role == ava::types::Role::User);
+  REQUIRE(messages[1].images.size() == 2);
+  REQUIRE(messages[1].images[0].data == "img-a");
+  REQUIRE(messages[1].images[1].data == "img-b");
 }
 
 TEST_CASE("conversation repair preserves distinct same-content tool calls", "[ava_types]") {

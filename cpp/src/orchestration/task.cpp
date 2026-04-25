@@ -1,10 +1,13 @@
 #include "ava/orchestration/task.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
+#include "ava/agent/runtime.hpp"
 #include "ava/orchestration/subagents.hpp"
 
 namespace ava::orchestration {
@@ -16,7 +19,7 @@ class SpawnBudgetGuard {
   explicit SpawnBudgetGuard(std::atomic<std::size_t>& counter) : counter_(counter) {}
   ~SpawnBudgetGuard() {
     if(active_) {
-      counter_.fetch_sub(1, std::memory_order_acq_rel);
+      counter_.fetch_sub(1, std::memory_order_relaxed);
     }
   }
 
@@ -26,6 +29,10 @@ class SpawnBudgetGuard {
   std::atomic<std::size_t>& counter_;
   bool active_{true};
 };
+
+[[nodiscard]] bool has_text(const std::optional<std::string>& value) {
+  return value.has_value() && value->find_first_not_of(" \t\r\n") != std::string::npos;
+}
 
 [[nodiscard]] std::string runtime_profile_to_string(SubAgentRuntimeProfile profile) {
   switch(profile) {
@@ -92,14 +99,14 @@ TaskResult NativeBlockingTaskSpawner::spawn_named(const std::string& agent_type,
 
   const auto maybe_definition = definition_for(agent_type);
   if(!maybe_definition.has_value() && is_known_agent_type(agent_type)) {
-    throw std::runtime_error("subagent '" + agent_type + "' is disabled in configuration");
+    throw std::runtime_error("subagent '" + agent_type + "' is disabled by default configuration");
   }
 
   if(options_.max_spawns == 0) {
     throw std::runtime_error("subagent delegation is disabled for this task");
   }
 
-  const auto next_spawn = spawn_count_.fetch_add(1, std::memory_order_acq_rel) + 1;
+  const auto next_spawn = spawn_count_.fetch_add(1, std::memory_order_relaxed) + 1;
   SpawnBudgetGuard budget_guard(spawn_count_);
   if(next_spawn > options_.max_spawns) {
     throw std::runtime_error("subagent budget exhausted (max " + std::to_string(options_.max_spawns) + ")");
@@ -193,6 +200,7 @@ TaskResult NativeBlockingTaskSpawner::spawn_named(const std::string& agent_type,
       .provider_override = nullptr,
       .provider_factory = options_.provider_factory,
       .credentials_override = options_.credentials_override,
+      .load_global_mcp_config = true,
   };
 
   auto composition = compose_runtime(std::move(request));
@@ -206,40 +214,163 @@ TaskResult NativeBlockingTaskSpawner::spawn_named(const std::string& agent_type,
       {"parent_agent_type", options_.parent_agent_type.value_or("")},
   };
 
-  const auto run_lease = composition.run_controller->begin_run();
+  const auto deadline = options_.child_run_timeout.has_value()
+                            ? std::optional<std::chrono::steady_clock::time_point>{
+                                  std::chrono::steady_clock::now() + *options_.child_run_timeout
+                              }
+                            : std::nullopt;
+  const auto run_lease = composition.run_controller->begin_run(deadline);
   composition.interactive_bridge->set_run_id(run_lease.run_id);
-  // M15 scope note: child-run cancellation remains internal for now.
-  // We thread token/run_id through runtime execution, but do not yet expose
-  // an externally addressable child cancellation handle on TaskResult/TaskSpawner.
-  const auto run_result = composition.runtime->run(
-      composition.session,
-      ava::agent::AgentRunInput{
-          .goal = prompt,
-          .queue = &composition.queue,
+  const auto persist_child_metadata = [&](const std::string& completion_reason,
+                                          bool watchdog_timed_out,
+                                          std::size_t turns_used,
+                                          const std::optional<std::string>& error) {
+    auto& metadata = composition.session.metadata["orchestration"]["subagent_run"];
+    metadata["turns_used"] = turns_used;
+    metadata["run_id"] = run_lease.run_id;
+    metadata["completion_reason"] = completion_reason;
+    metadata["watchdog_timed_out"] = watchdog_timed_out;
+    if(error.has_value()) {
+      metadata["error"] = *error;
+    } else {
+      metadata.erase("error");
+    }
+  };
+  register_active_child_run(
+      ChildRunInfo{
           .run_id = run_lease.run_id,
-          .is_cancelled = [&] {
-            return run_lease.token.is_cancelled();
-          },
-          .stream = true,
-      }
+          .session_id = composition.session.id,
+          .agent_type = agent_type,
+          .parent_session_id = options_.parent_session_id,
+          .depth = next_depth,
+      },
+      run_lease.handle
   );
+  ava::agent::AgentRunResult run_result;
+  std::atomic<bool> deadline_cancelled{false};
+  try {
+    const auto token = run_lease.token;
+    const auto parent_is_cancelled = options_.parent_is_cancelled;
+    run_result = composition.runtime->run(
+        composition.session,
+        ava::agent::AgentRunInput{
+            .goal = prompt,
+            .queue = &composition.queue,
+            .run_id = run_lease.run_id,
+            .is_cancelled = [token, parent_is_cancelled, &deadline_cancelled] {
+              if(token.is_deadline_expired()) {
+                deadline_cancelled.store(true, std::memory_order_release);
+                return true;
+              }
+              return token.is_cancelled() || (parent_is_cancelled && parent_is_cancelled());
+            },
+            .stream = true,
+        }
+    );
+  } catch(const std::exception& error) {
+    composition.interactive_bridge->set_run_id(std::nullopt);
+    try {
+      persist_child_metadata("error", false, 0, error.what());
+      composition.save_session();
+    } catch(...) {
+    }
+    try {
+      record_child_terminal_summary(ChildRunTerminalSummary{
+          .run_id = run_lease.run_id,
+          .session_id = composition.session.id,
+          .agent_type = agent_type,
+          .parent_session_id = options_.parent_session_id,
+          .depth = next_depth,
+          .completion_reason = "error",
+          .cancelled = false,
+          .watchdog_timed_out = false,
+          .turns_used = 0,
+          .error = error.what(),
+      });
+    } catch(...) {
+    }
+    throw;
+  } catch(...) {
+    composition.interactive_bridge->set_run_id(std::nullopt);
+    try {
+      persist_child_metadata("error", false, 0, "child run failed with non-standard exception");
+      composition.save_session();
+    } catch(...) {
+    }
+    try {
+      record_child_terminal_summary(ChildRunTerminalSummary{
+          .run_id = run_lease.run_id,
+          .session_id = composition.session.id,
+          .agent_type = agent_type,
+          .parent_session_id = options_.parent_session_id,
+          .depth = next_depth,
+          .completion_reason = "error",
+          .cancelled = false,
+          .watchdog_timed_out = false,
+          .turns_used = 0,
+          .error = "child run failed with non-standard exception",
+      });
+    } catch(...) {
+    }
+    throw;
+  }
   composition.interactive_bridge->set_run_id(std::nullopt);
 
-  composition.session.metadata["orchestration"]["subagent_run"]["turns_used"] = run_result.turns_used;
-  composition.session.metadata["orchestration"]["subagent_run"]["completion_reason"] = completion_reason_to_string(run_result.reason);
-  if(run_result.error.has_value()) {
-    composition.session.metadata["orchestration"]["subagent_run"]["error"] = *run_result.error;
-  }
+  const auto watchdog_timed_out = run_result.reason == ava::agent::AgentCompletionReason::Cancelled
+                                    && deadline_cancelled.load(std::memory_order_acquire);
+  const auto child_completion_reason = watchdog_timed_out ? std::string{"watchdog_timeout"}
+                                                          : completion_reason_to_string(run_result.reason);
+
+  persist_child_metadata(child_completion_reason, watchdog_timed_out, run_result.turns_used, run_result.error);
+
+  const auto terminal_error = run_result.error.has_value()
+                                  ? run_result.error
+                                  : (run_result.reason == ava::agent::AgentCompletionReason::Cancelled
+                                         ? std::optional<std::string>{watchdog_timed_out ? "child run watchdog timeout"
+                                                                                        : "child run cancelled"}
+                                         : std::nullopt);
+
+  const auto child_summary = ChildRunTerminalSummary{
+      .run_id = run_lease.run_id,
+      .session_id = composition.session.id,
+      .agent_type = agent_type,
+      .parent_session_id = options_.parent_session_id,
+      .depth = next_depth,
+      .completion_reason = child_completion_reason,
+      .cancelled = run_result.reason == ava::agent::AgentCompletionReason::Cancelled,
+      .watchdog_timed_out = watchdog_timed_out,
+      .turns_used = run_result.turns_used,
+      .error = terminal_error,
+  };
+  record_child_terminal_summary(child_summary);
 
   composition.save_session();
+  const auto should_emit_subagent_complete = run_result.reason == ava::agent::AgentCompletionReason::Completed ||
+                                             run_result.reason == ava::agent::AgentCompletionReason::MaxTurns;
+  if(options_.event_sink && has_text(options_.parent_run_id) && has_text(options_.parent_call_id) &&
+     should_emit_subagent_complete && !terminal_error.has_value()) {
+    try {
+      options_.event_sink(ava::agent::AgentEvent{
+          .kind = ava::agent::AgentEventKind::SubagentComplete,
+          .run_id = options_.parent_run_id,
+          .subagent_call_id = options_.parent_call_id,
+          .subagent_session_id = composition.session.id,
+          .subagent_description = prompt,
+          .subagent_message_count = composition.session.messages.size(),
+      });
+    } catch(...) {
+      // Event projection is observational; child results and persistence must still complete.
+    }
+  }
   // Persisted successfully: consume one spawn budget unit.
   budget_guard.release();
 
   TaskResult result{
-      .output = run_result.error.has_value() ? std::nullopt : std::optional<std::string>{run_result.final_response},
-      .error = run_result.error,
+      .output = terminal_error.has_value() ? std::nullopt : std::optional<std::string>{run_result.final_response},
+      .error = terminal_error,
       .session_id = composition.session.id,
-      .messages = composition.session.messages,
+      .messages = std::move(composition.session.messages),
+      .child_run_summary = child_summary,
   };
   return result;
 }
@@ -288,7 +419,7 @@ std::optional<std::vector<std::string>> NativeBlockingTaskSpawner::allowed_tools
       }
       profile_visible_tools = std::move(names);
     } else {
-      profile_visible_tools = std::vector<std::string>{"git", "git_read", "glob", "grep", "read"};
+      profile_visible_tools = read_only_runtime_tool_names();
     }
   }
 
@@ -307,6 +438,74 @@ std::optional<std::vector<std::string>> NativeBlockingTaskSpawner::allowed_tools
     }
   }
   return intersection;
+}
+
+std::vector<ChildRunInfo> NativeBlockingTaskSpawner::active_child_runs() const {
+  const std::lock_guard<std::mutex> lock(child_runs_mutex_);
+  std::vector<ChildRunInfo> runs;
+  runs.reserve(active_child_runs_.size());
+  for(const auto& [_, entry] : active_child_runs_) {
+    runs.push_back(entry.info);
+  }
+  std::sort(runs.begin(), runs.end(), [](const auto& lhs, const auto& rhs) {
+    return lhs.run_id < rhs.run_id;
+  });
+  return runs;
+}
+
+std::optional<ChildRunInfo> NativeBlockingTaskSpawner::active_child_run(const std::string& run_id) const {
+  const std::lock_guard<std::mutex> lock(child_runs_mutex_);
+  const auto it = active_child_runs_.find(run_id);
+  if(it == active_child_runs_.end()) {
+    return std::nullopt;
+  }
+  return it->second.info;
+}
+
+bool NativeBlockingTaskSpawner::cancel_child_run(const std::string& run_id) const {
+  RunCancellationHandle handle;
+  {
+    const std::lock_guard<std::mutex> lock(child_runs_mutex_);
+    const auto it = active_child_runs_.find(run_id);
+    if(it == active_child_runs_.end()) {
+      return false;
+    }
+    handle = it->second.cancel_handle;
+  }
+
+  handle.cancel();
+  return true;
+}
+
+std::vector<ChildRunTerminalSummary> NativeBlockingTaskSpawner::child_terminal_summaries() const {
+  const std::lock_guard<std::mutex> lock(child_runs_mutex_);
+  return child_terminal_summaries_;
+}
+
+std::optional<ChildRunTerminalSummary> NativeBlockingTaskSpawner::child_terminal_summary(const std::string& run_id) const {
+  const std::lock_guard<std::mutex> lock(child_runs_mutex_);
+  const auto it = std::find_if(child_terminal_summaries_.begin(), child_terminal_summaries_.end(), [&](const auto& summary) {
+    return summary.run_id == run_id;
+  });
+  if(it == child_terminal_summaries_.end()) {
+    return std::nullopt;
+  }
+  return *it;
+}
+
+void NativeBlockingTaskSpawner::register_active_child_run(ChildRunInfo info, RunCancellationHandle handle) const {
+  const std::lock_guard<std::mutex> lock(child_runs_mutex_);
+  const auto run_id = info.run_id;
+  active_child_runs_[run_id] = ActiveChildRunEntry{.info = std::move(info), .cancel_handle = std::move(handle)};
+}
+
+void NativeBlockingTaskSpawner::record_child_terminal_summary(ChildRunTerminalSummary summary) const {
+  const std::lock_guard<std::mutex> lock(child_runs_mutex_);
+  active_child_runs_.erase(summary.run_id);
+  child_terminal_summaries_.push_back(std::move(summary));
+  if(child_terminal_summaries_.size() > kMaxChildTerminalSummaries) {
+    child_terminal_summaries_.erase(child_terminal_summaries_.begin());
+  }
 }
 
 }  // namespace ava::orchestration

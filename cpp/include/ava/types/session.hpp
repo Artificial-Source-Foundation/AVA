@@ -37,6 +37,24 @@ struct SessionRecord {
   std::optional<std::string> branch_head;
 };
 
+struct SessionRecoveryStats {
+  std::size_t interrupted_tools_added{0};
+  std::size_t empty_assistant_removed{0};
+  std::size_t orphan_tool_removed{0};
+  std::size_t non_user_after_terminal_removed{0};
+  std::size_t consecutive_users_merged{0};
+  std::size_t duplicate_messages_removed{0};
+
+  [[nodiscard]] bool changed() const {
+    return interrupted_tools_added > 0 || empty_assistant_removed > 0 || orphan_tool_removed > 0
+           || non_user_after_terminal_removed > 0 || consecutive_users_merged > 0 || duplicate_messages_removed > 0;
+  }
+};
+
+SessionRecoveryStats synthesize_interrupted_tool_results(SessionRecord& session);
+SessionRecoveryStats repair_session_transcript_structure(SessionRecord& session);
+SessionRecoveryStats recover_session_messages(SessionRecord& session);
+
 struct TreeNode {
   SessionMessage message;
   std::vector<std::string> children;

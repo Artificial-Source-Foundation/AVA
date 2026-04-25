@@ -140,7 +140,7 @@ ServerCapabilities McpClient::initialize() {
         nlohmann::json{
             {"protocolVersion", "2024-11-05"},
             {"capabilities", nlohmann::json::object()},
-            {"clientInfo", nlohmann::json{{"name", "ava-cpp"}, {"version", "m25"}}},
+            {"clientInfo", nlohmann::json{{"name", "ava-cpp"}, {"version", "0.1.0"}}},
         }
     );
     require_object_result(result, "initialize", health_);

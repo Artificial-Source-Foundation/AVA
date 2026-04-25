@@ -308,7 +308,7 @@ TEST_CASE("openai provider reports CPR transport gating when disabled", "[ava_ll
 #endif
 }
 
-TEST_CASE("anthropic provider reports CPR transport gating and deferred streaming", "[ava_llm]") {
+TEST_CASE("anthropic provider reports CPR transport gating and streaming capability", "[ava_llm]") {
   const ava::llm::AnthropicProvider provider{
       "claude-sonnet-4-6",
       "test-key",
@@ -318,6 +318,11 @@ TEST_CASE("anthropic provider reports CPR transport gating and deferred streamin
 
   REQUIRE(provider.provider_kind() == ava::llm::ProviderKind::Anthropic);
   REQUIRE(provider.supports_tools());
+
+#if AVA_WITH_CPR
+  REQUIRE(provider.capabilities().supports_streaming);
+  SUCCEED("CPR-enabled build compiles Anthropic streaming transport path");
+#else
   REQUIRE_FALSE(provider.capabilities().supports_streaming);
 
   const auto stream_result = provider.stream_generate(
@@ -327,18 +332,14 @@ TEST_CASE("anthropic provider reports CPR transport gating and deferred streamin
       [](const ava::types::StreamChunk&) { return true; }
   );
   REQUIRE(stream_result == ava::llm::Provider::StreamDispatchResult::Unsupported);
-  REQUIRE_THROWS_AS(
-      provider.generate_stream(
-          {ava::llm::ChatMessage::user("hello")},
-          {},
-          ava::llm::ThinkingConfig::disabled()
-      ),
-      ava::llm::ProviderException
-  );
 
-#if AVA_WITH_CPR
-  SUCCEED("CPR-enabled build compiles Anthropic transport path");
-#else
+  const auto stream_chunks = provider.generate_stream(
+      {ava::llm::ChatMessage::user("hello")},
+      {},
+      ava::llm::ThinkingConfig::disabled()
+  );
+  REQUIRE(stream_chunks.empty());
+
   try {
     (void)provider.generate(
         {ava::llm::ChatMessage::user("hello")},
@@ -463,11 +464,13 @@ TEST_CASE("anthropic request builder handles system prompts, tools, and tool res
           },
       },
       2048,
-      ava::llm::ThinkingConfig::disabled()
+      ava::llm::ThinkingConfig::disabled(),
+      true
   );
 
   REQUIRE(request.at("model") == "claude-sonnet-4-6");
   REQUIRE(request.at("max_tokens") == 2048);
+  REQUIRE(request.at("stream") == true);
   REQUIRE(request.at("system") == "You are helpful");
   REQUIRE(request.at("messages").size() == 3);
   REQUIRE(request.at("messages").at(0).at("role") == "user");
@@ -511,6 +514,7 @@ TEST_CASE("anthropic request builder handles system and tool edge cases", "[ava_
   REQUIRE(request.at("messages").at(1).at("content").at(0).at("tool_use_id") == "toolu_plain");
   REQUIRE(request.at("messages").at(1).at("content").at(0).at("content") == "plain tool output");
   REQUIRE(request.at("tools").at(0).at("input_schema").at("type") == "object");
+  REQUIRE_FALSE(request.contains("stream"));
 }
 
 TEST_CASE("anthropic request builder groups consecutive tool results", "[ava_llm]") {
@@ -617,6 +621,129 @@ TEST_CASE("anthropic response parser captures cache creation tokens", "[ava_llm]
   REQUIRE(parsed.usage->input_tokens == 3);
   REQUIRE(parsed.usage->output_tokens == 4);
   REQUIRE(parsed.usage->cache_creation_tokens == 5);
+}
+
+TEST_CASE("anthropic stream parser captures text thinking tool and usage chunks", "[ava_llm]") {
+  const auto text_chunk = ava::llm::anthropic::parse_stream_event(nlohmann::json{
+      {"type", "content_block_delta"},
+      {"delta", {{"type", "text_delta"}, {"text", "hello"}}},
+  });
+  REQUIRE(text_chunk.has_value());
+  REQUIRE(text_chunk->content == "hello");
+
+  const auto initial_text_chunk = ava::llm::anthropic::parse_stream_event(nlohmann::json{
+      {"type", "content_block_start"},
+      {"index", 0},
+      {"content_block", {{"type", "text"}, {"text", "initial"}}},
+  });
+  REQUIRE(initial_text_chunk.has_value());
+  REQUIRE(initial_text_chunk->content == "initial");
+
+  const auto thinking_chunk = ava::llm::anthropic::parse_stream_event(nlohmann::json{
+      {"type", "content_block_delta"},
+      {"delta", {{"type", "thinking_delta"}, {"thinking", "plan"}}},
+  });
+  REQUIRE(thinking_chunk.has_value());
+  REQUIRE(thinking_chunk->thinking == "plan");
+
+  const auto initial_thinking_chunk = ava::llm::anthropic::parse_stream_event(nlohmann::json{
+      {"type", "content_block_start"},
+      {"index", 0},
+      {"content_block", {{"type", "thinking"}, {"thinking", "initial plan"}}},
+  });
+  REQUIRE(initial_thinking_chunk.has_value());
+  REQUIRE(initial_thinking_chunk->thinking == "initial plan");
+
+  const auto tool_start_chunk = ava::llm::anthropic::parse_stream_event(nlohmann::json{
+      {"type", "content_block_start"},
+      {"index", 1},
+      {"content_block", {{"type", "tool_use"}, {"id", "toolu_1"}, {"name", "read"}}},
+  });
+  REQUIRE(tool_start_chunk.has_value());
+  REQUIRE(tool_start_chunk->tool_call.has_value());
+  REQUIRE(tool_start_chunk->tool_call->index == 1);
+  REQUIRE(tool_start_chunk->tool_call->id == "toolu_1");
+  REQUIRE(tool_start_chunk->tool_call->name == "read");
+  REQUIRE_FALSE(tool_start_chunk->tool_call->arguments_delta.has_value());
+
+  const auto tool_args_chunk = ava::llm::anthropic::parse_stream_event(nlohmann::json{
+      {"type", "content_block_delta"},
+      {"index", 1},
+      {"delta", {{"type", "input_json_delta"}, {"partial_json", "{\"path\":\"README.md\"}"}}},
+  });
+  REQUIRE(tool_args_chunk.has_value());
+  REQUIRE(tool_args_chunk->tool_call.has_value());
+  REQUIRE(tool_args_chunk->tool_call->index == 1);
+  REQUIRE(tool_args_chunk->tool_call->arguments_delta == std::optional<std::string>{"{\"path\":\"README.md\"}"});
+
+  const auto usage_chunk = ava::llm::anthropic::parse_stream_event(nlohmann::json{
+      {"type", "message_delta"},
+      {"usage", {{"output_tokens", 17}}},
+  });
+  REQUIRE(usage_chunk.has_value());
+  REQUIRE(usage_chunk->usage.has_value());
+  REQUIRE(usage_chunk->usage->output_tokens == 17);
+
+  const auto nested_usage_chunk = ava::llm::anthropic::parse_stream_event(nlohmann::json{
+      {"type", "message_delta"},
+      {"delta", {{"usage", {{"output_tokens", 19}}}}},
+  });
+  REQUIRE(nested_usage_chunk.has_value());
+  REQUIRE(nested_usage_chunk->usage.has_value());
+  REQUIRE(nested_usage_chunk->usage->output_tokens == 19);
+
+  const auto done_chunk = ava::llm::anthropic::parse_stream_event(nlohmann::json{{"type", "message_stop"}});
+  REQUIRE(done_chunk.has_value());
+  REQUIRE(done_chunk->done);
+}
+
+TEST_CASE("anthropic stream parser ignores forward-compatible non-content events", "[ava_llm]") {
+  REQUIRE_FALSE(
+      ava::llm::anthropic::parse_stream_event(nlohmann::json{{"type", "message_start"}, {"message", nlohmann::json::object()}})
+          .has_value()
+  );
+  REQUIRE_FALSE(
+      ava::llm::anthropic::parse_stream_event(nlohmann::json{{"type", "content_block_stop"}, {"index", 0}})
+          .has_value()
+  );
+  REQUIRE_FALSE(ava::llm::anthropic::parse_stream_event(nlohmann::json{{"type", "ping"}}).has_value());
+  REQUIRE_FALSE(ava::llm::anthropic::parse_stream_event(nlohmann::json{{"type", "future_event"}}).has_value());
+}
+
+TEST_CASE("anthropic stream parser raises provider exception for error events", "[ava_llm]") {
+  try {
+    (void)ava::llm::anthropic::parse_stream_event(nlohmann::json{
+        {"type", "error"},
+        {"error", {{"type", "overloaded_error"}, {"message", "stream exploded"}}},
+    });
+    FAIL("expected stream error event to throw provider exception");
+  } catch(const ava::llm::ProviderException& ex) {
+    REQUIRE(ex.error().provider == "anthropic");
+    REQUIRE(ex.error().kind == ava::llm::ProviderErrorKind::ServerError);
+    REQUIRE(ex.error().message == "stream exploded");
+  }
+
+  try {
+    (void)ava::llm::anthropic::parse_stream_event(nlohmann::json{
+        {"type", "error"},
+        {"error", {{"type", "authentication_error"}, {"message", "bad key"}}},
+    });
+    FAIL("expected authentication stream error event to throw provider exception");
+  } catch(const ava::llm::ProviderException& ex) {
+    REQUIRE(ex.error().kind == ava::llm::ProviderErrorKind::AuthFailure);
+    REQUIRE(ex.error().message == "bad key");
+  }
+
+  try {
+    (void)ava::llm::anthropic::parse_stream_event(nlohmann::json{
+        {"type", "error"},
+        {"error", {{"type", "request_too_large"}, {"message", "too many tokens"}}},
+    });
+    FAIL("expected request-too-large stream error event to throw provider exception");
+  } catch(const ava::llm::ProviderException& ex) {
+    REQUIRE(ex.error().kind == ava::llm::ProviderErrorKind::ContextWindowExceeded);
+    REQUIRE(ex.error().message == "too many tokens");
+  }
 }
 
 TEST_CASE("openai stream parser captures content finish and usage chunks", "[ava_llm]") {

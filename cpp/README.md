@@ -192,17 +192,31 @@ After the default `cpp-debug` preset, app binaries live under `build/cpp/debug`.
 ctest --preset cpp-debug --output-on-failure
 ```
 
-Headless CLI flags (Milestone 9 lane retained in M10):
+Headless CLI flags (Milestone 9 lane retained and expanded through M32):
 
 - positional goal
 - `--provider`
 - `--model`
+- `--cwd`
+- `--agent`
+- `--trust`
 - `--continue`
 - `--session`
 - `--json`
 - `--max-turns`
+- `--max-budget`
 - `--auto-approve`
+- `--follow-up`, `--later`, `--later-group`
 - `--version`, `--smoke`
+
+M32 also honors these environment defaults when the matching CLI flags are absent:
+
+- `AVA_PROVIDER`
+- `AVA_MODEL`
+- `AVA_WORKING_DIRECTORY`
+- `AVA_AGENT`
+
+Explicit CLI flags take precedence over environment defaults. `--cwd` / `AVA_WORKING_DIRECTORY` must resolve to an existing directory and becomes the workspace root used by runtime composition and session metadata. `--trust` records that workspace as trusted through the current C++ trust store. `--agent` selects one of the builtin C++ agent profiles and can apply that profile's default turn budget when `--max-turns` was not specified.
 
 Optional live-provider smoke (only when explicitly enabled):
 
@@ -212,6 +226,8 @@ AVA_LIVE_PROVIDER_TESTS=1 OPENAI_API_KEY=... ctest --test-dir build/cpp -R ava_a
 
 By default, live-provider tests skip cleanly when env gates are not set.
 
+Milestone 33 adds deterministic non-live headless integration proof for the current app boundary. The focused evidence lane exercises workspace selection through `--cwd` and `AVA_WORKING_DIRECTORY`, `--trust` persistence, resume/recovery repair, queued follow-up/post-complete turns, budget-warning NDJSON, and lifecycle/tool/checkpoint event ordering through `run_headless_blocking`. See `cpp/MILESTONE33_BOUNDARIES.md` for the exact scope and remaining deferrals.
+
 ## Scope Guardrails
 
 - Milestone 11 = Milestone 10 foundations plus a smallest-honest FTXUI interactive terminal slice.
@@ -220,6 +236,9 @@ By default, live-provider tests skip cleanly when env gates are not set.
 - Milestone 14 (first narrow pass) = interactive control-plane lifecycle baseline + orchestration bridge wiring for approval/question/plan (`cpp/MILESTONE14_BOUNDARIES.md`).
 - Milestone 15 = narrow run identity + streaming/cancellation seam pass (`cpp/MILESTONE15_BOUNDARIES.md`).
 - Milestone 16 = narrow TUI workflow parity basics pass with adapter-state seams and no runtime ownership migration (`cpp/MILESTONE16_BOUNDARIES.md`).
+- Milestone 32 = narrow headless CLI/config/tool polish parity (`cpp/MILESTONE32_BOUNDARIES.md`) with `--cwd`/`--agent`/`--trust`, environment defaults, builtin-agent defaults, and core-tool schema/output polish.
+- Milestone 33 = deterministic non-live headless integration proof (`cpp/MILESTONE33_BOUNDARIES.md`) across workspace/trust, resume/recovery, queue turns, budget NDJSON, and event ordering.
+- Milestone 34 = final hardening/evidence milestone for the scoped C++ backend/headless migration lane (`cpp/MILESTONE34_BOUNDARIES.md`) with small production hardening fixes, broader local validation, docs consistency, and residual-risk inventory without new feature breadth.
 - Deferred work remains tracked in milestone boundary docs (task-tool parity, MCP/plugin-manager parity, async/background spawn ownership, and broader runtime-streaming parity).
 - The current `ava_agent` slice is intentionally useful but not yet parity with the full Rust runtime behavior stack.
 - No claim of full Rust behavior parity yet for async runtime, auth-heavy surfaces, or broader backend execution stack.

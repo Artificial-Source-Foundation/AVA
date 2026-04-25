@@ -41,6 +41,7 @@ public:
   [[nodiscard]] std::uint32_t current_post_group() const;
   void finish_post_complete_group();
   void advance_post_group();
+  void finish_and_advance_post_group();
   void clear_steering();
 
 private:

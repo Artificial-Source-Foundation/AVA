@@ -44,22 +44,6 @@ class SpawnBudgetGuard {
   return "full";
 }
 
-[[nodiscard]] std::string completion_reason_to_string(ava::agent::AgentCompletionReason reason) {
-  switch(reason) {
-    case ava::agent::AgentCompletionReason::Completed:
-      return "completed";
-    case ava::agent::AgentCompletionReason::Cancelled:
-      return "cancelled";
-    case ava::agent::AgentCompletionReason::MaxTurns:
-      return "max_turns";
-    case ava::agent::AgentCompletionReason::Stuck:
-      return "stuck";
-    case ava::agent::AgentCompletionReason::Error:
-      return "error";
-  }
-  return "error";
-}
-
 }  // namespace
 
 NativeBlockingTaskSpawner::NativeBlockingTaskSpawner(NativeTaskSpawnerOptions options)
@@ -318,8 +302,9 @@ TaskResult NativeBlockingTaskSpawner::spawn_named(const std::string& agent_type,
 
   const auto watchdog_timed_out = run_result.reason == ava::agent::AgentCompletionReason::Cancelled
                                     && deadline_cancelled.load(std::memory_order_acquire);
-  const auto child_completion_reason = watchdog_timed_out ? std::string{"watchdog_timeout"}
-                                                          : completion_reason_to_string(run_result.reason);
+  const auto child_completion_reason = watchdog_timed_out
+                                           ? std::string{"watchdog_timeout"}
+                                           : std::string{ava::agent::completion_reason_to_string(run_result.reason)};
 
   persist_child_metadata(child_completion_reason, watchdog_timed_out, run_result.turns_used, run_result.error);
 

@@ -17,19 +17,28 @@ const char* kEmbeddedRegistryJson = R"JSON(
       "id": "claude-opus-4-6",
       "provider": "anthropic",
       "name": "Claude Opus 4.6",
-      "aliases": ["opus"],
-      "capabilities": {"tool_call": true, "vision": false, "reasoning": false, "streaming": false, "loop_prone": false},
-      "limits": {"context_window": 200000, "max_output": 64000},
+      "aliases": ["opus", "opus-4.6", "claude-opus-4.6", "claude-opus-4"],
+      "capabilities": {"tool_call": true, "vision": true, "reasoning": true, "streaming": true, "loop_prone": false},
+      "limits": {"context_window": 1048576, "max_output": 32000},
       "cost": {"input_per_million": 5.0, "output_per_million": 25.0}
     },
     {
       "id": "claude-sonnet-4-6",
       "provider": "anthropic",
       "name": "Claude Sonnet 4.6",
-      "aliases": ["sonnet"],
-      "capabilities": {"tool_call": true, "vision": false, "reasoning": false, "streaming": false, "loop_prone": false},
-      "limits": {"context_window": 200000, "max_output": 64000},
+      "aliases": ["sonnet", "sonnet-4.6", "claude-sonnet-4.6", "claude-sonnet-4"],
+      "capabilities": {"tool_call": true, "vision": true, "reasoning": true, "streaming": true, "loop_prone": false},
+      "limits": {"context_window": 1048576, "max_output": 64000},
       "cost": {"input_per_million": 3.0, "output_per_million": 15.0}
+    },
+    {
+      "id": "claude-haiku-4-5",
+      "provider": "anthropic",
+      "name": "Claude Haiku 4.5",
+      "aliases": ["haiku", "haiku-4.5", "claude-haiku-4.5", "claude-haiku-4"],
+      "capabilities": {"tool_call": true, "vision": true, "reasoning": false, "streaming": true, "loop_prone": false},
+      "limits": {"context_window": 200000, "max_output": 8192},
+      "cost": {"input_per_million": 1.0, "output_per_million": 5.0}
     },
     {
       "id": "gpt-5.3-codex",
@@ -45,9 +54,63 @@ const char* kEmbeddedRegistryJson = R"JSON(
       "provider": "openai",
       "name": "GPT-5 mini",
       "aliases": ["mini"],
-      "capabilities": {"tool_call": true, "vision": false, "reasoning": false, "streaming": true, "loop_prone": false},
+      "capabilities": {"tool_call": true, "vision": false, "reasoning": true, "streaming": true, "loop_prone": false},
       "limits": {"context_window": 128000, "max_output": 16384},
       "cost": {"input_per_million": 0.3, "output_per_million": 1.2}
+    },
+    {
+      "id": "gpt-5.4",
+      "provider": "openai",
+      "name": "GPT-5.4",
+      "aliases": ["gpt5.4"],
+      "capabilities": {"tool_call": true, "vision": true, "reasoning": true, "streaming": true, "loop_prone": false},
+      "limits": {"context_window": 1048576, "max_output": 100000},
+      "cost": {"input_per_million": 2.5, "output_per_million": 15.0}
+    },
+    {
+      "id": "gemini-2.5-pro",
+      "provider": "gemini",
+      "name": "Gemini 2.5 Pro",
+      "aliases": ["gemini-pro"],
+      "capabilities": {"tool_call": true, "vision": true, "reasoning": true, "streaming": true, "loop_prone": false},
+      "limits": {"context_window": 1000000, "max_output": 65536},
+      "cost": {"input_per_million": 1.25, "output_per_million": 10.0}
+    },
+    {
+      "id": "gemini-2.5-flash",
+      "provider": "gemini",
+      "name": "Gemini 2.5 Flash",
+      "aliases": ["gemini-flash"],
+      "capabilities": {"tool_call": true, "vision": true, "reasoning": true, "streaming": true, "loop_prone": false},
+      "limits": {"context_window": 1000000, "max_output": 65536},
+      "cost": {"input_per_million": 0.15, "output_per_million": 0.6}
+    },
+    {
+      "id": "openai/gpt-4.1-mini",
+      "provider": "openrouter",
+      "name": "OpenRouter OpenAI GPT-4.1 Mini",
+      "aliases": ["or-gpt4.1-mini", "openrouter-openai-mini"],
+      "capabilities": {"tool_call": true, "vision": true, "reasoning": true, "streaming": true, "loop_prone": false},
+      "limits": {"context_window": 200000, "max_output": 100000},
+      "cost": {"input_per_million": 0.4, "output_per_million": 1.6}
+    },
+    {
+      "id": "anthropic/claude-sonnet-4",
+      "provider": "openrouter",
+      "name": "OpenRouter Anthropic Claude Sonnet 4",
+      "aliases": ["or-sonnet-4"],
+      "capabilities": {"tool_call": true, "vision": true, "reasoning": true, "streaming": true, "loop_prone": false},
+      "limits": {"context_window": 200000, "max_output": 64000},
+      "cost": {"input_per_million": 3.0, "output_per_million": 15.0}
+    },
+    {
+      "id": "llama3.3",
+      "provider": "ollama",
+      "name": "Llama 3.3",
+      "aliases": ["llama-3.3", "llama3.3:latest"],
+      "capabilities": {"tool_call": false, "vision": false, "reasoning": false, "streaming": true, "loop_prone": false},
+      "limits": {"context_window": 131072, "max_output": 8192},
+      "cost": {"input_per_million": 0.0, "output_per_million": 0.0}
     },
     {
       "id": "glm-4.7",

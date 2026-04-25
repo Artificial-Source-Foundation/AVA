@@ -17,6 +17,7 @@
 #include <utility>
 
 #if !defined(_WIN32)
+#include <dirent.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
@@ -231,10 +232,29 @@ void close_fd_if_open(int& fd) {
 }
 
 void close_inherited_fds_for_child() {
+  if(auto* dir = ::opendir("/proc/self/fd"); dir != nullptr) {
+    const int dir_fd = ::dirfd(dir);
+    if(dir_fd >= 0) {
+      while(const auto* entry = ::readdir(dir)) {
+        char* end = nullptr;
+        const long parsed = std::strtol(entry->d_name, &end, 10);
+        if(end == entry->d_name || (end != nullptr && *end != '\0')) {
+          continue;
+        }
+        if(parsed > STDERR_FILENO && parsed != dir_fd && parsed <= std::numeric_limits<int>::max()) {
+          ::close(static_cast<int>(parsed));
+        }
+      }
+      ::closedir(dir);
+      return;
+    }
+    ::closedir(dir);
+  }
+
   int max_fd = 1024;
   const long configured_max_fd = ::sysconf(_SC_OPEN_MAX);
   if(configured_max_fd > 0 && configured_max_fd <= static_cast<long>(std::numeric_limits<int>::max())) {
-    max_fd = static_cast<int>(configured_max_fd);
+    max_fd = std::min(static_cast<int>(configured_max_fd), 4096);
   }
   for(int fd = STDERR_FILENO + 1; fd < max_fd; ++fd) {
     ::close(fd);

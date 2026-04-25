@@ -80,7 +80,7 @@ constexpr std::uint32_t kMaxReceiveTimeoutMs = 120000;
   }
   const auto type = transport.at("type").get<std::string>();
   if(type != "stdio") {
-    throw std::runtime_error("MCP transport type is not supported in C++ Milestone 25: " + type);
+    throw std::runtime_error("MCP transport type is not supported by the current C++ runtime: " + type);
   }
   server.transport_type = TransportType::Stdio;
   server.stdio.command = transport.at("command").get<std::string>();

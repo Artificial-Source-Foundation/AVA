@@ -183,7 +183,7 @@ std::unique_ptr<McpTransport> McpManager::create_transport(const McpServerConfig
   }
 
   if(config.transport_type != TransportType::Stdio) {
-    throw std::runtime_error("MCP transport type is not supported in C++ Milestone 25");
+    throw std::runtime_error("MCP transport type is not supported by the current C++ runtime");
   }
 
   return std::make_unique<StdioTransport>(

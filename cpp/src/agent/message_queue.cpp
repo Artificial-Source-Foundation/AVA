@@ -126,6 +126,12 @@ void MessageQueue::advance_post_group() {
   ++current_post_group_;
 }
 
+void MessageQueue::finish_and_advance_post_group() {
+  const std::lock_guard<std::mutex> lock(*mutex_);
+  group_running_ = false;
+  ++current_post_group_;
+}
+
 void MessageQueue::clear_steering() {
   const std::lock_guard<std::mutex> lock(*mutex_);
   steering_.clear();

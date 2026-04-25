@@ -2,6 +2,8 @@
 
 #include <filesystem>
 #include <iostream>
+#include <cstdint>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -9,6 +11,7 @@
 
 #include "ava/agent/agent.hpp"
 #include "ava/config/paths.hpp"
+#include "ava/config/trust.hpp"
 #include "ava/orchestration/composition.hpp"
 #include "events.hpp"
 #include "signal_cancel.hpp"
@@ -33,9 +36,19 @@ class HeadlessSignalCancelScope {
   }
 };
 
-void populate_queue_from_cli_inputs(const CliOptions&, ava::agent::MessageQueue&) {
-  // Milestone 9 intentionally does not expose follow-up/later CLI queue flags yet.
-  // Queue parity is deferred to a later milestone.
+void populate_queue_from_cli_inputs(const CliOptions& cli, ava::agent::MessageQueue& queue) {
+  for(const auto& message : cli.follow_up_messages) {
+    queue.enqueue(ava::agent::QueuedMessage{.text = message, .tier = ava::types::MessageTier::follow_up()});
+  }
+  for(const auto& message : cli.post_complete_messages) {
+    queue.enqueue(ava::agent::QueuedMessage{.text = message, .tier = ava::types::MessageTier::post_complete()});
+  }
+  for(const auto& message : cli.post_complete_group_messages) {
+    queue.enqueue(ava::agent::QueuedMessage{
+        .text = message.text,
+        .tier = ava::types::MessageTier::post_complete(message.group),
+    });
+  }
 }
 
 [[nodiscard]] std::string startup_kind_to_string(ava::orchestration::SessionStartupKind kind) {
@@ -50,36 +63,27 @@ void populate_queue_from_cli_inputs(const CliOptions&, ava::agent::MessageQueue&
   return "new";
 }
 
-[[nodiscard]] std::string completion_reason_to_string(ava::agent::AgentCompletionReason reason) {
-  switch(reason) {
-    case ava::agent::AgentCompletionReason::Completed:
-      return "completed";
-    case ava::agent::AgentCompletionReason::Cancelled:
-      return "cancelled";
-    case ava::agent::AgentCompletionReason::MaxTurns:
-      return "max_turns";
-    case ava::agent::AgentCompletionReason::Stuck:
-      return "stuck";
-    case ava::agent::AgentCompletionReason::Error:
-      return "error";
-  }
-  return "error";
-}
-
 void persist_headless_metadata(
     ava::types::SessionRecord& session,
     const ava::orchestration::ResolvedRuntimeSelection& selection,
     const CliOptions& cli,
     const ava::agent::AgentRunResult& result,
     const std::string& run_id,
-    ava::orchestration::SessionStartupKind startup_kind
+    ava::orchestration::SessionStartupKind startup_kind,
+    const std::filesystem::path& workspace_root
 ) {
   session.metadata["headless"]["provider"] = selection.provider;
   session.metadata["headless"]["model"] = selection.model;
+  if(selection.agent.has_value()) {
+    session.metadata["headless"]["agent"] = *selection.agent;
+  } else {
+    session.metadata["headless"].erase("agent");
+  }
   session.metadata["headless"]["max_turns"] = selection.max_turns;
   session.metadata["headless"]["last_startup_kind"] = startup_kind_to_string(startup_kind);
+  session.metadata["headless"]["workspace_root"] = workspace_root.string();
   auto& last_run = session.metadata["headless"]["last_run"];
-  last_run["reason"] = completion_reason_to_string(result.reason);
+  last_run["reason"] = ava::agent::completion_reason_to_string(result.reason);
   last_run["run_id"] = run_id;
   last_run["turns_used"] = result.turns_used;
   last_run["json"] = cli.json;
@@ -89,6 +93,19 @@ void persist_headless_metadata(
   } else {
     last_run.erase("error");
   }
+}
+
+[[nodiscard]] std::filesystem::path resolve_workspace_root(const CliOptions& cli) {
+  std::filesystem::path root = cli.cwd.value_or(std::filesystem::current_path());
+  std::error_code ec;
+  const auto canonical = std::filesystem::weakly_canonical(root, ec);
+  if(!ec) {
+    root = canonical;
+  }
+  if(!std::filesystem::exists(root) || !std::filesystem::is_directory(root)) {
+    throw std::invalid_argument("--cwd must point to an existing directory: " + root.string());
+  }
+  return root;
 }
 
 }  // namespace
@@ -102,16 +119,23 @@ int run_headless_blocking(const CliOptions& cli, ava::llm::ProviderPtr provider_
     throw std::invalid_argument("No goal provided. Usage: ava \"your goal here\"");
   }
 
+  const auto workspace_root = resolve_workspace_root(cli);
+  if(cli.trust) {
+    ava::config::trust_project(workspace_root);
+  }
+
   auto composition = ava::orchestration::compose_runtime(ava::orchestration::RuntimeCompositionRequest{
       .session_db_path = ava::config::app_db_path(),
-      .workspace_root = std::filesystem::current_path(),
+      .workspace_root = workspace_root,
       .resume_latest = cli.resume,
       .session_id = cli.session_id,
       .selection = ava::orchestration::RuntimeSelectionOptions{
           .provider = cli.provider,
           .model = cli.model,
+          .agent = cli.agent,
           .max_turns = cli.max_turns,
           .max_turns_explicit = cli.max_turns_explicit,
+          .max_budget_usd = cli.max_budget_usd,
       },
       .auto_approve = cli.auto_approve,
       .allowed_tools = std::nullopt,
@@ -125,17 +149,24 @@ int run_headless_blocking(const CliOptions& cli, ava::llm::ProviderPtr provider_
   populate_queue_from_cli_inputs(cli, composition.queue);
 
   if(cli.json) {
-    std::cout << nlohmann::json{
-                      {"type", "session_context"},
-                      {"session_id", composition.session.id},
-                      {"provider", composition.selection.provider},
-                      {"model", composition.selection.model},
-                  }
-                      .dump()
-               << "\n";
+    nlohmann::json context{
+        {"type", "session_context"},
+        {"session_id", composition.session.id},
+        {"provider", composition.selection.provider},
+        {"model", composition.selection.model},
+        {"workspace_root", workspace_root.string()},
+    };
+    if(composition.selection.agent.has_value()) {
+      context["agent"] = *composition.selection.agent;
+    }
+    std::cout << context.dump() << "\n";
   } else {
     std::cout << "session=" << composition.session.id << " provider=" << composition.selection.provider
-              << " model=" << composition.selection.model << "\n";
+              << " model=" << composition.selection.model;
+    if(composition.selection.agent.has_value()) {
+      std::cout << " agent=" << *composition.selection.agent;
+    }
+    std::cout << " workspace=" << workspace_root.string() << "\n";
   }
 
   const auto run_lease = composition.run_controller->begin_run();
@@ -156,6 +187,9 @@ int run_headless_blocking(const CliOptions& cli, ava::llm::ProviderPtr provider_
             .stream = true,
         },
         [&](const ava::agent::AgentEvent& event) {
+          if(event.kind == ava::agent::AgentEventKind::Checkpoint) {
+            composition.save_session();
+          }
           if(cli.json) {
             std::cout << headless_event_to_ndjson(event).dump() << "\n";
             return;
@@ -177,7 +211,15 @@ int run_headless_blocking(const CliOptions& cli, ava::llm::ProviderPtr provider_
     }
   }
 
-  persist_headless_metadata(composition.session, composition.selection, cli, result, run_lease.run_id, composition.startup_kind);
+  persist_headless_metadata(
+      composition.session,
+      composition.selection,
+      cli,
+      result,
+      run_lease.run_id,
+      composition.startup_kind,
+      workspace_root
+  );
   composition.save_session();
 
   switch(result.reason) {
@@ -186,6 +228,7 @@ int run_headless_blocking(const CliOptions& cli, ava::llm::ProviderPtr provider_
     case ava::agent::AgentCompletionReason::Cancelled:
     case ava::agent::AgentCompletionReason::MaxTurns:
     case ava::agent::AgentCompletionReason::Stuck:
+    case ava::agent::AgentCompletionReason::BudgetExceeded:
     case ava::agent::AgentCompletionReason::Error:
       return 2;
   }

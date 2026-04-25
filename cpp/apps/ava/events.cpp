@@ -13,22 +13,6 @@ namespace {
   return value.has_value() && value->find_first_not_of(" \t\r\n") != std::string::npos;
 }
 
-[[nodiscard]] const char* completion_reason_to_string(ava::agent::AgentCompletionReason reason) {
-  switch(reason) {
-    case ava::agent::AgentCompletionReason::Completed:
-      return "completed";
-    case ava::agent::AgentCompletionReason::Cancelled:
-      return "cancelled";
-    case ava::agent::AgentCompletionReason::MaxTurns:
-      return "max_turns";
-    case ava::agent::AgentCompletionReason::Stuck:
-      return "stuck";
-    case ava::agent::AgentCompletionReason::Error:
-      return "error";
-  }
-  return "error";
-}
-
 [[nodiscard]] std::optional<std::string> missing_subagent_complete_field(const ava::agent::AgentEvent& event) {
   if(!has_text(event.run_id)) {
     return "run_id";
@@ -63,7 +47,10 @@ nlohmann::json headless_event_to_ndjson(const ava::agent::AgentEvent& event) {
     case ava::agent::AgentEventKind::AssistantResponseDelta:
       return with_run_id(nlohmann::json{{"type", "assistant_response_delta"}, {"turn", event.turn}, {"delta", event.message}});
     case ava::agent::AgentEventKind::AssistantResponse:
-      return with_run_id(nlohmann::json{{"type", "assistant_response"}, {"turn", event.turn}, {"content", event.message}});
+      return with_run_id(nlohmann::json{{"type", "assistant_response"},
+                                        {"turn", event.turn},
+                                        {"content", event.message},
+                                        {"replays_stream_deltas", event.replays_stream_deltas}});
     case ava::agent::AgentEventKind::ToolCall: {
       nlohmann::json json = with_run_id(nlohmann::json{{"type", "tool_call"}, {"turn", event.turn}});
       if(event.tool_call.has_value()) {
@@ -105,6 +92,27 @@ nlohmann::json headless_event_to_ndjson(const ava::agent::AgentEvent& event) {
       }
       return json;
     }
+    case ava::agent::AgentEventKind::BudgetWarning: {
+      nlohmann::json json = with_run_id(nlohmann::json{{"type", "budget_warning"}, {"turn", event.turn}});
+      if(event.budget_warning.has_value()) {
+        json["threshold_percent"] = event.budget_warning->threshold_percent;
+        json["spent_usd"] = event.budget_warning->spent_usd;
+        json["budget_usd"] = event.budget_warning->budget_usd;
+      }
+      return json;
+    }
+    case ava::agent::AgentEventKind::ContextCompacted: {
+      nlohmann::json json = with_run_id(nlohmann::json{{"type", "context_compacted"}, {"turn", event.turn}});
+      if(event.compacted_message_count.has_value()) {
+        json["message_count"] = *event.compacted_message_count;
+      }
+      if(event.compacted_token_estimate.has_value()) {
+        json["estimated_tokens"] = *event.compacted_token_estimate;
+      }
+      return json;
+    }
+    case ava::agent::AgentEventKind::Checkpoint:
+      return with_run_id(nlohmann::json{{"type", "checkpoint"}, {"turn", event.turn}, {"message", event.message}});
     case ava::agent::AgentEventKind::Completion: {
       // Preserve canonical tag spelling for overlapping lifecycle tags.
       nlohmann::json json = with_run_id(nlohmann::json{{"type", std::string(ava::control_plane::canonical_event_kind_to_type_tag(
@@ -112,7 +120,7 @@ nlohmann::json headless_event_to_ndjson(const ava::agent::AgentEvent& event) {
                                          {"turn", event.turn},
                                          {"message", event.message}});
       if(event.completion_reason.has_value()) {
-        json["reason"] = completion_reason_to_string(*event.completion_reason);
+        json["reason"] = ava::agent::completion_reason_to_string(*event.completion_reason);
       }
       return json;
     }
@@ -137,7 +145,7 @@ void print_headless_event_text(const ava::agent::AgentEvent& event) {
       std::cout << "\n[turn " << event.turn << "]\n";
       return;
     case ava::agent::AgentEventKind::AssistantResponse:
-      if(!event.message.empty()) {
+      if(!event.replays_stream_deltas && !event.message.empty()) {
         std::cout << event.message << "\n";
       }
       return;
@@ -163,11 +171,40 @@ void print_headless_event_text(const ava::agent::AgentEvent& event) {
         std::cout << "[subagent_complete]\n";
       }
       return;
+    case ava::agent::AgentEventKind::BudgetWarning:
+      if(event.budget_warning.has_value()) {
+        std::cerr << "[budget] " << event.budget_warning->threshold_percent << "% of budget used\n";
+      }
+      return;
+    case ava::agent::AgentEventKind::ContextCompacted:
+      std::cout << "[context] compacted";
+      if(event.compacted_message_count.has_value()) {
+        std::cout << " messages=" << *event.compacted_message_count;
+      }
+      if(event.compacted_token_estimate.has_value()) {
+        std::cout << " tokens~=" << *event.compacted_token_estimate;
+      }
+      std::cout << "\n";
+      return;
+    case ava::agent::AgentEventKind::Checkpoint:
+      std::cout << "[checkpoint] " << (event.message.empty() ? std::string{"saved"} : event.message) << "\n";
+      return;
     case ava::agent::AgentEventKind::Completion:
+      std::cout << "\n[completion]";
+      if(event.completion_reason.has_value()) {
+        std::cout << " reason=" << ava::agent::completion_reason_to_string(*event.completion_reason);
+      }
+      if(event.run_id.has_value()) {
+        std::cout << " run=" << *event.run_id;
+      }
       std::cout << "\n";
       return;
     case ava::agent::AgentEventKind::Error:
-      std::cerr << "[error] " << event.message << "\n";
+      std::cerr << "[error]";
+      if(event.run_id.has_value()) {
+        std::cerr << " run=" << *event.run_id;
+      }
+      std::cerr << " " << event.message << "\n";
       return;
   }
 }

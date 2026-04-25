@@ -81,6 +81,35 @@ TEST_CASE("default tools registration includes milestone 6 core set", "[ava_tool
   std::filesystem::remove_all(root);
 }
 
+TEST_CASE("core tools expose schema descriptions and search hints", "[ava_tools]") {
+  const auto root = temp_root_for_test();
+  std::filesystem::create_directories(root);
+
+  ava::tools::ToolRegistry registry;
+  const auto registration = ava::tools::register_default_tools(registry, root);
+  REQUIRE(registration.backup_session != nullptr);
+
+  for(const auto& tool : registry.list_tools()) {
+    REQUIRE(tool.parameters.contains("properties"));
+    for(const auto& [_, property] : tool.parameters.at("properties").items()) {
+      REQUIRE(property.contains("description"));
+      REQUIRE(property.at("description").is_string());
+      REQUIRE_FALSE(property.at("description").get<std::string>().empty());
+    }
+  }
+
+  auto backup = std::make_shared<ava::tools::FileBackupSession>(root);
+  REQUIRE_FALSE(ava::tools::ReadTool(root).search_hint().empty());
+  REQUIRE_FALSE(ava::tools::WriteTool(root, backup).search_hint().empty());
+  REQUIRE_FALSE(ava::tools::EditTool(root, backup).search_hint().empty());
+  REQUIRE_FALSE(ava::tools::BashTool(root).search_hint().empty());
+  REQUIRE_FALSE(ava::tools::GlobTool(root).search_hint().empty());
+  REQUIRE_FALSE(ava::tools::GrepTool(root).search_hint().empty());
+  REQUIRE_FALSE(ava::tools::GitReadTool(root).search_hint().empty());
+
+  std::filesystem::remove_all(root);
+}
+
 TEST_CASE("output fallback truncates oversized payloads with deterministic footer", "[ava_tools]") {
   const auto content = std::string("0123456789abcdef");
   const auto truncated = ava::tools::apply_output_fallback("read", content, 8);
@@ -120,11 +149,11 @@ TEST_CASE("read/write/edit operate within workspace", "[ava_tools]") {
   require_write_ok(write_tool, nlohmann::json{{"path", "nested/a.txt"}, {"content", "hello\nworld\n"}});
 
   const auto read_result = read_tool.execute(nlohmann::json{{"path", "nested/a.txt"}});
-  REQUIRE(read_result.content.find("1: hello") != std::string::npos);
-  REQUIRE(read_result.content.find("2: world") != std::string::npos);
+  REQUIRE(read_result.content.find("     1\thello") != std::string::npos);
+  REQUIRE(read_result.content.find("     2\tworld") != std::string::npos);
 
   const auto limited_read = read_tool.execute(nlohmann::json{{"path", "nested/a.txt"}, {"offset", 2}, {"limit", 1}});
-  REQUIRE(limited_read.content == "2: world");
+  REQUIRE(limited_read.content == "     2\tworld");
 
   const auto edit_result = edit_tool.execute(
       nlohmann::json{{"path", "nested/a.txt"}, {"old_text", "world"}, {"new_text", "ava"}}
@@ -141,7 +170,7 @@ TEST_CASE("read rejects oversized regular files before loading", "[ava_tools]") 
 
   const auto path = root / "large-read.txt";
   std::ofstream out(path, std::ios::binary);
-  out << std::string(8 * 1024 * 1024 + 1, 'x');
+  out << std::string(10 * 1024 * 1024 + 1, 'x');
   out.close();
 
   ava::tools::ReadTool read_tool(root);

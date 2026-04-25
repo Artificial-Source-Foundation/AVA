@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 
+#include "ava/agent/budget_tracker.hpp"
 #include "ava/agent/message_queue.hpp"
 #include "ava/agent/stuck_detector.hpp"
 #include "ava/llm/provider.hpp"
@@ -20,6 +21,11 @@ struct AgentConfig {
   ava::llm::ThinkingConfig thinking{ava::llm::ThinkingConfig::disabled()};
   bool enable_stuck_detector{true};
   StuckDetectorConfig stuck{};
+  double max_budget_usd{0.0};
+  bool auto_compact{false};
+  std::size_t max_context_tokens{0};
+  double compaction_threshold{0.8};
+  std::size_t preserve_recent_messages{6};
 };
 
 enum class AgentEventKind {
@@ -30,6 +36,9 @@ enum class AgentEventKind {
   ToolCall,
   ToolResult,
   SubagentComplete,
+  BudgetWarning,
+  ContextCompacted,
+  Checkpoint,
   Completion,
   Error,
 };
@@ -39,8 +48,11 @@ enum class AgentCompletionReason {
   Cancelled,
   MaxTurns,
   Stuck,
+  BudgetExceeded,
   Error,
 };
+
+[[nodiscard]] const char* completion_reason_to_string(AgentCompletionReason reason);
 
 struct AgentEvent {
   AgentEventKind kind{AgentEventKind::RunStarted};
@@ -53,7 +65,11 @@ struct AgentEvent {
   std::optional<std::string> subagent_session_id;
   std::optional<std::string> subagent_description;
   std::optional<std::size_t> subagent_message_count;
+  std::optional<BudgetWarning> budget_warning;
+  std::optional<std::size_t> compacted_message_count;
+  std::optional<std::size_t> compacted_token_estimate;
   std::optional<AgentCompletionReason> completion_reason;
+  bool replays_stream_deltas{false};
 };
 
 using AgentEventSink = std::function<void(const AgentEvent&)>;
@@ -86,8 +102,6 @@ public:
   ) const;
 
 private:
-  [[nodiscard]] static std::string completion_reason_to_string(AgentCompletionReason reason);
-
   const ava::llm::Provider& provider_;
   const ava::tools::ToolRegistry& tools_;
   AgentConfig config_;

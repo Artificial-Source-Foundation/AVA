@@ -17,6 +17,7 @@ class ReadTool final : public Tool {
 
   [[nodiscard]] std::string name() const override;
   [[nodiscard]] std::string description() const override;
+  [[nodiscard]] std::string search_hint() const override;
   [[nodiscard]] nlohmann::json parameters() const override;
   [[nodiscard]] ava::types::ToolResult execute(const nlohmann::json& args) const override;
 
@@ -30,6 +31,7 @@ class WriteTool final : public Tool {
 
   [[nodiscard]] std::string name() const override;
   [[nodiscard]] std::string description() const override;
+  [[nodiscard]] std::string search_hint() const override;
   [[nodiscard]] nlohmann::json parameters() const override;
   [[nodiscard]] ava::types::ToolResult execute(const nlohmann::json& args) const override;
 
@@ -44,6 +46,7 @@ class EditTool final : public Tool {
 
   [[nodiscard]] std::string name() const override;
   [[nodiscard]] std::string description() const override;
+  [[nodiscard]] std::string search_hint() const override;
   [[nodiscard]] nlohmann::json parameters() const override;
   [[nodiscard]] ava::types::ToolResult execute(const nlohmann::json& args) const override;
 
@@ -58,6 +61,7 @@ class BashTool final : public Tool {
 
   [[nodiscard]] std::string name() const override;
   [[nodiscard]] std::string description() const override;
+  [[nodiscard]] std::string search_hint() const override;
   [[nodiscard]] nlohmann::json parameters() const override;
   [[nodiscard]] ava::types::ToolResult execute(const nlohmann::json& args) const override;
 
@@ -71,6 +75,7 @@ class GlobTool final : public Tool {
 
   [[nodiscard]] std::string name() const override;
   [[nodiscard]] std::string description() const override;
+  [[nodiscard]] std::string search_hint() const override;
   [[nodiscard]] nlohmann::json parameters() const override;
   [[nodiscard]] ava::types::ToolResult execute(const nlohmann::json& args) const override;
 
@@ -84,6 +89,7 @@ class GrepTool final : public Tool {
 
   [[nodiscard]] std::string name() const override;
   [[nodiscard]] std::string description() const override;
+  [[nodiscard]] std::string search_hint() const override;
   [[nodiscard]] nlohmann::json parameters() const override;
   [[nodiscard]] ava::types::ToolResult execute(const nlohmann::json& args) const override;
 
@@ -97,6 +103,7 @@ class GitReadTool : public Tool {
 
   [[nodiscard]] std::string name() const override;
   [[nodiscard]] std::string description() const override;
+  [[nodiscard]] std::string search_hint() const override;
   [[nodiscard]] nlohmann::json parameters() const override;
   [[nodiscard]] ava::types::ToolResult execute(const nlohmann::json& args) const override;
 

@@ -87,6 +87,55 @@ private:
   mutable std::deque<ava::llm::LlmResponse> scripted_;
 };
 
+class CostingProvider final : public ava::llm::Provider {
+public:
+  explicit CostingProvider(std::vector<ava::llm::LlmResponse> scripted, double cost_per_token = 0.01)
+      : scripted_(scripted.begin(), scripted.end()), cost_per_token_(cost_per_token) {}
+
+  [[nodiscard]] std::string model_name() const override { return "costing"; }
+  [[nodiscard]] std::size_t estimate_tokens(std::string_view input) const override { return input.size(); }
+  [[nodiscard]] double estimate_cost(std::size_t input_tokens, std::size_t output_tokens) const override {
+    return static_cast<double>(input_tokens + output_tokens) * cost_per_token_;
+  }
+
+  [[nodiscard]] ava::llm::LlmResponse generate(
+      const std::vector<ava::llm::ChatMessage>& messages,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig
+  ) const override {
+    captured_messages.push_back(messages);
+    if(scripted_.empty()) {
+      throw std::runtime_error("costing provider exhausted");
+    }
+    auto next = scripted_.front();
+    scripted_.pop_front();
+    return next;
+  }
+
+  [[nodiscard]] std::vector<ava::types::StreamChunk> generate_stream(
+      const std::vector<ava::llm::ChatMessage>&,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig
+  ) const override {
+    return {};
+  }
+
+  [[nodiscard]] StreamDispatchResult stream_generate(
+      const std::vector<ava::llm::ChatMessage>&,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig,
+      const StreamChunkSink&
+  ) const override {
+    return StreamDispatchResult::Unsupported;
+  }
+
+  mutable std::vector<std::vector<ava::llm::ChatMessage>> captured_messages;
+
+private:
+  mutable std::deque<ava::llm::LlmResponse> scripted_;
+  double cost_per_token_{0.01};
+};
+
 class CapturingProvider final : public ava::llm::Provider {
 public:
   explicit CapturingProvider(std::vector<ava::llm::LlmResponse> scripted)
@@ -181,6 +230,60 @@ public:
 
  private:
   mutable std::deque<std::vector<ava::types::StreamChunk>> scripted_stream_;
+};
+
+class StreamCostingProvider final : public ava::llm::Provider {
+public:
+  explicit StreamCostingProvider(std::vector<std::vector<ava::types::StreamChunk>> scripted_stream, double cost_per_token = 0.01)
+      : scripted_stream_(scripted_stream.begin(), scripted_stream.end()), cost_per_token_(cost_per_token) {}
+
+  [[nodiscard]] std::string model_name() const override { return "stream-costing"; }
+  [[nodiscard]] std::size_t estimate_tokens(std::string_view input) const override { return input.size(); }
+  [[nodiscard]] double estimate_cost(std::size_t input_tokens, std::size_t output_tokens) const override {
+    return static_cast<double>(input_tokens + output_tokens) * cost_per_token_;
+  }
+
+  [[nodiscard]] ava::llm::LlmResponse generate(
+      const std::vector<ava::llm::ChatMessage>&,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig
+  ) const override {
+    throw std::runtime_error("unexpected non-stream call");
+  }
+
+  [[nodiscard]] std::vector<ava::types::StreamChunk> generate_stream(
+      const std::vector<ava::llm::ChatMessage>&,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig
+  ) const override {
+    throw std::runtime_error("unexpected materialized stream call");
+  }
+
+  [[nodiscard]] StreamDispatchResult stream_generate(
+      const std::vector<ava::llm::ChatMessage>& messages,
+      const std::vector<ava::types::Tool>&,
+      ava::llm::ThinkingConfig,
+      const StreamChunkSink& on_chunk
+  ) const override {
+    captured_messages.push_back(messages);
+    if(scripted_stream_.empty()) {
+      throw std::runtime_error("scripted stream provider exhausted");
+    }
+    auto next = scripted_stream_.front();
+    scripted_stream_.pop_front();
+    for(const auto& chunk : next) {
+      if(on_chunk && !on_chunk(chunk)) {
+        break;
+      }
+    }
+    return StreamDispatchResult::Completed;
+  }
+
+  mutable std::vector<std::vector<ava::llm::ChatMessage>> captured_messages;
+
+private:
+  mutable std::deque<std::vector<ava::types::StreamChunk>> scripted_stream_;
+  double cost_per_token_{0.01};
 };
 
 class EmptyStreamProvider final : public ava::llm::Provider {
@@ -594,8 +697,8 @@ TEST_CASE("agent runtime appends after sparse generated message ids", "[ava_agen
 
   REQUIRE(result.reason == ava::agent::AgentCompletionReason::Completed);
   REQUIRE(session.messages.size() == 4);
-  REQUIRE(session.messages.at(2).id == "m7_msg_6");
-  REQUIRE(session.messages.at(3).id == "m7_msg_7");
+  REQUIRE(session.messages.at(2).id == "ava_msg_6");
+  REQUIRE(session.messages.at(3).id == "ava_msg_7");
 }
 
 TEST_CASE("agent runtime appends and prompts from active branch head", "[ava_agent]") {
@@ -1320,4 +1423,535 @@ TEST_CASE("agent runtime emits terminal completion on exception paths", "[ava_ag
   });
   REQUIRE(saw_error);
   REQUIRE(saw_completion_error);
+}
+
+TEST_CASE("agent runtime recovers orphaned tool calls before provider prompt", "[ava_agent]") {
+  CapturingProvider provider({ava::llm::LlmResponse{.content = "recovered"}});
+  ava::tools::ToolRegistry tools;
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 1});
+
+  ava::types::SessionRecord session{
+      .id = "session_recover_orphan_tool",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {ava::types::SessionMessage{
+          .id = "m7_msg_1",
+          .role = "assistant",
+          .content = "",
+          .tool_calls = nlohmann::json::array({{{"id", "call_interrupted"}, {"name", "echo"}, {"arguments", nlohmann::json::object({{"input", "hello"}})}}}),
+          .timestamp = "2026-01-01T00:00:00Z",
+      }},
+      .branch_head = std::optional<std::string>{"m7_msg_1"},
+  };
+
+  std::vector<ava::agent::AgentEvent> events;
+  const auto result = runtime.run(
+      session,
+      ava::agent::AgentRunInput{.goal = "continue", .stream = false},
+      [&](const ava::agent::AgentEvent& event) {
+        events.push_back(event);
+      }
+  );
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Completed);
+  const auto synthetic = std::find_if(session.messages.begin(), session.messages.end(), [](const auto& message) {
+    return message.role == "tool" && message.tool_call_id == std::optional<std::string>{"call_interrupted"};
+  });
+  REQUIRE(synthetic != session.messages.end());
+  REQUIRE(synthetic->content == "[Tool execution was interrupted]");
+  REQUIRE(synthetic->tool_results.is_array());
+  REQUIRE(synthetic->tool_results.at(0).at("is_error") == true);
+  REQUIRE(synthetic->tool_results.at(0).at("call_id") == "call_interrupted");
+  REQUIRE(session.metadata["agent"]["last_recovery"]["interrupted_tools_added"] == 1);
+
+  REQUIRE(provider.captured_messages.size() == 1);
+  const auto prompt_has_synthetic_tool = std::any_of(
+      provider.captured_messages.front().begin(),
+      provider.captured_messages.front().end(),
+      [](const auto& message) {
+        return message.role == ava::types::Role::Tool
+            && message.tool_call_id == std::optional<std::string>{"call_interrupted"}
+            && message.content == "[Tool execution was interrupted]";
+      }
+  );
+  REQUIRE(prompt_has_synthetic_tool);
+
+  const auto checkpointed_recovery = std::any_of(events.begin(), events.end(), [](const auto& event) {
+    return event.kind == ava::agent::AgentEventKind::Checkpoint
+        && event.message == "checkpoint after session recovery";
+  });
+  REQUIRE(checkpointed_recovery);
+
+}
+
+TEST_CASE("agent runtime repairs empty assistant and consecutive users before provider prompt", "[ava_agent]") {
+  CapturingProvider provider({ava::llm::LlmResponse{.content = "repaired"}});
+  ava::tools::ToolRegistry tools;
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 1});
+
+  ava::types::SessionRecord session{
+      .id = "session_repair_transcript",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {
+          ava::types::SessionMessage{.id = "m7_msg_1", .role = "user", .content = "first", .timestamp = "2026-01-01T00:00:00Z"},
+          ava::types::SessionMessage{.id = "m7_msg_2", .role = "user", .content = "second", .timestamp = "2026-01-01T00:00:01Z", .parent_id = std::optional<std::string>{"m7_msg_1"}},
+          ava::types::SessionMessage{.id = "m7_msg_3", .role = "assistant", .content = "   ", .timestamp = "2026-01-01T00:00:02Z", .parent_id = std::optional<std::string>{"m7_msg_2"}},
+      },
+      .branch_head = std::optional<std::string>{"m7_msg_3"},
+  };
+
+  const auto result = runtime.run(session, ava::agent::AgentRunInput{.goal = "continue", .stream = false});
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Completed);
+  REQUIRE(session.metadata["agent"]["last_recovery"]["empty_assistant_removed"] == 1);
+  REQUIRE(session.metadata["agent"]["last_recovery"]["consecutive_users_merged"] == 1);
+  REQUIRE(std::none_of(session.messages.begin(), session.messages.end(), [](const auto& message) {
+    return message.role == "assistant" && message.content.find_first_not_of(" \t\r\n") == std::string::npos
+        && (!message.tool_calls.is_array() || message.tool_calls.empty());
+  }));
+
+  REQUIRE(provider.captured_messages.size() == 1);
+  const auto prompt_has_merged_user = std::any_of(
+      provider.captured_messages.front().begin(),
+      provider.captured_messages.front().end(),
+      [](const auto& message) {
+        return message.role == ava::types::Role::User && message.content.find("first\n\nsecond") != std::string::npos;
+      }
+  );
+  REQUIRE(prompt_has_merged_user);
+}
+
+TEST_CASE("session recovery is idempotent for combined SessionRecord defects", "[ava_agent]") {
+  ava::types::SessionRecord session{
+      .id = "session_recovery_combined",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {
+          ava::types::SessionMessage{.id = "m7_msg_1", .role = "user", .content = "first", .timestamp = "2026-01-01T00:00:00Z"},
+          ava::types::SessionMessage{.id = "m7_msg_2", .role = "user", .content = "second", .timestamp = "2026-01-01T00:00:01Z", .parent_id = std::optional<std::string>{"m7_msg_1"}},
+          ava::types::SessionMessage{.id = "m7_msg_3", .role = "assistant", .content = "", .tool_calls = nlohmann::json::array({{{"id", "call_recover"}, {"name", "echo"}, {"arguments", nlohmann::json::object()}}}), .timestamp = "2026-01-01T00:00:02Z", .parent_id = std::optional<std::string>{"m7_msg_2"}},
+          ava::types::SessionMessage{.id = "m7_msg_4", .role = "assistant", .content = "   ", .timestamp = "2026-01-01T00:00:03Z", .parent_id = std::optional<std::string>{"m7_msg_3"}},
+      },
+      .branch_head = std::optional<std::string>{"m7_msg_4"},
+  };
+
+  const auto first = ava::types::recover_session_messages(session);
+  REQUIRE(first.changed());
+  REQUIRE(first.interrupted_tools_added == 1);
+  REQUIRE(first.empty_assistant_removed == 1);
+  REQUIRE(first.consecutive_users_merged == 1);
+  REQUIRE(session.branch_head.has_value());
+  REQUIRE(std::any_of(session.messages.begin(), session.messages.end(), [](const auto& message) {
+    return message.id == "interrupted-tool-0-call_recover" && message.role == "tool"
+        && message.tool_call_id == std::optional<std::string>{"call_recover"};
+  }));
+  REQUIRE(std::none_of(session.messages.begin(), session.messages.end(), [](const auto& message) {
+    return message.parent_id == std::optional<std::string>{message.id};
+  }));
+
+  const auto size_after_first = session.messages.size();
+  const auto branch_after_first = session.branch_head;
+  const auto second = ava::types::recover_session_messages(session);
+  REQUIRE_FALSE(second.changed());
+  REQUIRE(session.messages.size() == size_after_first);
+  REQUIRE(session.branch_head == branch_after_first);
+}
+
+TEST_CASE("session recovery preserves synthetic tool results after terminal assistant", "[ava_agent]") {
+  ava::types::SessionRecord session{
+      .id = "session_recovery_terminal_then_tool",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {
+          ava::types::SessionMessage{.id = "m7_msg_1", .role = "assistant", .content = "", .tool_calls = nlohmann::json::array({{{"id", "call_after_terminal"}, {"name", "echo"}, {"arguments", nlohmann::json::object()}}}), .timestamp = "2026-01-01T00:00:00Z"},
+          ava::types::SessionMessage{.id = "m7_msg_2", .role = "assistant", .content = "finished", .timestamp = "2026-01-01T00:00:01Z", .parent_id = std::optional<std::string>{"m7_msg_1"}},
+      },
+      .branch_head = std::optional<std::string>{"m7_msg_2"},
+  };
+
+  const auto first = ava::types::recover_session_messages(session);
+  REQUIRE(first.changed());
+  REQUIRE(first.interrupted_tools_added == 1);
+  REQUIRE(std::any_of(session.messages.begin(), session.messages.end(), [](const auto& message) {
+    return message.role == "tool" && message.tool_call_id == std::optional<std::string>{"call_after_terminal"};
+  }));
+
+  const auto second = ava::types::recover_session_messages(session);
+  REQUIRE_FALSE(second.changed());
+}
+
+TEST_CASE("session recovery removes only identical duplicate message ids", "[ava_agent]") {
+  ava::types::SessionRecord session{
+      .id = "session_recovery_duplicate_ids",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {
+          ava::types::SessionMessage{.id = "same", .role = "assistant", .content = "duplicate", .timestamp = "2026-01-01T00:00:00Z"},
+          ava::types::SessionMessage{.id = "same", .role = "assistant", .content = "duplicate", .timestamp = "2026-01-01T00:00:01Z", .parent_id = std::optional<std::string>{"same"}},
+          ava::types::SessionMessage{.id = "distinct", .role = "assistant", .content = "duplicate", .timestamp = "2026-01-01T00:00:02Z", .parent_id = std::optional<std::string>{"same"}},
+      },
+      .branch_head = std::optional<std::string>{"distinct"},
+  };
+
+  const auto first = ava::types::recover_session_messages(session);
+  REQUIRE(first.changed());
+  REQUIRE(first.duplicate_messages_removed == 1);
+  REQUIRE(session.messages.size() == 2);
+  REQUIRE(std::count_if(session.messages.begin(), session.messages.end(), [](const auto& message) {
+    return message.id == "same";
+  }) == 1);
+  REQUIRE(std::any_of(session.messages.begin(), session.messages.end(), [](const auto& message) {
+    return message.id == "distinct";
+  }));
+  REQUIRE(std::none_of(session.messages.begin(), session.messages.end(), [](const auto& message) {
+    return message.parent_id == std::optional<std::string>{message.id};
+  }));
+}
+
+TEST_CASE("agent runtime emits checkpoint after tool result persistence point", "[ava_agent]") {
+  ScriptedProvider provider({
+      ava::llm::LlmResponse{
+          .content = "",
+          .tool_calls = {ava::types::ToolCall{.id = "call_echo", .name = "echo", .arguments = nlohmann::json{{"input", "hello"}}}},
+      },
+      ava::llm::LlmResponse{.content = "done"},
+  });
+  ava::tools::ToolRegistry tools;
+  tools.register_tool(std::make_unique<EchoTool>());
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 3});
+  ava::types::SessionRecord session{
+      .id = "session_checkpoint_tool_result",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {},
+      .branch_head = std::nullopt,
+  };
+
+  std::vector<ava::agent::AgentEvent> events;
+  const auto result = runtime.run(
+      session,
+      ava::agent::AgentRunInput{.goal = "use echo", .stream = false},
+      [&](const ava::agent::AgentEvent& event) {
+        events.push_back(event);
+      }
+  );
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Completed);
+  REQUIRE(std::any_of(events.begin(), events.end(), [](const auto& event) {
+    return event.kind == ava::agent::AgentEventKind::Checkpoint
+        && event.message == "checkpoint after user goal";
+  }));
+  REQUIRE(std::any_of(events.begin(), events.end(), [](const auto& event) {
+    return event.kind == ava::agent::AgentEventKind::Checkpoint
+        && event.message == "checkpoint after tool result";
+  }));
+  REQUIRE(std::any_of(session.messages.begin(), session.messages.end(), [](const auto& message) {
+    return message.role == "tool" && message.tool_call_id == std::optional<std::string>{"call_echo"};
+  }));
+}
+
+TEST_CASE("budget tracker accumulates usage and emits threshold warnings once", "[ava_agent]") {
+  ava::agent::BudgetTracker budget(1.0);
+
+  auto warnings = budget.observe(ava::types::TokenUsage{.input_tokens = 10, .output_tokens = 10}, 0.60);
+  REQUIRE(warnings.size() == 1);
+  REQUIRE(warnings.at(0).threshold_percent == 50);
+  REQUIRE_FALSE(budget.exhausted());
+
+  warnings = budget.observe(ava::types::TokenUsage{.input_tokens = 10, .output_tokens = 10}, 0.35);
+  REQUIRE(warnings.size() == 2);
+  REQUIRE(warnings.at(0).threshold_percent == 75);
+  REQUIRE(warnings.at(1).threshold_percent == 90);
+  REQUIRE_FALSE(budget.exhausted());
+
+  warnings = budget.observe(ava::types::TokenUsage{.input_tokens = 1, .output_tokens = 1}, 0.01);
+  REQUIRE(warnings.empty());
+  REQUIRE_FALSE(budget.exhausted());
+  REQUIRE(budget.usage().input_tokens == 21);
+  REQUIRE(budget.usage().output_tokens == 21);
+  REQUIRE(budget.to_session_metadata()["last_alert_threshold_percent"] == 90);
+}
+
+TEST_CASE("budget tracker exhausts at exact budget boundary", "[ava_agent]") {
+  ava::agent::BudgetTracker budget(1.0);
+
+  auto warnings = budget.observe(ava::types::TokenUsage{.input_tokens = 5, .output_tokens = 5}, 1.0);
+
+  REQUIRE(budget.exhausted());
+  REQUIRE(warnings.size() == 4);
+  REQUIRE(warnings.back().threshold_percent == 100);
+  REQUIRE(budget.to_session_metadata()["last_alert_threshold_percent"] == 100);
+}
+
+TEST_CASE("agent runtime emits budget warnings and stops before queued work when exhausted", "[ava_agent]") {
+  CostingProvider provider(
+      {ava::llm::LlmResponse{
+           .content = "main done",
+           .tool_calls = {},
+           .usage = ava::types::TokenUsage{.input_tokens = 10, .output_tokens = 10},
+           .thinking = std::nullopt,
+       }},
+      0.01
+  );
+  ava::tools::ToolRegistry tools;
+  ava::agent::AgentRuntime runtime(
+      provider,
+      tools,
+      ava::agent::AgentConfig{.max_turns = 3, .max_budget_usd = 0.10}
+  );
+  ava::agent::MessageQueue queue;
+  queue.enqueue(ava::agent::QueuedMessage{.text = "should not run", .tier = ava::types::MessageTier::follow_up()});
+
+  ava::types::SessionRecord session{
+      .id = "session_budget",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {},
+      .branch_head = std::nullopt,
+  };
+
+  std::vector<ava::agent::AgentEvent> events;
+  const auto result = runtime.run(
+      session,
+      ava::agent::AgentRunInput{.goal = "start", .queue = &queue, .stream = false},
+      [&](const ava::agent::AgentEvent& event) {
+        events.push_back(event);
+      }
+  );
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::BudgetExceeded);
+  REQUIRE(result.usage.has_value());
+  REQUIRE(result.usage->input_tokens == 10);
+  REQUIRE(result.usage->output_tokens == 10);
+  REQUIRE(session.metadata["agent"]["budget"]["exhausted"] == true);
+  REQUIRE(session.metadata["agent"]["budget"]["skipped_follow_ups"] == 1);
+  REQUIRE(std::none_of(session.messages.begin(), session.messages.end(), [](const auto& message) {
+    return message.content.find("should not run") != std::string::npos;
+  }));
+  REQUIRE(std::any_of(events.begin(), events.end(), [](const auto& event) {
+    return event.kind == ava::agent::AgentEventKind::BudgetWarning
+        && event.budget_warning.has_value()
+        && event.budget_warning->threshold_percent == 50;
+  }));
+}
+
+TEST_CASE("agent runtime records skipped steering on early cancellation", "[ava_agent]") {
+  CostingProvider provider({}, 0.01);
+  ava::tools::ToolRegistry tools;
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 1});
+  ava::agent::MessageQueue queue;
+  queue.enqueue(ava::agent::QueuedMessage{.text = "urgent steering", .tier = ava::types::MessageTier::steering()});
+
+  ava::types::SessionRecord session{
+      .id = "session_budget_preexhausted",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {},
+      .branch_head = std::nullopt,
+  };
+
+  const auto result = runtime.run(
+      session,
+      ava::agent::AgentRunInput{
+          .goal = "start",
+          .queue = &queue,
+          .is_cancelled = [] {
+            return true;
+          },
+          .stream = false,
+      }
+  );
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Cancelled);
+  REQUIRE(session.metadata["agent"]["budget"]["skipped_steering"] == 1);
+}
+
+TEST_CASE("agent runtime observes streaming usage once at turn end", "[ava_agent]") {
+  StreamCostingProvider provider(
+      {std::vector<ava::types::StreamChunk>{
+          ava::types::StreamChunk::text("hello"),
+          ava::types::StreamChunk{.usage = ava::types::TokenUsage{.input_tokens = 5, .output_tokens = 5}},
+          ava::types::StreamChunk{.usage = ava::types::TokenUsage{.input_tokens = 7, .output_tokens = 7}},
+      }},
+      0.01
+  );
+  ava::tools::ToolRegistry tools;
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 1, .max_budget_usd = 0.10});
+  ava::types::SessionRecord session{
+      .id = "session_stream_budget",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {},
+      .branch_head = std::nullopt,
+  };
+
+  const auto result = runtime.run(session, ava::agent::AgentRunInput{.goal = "start", .stream = true});
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::BudgetExceeded);
+  REQUIRE(result.usage.has_value());
+  REQUIRE(result.usage->input_tokens == 7);
+  REQUIRE(result.usage->output_tokens == 7);
+  REQUIRE(session.metadata["agent"]["budget"]["last_alert_threshold_percent"] == 100);
+}
+
+TEST_CASE("agent runtime estimates streaming usage when stream omits usage chunks", "[ava_agent]") {
+  StreamCostingProvider provider({std::vector<ava::types::StreamChunk>{ava::types::StreamChunk::text("streamed answer")}}, 0.001);
+  ava::tools::ToolRegistry tools;
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 1, .max_budget_usd = 100.0});
+  ava::types::SessionRecord session{
+      .id = "session_stream_budget_fallback",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {},
+      .branch_head = std::nullopt,
+  };
+
+  const auto result = runtime.run(session, ava::agent::AgentRunInput{.goal = "start", .stream = true});
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Completed);
+  REQUIRE(result.usage.has_value());
+  REQUIRE(result.usage->input_tokens > 0);
+  REQUIRE(result.usage->output_tokens == std::string("streamed answer").size());
+}
+
+TEST_CASE("agent runtime estimates non-streaming usage when provider omits usage", "[ava_agent]") {
+  CostingProvider provider({ava::llm::LlmResponse{.content = "estimated answer"}}, 0.001);
+  ava::tools::ToolRegistry tools;
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 1, .max_budget_usd = 100.0});
+  ava::types::SessionRecord session{
+      .id = "session_nonstream_budget_fallback",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {},
+      .branch_head = std::nullopt,
+  };
+
+  const auto result = runtime.run(session, ava::agent::AgentRunInput{.goal = "start", .stream = false});
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Completed);
+  REQUIRE(result.usage.has_value());
+  REQUIRE(result.usage->input_tokens > 0);
+  REQUIRE(result.usage->output_tokens == std::string("estimated answer").size());
+}
+
+TEST_CASE("agent runtime promotes follow-up and post-complete queued messages", "[ava_agent]") {
+  CostingProvider provider(
+      {
+          ava::llm::LlmResponse{.content = "main done", .usage = ava::types::TokenUsage{.input_tokens = 1, .output_tokens = 1}},
+          ava::llm::LlmResponse{.content = "follow done", .usage = ava::types::TokenUsage{.input_tokens = 1, .output_tokens = 1}},
+          ava::llm::LlmResponse{.content = "post done", .usage = ava::types::TokenUsage{.input_tokens = 1, .output_tokens = 1}},
+      },
+      0.0
+  );
+  ava::tools::ToolRegistry tools;
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 5});
+  ava::agent::MessageQueue queue;
+  queue.enqueue(ava::agent::QueuedMessage{.text = "check follow-up", .tier = ava::types::MessageTier::follow_up()});
+  queue.enqueue(ava::agent::QueuedMessage{.text = "post message", .tier = ava::types::MessageTier::post_complete(2)});
+
+  ava::types::SessionRecord session{
+      .id = "session_queue",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {},
+      .branch_head = std::nullopt,
+  };
+
+  const auto result = runtime.run(session, ava::agent::AgentRunInput{.goal = "start", .queue = &queue, .stream = false});
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Completed);
+  REQUIRE(result.final_response == "post done");
+  REQUIRE(provider.captured_messages.size() == 3);
+  const auto second_call_has_follow_up = std::any_of(
+      provider.captured_messages.at(1).begin(),
+      provider.captured_messages.at(1).end(),
+      [](const auto& message) {
+        return message.content.find("[User follow-up]") != std::string::npos
+            && message.content.find("check follow-up") != std::string::npos;
+      }
+  );
+  const auto third_call_has_post_complete = std::any_of(
+      provider.captured_messages.at(2).begin(),
+      provider.captured_messages.at(2).end(),
+      [](const auto& message) {
+        return message.content.find("[User post-complete group 2]") != std::string::npos
+            && message.content.find("post message") != std::string::npos;
+      }
+  );
+  REQUIRE(second_call_has_follow_up);
+  REQUIRE(third_call_has_post_complete);
+}
+
+TEST_CASE("agent runtime compacts old visible messages before provider prompt", "[ava_agent]") {
+  CostingProvider provider(
+      {ava::llm::LlmResponse{.content = "after compact", .usage = ava::types::TokenUsage{.input_tokens = 1, .output_tokens = 1}}},
+      0.0
+  );
+  ava::tools::ToolRegistry tools;
+  ava::agent::AgentRuntime runtime(
+      provider,
+      tools,
+      ava::agent::AgentConfig{
+          .max_turns = 2,
+          .max_budget_usd = 0.0,
+          .auto_compact = true,
+          .max_context_tokens = 10,
+          .compaction_threshold = 0.5,
+          .preserve_recent_messages = 2,
+      }
+  );
+
+  ava::types::SessionRecord session{
+      .id = "session_compact",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {
+          ava::types::SessionMessage{.id = "m7_msg_1", .role = "user", .content = "old visible content one", .timestamp = "2026-01-01T00:00:00Z"},
+          ava::types::SessionMessage{.id = "m7_msg_2", .role = "assistant", .content = "old visible content two", .timestamp = "2026-01-01T00:00:01Z", .parent_id = std::optional<std::string>{"m7_msg_1"}},
+          ava::types::SessionMessage{.id = "m7_msg_3", .role = "user", .content = "recent visible content", .timestamp = "2026-01-01T00:00:02Z", .parent_id = std::optional<std::string>{"m7_msg_2"}},
+      },
+      .branch_head = std::optional<std::string>{"m7_msg_3"},
+  };
+
+  std::vector<ava::agent::AgentEvent> events;
+  const auto result = runtime.run(
+      session,
+      ava::agent::AgentRunInput{.goal = "new visible goal", .stream = false},
+      [&](const ava::agent::AgentEvent& event) {
+        events.push_back(event);
+      }
+  );
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Completed);
+  REQUIRE(session.messages.at(0).agent_visible == false);
+  REQUIRE(session.messages.at(1).agent_visible == false);
+  REQUIRE(session.messages.at(2).agent_visible == true);
+  REQUIRE(session.metadata["agent"]["last_compaction"]["message_count"] == 2);
+  REQUIRE(std::any_of(events.begin(), events.end(), [](const auto& event) {
+    return event.kind == ava::agent::AgentEventKind::ContextCompacted
+        && event.compacted_message_count == std::optional<std::size_t>{2};
+  }));
+  REQUIRE(provider.captured_messages.size() == 1);
+  const auto prompt_contains_old = std::any_of(
+      provider.captured_messages.front().begin(),
+      provider.captured_messages.front().end(),
+      [](const auto& message) {
+        return message.content.find("old visible content") != std::string::npos;
+      }
+  );
+  REQUIRE_FALSE(prompt_contains_old);
 }

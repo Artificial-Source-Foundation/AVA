@@ -10,6 +10,8 @@
 #include "ava/llm/pricing.hpp"
 #include "ava/llm/providers/openai_protocol.hpp"
 
+#include "sse_utils.hpp"
+
 #if AVA_WITH_CPR
 #include <cpr/cpr.h>
 #endif
@@ -107,56 +109,6 @@ namespace {
   );
 }
 
-[[nodiscard]] std::string normalize_sse_newlines(std::string_view chunk, bool& pending_carriage_return) {
-  std::string normalized;
-  normalized.reserve(chunk.size() + (pending_carriage_return ? 1U : 0U));
-
-  std::size_t index = 0;
-  if(pending_carriage_return) {
-    pending_carriage_return = false;
-    if(!chunk.empty() && chunk.front() == '\n') {
-      normalized.push_back('\n');
-      index = 1;
-    } else {
-      normalized.push_back('\r');
-    }
-  }
-
-  for(; index < chunk.size(); ++index) {
-    const char ch = chunk.at(index);
-    if(ch == '\r') {
-      if(index + 1 < chunk.size() && chunk.at(index + 1) == '\n') {
-        ++index;
-        normalized.push_back('\n');
-      } else if(index + 1 == chunk.size()) {
-        pending_carriage_return = true;
-      } else {
-        normalized.push_back(ch);
-      }
-      continue;
-    }
-
-    normalized.push_back(ch);
-  }
-
-  return normalized;
-}
-
-[[nodiscard]] std::optional<std::string> extract_sse_data_line(std::string_view line) {
-  if(line.rfind("data:", 0) == 0) {
-    auto payload = line.substr(5);
-    while(!payload.empty() && payload.front() == ' ') {
-      payload.remove_prefix(1);
-    }
-    return std::string(payload);
-  }
-
-  if(line == "data") {
-    return std::string{};
-  }
-
-  return std::nullopt;
-}
 #endif
 
 }  // namespace
@@ -419,7 +371,7 @@ Provider::StreamDispatchResult OpenAiProvider::stream_generate(
                                           : std::string_view(event_block).substr(line_start, line_end - line_start);
         line_start = line_end == std::string::npos ? event_block.size() + 1 : line_end + 1;
 
-        if(const auto data_line = extract_sse_data_line(line); data_line.has_value()) {
+        if(const auto data_line = providers::extract_sse_data_line(line); data_line.has_value()) {
           if(saw_data) {
             payload.push_back('\n');
           }
@@ -444,7 +396,7 @@ Provider::StreamDispatchResult OpenAiProvider::stream_generate(
       [&](const std::string_view& data, intptr_t /*userdata*/) {
         try {
           // CPR owns this view only for the callback duration; consume it immediately.
-          pending += normalize_sse_newlines(data, pending_carriage_return);
+          pending += providers::normalize_sse_newlines(data, pending_carriage_return);
           return process_pending_events(false);
         } catch(...) {
           return false;

@@ -27,9 +27,21 @@ Excluded:
 
 ## Current Completion Read
 
-C++ is strongest in the narrow headless/runtime/TUI slices already implemented by M17-M27: request lifecycle ownership, adapter action routing, child-run cancellation, cooperative signal cancellation, scoped edit parity, Anthropic provider baseline, an MCP stdio runtime MVP bridge, and fail-closed TUI approval previews.
+C++ is strongest in the narrow headless/runtime/TUI slices implemented through M33, with M34 providing final hardening and evidence documentation rather than new feature parity: request lifecycle ownership, adapter action routing, child-run cancellation, cooperative signal cancellation, scoped edit parity, Anthropic provider streaming, an MCP stdio runtime MVP bridge, budget/queue/recovery/checkpoint support, daily-use headless CLI polish, deterministic non-live headless integration evidence, and fail-closed TUI approval previews.
 
-C++ is not yet a complete non-web/non-desktop Rust replacement. The largest remaining gaps are not single bugs; they are whole subsystems that Rust still owns: full permission classification, MCP HTTP/SSE/OAuth + custom-tool breadth, long-tail providers and real streaming breadth, session repair/bookmarks/compaction persistence, headless queue/approval policies, and advanced TUI/editor affordances.
+C++ is not yet a complete non-web/non-desktop Rust replacement. The largest remaining gaps are not single bugs; they are whole subsystems that Rust still owns or areas intentionally scoped smaller in C++: full permission policy breadth, MCP HTTP/SSE/OAuth + custom-tool/plugin breadth, long-tail providers, semantic compaction and JSONL audit logging, bookmarks/search, hard-kill recovery, and advanced TUI/editor affordances.
+
+## M28-M34 Completion Update
+
+The post-M26 milestone sequence closed several earlier audit gaps with scoped, tested slices rather than broad Rust parity claims:
+
+1. **Permission/security (M28):** source-aware permission inspection, exact-subject session approval caching, and compact headless dangerous-command classification are wired; persistent rules and full Rust classifier breadth remain deferred.
+2. **Long-run runtime (M29):** budget accumulation/warnings/exhaustion, follow-up/post-complete queue promotion, and structural `agent_visible=false` compaction are wired; semantic summarization and JSONL logging remain deferred.
+3. **Session recovery/checkpoints (M30):** interrupted-tool recovery, checkpoint events, and headless checkpoint saves are wired; bookmarks/search and cross-runtime UUID migration remain deferred.
+4. **Provider streaming (M31):** Anthropic CPR-gated SSE streaming is wired and parser-tested; broad long-tail providers and provider-specific retry/backoff parity remain deferred.
+5. **CLI/config/tool polish (M32):** `--cwd`, `--agent`, `--trust`, selected environment defaults, builtin-agent max-turn defaults, and core-tool metadata/output polish are wired; YAML config, custom TOML tools, web/browser tools, and subcommands remain deferred.
+6. **Headless integration proof (M33):** deterministic non-live app-boundary coverage now exercises workspace/trust, resume/recovery, queue turns, budget-warning NDJSON, and event ordering through `run_headless_blocking`.
+7. **Hardening/evidence (M34):** production-code shape review, small hardening fixes, focused local evidence, and residual-risk documentation close the scoped backend/headless lane without promoting web/desktop/full Rust parity.
 
 ## P0 Completion Blockers
 
@@ -48,16 +60,16 @@ C++ is not yet a complete non-web/non-desktop Rust replacement. The largest rema
    - C++ current surface: `cpp/src/llm/`, `cpp/include/ava/llm/`, `cpp/src/config/`.
    - Impact: C++ has OpenAI plus a scoped Anthropic baseline, but it still lacks Gemini/OpenRouter/Ollama/Copilot/Inception/Alibaba/ZAI/Kimi/Minimax provider parity, keychain/OAuth flows, provider plugin hooks, full message repair/normalization, and Rust-equivalent async streaming coverage.
 
-4. Long-run runtime features are incomplete.
+4. Long-run runtime features remain intentionally scoped.
    - Rust reference: `crates/ava-agent/src/agent_loop/`, `crates/ava-control-plane/src/orchestration.rs`, `crates/ava-tui/src/headless/`.
    - C++ current surface: `cpp/src/agent/runtime.cpp`, `cpp/src/control_plane/`, `cpp/apps/ava/`.
-   - Impact: C++ still lacks Rust-equivalent context compaction, budget enforcement, follow-up/post-complete queue promotion, checkpoint/session JSONL logging, and full headless resume metadata restoration.
+   - Impact: C++ now has scoped structural compaction, budget enforcement, follow-up/post-complete queue promotion, checkpoint events, and headless resume metadata restoration. Rust-equivalent semantic compaction, context-overflow retry, subagent budget rollups, and checkpoint/session JSONL logging remain deferred.
 
 ## P1 High-Priority Gaps
 
-1. Session repair and recovery.
-   - Rust has conversation repair, interrupted tool cleanup, bookmarks, session search, incremental persistence, external delegation links, and compaction-context restoration.
-   - C++ has strong SQLite/schema foundations but lacks several higher-level session recovery and UX features.
+1. Session UX breadth.
+   - Rust has bookmarks, session search, incremental JSONL/audit surfaces, external delegation links, and richer compaction-context restoration.
+   - C++ now has scoped interrupted-tool recovery and checkpoints, but still lacks several higher-level session UX and audit features.
 
 2. TUI feature breadth.
    - Rust has multiline composer behavior, slash/autocomplete/mentions, attachments, modal selectors, sidebar/status/toast systems, tool/thinking grouping, configurable keybindings, refined plan feedback, and richer question options.
@@ -68,7 +80,7 @@ C++ is not yet a complete non-web/non-desktop Rust replacement. The largest rema
    - C++ has meaningful scoped parity for read/write/edit/bash/glob/grep/git plus backup-history hardening, but advanced Rust tool ergonomics remain deferred.
 
 4. CLI/config breadth.
-   - C++ lacks many Rust CLI and config surfaces: `--cwd`/`AVA_WORKING_DIRECTORY`, `--agent`, `--trust`, `--thinking`, `--review`, queue flags (`--follow-up`, `--later`, `--later-group`), benchmark flags, auth/plugin/update/serve subcommands, YAML/TOML config loading, and project state.
+   - C++ now has scoped daily-use headless flags (`--cwd`, `--agent`, `--trust`), queue flags, and selected environment defaults. It still lacks many Rust CLI/config surfaces: `--thinking`, `--review`, benchmark flags, auth/plugin/update/serve subcommands, YAML/TOML config loading, and richer project state.
 
 ## Verified Corrections From This Audit
 
@@ -78,12 +90,12 @@ C++ is not yet a complete non-web/non-desktop Rust replacement. The largest rema
 
 ## Next Completion Sequence
 
-1. Extend the C++ MCP bridge beyond the new stdio MVP: add HTTP/SSE and OAuth-safe auth flows, then close resources/prompts and error-recovery breadth gaps.
+1. Extend the C++ MCP bridge beyond the stdio MVP: add HTTP/SSE and OAuth-safe auth flows, then close resources/prompts and error-recovery breadth gaps.
 2. Port the Rust permission classifier/policy core or define a smaller C++ policy that is explicitly accepted as a product constraint.
-3. Implement context compaction and budget enforcement in the C++ runtime before declaring long-run headless parity.
-4. Add session repair/interrupted-tool cleanup before relying on C++ persisted transcripts for crash recovery.
+3. Decide whether structural compaction is enough for the C++ lane or schedule semantic compaction/context-overflow retry as future work.
+4. Add session bookmarks/search, JSONL audit logging, and cross-runtime ID migration only if the C++ product surface needs them.
 5. Expand provider coverage based on product priority: Ollama/Gemini/OpenRouter first, then Copilot and long-tail compatible providers.
-6. Add CLI/config parity for non-web/non-desktop daily use: `--cwd`, `--agent`, queue flags, `--thinking`, env provider/model/cwd defaults, and explicit C++ help docs.
+6. Add remaining CLI/config breadth only when it has a concrete owner: `--thinking`, `--review`, benchmark flags, subcommands, YAML/TOML config loading, and richer project state.
 
 ## Evidence Commands
 

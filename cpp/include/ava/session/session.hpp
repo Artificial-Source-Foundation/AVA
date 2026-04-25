@@ -54,7 +54,6 @@ class SessionManager {
   [[nodiscard]] bool message_exists(void* db, const std::string& session_id, const std::string& message_id) const;
 
   [[nodiscard]] static std::string generate_id();
-  [[nodiscard]] static std::string now_utc_rfc3339();
 };
 
 }  // namespace ava::session

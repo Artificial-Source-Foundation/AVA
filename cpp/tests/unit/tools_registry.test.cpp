@@ -673,7 +673,7 @@ TEST_CASE("permission middleware deny wins over previous session approval", "[av
   );
 }
 
-TEST_CASE("permission middleware rejects unsupported AllowAlways persistence", "[ava_tools]") {
+TEST_CASE("permission middleware scopes AllowAlways approvals to the session", "[ava_tools]") {
   auto bridge = std::make_shared<AlwaysPersistBridge>();
   auto* bridge_ptr = bridge.get();
 
@@ -681,10 +681,10 @@ TEST_CASE("permission middleware rejects unsupported AllowAlways persistence", "
   registry.register_tool(std::make_unique<EchoTool>());
   registry.add_middleware(std::make_shared<ava::tools::PermissionMiddleware>(std::make_shared<AskInspector>(), bridge));
 
-  REQUIRE_THROWS_WITH(
-      registry.execute(ava::types::ToolCall{.id = "call_1", .name = "echo", .arguments = nlohmann::json{{"input", "persist"}}}),
-      Catch::Matchers::ContainsSubstring("AllowAlways rules are not implemented")
-  );
+  REQUIRE(registry.execute(ava::types::ToolCall{.id = "call_1", .name = "echo", .arguments = nlohmann::json{{"input", "persist"}}}).content == "persist");
+  REQUIRE(bridge_ptr->requests_.load() == 1);
+
+  REQUIRE(registry.execute(ava::types::ToolCall{.id = "call_2", .name = "echo", .arguments = nlohmann::json{{"input", "persist"}}}).content == "persist");
   REQUIRE(bridge_ptr->requests_.load() == 1);
 }
 

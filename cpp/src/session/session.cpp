@@ -1,9 +1,6 @@
 #include "ava/session/session.hpp"
 
 #include <algorithm>
-#include <chrono>
-#include <ctime>
-#include <iomanip>
 #include <memory>
 #include <random>
 #include <sstream>
@@ -14,6 +11,7 @@
 #include <sqlite3.h>
 
 #include "ava/types/session.hpp"
+#include "ava/types/time.hpp"
 
 namespace ava::session {
 namespace {
@@ -431,7 +429,7 @@ SessionManager::SessionManager(std::filesystem::path db_path)
 }
 
 ava::types::SessionRecord SessionManager::create() const {
-  const auto now = now_utc_rfc3339();
+  const auto now = ava::types::now_utc_rfc3339();
   return ava::types::SessionRecord{
       .id = generate_id(),
       .created_at = now,
@@ -636,7 +634,7 @@ void SessionManager::add_message(const std::string& session_id, const ava::types
 
     auto touch = prepare_or_throw(db.get(), "UPDATE sessions SET branch_head = ?1, updated_at = ?2 WHERE id = ?3");
     bind_text_or_throw(touch.get(), 1, message.id);
-    bind_text_or_throw(touch.get(), 2, now_utc_rfc3339());
+    bind_text_or_throw(touch.get(), 2, ava::types::now_utc_rfc3339());
     bind_text_or_throw(touch.get(), 3, session_id);
     step_done_or_throw(touch.get(), db.get());
 
@@ -786,7 +784,7 @@ ava::types::SessionMessage SessionManager::branch_from(
       .id = generate_id(),
       .role = "user",
       .content = new_user_message,
-      .timestamp = now_utc_rfc3339(),
+      .timestamp = ava::types::now_utc_rfc3339(),
       .parent_id = branch_point_id,
   };
 
@@ -830,7 +828,7 @@ ava::types::SessionMessage SessionManager::branch_from(
         "UPDATE sessions SET branch_head = ?1, updated_at = ?2 WHERE id = ?3"
     );
     bind_text_or_throw(update.get(), 1, message.id);
-    bind_text_or_throw(update.get(), 2, now_utc_rfc3339());
+    bind_text_or_throw(update.get(), 2, ava::types::now_utc_rfc3339());
     bind_text_or_throw(update.get(), 3, session_id);
     step_done_or_throw(update.get(), db.get());
 
@@ -857,7 +855,7 @@ void SessionManager::switch_branch(const std::string& session_id, const std::str
         "UPDATE sessions SET branch_head = ?1, updated_at = ?2 WHERE id = ?3"
     );
     bind_text_or_throw(stmt.get(), 1, leaf_id);
-    bind_text_or_throw(stmt.get(), 2, now_utc_rfc3339());
+    bind_text_or_throw(stmt.get(), 2, ava::types::now_utc_rfc3339());
     bind_text_or_throw(stmt.get(), 3, session_id);
     step_done_or_throw(stmt.get(), db.get());
 
@@ -968,22 +966,6 @@ std::string SessionManager::generate_id() {
   id[14] = '4';
   id[19] = kHex[(rng() % 4) + 8];
   return id;
-}
-
-std::string SessionManager::now_utc_rfc3339() {
-  const auto now = std::chrono::system_clock::now();
-  const auto time = std::chrono::system_clock::to_time_t(now);
-
-  std::tm utc{};
-#if defined(_WIN32)
-  gmtime_s(&utc, &time);
-#else
-  gmtime_r(&time, &utc);
-#endif
-
-  std::ostringstream out;
-  out << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
-  return out.str();
 }
 
 }  // namespace ava::session

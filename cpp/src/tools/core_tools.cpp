@@ -2,14 +2,12 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cctype>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <optional>
 #include <regex>
@@ -20,10 +18,9 @@
 #include <system_error>
 #include <vector>
 
-#include <sys/wait.h>
-
 #include "ava/tools/output_fallback.hpp"
 #include "ava/tools/path_guard.hpp"
+#include "shell_runner.hpp"
 
 namespace ava::tools {
 
@@ -32,7 +29,7 @@ namespace {
 constexpr std::size_t kReadDefaultLimit = 2000;
 constexpr std::size_t kReadMaxLineLength = 2000;
 constexpr std::size_t kReadOutputBytes = 48 * 1024;
-constexpr std::uintmax_t kReadMaxFileBytes = 8 * 1024 * 1024;
+constexpr std::uintmax_t kReadMaxFileBytes = 10 * 1024 * 1024;
 constexpr std::size_t kGlobMaxResults = 1000;
 constexpr std::size_t kGrepMaxMatches = 500;
 constexpr std::size_t kBashOutputBytes = 48 * 1024;
@@ -43,23 +40,6 @@ constexpr std::uintmax_t kEditMaxFileBytes = 8 * 1024 * 1024;
 constexpr std::size_t kEditReplaceAllMaxBytes = 8 * 1024 * 1024;
 constexpr std::size_t kEditReplaceAllMaxOutputBytes = 4 * 1024 * 1024;
 constexpr std::size_t kEditReplaceAllMaxReplacements = 100000;
-std::atomic<std::uint64_t> g_temp_file_counter{0};
-
-[[nodiscard]] std::string shell_single_quote(const std::string& value) {
-  std::string escaped;
-  escaped.reserve(value.size() + 2);
-  escaped.push_back('\'');
-  for(const auto ch : value) {
-    if(ch == '\'') {
-      escaped += "'\\''";
-    } else {
-      escaped.push_back(ch);
-    }
-  }
-  escaped.push_back('\'');
-  return escaped;
-}
-
 [[nodiscard]] std::string read_file_text(const std::filesystem::path& path) {
   std::ifstream file(path, std::ios::binary);
   if(!file) {
@@ -748,123 +728,6 @@ struct NormalizedQuoteText {
   };
 }
 
-struct CommandOutcome {
-  std::string output;
-  int exit_code{1};
-};
-
-class TempFileGuard {
- public:
-  explicit TempFileGuard(std::filesystem::path path) : path_(std::move(path)) {}
-
-  ~TempFileGuard() {
-    if(path_.empty()) {
-      return;
-    }
-
-    std::error_code ec;
-    std::filesystem::remove(path_, ec);
-  }
-
- private:
-  std::filesystem::path path_;
-};
-
-[[nodiscard]] CommandOutcome run_shell_command(
-    const std::string& command,
-    const std::filesystem::path& cwd,
-    std::uint64_t timeout_ms
-) {
-  const auto temp_file = std::filesystem::temp_directory_path() /
-                         ("ava_tool_output_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
-                          "_" + std::to_string(g_temp_file_counter.fetch_add(1, std::memory_order_relaxed)) + ".txt");
-  TempFileGuard temp_file_guard(temp_file);
-
-  const auto cd_clause = "cd " + shell_single_quote(cwd.string()) + " && ";
-  const auto timeout_secs = timeout_ms >= std::numeric_limits<std::uint64_t>::max() - 999
-                                ? std::numeric_limits<std::uint64_t>::max() / 1000
-                                : std::max<std::uint64_t>(1, (timeout_ms + 999) / 1000);
-  const auto output_redirect = " >" + shell_single_quote(temp_file.string()) + " 2>&1";
-  const auto tool_command = "sh -lc " + shell_single_quote(command);
-  const auto wrapped = cd_clause + "if command -v timeout >/dev/null 2>&1; then timeout --signal=TERM --kill-after=1s " +
-                       std::to_string(timeout_secs) + "s " + tool_command + output_redirect + "; else " + tool_command +
-                       output_redirect + "; fi";
-
-  const auto full = "sh -lc " + shell_single_quote(wrapped);
-  const int status = std::system(full.c_str());
-
-  std::error_code ec;
-  std::string content;
-  if(std::filesystem::exists(temp_file, ec) && !ec) {
-    content = read_file_text(temp_file);
-  }
-
-  int exit_code = 1;
-  if(status != -1) {
-    if(WIFEXITED(status)) {
-      exit_code = WEXITSTATUS(status);
-    } else if(WIFSIGNALED(status)) {
-      exit_code = 128 + WTERMSIG(status);
-    } else {
-      exit_code = status;
-    }
-  }
-
-  return CommandOutcome{.output = std::move(content), .exit_code = exit_code};
-}
-
-[[nodiscard]] std::string render_shell_result(const CommandOutcome& outcome) {
-  std::ostringstream oss;
-  oss << "stdout:\n" << outcome.output << "\n\nstderr:\n\nexit_code: " << outcome.exit_code;
-  return oss.str();
-}
-
-[[nodiscard]] std::string remove_backup_history_lines(const std::string& output) {
-  std::istringstream stream(output);
-  std::ostringstream filtered;
-  std::string line;
-  bool first = true;
-  while(std::getline(stream, line)) {
-    if(line.find(".ava/file-history-m6") != std::string::npos) {
-      continue;
-    }
-    if(!first) {
-      filtered << '\n';
-    }
-    filtered << line;
-    first = false;
-  }
-  if(!output.empty() && output.ends_with('\n') && !first) {
-    filtered << '\n';
-  }
-  return filtered.str();
-}
-
-[[nodiscard]] bool contains_shell_metacharacters(const std::string& command) {
-  static constexpr std::array<char, 14> kDisallowed = {';', '|', '&', '$', '<', '>', '`', '(', ')', '[', ']', '{', '}', '\n'};
-  return std::any_of(command.begin(), command.end(), [](char ch) {
-    return std::find(kDisallowed.begin(), kDisallowed.end(), ch) != kDisallowed.end();
-  });
-}
-
-[[nodiscard]] bool contains_git_quote_or_escape(const std::string& command) {
-  static constexpr std::array<char, 3> kDisallowed = {'\'', '"', '\\'};
-  return std::any_of(command.begin(), command.end(), [](char ch) {
-    return std::find(kDisallowed.begin(), kDisallowed.end(), ch) != kDisallowed.end();
-  });
-}
-
-[[nodiscard]] bool contains_mutating_git_patterns(const std::string& lower) {
-  static const std::vector<std::string> kMutatingPatterns = {
-      " push",       " commit",      " reset",       " checkout",   " merge",   " rebase",
-      " cherry-pick", " branch -d",   " branch --delete", " tag -d",     " tag --delete", " remote add",
-      " remote remove", " stash push", " stash pop",       " apply",      " am ",          " revert",};
-
-  return std::any_of(kMutatingPatterns.begin(), kMutatingPatterns.end(), [&](const auto& pattern) {
-    return lower.find(pattern) != std::string::npos;
-  });
-}
-
 [[nodiscard]] bool is_backup_history_path(
     const std::filesystem::path& workspace_root,
     const std::filesystem::path& candidate
@@ -891,75 +754,6 @@ void reject_backup_history_access(
   }
 }
 
-[[nodiscard]] bool has_forbidden_git_path_or_option(const std::string& subcommand) {
-  std::istringstream iss(subcommand);
-  std::string token;
-  while(iss >> token) {
-    const auto lower = lowercase(token);
-    if(lower == "--no-index" || lower == "--output" || lower.rfind("--output=", 0) == 0 || lower == "-o" ||
-       lower == "--ext-diff" || lower == "--textconv" || lower.rfind("--ext-diff=", 0) == 0 ||
-       lower.rfind("--textconv=", 0) == 0 || lower == "--git-dir" || lower.rfind("--git-dir=", 0) == 0 ||
-       lower == "--work-tree" || lower.rfind("--work-tree=", 0) == 0 || lower == "-c" || lower == "--ignored" ||
-       lower == "--contents" || lower.rfind("--contents=", 0) == 0 || lower == "-s" ||
-       lower == "--ignore-revs-file" || lower.rfind("--ignore-revs-file=", 0) == 0 || lower == "-d" ||
-       lower == "-D" || lower == "-m" || lower == "-M" || lower == "-f" || lower == "--force" ||
-       lower == "--delete" || lower == "--move" || lower == "--set-upstream-to" || lower == "--unset-upstream" ||
-       lower == "add" || lower == "remove" || lower == "rename" || lower == "set-url" || lower == "set-head" ||
-       lower == "prune" || lower == "update") {
-      return true;
-    }
-    if(token.starts_with('/') || token == ".." || token.starts_with("../") || token.find("/../") != std::string::npos ||
-       lower.find(".ava/file-history-m6") != std::string::npos || lower.find("file-history-m6") != std::string::npos ||
-       token.find('*') != std::string::npos || token.find('?') != std::string::npos || token.starts_with('~')) {
-      return true;
-    }
-  }
-  return false;
-}
-
-[[nodiscard]] bool is_safe_git_subcommand(const std::string& lower_subcommand) {
-  std::istringstream iss(lower_subcommand);
-  std::string first;
-  iss >> first;
-  if(first.empty()) {
-    return false;
-  }
-
-  if(first == "status" || first == "log" || first == "diff" || first == "show" || first == "blame" ||
-     first == "rev-parse" || first == "describe" || first == "ls-files" || first == "shortlog" ||
-     first == "rev-list" || first == "cat-file" || first == "for-each-ref") {
-    return true;
-  }
-
-  if(first == "branch") {
-    std::string second;
-    iss >> second;
-    return second.empty() || second == "--list" || second == "-l" || second == "-v" || second == "-vv" ||
-           second == "-a" || second == "-r" || second == "--show-current" || second == "--contains" ||
-           second == "--merged" || second == "--no-merged";
-  }
-
-  if(first == "tag") {
-    std::string second;
-    iss >> second;
-    return second.empty() || second == "-l" || second == "--list" || second == "-n";
-  }
-
-  if(first == "remote") {
-    std::string second;
-    iss >> second;
-    return second == "-v" || second == "show";
-  }
-
-  if(first == "stash") {
-    std::string second;
-    iss >> second;
-    return second == "list" || second == "show";
-  }
-
-  return false;
-}
-
 }  // namespace
 
 ReadTool::ReadTool(std::filesystem::path workspace_root)
@@ -970,7 +764,11 @@ std::string ReadTool::name() const {
 }
 
 std::string ReadTool::description() const {
-  return "Read file or directory content";
+  return "Read file content with line numbers";
+}
+
+std::string ReadTool::search_hint() const {
+  return "read file contents lines offset limit directory";
 }
 
 nlohmann::json ReadTool::parameters() const {
@@ -979,9 +777,9 @@ nlohmann::json ReadTool::parameters() const {
       {"required", nlohmann::json::array({"path"})},
       {"properties",
        {
-           {"path", {{"type", "string"}}},
-           {"offset", {{"type", "integer"}, {"minimum", 1}}},
-           {"limit", {{"type", "integer"}, {"minimum", 1}}},
+            {"path", {{"type", "string"}, {"description", "File or directory path to read, relative to the workspace root"}}},
+            {"offset", {{"type", "integer"}, {"minimum", 1}, {"description", "1-based line offset for file reads"}}},
+            {"limit", {{"type", "integer"}, {"minimum", 1}, {"description", "Maximum number of lines to return"}}},
        }},
   };
 }
@@ -1036,7 +834,7 @@ ava::types::ToolResult ReadTool::execute(const nlohmann::json& args) const {
     if(emitted > 0) {
       out << "\n";
     }
-    out << (index + 1) << ": " << lines[index];
+    out << std::setw(6) << (index + 1) << '\t' << lines[index];
   }
 
   return ava::types::ToolResult{.call_id = "", .content = apply_output_fallback(name(), out.str(), kReadOutputBytes), .is_error = false};
@@ -1054,10 +852,16 @@ std::string WriteTool::description() const {
   return "Write content to a file";
 }
 
+std::string WriteTool::search_hint() const {
+  return "write create overwrite file content";
+}
+
 nlohmann::json WriteTool::parameters() const {
   return nlohmann::json{{"type", "object"},
                         {"required", nlohmann::json::array({"path", "content"})},
-                        {"properties", {{"path", {{"type", "string"}}}, {"content", {{"type", "string"}}}}}};
+                        {"properties",
+                         {{"path", {{"type", "string"}, {"description", "File path to write, relative to the workspace root"}}},
+                          {"content", {{"type", "string"}, {"description", "Complete file content to write"}}}}}};
 }
 
 ava::types::ToolResult WriteTool::execute(const nlohmann::json& args) const {
@@ -1094,18 +898,22 @@ std::string EditTool::description() const {
   return "Edit existing file content with a scoped multi-strategy cascade";
 }
 
+std::string EditTool::search_hint() const {
+  return "edit replace old_text new_text occurrence line anchors";
+}
+
 nlohmann::json EditTool::parameters() const {
   return nlohmann::json{{"type", "object"},
                         {"required", nlohmann::json::array({"path", "old_text", "new_text"})},
                         {"properties",
-                         {{"path", {{"type", "string"}}},
-                          {"old_text", {{"type", "string"}}},
-                          {"new_text", {{"type", "string"}}},
-                          {"replace_all", {{"type", "boolean"}}},
-                          {"occurrence", {{"type", "integer"}, {"minimum", 1}}},
-                          {"line_number", {{"type", "integer"}, {"minimum", 1}}},
-                          {"before_anchor", {{"type", "string"}}},
-                          {"after_anchor", {{"type", "string"}}}}}};
+                         {{"path", {{"type", "string"}, {"description", "File path to edit, relative to the workspace root"}}},
+                          {"old_text", {{"type", "string"}, {"description", "Existing text to replace"}}},
+                          {"new_text", {{"type", "string"}, {"description", "Replacement text"}}},
+                          {"replace_all", {{"type", "boolean"}, {"description", "Replace every exact occurrence instead of one match"}}},
+                          {"occurrence", {{"type", "integer"}, {"minimum", 1}, {"description", "1-based occurrence to replace"}}},
+                          {"line_number", {{"type", "integer"}, {"minimum", 1}, {"description", "1-based line locator for the replacement"}}},
+                          {"before_anchor", {{"type", "string"}, {"description", "Text immediately before an anchored replacement block"}}},
+                          {"after_anchor", {{"type", "string"}, {"description", "Text immediately after an anchored replacement block"}}}}}};
 }
 
 ava::types::ToolResult EditTool::execute(const nlohmann::json& args) const {
@@ -1117,6 +925,9 @@ ava::types::ToolResult EditTool::execute(const nlohmann::json& args) const {
   const auto old_text = args.at("old_text").get<std::string>();
   const auto new_text = args.at("new_text").get<std::string>();
   const bool replace_all = args.value("replace_all", false);
+  if(old_text.empty()) {
+    throw std::runtime_error("old_text must not be empty");
+  }
   if(!replace_all && old_text.size() > kEditCascadeMaxOldTextBytes) {
     throw std::runtime_error("old_text is too large for edit");
   }
@@ -1151,10 +962,6 @@ ava::types::ToolResult EditTool::execute(const nlohmann::json& args) const {
   std::optional<std::string> after_anchor;
   if(args.contains("after_anchor")) {
     after_anchor = args.at("after_anchor").get<std::string>();
-  }
-
-  if(old_text.empty()) {
-    throw std::runtime_error("old_text must not be empty");
   }
 
   const bool has_locator_arg = occurrence.has_value() || line_number.has_value() || before_anchor.has_value() || after_anchor.has_value();
@@ -1307,13 +1114,17 @@ std::string BashTool::description() const {
   return "Execute shell command";
 }
 
+std::string BashTool::search_hint() const {
+  return "run execute shell command terminal bash timeout cwd";
+}
+
 nlohmann::json BashTool::parameters() const {
   return nlohmann::json{{"type", "object"},
                         {"required", nlohmann::json::array({"command"})},
                         {"properties",
-                         {{"command", {{"type", "string"}}},
-                          {"timeout_ms", {{"type", "integer"}, {"minimum", 1}}},
-                          {"cwd", {{"type", "string"}}}}}};
+                         {{"command", {{"type", "string"}, {"description", "Non-interactive shell command to execute"}}},
+                          {"timeout_ms", {{"type", "integer"}, {"minimum", 1}, {"description", "Command timeout in milliseconds"}}},
+                          {"cwd", {{"type", "string"}, {"description", "Working directory relative to the workspace root"}}}}}};
 }
 
 ava::types::ToolResult BashTool::execute(const nlohmann::json& args) const {
@@ -1344,10 +1155,16 @@ std::string GlobTool::description() const {
   return "Find files by glob pattern";
 }
 
+std::string GlobTool::search_hint() const {
+  return "glob find files pattern path";
+}
+
 nlohmann::json GlobTool::parameters() const {
   return nlohmann::json{{"type", "object"},
                         {"required", nlohmann::json::array({"pattern"})},
-                        {"properties", {{"pattern", {{"type", "string"}}}, {"path", {{"type", "string"}}}}}};
+                        {"properties",
+                         {{"pattern", {{"type", "string"}, {"description", "Glob pattern to match"}}},
+                          {"path", {{"type", "string"}, {"description", "Directory to search, relative to the workspace root"}}}}}};
 }
 
 ava::types::ToolResult GlobTool::execute(const nlohmann::json& args) const {
@@ -1414,7 +1231,8 @@ ava::types::ToolResult GlobTool::execute(const nlohmann::json& args) const {
     out << matches[idx];
   }
   if(truncated) {
-    out << "\n\n(Results are truncated: showing first " << kGlobMaxResults << " results.)";
+    out << "\n\n(Results are truncated: showing first " << kGlobMaxResults
+        << " results. Consider using a more specific path or pattern.)";
   }
 
   return ava::types::ToolResult{.call_id = "", .content = out.str(), .is_error = false};
@@ -1431,13 +1249,17 @@ std::string GrepTool::description() const {
   return "Search files by regex";
 }
 
+std::string GrepTool::search_hint() const {
+  return "grep search regex pattern files include path";
+}
+
 nlohmann::json GrepTool::parameters() const {
   return nlohmann::json{{"type", "object"},
                         {"required", nlohmann::json::array({"pattern"})},
                         {"properties",
-                         {{"pattern", {{"type", "string"}}},
-                          {"path", {{"type", "string"}}},
-                          {"include", {{"type", "string"}}}}}};
+                         {{"pattern", {{"type", "string"}, {"description", "Regular expression to search for"}}},
+                          {"path", {{"type", "string"}, {"description", "Directory to search, relative to the workspace root"}}},
+                          {"include", {{"type", "string"}, {"description", "Optional glob pattern limiting searched files"}}}}}};
 }
 
 ava::types::ToolResult GrepTool::execute(const nlohmann::json& args) const {
@@ -1526,64 +1348,11 @@ ava::types::ToolResult GrepTool::execute(const nlohmann::json& args) const {
     out << matches[idx];
   }
   if(matches.size() >= kGrepMaxMatches) {
-    out << "\n\n(Results truncated: showing first " << kGrepMaxMatches << " matches.)";
+    out << "\n\n(Results truncated: showing first " << kGrepMaxMatches
+        << " matches. Consider using a more specific path or pattern.)";
   }
 
   return ava::types::ToolResult{.call_id = "", .content = out.str(), .is_error = false};
-}
-
-GitReadTool::GitReadTool(std::filesystem::path workspace_root)
-    : workspace_root_(normalize_workspace_root(workspace_root)),
-      tool_name_("git") {}
-
-std::string GitReadTool::name() const {
-  return tool_name_;
-}
-
-std::string GitReadTool::description() const {
-  return "Run read-only git commands (status, log, diff, show, blame, etc.)";
-}
-
-nlohmann::json GitReadTool::parameters() const {
-  return nlohmann::json{{"type", "object"},
-                        {"required", nlohmann::json::array({"command"})},
-                        {"properties", {{"command", {{"type", "string"}}}}}};
-}
-
-ava::types::ToolResult GitReadTool::execute(const nlohmann::json& args) const {
-  if(!args.contains("command")) {
-    throw std::runtime_error("missing required field: command");
-  }
-
-  const auto subcommand = args.at("command").get<std::string>();
-  if(contains_shell_metacharacters(subcommand) || contains_git_quote_or_escape(subcommand)) {
-    throw std::runtime_error("git command contains disallowed shell metacharacters");
-  }
-
-  const auto lower_subcommand = lowercase(subcommand);
-  if(!is_safe_git_subcommand(lower_subcommand) || contains_mutating_git_patterns(" " + lower_subcommand) ||
-     has_forbidden_git_path_or_option(subcommand)) {
-    throw std::runtime_error("git command not allowed in read-only mode: " + subcommand);
-  }
-
-  const auto outcome = run_shell_command(
-      "env GIT_OPTIONAL_LOCKS=0 GIT_EXTERNAL_DIFF= GIT_PAGER=cat git " + subcommand,
-      workspace_root_,
-      120000
-  );
-  const auto content = render_shell_result(CommandOutcome{
-      .output = remove_backup_history_lines(outcome.output),
-      .exit_code = outcome.exit_code,
-  });
-
-  return ava::types::ToolResult{.call_id = "", .content = content, .is_error = outcome.exit_code != 0};
-}
-
-GitReadAliasTool::GitReadAliasTool(std::filesystem::path workspace_root)
-    : GitReadTool(std::move(workspace_root)) {}
-
-std::string GitReadAliasTool::name() const {
-  return "git_read";
 }
 
 DefaultToolRegistration register_default_tools(ToolRegistry& registry, const std::filesystem::path& workspace_root) {

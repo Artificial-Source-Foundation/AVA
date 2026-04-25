@@ -180,10 +180,9 @@ void PermissionMiddleware::before_with_source(const ava::types::ToolCall& tool_c
       finish_approval(true);
       return;
     case ToolApprovalKind::AllowAlways:
-      finish_approval(false);
-      throw std::runtime_error(
-          "Permission denied: persistent AllowAlways rules are not implemented in the C++ backend yet"
-      );
+      // Persistent rules are deferred; keep the approved action session-scoped instead of failing hard.
+      finish_approval(true);
+      return;
     case ToolApprovalKind::Rejected: {
       finish_approval(false);
       const auto reason = approval.reason.value_or("Tool approval rejected by user");

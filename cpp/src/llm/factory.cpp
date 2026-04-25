@@ -103,7 +103,8 @@ ProviderPtr create_provider(
     throw ProviderException(ProviderError{
         .kind = ProviderErrorKind::Unknown,
         .provider = normalized,
-        .message = "provider '" + normalized + "' is recognized but not implemented in C++ Milestone 23 scoped provider slice",
+        .message = "provider '" + normalized
+                   + "' is recognized but not implemented in the C++ provider runtime; implemented providers: openai, anthropic, mock",
     });
   }
 

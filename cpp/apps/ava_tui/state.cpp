@@ -57,22 +57,6 @@ struct SlashCommand {
   };
 }
 
-[[nodiscard]] const char* completion_reason_to_string(ava::agent::AgentCompletionReason reason) {
-  switch(reason) {
-    case ava::agent::AgentCompletionReason::Completed:
-      return "completed";
-    case ava::agent::AgentCompletionReason::Cancelled:
-      return "cancelled";
-    case ava::agent::AgentCompletionReason::MaxTurns:
-      return "max_turns";
-    case ava::agent::AgentCompletionReason::Stuck:
-      return "stuck";
-    case ava::agent::AgentCompletionReason::Error:
-      return "error";
-  }
-  return "error";
-}
-
 [[nodiscard]] std::string turn_status_line(std::size_t turn) {
   return "Turn " + std::to_string(turn) + " started.";
 }
@@ -306,11 +290,24 @@ void AppState::apply_agent_event(const ava::agent::AgentEvent& event) {
       }
       status_line_ = "Subagent complete.";
       return;
+    case ava::agent::AgentEventKind::BudgetWarning:
+      if(event.budget_warning.has_value()) {
+        status_line_ = "Budget warning: " + std::to_string(event.budget_warning->threshold_percent) + "% used.";
+      } else {
+        status_line_ = "Budget warning.";
+      }
+      return;
+    case ava::agent::AgentEventKind::ContextCompacted:
+      status_line_ = "Context compacted.";
+      return;
+    case ava::agent::AgentEventKind::Checkpoint:
+      status_line_ = event.message.empty() ? "Checkpoint saved." : event.message;
+      return;
     case ava::agent::AgentEventKind::Completion:
       running_ = false;
       assistant_delta_open_ = false;
       if(event.completion_reason.has_value()) {
-        status_line_ = std::string("Run complete: ") + completion_reason_to_string(*event.completion_reason);
+        status_line_ = std::string("Run complete: ") + ava::agent::completion_reason_to_string(*event.completion_reason);
       } else {
         status_line_ = "Run complete.";
       }

@@ -1612,7 +1612,7 @@ TEST_CASE("runtime composition remains usable after move", "[ava_orchestration]"
   std::filesystem::remove_all(root);
 }
 
-TEST_CASE("read-only explicit allowed tools cannot bypass runtime profile", "[ava_orchestration]") {
+TEST_CASE("read-only explicit allowed tools return missing tool result to child", "[ava_orchestration]") {
   const auto root = temp_root_for_test();
   std::filesystem::create_directories(root);
 
@@ -1640,20 +1640,26 @@ TEST_CASE("read-only explicit allowed tools cannot bypass runtime profile", "[av
       .workspace_root = root,
       .provider = "mock",
       .model = "mock-model",
-      .max_turns = 2,
+      .max_turns = 3,
       .max_spawns = 1,
       .auto_approve = true,
       .parent_registry = parent_registry,
       .agents_config = config,
       .provider_factory = [&](const ava::orchestration::ResolvedRuntimeSelection&) {
-        return ava::llm::create_mock_provider("mock-model", std::vector<ava::llm::LlmResponse>{scripted});
+        ava::llm::LlmResponse recovered;
+        recovered.content = "handled missing tool";
+        return ava::llm::create_mock_provider("mock-model", std::vector<ava::llm::LlmResponse>{scripted, recovered});
       },
   });
 
   const auto result = spawner.spawn_named("review", "inspect");
-  REQUIRE(!result.ok());
-  REQUIRE(result.error.has_value());
-  REQUIRE_THAT(*result.error, Catch::Matchers::ContainsSubstring("Tool not found: write"));
+  REQUIRE(result.ok());
+  REQUIRE(result.output.has_value());
+  REQUIRE_THAT(*result.output, Catch::Matchers::ContainsSubstring("handled missing tool"));
+  REQUIRE(result.messages.size() >= 3);
+  const auto tool_payload = nlohmann::json::parse(result.messages.at(2).content);
+  REQUIRE(tool_payload.at("is_error") == true);
+  REQUIRE_THAT(tool_payload.at("content").get<std::string>(), Catch::Matchers::ContainsSubstring("Tool not found: write"));
 
   std::filesystem::remove_all(root);
 }
@@ -2512,7 +2518,7 @@ TEST_CASE("native blocking task spawner threads credentials override into child 
       .workspace_root = root,
       .provider = "openai",
       .model = "gpt-5-mini",
-      .max_turns = 1,
+      .max_turns = 3,
       .max_spawns = 1,
       .auto_approve = true,
       .credentials_override = ava::config::CredentialStore{},
@@ -2531,7 +2537,7 @@ TEST_CASE("native blocking task spawner threads credentials override into child 
       .workspace_root = root,
       .provider = "openai",
       .model = "gpt-5-mini",
-      .max_turns = 1,
+      .max_turns = 3,
       .max_spawns = 1,
       .auto_approve = true,
       .credentials_override = credentials,
@@ -2574,14 +2580,19 @@ TEST_CASE("native blocking task spawner threads interactive resolvers into child
         };
       },
       .provider_factory = [&](const ava::orchestration::ResolvedRuntimeSelection&) {
-        return ava::llm::create_mock_provider("mock-model", std::vector<ava::llm::LlmResponse>{scripted});
+        ava::llm::LlmResponse recovered;
+        recovered.content = "handled rejection";
+        return ava::llm::create_mock_provider("mock-model", std::vector<ava::llm::LlmResponse>{scripted, recovered});
       },
   });
 
   const auto result = spawner.spawn_named("general", "try writing");
   REQUIRE(approval_called);
-  REQUIRE(result.error.has_value());
-  REQUIRE_THAT(*result.error, Catch::Matchers::ContainsSubstring("blocked by propagated resolver"));
+  REQUIRE(result.ok());
+  REQUIRE(result.messages.size() >= 3);
+  const auto tool_payload = nlohmann::json::parse(result.messages.at(2).content);
+  REQUIRE(tool_payload.at("is_error") == true);
+  REQUIRE_THAT(tool_payload.at("content").get<std::string>(), Catch::Matchers::ContainsSubstring("blocked by propagated resolver"));
 
   std::filesystem::remove_all(root);
 }

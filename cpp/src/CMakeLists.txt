@@ -1,6 +1,8 @@
 add_library(ava_types STATIC
   types/build_info.cpp
   types/message.cpp
+  types/session_recovery.cpp
+  types/time.cpp
   types/thinking.cpp
   types/attachment.cpp
 )
@@ -101,6 +103,7 @@ add_library(ava_llm STATIC
   llm/providers/anthropic_provider.cpp
   llm/providers/openai_protocol.cpp
   llm/providers/openai_provider.cpp
+  llm/providers/sse_utils.cpp
 )
 target_include_directories(ava_llm
   PUBLIC
@@ -127,6 +130,8 @@ add_library(ava_tools STATIC
   tools/file_backup.cpp
   tools/output_fallback.cpp
   tools/core_tools.cpp
+  tools/git_read_tool.cpp
+  tools/shell_runner.cpp
 )
 target_include_directories(ava_tools
   PUBLIC
@@ -167,10 +172,13 @@ target_link_libraries(ava_tools
 )
 
 add_library(ava_agent STATIC
+  agent/budget_tracker.cpp
   agent/message_queue.cpp
   agent/stuck_detector.cpp
   agent/response.cpp
   agent/runtime.cpp
+  agent/runtime_run_loop.cpp
+  agent/runtime_session_ops.cpp
 )
 target_include_directories(ava_agent
   PUBLIC

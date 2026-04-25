@@ -29,14 +29,18 @@ enum class SessionStartupKind {
 struct RuntimeSelectionOptions {
   std::optional<std::string> provider;
   std::optional<std::string> model;
+  std::optional<std::string> agent;
   std::size_t max_turns{16};
   bool max_turns_explicit{false};
+  double max_budget_usd{0.0};
 };
 
 struct ResolvedRuntimeSelection {
   std::string provider;
   std::string model;
+  std::optional<std::string> agent;
   std::size_t max_turns{16};
+  double max_budget_usd{0.0};
 };
 
 struct ResolvedSessionStartup {

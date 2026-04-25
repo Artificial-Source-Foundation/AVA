@@ -15,10 +15,13 @@ namespace ava::llm::anthropic {
     const std::vector<ChatMessage>& messages,
     const std::vector<types::Tool>& tools,
     std::uint32_t max_tokens,
-    ThinkingConfig thinking
+    ThinkingConfig thinking,
+    bool stream = false
 );
 
 [[nodiscard]] LlmResponse parse_messages_response(const nlohmann::json& payload);
+[[nodiscard]] std::vector<types::StreamChunk> parse_stream_events(const nlohmann::json& payload);
+[[nodiscard]] std::optional<types::StreamChunk> parse_stream_event(const nlohmann::json& payload);
 [[nodiscard]] std::vector<nlohmann::json> tools_to_anthropic_format(const std::vector<types::Tool>& tools);
 
 }  // namespace ava::llm::anthropic

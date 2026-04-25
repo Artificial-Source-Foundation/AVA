@@ -219,6 +219,41 @@ TEST_CASE("tui state maps runtime events into visible assistant output and statu
   REQUIRE(state.messages().front().text == "hello from assistant");
 }
 
+TEST_CASE("tui state maps budget and compaction runtime events", "[ava_tui]") {
+  ava::tui::AppState state;
+  state.set_running(true);
+
+  state.apply_agent_event(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::BudgetWarning,
+      .budget_warning = ava::agent::BudgetWarning{
+          .threshold_percent = 75,
+          .spent_usd = 0.75,
+          .budget_usd = 1.0,
+      },
+  });
+  REQUIRE(state.status_line() == "Budget warning: 75% used.");
+
+  state.apply_agent_event(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::ContextCompacted,
+      .compacted_message_count = 4,
+      .compacted_token_estimate = 1200,
+  });
+  REQUIRE(state.status_line() == "Context compacted.");
+
+  state.apply_agent_event(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::Checkpoint,
+      .message = "checkpoint after session recovery",
+  });
+  REQUIRE(state.status_line() == "checkpoint after session recovery");
+
+  state.apply_agent_event(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::Completion,
+      .completion_reason = ava::agent::AgentCompletionReason::BudgetExceeded,
+  });
+  REQUIRE_FALSE(state.running());
+  REQUIRE(state.status_line() == "Run complete: budget_exceeded");
+}
+
 TEST_CASE("tui state maps streaming assistant deltas and cancelled completion", "[ava_tui]") {
   ava::tui::AppState state;
   state.set_running(true);

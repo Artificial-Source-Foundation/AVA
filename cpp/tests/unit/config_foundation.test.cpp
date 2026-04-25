@@ -319,9 +319,13 @@ TEST_CASE("embedded model registry supports lookup and normalize", "[ava_config]
   const auto* opus = registry.find("claude-opus-4-6");
   REQUIRE(opus != nullptr);
   REQUIRE(opus->capabilities.tool_call);
-  REQUIRE_FALSE(opus->capabilities.streaming);
-  REQUIRE_FALSE(opus->capabilities.reasoning);
-  REQUIRE_FALSE(opus->capabilities.vision);
+  REQUIRE(opus->capabilities.streaming);
+  REQUIRE(opus->capabilities.reasoning);
+  REQUIRE(opus->capabilities.vision);
+  REQUIRE(registry.find_for_provider("gemini", "gemini-2.5-pro") != nullptr);
+  REQUIRE(registry.find_for_provider("ollama", "llama3.3") != nullptr);
+  REQUIRE(registry.find_for_provider("openrouter", "openai/gpt-4.1-mini") != nullptr);
+  REQUIRE(registry.normalize("haiku") == std::optional<std::string>{"claude-haiku-4-5"});
   REQUIRE(registry.is_loop_prone("glm-4.7"));
   REQUIRE_FALSE(registry.is_loop_prone("claude-opus-4-6"));
   REQUIRE(registry.find_for_provider("openai", "missing-model") == nullptr);
@@ -342,6 +346,14 @@ TEST_CASE("model specs parse provider model aliases and cli specs", "[ava_config
   const auto alias_spec = ava::config::parse_model_spec("opus");
   REQUIRE(alias_spec.provider == "anthropic");
   REQUIRE(alias_spec.model == "claude-opus-4-6");
+
+  const auto haiku_spec = ava::config::parse_model_spec("haiku");
+  REQUIRE(haiku_spec.provider == "anthropic");
+  REQUIRE(haiku_spec.model == "claude-haiku-4-5");
+
+  const auto openrouter_spec = ava::config::parse_model_spec("openrouter/openai/gpt-4.1-mini");
+  REQUIRE(openrouter_spec.provider == "openrouter");
+  REQUIRE(openrouter_spec.model == "openai/gpt-4.1-mini");
 
   const auto unknown_spec = ava::config::parse_model_spec("unknown-model");
   REQUIRE(unknown_spec.provider == "openrouter");

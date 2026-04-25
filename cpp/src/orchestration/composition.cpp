@@ -11,6 +11,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "ava/config/agents.hpp"
 #include "ava/config/model_registry.hpp"
 #include "ava/config/model_spec.hpp"
 #include "ava/config/paths.hpp"
@@ -88,6 +89,14 @@ constexpr auto* kLegacyHeadlessMetadataNamespace = "headless";
   throw std::runtime_error("no default model known for provider: " + provider);
 }
 
+[[nodiscard]] const ava::config::BuiltinAgentTemplate* find_builtin_agent(const std::string& agent_id) {
+  const auto& templates = ava::config::builtin_agent_templates();
+  const auto it = std::find_if(templates.begin(), templates.end(), [&](const auto& item) {
+    return item.id == agent_id;
+  });
+  return it == templates.end() ? nullptr : &*it;
+}
+
 void apply_allowed_tools(ava::tools::ToolRegistry& registry, const std::vector<std::string>& allowed_tools) {
   const auto tool_names = registry.tool_names();
   const std::unordered_set<std::string> known(tool_names.begin(), tool_names.end());
@@ -132,7 +141,15 @@ void apply_allowed_tools(ava::tools::ToolRegistry& registry, const std::vector<s
 void persist_runtime_selection_metadata(ava::types::SessionRecord& session, const ResolvedRuntimeSelection& selection) {
   session.metadata[kRuntimeMetadataNamespace]["provider"] = selection.provider;
   session.metadata[kRuntimeMetadataNamespace]["model"] = selection.model;
+  if(selection.agent.has_value()) {
+    session.metadata[kRuntimeMetadataNamespace]["agent"] = *selection.agent;
+  } else {
+    session.metadata[kRuntimeMetadataNamespace].erase("agent");
+  }
   session.metadata[kRuntimeMetadataNamespace]["max_turns"] = selection.max_turns;
+  if(selection.max_budget_usd > 0.0) {
+    session.metadata[kRuntimeMetadataNamespace]["max_budget_usd"] = selection.max_budget_usd;
+  }
 }
 
 [[nodiscard]] ava::mcp::McpConfig merge_mcp_config(
@@ -220,6 +237,7 @@ ResolvedRuntimeSelection resolve_runtime_selection(
 ) {
   const auto persisted_provider = metadata_string(session, "provider");
   const auto persisted_model = metadata_string(session, "model");
+  const auto persisted_agent = metadata_string(session, "agent");
 
   std::optional<std::string> provider;
   std::optional<std::string> model;
@@ -256,17 +274,32 @@ ResolvedRuntimeSelection resolve_runtime_selection(
     model = default_model_for_provider(*provider);
   }
 
+  std::optional<std::string> agent = options.agent.has_value() ? options.agent : persisted_agent;
+  const ava::config::BuiltinAgentTemplate* agent_template = nullptr;
+  if(agent.has_value()) {
+    agent_template = find_builtin_agent(*agent);
+    if(agent_template == nullptr && options.agent.has_value()) {
+      throw std::invalid_argument("unknown agent profile: " + *agent);
+    }
+  }
+
   std::size_t max_turns = options.max_turns;
   if(!options.max_turns_explicit) {
-    if(const auto persisted_turns = metadata_max_turns(session); persisted_turns.has_value()) {
+    if(options.agent.has_value() && agent_template != nullptr && agent_template->max_turns.has_value()) {
+      max_turns = *agent_template->max_turns;
+    } else if(const auto persisted_turns = metadata_max_turns(session); persisted_turns.has_value()) {
       max_turns = *persisted_turns;
+    } else if(agent_template != nullptr && agent_template->max_turns.has_value()) {
+      max_turns = *agent_template->max_turns;
     }
   }
 
   return ResolvedRuntimeSelection{
       .provider = *provider,
       .model = *model,
+      .agent = agent,
       .max_turns = max_turns,
+      .max_budget_usd = options.max_budget_usd,
   };
 }
 
@@ -352,7 +385,7 @@ RuntimeComposition compose_runtime(RuntimeCompositionRequest request) {
     apply_allowed_tools(*registry, *request.allowed_tools);
   }
 
-  ava::agent::AgentConfig agent_config{.max_turns = selection.max_turns};
+  ava::agent::AgentConfig agent_config{.max_turns = selection.max_turns, .max_budget_usd = selection.max_budget_usd};
   if(request.system_prompt_preamble.has_value()) {
     agent_config.system_prompt_preamble = *request.system_prompt_preamble;
   }

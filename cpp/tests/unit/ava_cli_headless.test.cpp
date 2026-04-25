@@ -2,10 +2,13 @@
 
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <sstream>
+#include <utility>
 
 #include <nlohmann/json.hpp>
 
@@ -33,9 +36,40 @@ ava::types::SessionRecord empty_session(std::string id) {
   };
 }
 
+class EnvGuard {
+ public:
+  explicit EnvGuard(std::vector<std::string> names) : names_(std::move(names)) {
+    for(const auto& name : names_) {
+      if(const char* value = std::getenv(name.c_str()); value != nullptr) {
+        previous_.push_back({name, std::string(value)});
+      } else {
+        previous_.push_back({name, std::nullopt});
+      }
+      unsetenv(name.c_str());
+    }
+  }
+
+  ~EnvGuard() {
+    for(const auto& [name, value] : previous_) {
+      if(value.has_value()) {
+        setenv(name.c_str(), value->c_str(), 1);
+      } else {
+        unsetenv(name.c_str());
+      }
+    }
+  }
+
+  EnvGuard(const EnvGuard&) = delete;
+  EnvGuard& operator=(const EnvGuard&) = delete;
+
+ private:
+  std::vector<std::string> names_;
+  std::vector<std::pair<std::string, std::optional<std::string>>> previous_;
+};
+
 }  // namespace
 
-TEST_CASE("cli parses headless milestone 9 flags", "[ava_app]") {
+TEST_CASE("cli parses full headless flag surface", "[ava_app]") {
   const char* argv[] = {
       "ava",
       "fix tests",
@@ -43,10 +77,23 @@ TEST_CASE("cli parses headless milestone 9 flags", "[ava_app]") {
       "openai",
       "--model",
       "gpt-5-mini",
+      "--cwd",
+      ".",
+      "--agent",
+      "review",
+      "--trust",
       "--continue",
       "--json",
       "--max-turns",
       "5",
+      "--max-budget",
+      "1.25",
+      "--follow-up",
+      "run checks",
+      "--later",
+      "summarize",
+      "--later-group",
+      "2:notify",
       "--auto-approve",
   };
 
@@ -54,11 +101,54 @@ TEST_CASE("cli parses headless milestone 9 flags", "[ava_app]") {
   REQUIRE(cli.goal == std::optional<std::string>{"fix tests"});
   REQUIRE(cli.provider == std::optional<std::string>{"openai"});
   REQUIRE(cli.model == std::optional<std::string>{"gpt-5-mini"});
+  REQUIRE(cli.cwd == std::optional<std::filesystem::path>{std::filesystem::path(".")});
+  REQUIRE(cli.agent == std::optional<std::string>{"review"});
+  REQUIRE(cli.trust);
   REQUIRE(cli.resume);
   REQUIRE(cli.json);
   REQUIRE(cli.max_turns == 5);
   REQUIRE(cli.max_turns_explicit);
+  REQUIRE(cli.max_budget_usd == 1.25);
+  REQUIRE(cli.follow_up_messages == std::vector<std::string>{"run checks"});
+  REQUIRE(cli.post_complete_messages == std::vector<std::string>{"summarize"});
+  REQUIRE(cli.post_complete_group_messages.size() == 1);
+  REQUIRE(cli.post_complete_group_messages.front().group == 2);
+  REQUIRE(cli.post_complete_group_messages.front().text == "notify");
   REQUIRE(cli.auto_approve);
+}
+
+TEST_CASE("cli applies environment defaults when flags are unset", "[ava_app]") {
+  EnvGuard env({"AVA_PROVIDER", "AVA_MODEL", "AVA_WORKING_DIRECTORY", "AVA_AGENT"});
+  setenv("AVA_PROVIDER", "anthropic", 1);
+  setenv("AVA_MODEL", "claude-sonnet-4", 1);
+  setenv("AVA_WORKING_DIRECTORY", "/tmp", 1);
+  setenv("AVA_AGENT", "explore", 1);
+
+  const char* argv[] = {"ava", "inspect repo"};
+  const auto cli = ava::app::parse_cli_or_throw(static_cast<int>(std::size(argv)), const_cast<char**>(argv));
+
+  REQUIRE(cli.provider == std::optional<std::string>{"anthropic"});
+  REQUIRE(cli.model == std::optional<std::string>{"claude-sonnet-4"});
+  REQUIRE(cli.cwd == std::optional<std::filesystem::path>{std::filesystem::path("/tmp")});
+  REQUIRE(cli.agent == std::optional<std::string>{"explore"});
+}
+
+TEST_CASE("cli flags override environment defaults", "[ava_app]") {
+  EnvGuard env({"AVA_PROVIDER", "AVA_MODEL", "AVA_WORKING_DIRECTORY", "AVA_AGENT"});
+  setenv("AVA_PROVIDER", "anthropic", 1);
+  setenv("AVA_MODEL", "claude-sonnet-4", 1);
+  setenv("AVA_WORKING_DIRECTORY", "/tmp", 1);
+  setenv("AVA_AGENT", "explore", 1);
+
+  const char* argv[] = {
+      "ava", "inspect repo", "--provider", "openai", "--model", "gpt-5-mini", "--cwd", ".", "--agent", "review",
+  };
+  const auto cli = ava::app::parse_cli_or_throw(static_cast<int>(std::size(argv)), const_cast<char**>(argv));
+
+  REQUIRE(cli.provider == std::optional<std::string>{"openai"});
+  REQUIRE(cli.model == std::optional<std::string>{"gpt-5-mini"});
+  REQUIRE(cli.cwd == std::optional<std::filesystem::path>{std::filesystem::path(".")});
+  REQUIRE(cli.agent == std::optional<std::string>{"review"});
 }
 
 TEST_CASE("cli rejects conflicting resume flags", "[ava_app]") {
@@ -235,6 +325,102 @@ TEST_CASE("agent selection restores persisted provider model when cli unset", "[
   REQUIRE(selection.max_turns == 4);
 }
 
+TEST_CASE("agent selection applies builtin agent defaults", "[ava_app]") {
+  auto session = empty_session("sess_agent");
+
+  const auto selection = ava::orchestration::resolve_runtime_selection(
+      ava::orchestration::RuntimeSelectionOptions{
+          .provider = "openai",
+          .model = "gpt-5-mini",
+          .agent = "explore",
+          .max_turns = 16,
+          .max_turns_explicit = false,
+      },
+      session
+  );
+
+  REQUIRE(selection.agent == std::optional<std::string>{"explore"});
+  REQUIRE(selection.max_turns == 5);
+}
+
+TEST_CASE("agent selection rejects unknown agent profiles", "[ava_app]") {
+  auto session = empty_session("sess_unknown_agent");
+
+  REQUIRE_THROWS(ava::orchestration::resolve_runtime_selection(
+      ava::orchestration::RuntimeSelectionOptions{
+          .provider = "openai",
+          .model = "gpt-5-mini",
+          .agent = "missing-agent",
+          .max_turns = 16,
+          .max_turns_explicit = false,
+      },
+      session
+  ));
+}
+
+TEST_CASE("runtime selection preserves unknown persisted agent without applying defaults", "[ava_app]") {
+  auto session = empty_session("sess_persisted_agent");
+  session.metadata["runtime"] = nlohmann::json{
+      {"agent", "custom-agent"},
+      {"max_turns", 11},
+  };
+
+  const auto selection = ava::orchestration::resolve_runtime_selection(
+      ava::orchestration::RuntimeSelectionOptions{
+          .provider = "openai",
+          .model = "gpt-5-mini",
+          .max_turns = 16,
+          .max_turns_explicit = false,
+      },
+      session
+  );
+
+  REQUIRE(selection.agent == std::optional<std::string>{"custom-agent"});
+  REQUIRE(selection.max_turns == 11);
+}
+
+TEST_CASE("runtime selection prefers persisted turns over builtin agent defaults", "[ava_app]") {
+  auto session = empty_session("sess_agent_turns");
+  session.metadata["runtime"] = nlohmann::json{
+      {"agent", "explore"},
+      {"max_turns", 12},
+  };
+
+  const auto selection = ava::orchestration::resolve_runtime_selection(
+      ava::orchestration::RuntimeSelectionOptions{
+          .provider = "openai",
+          .model = "gpt-5-mini",
+          .max_turns = 16,
+          .max_turns_explicit = false,
+      },
+      session
+  );
+
+  REQUIRE(selection.agent == std::optional<std::string>{"explore"});
+  REQUIRE(selection.max_turns == 12);
+}
+
+TEST_CASE("runtime selection applies explicit agent defaults over persisted turns", "[ava_app]") {
+  auto session = empty_session("sess_agent_override_turns");
+  session.metadata["runtime"] = nlohmann::json{
+      {"max_turns", 12},
+  };
+
+  const auto selection = ava::orchestration::resolve_runtime_selection(
+      ava::orchestration::RuntimeSelectionOptions{
+          .provider = "openai",
+          .model = "gpt-5-mini",
+          .agent = "explore",
+          .max_turns = 16,
+          .max_turns_explicit = false,
+      },
+      session
+  );
+
+  REQUIRE(selection.agent == std::optional<std::string>{"explore"});
+  REQUIRE(selection.max_turns == 5);
+}
+
 TEST_CASE("runtime selection prefers orchestration runtime metadata namespace", "[ava_app]") {
   auto session = empty_session("sess_runtime");
   session.metadata["runtime"] = nlohmann::json{
@@ -339,6 +525,53 @@ TEST_CASE("ndjson event carries run_id and streaming delta payload", "[ava_app]"
       .tool_result = ava::types::ToolResult{.call_id = "call-1", .content = "ok", .is_error = false},
   });
   REQUIRE(tool_result.at("run_id") == "run-1");
+}
+
+TEST_CASE("ndjson event projects budget and compaction fields", "[ava_app]") {
+  const auto budget = ava::app::headless_event_to_ndjson(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::BudgetWarning,
+      .run_id = "run-budget",
+      .turn = 3,
+      .budget_warning = ava::agent::BudgetWarning{.threshold_percent = 100, .spent_usd = 1.25, .budget_usd = 1.0},
+  });
+  REQUIRE(budget.at("type") == "budget_warning");
+  REQUIRE(budget.at("run_id") == "run-budget");
+  REQUIRE(budget.at("threshold_percent") == 100);
+  REQUIRE(budget.at("spent_usd") == 1.25);
+  REQUIRE(budget.at("budget_usd") == 1.0);
+
+  const auto compacted = ava::app::headless_event_to_ndjson(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::ContextCompacted,
+      .run_id = "run-compact",
+      .turn = 4,
+      .compacted_message_count = 7,
+      .compacted_token_estimate = 1234,
+  });
+  REQUIRE(compacted.at("type") == "context_compacted");
+  REQUIRE(compacted.at("run_id") == "run-compact");
+  REQUIRE(compacted.at("message_count") == 7);
+  REQUIRE(compacted.at("estimated_tokens") == 1234);
+
+  const auto complete = ava::app::headless_event_to_ndjson(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::Completion,
+      .run_id = "run-budget",
+      .turn = 5,
+      .message = "budget exhausted",
+      .completion_reason = ava::agent::AgentCompletionReason::BudgetExceeded,
+  });
+  REQUIRE(complete.at("type") == "complete");
+  REQUIRE(complete.at("reason") == "budget_exceeded");
+
+  const auto checkpoint = ava::app::headless_event_to_ndjson(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::Checkpoint,
+      .run_id = "run-checkpoint",
+      .turn = 6,
+      .message = "checkpoint after tool result",
+  });
+  REQUIRE(checkpoint.at("type") == "checkpoint");
+  REQUIRE(checkpoint.at("run_id") == "run-checkpoint");
+  REQUIRE(checkpoint.at("turn") == 6);
+  REQUIRE(checkpoint.at("message") == "checkpoint after tool result");
 }
 
 TEST_CASE("ndjson tool call and result correlate call_id", "[ava_app]") {
@@ -448,6 +681,40 @@ TEST_CASE("text subagent complete event prints stable label", "[ava_app]") {
 
   std::cout.rdbuf(previous);
   REQUIRE(output.str() == "[subagent_complete] Review the parser changes\n[subagent_complete]\n");
+}
+
+TEST_CASE("text budget and checkpoint events include actionable details", "[ava_app]") {
+  std::ostringstream output;
+  std::ostringstream error;
+  auto* previous_out = std::cout.rdbuf(output.rdbuf());
+  auto* previous_err = std::cerr.rdbuf(error.rdbuf());
+
+  ava::app::print_headless_event_text(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::ContextCompacted,
+      .compacted_message_count = 3,
+      .compacted_token_estimate = 99,
+  });
+  ava::app::print_headless_event_text(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::Completion,
+      .run_id = "run-text",
+      .completion_reason = ava::agent::AgentCompletionReason::BudgetExceeded,
+  });
+  ava::app::print_headless_event_text(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::Error,
+      .run_id = "run-text",
+      .message = "boom",
+  });
+  ava::app::print_headless_event_text(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::Checkpoint,
+      .message = "checkpoint after tool result",
+  });
+
+  std::cout.rdbuf(previous_out);
+  std::cerr.rdbuf(previous_err);
+  REQUIRE(output.str().find("[context] compacted messages=3 tokens~=99") != std::string::npos);
+  REQUIRE(output.str().find("[completion] reason=budget_exceeded run=run-text") != std::string::npos);
+  REQUIRE(output.str().find("[checkpoint] checkpoint after tool result") != std::string::npos);
+  REQUIRE(error.str().find("[error] run=run-text boom") != std::string::npos);
 }
 
 TEST_CASE("ndjson error tool result preserves call_id", "[ava_app]") {

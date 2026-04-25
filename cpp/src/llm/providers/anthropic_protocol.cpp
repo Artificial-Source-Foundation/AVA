@@ -94,7 +94,8 @@ nlohmann::json build_messages_request(
     const std::vector<ChatMessage>& messages,
     const std::vector<types::Tool>& tools,
     std::uint32_t max_tokens,
-    ThinkingConfig thinking
+    ThinkingConfig thinking,
+    bool stream
 ) {
   nlohmann::json body{
       {"model", model},
@@ -184,6 +185,11 @@ nlohmann::json build_messages_request(
     body["tools"] = tools_to_anthropic_format(tools);
   }
 
+  if(stream) {
+    body["stream"] = true;
+  }
+
+  // Thinking request-body parity remains outside this provider streaming milestone.
   (void)thinking;
   return body;
 }
@@ -244,6 +250,156 @@ LlmResponse parse_messages_response(const nlohmann::json& payload) {
 
   response.usage = parse_usage(payload);
   return response;
+}
+
+std::vector<types::StreamChunk> parse_stream_events(const nlohmann::json& payload) {
+  std::vector<types::StreamChunk> chunks;
+  const auto event_type = payload.value("type", std::string{});
+
+  if(event_type == "message_start" || event_type == "content_block_stop" || event_type == "ping") {
+    return chunks;
+  }
+
+  if(event_type == "content_block_delta") {
+    if(!payload.contains("delta") || !payload.at("delta").is_object()) {
+      return chunks;
+    }
+
+    const auto& delta = payload.at("delta");
+    const auto delta_type = delta.value("type", std::string{});
+    if(delta_type == "text_delta") {
+      const auto text = delta.value("text", std::string{});
+      if(!text.empty()) {
+        chunks.push_back(types::StreamChunk::text(text));
+      }
+      return chunks;
+    }
+
+    if(delta_type == "thinking_delta") {
+      const auto thinking = delta.value("thinking", std::string{});
+      if(!thinking.empty()) {
+        types::StreamChunk chunk;
+        chunk.thinking = thinking;
+        chunks.push_back(std::move(chunk));
+      }
+      return chunks;
+    }
+
+    if(delta_type == "input_json_delta") {
+      const auto partial_json = delta.value("partial_json", std::string{});
+      if(!partial_json.empty()) {
+        types::StreamChunk chunk;
+        chunk.tool_call = types::StreamToolCall{
+            .index = payload.value("index", 0U),
+            .id = std::nullopt,
+            .name = std::nullopt,
+            .arguments_delta = partial_json,
+        };
+        chunks.push_back(std::move(chunk));
+      }
+      return chunks;
+    }
+
+    return chunks;
+  }
+
+  if(event_type == "content_block_start") {
+    if(!payload.contains("content_block") || !payload.at("content_block").is_object()) {
+      return chunks;
+    }
+
+    const auto& block = payload.at("content_block");
+    const auto block_type = block.value("type", std::string{});
+    if(block_type == "text") {
+      const auto text = block.value("text", std::string{});
+      if(!text.empty()) {
+        chunks.push_back(types::StreamChunk::text(text));
+      }
+      return chunks;
+    }
+
+    if(block_type == "thinking") {
+      const auto thinking = block.value("thinking", std::string{});
+      if(!thinking.empty()) {
+        types::StreamChunk chunk;
+        chunk.thinking = thinking;
+        chunks.push_back(std::move(chunk));
+      }
+      return chunks;
+    }
+
+    if(block_type == "tool_use") {
+      types::StreamChunk chunk;
+      chunk.tool_call = types::StreamToolCall{
+          .index = payload.value("index", 0U),
+          .id = block.contains("id") && block.at("id").is_string()
+                    ? std::optional<std::string>{block.at("id").get<std::string>()}
+                    : std::nullopt,
+          .name = block.contains("name") && block.at("name").is_string()
+                      ? std::optional<std::string>{block.at("name").get<std::string>()}
+                      : std::nullopt,
+          .arguments_delta = std::nullopt,
+      };
+      chunks.push_back(std::move(chunk));
+    }
+    return chunks;
+  }
+
+  if(event_type == "message_delta") {
+    auto usage = parse_usage(payload);
+    if(
+        !usage.has_value() && payload.contains("delta") && payload.at("delta").is_object()
+        && payload.at("delta").contains("usage") && payload.at("delta").at("usage").is_object()
+    ) {
+      usage = parse_usage(nlohmann::json{{"usage", payload.at("delta").at("usage")}});
+    }
+
+    if(usage.has_value()) {
+      chunks.push_back(types::StreamChunk::with_usage(*usage));
+    }
+    return chunks;
+  }
+
+  if(event_type == "message_stop") {
+    chunks.push_back(types::StreamChunk::finished());
+    return chunks;
+  }
+
+  if(event_type == "error") {
+    std::string message = "Anthropic stream error";
+    auto kind = ProviderErrorKind::Unknown;
+    if(payload.contains("error") && payload.at("error").is_object()) {
+      const auto& error = payload.at("error");
+      message = error.value("message", message);
+      const auto error_type = error.value("type", std::string{});
+      if(error_type == "rate_limit_error") {
+        kind = ProviderErrorKind::RateLimit;
+      } else if(error_type == "overloaded_error" || error_type == "api_error") {
+        kind = ProviderErrorKind::ServerError;
+      } else if(error_type == "authentication_error" || error_type == "permission_error") {
+        kind = ProviderErrorKind::AuthFailure;
+      } else if(error_type == "not_found_error") {
+        kind = ProviderErrorKind::ModelNotFound;
+      } else if(error_type == "request_too_large") {
+        kind = ProviderErrorKind::ContextWindowExceeded;
+      }
+    }
+    throw ProviderException(ProviderError{
+        .kind = kind,
+        .provider = "anthropic",
+        .message = std::move(message),
+    });
+  }
+
+  return chunks;
+}
+
+std::optional<types::StreamChunk> parse_stream_event(const nlohmann::json& payload) {
+  const auto chunks = parse_stream_events(payload);
+  if(chunks.empty()) {
+    return std::nullopt;
+  }
+  return chunks.front();
 }
 
 std::vector<nlohmann::json> tools_to_anthropic_format(const std::vector<types::Tool>& tools) {

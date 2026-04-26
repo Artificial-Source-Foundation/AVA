@@ -5,6 +5,7 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -20,6 +21,36 @@ using SqliteDb = std::unique_ptr<sqlite3, decltype(&sqlite3_close)>;
 using SqliteStmt = std::unique_ptr<sqlite3_stmt, decltype(&sqlite3_finalize)>;
 
 void exec_or_throw(sqlite3* db, const char* sql);
+
+void enforce_owner_only_permissions(const std::filesystem::path& path, std::filesystem::perms permissions) {
+  std::error_code ec;
+  if(!std::filesystem::exists(path, ec)) {
+    return;
+  }
+  if(ec) {
+    throw std::runtime_error("Failed to inspect session store permissions: " + path.string());
+  }
+  std::filesystem::permissions(path, permissions, std::filesystem::perm_options::replace, ec);
+  if(ec) {
+    throw std::runtime_error("Failed to restrict session store permissions: " + path.string());
+  }
+  const auto actual = std::filesystem::status(path, ec).permissions();
+  if(ec) {
+    throw std::runtime_error("Failed to verify session store permissions: " + path.string());
+  }
+  if((actual & (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) != std::filesystem::perms::none) {
+    throw std::runtime_error("Session store path is not owner-only: " + path.string());
+  }
+}
+
+void enforce_session_store_permissions(const std::filesystem::path& db_path) {
+  if(db_path.has_parent_path()) {
+    enforce_owner_only_permissions(db_path.parent_path(), std::filesystem::perms::owner_all);
+  }
+  enforce_owner_only_permissions(db_path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+  enforce_owner_only_permissions(db_path.string() + "-wal", std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+  enforce_owner_only_permissions(db_path.string() + "-shm", std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+}
 
 constexpr const char* kSchemaSql = R"SQL(
 PRAGMA foreign_keys = ON;
@@ -89,6 +120,7 @@ END;
   exec_or_throw(raw, "PRAGMA synchronous = NORMAL;");
   exec_or_throw(raw, "PRAGMA foreign_keys = ON;");
   exec_or_throw(raw, "PRAGMA cache_size = -64000;");
+  enforce_session_store_permissions(path);
   return SqliteDb(raw, sqlite3_close);
 }
 
@@ -423,9 +455,15 @@ void check_row_loop_finished_or_throw(int rc, sqlite3* db) {
 SessionManager::SessionManager(std::filesystem::path db_path)
     : db_path_(std::move(db_path)) {
   if(db_path_.has_parent_path()) {
-    std::filesystem::create_directories(db_path_.parent_path());
+    std::error_code ec;
+    std::filesystem::create_directories(db_path_.parent_path(), ec);
+    if(ec) {
+      throw std::runtime_error("Failed to create session store directory: " + db_path_.parent_path().string());
+    }
+    enforce_owner_only_permissions(db_path_.parent_path(), std::filesystem::perms::owner_all);
   }
   init_schema();
+  enforce_session_store_permissions(db_path_);
 }
 
 ava::types::SessionRecord SessionManager::create() const {
@@ -524,6 +562,7 @@ void SessionManager::save(const ava::types::SessionRecord& session) {
     }
 
     exec_or_throw(db.get(), "COMMIT;");
+    enforce_session_store_permissions(db_path_);
   } catch(...) {
     rollback_best_effort(db.get());
     throw;
@@ -639,6 +678,7 @@ void SessionManager::add_message(const std::string& session_id, const ava::types
     step_done_or_throw(touch.get(), db.get());
 
     exec_or_throw(db.get(), "COMMIT;");
+    enforce_session_store_permissions(db_path_);
   } catch(...) {
     rollback_best_effort(db.get());
     throw;
@@ -833,6 +873,7 @@ ava::types::SessionMessage SessionManager::branch_from(
     step_done_or_throw(update.get(), db.get());
 
     exec_or_throw(db.get(), "COMMIT;");
+    enforce_session_store_permissions(db_path_);
     return message;
   } catch(...) {
     rollback_best_effort(db.get());
@@ -860,6 +901,7 @@ void SessionManager::switch_branch(const std::string& session_id, const std::str
     step_done_or_throw(stmt.get(), db.get());
 
     exec_or_throw(db.get(), "COMMIT;");
+    enforce_session_store_permissions(db_path_);
   } catch(...) {
     rollback_best_effort(db.get());
     throw;
@@ -871,6 +913,7 @@ void SessionManager::init_schema() {
   exec_or_throw(db.get(), kSchemaSql);
   exec_or_ignore_duplicate_column(db.get(), "ALTER TABLE sessions ADD COLUMN parent_id TEXT;");
   exec_or_ignore_duplicate_column(db.get(), "ALTER TABLE sessions ADD COLUMN token_usage TEXT NOT NULL DEFAULT '{}';");
+  exec_or_ignore_duplicate_column(db.get(), "ALTER TABLE sessions ADD COLUMN branch_head TEXT;");
   exec_or_ignore_duplicate_column(db.get(), "ALTER TABLE messages ADD COLUMN tool_calls TEXT NOT NULL DEFAULT '[]';");
   exec_or_ignore_duplicate_column(db.get(), "ALTER TABLE messages ADD COLUMN tool_results TEXT NOT NULL DEFAULT '[]';");
   exec_or_ignore_duplicate_column(db.get(), "ALTER TABLE messages ADD COLUMN tool_call_id TEXT;");
@@ -880,6 +923,7 @@ void SessionManager::init_schema() {
   exec_or_ignore_duplicate_column(db.get(), "ALTER TABLE messages ADD COLUMN original_content TEXT;");
   exec_or_ignore_duplicate_column(db.get(), "ALTER TABLE messages ADD COLUMN structured_content TEXT NOT NULL DEFAULT '[]';");
   exec_or_ignore_duplicate_column(db.get(), "ALTER TABLE messages ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}';");
+  enforce_session_store_permissions(db_path_);
 }
 
 std::optional<ava::types::SessionRecord> SessionManager::get_with_db(void* db_raw, const std::string& id) const {

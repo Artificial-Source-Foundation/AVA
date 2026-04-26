@@ -6,7 +6,7 @@ It remains intentionally scoped and honest:
 
 - It creates a real CMake workspace and dependency wiring.
 - It now includes real foundational implementations in `ava_types`, `ava_control_plane`, `ava_platform`, `ava_config`, `ava_session`, `ava_llm`, `ava_tools`, a scoped runtime-core `ava_agent`, and a smallest-honest `ava_orchestration` contracts/data slice.
-- The current `ava_runtime` aggregate includes the implemented M10-M34 scoped backend/headless/TUI migration slices: blocking headless execution, an FTXUI TUI lane, orchestration-owned runtime composition, native blocking subagents, interactive request lifecycle seams, streaming/cancellation events, MCP stdio MVP wiring, budget/queue/compaction controls, session recovery checkpoints, provider streaming slices, daily-use headless CLI polish, deterministic headless evidence, and final hardening cleanup.
+- The current `ava_runtime` aggregate includes the implemented M10-M34 scoped backend/headless/TUI migration slices: blocking headless execution, an FTXUI TUI lane, orchestration-owned runtime composition, native blocking subagents, interactive request lifecycle seams, streaming/cancellation events, MCP stdio MVP wiring plus CPR-gated HTTP JSON execution, budget/queue/compaction controls, session recovery checkpoints, provider streaming slices, daily-use headless CLI polish, deterministic headless evidence, and final hardening cleanup.
 - It still does **not** claim runtime parity or a production C++ backend port.
 
 ## Included Targets
@@ -43,7 +43,9 @@ Tests:
 9. `ava_config_tests` (leaf-target tests for config, trust, credentials, agents, and model registry behavior)
 10. `ava_session_tests` (leaf-target tests for SQLite-backed session persistence and tree behavior)
 11. `ava_mcp_tests` (leaf-target tests for scoped MCP protocol/config/client/manager/transport behavior)
-12. `ava_m3_foundation_tests` (targeted M3 foundation regression lane)
+12. `ava_m3_foundation_tests` (targeted original M3 foundation regression lane)
+13. `ava_m3_runtime_tests` / CTest `ava_m3_runtime` (C++ adoption M3 real `ava_cli` dogfood lane)
+14. `ava_m6_e2e_tests` / CTest `ava_m6_e2e` (C++ adoption M6 deterministic end-to-end evidence lane)
 
 ## Implemented Foundations
 
@@ -68,11 +70,14 @@ Tests:
     - Explicitly deferred command-execution runtime behavior for a later milestone
 
 4. **`ava_config`**
-    - XDG + legacy-aware app path resolution for config/data/state/cache
-    - Trusted-project persistence (`trusted_projects.json`) with process-cache invalidation
-    - JSON credential store persistence with provider env-override precedence
-    - Embedded model registry fixture with alias normalization/pricing/loop-prone helpers
-    - File-backed config/trust/credential persistence routed through the current `ava_platform` filesystem primitives
+     - XDG + legacy-aware app path resolution for config/data/state/cache
+     - Trusted-project persistence (`trusted_projects.json`) with process-cache invalidation
+     - JSON credential store persistence with provider env-override precedence
+     - OAuth credential updates that preserve static fields, plus explicit key-redaction helpers and native-keychain unavailability reporting
+     - Routing profile structs/JSON normalization and project-local `.ava/state.json` persistence for recent/model-mode selections
+     - Embedded model registry fixture with alias normalization/pricing/loop-prone helpers
+     - File-backed config/trust/credential persistence routed through the current `ava_platform` filesystem primitives
+     - Native OS keychain, encrypted fallback/migration, OAuth refresh flows, full YAML config loading, and runtime routing-profile selection remain deferred
 
 5. **`ava_session`**
     - Real blocking SQLite persistence for sessions/messages
@@ -89,17 +94,20 @@ Tests:
     - Heuristic token/cost helpers.
     - Provider factory plumbing with explicit deferred-provider error surfacing.
     - Real `MockProvider` implementation.
-     - Two scoped production providers in the current milestone lane:
-       - `OpenAI` (blocking HTTP + SSE chunk collection via CPR when enabled).
-        - `Anthropic` (Messages API generation and CPR-gated SSE streaming; default no-CPR builds fail transport explicitly).
+    - Scoped production provider protocols in the current milestone lane:
+      - `OpenAI` (blocking HTTP + SSE chunk collection via CPR when enabled), reused for protocol-compatible `openrouter`, `inception`, and `zai` factory wiring.
+      - `Anthropic` (Messages API generation and CPR-gated SSE streaming; default no-CPR builds fail transport explicitly), reused for protocol-compatible `alibaba`, `kimi`, and `minimax` factory wiring.
+      - Native Gemini, Copilot OAuth/device flow, Ollama local behavior, provider-specific routing/reasoning payloads, and live-provider validation remain deferred.
 
 7. **`ava_tools` (scoped Milestone 6 core-tool-system slice)**
      - Real tool registry with tool interface, tool metadata/schema exposure, tier/source tracking, middleware chain, and call-id normalization.
      - Rust-aligned retry helper behavior for retryable read-only tools (`MAX_RETRIES=2`, backoff `100ms/200ms`, transient/permanent heuristics).
      - Simplified permission middleware seam with explicit fail-closed behavior when approval is required but no approval bridge exists.
      - Current Milestone 6 tool execution remains intentionally local to `ava_tools`; deeper unification of file/process execution behind `ava_platform` is deferred.
-     - Real core tools for `read`, `write`, `edit` (narrow exact/replace-all strategy set), `bash`, `glob`, `grep`, `git`, and `git_read`.
-      - Honest default registration boundary: `web_fetch`/`web_search` are deferred and not registered as fake defaults in this milestone.
+      - Real core tools for `read`, `write`, `edit` (narrow exact/replace-all strategy set), `bash`, `glob`, `grep`, `git`, and `git_read`.
+      - Headless parity helpers now include process-local `todo_write`/`todo_read` checklist state and a registry-backed `tool_search` discovery tool.
+      - `web_fetch`/`web_search` remain deferred from the default C++ tool surface until a safe native HTTP transport lane is promoted (for example CPR-backed wiring) without widening this milestone slice.
+      - The delegated task/subagent tool route remains deferred in C++ until run/call context threading is promoted through the runtime seam.
 
 8. **`ava_agent` (scoped Milestone 7 runtime-core slice)**
      - Minimal agent runtime loop capable of prompt assembly, provider turn execution, tool-call parsing, tool execution, session transcript mutation, and bounded completion.
@@ -232,6 +240,40 @@ By default, live-provider tests skip cleanly when env gates are not set.
 
 Milestone 33 adds deterministic non-live headless integration proof for the current app boundary. The focused evidence lane exercises workspace selection through `--cwd` and `AVA_WORKING_DIRECTORY`, `--trust` persistence, resume/recovery repair, queued follow-up/post-complete turns, budget-warning NDJSON, and lifecycle/tool/checkpoint event ordering through `run_headless_blocking`. See `cpp/MILESTONE33_BOUNDARIES.md` for the exact scope and remaining deferrals.
 
+C++ adoption Milestone 3 adds a deterministic real-binary dogfood lane for backend-runtime reliability. `ava_m3_runtime` runs the compiled `ava_cli` with isolated HOME/XDG directories, a mock provider response file (`AVA_MOCK_PROVIDER_RESPONSES_FILE`), `--cwd`, `--json`, and real tool execution, then verifies NDJSON tool-call/tool-result/token-usage events plus persisted SQLite session metadata. From the repository root, `scripts/testing/cpp-m3-dogfood.sh` runs the focused CTest lane.
+
+C++ adoption Milestone 6 adds a deterministic non-live end-to-end adoption-evidence lane (`ava_m6_e2e`) that keeps the same compiled-binary + isolated HOME/XDG + mock-provider approach while tightening explicit event-order checks and SQLite/session transcript checks in one focused proof path. From the repository root, `scripts/testing/cpp-m6-e2e.sh` runs this lane. Scope remains evidence-only (`cpp/MILESTONE6_ADOPTION_BOUNDARIES.md`): no live-provider soak by default, no full Rust golden parity claim, and no web/desktop parity claim.
+
+## C++ Adoption Loop Milestone 5 (TUI Product Parity Baseline)
+
+Adoption-loop **Milestone 5** is a terminology convenience for the current C++ TUI product-parity baseline evidence pass. It is distinct from historical **C++ Milestone 5**, which was the `ava_llm` foundation slice.
+
+The current baseline evidence is intentionally scoped to already-landed behavior:
+
+1. Slash-command/operator basics: `/help`, `/clear`, `/model`, graceful unsupported `/compact`, and unknown-command handling.
+2. Input history + navigation seams: Up/Down history draft restore, message range/status visibility, and top/bottom jumps.
+3. Adapter-facing interactive lifecycle visibility/actions: approval/question/plan pending handles, request-id-bearing approve/reject/answer/accept-plan/reject-plan/cancel-question actions, and backend-owned lifecycle settlement.
+4. Child-run observer projection: bounded active/terminal child-run metadata projection without TUI lifecycle ownership.
+5. TUI option parsing evidence: provider/model/max-turns/auto-approve parse success, continue/session conflict rejection, and actionable CLI parse diagnostics.
+6. Interactive dock scope: bounded UTF-8-safe preview projection, priority/sticky selection, cancellation-aware resolver behavior, and fail-closed approval gating when preview data is truncated.
+
+Focused evidence anchors:
+
+- `cpp/tests/unit/ava_tui_state.test.cpp`
+- `docs/archive/cpp-milestones/MILESTONE11_BOUNDARIES.md`
+- `docs/archive/cpp-milestones/MILESTONE12_BOUNDARIES.md`
+- `docs/archive/cpp-milestones/MILESTONE16_BOUNDARIES.md`
+- `docs/archive/cpp-milestones/MILESTONE18_BOUNDARIES.md`
+- `docs/archive/cpp-milestones/MILESTONE19_BOUNDARIES.md`
+- `docs/archive/cpp-milestones/MILESTONE26_BOUNDARIES.md`
+
+Still explicitly deferred in this adoption-loop M5 baseline:
+
+- full Rust TUI modal/sidebar/theme/provider-connect UX
+- broader command-palette/session/model-picker parity
+- richer request payload rendering and child-run modal UX
+- MCP/plugin/custom-tool TUI UX parity and web/desktop UX parity
+
 ## Scope Guardrails
 
 - Milestone 11 = Milestone 10 foundations plus a smallest-honest FTXUI interactive terminal slice.
@@ -243,6 +285,10 @@ Milestone 33 adds deterministic non-live headless integration proof for the curr
 - Milestone 32 = narrow headless CLI/config/tool polish parity (`cpp/MILESTONE32_BOUNDARIES.md`) with `--cwd`/`--agent`/`--trust`, environment defaults, builtin-agent defaults, and core-tool schema/output polish.
 - Milestone 33 = deterministic non-live headless integration proof (`cpp/MILESTONE33_BOUNDARIES.md`) across workspace/trust, resume/recovery, queue turns, budget NDJSON, and event ordering.
 - Milestone 34 = final hardening/evidence milestone for the scoped C++ backend/headless migration lane (`cpp/MILESTONE34_BOUNDARIES.md`) with small production hardening fixes, broader local validation, docs consistency, and residual-risk inventory without new feature breadth.
+- Milestone 35 = narrow permission-classification parity hardening (`cpp/MILESTONE35_BOUNDARIES.md`) with additional critical deletion-path detections plus parser-differential heuristics (IFS, dangerous brace expansion, ANSI-C quoting, unicode whitespace) while full tree-sitter policy parity/persistent rules/audit stores/plugin hooks remain deferred.
+- Milestone 36 = narrow MCP runtime breadth (`cpp/MILESTONE36_BOUNDARIES.md`) with resources/prompts protocol methods and bounded MCP result projection over the existing synchronous transport seam; HTTP/SSE, OAuth, binary blobs, custom TOML tools, and UI wiring remain deferred.
+- Milestone 39 = narrow MCP remote-transport guardrails (`cpp/MILESTONE39_BOUNDARIES.md`) with parsed `http`/`sse` server declarations, safe auth metadata validation, inline-secret rejection, and fail-closed runtime reporting as the pre-execution baseline.
+- Milestone 40 = narrow MCP remote HTTP execution (`cpp/MILESTONE40_BOUNDARIES.md`) with POST-only JSON-RPC over `TransportType::Http` when `AVA_WITH_CPR=ON`; SSE execution, OAuth lifecycle flows, retries/sessions, response batches, and UI/runtime parity remain deferred.
 - Deferred work remains tracked in milestone boundary docs (task-tool parity, MCP/plugin-manager parity, async/background spawn ownership, and broader runtime-streaming parity).
 - The current `ava_agent` slice is intentionally useful but not yet parity with the full Rust runtime behavior stack.
 - No claim of full Rust behavior parity yet for async runtime, auth-heavy surfaces, or broader backend execution stack.

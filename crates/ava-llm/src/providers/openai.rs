@@ -966,7 +966,87 @@ mod tests {
     use super::*;
 
     fn provider() -> OpenAIProvider {
-        OpenAIProvider::new(Arc::new(ConnectionPool::new()), "key", "gpt-5.4")
+        provider_for_model("gpt-5.4")
+    }
+
+    fn provider_for_model(model: &str) -> OpenAIProvider {
+        OpenAIProvider::new(Arc::new(ConnectionPool::new()), "key", model)
+    }
+
+    #[test]
+    fn capabilities_and_thinking_levels_follow_model_gates() {
+        let non_reasoning = provider_for_model("gpt-4.1-mini");
+        assert!(!non_reasoning.supports_thinking());
+        assert!(non_reasoning.thinking_levels().is_empty());
+        assert!(!non_reasoning.supports_xhigh());
+        let non_reasoning_caps = non_reasoning.capabilities();
+        assert!(!non_reasoning_caps.supports_thinking);
+        assert!(!non_reasoning_caps.supports_thinking_levels);
+
+        let reasoning = provider_for_model("gpt-5-mini");
+        assert!(reasoning.supports_thinking());
+        assert_eq!(
+            reasoning.thinking_levels(),
+            &[
+                ThinkingLevel::Low,
+                ThinkingLevel::Medium,
+                ThinkingLevel::High,
+            ]
+        );
+        assert!(!reasoning.supports_xhigh());
+        let reasoning_caps = reasoning.capabilities();
+        assert!(reasoning_caps.supports_thinking);
+        assert!(reasoning_caps.supports_thinking_levels);
+
+        let xhigh_reasoning = provider_for_model("gpt-5.4");
+        assert!(xhigh_reasoning.supports_thinking());
+        assert_eq!(
+            xhigh_reasoning.thinking_levels(),
+            &[
+                ThinkingLevel::Low,
+                ThinkingLevel::Medium,
+                ThinkingLevel::High,
+                ThinkingLevel::Max,
+            ]
+        );
+        assert!(xhigh_reasoning.supports_xhigh());
+        let xhigh_caps = xhigh_reasoning.capabilities();
+        assert!(xhigh_caps.supports_thinking);
+        assert!(xhigh_caps.supports_thinking_levels);
+    }
+
+    #[test]
+    fn request_body_with_max_thinking_falls_back_when_model_lacks_xhigh() {
+        let messages = [Message::new(Role::User, "Think carefully")];
+
+        let chat_body = provider_for_model("gpt-5-mini").build_request_body_with_thinking(
+            &messages,
+            &[],
+            false,
+            ThinkingLevel::Max,
+        );
+        assert_eq!(chat_body["reasoning_effort"], json!("high"));
+
+        let responses_body = provider_for_model("gpt-5-mini")
+            .build_responses_request_body_with_thinking(&messages, &[], false, ThinkingLevel::Max);
+        assert_eq!(responses_body["reasoning"]["effort"], json!("high"));
+    }
+
+    #[test]
+    fn request_body_with_max_thinking_uses_xhigh_for_supported_models() {
+        let messages = [Message::new(Role::User, "Think carefully")];
+
+        let chat_body = provider_for_model("gpt-5.4").build_request_body_with_thinking(
+            &messages,
+            &[],
+            false,
+            ThinkingLevel::Max,
+        );
+        assert_eq!(chat_body["reasoning_effort"], json!("xhigh"));
+
+        let responses_body = provider_for_model("gpt-5.4")
+            .build_responses_request_body_with_thinking(&messages, &[], false, ThinkingLevel::Max);
+        assert_eq!(responses_body["reasoning"]["effort"], json!("xhigh"));
     }
 
     #[test]

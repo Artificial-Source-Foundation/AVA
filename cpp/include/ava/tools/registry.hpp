@@ -18,6 +18,12 @@ struct ToolDefinitionWithSource {
   ToolTier tier{ToolTier::Default};
 };
 
+struct ToolSearchMatch {
+  ava::types::Tool definition;
+  std::string search_hint;
+  int score{0};
+};
+
 class ToolRegistry {
  public:
   ToolRegistry() = default;
@@ -36,6 +42,8 @@ class ToolRegistry {
       const std::vector<ToolTier>& tiers
   ) const;
   [[nodiscard]] std::vector<ToolDefinitionWithSource> list_tools_with_source() const;
+  [[nodiscard]] std::vector<ToolSearchMatch> search_index() const;
+  [[nodiscard]] std::vector<ToolSearchMatch> search_tools(const std::string& query) const;
 
   [[nodiscard]] std::size_t tool_count() const;
   [[nodiscard]] bool has_tool(const std::string& name) const;

@@ -1,5 +1,6 @@
 #include "runtime_run_loop.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -23,6 +24,13 @@ using runtime_detail::estimate_turn_usage;
 using runtime_detail::persist_completion_metadata;
 using runtime_detail::persist_error_metadata;
 using runtime_detail::record_unprocessed_queue_items;
+
+void merge_stream_usage(ava::types::TokenUsage& target, const ava::types::TokenUsage& update) {
+  target.input_tokens = std::max(target.input_tokens, update.input_tokens);
+  target.output_tokens = std::max(target.output_tokens, update.output_tokens);
+  target.cache_read_tokens = std::max(target.cache_read_tokens, update.cache_read_tokens);
+  target.cache_creation_tokens = std::max(target.cache_creation_tokens, update.cache_creation_tokens);
+}
 
 class AgentRunLoop {
  public:
@@ -205,7 +213,11 @@ class AgentRunLoop {
             response::accumulate_tool_call(tool_call_accumulators, *chunk.tool_call);
           }
           if(chunk.usage.has_value()) {
-            stream_turn_usage = chunk.usage;
+            if(stream_turn_usage.has_value()) {
+              merge_stream_usage(*stream_turn_usage, *chunk.usage);
+            } else {
+              stream_turn_usage = chunk.usage;
+            }
           }
           return true;
         }
@@ -402,6 +414,13 @@ class AgentRunLoop {
       return;
     }
     const auto cost = provider_.estimate_cost(usage->input_tokens, usage->output_tokens);
+    emit(AgentEvent{
+        .kind = AgentEventKind::TokenUsage,
+        .turn = result_.turns_used,
+        .message = "token usage",
+        .token_usage = *usage,
+        .token_cost_usd = cost,
+    });
     for(const auto& warning : budget_.observe(*usage, cost)) {
       emit(AgentEvent{
           .kind = AgentEventKind::BudgetWarning,
@@ -410,7 +429,14 @@ class AgentRunLoop {
           .budget_warning = warning,
       });
     }
-    result_.usage = budget_.usage();
+    const auto accumulated_usage = budget_.usage();
+    result_.usage = accumulated_usage;
+    session_.token_usage = nlohmann::json{
+        {"input_tokens", accumulated_usage.input_tokens},
+        {"output_tokens", accumulated_usage.output_tokens},
+        {"cache_read_tokens", accumulated_usage.cache_read_tokens},
+        {"cache_creation_tokens", accumulated_usage.cache_creation_tokens},
+    };
   }
 
   void emit_budget_exhaustion_warning() {

@@ -36,6 +36,7 @@ enum class AgentEventKind {
   ToolCall,
   ToolResult,
   SubagentComplete,
+  TokenUsage,
   BudgetWarning,
   ContextCompacted,
   Checkpoint,
@@ -65,6 +66,8 @@ struct AgentEvent {
   std::optional<std::string> subagent_session_id;
   std::optional<std::string> subagent_description;
   std::optional<std::size_t> subagent_message_count;
+  std::optional<ava::types::TokenUsage> token_usage;
+  std::optional<double> token_cost_usd;
   std::optional<BudgetWarning> budget_warning;
   std::optional<std::size_t> compacted_message_count;
   std::optional<std::size_t> compacted_token_estimate;

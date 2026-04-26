@@ -1,35 +1,14 @@
 #include "state.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
 
+#include "ava/core/string_utils.hpp"
+
 namespace ava::tui {
 namespace {
-
-[[nodiscard]] std::string trim_copy(const std::string& text) {
-  const auto begin = std::find_if_not(text.begin(), text.end(), [](unsigned char ch) {
-    return std::isspace(ch) != 0;
-  });
-  if(begin == text.end()) {
-    return "";
-  }
-
-  const auto end = std::find_if_not(text.rbegin(), text.rend(), [](unsigned char ch) {
-    return std::isspace(ch) != 0;
-  }).base();
-
-  return std::string(begin, end);
-}
-
-[[nodiscard]] std::string lowercase_copy(std::string text) {
-  std::transform(text.begin(), text.end(), text.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  return text;
-}
 
 struct SlashCommand {
   std::string name;
@@ -48,12 +27,12 @@ struct SlashCommand {
 
   const auto split = body.find_first_of(" \t");
   if(split == std::string::npos) {
-    return SlashCommand{.name = lowercase_copy(body), .args = ""};
+    return SlashCommand{.name = ava::core::lowercase_ascii(body), .args = ""};
   }
 
   return SlashCommand{
-      .name = lowercase_copy(body.substr(0, split)),
-      .args = trim_copy(body.substr(split + 1)),
+      .name = ava::core::lowercase_ascii(body.substr(0, split)),
+      .args = ava::core::trim_copy(body.substr(split + 1)),
   };
 }
 
@@ -187,7 +166,7 @@ std::optional<std::string> AppState::take_submission() {
     return std::nullopt;
   }
 
-  const auto trimmed = trim_copy(input_buffer_);
+  const auto trimmed = ava::core::trim_copy(input_buffer_);
   input_buffer_.clear();
   if(trimmed.empty()) {
     status_line_ = "Input is empty.";
@@ -289,6 +268,8 @@ void AppState::apply_agent_event(const ava::agent::AgentEvent& event) {
         append_message(MessageKind::System, "subagent_complete: " + *event.subagent_description);
       }
       status_line_ = "Subagent complete.";
+      return;
+    case ava::agent::AgentEventKind::TokenUsage:
       return;
     case ava::agent::AgentEventKind::BudgetWarning:
       if(event.budget_warning.has_value()) {

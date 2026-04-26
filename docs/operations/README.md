@@ -19,6 +19,7 @@ It is intentionally outside the normal product and contributor quick-start path.
 ## Related Docs
 
 1. [Releasing AVA Desktop](../contributing/releasing.md) - current release build, signing, and GitHub release flow
+2. [C++ M6 Adoption Boundaries](../../cpp/MILESTONE6_ADOPTION_BOUNDARIES.md) - scoped non-live C++ headless adoption evidence and residual-risk guardrails
 
 ## Scope
 

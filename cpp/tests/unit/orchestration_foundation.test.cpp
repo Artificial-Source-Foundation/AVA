@@ -981,6 +981,13 @@ TEST_CASE("runtime composition wires MCP tools into the shared runtime path", "[
   REQUIRE(source.has_value());
   REQUIRE(source->kind == ava::tools::ToolSourceKind::MCP);
   REQUIRE(source->detail == "mock");
+  const auto search_result = composition.registry->execute(ava::types::ToolCall{
+      .id = "call_search_mcp",
+      .name = "tool_search",
+      .arguments = nlohmann::json{{"query", "mcp_mock_echo"}},
+  });
+  REQUIRE_FALSE(search_result.is_error);
+  REQUIRE(search_result.content.find("mcp_mock_echo") != std::string::npos);
 
   const auto run_result = composition.runtime->run(
       composition.session,
@@ -1139,14 +1146,15 @@ TEST_CASE("runtime composition isolates MCP server with blank tool names", "[ava
   });
 
   REQUIRE(composition.mcp_manager != nullptr);
-  REQUIRE(composition.mcp_manager->server_count() == 1);
+  REQUIRE(composition.mcp_manager->server_count() == 2);
   REQUIRE(composition.mcp_manager->has_server("stable"));
-  REQUIRE_FALSE(composition.mcp_manager->has_server("malformed"));
+  REQUIRE(composition.mcp_manager->has_server("malformed"));
 
   const auto malformed_report = composition.mcp_manager->server_report("malformed");
   REQUIRE(malformed_report.has_value());
-  REQUIRE_FALSE(malformed_report->connected);
+  REQUIRE(malformed_report->connected);
   REQUIRE(malformed_report->error.has_value());
+  REQUIRE_THAT(*malformed_report->error, Catch::Matchers::ContainsSubstring("tools/list failed"));
   REQUIRE_THAT(*malformed_report->error, Catch::Matchers::ContainsSubstring("empty or blank"));
 
   REQUIRE(composition.registry->has_tool("mcp_stable_echo"));

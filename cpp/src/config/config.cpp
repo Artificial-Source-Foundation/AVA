@@ -8,6 +8,9 @@ ConfigSummary summary() {
       .trust_store = true,
       .credential_store = true,
       .embedded_model_registry = true,
+      .routing_config = true,
+      .project_state = true,
+      .keychain_redaction = true,
   };
 }
 

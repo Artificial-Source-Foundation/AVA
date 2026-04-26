@@ -1,13 +1,18 @@
 #include "ava/tools/registry.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <exception>
 #include <sstream>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <thread>
 
+#include "ava/core/string_utils.hpp"
 #include "ava/tools/retry.hpp"
+#include "tool_search_scoring.hpp"
 
 namespace ava::tools {
 
@@ -254,6 +259,54 @@ std::vector<ToolDefinitionWithSource> ToolRegistry::list_tools_with_source() con
     return left.definition.name < right.definition.name;
   });
   return out;
+}
+
+std::vector<ToolSearchMatch> ToolRegistry::search_index() const {
+  std::vector<ToolSearchMatch> index;
+  index.reserve(tools_.size());
+
+  for(const auto& [name, tool] : tools_) {
+    index.push_back(ToolSearchMatch{
+        .definition = ava::types::Tool{.name = tool->name(), .description = tool->description(), .parameters = tool->parameters()},
+        .search_hint = tool->search_hint(),
+        .score = 0,
+    });
+  }
+
+  std::sort(index.begin(), index.end(), [](const ToolSearchMatch& left, const ToolSearchMatch& right) {
+    return left.definition.name < right.definition.name;
+  });
+  return index;
+}
+
+std::vector<ToolSearchMatch> ToolRegistry::search_tools(const std::string& query) const {
+  const auto query_lower = ava::core::lowercase_ascii(query);
+
+  std::vector<ToolSearchMatch> matches;
+  matches.reserve(tools_.size());
+
+  for(const auto& [name, tool] : tools_) {
+    const auto hint = tool->search_hint();
+    const auto candidate = ToolSearchMatch{
+        .definition = ava::types::Tool{.name = tool->name(), .description = tool->description(), .parameters = tool->parameters()},
+        .search_hint = hint,
+        .score = 0,
+    };
+    const auto score = score_tool_search_match(candidate, query_lower);
+
+    if(score <= 0) {
+      continue;
+    }
+
+    matches.push_back(ToolSearchMatch{
+        .definition = candidate.definition,
+        .search_hint = hint,
+        .score = score,
+    });
+  }
+
+  sort_tool_search_matches(matches);
+  return matches;
 }
 
 std::size_t ToolRegistry::tool_count() const {

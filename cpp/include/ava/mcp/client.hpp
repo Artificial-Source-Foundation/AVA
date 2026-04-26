@@ -22,6 +22,19 @@ struct McpTool {
   nlohmann::json input_schema{nlohmann::json::object()};
 };
 
+struct McpResource {
+  std::string uri;
+  std::string name;
+  std::string description;
+  std::string mime_type;
+};
+
+struct McpPrompt {
+  std::string name;
+  std::string description;
+  nlohmann::json arguments{nlohmann::json::array()};
+};
+
 class ConnectionHealth {
  public:
   void record_success();
@@ -48,6 +61,10 @@ class McpClient {
   ServerCapabilities initialize();
   std::vector<McpTool> list_tools();
   nlohmann::json call_tool(const std::string& name, const nlohmann::json& arguments);
+  std::vector<McpResource> list_resources();
+  nlohmann::json read_resource(const std::string& uri);
+  std::vector<McpPrompt> list_prompts();
+  nlohmann::json get_prompt(const std::string& name, const nlohmann::json& arguments = nlohmann::json::object());
   void close();
 
  private:
@@ -56,6 +73,8 @@ class McpClient {
   [[nodiscard]] JsonRpcMessage receive_matching_response(std::uint64_t id);
   void apply_error(const JsonRpcMessage& message);
   void require_initialized_with_tools(const char* operation) const;
+  void require_initialized_with_resources(const char* operation) const;
+  void require_initialized_with_prompts(const char* operation) const;
 
   std::unique_ptr<McpTransport> transport_;
   std::string server_name_;

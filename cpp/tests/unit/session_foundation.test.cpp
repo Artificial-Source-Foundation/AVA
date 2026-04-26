@@ -20,6 +20,12 @@ std::filesystem::path temp_root_for_test() {
   return std::filesystem::temp_directory_path() / ("ava_cpp_session_test_" + unique);
 }
 
+void require_owner_only(const std::filesystem::path& path) {
+  const auto permissions = std::filesystem::status(path).permissions();
+  REQUIRE((permissions & std::filesystem::perms::group_all) == std::filesystem::perms::none);
+  REQUIRE((permissions & std::filesystem::perms::others_all) == std::filesystem::perms::none);
+}
+
 }  // namespace
 
 TEST_CASE("session manager persists and loads sessions/messages", "[ava_session]") {
@@ -94,6 +100,27 @@ TEST_CASE("session manager persists and loads sessions/messages", "[ava_session]
   std::filesystem::remove_all(root);
 }
 
+TEST_CASE("session manager keeps sqlite store owner-only", "[ava_session]") {
+  const auto root = temp_root_for_test();
+  std::filesystem::create_directories(root);
+  const auto db_path = root / "sessions.db";
+
+  ava::session::SessionManager manager(db_path);
+  auto session = manager.create();
+  manager.save(session);
+
+  require_owner_only(root);
+  require_owner_only(db_path);
+  for(const auto& sidecar : {std::filesystem::path(db_path.string() + "-wal"), std::filesystem::path(db_path.string() + "-shm")}) {
+    std::error_code ec;
+    if(std::filesystem::exists(sidecar, ec) && !ec) {
+      require_owner_only(sidecar);
+    }
+  }
+
+  std::filesystem::remove_all(root);
+}
+
 TEST_CASE("session manager migrates legacy sqlite schema idempotently", "[ava_session]") {
   const auto root = temp_root_for_test();
   std::filesystem::create_directories(root);
@@ -114,9 +141,9 @@ TEST_CASE("session manager migrates legacy sqlite schema idempotently", "[ava_se
     REQUIRE(rc == SQLITE_OK);
   };
 
-  exec("CREATE TABLE sessions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, metadata TEXT NOT NULL, branch_head TEXT);");
+  exec("CREATE TABLE sessions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, metadata TEXT NOT NULL);");
   exec("CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, timestamp TEXT NOT NULL, parent_id TEXT);");
-  exec("INSERT INTO sessions (id, created_at, updated_at, metadata, branch_head) VALUES ('legacy-session', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '{\"title\":\"legacy\"}', 'legacy-message');");
+  exec("INSERT INTO sessions (id, created_at, updated_at, metadata) VALUES ('legacy-session', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '{\"title\":\"legacy\"}');");
   exec("INSERT INTO messages (id, session_id, role, content, timestamp, parent_id) VALUES ('legacy-message', 'legacy-session', 'user', 'from old schema', '2026-01-01T00:00:00Z', NULL);");
   REQUIRE(sqlite3_close(raw) == SQLITE_OK);
 

@@ -347,12 +347,16 @@ impl AgentMcpRuntime {
             .await;
         self.refresh_shared_tool_sources(shared_tool_sources, &registry, true);
         drop(registry);
-        Ok(self.store_init_result(init).await)
+        let counts = self.store_init_result(init).await;
+        *self.init_state.lock().await = McpInitState::Done;
+        Ok(counts)
     }
 
     pub(super) async fn populate_registry(&self, registry: &mut ToolRegistry) -> (usize, usize) {
         let init = self.build_init_result(registry).await;
-        self.store_init_result(init).await
+        let counts = self.store_init_result(init).await;
+        *self.init_state.lock().await = McpInitState::Done;
+        counts
     }
 
     async fn build_init_result(&self, registry: &mut ToolRegistry) -> MCPInitResult {

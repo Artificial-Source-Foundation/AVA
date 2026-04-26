@@ -234,6 +234,14 @@ TEST_CASE("tui state maps budget and compaction runtime events", "[ava_tui]") {
   REQUIRE(state.status_line() == "Budget warning: 75% used.");
 
   state.apply_agent_event(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::TokenUsage,
+      .token_usage = ava::types::TokenUsage{.input_tokens = 12, .output_tokens = 8},
+      .token_cost_usd = 0.001,
+  });
+  REQUIRE(state.running());
+  REQUIRE(state.status_line() == "Budget warning: 75% used.");
+
+  state.apply_agent_event(ava::agent::AgentEvent{
       .kind = ava::agent::AgentEventKind::ContextCompacted,
       .compacted_message_count = 4,
       .compacted_token_estimate = 1200,
@@ -772,11 +780,20 @@ TEST_CASE("tui state tracks adapter-facing interactive request visibility and cl
           .run_id = "run-1",
       }
   );
+  state.set_interactive_request(
+      ava::control_plane::InteractiveRequestKind::Plan,
+      ava::control_plane::InteractiveRequestHandle{
+          .request_id = "plan-1",
+          .kind = ava::control_plane::InteractiveRequestKind::Plan,
+          .state = ava::control_plane::InteractiveRequestState::Pending,
+          .run_id = "run-1",
+      }
+  );
 
-  REQUIRE(state.interactive_requests().pending_count() == 2);
+  REQUIRE(state.interactive_requests().pending_count() == 3);
   REQUIRE(state.interactive_requests().approval.has_value());
   REQUIRE(state.interactive_requests().question.has_value());
-  REQUIRE_FALSE(state.interactive_requests().plan.has_value());
+  REQUIRE(state.interactive_requests().plan.has_value());
 
   state.clear_interactive_requests();
   REQUIRE(state.interactive_requests().pending_count() == 0);

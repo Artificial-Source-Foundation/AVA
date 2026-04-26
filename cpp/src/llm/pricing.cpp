@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 
+#include "ava/core/string_utils.hpp"
 #include "ava/config/model_registry.hpp"
 
 namespace ava::llm {
@@ -12,14 +13,6 @@ struct PricePoint {
   double input_per_million;
   double output_per_million;
 };
-
-[[nodiscard]] std::string lower(std::string_view value) {
-  std::string out(value);
-  std::transform(out.begin(), out.end(), out.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  return out;
-}
 
 }  // namespace
 
@@ -49,7 +42,7 @@ double estimate_cost_usd(
   } else if(const auto registered_price = ava::config::registry().pricing(std::string(model)); registered_price.has_value()) {
     point = PricePoint{registered_price->first, registered_price->second};
   } else {
-    const auto provider_lower = lower(provider);
+    const auto provider_lower = ava::core::lowercase_ascii(provider);
     if(provider_lower != "openai") {
       return static_cast<double>(input_tokens + output_tokens) * 0.0000005;
     }

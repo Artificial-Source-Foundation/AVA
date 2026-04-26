@@ -12,7 +12,9 @@ namespace ava::mcp {
 
 namespace {
 
-constexpr std::size_t kMaxToolListPages = 64;
+constexpr std::size_t kMaxMcpListPages = 64;
+constexpr std::size_t kMaxMcpOutputChars = 100'000;
+constexpr std::string_view kMcpTruncationMarker = "\n[ava: truncated MCP output to 100000 bytes]";
 
 [[nodiscard]] bool is_empty_or_blank(std::string_view value) {
   if(value.empty()) {
@@ -21,6 +23,21 @@ constexpr std::size_t kMaxToolListPages = 64;
   return std::all_of(value.begin(), value.end(), [](unsigned char ch) {
     return std::isspace(ch) != 0;
   });
+}
+
+[[nodiscard]] bool is_utf8_continuation_byte(unsigned char ch) {
+  return (ch & 0b1100'0000U) == 0b1000'0000U;
+}
+
+[[nodiscard]] std::size_t utf8_prefix_boundary(std::string_view value, std::size_t max_bytes) {
+  if(max_bytes >= value.size()) {
+    return value.size();
+  }
+  auto boundary = max_bytes;
+  while(boundary > 0 && is_utf8_continuation_byte(static_cast<unsigned char>(value[boundary]))) {
+    --boundary;
+  }
+  return boundary == max_bytes ? max_bytes : boundary;
 }
 
 void require_object_result(const nlohmann::json& result, const std::string& operation, ConnectionHealth& health) {
@@ -74,11 +91,145 @@ void require_object_result(const nlohmann::json& result, const std::string& oper
   return tools;
 }
 
+void truncate_large_strings(
+    nlohmann::json& value,
+    ConnectionHealth& health,
+    std::string_view field_name = {},
+    bool binary_payload_field = false
+) {
+  if(value.is_string()) {
+    auto text = value.get<std::string>();
+    if(text.size() > kMaxMcpOutputChars) {
+      if(binary_payload_field) {
+        health.record_terminal_error();
+        throw std::runtime_error(
+            "MCP binary payload field '" + std::string(field_name) + "' exceeded " +
+            std::to_string(kMaxMcpOutputChars) + " bytes"
+        );
+      }
+      const auto max_keep = kMaxMcpOutputChars > kMcpTruncationMarker.size() ? kMaxMcpOutputChars - kMcpTruncationMarker.size() : 0U;
+      const auto keep = utf8_prefix_boundary(text, max_keep);
+      text.resize(keep);
+      text += kMcpTruncationMarker;
+      value = std::move(text);
+    }
+    return;
+  }
+  if(value.is_array()) {
+    for(auto& item : value) {
+      truncate_large_strings(item, health, field_name, binary_payload_field);
+    }
+    return;
+  }
+  if(value.is_object()) {
+    const auto object_type = value.value("type", std::string{});
+    for(auto& item : value.items()) {
+      const auto& key = item.key();
+      if(key == "uri" || key == "mimeType" || key == "type" || key == "role" || key == "name") {
+        continue;
+      }
+      const auto is_binary_field = key == "blob" || (key == "data" && (object_type == "image" || object_type == "audio"));
+      truncate_large_strings(item.value(), health, key, is_binary_field);
+    }
+  }
+}
+
+[[nodiscard]] nlohmann::json bounded_mcp_result(nlohmann::json result, ConnectionHealth& health) {
+  truncate_large_strings(result, health);
+  return result;
+}
+
+[[nodiscard]] std::vector<McpResource> parse_resources(const nlohmann::json& result) {
+  if(!result.contains("resources") || !result.at("resources").is_array()) {
+    throw std::runtime_error("MCP resources/list result must contain a resources array");
+  }
+  std::vector<McpResource> resources;
+  for(const auto& resource : result.at("resources")) {
+    if(!resource.is_object() || !resource.contains("uri") || !resource.at("uri").is_string()) {
+      throw std::runtime_error("MCP resource entry must include a string uri");
+    }
+    if(!resource.contains("name") || !resource.at("name").is_string()) {
+      throw std::runtime_error("MCP resource entry must include a string name");
+    }
+    auto uri = resource.at("uri").get<std::string>();
+    if(is_empty_or_blank(uri)) {
+      throw std::runtime_error("MCP resource uri must not be empty or blank");
+    }
+    auto name = resource.at("name").get<std::string>();
+    if(is_empty_or_blank(name)) {
+      throw std::runtime_error("MCP resource name must not be empty or blank");
+    }
+    resources.push_back(McpResource{
+        .uri = std::move(uri),
+        .name = std::move(name),
+        .description = resource.value("description", std::string{}),
+        .mime_type = resource.value("mimeType", std::string{}),
+    });
+  }
+  return resources;
+}
+
+[[nodiscard]] std::vector<McpPrompt> parse_prompts(const nlohmann::json& result) {
+  if(!result.contains("prompts") || !result.at("prompts").is_array()) {
+    throw std::runtime_error("MCP prompts/list result must contain a prompts array");
+  }
+  std::vector<McpPrompt> prompts;
+  for(const auto& prompt : result.at("prompts")) {
+    if(!prompt.is_object() || !prompt.contains("name") || !prompt.at("name").is_string()) {
+      throw std::runtime_error("MCP prompt entry must include a string name");
+    }
+    auto name = prompt.at("name").get<std::string>();
+    if(is_empty_or_blank(name)) {
+      throw std::runtime_error("MCP prompt name must not be empty or blank");
+    }
+    auto arguments = nlohmann::json::array();
+    if(prompt.contains("arguments")) {
+      if(!prompt.at("arguments").is_array()) {
+        throw std::runtime_error("MCP prompt arguments must be an array when present");
+      }
+      arguments = prompt.at("arguments");
+    }
+    prompts.push_back(McpPrompt{
+        .name = std::move(name),
+        .description = prompt.value("description", std::string{}),
+        .arguments = std::move(arguments),
+    });
+  }
+  return prompts;
+}
+
+void require_array_field_result(const nlohmann::json& result, const std::string& operation, const char* field, ConnectionHealth& health) {
+  require_object_result(result, operation, health);
+  if(!result.contains(field) || !result.at(field).is_array()) {
+    health.record_terminal_error();
+    throw std::runtime_error("MCP " + operation + " result must contain a " + field + " array");
+  }
+}
+
 [[nodiscard]] std::optional<std::string> parse_next_cursor(const nlohmann::json& result) {
   if(!result.contains("nextCursor") || result.at("nextCursor").is_null()) {
     return std::nullopt;
   }
+  if(!result.at("nextCursor").is_string()) {
+    throw std::runtime_error("MCP list nextCursor must be a string when present");
+  }
   return result.at("nextCursor").get<std::string>();
+}
+
+[[nodiscard]] nlohmann::json prompt_get_params(const std::string& name, const nlohmann::json& arguments) {
+  if(!arguments.is_object()) {
+    throw std::runtime_error("MCP prompt arguments must be an object with string values");
+  }
+  nlohmann::json params{{"name", name}};
+  if(!arguments.empty()) {
+    for(const auto& argument : arguments.items()) {
+      if(!argument.value().is_string()) {
+        throw std::runtime_error("MCP prompt arguments must be an object with string values");
+      }
+    }
+    params["arguments"] = arguments;
+  }
+  return params;
 }
 
 }  // namespace
@@ -166,45 +317,129 @@ ServerCapabilities McpClient::initialize() {
 
 std::vector<McpTool> McpClient::list_tools() {
   require_initialized_with_tools("tools/list");
-  try {
-    std::vector<McpTool> tools;
-    std::optional<std::string> cursor;
-    std::size_t pages = 0;
-    do {
-      ++pages;
-      if(pages > kMaxToolListPages) {
-        health_.record_terminal_error();
-        throw std::runtime_error("MCP tools/list exceeded page limit");
-      }
-      nlohmann::json params = nlohmann::json::object();
-      if(cursor.has_value()) {
-        params["cursor"] = *cursor;
-      }
-      const auto result = request("tools/list", std::move(params));
-      require_object_result(result, "tools/list", health_);
-      std::vector<McpTool> page;
-      try {
-        page = parse_tools(result);
-        cursor = parse_next_cursor(result);
-      } catch(const std::runtime_error&) {
-        health_.record_terminal_error();
-        throw;
-      }
-      tools.insert(tools.end(), page.begin(), page.end());
-    } while(cursor.has_value() && !cursor->empty());
-    return tools;
-  } catch(const nlohmann::json::exception& e) {
-    health_.record_terminal_error();
-    throw std::runtime_error(std::string("MCP tools/list response was malformed: ") + e.what());
-  }
+  std::vector<McpTool> tools;
+  std::optional<std::string> cursor;
+  std::size_t pages = 0;
+  do {
+    ++pages;
+    if(pages > kMaxMcpListPages) {
+      health_.record_terminal_error();
+      throw std::runtime_error("MCP tools/list exceeded page limit");
+    }
+    nlohmann::json params = nlohmann::json::object();
+    if(cursor.has_value()) {
+      params["cursor"] = *cursor;
+    }
+    const auto result = request("tools/list", std::move(params));
+    require_object_result(result, "tools/list", health_);
+    std::vector<McpTool> page;
+    try {
+      page = parse_tools(result);
+      cursor = parse_next_cursor(result);
+    } catch(const std::runtime_error&) {
+      health_.record_terminal_error();
+      throw;
+    } catch(const nlohmann::json::exception& e) {
+      health_.record_terminal_error();
+      throw std::runtime_error(std::string("MCP tools/list response was malformed: ") + e.what());
+    }
+    tools.insert(tools.end(), page.begin(), page.end());
+  } while(cursor.has_value());
+  return tools;
 }
 
 nlohmann::json McpClient::call_tool(const std::string& name, const nlohmann::json& arguments) {
   require_initialized_with_tools("tools/call");
-  if(name.empty()) {
-    throw std::runtime_error("MCP tool name must not be empty");
+  if(is_empty_or_blank(name)) {
+    throw std::runtime_error("MCP tool name must not be empty or blank");
   }
-  return request("tools/call", nlohmann::json{{"name", name}, {"arguments", arguments}});
+  return bounded_mcp_result(request("tools/call", nlohmann::json{{"name", name}, {"arguments", arguments}}), health_);
+}
+
+std::vector<McpResource> McpClient::list_resources() {
+  require_initialized_with_resources("resources/list");
+  std::vector<McpResource> resources;
+  std::optional<std::string> cursor;
+  std::size_t pages = 0;
+  do {
+    ++pages;
+    if(pages > kMaxMcpListPages) {
+      health_.record_terminal_error();
+      throw std::runtime_error("MCP resources/list exceeded page limit");
+    }
+    nlohmann::json params = nlohmann::json::object();
+    if(cursor.has_value()) {
+      params["cursor"] = *cursor;
+    }
+    const auto result = request("resources/list", std::move(params));
+    require_object_result(result, "resources/list", health_);
+    std::vector<McpResource> page;
+    try {
+      page = parse_resources(result);
+      cursor = parse_next_cursor(result);
+    } catch(const std::runtime_error&) {
+      health_.record_terminal_error();
+      throw;
+    } catch(const nlohmann::json::exception& e) {
+      health_.record_terminal_error();
+      throw std::runtime_error(std::string("MCP resources/list response was malformed: ") + e.what());
+    }
+    resources.insert(resources.end(), page.begin(), page.end());
+  } while(cursor.has_value());
+  return resources;
+}
+
+nlohmann::json McpClient::read_resource(const std::string& uri) {
+  require_initialized_with_resources("resources/read");
+  if(is_empty_or_blank(uri)) {
+    throw std::runtime_error("MCP resource uri must not be empty or blank");
+  }
+  auto result = request("resources/read", nlohmann::json{{"uri", uri}});
+  require_array_field_result(result, "resources/read", "contents", health_);
+  return bounded_mcp_result(std::move(result), health_);
+}
+
+std::vector<McpPrompt> McpClient::list_prompts() {
+  require_initialized_with_prompts("prompts/list");
+  std::vector<McpPrompt> prompts;
+  std::optional<std::string> cursor;
+  std::size_t pages = 0;
+  do {
+    ++pages;
+    if(pages > kMaxMcpListPages) {
+      health_.record_terminal_error();
+      throw std::runtime_error("MCP prompts/list exceeded page limit");
+    }
+    nlohmann::json params = nlohmann::json::object();
+    if(cursor.has_value()) {
+      params["cursor"] = *cursor;
+    }
+    const auto result = request("prompts/list", std::move(params));
+    require_object_result(result, "prompts/list", health_);
+    std::vector<McpPrompt> page;
+    try {
+      page = parse_prompts(result);
+      cursor = parse_next_cursor(result);
+    } catch(const std::runtime_error&) {
+      health_.record_terminal_error();
+      throw;
+    } catch(const nlohmann::json::exception& e) {
+      health_.record_terminal_error();
+      throw std::runtime_error(std::string("MCP prompts/list response was malformed: ") + e.what());
+    }
+    prompts.insert(prompts.end(), page.begin(), page.end());
+  } while(cursor.has_value());
+  return prompts;
+}
+
+nlohmann::json McpClient::get_prompt(const std::string& name, const nlohmann::json& arguments) {
+  require_initialized_with_prompts("prompts/get");
+  if(is_empty_or_blank(name)) {
+    throw std::runtime_error("MCP prompt name must not be empty or blank");
+  }
+  auto result = request("prompts/get", prompt_get_params(name, arguments));
+  require_array_field_result(result, "prompts/get", "messages", health_);
+  return bounded_mcp_result(std::move(result), health_);
 }
 
 void McpClient::close() {
@@ -213,6 +448,8 @@ void McpClient::close() {
   } catch(...) {
     // Best effort close.
   }
+  initialized_ = false;
+  capabilities_ = ServerCapabilities{};
 }
 
 std::uint64_t McpClient::next_id() {
@@ -313,6 +550,24 @@ void McpClient::require_initialized_with_tools(const char* operation) const {
   }
   if(!capabilities_.tools) {
     throw std::runtime_error(std::string("MCP server '") + server_name_ + "' did not advertise tools capability for " + operation);
+  }
+}
+
+void McpClient::require_initialized_with_resources(const char* operation) const {
+  if(!initialized_) {
+    throw std::runtime_error(std::string("MCP client must be initialized before ") + operation);
+  }
+  if(!capabilities_.resources) {
+    throw std::runtime_error(std::string("MCP server '") + server_name_ + "' did not advertise resources capability for " + operation);
+  }
+}
+
+void McpClient::require_initialized_with_prompts(const char* operation) const {
+  if(!initialized_) {
+    throw std::runtime_error(std::string("MCP client must be initialized before ") + operation);
+  }
+  if(!capabilities_.prompts) {
+    throw std::runtime_error(std::string("MCP server '") + server_name_ + "' did not advertise prompts capability for " + operation);
   }
 }
 

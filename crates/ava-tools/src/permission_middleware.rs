@@ -129,6 +129,15 @@ impl PermissionMiddleware {
         self
     }
 
+    /// Use an externally-owned tool-source map.
+    ///
+    /// This is useful when rebuilding a registry while preserving the source map
+    /// handle used by other runtime components.
+    pub fn with_tool_sources(mut self, tool_sources: SharedToolSources) -> Self {
+        self.tool_sources = tool_sources;
+        self
+    }
+
     /// Return a shared handle to the tool-source map.
     ///
     /// The caller (typically `build_tool_registry` in `ava-agent`) populates this
@@ -142,23 +151,19 @@ impl PermissionMiddleware {
 #[async_trait]
 impl Middleware for PermissionMiddleware {
     async fn before(&self, tool_call: &ToolCall) -> Result<()> {
-        // Set the tool source on the context so the inspector can make
-        // source-aware decisions (e.g. only auto-approve truly built-in tools).
-        {
-            let source = self
-                .tool_sources
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(&tool_call.name)
-                .cloned();
-            self.context.write().await.tool_source = source;
-        }
-
-        let context = self.context.read().await;
+        let source = self
+            .tool_sources
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&tool_call.name)
+            .cloned();
+        let mut context = self.context.read().await.clone();
+        // Keep source provenance local to this inspection so concurrent tool
+        // calls cannot race through the shared InspectionContext.
+        context.tool_source = source;
         let result = self
             .inspector
             .inspect(&tool_call.name, &tool_call.arguments, &context);
-        drop(context);
 
         match result.action {
             ava_permissions::Action::Allow => Ok(()),

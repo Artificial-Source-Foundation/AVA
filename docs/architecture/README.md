@@ -33,11 +33,9 @@ Use these first when deciding where code should live today:
 3. [Canonical shared-backend contract (Milestone 6)](shared-backend-contract-m6.md) - normative command/event/session/queue/delegation contract for cross-surface behavior
 4. [Backend contract exceptions](backend-contract-exceptions.md) - versioned registry of intentional adapter-level contract exceptions
 5. [Backend correction implementation roadmap (Milestone 7)](backend-correction-roadmap-m7.md) - implementation sequencing and adoption order against the canonical contract
-6. [C++ backend/TUI migration plan (C++ Milestone 1)](cpp-backend-tui-migration-plan-m1.md) - staged backend/TUI rewrite plan, target CMake layout, and file-by-file migration order
-7. [C++ contract freeze (C++ Milestone 1)](cpp-contract-freeze-m1.md) - concrete Phase 0 freeze scope, existing fixture anchors, drift risks, and Phase 1 signoff gates
-8. [C++ M1 event-stream parity checklist](cpp-m1-event-stream-parity-checklist.md) - concrete headless JSON output checklist required before Phase 1 C++ work can start
-9. [C++ workspace bootstrap README (Milestone 2)](../../cpp/README.md) - implemented CMake build graph bootstrap and explicit placeholder scope for initial C++ targets
-10. [C++ Milestone 2 boundaries (green-fix pass)](../../cpp/MILESTONE2_BOUNDARIES.md) - scoped M2 bootstrap quality/documentation fixes, verification lane, and explicit deferred boundaries
+6. [C++ contract freeze (C++ Milestone 1)](cpp-contract-freeze-m1.md) - active freeze scope, fixture anchors, drift risks, and signoff gates
+7. [C++ workspace README](../../cpp/README.md) - current scoped C++ backend/headless/TUI workspace documentation and validation lanes
+8. [C++/Rust parity gap audit (Post-M26)](cpp-rust-parity-gap-audit-post-m26.md) - current parity assessment for the scoped C++ lane and remaining non-goal buckets
 
 ## Active Planning
 
@@ -45,10 +43,7 @@ These are current forward-looking planning docs that build on the canonical seam
 
 1. [Agent backend modularization roadmap (Track Milestone 1)](agent-backend-modularization-roadmap-m1.md) - active planning roadmap for modularization hotspots, target owner seams, phased execution order, risks, and validation gates, building on the existing M6/M7 contract baseline
 2. [Plugin boundary checklist](plugin-boundary.md) - future-track note for optional plugin migration work
-3. [C++ backend/TUI migration completion gap audit (Post-M16)](cpp-backend-tui-migration-completion-gap-audit-m16.md) - planning audit of completion-critical gaps, deferred inventory, and RP evidence targets after Milestone 16
-4. [C++ backend/TUI parity contract audit (Post-M16)](cpp-backend-tui-parity-contract-audit-post-m16.md) - planning checklist of scoped backend/headless/TUI contract evidence needed before claiming migration completion
-5. [C++ backend/headless/TUI migration completion roadmap (Post-M16, M17+)](cpp-backend-headless-tui-migration-completion-roadmap-post-m16-m17-plus.md) - durable execution sequence for M17-M20 (interactive terminal-state closure, TUI adapter action harness, child-run cancellation/watchdog, and evidence hardening/deferred-inventory guardrails) with acceptance gates and decision points
-6. [C++/Rust parity gap audit (Post-M26)](cpp-rust-parity-gap-audit-post-m26.md) - current non-web/non-desktop parity audit after M26, identifying remaining C++ completion blockers across tools, permissions, MCP/custom tools, runtime, sessions, providers, TUI, CLI, and config
+3. [C++/Rust parity gap audit (Post-M26)](cpp-rust-parity-gap-audit-post-m26.md) - current non-web/non-desktop parity audit, identifying remaining C++ gaps across tools, permissions, MCP/custom tools, runtime, sessions, providers, TUI, CLI, and config
 
 ## Historical Milestone Artifacts
 
@@ -57,7 +52,8 @@ These are preserved historical planning/audit artifacts that explain why the cur
 Historical archive:
 
 1. [Architecture archive](../archive/architecture/README.md) - milestone snapshots and superseded planning/audit artifacts
-2. [Active backlog](../project/backlog.md) - current pending execution queue derived from milestone analysis and contract work
+2. [C++ milestone archive](../archive/cpp-milestones/) - historical C++ Milestone 2-33 boundary documents; `cpp/MILESTONE34_BOUNDARIES.md` remains the current final scoped boundary
+3. [Active backlog](../project/backlog.md) - current pending execution queue derived from milestone analysis and contract work
 
 ## Reading Rule
 

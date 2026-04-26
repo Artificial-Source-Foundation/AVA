@@ -3,18 +3,9 @@
 #include <algorithm>
 #include <cctype>
 
+#include "ava/core/string_utils.hpp"
+
 namespace ava::llm {
-namespace {
-
-[[nodiscard]] std::string to_lower_ascii(std::string_view value) {
-  std::string lower(value);
-  std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  return lower;
-}
-
-}  // namespace
 
 ProviderError classify_provider_error(
     std::string provider,
@@ -22,7 +13,7 @@ ProviderError classify_provider_error(
     std::string_view body_or_message,
     std::optional<std::uint64_t> retry_after_secs
 ) {
-  const std::string lower = to_lower_ascii(body_or_message);
+  const std::string lower = ava::core::lowercase_ascii(body_or_message);
 
   ProviderError error{
       .kind = ProviderErrorKind::Unknown,

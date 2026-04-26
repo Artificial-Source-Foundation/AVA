@@ -73,6 +73,7 @@ void persist_headless_metadata(
     const std::filesystem::path& workspace_root
 ) {
   session.metadata["headless"]["provider"] = selection.provider;
+  session.metadata["headless"]["credential_provider"] = selection.credential_provider;
   session.metadata["headless"]["model"] = selection.model;
   if(selection.agent.has_value()) {
     session.metadata["headless"]["agent"] = *selection.agent;

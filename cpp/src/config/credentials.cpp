@@ -8,10 +8,30 @@
 #include <map>
 #include <set>
 #include <stdexcept>
+#include <utility>
 
+#include "ava/core/string_utils.hpp"
 #include "ava/platform/filesystem.hpp"
 
 namespace ava::config {
+
+bool is_placeholder_api_key(const std::string& key) {
+  if(key.empty()) {
+    return false;
+  }
+  const std::string lowered = ava::core::lowercase_ascii(key);
+  static const std::set<std::string> kPlaceholders{
+      "your-api-key",
+      "your_api_key",
+      "replace-me",
+      "replace_me",
+      "replace-with-api-key",
+      "replace_with_api_key",
+      "sk-...",
+  };
+  return kPlaceholders.contains(lowered);
+}
+
 namespace {
 
 ava::platform::LocalFileSystem g_filesystem;
@@ -26,31 +46,8 @@ ava::platform::LocalFileSystem g_filesystem;
   return value;
 }
 
-[[nodiscard]] std::string lowercase(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  return value;
-}
-
-[[nodiscard]] bool is_placeholder_key(const std::string& key) {
-  if(key.empty()) {
-    return false;
-  }
-  const std::string lowered = lowercase(key);
-  static const std::set<std::string> kPlaceholders{
-      "your-api-key",
-      "your_api_key",
-      "replace-me",
-      "replace_me",
-      "replace-with-api-key",
-      "replace_with_api_key",
-  };
-  return kPlaceholders.contains(lowered);
-}
-
 [[nodiscard]] bool is_provider_configured(const std::string& provider, const ProviderCredential& credential) {
-  const auto has_key = !credential.api_key.empty() && !is_placeholder_key(credential.api_key);
+  const auto has_key = !credential.api_key.empty() && !is_placeholder_api_key(credential.api_key);
   const auto has_oauth = credential.is_oauth_configured();
   const auto has_base_url = credential.base_url.has_value();
   return has_key || has_oauth || (provider == "ollama" && has_base_url);
@@ -65,7 +62,7 @@ ava::platform::LocalFileSystem g_filesystem;
     trimmed.erase(std::find_if(trimmed.rbegin(), trimmed.rend(), [](unsigned char ch) {
       return !std::isspace(ch);
     }).base(), trimmed.end());
-    if(!trimmed.empty() && !is_placeholder_key(trimmed)) {
+    if(!trimmed.empty() && !is_placeholder_api_key(trimmed)) {
       return trimmed;
     }
   }
@@ -76,18 +73,24 @@ ava::platform::LocalFileSystem g_filesystem;
     const std::string& provider,
     const ProviderCredential* base
 ) {
+  auto credential = base != nullptr ? *base : ProviderCredential{};
+  auto apply_env_api_key = [&credential](const std::string& api_key) {
+    credential.api_key = api_key;
+    credential.oauth_token.reset();
+    credential.oauth_refresh_token.reset();
+    credential.oauth_expires_at.reset();
+    credential.oauth_account_id.reset();
+  };
   const auto provider_key = to_upper_underscore(provider);
   const auto ava_env = "AVA_" + provider_key + "_API_KEY";
   if(const auto override = env_value(ava_env); override.has_value()) {
-    auto credential = base != nullptr ? *base : ProviderCredential{};
-    credential.api_key = *override;
+    apply_env_api_key(*override);
     return credential;
   }
 
   if(const auto standard = standard_env_var(provider); standard.has_value()) {
     if(const auto override = env_value(*standard); override.has_value()) {
-      auto credential = base != nullptr ? *base : ProviderCredential{};
-      credential.api_key = *override;
+      apply_env_api_key(*override);
       return credential;
     }
   }
@@ -150,10 +153,12 @@ CredentialStore CredentialStore::load(const std::filesystem::path& path) {
     store = parsed.get<CredentialStore>();
   } catch(const nlohmann::json::exception&) {
     return {};
+  } catch(const std::runtime_error&) {
+    return {};
   }
 
   for(auto it = store.providers.begin(); it != store.providers.end();) {
-    if(!it->second.is_oauth_configured() && is_placeholder_key(it->second.api_key)) {
+    if(!it->second.is_oauth_configured() && is_placeholder_api_key(it->second.api_key)) {
       it = store.providers.erase(it);
     } else {
       ++it;
@@ -192,6 +197,21 @@ std::optional<ProviderCredential> CredentialStore::get(const std::string& provid
 
 void CredentialStore::set(const std::string& provider, const ProviderCredential& credential) {
   providers[provider] = credential;
+}
+
+void CredentialStore::set_oauth(
+    const std::string& provider,
+    const std::string& access_token,
+    std::optional<std::string> refresh_token,
+    std::optional<std::uint64_t> expires_at,
+    std::optional<std::string> account_id
+) {
+  auto credential = providers.contains(provider) ? providers.at(provider) : ProviderCredential{};
+  credential.oauth_token = access_token;
+  credential.oauth_refresh_token = std::move(refresh_token);
+  credential.oauth_expires_at = expires_at;
+  credential.oauth_account_id = std::move(account_id);
+  providers[provider] = std::move(credential);
 }
 
 bool CredentialStore::remove(const std::string& provider) {
@@ -252,7 +272,7 @@ const std::vector<std::string>& known_providers() {
 }
 
 std::string normalize_provider_name(const std::string& provider) {
-  const auto lower = lowercase(provider);
+  const auto lower = ava::core::lowercase_ascii(provider);
   if(lower == "chatgpt") {
     return "openai";
   }
@@ -286,6 +306,7 @@ std::optional<std::string> standard_env_var(const std::string& provider) {
       {"alibaba", "DASHSCOPE_API_KEY"},
       {"zai", "ZAI_API_KEY"},
       {"kimi", "MOONSHOT_API_KEY"},
+      {"minimax", "MINIMAX_API_KEY"},
   };
 
   if(const auto it = kEnvMap.find(normalized); it != kEnvMap.end()) {
@@ -295,13 +316,24 @@ std::optional<std::string> standard_env_var(const std::string& provider) {
 }
 
 std::optional<std::string> default_base_url_for_provider(const std::string& provider) {
+  const auto lower = ava::core::lowercase_ascii(provider);
+  if(lower == "alibaba-cn") {
+    return "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1";
+  }
+
   const auto normalized = normalize_provider_name(provider);
   static const std::map<std::string, std::string> kBaseUrls{
       {"openai", "https://api.openai.com"},
       {"anthropic", "https://api.anthropic.com"},
       {"openrouter", "https://openrouter.ai/api"},
       {"gemini", "https://generativelanguage.googleapis.com"},
+      {"copilot", "https://api.individual.githubcopilot.com"},
+      {"inception", "https://api.inceptionlabs.ai"},
       {"ollama", "http://localhost:11434"},
+      {"alibaba", "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic/v1"},
+      {"zai", "https://api.z.ai/api/coding/paas/v4"},
+      {"kimi", "https://api.kimi.com/coding/v1"},
+      {"minimax", "https://api.minimax.io/anthropic/v1"},
   };
 
   if(const auto it = kBaseUrls.find(normalized); it != kBaseUrls.end()) {
@@ -341,7 +373,9 @@ void to_json(nlohmann::json& j, const ProviderCredential& value) {
 }
 
 void from_json(const nlohmann::json& j, ProviderCredential& value) {
-  value.api_key = j.value("api_key", "");
+  if(j.contains("api_key") && !j.at("api_key").is_null()) {
+    value.api_key = j.at("api_key").get<std::string>();
+  }
   if(j.contains("base_url") && !j.at("base_url").is_null()) {
     value.base_url = j.at("base_url").get<std::string>();
   }

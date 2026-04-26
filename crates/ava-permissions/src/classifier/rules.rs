@@ -16,12 +16,31 @@ const SHELL_BINARIES: &[&str] = &[
 /// Collect all single-character flags from an argument list.
 ///
 /// Handles both combined flags (`-rf`) and separate flags (`-r -f`).
-fn collect_flags(tokens: &[&str]) -> std::collections::HashSet<char> {
+/// Also recognizes GNU `rm` long-option abbreviations for `--force` and
+/// `--recursive` (for example `--f`, `--fo`, `--r`, `--rec`).
+fn collect_flags(tokens: &[String]) -> std::collections::HashSet<char> {
     let mut flags = std::collections::HashSet::new();
-    for token in tokens.iter().skip(1) {
+    for token in tokens
+        .iter()
+        .skip(1)
+        .map(|token| shell_dequote_token(token))
+    {
+        let token = token.as_str();
         // Stop processing flags at `--` (end-of-options sentinel)
-        if *token == "--" {
+        if token == "--" {
             break;
+        }
+        if let Some(long) = token.strip_prefix("--") {
+            let long = long.split('=').next().unwrap_or(long);
+            if !long.is_empty() {
+                if "force".starts_with(long) {
+                    flags.insert('f');
+                }
+                if "recursive".starts_with(long) {
+                    flags.insert('r');
+                }
+            }
+            continue;
         }
         if let Some(rest) = token.strip_prefix('-') {
             if !rest.is_empty() && !rest.starts_with('-') {
@@ -42,25 +61,48 @@ fn has_recursive_force(flags: &std::collections::HashSet<char>) -> bool {
 /// Strips leading/trailing ASCII quotes and rejects tokens containing
 /// shell metacharacters (`;`, `&&`, `||`, `|`, `` ` ``), env-var
 /// references (`$`), and unicode trickery (zero-width chars).
-fn extract_rm_paths(tokens: &[&str]) -> Vec<String> {
+fn extract_rm_paths(tokens: &[String]) -> Vec<String> {
     let mut paths = Vec::new();
     let mut past_double_dash = false;
-    for token in tokens.iter().skip(1) {
-        if *token == "--" {
+    let mut idx = 1;
+
+    while idx < tokens.len() {
+        let token = tokens[idx].as_str();
+
+        if token == "--" {
             past_double_dash = true;
+            idx += 1;
+            continue;
+        }
+        // Skip redirection operators and their immediate target operands.
+        if is_redirection_operator(token) {
+            idx += 1;
+            if idx < tokens.len() {
+                idx += 1;
+            }
+            continue;
+        }
+        // Skip file descriptor designators in forms like `2>/dev/null`.
+        if token.chars().all(|c| c.is_ascii_digit())
+            && idx + 1 < tokens.len()
+            && is_redirection_operator(tokens[idx + 1].as_str())
+        {
+            idx += 1;
             continue;
         }
         // Before `--`, pure flag tokens are skipped
         if !past_double_dash && token.starts_with('-') {
+            idx += 1;
             continue;
         }
-        // Strip wrapping quotes
-        let stripped = token.trim_matches(|c| c == '"' || c == '\'');
+        // Match shell-visible path tokens, including quoted path components.
+        let stripped = shell_dequote_token(token);
         // Reject tokens that contain shell metacharacters or env-var references
         if stripped
             .chars()
-            .any(|c| matches!(c, ';' | '|' | '`' | '$' | '&'))
+            .any(|c| matches!(c, ';' | '|' | '`' | '$' | '&' | '<' | '>'))
         {
+            idx += 1;
             continue;
         }
         // Reject tokens with zero-width or unusual unicode that could bypass matching
@@ -68,20 +110,218 @@ fn extract_rm_paths(tokens: &[&str]) -> Vec<String> {
             .chars()
             .any(|c| (c as u32) < 0x20 || c == '\u{200b}')
         {
+            idx += 1;
             continue;
         }
         if !stripped.is_empty() {
-            paths.push(stripped.to_string());
+            paths.push(stripped);
         }
+        idx += 1;
     }
     paths
 }
 
+/// Tokenize a shell command conservatively for security matching.
+///
+/// Splits on ASCII whitespace and on redirection operators (`<`, `>`, `<<`, `>>`),
+/// while preserving quoted content as a single token.
+fn tokenize_for_matching(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut chars = input.chars().peekable();
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut escaped = false;
+
+    while let Some(ch) = chars.next() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if !in_single_quote => {
+                current.push(ch);
+                escaped = true;
+            }
+            '&' if !in_single_quote && !in_double_quote && chars.peek() == Some(&'>') => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+                chars.next();
+                if chars.peek() == Some(&'>') {
+                    chars.next();
+                    tokens.push("&>>".to_string());
+                } else {
+                    tokens.push("&>".to_string());
+                }
+            }
+            '\'' if !in_double_quote => {
+                in_single_quote = !in_single_quote;
+                current.push(ch);
+            }
+            '"' if !in_single_quote => {
+                in_double_quote = !in_double_quote;
+                current.push(ch);
+            }
+            '<' | '>' if !in_single_quote && !in_double_quote => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+                if chars
+                    .peek()
+                    .is_some_and(|next| *next == '&' || *next == '|')
+                {
+                    let next = chars.next().unwrap_or_default();
+                    tokens.push(format!("{ch}{next}"));
+                } else if chars.peek() == Some(&ch) {
+                    chars.next();
+                    if chars.peek() == Some(&'&') {
+                        chars.next();
+                        tokens.push(format!("{ch}{ch}&"));
+                    } else {
+                        tokens.push(format!("{ch}{ch}"));
+                    }
+                } else {
+                    tokens.push(ch.to_string());
+                }
+            }
+            c if c.is_ascii_whitespace() && !in_single_quote && !in_double_quote => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    tokens
+}
+
+fn is_redirection_operator(token: &str) -> bool {
+    matches!(
+        token,
+        "<" | ">" | "<<" | ">>" | "<&" | ">&" | ">|" | ">>&" | "&>" | "&>>"
+    )
+}
+
+fn shell_dequote_token(token: &str) -> String {
+    let mut output = String::with_capacity(token.len());
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut escaped = false;
+
+    for ch in token.chars() {
+        if escaped {
+            output.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if !in_single_quote => {
+                escaped = true;
+            }
+            '\'' if !in_double_quote => {
+                in_single_quote = !in_single_quote;
+            }
+            '"' if !in_single_quote => {
+                in_double_quote = !in_double_quote;
+            }
+            _ => output.push(ch),
+        }
+    }
+
+    if escaped {
+        output.push('\\');
+    }
+
+    output
+}
+
+fn shell_binary_name(token: &str) -> String {
+    let dequoted = shell_dequote_token(token);
+    dequoted
+        .rsplit('/')
+        .next()
+        .unwrap_or(dequoted.as_str())
+        .to_string()
+}
+
+fn unwrap_command_tokens(tokens: &[String]) -> &[String] {
+    let mut index = 0;
+    while index < tokens.len() {
+        let binary = shell_binary_name(&tokens[index]);
+        match binary.as_str() {
+            "command" | "exec" | "time" | "nice" | "nohup" | "setsid" => {
+                index += 1;
+                while index < tokens.len() && shell_dequote_token(&tokens[index]).starts_with('-') {
+                    index += 1;
+                }
+            }
+            "env" => {
+                index += 1;
+                while index < tokens.len() {
+                    let token = shell_dequote_token(&tokens[index]);
+                    if token == "--" || token == "-" {
+                        index += 1;
+                        break;
+                    }
+                    if token.contains('=') && !token.starts_with('-') {
+                        index += 1;
+                        continue;
+                    }
+                    if token.starts_with('-') {
+                        index += 1;
+                        continue;
+                    }
+                    break;
+                }
+            }
+            _ => break,
+        }
+    }
+    &tokens[index.min(tokens.len())..]
+}
+
+fn normalize_rm_pattern(path: &str) -> String {
+    let mut components: Vec<&str> = Vec::new();
+    let absolute = path.starts_with('/');
+    for component in path.split('/') {
+        match component {
+            "" | "." => {}
+            ".." => {
+                components.pop();
+            }
+            other => components.push(other),
+        }
+    }
+    let mut normalized = if absolute {
+        "/".to_string()
+    } else {
+        String::new()
+    };
+    normalized.push_str(&components.join("/"));
+    if normalized.len() > 1 && normalized.ends_with('/') {
+        normalized.pop();
+    }
+    normalized
+}
+
 /// Return true if the path (after normalisation) matches a critical prefix.
 fn path_is_critical(path: &str) -> bool {
+    if crate::dangerous_paths::is_dangerous_removal_path(path) {
+        return true;
+    }
+
     // Normalise: collapse multiple slashes, remove trailing slash (except root)
     let normalised = {
-        let mut s = path.trim().to_string();
+        let mut s = normalize_rm_pattern(path.trim());
         // Collapse runs of '/' to a single '/'
         while s.contains("//") {
             s = s.replace("//", "/");
@@ -108,6 +348,12 @@ fn path_is_critical(path: &str) -> bool {
             if rest == "/*" || rest == "*" {
                 return true;
             }
+            if let Some(child) = rest.strip_prefix('/') {
+                let immediate = child.split('/').next().unwrap_or(child);
+                if immediate.chars().any(|ch| matches!(ch, '*' | '?' | '[')) {
+                    return true;
+                }
+            }
         }
     }
 
@@ -132,11 +378,16 @@ fn has_pipe_to_shell(cmd: &str) -> bool {
 pub(super) fn check_blocked_patterns(lower: &str, original: &str) -> Option<String> {
     // rm with recursive+force flags on a critical path
     {
-        let tokens: Vec<&str> = lower.split_ascii_whitespace().collect();
-        if tokens.first().copied() == Some("rm") {
-            let flags = collect_flags(&tokens);
+        let tokens = tokenize_for_matching(lower);
+        let effective_tokens = unwrap_command_tokens(&tokens);
+        if effective_tokens
+            .first()
+            .map(String::as_str)
+            .is_some_and(|token| shell_binary_name(token) == "rm")
+        {
+            let flags = collect_flags(effective_tokens);
             if has_recursive_force(&flags) {
-                for path in extract_rm_paths(&tokens) {
+                for path in extract_rm_paths(effective_tokens) {
                     if path_is_critical(&path) {
                         return Some(format!("rm -rf on critical path: {path}"));
                     }
@@ -187,15 +438,24 @@ pub(super) fn check_blocked_patterns(lower: &str, original: &str) -> Option<Stri
 
     // find -exec rm -rf / find -delete — semantic bypass of the rm block
     // e.g. `find / -exec rm -rf {} +`  or  `find /etc -delete`
-    if lower.starts_with("find ") {
+    let find_tokens = tokenize_for_matching(lower);
+    let effective_find_tokens = unwrap_command_tokens(&find_tokens);
+    if effective_find_tokens
+        .first()
+        .map(String::as_str)
+        .is_some_and(|token| shell_binary_name(token) == "find")
+    {
         // -delete flag recursively removes every matched file/directory
-        let tokens: Vec<&str> = lower.split_ascii_whitespace().collect();
-        if tokens.contains(&"-delete") {
+        let tokens = effective_find_tokens;
+        if tokens.iter().any(|t| shell_dequote_token(t) == "-delete") {
             return Some("find -delete can recursively delete files".to_string());
         }
         // -exec rm with recursive+force is equivalent to rm -rf
-        if lower.contains("-exec") && lower.contains(" rm ") {
-            let rm_idx = tokens.iter().position(|t| *t == "rm");
+        if tokens
+            .iter()
+            .any(|t| matches!(shell_dequote_token(t).as_str(), "-exec" | "-execdir"))
+        {
+            let rm_idx = tokens.iter().position(|t| shell_binary_name(t) == "rm");
             if let Some(idx) = rm_idx {
                 let flags = collect_flags(&tokens[idx..]);
                 if has_recursive_force(&flags) {
@@ -723,11 +983,13 @@ pub(super) fn check_high_risk_patterns(
     let mut tags = vec![SafetyTag::Destructive];
 
     // rm -rf (non-root paths -- root is already blocked)
-    let rm_has_recursive_force = first_word == "rm" && {
-        let tokens: Vec<&str> = lower.split_ascii_whitespace().collect();
-        let flags = collect_flags(&tokens);
-        has_recursive_force(&flags)
-    };
+    let tokens = tokenize_for_matching(lower);
+    let effective_tokens = unwrap_command_tokens(&tokens);
+    let rm_has_recursive_force = effective_tokens
+        .first()
+        .map(String::as_str)
+        .is_some_and(|token| shell_binary_name(token) == "rm")
+        && has_recursive_force(&collect_flags(effective_tokens));
     if rm_has_recursive_force {
         warnings.push("rm -rf can recursively delete files".to_string());
         return Some(CommandClassification {
@@ -1367,6 +1629,10 @@ fn check_path_hijacking(lower: &str) -> Option<CommandClassification> {
 /// Returns High risk classification for commands that could be parsed differently
 /// by our classifier vs. the actual shell, creating a security gap.
 pub(super) fn check_parser_differential(original: &str) -> Option<CommandClassification> {
+    if let Some(blocked) = classify_materialized_parser_differential(original) {
+        return Some(blocked);
+    }
+
     // 1. IFS manipulation: changes word splitting, can make safe-looking commands dangerous.
     if original.contains("IFS=") || original.contains("${IFS") || original.contains("$IFS") {
         return Some(CommandClassification {
@@ -1442,6 +1708,148 @@ pub(super) fn check_parser_differential(original: &str) -> Option<CommandClassif
     }
 
     None
+}
+
+fn classify_materialized_parser_differential(original: &str) -> Option<CommandClassification> {
+    let materialized = materialize_parser_differential(original);
+    if materialized == original {
+        return None;
+    }
+    let lower = materialized.to_ascii_lowercase();
+    check_blocked_patterns(&lower, &materialized).map(|reason| CommandClassification {
+        risk_level: RiskLevel::Critical,
+        tags: vec![SafetyTag::Destructive],
+        warnings: vec![reason.clone()],
+        blocked: true,
+        reason: Some(reason),
+    })
+}
+
+fn materialize_parser_differential(original: &str) -> String {
+    let mut command = original.to_string();
+    command = command.replace("${IFS}", " ").replace("$IFS", " ");
+    if command.to_ascii_lowercase().starts_with("ifs=") {
+        if let Some((_, rest)) = command.split_once(char::is_whitespace) {
+            command = rest.trim_start().to_string();
+        }
+    }
+    command = decode_ansi_c_quoted_fragments(&command);
+    command = command
+        .chars()
+        .map(|ch| {
+            if is_unicode_whitespace_char(ch) {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect();
+    materialize_simple_brace_rm(&command).unwrap_or(command)
+}
+
+fn decode_ansi_c_quoted_fragments(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(start) = rest.find("$'") {
+        output.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        if let Some(end) = after.find('\'') {
+            output.push_str(&decode_ansi_c_fragment(&after[..end]));
+            rest = &after[end + 1..];
+        } else {
+            output.push_str(&rest[start..]);
+            return output;
+        }
+    }
+    output.push_str(rest);
+    output
+}
+
+fn decode_ansi_c_fragment(fragment: &str) -> String {
+    let mut output = String::new();
+    let mut chars = fragment.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            output.push(ch);
+            continue;
+        }
+        match chars.peek().copied() {
+            Some('x') => {
+                chars.next();
+                let hex: String = (0..2)
+                    .filter_map(|_| chars.next_if(|c| c.is_ascii_hexdigit()))
+                    .collect();
+                if let Ok(value) = u8::from_str_radix(&hex, 16) {
+                    output.push(value as char);
+                }
+            }
+            Some('u') | Some('U') => {
+                let width = if chars.next() == Some('u') { 4 } else { 8 };
+                let hex: String = (0..width)
+                    .filter_map(|_| chars.next_if(|c| c.is_ascii_hexdigit()))
+                    .collect();
+                if let Some(value) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+                    output.push(value);
+                }
+            }
+            Some(c @ '0'..='7') => {
+                let mut octal = String::new();
+                octal.push(c);
+                chars.next();
+                for _ in 0..2 {
+                    if let Some(next) = chars.next_if(|c| matches!(c, '0'..='7')) {
+                        octal.push(next);
+                    }
+                }
+                if let Ok(value) = u8::from_str_radix(&octal, 8) {
+                    output.push(value as char);
+                }
+            }
+            Some(other) => {
+                chars.next();
+                output.push(other);
+            }
+            None => output.push('\\'),
+        }
+    }
+    output
+}
+
+fn materialize_simple_brace_rm(command: &str) -> Option<String> {
+    let start = command.find('{')?;
+    let end = command[start..].find('}')? + start;
+    let inner = &command[start + 1..end];
+    let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
+    if parts.len() >= 3 && shell_binary_name(parts[0]) == "rm" {
+        let mut out = String::new();
+        out.push_str(&command[..start]);
+        out.push_str(&parts.join(" "));
+        out.push_str(&command[end + 1..]);
+        return Some(out);
+    }
+    None
+}
+
+fn is_unicode_whitespace_char(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{00A0}'
+            | '\u{1680}'
+            | '\u{2000}'
+            | '\u{2001}'
+            | '\u{2002}'
+            | '\u{2003}'
+            | '\u{2004}'
+            | '\u{2005}'
+            | '\u{2006}'
+            | '\u{2007}'
+            | '\u{2008}'
+            | '\u{2009}'
+            | '\u{200A}'
+            | '\u{202F}'
+            | '\u{205F}'
+            | '\u{3000}'
+    )
 }
 
 fn check_brace_expansion(cmd: &str) -> Option<CommandClassification> {

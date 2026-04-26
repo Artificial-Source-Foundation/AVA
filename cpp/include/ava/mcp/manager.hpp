@@ -50,6 +50,10 @@ class McpManager {
       const std::string& tool_name,
       const nlohmann::json& arguments
   );
+  [[nodiscard]] std::vector<McpResource> list_resources(const std::string& server_name);
+  [[nodiscard]] nlohmann::json read_resource(const std::string& server_name, const std::string& uri);
+  [[nodiscard]] std::vector<McpPrompt> list_prompts(const std::string& server_name);
+  [[nodiscard]] nlohmann::json get_prompt(const std::string& server_name, const std::string& name, const nlohmann::json& arguments = nlohmann::json::object());
 
   void shutdown() noexcept;
 

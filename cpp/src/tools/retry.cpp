@@ -5,16 +5,20 @@
 #include <cctype>
 #include <string>
 
+#include "ava/core/string_utils.hpp"
+
 namespace ava::tools::retry {
 
 namespace {
 
-constexpr std::array<std::string_view, 5> kRetryableTools = {
+constexpr std::array<std::string_view, 7> kRetryableTools = {
     "read",
     "glob",
     "grep",
     "git",
     "git_read",
+    "web_fetch",
+    "web_search",
 };
 
 constexpr std::array<std::chrono::milliseconds, 2> kBackoffDurations = {
@@ -22,7 +26,7 @@ constexpr std::array<std::chrono::milliseconds, 2> kBackoffDurations = {
     std::chrono::milliseconds(200),
 };
 
-constexpr std::array<std::string_view, 20> kTransientPatterns = {
+constexpr std::array<std::string_view, 23> kTransientPatterns = {
     "permission denied",
     "connection refused",
     "connection reset",
@@ -43,6 +47,9 @@ constexpr std::array<std::string_view, 20> kTransientPatterns = {
     "503",
     "504",
     "eagain",
+    "could not resolve host",
+    "temporary failure in name resolution",
+    "name or service not known",
 };
 
 constexpr std::array<std::string_view, 11> kPermanentPatterns = {
@@ -59,14 +66,6 @@ constexpr std::array<std::string_view, 11> kPermanentPatterns = {
     "missing required",
 };
 
-[[nodiscard]] std::string lowercase(std::string_view value) {
-  std::string out(value);
-  std::transform(out.begin(), out.end(), out.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  return out;
-}
-
 }  // namespace
 
 bool is_retryable_tool(std::string_view tool_name) {
@@ -74,7 +73,7 @@ bool is_retryable_tool(std::string_view tool_name) {
 }
 
 bool is_transient_error(std::string_view error_message) {
-  const auto lower = lowercase(error_message);
+  const auto lower = ava::core::lowercase_ascii(error_message);
 
   for(const auto& pattern : kPermanentPatterns) {
     if(lower.find(pattern) != std::string::npos) {

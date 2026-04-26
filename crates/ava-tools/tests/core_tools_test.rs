@@ -543,6 +543,10 @@ fn core_tools_are_registered() {
         "web_search should be registered"
     );
     assert!(names.contains(&"git"), "git should be registered");
+    assert!(
+        names.contains(&"tool_search"),
+        "tool_search should be registered"
+    );
 }
 
 #[test]
@@ -554,11 +558,11 @@ fn default_tools_gives_9_tools() {
     register_default_tools(&mut registry, Arc::new(StandardPlatform));
 
     let all = registry.list_tools();
-    assert_eq!(
-        all.len(),
-        9,
-        "default tier should have exactly 9 tools, got: {:?}",
-        all.iter().map(|t| t.name.as_str()).collect::<Vec<_>>()
+    assert_eq!(all.len(), 10, "expected 9 default tools + tool_search");
+    let all_names: Vec<&str> = all.iter().map(|t| t.name.as_str()).collect();
+    assert!(
+        all_names.contains(&"tool_search"),
+        "tool_search should be registered"
     );
 
     let default_only = registry.list_tools_for_tiers(&[ToolTier::Default]);
@@ -581,6 +585,17 @@ fn default_tools_gives_9_tools() {
             "{expected} should be in default tools"
         );
     }
+    assert!(
+        !names.contains(&"tool_search"),
+        "tool_search should not be in default tier"
+    );
+
+    let deferred_only = registry.list_tools_for_tiers(&[ToolTier::Deferred]);
+    assert_eq!(deferred_only.len(), 1);
+    assert_eq!(deferred_only[0].name, "tool_search");
+
+    let deferred_names = registry.list_deferred_tool_names();
+    assert_eq!(deferred_names, vec!["tool_search"]);
 }
 
 #[test]
@@ -594,6 +609,26 @@ fn extended_tier_is_empty() {
     // Extended tier should be empty — extended tools were removed
     let extended_only = registry.list_tools_for_tiers(&[ToolTier::Extended]);
     assert_eq!(extended_only.len(), 0, "extended tier should be empty");
+}
+
+#[tokio::test]
+async fn deferred_tool_search_is_searchable_by_hint() {
+    use ava_tools::core::register_default_tools;
+    use ava_tools::registry::ToolRegistry;
+
+    let mut registry = ToolRegistry::new();
+    register_default_tools(&mut registry, Arc::new(StandardPlatform));
+
+    let result = registry
+        .execute(ava_types::ToolCall {
+            id: "call_1".to_string(),
+            name: "tool_search".to_string(),
+            arguments: json!({ "query": "terminal" }),
+        })
+        .await
+        .expect("tool_search executes");
+
+    assert!(result.content.contains("bash"));
 }
 
 #[tokio::test]

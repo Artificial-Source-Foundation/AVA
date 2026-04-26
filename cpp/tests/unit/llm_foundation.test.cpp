@@ -2,13 +2,26 @@
 #include <catch2/catch_approx.hpp>
 
 #include <chrono>
+#include <cstdlib>
+#include <cstdint>
+#include <optional>
+#include <stdexcept>
+#include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
+#if AVA_WITH_CPR
+#include <cpr/cpr.h>
+#endif
+
+#include "ava/core/string_utils.hpp"
 #include "ava/llm/llm.hpp"
 #include "ava/llm/providers/anthropic_protocol.hpp"
 #include "ava/llm/providers/anthropic_provider.hpp"
 #include "ava/llm/providers/openai_protocol.hpp"
 #include "ava/llm/providers/openai_provider.hpp"
+#include "sse_utils.hpp"
 
 namespace {
 
@@ -40,6 +53,146 @@ public:
 private:
   bool supports_thinking_;
 };
+
+class EnvGuard {
+public:
+  explicit EnvGuard(std::vector<std::string> names) : names_(std::move(names)) {
+    for(const auto& name : names_) {
+      if(const char* value = std::getenv(name.c_str()); value != nullptr) {
+        previous_.push_back({name, std::string(value)});
+      } else {
+        previous_.push_back({name, std::nullopt});
+      }
+      unsetenv(name.c_str());
+    }
+  }
+
+  ~EnvGuard() {
+    for(const auto& [name, value] : previous_) {
+      if(value.has_value()) {
+        setenv(name.c_str(), value->c_str(), 1);
+      } else {
+        unsetenv(name.c_str());
+      }
+    }
+  }
+
+  EnvGuard(const EnvGuard&) = delete;
+  EnvGuard& operator=(const EnvGuard&) = delete;
+
+private:
+  std::vector<std::string> names_;
+  std::vector<std::pair<std::string, std::optional<std::string>>> previous_;
+};
+
+TEST_CASE("trim_ascii_view removes surrounding ASCII whitespace", "[ava_llm]") {
+  REQUIRE(ava::core::trim_ascii_view("hello") == "hello");
+  REQUIRE(ava::core::trim_ascii_view(" \t hello world \r\n") == "hello world");
+  REQUIRE(ava::core::trim_ascii_view("\n\t\r ").empty());
+}
+
+#if AVA_WITH_CPR
+TEST_CASE("provider retry-after parser handles ms, seconds, and reset timestamp hints", "[ava_llm]") {
+  const cpr::Header ms_priority_headers{
+      {"retry-after", "15"},
+      {"retry-after-ms", "1500"},
+  };
+  const auto parsed_ms_priority = ava::llm::providers::parse_retry_after_secs(ms_priority_headers);
+  REQUIRE(parsed_ms_priority.has_value());
+  REQUIRE(*parsed_ms_priority == 2);
+
+  const cpr::Header valid_seconds_headers{
+      {"Date", "Wed, 26 Jun 2024 12:00:00 GMT"},
+      {"ReTrY-AfTeR", " 15 "},
+  };
+  const auto parsed_seconds = ava::llm::providers::parse_retry_after_secs(valid_seconds_headers);
+  REQUIRE(parsed_seconds.has_value());
+  REQUIRE(*parsed_seconds == 15);
+
+  const auto now_epoch =
+      std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch());
+  const auto now_secs = now_epoch.count() > 0 ? static_cast<std::uint64_t>(now_epoch.count()) : 0U;
+
+  const auto parsed_reset = ava::llm::providers::parse_retry_after_secs(
+      cpr::Header{{"x-ratelimit-reset", std::to_string(now_secs + 3)}}
+  );
+  REQUIRE(parsed_reset.has_value());
+  REQUIRE(*parsed_reset <= 3);
+  REQUIRE(*parsed_reset >= 1);
+
+  const auto parsed_past_reset = ava::llm::providers::parse_retry_after_secs(
+      cpr::Header{{"x-ratelimit-reset", std::to_string(now_secs > 0 ? now_secs - 1 : 0U)}}
+  );
+  REQUIRE(parsed_past_reset.has_value());
+  REQUIRE(*parsed_past_reset == 0);
+
+  const auto parsed_seconds_fallback = ava::llm::providers::parse_retry_after_secs(
+      cpr::Header{{"retry-after-ms", "NaN"}, {"retry-after", "7"}}
+  );
+  REQUIRE(parsed_seconds_fallback.has_value());
+  REQUIRE(*parsed_seconds_fallback == 7);
+
+  const auto parsed_reset_fallback = ava::llm::providers::parse_retry_after_secs(
+      cpr::Header{{"retry-after", "NaN"}, {"x-ratelimit-reset", std::to_string(now_secs + 2)}}
+  );
+  REQUIRE(parsed_reset_fallback.has_value());
+  REQUIRE(*parsed_reset_fallback <= 2);
+  REQUIRE(*parsed_reset_fallback >= 1);
+
+  REQUIRE_FALSE(ava::llm::providers::parse_retry_after_secs(cpr::Header{{"retry-after", "2.5"}}).has_value());
+  REQUIRE_FALSE(ava::llm::providers::parse_retry_after_secs(cpr::Header{{"retry-after", " "}}).has_value());
+  REQUIRE_FALSE(ava::llm::providers::parse_retry_after_secs(cpr::Header{{"retry-after-ms", " "}}).has_value());
+  REQUIRE_FALSE(ava::llm::providers::parse_retry_after_secs(cpr::Header{{"x-request-id", "req_123"}}).has_value());
+}
+#endif
+
+TEST_CASE("SSE event buffer handles split CRLF and multiline payloads", "[ava_llm]") {
+  ava::llm::providers::SseEventBuffer buffer;
+  std::vector<std::string> payloads;
+
+  REQUIRE(buffer.append("event: message\r", [&](std::string_view payload) {
+    payloads.emplace_back(payload);
+    return true;
+  }));
+  REQUIRE(payloads.empty());
+
+  REQUIRE(buffer.append("\ndata: {\"a\":1}\r\ndata: {\"b\":2}\r\n\r\n", [&](std::string_view payload) {
+    payloads.emplace_back(payload);
+    return true;
+  }));
+
+  REQUIRE(payloads == std::vector<std::string>{"{\"a\":1}\n{\"b\":2}"});
+}
+
+TEST_CASE("SSE event buffer stops when payload handler returns false", "[ava_llm]") {
+  ava::llm::providers::SseEventBuffer buffer;
+  std::size_t calls = 0;
+
+  REQUIRE_FALSE(buffer.append("data: one\n\ndata: two\n\n", [&](std::string_view) {
+    ++calls;
+    return false;
+  }));
+  REQUIRE(calls == 1);
+}
+
+TEST_CASE("SSE event buffer flushes partial payloads and bounds oversized events", "[ava_llm]") {
+  ava::llm::providers::SseEventBuffer buffer;
+  std::vector<std::string> payloads;
+
+  REQUIRE(buffer.append("data: partial", [&](std::string_view payload) {
+    payloads.emplace_back(payload);
+    return true;
+  }));
+  REQUIRE(payloads.empty());
+  REQUIRE(buffer.flush([&](std::string_view payload) {
+    payloads.emplace_back(payload);
+    return true;
+  }));
+  REQUIRE(payloads == std::vector<std::string>{"partial"});
+
+  ava::llm::providers::SseEventBuffer oversized;
+  REQUIRE_THROWS_AS(oversized.append(std::string(4 * 1024 * 1024 + 1, 'x'), nullptr), std::runtime_error);
+}
 
 }  // namespace
 
@@ -230,13 +383,66 @@ TEST_CASE("openai thinking config clamps oversized quantitative budgets", "[ava_
   REQUIRE(result.applied.budget_tokens == 8192);
 }
 
-TEST_CASE("factory selects openai + anthropic and stubs deferred providers", "[ava_llm]") {
+TEST_CASE("openai reasoning models expose thinking support", "[ava_llm]") {
+  const ava::llm::OpenAiProvider provider{"o3-mini", "test-key", "https://api.openai.com", std::nullopt};
+
+  REQUIRE(provider.supports_thinking());
+  REQUIRE_FALSE(provider.thinking_levels().empty());
+}
+
+TEST_CASE("openai non-xhigh reasoning models exclude max thinking level", "[ava_llm]") {
+  const ava::llm::OpenAiProvider provider{"gpt-5-mini", "test-key", "https://api.openai.com", std::nullopt};
+
+  REQUIRE(
+      provider.thinking_levels()
+      == std::vector<ava::types::ThinkingLevel>{
+          ava::types::ThinkingLevel::Low,
+          ava::types::ThinkingLevel::Medium,
+          ava::types::ThinkingLevel::High,
+      }
+  );
+}
+
+TEST_CASE("openai xhigh-capable reasoning models include max thinking level", "[ava_llm]") {
+  const ava::llm::OpenAiProvider provider{"gpt-5.3-codex", "test-key", "https://api.openai.com", std::nullopt};
+
+  REQUIRE(
+      provider.thinking_levels()
+      == std::vector<ava::types::ThinkingLevel>{
+          ava::types::ThinkingLevel::Low,
+          ava::types::ThinkingLevel::Medium,
+          ava::types::ThinkingLevel::High,
+          ava::types::ThinkingLevel::Max,
+      }
+  );
+}
+
+TEST_CASE("openai capabilities mirror model-gated thinking support", "[ava_llm]") {
+  const ava::llm::OpenAiProvider provider{"gpt-4.1-mini", "test-key", "https://api.openai.com", std::nullopt};
+
+  const auto caps = provider.capabilities();
+  const auto supports_thinking = provider.supports_thinking();
+  const auto supports_thinking_levels = !provider.thinking_levels().empty();
+
+  REQUIRE_FALSE(supports_thinking);
+  REQUIRE_FALSE(supports_thinking_levels);
+  REQUIRE(caps.supports_thinking == supports_thinking);
+  REQUIRE(caps.supports_thinking_levels == supports_thinking_levels);
+}
+
+TEST_CASE("factory selects implemented API provider families and stubs deferred providers", "[ava_llm]") {
   ava::config::CredentialStore store;
   store.set("openai", ava::config::ProviderCredential{.api_key = "test-key"});
   store.set(
       "anthropic",
       ava::config::ProviderCredential{.api_key = "anthropic-key", .base_url = "https://anthropic.example"}
   );
+  store.set("openrouter", ava::config::ProviderCredential{.api_key = "openrouter-key"});
+  store.set("inception", ava::config::ProviderCredential{.api_key = "inception-key"});
+  store.set("zai", ava::config::ProviderCredential{.api_key = "zai-key"});
+  store.set("alibaba", ava::config::ProviderCredential{.api_key = "alibaba-key"});
+  store.set("kimi", ava::config::ProviderCredential{.api_key = "kimi-key"});
+  store.set("minimax", ava::config::ProviderCredential{.api_key = "minimax-key"});
 
   const auto openai = ava::llm::create_provider("openai", "gpt-4.1-mini", store);
   REQUIRE(openai->provider_kind() == ava::llm::ProviderKind::OpenAI);
@@ -248,7 +454,270 @@ TEST_CASE("factory selects openai + anthropic and stubs deferred providers", "[a
   REQUIRE(anthropic->provider_kind() == ava::llm::ProviderKind::Anthropic);
   REQUIRE(anthropic->model_name() == "claude-sonnet-4-6");
 
+  const auto openrouter = ava::llm::create_provider("openrouter", "openai/gpt-4.1-mini", store);
+  REQUIRE(openrouter->provider_kind() == ava::llm::ProviderKind::OpenRouter);
+
+  const auto inception = ava::llm::create_provider("inception", "mercury-coder-small", store);
+  REQUIRE(inception->provider_kind() == ava::llm::ProviderKind::Inception);
+
+  const auto zai = ava::llm::create_provider("zai", "glm-4.5", store);
+  REQUIRE(zai->provider_kind() == ava::llm::ProviderKind::OpenAI);
+
+  const auto alibaba = ava::llm::create_provider("alibaba", "qwen3-coder-plus", store);
+  REQUIRE(alibaba->provider_kind() == ava::llm::ProviderKind::Anthropic);
+
+  const auto kimi = ava::llm::create_provider("kimi", "kimi-k2", store);
+  REQUIRE(kimi->provider_kind() == ava::llm::ProviderKind::Anthropic);
+
+  const auto minimax = ava::llm::create_provider("minimax", "minimax-m1", store);
+  REQUIRE(minimax->provider_kind() == ava::llm::ProviderKind::Anthropic);
+
   REQUIRE_THROWS_AS(ava::llm::create_provider("gemini", "gemini-2.5-pro", store), ava::llm::ProviderException);
+}
+
+TEST_CASE("factory resolves mixed-case aliases and rejects placeholder alias env keys", "[ava_llm]") {
+  EnvGuard env({"OPENAI_API_KEY", "AVA_OPENAI_API_KEY", "AVA_CHATGPT_API_KEY"});
+
+  ava::config::CredentialStore alias_store;
+  alias_store.set("chatgpt", ava::config::ProviderCredential{.api_key = "alias-key"});
+
+  const auto alias = ava::llm::create_provider("ChatGPT", "gpt-4.1-mini", alias_store);
+  REQUIRE(alias->provider_kind() == ava::llm::ProviderKind::OpenAI);
+
+  ava::config::CredentialStore raw_alias_store;
+  raw_alias_store.set("ChatGPT", ava::config::ProviderCredential{.api_key = "raw-alias-key"});
+  const auto raw_alias = ava::llm::create_provider("ChatGPT", "gpt-4.1-mini", raw_alias_store);
+  REQUIRE(raw_alias->provider_kind() == ava::llm::ProviderKind::OpenAI);
+
+  setenv("AVA_CHATGPT_API_KEY", "replace-me", 1);
+  ava::config::CredentialStore empty_store;
+  REQUIRE_THROWS_AS(ava::llm::create_provider("ChatGPT", "gpt-4.1-mini", empty_store), ava::llm::ProviderException);
+
+  setenv("AVA_CHATGPT_API_KEY", "sk-...", 1);
+  REQUIRE_THROWS_AS(ava::llm::create_provider("ChatGPT", "gpt-4.1-mini", empty_store), ava::llm::ProviderException);
+}
+
+TEST_CASE("factory alias api keys clear oauth fields from the same alias credential", "[ava_llm]") {
+  EnvGuard env({"OPENAI_API_KEY", "AVA_OPENAI_API_KEY", "AVA_CHATGPT_API_KEY"});
+
+  ava::config::CredentialStore store;
+  store.set(
+      "openai",
+      ava::config::ProviderCredential{
+          .oauth_token = "canonical-oauth-token",
+          .oauth_refresh_token = "canonical-refresh-token",
+          .oauth_expires_at = 4'102'444'800ULL,
+          .oauth_account_id = "canonical-account",
+      }
+  );
+  store.set(
+      "chatgpt",
+      ava::config::ProviderCredential{
+          .api_key = "alias-key",
+          .oauth_token = "alias-oauth-token",
+          .oauth_refresh_token = "alias-refresh-token",
+          .oauth_expires_at = 4'102'444'801ULL,
+          .oauth_account_id = "alias-account",
+      }
+  );
+
+  const auto merged = ava::llm::resolve_credential_for_provider_for_testing(store, "chatgpt");
+  REQUIRE(merged.has_value());
+  REQUIRE(merged->api_key == "alias-key");
+  REQUIRE_FALSE(merged->oauth_token.has_value());
+  REQUIRE_FALSE(merged->oauth_refresh_token.has_value());
+  REQUIRE_FALSE(merged->oauth_expires_at.has_value());
+  REQUIRE_FALSE(merged->oauth_account_id.has_value());
+}
+
+TEST_CASE("factory placeholder alias api keys preserve canonical oauth credentials", "[ava_llm]") {
+  EnvGuard env({"OPENAI_API_KEY", "AVA_OPENAI_API_KEY", "AVA_CHATGPT_API_KEY"});
+
+  ava::config::CredentialStore store;
+  store.set(
+      "openai",
+      ava::config::ProviderCredential{
+          .oauth_token = "canonical-oauth-token",
+          .oauth_refresh_token = "canonical-refresh-token",
+          .oauth_expires_at = 4'102'444'800ULL,
+          .oauth_account_id = "canonical-account",
+      }
+  );
+  store.set("chatgpt", ava::config::ProviderCredential{.api_key = "replace-me"});
+
+  const auto merged = ava::llm::resolve_credential_for_provider_for_testing(store, "chatgpt");
+  REQUIRE(merged.has_value());
+  REQUIRE(merged->api_key.empty());
+  REQUIRE(merged->oauth_token == std::optional<std::string>{"canonical-oauth-token"});
+  REQUIRE(merged->oauth_refresh_token == std::optional<std::string>{"canonical-refresh-token"});
+  REQUIRE(merged->oauth_expires_at == std::optional<std::uint64_t>{4'102'444'800ULL});
+  REQUIRE(merged->oauth_account_id == std::optional<std::string>{"canonical-account"});
+
+  const auto provider = ava::llm::create_provider("chatgpt", "gpt-4.1-mini", store);
+  REQUIRE(provider->provider_kind() == ava::llm::ProviderKind::OpenAI);
+}
+
+TEST_CASE("factory alias placeholder api key can still provide oauth credentials", "[ava_llm]") {
+  EnvGuard env({"OPENAI_API_KEY", "AVA_OPENAI_API_KEY", "AVA_CHATGPT_API_KEY"});
+
+  ava::config::CredentialStore store;
+  store.set(
+      "chatgpt",
+      ava::config::ProviderCredential{
+          .api_key = "replace-me",
+          .oauth_token = "alias-oauth-token",
+          .oauth_refresh_token = "alias-refresh-token",
+          .oauth_expires_at = 4'102'444'800ULL,
+          .oauth_account_id = "alias-account",
+      }
+  );
+
+  const auto merged = ava::llm::resolve_credential_for_provider_for_testing(store, "chatgpt");
+
+  REQUIRE(merged.has_value());
+  REQUIRE(merged->api_key.empty());
+  REQUIRE(merged->oauth_token == std::optional<std::string>{"alias-oauth-token"});
+  REQUIRE(merged->oauth_refresh_token == std::optional<std::string>{"alias-refresh-token"});
+  REQUIRE(merged->oauth_expires_at == std::optional<std::uint64_t>{4'102'444'800ULL});
+  REQUIRE(merged->oauth_account_id == std::optional<std::string>{"alias-account"});
+}
+
+TEST_CASE("factory env api key precedence is standard canonical then alias specific", "[ava_llm]") {
+  EnvGuard env({"OPENAI_API_KEY", "AVA_OPENAI_API_KEY", "AVA_CHATGPT_API_KEY"});
+
+  ava::config::CredentialStore empty_store;
+  setenv("OPENAI_API_KEY", "standard-env-key", 1);
+  setenv("AVA_OPENAI_API_KEY", "canonical-env-key", 1);
+  setenv("AVA_CHATGPT_API_KEY", "alias-env-key", 1);
+
+  const auto alias_wins = ava::llm::resolve_credential_for_provider_for_testing(empty_store, "chatgpt");
+  REQUIRE(alias_wins.has_value());
+  REQUIRE(alias_wins->api_key == "alias-env-key");
+  REQUIRE_FALSE(alias_wins->oauth_token.has_value());
+
+  unsetenv("AVA_CHATGPT_API_KEY");
+  const auto canonical_wins = ava::llm::resolve_credential_for_provider_for_testing(empty_store, "chatgpt");
+  REQUIRE(canonical_wins.has_value());
+  REQUIRE(canonical_wins->api_key == "canonical-env-key");
+  REQUIRE_FALSE(canonical_wins->oauth_token.has_value());
+
+  unsetenv("AVA_OPENAI_API_KEY");
+  const auto standard_used = ava::llm::resolve_credential_for_provider_for_testing(empty_store, "chatgpt");
+  REQUIRE(standard_used.has_value());
+  REQUIRE(standard_used->api_key == "standard-env-key");
+  REQUIRE_FALSE(standard_used->oauth_token.has_value());
+}
+
+TEST_CASE("factory env api key overrides alias metadata while preserving non-auth fields", "[ava_llm]") {
+  EnvGuard env({"OPENAI_API_KEY", "AVA_OPENAI_API_KEY", "AVA_CHATGPT_API_KEY"});
+  setenv("OPENAI_API_KEY", "standard-env-key", 1);
+
+  ava::config::CredentialStore store;
+  store.set(
+      "chatgpt",
+      ava::config::ProviderCredential{
+          .base_url = "https://proxy.example",
+          .org_id = "org-123",
+          .litellm_compatible = true,
+      }
+  );
+
+  const auto merged = ava::llm::resolve_credential_for_provider_for_testing(store, "chatgpt");
+
+  REQUIRE(merged.has_value());
+  REQUIRE(merged->api_key == "standard-env-key");
+  REQUIRE(merged->base_url == std::optional<std::string>{"https://proxy.example"});
+  REQUIRE(merged->org_id == std::optional<std::string>{"org-123"});
+  REQUIRE(merged->litellm_compatible == std::optional<bool>{true});
+}
+
+TEST_CASE("factory alias metadata overrides canonical provider metadata", "[ava_llm]") {
+  EnvGuard env({"OPENAI_API_KEY", "AVA_OPENAI_API_KEY", "AVA_CHATGPT_API_KEY"});
+
+  ava::config::CredentialStore store;
+  store.set(
+      "openai",
+      ava::config::ProviderCredential{
+          .api_key = "canonical-key",
+          .base_url = "https://canonical.example",
+          .org_id = "canonical-org",
+      }
+  );
+  store.set(
+      "chatgpt",
+      ava::config::ProviderCredential{
+          .base_url = "https://alias.example",
+          .org_id = "alias-org",
+      }
+  );
+
+  const auto merged = ava::llm::resolve_credential_for_provider_for_testing(store, "chatgpt");
+
+  REQUIRE(merged.has_value());
+  REQUIRE(merged->api_key == "canonical-key");
+  REQUIRE(merged->base_url == std::optional<std::string>{"https://alias.example"});
+  REQUIRE(merged->org_id == std::optional<std::string>{"alias-org"});
+}
+
+TEST_CASE("factory canonical api key can merge with alias oauth credentials", "[ava_llm]") {
+  EnvGuard env({"OPENAI_API_KEY", "AVA_OPENAI_API_KEY", "AVA_CHATGPT_API_KEY"});
+
+  ava::config::CredentialStore store;
+  store.set("openai", ava::config::ProviderCredential{.api_key = "canonical-key"});
+  store.set(
+      "chatgpt",
+      ava::config::ProviderCredential{
+          .oauth_token = "alias-oauth-token",
+          .oauth_refresh_token = "alias-refresh-token",
+          .oauth_expires_at = 4'102'444'800ULL,
+          .oauth_account_id = "alias-account",
+      }
+  );
+
+  const auto merged = ava::llm::resolve_credential_for_provider_for_testing(store, "chatgpt");
+
+  REQUIRE(merged.has_value());
+  REQUIRE(merged->api_key == "canonical-key");
+  REQUIRE(merged->oauth_token == std::optional<std::string>{"alias-oauth-token"});
+  REQUIRE(merged->oauth_refresh_token == std::optional<std::string>{"alias-refresh-token"});
+  REQUIRE(merged->oauth_expires_at == std::optional<std::uint64_t>{4'102'444'800ULL});
+  REQUIRE(merged->oauth_account_id == std::optional<std::string>{"alias-account"});
+  REQUIRE(merged->effective_api_key() == std::optional<std::string>{"alias-oauth-token"});
+}
+
+TEST_CASE("factory placeholder standard env does not block real alias env key", "[ava_llm]") {
+  EnvGuard env({"OPENAI_API_KEY", "AVA_OPENAI_API_KEY", "AVA_CHATGPT_API_KEY"});
+  setenv("OPENAI_API_KEY", "replace-me", 1);
+  setenv("AVA_CHATGPT_API_KEY", "alias-env-key", 1);
+
+  ava::config::CredentialStore empty_store;
+  const auto merged = ava::llm::resolve_credential_for_provider_for_testing(empty_store, "chatgpt");
+
+  REQUIRE(merged.has_value());
+  REQUIRE(merged->api_key == "alias-env-key");
+}
+
+TEST_CASE("factory reports explicit deferred provider inventory", "[ava_llm]") {
+  ava::config::CredentialStore store;
+  store.set("openai", ava::config::ProviderCredential{.api_key = "test-key"});
+  store.set("anthropic", ava::config::ProviderCredential{.api_key = "anthropic-key"});
+
+  const auto deferred_providers = ava::llm::deferred_provider_names();
+  REQUIRE_FALSE(deferred_providers.empty());
+
+  for(const auto& provider : deferred_providers) {
+    INFO(provider);
+    REQUIRE(ava::llm::is_known_provider(provider));
+
+    try {
+      (void)ava::llm::create_provider(provider, "test-model", store);
+      FAIL("expected deferred provider failure");
+    } catch(const ava::llm::ProviderException& ex) {
+      REQUIRE(ex.error().kind == ava::llm::ProviderErrorKind::Unknown);
+      REQUIRE(ex.error().provider == provider);
+      REQUIRE(ex.error().message.find("not implemented") != std::string::npos);
+    }
+  }
 }
 
 TEST_CASE("factory errors include provider context", "[ava_llm]") {
@@ -282,10 +751,13 @@ TEST_CASE("factory errors include provider context", "[ava_llm]") {
 }
 
 TEST_CASE("openai provider reports CPR transport gating when disabled", "[ava_llm]") {
+  const ava::llm::OpenAiProvider provider{"gpt-4.1-mini", "test-key", "https://api.openai.com", std::nullopt};
+
 #if AVA_WITH_CPR
+  REQUIRE(provider.capabilities().supports_streaming);
   SUCCEED("CPR-enabled build compiles OpenAI transport path");
 #else
-  const ava::llm::OpenAiProvider provider{"gpt-4.1-mini", "test-key", "https://api.openai.com", std::nullopt};
+  REQUIRE_FALSE(provider.capabilities().supports_streaming);
 
   try {
     (void)provider.generate(
@@ -418,6 +890,30 @@ TEST_CASE("openai request building and response parsing", "[ava_llm]") {
   REQUIRE(parsed.usage.has_value());
   REQUIRE(parsed.usage->input_tokens == 7);
   REQUIRE(parsed.usage->output_tokens == 3);
+}
+
+TEST_CASE("openai request max thinking falls back to high for non-xhigh models", "[ava_llm]") {
+  const auto request = ava::llm::openai::build_chat_completions_request(
+      "gpt-5-mini",
+      {ava::llm::ChatMessage::user("hi")},
+      {},
+      false,
+      ava::llm::ThinkingConfig{.level = ava::types::ThinkingLevel::Max, .budget_tokens = std::nullopt}
+  );
+
+  REQUIRE(request.at("reasoning_effort") == "high");
+}
+
+TEST_CASE("openai request max thinking keeps xhigh for supported models", "[ava_llm]") {
+  const auto request = ava::llm::openai::build_chat_completions_request(
+      "gpt-5.4",
+      {ava::llm::ChatMessage::user("hi")},
+      {},
+      false,
+      ava::llm::ThinkingConfig{.level = ava::types::ThinkingLevel::Max, .budget_tokens = std::nullopt}
+  );
+
+  REQUIRE(request.at("reasoning_effort") == "xhigh");
 }
 
 TEST_CASE("openai completion parser tolerates tool-only payloads", "[ava_llm]") {
@@ -675,6 +1171,16 @@ TEST_CASE("anthropic stream parser captures text thinking tool and usage chunks"
   REQUIRE(tool_args_chunk->tool_call.has_value());
   REQUIRE(tool_args_chunk->tool_call->index == 1);
   REQUIRE(tool_args_chunk->tool_call->arguments_delta == std::optional<std::string>{"{\"path\":\"README.md\"}"});
+
+  const auto start_usage_chunk = ava::llm::anthropic::parse_stream_event(nlohmann::json{
+      {"type", "message_start"},
+      {"message", {{"usage", {{"input_tokens", 11}, {"cache_read_input_tokens", 3}}}}},
+  });
+  REQUIRE(start_usage_chunk.has_value());
+  REQUIRE(start_usage_chunk->usage.has_value());
+  REQUIRE(start_usage_chunk->usage->input_tokens == 11);
+  REQUIRE(start_usage_chunk->usage->cache_read_tokens == 3);
+  REQUIRE_FALSE(start_usage_chunk->done);
 
   const auto usage_chunk = ava::llm::anthropic::parse_stream_event(nlohmann::json{
       {"type", "message_delta"},

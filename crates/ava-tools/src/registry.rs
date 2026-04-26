@@ -120,6 +120,14 @@ pub enum ToolSource {
     Custom { path: String },
 }
 
+/// Metadata used for tool discovery/search indexing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolSearchMetadata {
+    pub name: String,
+    pub description: String,
+    pub hint: String,
+}
+
 impl std::fmt::Display for ToolSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -141,7 +149,8 @@ pub fn truncated_description(desc: &str) -> String {
         desc.to_string()
     } else {
         let suffix = "... [truncated]";
-        let mut truncated = desc[..MAX_TOOL_DESCRIPTION_LENGTH - suffix.len()].to_string();
+        let split_at = desc.floor_char_boundary(MAX_TOOL_DESCRIPTION_LENGTH - suffix.len());
+        let mut truncated = desc[..split_at].to_string();
         truncated.push_str(suffix);
         truncated
     }
@@ -344,6 +353,24 @@ impl ToolRegistry {
         tools
     }
 
+    /// List tool metadata including search hints.
+    ///
+    /// Used by discovery flows (for example, `tool_search`) that need each
+    /// tool's hint text in addition to the public definition fields.
+    pub fn list_tools_with_hints(&self) -> Vec<ToolSearchMetadata> {
+        let mut tools: Vec<ToolSearchMetadata> = self
+            .tools
+            .values()
+            .map(|tool| ToolSearchMetadata {
+                name: tool.name().to_string(),
+                description: tool.description().to_string(),
+                hint: tool.search_hint().to_string(),
+            })
+            .collect();
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
+        tools
+    }
+
     /// List only tools matching the given tiers. Used to control which tool
     /// definitions are sent to the LLM in the system prompt.
     ///
@@ -443,6 +470,10 @@ impl ToolRegistry {
     /// hints. Hint matches are ranked higher than description-only matches.
     /// Returns tool definitions sorted by relevance (hint > name > description).
     pub fn search_tools(&self, query: &str) -> Vec<ToolDefinition> {
+        if query.trim().is_empty() {
+            return Vec::new();
+        }
+
         let query_lower = query.to_lowercase();
         let query_words: Vec<&str> = query_lower.split_whitespace().collect();
 
@@ -807,6 +838,21 @@ mod tests {
     }
 
     #[test]
+    fn long_description_truncates_on_utf8_boundary() {
+        let suffix = "... [truncated]";
+        let desc = format!(
+            "{}é{}",
+            "x".repeat(MAX_TOOL_DESCRIPTION_LENGTH - suffix.len() - 1),
+            "y".repeat(100)
+        );
+
+        let result = truncated_description(&desc);
+
+        assert!(result.len() <= MAX_TOOL_DESCRIPTION_LENGTH);
+        assert!(result.ends_with(suffix));
+    }
+
+    #[test]
     fn exact_limit_description_unchanged() {
         let desc = "y".repeat(MAX_TOOL_DESCRIPTION_LENGTH);
         assert_eq!(truncated_description(&desc), desc);
@@ -817,6 +863,10 @@ mod tests {
     struct HintedTool {
         tool_name: &'static str,
         hint: &'static str,
+    }
+
+    struct LongDescriptionTool {
+        description: String,
     }
 
     #[async_trait]
@@ -847,6 +897,26 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl Tool for LongDescriptionTool {
+        fn name(&self) -> &str {
+            "long_description"
+        }
+        fn description(&self) -> &str {
+            &self.description
+        }
+        fn parameters(&self) -> Value {
+            serde_json::json!({"type": "object"})
+        }
+        async fn execute(&self, _args: Value) -> Result<ToolResult> {
+            Ok(ToolResult {
+                call_id: String::new(),
+                content: "ok".into(),
+                is_error: false,
+            })
+        }
+    }
+
     #[test]
     fn search_tools_by_name() {
         let mut registry = ToolRegistry::new();
@@ -857,6 +927,20 @@ mod tests {
         let results = registry.search_tools("my_tool");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "my_tool");
+    }
+
+    #[test]
+    fn list_tools_with_hints_includes_hint_text() {
+        let mut registry = ToolRegistry::new();
+        registry.register(HintedTool {
+            tool_name: "hinted",
+            hint: "banana cherry",
+        });
+
+        let tools = registry.list_tools_with_hints();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "hinted");
+        assert_eq!(tools[0].hint, "banana cherry");
     }
 
     #[test]
@@ -901,6 +985,32 @@ mod tests {
         });
         let results = registry.search_tools("xyzzy");
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn search_tools_empty_query_returns_no_results() {
+        let mut registry = ToolRegistry::new();
+        registry.register(HintedTool {
+            tool_name: "foo",
+            hint: "bar",
+        });
+
+        assert!(registry.search_tools("").is_empty());
+        assert!(registry.search_tools("   ").is_empty());
+    }
+
+    #[test]
+    fn list_tools_for_tiers_truncates_long_descriptions() {
+        let mut registry = ToolRegistry::new();
+        registry.register(LongDescriptionTool {
+            description: "x".repeat(3000),
+        });
+
+        let tools = registry.list_tools_for_tiers(&[ToolTier::Default]);
+
+        assert_eq!(tools.len(), 1);
+        assert!(tools[0].description.len() <= MAX_TOOL_DESCRIPTION_LENGTH);
+        assert!(tools[0].description.ends_with("... [truncated]"));
     }
 
     // --- F55: activity_description tests ---

@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "ava/config/agents.hpp"
+#include "ava/core/string_utils.hpp"
 #include "ava/config/model_registry.hpp"
 #include "ava/config/model_spec.hpp"
 #include "ava/config/paths.hpp"
@@ -21,6 +22,7 @@
 #include "ava/tools/core_tools.hpp"
 #include "ava/tools/mcp_bridge.hpp"
 #include "ava/tools/permission_middleware.hpp"
+#include "ava/tools/tool_search_tool.hpp"
 
 namespace ava::orchestration {
 namespace {
@@ -126,15 +128,8 @@ void apply_allowed_tools(ava::tools::ToolRegistry& registry, const std::vector<s
   }
 }
 
-[[nodiscard]] std::string lower_ascii(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  return value;
-}
-
 [[nodiscard]] bool is_headless_auto_approvable_risk(std::string risk_level) {
-  risk_level = lower_ascii(std::move(risk_level));
+  risk_level = ava::core::lowercase_ascii(std::move(risk_level));
   return risk_level == "safe" || risk_level == "low";
 }
 
@@ -146,6 +141,7 @@ void persist_runtime_selection_metadata(ava::types::SessionRecord& session, cons
   } else {
     session.metadata[kRuntimeMetadataNamespace].erase("agent");
   }
+  session.metadata[kRuntimeMetadataNamespace]["credential_provider"] = selection.credential_provider;
   session.metadata[kRuntimeMetadataNamespace]["max_turns"] = selection.max_turns;
   if(selection.max_budget_usd > 0.0) {
     session.metadata[kRuntimeMetadataNamespace]["max_budget_usd"] = selection.max_budget_usd;
@@ -236,25 +232,30 @@ ResolvedRuntimeSelection resolve_runtime_selection(
     const ava::types::SessionRecord& session
 ) {
   const auto persisted_provider = metadata_string(session, "provider");
+  const auto persisted_credential_provider = metadata_string(session, "credential_provider");
   const auto persisted_model = metadata_string(session, "model");
   const auto persisted_agent = metadata_string(session, "agent");
 
   std::optional<std::string> provider;
+  std::optional<std::string> credential_provider;
   std::optional<std::string> model;
 
   if(options.model.has_value()) {
     if(options.provider.has_value()) {
       provider = ava::config::normalize_provider_name(*options.provider);
+      credential_provider = *options.provider;
       model = *options.model;
     } else {
       const auto parsed = ava::config::parse_model_spec(*options.model);
       provider = ava::config::normalize_provider_name(parsed.provider);
+      credential_provider = parsed.credential_provider;
       model = parsed.model;
     }
   }
 
   if(!provider.has_value() && options.provider.has_value()) {
     provider = ava::config::normalize_provider_name(*options.provider);
+    credential_provider = *options.provider;
   }
   if(!model.has_value() && options.model.has_value()) {
     model = *options.model;
@@ -262,6 +263,7 @@ ResolvedRuntimeSelection resolve_runtime_selection(
 
   if(!provider.has_value() && persisted_provider.has_value()) {
     provider = ava::config::normalize_provider_name(*persisted_provider);
+    credential_provider = persisted_credential_provider.value_or(*persisted_provider);
   }
   if(!model.has_value() && persisted_model.has_value()) {
     model = *persisted_model;
@@ -269,6 +271,10 @@ ResolvedRuntimeSelection resolve_runtime_selection(
 
   if(!provider.has_value()) {
     provider = std::string{"openai"};
+    credential_provider = *provider;
+  }
+  if(!credential_provider.has_value()) {
+    credential_provider = *provider;
   }
   if(!model.has_value()) {
     model = default_model_for_provider(*provider);
@@ -296,6 +302,7 @@ ResolvedRuntimeSelection resolve_runtime_selection(
 
   return ResolvedRuntimeSelection{
       .provider = *provider,
+      .credential_provider = *credential_provider,
       .model = *model,
       .agent = agent,
       .max_turns = max_turns,
@@ -327,7 +334,7 @@ RuntimeComposition compose_runtime(RuntimeCompositionRequest request) {
     const auto credentials = request.credentials_override.has_value()
                                  ? *request.credentials_override
                                  : ava::config::CredentialStore::load(ava::config::credentials_path());
-    provider = ava::llm::create_provider(selection.provider, selection.model, credentials);
+    provider = ava::llm::create_provider(selection.credential_provider, selection.model, credentials);
   }
 
   auto registry = std::make_shared<ava::tools::ToolRegistry>();
@@ -350,6 +357,8 @@ RuntimeComposition compose_runtime(RuntimeCompositionRequest request) {
   }
   mcp_manager->initialize(mcp_config);
   [[maybe_unused]] const auto mcp_registered = ava::tools::register_mcp_tools(*registry, mcp_manager);
+  registry->unregister_tool("tool_search");
+  registry->register_tool(std::make_unique<ava::tools::ToolSearchTool>(*registry));
 
   auto approval_resolver = request.approval_resolver;
   if(!approval_resolver && request.auto_approve) {

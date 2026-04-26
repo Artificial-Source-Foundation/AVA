@@ -14,9 +14,19 @@
 
 #include <nlohmann/json.hpp>
 
+#include "ava/tools/bash_tool.hpp"
 #include "ava/tools/core_tools.hpp"
+#include "ava/tools/edit_tool.hpp"
+#include "ava/tools/file_backup.hpp"
+#include "ava/tools/git_read_tool.hpp"
 #include "ava/tools/output_fallback.hpp"
 #include "ava/tools/path_guard.hpp"
+#include "ava/tools/read_tool.hpp"
+#include "ava/tools/search_tools.hpp"
+#include "ava/tools/todo_tools.hpp"
+#include "ava/tools/tool_search_tool.hpp"
+#include "ava/tools/web_tools.hpp"
+#include "ava/tools/write_tool.hpp"
 
 namespace {
 
@@ -59,7 +69,7 @@ ava::types::ToolResult require_edit_ok(ava::tools::EditTool& tool, nlohmann::jso
 
 }  // namespace
 
-TEST_CASE("default tools registration includes milestone 6 core set", "[ava_tools]") {
+TEST_CASE("default tools registration includes scoped headless parity set with deferred web tools", "[ava_tools]") {
   const auto root = temp_root_for_test();
   std::filesystem::create_directories(root);
 
@@ -75,8 +85,13 @@ TEST_CASE("default tools registration includes milestone 6 core set", "[ava_tool
   REQUIRE(registry.has_tool("grep"));
   REQUIRE(registry.has_tool("git"));
   REQUIRE(registry.has_tool("git_read"));
+  REQUIRE(registry.has_tool("todo_write"));
+  REQUIRE(registry.has_tool("todo_read"));
+  REQUIRE(registry.has_tool("tool_search"));
   REQUIRE_FALSE(registry.has_tool("web_fetch"));
   REQUIRE_FALSE(registry.has_tool("web_search"));
+  REQUIRE_FALSE(registry.has_tool("subagent"));
+  REQUIRE_FALSE(registry.has_tool("task"));
 
   std::filesystem::remove_all(root);
 }
@@ -99,13 +114,19 @@ TEST_CASE("core tools expose schema descriptions and search hints", "[ava_tools]
   }
 
   auto backup = std::make_shared<ava::tools::FileBackupSession>(root);
+  auto todos = std::make_shared<ava::tools::TodoListState>();
   REQUIRE_FALSE(ava::tools::ReadTool(root).search_hint().empty());
   REQUIRE_FALSE(ava::tools::WriteTool(root, backup).search_hint().empty());
   REQUIRE_FALSE(ava::tools::EditTool(root, backup).search_hint().empty());
   REQUIRE_FALSE(ava::tools::BashTool(root).search_hint().empty());
   REQUIRE_FALSE(ava::tools::GlobTool(root).search_hint().empty());
   REQUIRE_FALSE(ava::tools::GrepTool(root).search_hint().empty());
+  REQUIRE_FALSE(ava::tools::WebFetchTool(root).search_hint().empty());
+  REQUIRE_FALSE(ava::tools::WebSearchTool(root).search_hint().empty());
   REQUIRE_FALSE(ava::tools::GitReadTool(root).search_hint().empty());
+  REQUIRE_FALSE(ava::tools::TodoWriteTool(todos).search_hint().empty());
+  REQUIRE_FALSE(ava::tools::TodoReadTool(todos).search_hint().empty());
+  REQUIRE_FALSE(ava::tools::ToolSearchTool(registry).search_hint().empty());
 
   std::filesystem::remove_all(root);
 }
@@ -160,6 +181,72 @@ TEST_CASE("read/write/edit operate within workspace", "[ava_tools]") {
   );
   REQUIRE(edit_result.content.find("exact_match") != std::string::npos);
   REQUIRE(read_text_file(file) == "hello\nava\n");
+
+  std::filesystem::remove_all(root);
+}
+
+TEST_CASE("web tools fail closed on invalid or blocked URLs", "[ava_tools]") {
+  const auto root = temp_root_for_test();
+  std::filesystem::create_directories(root);
+
+  ava::tools::WebFetchTool web_fetch(root);
+  REQUIRE_THROWS(web_fetch.execute(nlohmann::json{{"url", "file:///etc/passwd"}}));
+  REQUIRE_THROWS(web_fetch.execute(nlohmann::json{{"url", "http://localhost"}}));
+  REQUIRE_THROWS(web_fetch.execute(nlohmann::json{{"url", "http://127.0.0.1"}}));
+  REQUIRE_THROWS(web_fetch.execute(nlohmann::json{{"url", "http://10.0.0.1"}}));
+  REQUIRE_THROWS(web_fetch.execute(nlohmann::json{{"url", "http://172.17.0.1"}}));
+  REQUIRE_THROWS(web_fetch.execute(nlohmann::json{{"url", "http://192.168.1.1"}}));
+  REQUIRE_THROWS(web_fetch.execute(nlohmann::json{{"url", "http://[::1]/"}}));
+  REQUIRE_THROWS(web_fetch.execute(nlohmann::json{{"url", "http://[fe80::1]/"}}));
+  REQUIRE_THROWS(web_fetch.execute(nlohmann::json{{"url", "http://%31%32%37.0.0.1/"}}));
+  REQUIRE_THROWS(web_fetch.execute(nlohmann::json{{"url", "http://172.99999999999999999999.0.1/"}}));
+  REQUIRE_THROWS(web_fetch.execute(nlohmann::json{{"url", "http://169.254.169.254/latest/meta-data"}}));
+
+  ava::tools::WebSearchTool web_search(root);
+  REQUIRE_THROWS(web_search.execute(nlohmann::json::object()));
+  REQUIRE_THROWS(web_search.execute(nlohmann::json{{"query", "ava"}, {"provider", "unsupported"}}));
+
+  std::filesystem::remove_all(root);
+}
+
+TEST_CASE("tool_search discovers registered tools by keyword", "[ava_tools]") {
+  const auto root = temp_root_for_test();
+  std::filesystem::create_directories(root);
+
+  ava::tools::ToolRegistry registry;
+  const auto registration = ava::tools::register_default_tools(registry, root);
+  REQUIRE(registration.backup_session != nullptr);
+
+  ava::tools::ToolSearchTool search_tool(registry);
+  const auto search_result = search_tool.execute(nlohmann::json{{"query", "shell terminal"}});
+  REQUIRE_FALSE(search_result.is_error);
+  REQUIRE(search_result.content.find("bash") != std::string::npos);
+
+  const auto deferred_web = search_tool.execute(nlohmann::json{{"query", "web fetch"}});
+  REQUIRE_FALSE(deferred_web.is_error);
+  REQUIRE(deferred_web.content.find("web_fetch") == std::string::npos);
+
+  const auto no_match = search_tool.execute(nlohmann::json{{"query", "xyzzyplugh"}});
+  REQUIRE_FALSE(no_match.is_error);
+  REQUIRE(no_match.content.find("No tools found") != std::string::npos);
+
+  std::filesystem::remove_all(root);
+}
+
+TEST_CASE("tool_search uses construction-time registry snapshot", "[ava_tools]") {
+  const auto root = temp_root_for_test();
+  std::filesystem::create_directories(root);
+
+  ava::tools::ToolRegistry registry;
+  const auto registration = ava::tools::register_default_tools(registry, root);
+  REQUIRE(registration.backup_session != nullptr);
+
+  ava::tools::ToolSearchTool search_tool(registry);
+  registry.unregister_tool("bash");
+
+  const auto result = search_tool.execute(nlohmann::json{{"query", "shell terminal"}});
+  REQUIRE_FALSE(result.is_error);
+  REQUIRE(result.content.find("bash") != std::string::npos);
 
   std::filesystem::remove_all(root);
 }
@@ -328,7 +415,7 @@ TEST_CASE("write backup session keeps snapshots for same filenames in different 
   std::filesystem::remove_all(root);
 }
 
-TEST_CASE("edit backup session rejects symlinked ava directory", "[ava_tools]") {
+TEST_CASE("edit backup session stores generated history outside workspace ava directory", "[ava_tools]") {
   const auto root = temp_root_for_test();
   const auto outside = temp_root_for_test() / "backup-outside";
   std::filesystem::create_directories(root);
@@ -347,10 +434,12 @@ TEST_CASE("edit backup session rejects symlinked ava directory", "[ava_tools]") 
   ava::tools::EditTool edit_tool(root, backup);
 
   require_write_ok(write_tool, nlohmann::json{{"path", "tracked.txt"}, {"content", "before"}});
-  REQUIRE_THROWS(edit_tool.execute(nlohmann::json{{"path", "tracked.txt"}, {"old_text", "before"}, {"new_text", "after"}}));
+  REQUIRE_NOTHROW(edit_tool.execute(nlohmann::json{{"path", "tracked.txt"}, {"old_text", "before"}, {"new_text", "after"}}));
 
-  REQUIRE(read_text_file(root / "tracked.txt") == "before");
+  REQUIRE(read_text_file(root / "tracked.txt") == "after");
+  REQUIRE_FALSE(ava::tools::is_path_within_or_equal(root, backup->backup_root()));
   REQUIRE_FALSE(std::filesystem::exists(outside / "file-history-m6"));
+  std::filesystem::remove_all(backup->backup_root().parent_path());
   std::filesystem::remove_all(root);
   std::filesystem::remove_all(outside.parent_path());
 }
@@ -1294,30 +1383,111 @@ TEST_CASE("git and git_read execute read-only git commands", "[ava_tools]") {
   CwdGuard cwd_guard;
   std::filesystem::current_path(root);
   REQUIRE(std::system("git init >/dev/null 2>&1") == 0);
+  std::ofstream(root / "untracked.txt") << "pending\n";
+  const auto fsmonitor_marker = root / "fsmonitor-ran";
+  const auto fsmonitor_hook = root / ".git" / "hooks" / "fsmonitor-test";
+  std::ofstream(fsmonitor_hook) << "#!/bin/sh\ntouch \"" << fsmonitor_marker.string() << "\"\nprintf '\\n'\n";
+  std::filesystem::permissions(
+      fsmonitor_hook,
+      std::filesystem::perms::owner_read | std::filesystem::perms::owner_write | std::filesystem::perms::owner_exec,
+      std::filesystem::perm_options::replace
+  );
+  REQUIRE(std::system("git config core.fsmonitor .git/hooks/fsmonitor-test >/dev/null 2>&1") == 0);
 
   ava::tools::GitReadTool git_tool(root);
   const auto status_result = git_tool.execute(nlohmann::json{{"command", "status --short"}});
   REQUIRE(status_result.content.find("exit_code: 0") != std::string::npos);
+  REQUIRE(status_result.content.find("untracked.txt") != std::string::npos);
+  REQUIRE_FALSE(std::filesystem::exists(fsmonitor_marker));
 
   REQUIRE_NOTHROW(git_tool.execute(nlohmann::json{{"command", "branch -v"}}));
+  REQUIRE_NOTHROW(git_tool.execute(nlohmann::json{{"command", "branch -vv"}}));
   REQUIRE_NOTHROW(git_tool.execute(nlohmann::json{{"command", "branch -a"}}));
   REQUIRE_NOTHROW(git_tool.execute(nlohmann::json{{"command", "branch -r"}}));
+  REQUIRE_NOTHROW(git_tool.execute(nlohmann::json{{"command", "branch --contains HEAD"}}));
   REQUIRE_NOTHROW(git_tool.execute(nlohmann::json{{"command", "branch --show-current"}}));
   REQUIRE_NOTHROW(git_tool.execute(nlohmann::json{{"command", "tag -n"}}));
+  REQUIRE(std::system("git remote add origin https://user:secret-token@example.com/org/repo.git >/dev/null 2>&1") == 0);
+  const auto remote_result = git_tool.execute(nlohmann::json{{"command", "remote -v"}});
+  REQUIRE(remote_result.content.find("secret-token") == std::string::npos);
+  REQUIRE(remote_result.content.find("https://***@") != std::string::npos);
+  REQUIRE(remote_result.content.find("example.com/org/repo.git") != std::string::npos);
+  REQUIRE(std::system("git remote add email https://user@example.com:other-secret@github.com/org/repo.git >/dev/null 2>&1") == 0);
+  const auto email_remote_result = git_tool.execute(nlohmann::json{{"command", "remote -v"}});
+  REQUIRE(email_remote_result.content.find("other-secret") == std::string::npos);
+  REQUIRE(email_remote_result.content.find("https://***@github.com/org/repo.git") != std::string::npos);
+  REQUIRE(std::system("git remote add ssh git@github.com:org/repo.git >/dev/null 2>&1") == 0);
+  const auto ssh_remote_result = git_tool.execute(nlohmann::json{{"command", "remote -v"}});
+  REQUIRE(ssh_remote_result.content.find("git@github.com") == std::string::npos);
+  REQUIRE(ssh_remote_result.content.find("***@github.com:org/repo.git") != std::string::npos);
+  REQUIRE(std::system("git remote add query https://example.com/org/repo.git?access_token=secret-query >/dev/null 2>&1") == 0);
+  REQUIRE(std::system("git remote add sshquery git@github.com:org/repo.git?token=secret-ssh >/dev/null 2>&1") == 0);
+  REQUIRE(std::system("git remote add hostquery github.com:org/repo.git?token=secret-host >/dev/null 2>&1") == 0);
+  REQUIRE(std::system("git remote add ipv6 'token@[::1]:repo.git?access_token=secret-ipv6#frag' >/dev/null 2>&1") == 0);
+  const auto query_remote_result = git_tool.execute(nlohmann::json{{"command", "remote -v"}});
+  REQUIRE(query_remote_result.content.find("secret-query") == std::string::npos);
+  REQUIRE(query_remote_result.content.find("secret-ssh") == std::string::npos);
+  REQUIRE(query_remote_result.content.find("secret-host") == std::string::npos);
+  REQUIRE(query_remote_result.content.find("secret-ipv6") == std::string::npos);
+  REQUIRE(query_remote_result.content.find("https://example.com/org/repo.git?***") != std::string::npos);
+  REQUIRE(query_remote_result.content.find("***@github.com:org/repo.git?***") != std::string::npos);
+  REQUIRE(query_remote_result.content.find("github.com:org/repo.git?***") != std::string::npos);
+  REQUIRE(query_remote_result.content.find("***@[::1]:repo.git?***") != std::string::npos);
 
   ava::tools::GitReadAliasTool git_read_tool(root);
   const auto log_result = git_read_tool.execute(nlohmann::json{{"command", "status --short"}});
   REQUIRE(log_result.content.find("exit_code: 0") != std::string::npos);
+  REQUIRE_NOTHROW(git_tool.execute(nlohmann::json{{"command", "status -s"}}));
+  REQUIRE_NOTHROW(git_tool.execute(nlohmann::json{{"command", "log HEAD@{0} --max-count=1"}}));
 
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "push origin main"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "branch -D main"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "branch attacker-controlled-ref HEAD"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "branch -v attacker-controlled-ref HEAD"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "branch -vv attacker-controlled-ref HEAD"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "branch --force attacker-controlled-ref HEAD"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "branch -v -D temp"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "tag -f v1.0"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "remote -v set-url origin https://attacker.invalid/repo.git"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "remote show origin"}}));
+  REQUIRE_NOTHROW(git_tool.execute(nlohmann::json{{"command", "remote show -n origin"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "status --short; status --short"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "diff --no-index /etc/hosts /dev/null"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "diff HEAD"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "show HEAD"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "cat-file -p HEAD"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "log -p --all"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "log --patch-with-raw -1"}}));
+  REQUIRE_NOTHROW(git_tool.execute(nlohmann::json{{"command", "log --since=2024-01-01T12:00:00 --max-count=1"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "log --format=%GS -1"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "log --pretty=%G? -1"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "log --show-signature -1"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "log --diff-merges=first-parent -1"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "log --dd -1"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "log --remerge-diff -1"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "log -pU1 --max-count=1"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "log -pM --max-count=1"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "log -1 -wp"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "diff --stat -p HEAD"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "diff --stat -pU1 HEAD"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "diff --stat -wp HEAD"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "diff --stat --check"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "diff --name-only -- :/README.md"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "ls-files :0:file.txt"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "diff --name-only --word-diff HEAD"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "status -vv"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "status -vuno"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "status -bv"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "stash list -p -1"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "stash show --dd"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "stash show -pU1"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "stash show -wp"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "log --check"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "log --color-words --max-count=1"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "blame README.md"}}));
+  REQUIRE_NOTHROW(git_tool.execute(nlohmann::json{{"command", "diff --name-only HEAD"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "show --no-patch HEAD"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "show --name-only HEAD:file.txt"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "diff '--no-index' '/etc/hosts' '/dev/null'"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "diff --no-inde[x] .ava/file-history-m[6] baseline"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "diff --output=/tmp/out HEAD"}}));
@@ -1327,7 +1497,14 @@ TEST_CASE("git and git_read execute read-only git commands", "[ava_tools]") {
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "blame --contents=.ava/*/*/*.bak -- README.md"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "blame --ignore-revs-file=.ava/file-history-m6/revs -- README.md"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "status --ignored -uall"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "status --short --ignored=matching -uall"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "ls-files -i --others --exclude-standard"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "ls-files --others --i --exclude-standard"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "ls-files --others"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "ls-files --o"}}));
+  REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "ls-files -o"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "status .ava/file-history-m6/snapshot.bak"}}));
+  REQUIRE_NOTHROW(git_tool.execute(nlohmann::json{{"command", "status file-history/snapshot.bak"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "show /etc/hosts"}}));
   REQUIRE_THROWS(git_tool.execute(nlohmann::json{{"command", "show ../outside"}}));
 
@@ -1357,18 +1534,27 @@ TEST_CASE("read glob and grep do not expose file-history backups", "[ava_tools]"
     }
   }
   REQUIRE_FALSE(backup_file.empty());
-  const auto relative_backup = std::filesystem::relative(backup_file, root).generic_string();
+  REQUIRE_FALSE(ava::tools::is_path_within_or_equal(root, backup->backup_root()));
 
-  const auto ava_listing = read_tool.execute(nlohmann::json{{"path", ".ava"}}).content;
-  REQUIRE(ava_listing.find("file-history-m6") == std::string::npos);
-  REQUIRE_THROWS(read_tool.execute(nlohmann::json{{"path", relative_backup}}));
-  REQUIRE_THROWS(write_tool.execute(nlohmann::json{{"path", relative_backup}, {"content", "tamper"}}));
-  REQUIRE_THROWS(edit_tool.execute(nlohmann::json{{"path", relative_backup}, {"old_text", "old-secret-token"}, {"new_text", "tamper"}}));
+  std::error_code link_ec;
+  std::filesystem::create_symlink(backup_file, root / "leak.bak", link_ec);
+  if(link_ec) {
+    std::filesystem::remove_all(backup->backup_root().parent_path());
+    std::filesystem::remove_all(root);
+    SKIP("filesystem does not permit backup symlink creation in this environment");
+  }
+
+  REQUIRE_THROWS(read_tool.execute(nlohmann::json{{"path", backup_file.string()}}));
+  REQUIRE_THROWS(write_tool.execute(nlohmann::json{{"path", backup_file.string()}, {"content", "tamper"}}));
+  REQUIRE_THROWS(edit_tool.execute(nlohmann::json{{"path", backup_file.string()}, {"old_text", "old-secret-token"}, {"new_text", "tamper"}}));
   const auto glob_result = glob_tool.execute(nlohmann::json{{"pattern", "**/*.bak"}, {"path", "."}}).content;
-  REQUIRE(glob_result.find("file-history-m6") == std::string::npos);
+  REQUIRE(glob_result.find("file-history") == std::string::npos);
+  REQUIRE(glob_result.find("leak.bak") == std::string::npos);
   const auto grep_result = grep_tool.execute(nlohmann::json{{"pattern", "old-secret-token"}, {"path", "."}}).content;
   REQUIRE(grep_result.find("old-secret-token") == std::string::npos);
+  REQUIRE(grep_result.find("leak.bak") == std::string::npos);
 
+  std::filesystem::remove_all(backup->backup_root().parent_path());
   std::filesystem::remove_all(root);
 }
 

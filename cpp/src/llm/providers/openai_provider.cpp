@@ -1,12 +1,9 @@
 #include "ava/llm/providers/openai_provider.hpp"
 
-#include <algorithm>
-#include <charconv>
-#include <cctype>
-#include <system_error>
 #include <string_view>
 #include <utility>
 
+#include "ava/core/string_utils.hpp"
 #include "ava/llm/pricing.hpp"
 #include "ava/llm/providers/openai_protocol.hpp"
 
@@ -24,51 +21,24 @@ namespace {
       types::ThinkingLevel::Low,
       types::ThinkingLevel::Medium,
       types::ThinkingLevel::High,
-      types::ThinkingLevel::Max,
   };
 }
 
+[[nodiscard]] bool supports_xhigh_reasoning_model(std::string_view lower_model) {
+  if(lower_model.find("codex") != std::string_view::npos) {
+    return lower_model.find("5.2") != std::string_view::npos || lower_model.find("5.3") != std::string_view::npos;
+  }
+
+  return lower_model.find("gpt-5.3") != std::string_view::npos
+         || lower_model.find("gpt-5.4") != std::string_view::npos
+         || lower_model.find("gpt-5.5") != std::string_view::npos;
+}
+
 #if AVA_WITH_CPR
-[[nodiscard]] std::string_view trim_ascii(std::string_view value) {
-  while(!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
-    value.remove_prefix(1);
-  }
-  while(!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
-    value.remove_suffix(1);
-  }
-  return value;
-}
-
-[[nodiscard]] std::optional<std::uint64_t> parse_retry_after_secs(const cpr::Header& headers) {
-  for(const auto& [name, value] : headers) {
-    std::string lower_name(name);
-    std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), [](unsigned char ch) {
-      return static_cast<char>(std::tolower(ch));
-    });
-    if(lower_name != "retry-after") {
-      continue;
-    }
-
-    const auto trimmed = trim_ascii(value);
-    if(trimmed.empty()) {
-      return std::nullopt;
-    }
-
-    std::uint64_t parsed = 0;
-    const auto* begin = trimmed.data();
-    const auto* end = begin + trimmed.size();
-    const auto [ptr, ec] = std::from_chars(begin, end, parsed);
-    if(ec == std::errc{} && ptr == end) {
-      return parsed;
-    }
-    return std::nullopt;
-  }
-
-  return std::nullopt;
-}
+constexpr auto kOpenAiTimeoutMs = 120000;
 
 [[nodiscard]] std::string summarize_openai_error_body(std::string_view body) {
-  const auto trimmed = trim_ascii(body);
+  const auto trimmed = ava::core::trim_ascii_view(body);
   if(trimmed.empty()) {
     return "request failed";
   }
@@ -96,16 +66,16 @@ namespace {
   return std::string(trimmed);
 }
 
-[[nodiscard]] ProviderError classify_openai_error(const cpr::Response& response) {
+[[nodiscard]] ProviderError classify_openai_error(const cpr::Response& response, std::string_view provider_label) {
   const auto status = response.status_code > 0
                           ? std::optional<std::uint16_t>(static_cast<std::uint16_t>(response.status_code))
                           : std::nullopt;
 
   return classify_provider_error(
-      "openai",
+      std::string(provider_label),
       status,
       summarize_openai_error_body(response.text),
-      parse_retry_after_secs(response.header)
+      providers::parse_retry_after_secs(response.header)
   );
 }
 
@@ -117,12 +87,16 @@ OpenAiProvider::OpenAiProvider(
     std::string model,
     std::string api_key,
     std::string base_url,
-    std::optional<std::string> org_id
+    std::optional<std::string> org_id,
+    ProviderKind provider_kind,
+    std::string provider_label
 )
     : model_(std::move(model)),
       api_key_(std::move(api_key)),
       base_url_(std::move(base_url)),
-      org_id_(std::move(org_id)) {}
+      org_id_(std::move(org_id)),
+      provider_kind_(provider_kind),
+      provider_label_(std::move(provider_label)) {}
 
 OpenAiProvider OpenAiProvider::from_credential(const std::string& model, const ava::config::ProviderCredential& credential) {
   const auto api_key = credential.effective_api_key();
@@ -147,15 +121,19 @@ std::string OpenAiProvider::model_name() const {
 }
 
 ProviderKind OpenAiProvider::provider_kind() const {
-  return ProviderKind::OpenAI;
+  return provider_kind_;
 }
 
 ProviderCapabilities OpenAiProvider::capabilities() const {
   ProviderCapabilities caps;
+#if AVA_WITH_CPR
   caps.supports_streaming = true;
+#else
+  caps.supports_streaming = false;
+#endif
   caps.supports_tool_use = true;
-  caps.supports_thinking = true;
-  caps.supports_thinking_levels = true;
+  caps.supports_thinking = supports_thinking();
+  caps.supports_thinking_levels = !thinking_levels().empty();
   caps.supports_prompt_caching = false;
   return caps;
 }
@@ -165,7 +143,7 @@ std::size_t OpenAiProvider::estimate_tokens(std::string_view input) const {
 }
 
 double OpenAiProvider::estimate_cost(std::size_t input_tokens, std::size_t output_tokens) const {
-  return estimate_cost_usd("openai", model_, input_tokens, output_tokens, false);
+  return estimate_cost_usd(provider_label_, model_, input_tokens, output_tokens, false);
 }
 
 bool OpenAiProvider::supports_tools() const {
@@ -173,10 +151,7 @@ bool OpenAiProvider::supports_tools() const {
 }
 
 bool OpenAiProvider::supports_thinking() const {
-  auto lower = model_;
-  std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
+  const auto lower = ava::core::lowercase_ascii(model_);
   return lower.find("gpt-5") != std::string::npos || lower.find("o3") != std::string::npos
          || lower.find("o4") != std::string::npos || lower.find("codex") != std::string::npos;
 }
@@ -185,7 +160,13 @@ std::vector<types::ThinkingLevel> OpenAiProvider::thinking_levels() const {
   if(!supports_thinking()) {
     return {};
   }
-  return kSupportedThinkingLevels();
+
+  auto levels = kSupportedThinkingLevels();
+  const auto lower = ava::core::lowercase_ascii(model_);
+  if(supports_xhigh_reasoning_model(lower)) {
+    levels.push_back(types::ThinkingLevel::Max);
+  }
+  return levels;
 }
 
 ResolvedThinkingConfig OpenAiProvider::resolve_thinking_config(ThinkingConfig config) const {
@@ -237,23 +218,27 @@ LlmResponse OpenAiProvider::generate(
       cpr::Url{chat_completions_url()},
       headers,
       cpr::Body{request_body.dump()},
-      cpr::Timeout{120000}
+      cpr::Timeout{kOpenAiTimeoutMs}
   );
 
   if(response.error.code != cpr::ErrorCode::OK) {
-    throw ProviderException(classify_provider_error("openai", std::nullopt, response.error.message));
+    throw ProviderException(classify_provider_error(provider_label_, std::nullopt, response.error.message));
   }
 
   if(response.status_code < 200 || response.status_code > 299) {
-    throw ProviderException(classify_openai_error(response));
+    throw ProviderException(classify_openai_error(response, provider_label_));
   }
 
   try {
     return openai::parse_chat_completion_response(nlohmann::json::parse(response.text));
+  } catch(const ProviderException& ex) {
+    auto error = ex.error();
+    error.provider = provider_label_;
+    throw ProviderException(std::move(error));
   } catch(const std::exception& ex) {
     throw ProviderException(ProviderError{
         .kind = ProviderErrorKind::Unknown,
-        .provider = "openai",
+        .provider = provider_label_,
         .message = std::string("failed to parse completion response: ") + ex.what(),
     });
   }
@@ -263,8 +248,8 @@ LlmResponse OpenAiProvider::generate(
   (void)thinking;
   throw ProviderException(ProviderError{
       .kind = ProviderErrorKind::Unknown,
-      .provider = "openai",
-      .message = "OpenAI provider requires AVA_WITH_CPR=ON",
+      .provider = provider_label_,
+      .message = provider_label_ + " provider requires AVA_WITH_CPR=ON",
   });
 #endif
 }
@@ -306,11 +291,10 @@ Provider::StreamDispatchResult OpenAiProvider::stream_generate(
   bool emitted_done = false;
   bool stop_requested = false;
   std::optional<std::string> parse_failure;
-  std::string pending;
-  bool pending_carriage_return = false;
+  providers::SseEventBuffer sse_events;
 
   auto dispatch_sse_payload = [&](std::string_view payload_view) {
-    const auto payload = trim_ascii(payload_view);
+    const auto payload = ava::core::trim_ascii_view(payload_view);
     if(payload.empty()) {
       return true;
     }
@@ -342,63 +326,16 @@ Provider::StreamDispatchResult OpenAiProvider::stream_generate(
     return true;
   };
 
-  auto process_pending_events = [&](bool flush_remainder) {
-    if(flush_remainder && pending_carriage_return) {
-      pending.push_back('\n');
-      pending_carriage_return = false;
-    }
-    if(flush_remainder && !pending.empty()) {
-      // Treat a cleanly closed stream's final bytes as a complete SSE event.
-      pending.append("\n\n");
-    }
-
-    while(true) {
-      const auto event_end = pending.find("\n\n");
-      if(event_end == std::string::npos) {
-        break;
-      }
-
-      const std::string event_block = pending.substr(0, event_end);
-      pending.erase(0, event_end + 2);
-
-      bool saw_data = false;
-      std::string payload;
-      std::size_t line_start = 0;
-      while(line_start <= event_block.size()) {
-        const auto line_end = event_block.find('\n', line_start);
-        const std::string_view line = line_end == std::string::npos
-                                          ? std::string_view(event_block).substr(line_start)
-                                          : std::string_view(event_block).substr(line_start, line_end - line_start);
-        line_start = line_end == std::string::npos ? event_block.size() + 1 : line_end + 1;
-
-        if(const auto data_line = providers::extract_sse_data_line(line); data_line.has_value()) {
-          if(saw_data) {
-            payload.push_back('\n');
-          }
-          payload += *data_line;
-          saw_data = true;
-        }
-      }
-
-      if(!saw_data) {
-        continue;
-      }
-
-      if(!dispatch_sse_payload(payload)) {
-        return false;
-      }
-    }
-
-    return true;
-  };
-
   auto write_callback = cpr::WriteCallback{
       [&](const std::string_view& data, intptr_t /*userdata*/) {
         try {
           // CPR owns this view only for the callback duration; consume it immediately.
-          pending += providers::normalize_sse_newlines(data, pending_carriage_return);
-          return process_pending_events(false);
+          return sse_events.append(data, dispatch_sse_payload);
+        } catch(const std::exception& ex) {
+          parse_failure = ex.what();
+          return false;
         } catch(...) {
+          parse_failure = "unknown stream callback failure";
           return false;
         }
       },
@@ -409,12 +346,12 @@ Provider::StreamDispatchResult OpenAiProvider::stream_generate(
       cpr::Url{chat_completions_url()},
       headers,
       cpr::Body{request_body.dump()},
-      cpr::Timeout{120000},
+      cpr::Timeout{kOpenAiTimeoutMs},
       write_callback
   );
 
   if(!stop_requested && response.error.code == cpr::ErrorCode::OK && response.status_code >= 200 && response.status_code <= 299) {
-    (void)process_pending_events(true);
+    (void)sse_events.flush(dispatch_sse_payload);
   }
 
   if(stop_requested) {
@@ -424,16 +361,16 @@ Provider::StreamDispatchResult OpenAiProvider::stream_generate(
   if(parse_failure.has_value()) {
     throw ProviderException(ProviderError{
         .kind = ProviderErrorKind::Unknown,
-        .provider = "openai",
+        .provider = provider_label_,
         .message = "failed to parse stream event: " + *parse_failure,
     });
   }
 
   if(response.error.code != cpr::ErrorCode::OK) {
-    throw ProviderException(classify_provider_error("openai", std::nullopt, response.error.message));
+    throw ProviderException(classify_provider_error(provider_label_, std::nullopt, response.error.message));
   }
   if(response.status_code < 200 || response.status_code > 299) {
-    throw ProviderException(classify_openai_error(response));
+    throw ProviderException(classify_openai_error(response, provider_label_));
   }
 
   if(!emitted_done && on_chunk) {
@@ -451,7 +388,7 @@ Provider::StreamDispatchResult OpenAiProvider::stream_generate(
 
 std::string OpenAiProvider::chat_completions_url() const {
   const auto base = base_url_.ends_with('/') ? base_url_.substr(0, base_url_.size() - 1) : base_url_;
-  if(base.ends_with("/v1")) {
+  if(base.ends_with("/v1") || base.ends_with("/v3") || base.ends_with("/v4")) {
     return base + "/chat/completions";
   }
   return base + "/v1/chat/completions";

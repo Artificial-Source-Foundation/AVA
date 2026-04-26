@@ -120,12 +120,28 @@ pub fn register_default_tools_with_plugins(
     registry.register(web_fetch::WebFetchTool::new());
     registry.register(web_search::WebSearchTool::new());
     registry.register(git_read::GitReadTool::new());
+    register_tool_search_tool(registry);
     backup_session
 }
 
 /// Register all core tools. Backwards-compatible alias for `register_default_tools`.
 pub fn register_core_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platform>) {
     let _ = register_default_tools(registry, platform);
+}
+
+/// Register `tool_search` as a deferred discovery tool.
+///
+/// Deferred tools are executable but excluded from the default prompt tool list.
+/// Re-running this function refreshes the `tool_search` index from the current
+/// registry snapshot (new registration replaces the prior `tool_search` tool).
+///
+/// Public so callers can refresh the snapshot after registering additional
+/// deferred/extended tools.
+pub fn register_tool_search_tool(registry: &mut ToolRegistry) {
+    use crate::registry::ToolTier;
+
+    let tool = tool_search::ToolSearchTool::from_registry(registry);
+    registry.register_with_tier(tool, ToolTier::Deferred);
 }
 
 /// Register the task tool with a spawner that can create sub-agent runs.
@@ -195,4 +211,108 @@ pub fn register_custom_tools_with_plugins(
     plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
 ) {
     custom_tool::register_custom_tools_with_plugins(registry, dirs, plugin_manager);
+}
+
+#[cfg(test)]
+mod tests {
+    use async_trait::async_trait;
+    use ava_types::{ToolCall, ToolResult};
+    use serde_json::{json, Value};
+
+    use super::register_tool_search_tool;
+    use crate::registry::{Tool, ToolRegistry, ToolTier};
+
+    struct DeferredNeedleTool;
+
+    #[async_trait]
+    impl Tool for DeferredNeedleTool {
+        fn name(&self) -> &str {
+            "deferred_needle"
+        }
+
+        fn description(&self) -> &str {
+            "Deferred discovery test tool"
+        }
+
+        fn parameters(&self) -> Value {
+            json!({"type": "object"})
+        }
+
+        fn search_hint(&self) -> &str {
+            "zz_deferred_hint"
+        }
+
+        async fn execute(&self, _args: Value) -> ava_types::Result<ToolResult> {
+            Ok(ToolResult {
+                call_id: String::new(),
+                content: "ok".to_string(),
+                is_error: false,
+            })
+        }
+    }
+
+    struct LateDeferredTool;
+
+    #[async_trait]
+    impl Tool for LateDeferredTool {
+        fn name(&self) -> &str {
+            "late_deferred"
+        }
+
+        fn description(&self) -> &str {
+            "Registered after tool_search snapshot"
+        }
+
+        fn parameters(&self) -> Value {
+            json!({"type": "object"})
+        }
+
+        fn search_hint(&self) -> &str {
+            "zz_late_refresh"
+        }
+
+        async fn execute(&self, _args: Value) -> ava_types::Result<ToolResult> {
+            Ok(ToolResult {
+                call_id: String::new(),
+                content: "ok".to_string(),
+                is_error: false,
+            })
+        }
+    }
+
+    async fn execute_tool_search(registry: &ToolRegistry, query: &str) -> String {
+        registry
+            .execute(ToolCall {
+                id: "call_1".to_string(),
+                name: "tool_search".to_string(),
+                arguments: json!({ "query": query }),
+            })
+            .await
+            .expect("tool_search executes")
+            .content
+    }
+
+    #[tokio::test]
+    async fn deferred_tools_are_discoverable_via_tool_search() {
+        let mut registry = ToolRegistry::new();
+        registry.register_with_tier(DeferredNeedleTool, ToolTier::Deferred);
+        register_tool_search_tool(&mut registry);
+
+        let content = execute_tool_search(&registry, "zz_deferred_hint").await;
+        assert!(content.contains("deferred_needle"));
+    }
+
+    #[tokio::test]
+    async fn register_tool_search_tool_refreshes_snapshot() {
+        let mut registry = ToolRegistry::new();
+        register_tool_search_tool(&mut registry);
+        registry.register_with_tier(LateDeferredTool, ToolTier::Deferred);
+
+        let before_refresh = execute_tool_search(&registry, "zz_late_refresh").await;
+        assert!(before_refresh.contains("No tools found"));
+
+        register_tool_search_tool(&mut registry);
+        let after_refresh = execute_tool_search(&registry, "zz_late_refresh").await;
+        assert!(after_refresh.contains("late_deferred"));
+    }
 }

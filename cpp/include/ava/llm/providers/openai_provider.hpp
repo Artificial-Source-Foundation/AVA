@@ -9,7 +9,14 @@ namespace ava::llm {
 
 class OpenAiProvider final : public Provider {
 public:
-  OpenAiProvider(std::string model, std::string api_key, std::string base_url, std::optional<std::string> org_id);
+  OpenAiProvider(
+      std::string model,
+      std::string api_key,
+      std::string base_url,
+      std::optional<std::string> org_id,
+      ProviderKind provider_kind = ProviderKind::OpenAI,
+      std::string provider_label = "openai"
+  );
 
   [[nodiscard]] static OpenAiProvider from_credential(
       const std::string& model,
@@ -54,6 +61,8 @@ private:
   std::string api_key_;
   std::string base_url_;
   std::optional<std::string> org_id_;
+  ProviderKind provider_kind_{ProviderKind::OpenAI};
+  std::string provider_label_{"openai"};
 };
 
 }  // namespace ava::llm

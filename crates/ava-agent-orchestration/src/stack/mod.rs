@@ -35,7 +35,7 @@ use ava_tools::core::question::QuestionBridge;
 use ava_tools::core::task::{TaskResult, TaskSpawner};
 use ava_tools::core::{
     register_custom_tools_with_plugins, register_plan_tool, register_question_tool,
-    register_task_tool, register_todo_tools,
+    register_task_tool, register_todo_tools, register_tool_search_tool,
 };
 use ava_tools::permission_middleware::{convert_tool_source, ApprovalBridge, SharedToolSources};
 use ava_tools::registry::{ToolRegistry, ToolSource, ToolTier};
@@ -497,6 +497,7 @@ impl AgentStack {
                 Arc::clone(&permission_context),
                 approval_bridge.clone(),
                 Some(Arc::clone(&plugin_manager)),
+                None,
             );
         register_todo_tools(&mut registry, todo_state.clone());
         register_question_tool(&mut registry, question_bridge.clone());
@@ -506,6 +507,7 @@ impl AgentStack {
             &custom_tool_dirs,
             Some(Arc::clone(&plugin_manager)),
         );
+        register_tool_search_tool(&mut registry);
 
         let mcp_runtime =
             AgentMcpRuntime::new(mcp_global_config.clone(), mcp_project_config.clone());
@@ -517,6 +519,7 @@ impl AgentStack {
             let mut sources = shared_tool_sources
                 .write()
                 .unwrap_or_else(|e| e.into_inner());
+            sources.clear();
             for (def, src) in registry.list_tools_with_source() {
                 sources.insert(def.name, convert_tool_source(&src));
             }
@@ -680,6 +683,20 @@ impl AgentStack {
             &self.custom_tool_dirs,
             Some(Arc::clone(&self.plugin_manager)),
         );
+        {
+            let mut sources = self
+                .shared_tool_sources
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            sources.retain(|_, src| {
+                !matches!(src, ava_permissions::inspector::ToolSource::Custom { .. })
+            });
+            for (def, src) in registry.list_tools_with_source() {
+                if matches!(src, ToolSource::Custom { .. }) {
+                    sources.insert(def.name, convert_tool_source(&src));
+                }
+            }
+        }
         registry
             .list_tools_with_source()
             .iter()
@@ -694,6 +711,7 @@ impl AgentStack {
             Arc::clone(&self.permission_context),
             self.approval_bridge.clone(),
             Some(Arc::clone(&self.plugin_manager)),
+            Some(self.shared_tool_sources.clone()),
         );
         register_todo_tools(&mut registry, self.todo_state.clone());
         register_question_tool(&mut registry, self.question_bridge.clone());
@@ -708,10 +726,12 @@ impl AgentStack {
             Some(Arc::clone(&self.plugin_manager)),
         );
         self.mcp_runtime.populate_registry(&mut registry).await;
+        register_tool_search_tool(&mut registry);
         // Populate tool sources for the permission middleware.
         {
             // infallible: RwLock poisoning is recovered by taking the inner value
             let mut sources = reload_sources.write().unwrap_or_else(|e| e.into_inner());
+            sources.clear();
             for (def, src) in registry.list_tools_with_source() {
                 sources.insert(def.name, convert_tool_source(&src));
             }
@@ -748,6 +768,7 @@ impl AgentStack {
                 Arc::clone(&self.permission_context),
                 self.approval_bridge.clone(),
                 Some(Arc::clone(&self.plugin_manager)),
+                None,
             );
             register_todo_tools(&mut registry, self.todo_state.clone());
             register_question_tool(&mut registry, self.question_bridge.clone());
@@ -767,6 +788,7 @@ impl AgentStack {
             }
 
             self.register_enabled_runtime_mcp_tools(&mut registry).await;
+            register_tool_search_tool(&mut registry);
 
             registry
         };
@@ -1168,6 +1190,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use async_trait::async_trait;
     use ava_llm::provider::LLMResponse;
@@ -1192,6 +1215,22 @@ mod tests {
     struct RecordingToolSurfaceProvider {
         model: String,
         recorded_tool_names: Arc<tokio::sync::Mutex<Vec<Vec<String>>>>,
+    }
+
+    struct ToolSearchMcpProvider {
+        model: String,
+        mcp_tool_name: String,
+        calls: AtomicUsize,
+    }
+
+    impl ToolSearchMcpProvider {
+        fn new(model: &str, mcp_tool_name: String) -> Self {
+            Self {
+                model: model.to_string(),
+                mcp_tool_name,
+                calls: AtomicUsize::new(0),
+            }
+        }
     }
 
     impl RecordingToolSurfaceProvider {
@@ -1262,6 +1301,79 @@ mod tests {
                 usage: None,
                 thinking: None,
             })
+        }
+    }
+
+    #[async_trait]
+    impl LLMProvider for ToolSearchMcpProvider {
+        async fn generate(&self, _messages: &[Message]) -> Result<String> {
+            Ok(String::new())
+        }
+
+        async fn generate_stream(
+            &self,
+            _messages: &[Message],
+        ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+            Ok(Box::pin(futures::stream::iter(vec![
+                StreamChunk::finished(),
+            ])))
+        }
+
+        fn estimate_tokens(&self, input: &str) -> usize {
+            input.len() / 4
+        }
+
+        fn estimate_cost(&self, _input_tokens: usize, _output_tokens: usize) -> f64 {
+            0.0
+        }
+
+        fn model_name(&self) -> &str {
+            &self.model
+        }
+
+        fn supports_tools(&self) -> bool {
+            true
+        }
+
+        async fn generate_with_tools(
+            &self,
+            messages: &[Message],
+            tools: &[ava_types::Tool],
+        ) -> Result<LLMResponse> {
+            match self.calls.fetch_add(1, Ordering::SeqCst) {
+                0 => {
+                    assert!(tools.iter().any(|tool| tool.name == "tool_search"));
+                    assert!(tools.iter().any(|tool| tool.name == self.mcp_tool_name));
+                    Ok(LLMResponse {
+                        content: String::new(),
+                        tool_calls: vec![ToolCall {
+                            id: "call-tool-search".to_string(),
+                            name: "tool_search".to_string(),
+                            arguments: json!({ "query": self.mcp_tool_name }),
+                        }],
+                        usage: None,
+                        thinking: None,
+                    })
+                }
+                _ => {
+                    assert!(
+                        messages
+                            .iter()
+                            .any(|message| message.content.contains(&self.mcp_tool_name)),
+                        "tool_search result should include refreshed MCP tool snapshot"
+                    );
+                    Ok(LLMResponse {
+                        content: String::new(),
+                        tool_calls: vec![ToolCall {
+                            id: "call-attempt-completion".to_string(),
+                            name: "attempt_completion".to_string(),
+                            arguments: json!({ "result": "done" }),
+                        }],
+                        usage: None,
+                        thinking: None,
+                    })
+                }
+            }
         }
     }
 
@@ -1552,6 +1664,55 @@ mod tests {
                 "session-disabled MCP tool should stay filtered for the rest of the session"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn run_scoped_tool_search_discovers_enabled_mcp_tools() {
+        let temp = tempfile::tempdir().expect("temp");
+        let mcp_tool_name = namespaced_mcp_tool_name("enabled-server", "enabled_tool");
+        let provider = Arc::new(ToolSearchMcpProvider::new(
+            "test-model",
+            mcp_tool_name.clone(),
+        ));
+        let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+            data_dir: temp.path().to_path_buf(),
+            injected_provider: Some(provider),
+            ..Default::default()
+        })
+        .await
+        .expect("stack init should succeed");
+
+        stack
+            .set_mcp_runtime_for_tests(Some(MCPRuntime {
+                caller: Arc::new(stack_mcp::McpManagerCaller {
+                    manager: ava_mcp::manager::McpManager::new(),
+                }),
+                server_count: 1,
+                tool_count: 1,
+                tools_with_source: vec![("enabled-server".to_string(), test_tool("enabled_tool"))],
+                server_scopes: HashMap::from([(
+                    "enabled-server".to_string(),
+                    McpServerScope::Global,
+                )]),
+            }))
+            .await;
+
+        let result = stack
+            .run(
+                "search for MCP tool",
+                5,
+                None,
+                CancellationToken::new(),
+                Vec::new(),
+                None,
+                Vec::new(),
+                None,
+                None,
+            )
+            .await
+            .expect("run should succeed");
+
+        assert!(result.success);
     }
 
     #[test]

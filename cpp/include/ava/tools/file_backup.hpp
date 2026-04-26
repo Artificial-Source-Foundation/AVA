@@ -5,9 +5,18 @@
 
 namespace ava::tools {
 
-inline constexpr const char* kAvaDirectoryName = ".ava";
-// Existing backup stores use this directory name; keep it stable for persisted workspaces.
-inline constexpr const char* kFileHistoryDirectoryName = "file-history-m6";
+inline constexpr const char* kLegacyProjectAvaDirectoryName = ".ava";
+inline constexpr const char* kLegacyProjectFileHistoryDirectoryName = "file-history-m6";
+
+[[nodiscard]] bool is_backup_history_path(
+    const std::filesystem::path& workspace_root,
+    const std::filesystem::path& candidate
+);
+void reject_backup_history_access(
+    const std::filesystem::path& workspace_root,
+    const std::filesystem::path& candidate,
+    const std::string& tool_name
+);
 
 class FileBackupSession {
  public:
@@ -18,6 +27,7 @@ class FileBackupSession {
 
  private:
   std::filesystem::path workspace_root_;
+  std::filesystem::path history_root_;
   std::filesystem::path backup_root_;
   std::string session_id_;
 };

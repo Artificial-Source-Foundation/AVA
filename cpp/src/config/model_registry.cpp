@@ -7,6 +7,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "ava/core/string_utils.hpp"
+
 namespace ava::config {
 namespace {
 
@@ -134,13 +136,6 @@ const char* kEmbeddedRegistryJson = R"JSON(
 }
 )JSON";
 
-[[nodiscard]] std::string lowercase(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  return value;
-}
-
 [[nodiscard]] std::string normalize_token(const std::string& value) {
   std::string normalized;
   normalized.reserve(value.size());
@@ -199,13 +194,13 @@ ModelRegistry ModelRegistry::load_embedded() {
 }
 
 const RegisteredModel* ModelRegistry::find(const std::string& query) const {
-  const auto lowered = lowercase(query);
+  const auto lowered = ava::core::lowercase_ascii(query);
   for(const auto& model : models_) {
-    if(lowercase(model.id) == lowered) {
+    if(ava::core::lowercase_ascii(model.id) == lowered) {
       return &model;
     }
     if(std::any_of(model.aliases.begin(), model.aliases.end(), [&](const auto& alias) {
-         return lowercase(alias) == lowered;
+         return ava::core::lowercase_ascii(alias) == lowered;
        })) {
       return &model;
     }
@@ -217,16 +212,16 @@ const RegisteredModel* ModelRegistry::find_for_provider(
     const std::string& provider,
     const std::string& model
 ) const {
-  const auto lowered = lowercase(model);
+  const auto lowered = ava::core::lowercase_ascii(model);
   for(const auto& entry : models_) {
     if(entry.provider != provider) {
       continue;
     }
-    if(lowercase(entry.id) == lowered) {
+    if(ava::core::lowercase_ascii(entry.id) == lowered) {
       return &entry;
     }
     if(std::any_of(entry.aliases.begin(), entry.aliases.end(), [&](const auto& alias) {
-         return lowercase(alias) == lowered;
+         return ava::core::lowercase_ascii(alias) == lowered;
        })) {
       return &entry;
     }
@@ -235,12 +230,12 @@ const RegisteredModel* ModelRegistry::find_for_provider(
 }
 
 std::optional<std::pair<double, double>> ModelRegistry::pricing(const std::string& model) const {
-  const auto lowered = lowercase(model);
+  const auto lowered = ava::core::lowercase_ascii(model);
   std::vector<const RegisteredModel*> matches;
   for(const auto& entry : models_) {
-    const auto match_id = lowercase(entry.id) == lowered;
+    const auto match_id = ava::core::lowercase_ascii(entry.id) == lowered;
     const auto match_alias = std::any_of(entry.aliases.begin(), entry.aliases.end(), [&](const auto& alias) {
-      return lowercase(alias) == lowered;
+      return ava::core::lowercase_ascii(alias) == lowered;
     });
     if(match_id || match_alias) {
       matches.push_back(&entry);
@@ -273,7 +268,7 @@ bool ModelRegistry::is_loop_prone(const std::string& model) const {
     return known->capabilities.loop_prone;
   }
 
-  const auto lowered = lowercase(model);
+  const auto lowered = ava::core::lowercase_ascii(model);
   return lowered.find("glm") != std::string::npos || lowered.find("codegeex") != std::string::npos
       || lowered.find("minimax") != std::string::npos || lowered.find("kimi") != std::string::npos
       || lowered.find("mercury") != std::string::npos;

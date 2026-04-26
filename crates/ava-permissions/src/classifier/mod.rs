@@ -532,6 +532,119 @@ mod tests {
         assert!(result.blocked, "rm -rf \"/\" must be blocked");
     }
 
+    /// Bypass class 6: compact redirection after root operand (`rm -rf />/dev/null`)
+    #[test]
+    fn blocks_rm_rf_root_with_compact_stdout_redirect() {
+        let result = classify_bash_command("rm -rf />/dev/null");
+        assert!(result.blocked, "rm -rf />/dev/null must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+        assert!(
+            result
+                .reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("rm -rf on critical path")),
+            "expected rm critical-path reason, got: {:?}",
+            result.reason
+        );
+    }
+
+    /// Bypass class 7: compact append redirection after root operand (`rm -rf />>/tmp/out`)
+    #[test]
+    fn blocks_rm_rf_root_with_compact_append_redirect() {
+        let result = classify_bash_command("rm -rf />>/tmp/out");
+        assert!(result.blocked, "rm -rf />>/tmp/out must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+        assert!(
+            result
+                .reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("rm -rf on critical path")),
+            "expected rm critical-path reason, got: {:?}",
+            result.reason
+        );
+    }
+
+    #[test]
+    fn blocks_path_qualified_rm_rf_root_and_compact_amp_redirect() {
+        let result = classify_bash_command("/bin/rm -rf /");
+        assert!(result.blocked, "/bin/rm -rf / must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+
+        let result = classify_bash_command("/bin/rm -rf /usr/../etc");
+        assert!(result.blocked, "/bin/rm -rf /usr/../etc must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+
+        let result = classify_bash_command("rm -rf /&>/tmp/out");
+        assert!(result.blocked, "rm -rf /&>/tmp/out must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+
+        let result = classify_bash_command("rm -rf /&>>/tmp/out");
+        assert!(result.blocked, "rm -rf /&>>/tmp/out must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+    }
+
+    /// Bypass class 8: GNU long-option abbreviations (`--f`/`--r`)
+    #[test]
+    fn blocks_rm_long_option_abbrev_force_recursive() {
+        let result = classify_bash_command("rm --f --r /home/*");
+        assert!(result.blocked, "rm --f --r /home/* must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+        assert!(
+            result
+                .reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("rm -rf on critical path")),
+            "expected rm critical-path reason, got: {:?}",
+            result.reason
+        );
+    }
+
+    /// Longer GNU long-option abbreviations (`--fo`/`--rec`) should also map to rm -rf.
+    #[test]
+    fn blocks_rm_long_option_abbrev_force_recursive_longer_prefixes() {
+        let result = classify_bash_command("rm --fo --rec /home/*");
+        assert!(result.blocked, "rm --fo --rec /home/* must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+        assert!(
+            result
+                .reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("rm -rf on critical path")),
+            "expected rm critical-path reason, got: {:?}",
+            result.reason
+        );
+    }
+
+    #[test]
+    fn blocks_rm_critical_prefix_glob_variants() {
+        let result = classify_bash_command("rm -rf /etc/?*");
+        assert!(result.blocked, "rm -rf /etc/?* must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+
+        let result = classify_bash_command("rm -rf /home/[!.]*");
+        assert!(result.blocked, "rm -rf /home/[!.]* must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+    }
+
+    #[test]
+    fn blocks_quoted_flags_and_wrapped_rm() {
+        let result = classify_bash_command("rm '-rf' /home/*");
+        assert!(result.blocked, "quoted -rf flag must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+
+        let result = classify_bash_command("rm '--recursive' '--force' /etc/*");
+        assert!(result.blocked, "quoted long rm flags must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+
+        let result = classify_bash_command("command rm -rf /home/*");
+        assert!(result.blocked, "command wrapper rm -rf must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+
+        let result = classify_bash_command("env rm -rf /home/*");
+        assert!(result.blocked, "env wrapper rm -rf must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+    }
+
     /// Legitimate path under a protected prefix should NOT be blocked
     #[test]
     fn allows_rm_rf_home_user_project() {
@@ -540,6 +653,37 @@ mod tests {
             !result.blocked,
             "rm -rf on user project path should not be blocked"
         );
+    }
+
+    #[test]
+    fn path_qualified_rm_rf_noncritical_path_is_high() {
+        let result = classify_bash_command("/bin/rm -rf /home/user/project/target");
+        assert!(
+            !result.blocked,
+            "path-qualified rm on project path should not be blocked"
+        );
+        assert_eq!(result.risk_level, RiskLevel::High);
+    }
+
+    #[test]
+    fn parser_differential_materialized_rm_is_blocked() {
+        let result = classify_bash_command("rm${IFS}-rf${IFS}/");
+        assert!(result.blocked, "IFS materialized rm -rf / must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+
+        let result = classify_bash_command("$'\\x72\\x6d' -rf /");
+        assert!(
+            result.blocked,
+            "ANSI-C materialized rm -rf / must be blocked"
+        );
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+
+        let result = classify_bash_command("{rm,-f,-r,/home/*}");
+        assert!(
+            result.blocked,
+            "brace materialized rm -rf /home/* must be blocked"
+        );
+        assert_eq!(result.risk_level, RiskLevel::Critical);
     }
 
     /// curl/wget piped to zsh should also be blocked
@@ -593,6 +737,104 @@ mod tests {
     fn blocks_find_exec_rm_nonrecursive() {
         let result = classify_bash_command("find /tmp -name '*.log' -exec rm -rf {} +");
         assert!(result.blocked);
+    }
+
+    /// `find -exec rm` with GNU long-option abbreviations should be treated as rm -rf
+    #[test]
+    fn blocks_find_exec_rm_long_option_abbrev_force_recursive() {
+        let result = classify_bash_command("find /tmp -type f -exec rm --f --r {} +");
+        assert!(
+            result.blocked,
+            "find /tmp -type f -exec rm --f --r {{}} + must be blocked"
+        );
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+        assert!(
+            result
+                .reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("find -exec rm -rf")),
+            "expected find-exec rm-rf reason, got: {:?}",
+            result.reason
+        );
+    }
+
+    #[test]
+    fn blocks_find_execdir_rm_rf() {
+        let result = classify_bash_command("find /tmp -type f -execdir rm -rf {} +");
+        assert!(
+            result.blocked,
+            "find /tmp -type f -execdir rm -rf {{}} + must be blocked"
+        );
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+        assert!(
+            result
+                .reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("find -exec rm -rf")),
+            "expected find-exec rm-rf reason, got: {:?}",
+            result.reason
+        );
+    }
+
+    #[test]
+    fn blocks_path_qualified_find_and_exec_rm_rf() {
+        let result = classify_bash_command("/usr/bin/find . -delete");
+        assert!(result.blocked, "/usr/bin/find . -delete must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+
+        let result = classify_bash_command("find /tmp -type f -exec /bin/rm -rf {} +");
+        assert!(result.blocked, "find -exec /bin/rm -rf must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+    }
+
+    #[test]
+    fn blocks_quoted_find_actions_and_path_qualified_rm() {
+        let result = classify_bash_command("find . '-delete'");
+        assert!(result.blocked, "quoted find -delete must be blocked");
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+
+        let result = classify_bash_command("find . '-exec' /bin/'rm' -rf {} +");
+        assert!(
+            result.blocked,
+            "quoted find -exec /bin/'rm' -rf must be blocked"
+        );
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+    }
+
+    #[test]
+    fn does_not_treat_redirection_target_as_rm_operand() {
+        let result = classify_bash_command("rm -rf /home/user >& /");
+        assert!(
+            !result.blocked,
+            "redirection target must not be treated as an rm operand"
+        );
+        assert_eq!(result.risk_level, RiskLevel::High);
+
+        let result = classify_bash_command("rm -rf /home/user >| /");
+        assert!(
+            !result.blocked,
+            "noclobber redirection target must not be treated as an rm operand"
+        );
+        assert_eq!(result.risk_level, RiskLevel::High);
+    }
+
+    /// `find -exec rm` should also block on longer GNU abbreviations (`--fo`/`--rec`).
+    #[test]
+    fn blocks_find_exec_rm_long_option_abbrev_force_recursive_longer_prefixes() {
+        let result = classify_bash_command("find /tmp -type f -exec rm --fo --rec {} +");
+        assert!(
+            result.blocked,
+            "find /tmp -type f -exec rm --fo --rec {{}} + must be blocked"
+        );
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+        assert!(
+            result
+                .reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("find -exec rm -rf")),
+            "expected find-exec rm-rf reason, got: {:?}",
+            result.reason
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════

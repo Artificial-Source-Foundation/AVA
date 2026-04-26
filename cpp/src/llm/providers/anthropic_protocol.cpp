@@ -256,7 +256,22 @@ std::vector<types::StreamChunk> parse_stream_events(const nlohmann::json& payloa
   std::vector<types::StreamChunk> chunks;
   const auto event_type = payload.value("type", std::string{});
 
-  if(event_type == "message_start" || event_type == "content_block_stop" || event_type == "ping") {
+  if(event_type == "message_start") {
+    if(
+        payload.contains("message") && payload.at("message").is_object()
+        && payload.at("message").contains("usage") && payload.at("message").at("usage").is_object()
+    ) {
+      const auto usage = parse_usage(nlohmann::json{{"usage", payload.at("message").at("usage")}});
+      if(usage.has_value()) {
+        types::StreamChunk chunk;
+        chunk.usage = *usage;
+        chunks.push_back(std::move(chunk));
+      }
+    }
+    return chunks;
+  }
+
+  if(event_type == "content_block_stop" || event_type == "ping") {
     return chunks;
   }
 

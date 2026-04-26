@@ -54,7 +54,10 @@ ava_enable_sanitizers(ava_platform)
 add_library(ava_config STATIC
   config/agents.cpp
   config/config.cpp
+  config/keychain.cpp
   config/paths.cpp
+  config/project_state.cpp
+  config/routing.cpp
   config/trust.cpp
   config/credentials.cpp
   config/model_spec.cpp
@@ -125,12 +128,19 @@ add_library(ava_tools STATIC
   tools/retry.cpp
   tools/command_classifier.cpp
   tools/permission_middleware.cpp
-  tools/mcp_bridge.cpp
   tools/path_guard.cpp
+  tools/file_io.cpp
   tools/file_backup.cpp
   tools/output_fallback.cpp
   tools/core_tools.cpp
+  tools/edit_tool.cpp
+  tools/bash_tool.cpp
   tools/git_read_tool.cpp
+  tools/read_write_tools.cpp
+  tools/search_tools.cpp
+  tools/web_tools.cpp
+  tools/todo_tools.cpp
+  tools/tool_search_tool.cpp
   tools/shell_runner.cpp
 )
 target_include_directories(ava_tools
@@ -142,6 +152,8 @@ target_link_libraries(ava_tools
     ava_types
     ava_platform
     nlohmann_json::nlohmann_json
+  PRIVATE
+    ava_config
 )
 ava_apply_toolchain_hygiene(ava_tools)
 ava_apply_warnings(ava_tools)
@@ -161,15 +173,27 @@ target_include_directories(ava_mcp
 target_link_libraries(ava_mcp
   PUBLIC
     nlohmann_json::nlohmann_json
+    ava_optional_cpr
 )
 ava_apply_toolchain_hygiene(ava_mcp)
 ava_apply_warnings(ava_mcp)
 ava_enable_sanitizers(ava_mcp)
 
-target_link_libraries(ava_tools
+add_library(ava_mcp_tools STATIC
+  tools/mcp_bridge.cpp
+)
+target_include_directories(ava_mcp_tools
   PUBLIC
+    "${AVA_CPP_INCLUDE_DIR}"
+)
+target_link_libraries(ava_mcp_tools
+  PUBLIC
+    ava_tools
     ava_mcp
 )
+ava_apply_toolchain_hygiene(ava_mcp_tools)
+ava_apply_warnings(ava_mcp_tools)
+ava_enable_sanitizers(ava_mcp_tools)
 
 add_library(ava_agent STATIC
   agent/budget_tracker.cpp
@@ -217,6 +241,7 @@ target_link_libraries(ava_orchestration
     ava_llm
     ava_tools
     ava_mcp
+    ava_mcp_tools
     ava_agent
 )
 ava_apply_toolchain_hygiene(ava_orchestration)
@@ -240,6 +265,7 @@ target_link_libraries(ava_runtime
     ava_llm
     ava_tools
     ava_mcp
+    ava_mcp_tools
     ava_agent
     ava_orchestration
     ava_optional_ftxui

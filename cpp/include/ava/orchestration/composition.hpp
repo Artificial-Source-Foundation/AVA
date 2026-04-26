@@ -37,6 +37,7 @@ struct RuntimeSelectionOptions {
 
 struct ResolvedRuntimeSelection {
   std::string provider;
+  std::string credential_provider;
   std::string model;
   std::optional<std::string> agent;
   std::size_t max_turns{16};

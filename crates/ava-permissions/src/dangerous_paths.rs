@@ -98,7 +98,13 @@ pub fn is_dangerous_rm_command(command: &str) -> bool {
     let lower = command.to_ascii_lowercase();
     let tokens: Vec<&str> = lower.split_ascii_whitespace().collect();
 
-    if tokens.first().copied() != Some("rm") {
+    let first = tokens.first().copied().unwrap_or_default();
+    let first_binary = first
+        .trim_matches(|ch| ch == '\'' || ch == '"')
+        .rsplit('/')
+        .next()
+        .unwrap_or(first);
+    if first_binary != "rm" {
         return false;
     }
 
@@ -121,12 +127,27 @@ pub fn is_dangerous_rm_command(command: &str) -> bool {
 
     // Extract path arguments (non-flag tokens after "rm")
     let mut past_double_dash = false;
-    for token in tokens.iter().skip(1) {
-        if *token == "--" {
+    let mut idx = 1;
+    while idx < tokens.len() {
+        let token = tokens[idx];
+        if token == "--" {
             past_double_dash = true;
+            idx += 1;
+            continue;
+        }
+        if is_redirection_operator(token) {
+            idx += 2;
+            continue;
+        }
+        if token.chars().all(|c| c.is_ascii_digit())
+            && idx + 1 < tokens.len()
+            && is_redirection_operator(tokens[idx + 1])
+        {
+            idx += 2;
             continue;
         }
         if !past_double_dash && token.starts_with('-') {
+            idx += 1;
             continue;
         }
         // Strip quotes
@@ -134,9 +155,17 @@ pub fn is_dangerous_rm_command(command: &str) -> bool {
         if is_dangerous_removal_path(stripped) {
             return true;
         }
+        idx += 1;
     }
 
     false
+}
+
+fn is_redirection_operator(token: &str) -> bool {
+    matches!(
+        token,
+        "<" | ">" | "<<" | ">>" | "<&" | ">&" | ">|" | ">>&" | "&>" | "&>>"
+    )
 }
 
 #[cfg(test)]

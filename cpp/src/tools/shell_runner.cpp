@@ -1,19 +1,23 @@
 #include "shell_runner.hpp"
 
-#include <atomic>
-#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <limits>
+#include <random>
 #include <sstream>
 #include <system_error>
 
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#include <sys/stat.h>
+#else
+#include <unistd.h>
 #include <sys/wait.h>
+#endif
 
 namespace ava::tools {
 namespace {
-
-std::atomic<std::uint64_t> g_temp_file_counter{0};
 
 [[nodiscard]] std::string shell_single_quote(const std::string& value) {
   std::string escaped;
@@ -30,7 +34,7 @@ std::atomic<std::uint64_t> g_temp_file_counter{0};
   return escaped;
 }
 
-[[nodiscard]] std::string read_file_text(const std::filesystem::path& path) {
+[[nodiscard]] std::string read_temp_file_or_empty(const std::filesystem::path& path) {
   std::ifstream file(path, std::ios::binary);
   if(!file) {
     return {};
@@ -57,6 +61,30 @@ class TempFileGuard {
   std::filesystem::path path_;
 };
 
+[[nodiscard]] std::filesystem::path create_private_temp_file() {
+#if defined(_WIN32)
+  for(int attempt = 0; attempt < 64; ++attempt) {
+    std::random_device random;
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("ava_tool_output_" + std::to_string(random()) + "_" + std::to_string(attempt) + ".txt");
+    const auto fd = _open(path.string().c_str(), _O_CREAT | _O_EXCL | _O_BINARY | _O_RDWR, _S_IREAD | _S_IWRITE);
+    if(fd != -1) {
+      _close(fd);
+      return path;
+    }
+  }
+  throw std::runtime_error("Failed to create private tool output file");
+#else
+  auto pattern = (std::filesystem::temp_directory_path() / "ava_tool_output_XXXXXX").string();
+  const int fd = mkstemp(pattern.data());
+  if(fd == -1) {
+    throw std::runtime_error("Failed to create private tool output file");
+  }
+  close(fd);
+  return pattern;
+#endif
+}
+
 }  // namespace
 
 CommandOutcome run_shell_command(
@@ -64,9 +92,7 @@ CommandOutcome run_shell_command(
     const std::filesystem::path& cwd,
     std::uint64_t timeout_ms
 ) {
-  const auto temp_file = std::filesystem::temp_directory_path() /
-                         ("ava_tool_output_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
-                          "_" + std::to_string(g_temp_file_counter.fetch_add(1, std::memory_order_relaxed)) + ".txt");
+  const auto temp_file = create_private_temp_file();
   TempFileGuard temp_file_guard(temp_file);
 
   const auto cd_clause = "cd " + shell_single_quote(cwd.string()) + " && ";
@@ -87,11 +113,14 @@ CommandOutcome run_shell_command(
   std::error_code ec;
   std::string content;
   if(std::filesystem::exists(temp_file, ec) && !ec) {
-    content = read_file_text(temp_file);
+    content = read_temp_file_or_empty(temp_file);
   }
 
   int exit_code = 1;
   if(status != -1) {
+#if defined(_WIN32)
+    exit_code = status;
+#else
     if(WIFEXITED(status)) {
       exit_code = WEXITSTATUS(status);
     } else if(WIFSIGNALED(status)) {
@@ -99,6 +128,7 @@ CommandOutcome run_shell_command(
     } else {
       exit_code = status;
     }
+#endif
   }
 
   return CommandOutcome{.output = std::move(content), .exit_code = exit_code};

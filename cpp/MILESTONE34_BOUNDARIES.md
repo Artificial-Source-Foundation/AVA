@@ -48,10 +48,16 @@ ionice -c 3 nice -n 15 ./build/cpp/debug/tests/ava_mcp_tests
 2. Semantic/LLM summarization compaction, JSONL audit logging, bookmarks/search, and cross-runtime UUID normalization remain deferred.
 3. Live-provider soak remains opt-in; default evidence uses deterministic mock/provider-free lanes.
 4. `AgentRunLoop` is split out of `runtime.cpp` and stack-allocated, but deeper phase-level extraction remains a future refactor if the loop grows again.
-5. `core_tools.cpp` remains a large multi-tool translation unit; splitting tools by file is a future maintainability refactor.
-6. SQLite session operations still open short-lived connections per operation; a persistent connection/pool is deferred until there is soak evidence that the current path is insufficient.
-7. Shell execution still uses the portable shell wrapper rather than a shared direct process-runner abstraction; stdout/stderr split and fully portable timeout enforcement remain future work.
-8. Signal handling remains cooperative cancellation, not hard-kill crash recovery.
+5. Generated C++ file-history backups now use the XDG app state file-history directory instead of workspace `.ava`; legacy `.ava/file-history-m6` guards remain only to protect existing workspaces. Backup directories/files now fail closed on permission-repair errors, but a direct `open(O_NOFOLLOW, 0600)` backup-copy primitive remains a possible future hardening simplification.
+6. C++ session SQLite stores now fail closed when owner-only directory/database permission repair cannot be applied or verified. WAL/SHM permission repair is re-applied after schema and write commits, while sidecar timing remains constrained by SQLite-managed file lifetimes.
+7. Git/search backup-history guards now constrain patch/object output and symlinked backup targets, `git_read` redacts credential-bearing remote URLs, and legitimate workspace paths named `file-history` are no longer hidden by broad substring filtering. Broader git-read UX for safe patch summaries can be revisited with path-aware redaction if needed.
+8. `core_tools.cpp` is now limited to default tool registration, and the read/write, edit, Bash, Git read, and search implementations each live in dedicated translation units with dedicated public headers. `tools.hpp` is a narrowed default-surface compatibility umbrella; opt-in/deferred adapters such as MCP bridge and web tools require direct headers. Todo-tool behavior tests now live in `tools_todo.test.cpp`; the remaining tool-shape cleanup is to continue splitting the still-large `tools_core_tools.test.cpp` suite by ownership slice as future low-risk work.
+9. The MCP bridge now lives behind a dedicated adapter target instead of the core `ava_tools` library linking MCP directly; moving its public compatibility header out of `ava/tools` remains a future API cleanup.
+10. SQLite session operations still open short-lived connections per operation; a persistent connection/pool is deferred until there is soak evidence that the current path is insufficient.
+11. Shell execution still uses the portable shell wrapper rather than a shared direct process-runner abstraction; stdout/stderr split and fully portable timeout enforcement remain future work, though captured output now uses a private temp file.
+12. Signal handling remains cooperative cancellation, not hard-kill crash recovery.
+13. Provider streaming still keeps per-provider HTTP/SSE dispatch loops and JSON error-body summarizers separate; exact duplicate trim/retry-after helpers are shared, but broader dispatch abstraction is deferred until the provider surface grows enough to justify it.
+14. `web_tools.cpp` remains compiled into `ava_tools` even though web tools are not default-registered, and shell quoting remains duplicated between shell/web tool internals. Moving web tools to an opt-in target and sharing shell escaping are deferred until the web-tool transport surface is promoted.
 
 ## Acceptance Bar
 

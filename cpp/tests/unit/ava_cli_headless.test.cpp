@@ -299,14 +299,60 @@ TEST_CASE("agent selection applies cli precedence over persisted metadata", "[av
       session
   );
   REQUIRE(selection.provider == "openai");
+  REQUIRE(selection.credential_provider == "openai");
   REQUIRE(selection.model == "gpt-5.3-codex");
   REQUIRE(selection.max_turns == 9);
+}
+
+TEST_CASE("agent selection preserves raw provider alias for credential lookup", "[ava_app]") {
+  const auto selection = ava::orchestration::resolve_runtime_selection(
+      ava::orchestration::RuntimeSelectionOptions{
+          .provider = "chatgpt",
+          .model = "gpt-5-mini",
+          .max_turns = 16,
+          .max_turns_explicit = false,
+      },
+      empty_session("sess_alias")
+  );
+
+  REQUIRE(selection.provider == "openai");
+  REQUIRE(selection.credential_provider == "chatgpt");
+  REQUIRE(selection.model == "gpt-5-mini");
+
+  const auto model_spec_selection = ava::orchestration::resolve_runtime_selection(
+      ava::orchestration::RuntimeSelectionOptions{
+          .provider = std::nullopt,
+          .model = "chatgpt/gpt-5-mini",
+          .max_turns = 16,
+          .max_turns_explicit = false,
+      },
+      empty_session("sess_alias_model")
+  );
+
+  REQUIRE(model_spec_selection.provider == "openai");
+  REQUIRE(model_spec_selection.credential_provider == "chatgpt");
+  REQUIRE(model_spec_selection.model == "gpt-5-mini");
+
+  const auto mixed_case_selection = ava::orchestration::resolve_runtime_selection(
+      ava::orchestration::RuntimeSelectionOptions{
+          .provider = "ChatGPT",
+          .model = "gpt-5-mini",
+          .max_turns = 16,
+          .max_turns_explicit = false,
+      },
+      empty_session("sess_alias_mixed_case")
+  );
+
+  REQUIRE(mixed_case_selection.provider == "openai");
+  REQUIRE(mixed_case_selection.credential_provider == "ChatGPT");
+  REQUIRE(mixed_case_selection.model == "gpt-5-mini");
 }
 
 TEST_CASE("agent selection restores persisted provider model when cli unset", "[ava_app]") {
   auto session = empty_session("sess_2");
   session.metadata["headless"] = nlohmann::json{
       {"provider", "openai"},
+      {"credential_provider", "chatgpt"},
       {"model", "gpt-5-mini"},
       {"max_turns", 4},
   };
@@ -321,6 +367,7 @@ TEST_CASE("agent selection restores persisted provider model when cli unset", "[
       session
   );
   REQUIRE(selection.provider == "openai");
+  REQUIRE(selection.credential_provider == "chatgpt");
   REQUIRE(selection.model == "gpt-5-mini");
   REQUIRE(selection.max_turns == 4);
 }
@@ -527,7 +574,23 @@ TEST_CASE("ndjson event carries run_id and streaming delta payload", "[ava_app]"
   REQUIRE(tool_result.at("run_id") == "run-1");
 }
 
-TEST_CASE("ndjson event projects budget and compaction fields", "[ava_app]") {
+TEST_CASE("ndjson event projects token usage budget and compaction fields", "[ava_app]") {
+  const auto usage = ava::app::headless_event_to_ndjson(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::TokenUsage,
+      .run_id = "run-usage",
+      .turn = 2,
+      .token_usage = ava::types::TokenUsage{.input_tokens = 10, .output_tokens = 7, .cache_read_tokens = 3, .cache_creation_tokens = 2},
+      .token_cost_usd = 0.0042,
+  });
+  REQUIRE(usage.at("type") == "token_usage");
+  REQUIRE(usage.at("run_id") == "run-usage");
+  REQUIRE(usage.at("turn") == 2);
+  REQUIRE(usage.at("input_tokens") == 10);
+  REQUIRE(usage.at("output_tokens") == 7);
+  REQUIRE(usage.at("cache_read_tokens") == 3);
+  REQUIRE(usage.at("cache_creation_tokens") == 2);
+  REQUIRE(usage.at("cost_usd") == 0.0042);
+
   const auto budget = ava::app::headless_event_to_ndjson(ava::agent::AgentEvent{
       .kind = ava::agent::AgentEventKind::BudgetWarning,
       .run_id = "run-budget",
@@ -538,7 +601,9 @@ TEST_CASE("ndjson event projects budget and compaction fields", "[ava_app]") {
   REQUIRE(budget.at("run_id") == "run-budget");
   REQUIRE(budget.at("threshold_percent") == 100);
   REQUIRE(budget.at("spent_usd") == 1.25);
+  REQUIRE(budget.at("current_cost_usd") == 1.25);
   REQUIRE(budget.at("budget_usd") == 1.0);
+  REQUIRE(budget.at("max_budget_usd") == 1.0);
 
   const auto compacted = ava::app::headless_event_to_ndjson(ava::agent::AgentEvent{
       .kind = ava::agent::AgentEventKind::ContextCompacted,

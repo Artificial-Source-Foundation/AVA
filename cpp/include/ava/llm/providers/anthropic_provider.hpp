@@ -9,7 +9,13 @@ namespace ava::llm {
 
 class AnthropicProvider final : public Provider {
 public:
-  AnthropicProvider(std::string model, std::string api_key, std::string base_url, std::string anthropic_version);
+  AnthropicProvider(
+      std::string model,
+      std::string api_key,
+      std::string base_url,
+      std::string anthropic_version,
+      std::string provider_label = "anthropic"
+  );
 
   [[nodiscard]] static AnthropicProvider from_credential(
       const std::string& model,
@@ -51,6 +57,7 @@ private:
   std::string api_key_;
   std::string base_url_;
   std::string anthropic_version_;
+  std::string provider_label_{"anthropic"};
 };
 
 }  // namespace ava::llm

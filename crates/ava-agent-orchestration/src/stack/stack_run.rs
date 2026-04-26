@@ -35,7 +35,7 @@ use ava_tools::core::register_core_tools;
 use ava_tools::core::task::{current_originating_tool_call_id, TaskResult, TaskSpawner};
 use ava_tools::core::{
     file_backup::new_backup_session, register_custom_tools_with_plugins, register_plan_tool,
-    register_question_tool, register_task_tool, register_todo_tools,
+    register_question_tool, register_task_tool, register_todo_tools, register_tool_search_tool,
 };
 use ava_tools::permission_middleware::{convert_tool_source, SharedToolSources};
 use ava_tools::registry::ToolRegistry;
@@ -606,6 +606,7 @@ impl AgentStack {
                     Arc::clone(&run_permission_context),
                     self.approval_bridge.with_run_id(interactive_run_id.clone()),
                     Some(Arc::clone(&self.plugin_manager)),
+                    None,
                 );
             register_todo_tools(&mut registry, run_todo_state);
             register_question_tool(
@@ -646,6 +647,7 @@ impl AgentStack {
             }
 
             self.register_enabled_runtime_mcp_tools(&mut registry).await;
+            register_tool_search_tool(&mut registry);
 
             (registry, run_tool_sources, run_backup_session)
         };
@@ -688,6 +690,7 @@ impl AgentStack {
         {
             // infallible: RwLock poisoning is recovered by taking the inner value
             let mut sources = run_tool_sources.write().unwrap_or_else(|e| e.into_inner());
+            sources.clear();
             for (def, src) in registry.list_tools_with_source() {
                 sources.insert(def.name, convert_tool_source(&src));
             }

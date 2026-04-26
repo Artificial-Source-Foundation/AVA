@@ -2,7 +2,7 @@
 title: "Backend Contract Exceptions"
 description: "Versioned registry of intentional adapter-specific exceptions to the canonical shared-backend contract."
 order: 11
-updated: "2026-04-25"
+updated: "2026-04-26"
 ---
 
 # Backend Contract Exceptions
@@ -104,11 +104,14 @@ Rules:
 - Rationale: the C++ migration lane preserves canonical overlapping lifecycle tag spelling for `complete`, `error`, and `subagent_complete`, but its scoped headless proof currently emits C++ runtime event names such as `run_started`, `turn_started`, `assistant_response_delta`, `assistant_response`, `checkpoint`, `budget_warning`, and `context_compacted` rather than claiming full Rust headless JSON parity.
 - Current behavior:
   - C++ headless NDJSON is tested as a deterministic scoped dialect in `cpp/tests/unit/ava_cli_headless.test.cpp` and `cpp/tests/integration/headless_runtime_m10.test.cpp`
-  - full Rust headless tags such as `text`, `thinking`, `progress`, `tool_stats`, and `token_usage` are not guaranteed by the C++ headless surface
+  - C++ now emits `token_usage` records for observed or estimated turn usage and includes the Rust-compatible `current_cost_usd` alias on `budget_warning`, while preserving its older `spent_usd` field for existing C++ consumers
+  - full Rust headless tags such as `text`, `thinking`, `progress`, and `tool_stats` are not guaranteed by the C++ headless surface
   - shared lifecycle events that overlap the backend contract keep canonical spellings where already promoted into the shared contract
 - Risk: automation consumers may assume the C++ headless CLI is a drop-in replacement for Rust headless JSON unless this scoped dialect remains explicit.
 - Owner: backend/headless/TUI migration owner
 - Expiry/removal trigger: either align C++ headless NDJSON with the Rust headless schema for overlapping and non-overlapping events, or version the C++ dialect as a long-term product surface with a dedicated contract document and golden fixtures.
 - Required tests:
   - current C++ NDJSON field/order tests in `ava_app_tests` and `ava_app_integration_tests`
+  - `ndjson event projects token usage budget and compaction fields` covers `token_usage` and the budget-warning field alias
+  - `ava_m6_e2e` deterministic compiled-CLI adoption evidence covers isolated HOME/XDG execution, real tool NDJSON emission, and persisted session retrieval from SQLite
   - future removal requires cross-runtime golden comparison coverage for the selected canonical headless event subset

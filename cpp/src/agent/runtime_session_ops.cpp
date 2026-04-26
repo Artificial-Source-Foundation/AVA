@@ -23,8 +23,8 @@ constexpr std::array<std::string_view, 2> kGeneratedMessageIdPrefixes{
     "m7_msg_",
 };
 
-[[nodiscard]] std::string make_message_id(std::uint64_t index) {
-  return std::string{kRuntimeMessageIdPrefix} + std::to_string(index);
+[[nodiscard]] std::string make_message_id(const std::string& session_id, std::uint64_t index) {
+  return std::string{kRuntimeMessageIdPrefix} + std::to_string(index) + "_" + session_id;
 }
 
 [[nodiscard]] std::string normalize_role(const std::string& role) {
@@ -206,7 +206,7 @@ std::uint64_t derive_message_id_counter(const ava::types::SessionRecord& session
     const auto* begin = suffix->data();
     const auto* end = begin + suffix->size();
     const auto [parsed_end, error] = std::from_chars(begin, end, parsed);
-    if(error == std::errc{} && parsed_end == end) {
+    if(error == std::errc{} && (parsed_end == end || *parsed_end == '_')) {
       saw_generated_id = true;
       max_seen = std::max(max_seen, parsed);
     }
@@ -227,7 +227,7 @@ void append_session_message(
   const auto now = ava::types::now_utc_rfc3339();
   const auto parent = append_parent_id(session);
   session.messages.push_back(ava::types::SessionMessage{
-      .id = make_message_id(++id_counter),
+      .id = make_message_id(session.id, ++id_counter),
       .role = role,
       .content = std::move(content),
       .tool_calls = tool_calls.is_array() ? std::move(tool_calls) : nlohmann::json::array(),

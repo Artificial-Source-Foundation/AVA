@@ -697,8 +697,8 @@ TEST_CASE("agent runtime appends after sparse generated message ids", "[ava_agen
 
   REQUIRE(result.reason == ava::agent::AgentCompletionReason::Completed);
   REQUIRE(session.messages.size() == 4);
-  REQUIRE(session.messages.at(2).id == "ava_msg_6");
-  REQUIRE(session.messages.at(3).id == "ava_msg_7");
+  REQUIRE(session.messages.at(2).id == "ava_msg_6_session_sparse_ids");
+  REQUIRE(session.messages.at(3).id == "ava_msg_7_session_sparse_ids");
 }
 
 TEST_CASE("agent runtime appends and prompts from active branch head", "[ava_agent]") {
@@ -1765,6 +1765,15 @@ TEST_CASE("agent runtime emits budget warnings and stops before queued work when
     return message.content.find("should not run") != std::string::npos;
   }));
   REQUIRE(std::any_of(events.begin(), events.end(), [](const auto& event) {
+    return event.kind == ava::agent::AgentEventKind::TokenUsage
+        && event.token_usage.has_value()
+        && event.token_usage->input_tokens == 10
+        && event.token_usage->output_tokens == 10
+        && event.token_cost_usd.has_value()
+        && *event.token_cost_usd > 0.199
+        && *event.token_cost_usd < 0.201;
+  }));
+  REQUIRE(std::any_of(events.begin(), events.end(), [](const auto& event) {
     return event.kind == ava::agent::AgentEventKind::BudgetWarning
         && event.budget_warning.has_value()
         && event.budget_warning->threshold_percent == 50;
@@ -1807,8 +1816,8 @@ TEST_CASE("agent runtime observes streaming usage once at turn end", "[ava_agent
   StreamCostingProvider provider(
       {std::vector<ava::types::StreamChunk>{
           ava::types::StreamChunk::text("hello"),
-          ava::types::StreamChunk{.usage = ava::types::TokenUsage{.input_tokens = 5, .output_tokens = 5}},
-          ava::types::StreamChunk{.usage = ava::types::TokenUsage{.input_tokens = 7, .output_tokens = 7}},
+          ava::types::StreamChunk{.usage = ava::types::TokenUsage{.input_tokens = 7, .cache_read_tokens = 2}},
+          ava::types::StreamChunk{.usage = ava::types::TokenUsage{.output_tokens = 7}},
       }},
       0.01
   );
@@ -1829,6 +1838,7 @@ TEST_CASE("agent runtime observes streaming usage once at turn end", "[ava_agent
   REQUIRE(result.usage.has_value());
   REQUIRE(result.usage->input_tokens == 7);
   REQUIRE(result.usage->output_tokens == 7);
+  REQUIRE(result.usage->cache_read_tokens == 2);
   REQUIRE(session.metadata["agent"]["budget"]["last_alert_threshold_percent"] == 100);
 }
 

@@ -6,6 +6,8 @@
 
 namespace ava::tools {
 
+inline constexpr std::uint64_t kDefaultShellCommandTimeoutMs = 120000;
+
 struct CommandOutcome {
   std::string output;
   int exit_code{1};

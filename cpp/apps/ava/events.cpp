@@ -92,12 +92,27 @@ nlohmann::json headless_event_to_ndjson(const ava::agent::AgentEvent& event) {
       }
       return json;
     }
+    case ava::agent::AgentEventKind::TokenUsage: {
+      nlohmann::json json = with_run_id(nlohmann::json{{"type", "token_usage"}, {"turn", event.turn}});
+      if(event.token_usage.has_value()) {
+        json["input_tokens"] = event.token_usage->input_tokens;
+        json["output_tokens"] = event.token_usage->output_tokens;
+        json["cache_read_tokens"] = event.token_usage->cache_read_tokens;
+        json["cache_creation_tokens"] = event.token_usage->cache_creation_tokens;
+      }
+      if(event.token_cost_usd.has_value()) {
+        json["cost_usd"] = *event.token_cost_usd;
+      }
+      return json;
+    }
     case ava::agent::AgentEventKind::BudgetWarning: {
       nlohmann::json json = with_run_id(nlohmann::json{{"type", "budget_warning"}, {"turn", event.turn}});
       if(event.budget_warning.has_value()) {
         json["threshold_percent"] = event.budget_warning->threshold_percent;
         json["spent_usd"] = event.budget_warning->spent_usd;
+        json["current_cost_usd"] = event.budget_warning->spent_usd;
         json["budget_usd"] = event.budget_warning->budget_usd;
+        json["max_budget_usd"] = event.budget_warning->budget_usd;
       }
       return json;
     }
@@ -170,6 +185,8 @@ void print_headless_event_text(const ava::agent::AgentEvent& event) {
       } else {
         std::cout << "[subagent_complete]\n";
       }
+      return;
+    case ava::agent::AgentEventKind::TokenUsage:
       return;
     case ava::agent::AgentEventKind::BudgetWarning:
       if(event.budget_warning.has_value()) {

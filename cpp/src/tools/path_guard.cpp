@@ -7,11 +7,13 @@
 namespace ava::tools {
 
 bool is_path_within_or_equal(const std::filesystem::path& workspace_root, const std::filesystem::path& candidate) {
-  auto root_it = workspace_root.begin();
-  auto target_it = candidate.begin();
+  const auto normalized_root = workspace_root.lexically_normal();
+  const auto normalized_candidate = candidate.lexically_normal();
+  auto root_it = normalized_root.begin();
+  auto target_it = normalized_candidate.begin();
 
-  for(; root_it != workspace_root.end(); ++root_it, ++target_it) {
-    if(target_it == candidate.end() || *root_it != *target_it) {
+  for(; root_it != normalized_root.end(); ++root_it, ++target_it) {
+    if(target_it == normalized_candidate.end() || *root_it != *target_it) {
       return false;
     }
   }

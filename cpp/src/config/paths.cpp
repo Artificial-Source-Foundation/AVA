@@ -19,6 +19,11 @@ constexpr const char* kAppDirName = "ava";
   if(const auto home = env_path("HOME"); !home.empty()) {
     return home;
   }
+#if defined(_WIN32)
+  if(const auto user_profile = env_path("USERPROFILE"); !user_profile.empty()) {
+    return user_profile;
+  }
+#endif
   throw std::runtime_error("Could not resolve HOME for XDG path resolution");
 }
 
@@ -74,6 +79,11 @@ std::filesystem::path app_db_path() {
   return prefer_existing(paths.data_dir / "data.db", "data.db");
 }
 
+std::filesystem::path file_history_dir() {
+  const auto paths = resolve_app_paths();
+  return paths.state_dir / "file-history";
+}
+
 std::filesystem::path mcp_config_path() {
   const auto paths = resolve_app_paths();
   return prefer_existing(paths.config_dir / "mcp.json", "mcp.json");
@@ -90,6 +100,10 @@ std::filesystem::path project_mcp_config_path(const std::filesystem::path& works
 
 std::filesystem::path project_custom_tools_dir(const std::filesystem::path& workspace_root) {
   return workspace_root / ".ava" / "tools";
+}
+
+std::filesystem::path project_state_file_path(const std::filesystem::path& workspace_root) {
+  return workspace_root / ".ava" / "state.json";
 }
 
 }  // namespace ava::config

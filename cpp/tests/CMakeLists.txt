@@ -67,12 +67,16 @@ ava_enable_sanitizers(ava_session_tests)
 add_test(NAME ava_session_unit COMMAND ava_session_tests)
 
 add_executable(ava_tools_tests
+  unit/core_string_utils.test.cpp
   unit/tools_core_tools.test.cpp
+  unit/tools_todo.test.cpp
+  unit/tools_public_headers.test.cpp
   unit/tools_registry.test.cpp
 )
 target_link_libraries(ava_tools_tests
   PRIVATE
     ava_tools
+    ava_mcp_tools
     Catch2::Catch2WithMain
 )
 ava_apply_toolchain_hygiene(ava_tools_tests)
@@ -119,6 +123,10 @@ target_link_libraries(ava_llm_tests
   PRIVATE
     ava_llm
     Catch2::Catch2WithMain
+)
+target_include_directories(ava_llm_tests
+  PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../src/llm/providers"
 )
 ava_apply_toolchain_hygiene(ava_llm_tests)
 ava_apply_warnings(ava_llm_tests)
@@ -198,3 +206,45 @@ ava_apply_warnings(ava_app_integration_tests)
 ava_enable_sanitizers(ava_app_integration_tests)
 
 add_test(NAME ava_app_integration COMMAND ava_app_integration_tests)
+
+add_executable(ava_m3_runtime_tests
+  integration/m3_runtime_reliability.test.cpp
+)
+target_link_libraries(ava_m3_runtime_tests
+  PRIVATE
+    ava_session
+    nlohmann_json::nlohmann_json
+    Catch2::Catch2WithMain
+)
+target_compile_definitions(ava_m3_runtime_tests
+  PRIVATE
+    AVA_CLI_BINARY_PATH="$<TARGET_FILE:ava_cli>"
+)
+add_dependencies(ava_m3_runtime_tests ava_cli)
+ava_apply_toolchain_hygiene(ava_m3_runtime_tests)
+ava_apply_warnings(ava_m3_runtime_tests)
+ava_enable_sanitizers(ava_m3_runtime_tests)
+
+add_test(NAME ava_m3_runtime COMMAND ava_m3_runtime_tests)
+set_tests_properties(ava_m3_runtime PROPERTIES TIMEOUT 30)
+
+add_executable(ava_m6_e2e_tests
+  integration/m6_adoption_e2e.test.cpp
+)
+target_link_libraries(ava_m6_e2e_tests
+  PRIVATE
+    ava_session
+    nlohmann_json::nlohmann_json
+    Catch2::Catch2WithMain
+)
+target_compile_definitions(ava_m6_e2e_tests
+  PRIVATE
+    AVA_CLI_BINARY_PATH="$<TARGET_FILE:ava_cli>"
+)
+add_dependencies(ava_m6_e2e_tests ava_cli)
+ava_apply_toolchain_hygiene(ava_m6_e2e_tests)
+ava_apply_warnings(ava_m6_e2e_tests)
+ava_enable_sanitizers(ava_m6_e2e_tests)
+
+add_test(NAME ava_m6_e2e COMMAND ava_m6_e2e_tests)
+set_tests_properties(ava_m6_e2e PROPERTIES TIMEOUT 30)

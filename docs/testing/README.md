@@ -48,6 +48,15 @@ Entry points:
 - `bash scripts/testing/backend-automation-gate.sh`
 - `just backend-gate`
 
+## C++ Adoption Evidence
+
+The active C++ adoption loop keeps backend/headless/TUI evidence scoped separately from Rust-first product work. For adoption Milestone 6, use the deterministic non-live evidence lane when validating the compiled C++ headless path:
+
+- `just cpp-m6-e2e`
+- `bash scripts/testing/cpp-m6-e2e.sh`
+
+This lane runs `ava_m6_e2e` through CTest after `ava_cli` has been configured and built with the `cpp-debug` preset. It proves isolated HOME/XDG execution, scripted mock-provider responses, one real `read` tool call, strict NDJSON lifecycle/tool/token/completion ordering, and SQLite/session persistence. It does not claim live-provider soak, full Rust golden NDJSON parity, or web/desktop parity; those boundaries are documented in `cpp/MILESTONE6_ADOPTION_BOUNDARIES.md`.
+
 ## V1 Preflight (`verify-v1`)
 
 Use the local V1 preflight entrypoint at `scripts/testing/verify-v1.sh`.
@@ -118,3 +127,4 @@ Local policy note: git hooks now keep `pre-commit` staged-file-oriented and make
 
 1. [Development Workflow](../contributing/development-workflow.md)
 2. [Benchmark Docs](../benchmark/README.md)
+3. [C++ M6 Adoption Boundaries](../../cpp/MILESTONE6_ADOPTION_BOUNDARIES.md)

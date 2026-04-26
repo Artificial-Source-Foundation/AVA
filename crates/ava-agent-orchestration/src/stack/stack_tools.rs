@@ -54,6 +54,7 @@ pub(crate) fn build_tool_registry_with_plugins(
     permission_context: Arc<RwLock<InspectionContext>>,
     approval_bridge: ApprovalBridge,
     plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
+    shared_tool_sources: Option<SharedToolSources>,
 ) -> (
     ToolRegistry,
     SharedToolSources,
@@ -67,6 +68,11 @@ pub(crate) fn build_tool_registry_with_plugins(
         permission_context,
         Some(approval_bridge),
     );
+    let middleware = if let Some(shared_sources) = shared_tool_sources {
+        middleware.with_tool_sources(shared_sources)
+    } else {
+        middleware
+    };
     // Wire the permission.ask hook: attach the plugin manager so plugins can
     // approve/deny tool calls before the interactive TUI bridge is invoked.
     let middleware = if let Some(pm) = plugin_manager {

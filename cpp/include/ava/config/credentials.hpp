@@ -35,6 +35,13 @@ struct CredentialStore {
 
   [[nodiscard]] std::optional<ProviderCredential> get(const std::string& provider) const;
   void set(const std::string& provider, const ProviderCredential& credential);
+  void set_oauth(
+      const std::string& provider,
+      const std::string& access_token,
+      std::optional<std::string> refresh_token = std::nullopt,
+      std::optional<std::uint64_t> expires_at = std::nullopt,
+      std::optional<std::string> account_id = std::nullopt
+  );
   bool remove(const std::string& provider);
 
   [[nodiscard]] std::vector<std::string> provider_names() const;
@@ -45,6 +52,7 @@ struct CredentialStore {
 [[nodiscard]] std::string normalize_provider_name(const std::string& provider);
 [[nodiscard]] std::optional<std::string> standard_env_var(const std::string& provider);
 [[nodiscard]] std::optional<std::string> default_base_url_for_provider(const std::string& provider);
+[[nodiscard]] bool is_placeholder_api_key(const std::string& key);
 
 void to_json(nlohmann::json& j, const ProviderCredential& value);
 void from_json(const nlohmann::json& j, ProviderCredential& value);

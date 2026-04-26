@@ -2,6 +2,8 @@
 
 #include <random>
 
+#include "ava/core/string_utils.hpp"
+
 namespace ava::llm::openai {
 namespace {
 
@@ -15,7 +17,17 @@ namespace {
   return std::string(ava::types::role_to_string(role));
 }
 
-[[nodiscard]] std::string thinking_effort(types::ThinkingLevel level) {
+[[nodiscard]] bool supports_xhigh_reasoning_model(std::string_view lower_model) {
+  if(lower_model.find("codex") != std::string_view::npos) {
+    return lower_model.find("5.2") != std::string_view::npos || lower_model.find("5.3") != std::string_view::npos;
+  }
+
+  return lower_model.find("gpt-5.3") != std::string_view::npos
+         || lower_model.find("gpt-5.4") != std::string_view::npos
+         || lower_model.find("gpt-5.5") != std::string_view::npos;
+}
+
+[[nodiscard]] std::string thinking_effort(types::ThinkingLevel level, std::string_view lower_model) {
   switch(level) {
     case types::ThinkingLevel::Off:
       return "low";
@@ -26,7 +38,7 @@ namespace {
     case types::ThinkingLevel::High:
       return "high";
     case types::ThinkingLevel::Max:
-      return "xhigh";
+      return supports_xhigh_reasoning_model(lower_model) ? "xhigh" : "high";
   }
   return "low";
 }
@@ -151,7 +163,8 @@ nlohmann::json build_chat_completions_request(
   }
 
   if(thinking.is_enabled()) {
-    body["reasoning_effort"] = thinking_effort(thinking.level);
+    const auto lower_model = ava::core::lowercase_ascii(model);
+    body["reasoning_effort"] = thinking_effort(thinking.level, lower_model);
   }
 
   return body;

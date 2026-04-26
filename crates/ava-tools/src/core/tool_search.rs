@@ -8,20 +8,13 @@ use async_trait::async_trait;
 use ava_types::{AvaError, ToolResult};
 use serde_json::{json, Value};
 
-use crate::registry::Tool;
+use crate::registry::{Tool, ToolSearchMetadata};
 
 /// A tool that searches the tool registry by keyword, matching against
 /// tool names, descriptions, and search hints.
 pub struct ToolSearchTool {
-    /// Snapshot of (name, description, hint) for all tools at registration time.
-    entries: Vec<ToolEntry>,
-}
-
-#[derive(Clone)]
-struct ToolEntry {
-    name: String,
-    description: String,
-    hint: String,
+    /// Snapshot of tool metadata at registration time.
+    entries: Vec<ToolSearchMetadata>,
 }
 
 impl ToolSearchTool {
@@ -30,38 +23,26 @@ impl ToolSearchTool {
     /// Callers should construct this *after* all tools are registered so
     /// the snapshot is complete.
     pub fn from_registry(registry: &crate::registry::ToolRegistry) -> Self {
-        let entries = registry
-            .list_tools()
-            .into_iter()
-            .map(|def| ToolEntry {
-                name: def.name,
-                description: def.description,
-                hint: String::new(), // hints are looked up dynamically via search_tools
-            })
-            .collect();
-        Self { entries }
-    }
-
-    /// Build from explicit entries (used in tests and when the registry
-    /// exposes hints).
-    pub fn from_entries(entries: Vec<(String, String, String)>) -> Self {
         Self {
-            entries: entries
-                .into_iter()
-                .map(|(name, description, hint)| ToolEntry {
-                    name,
-                    description,
-                    hint,
-                })
-                .collect(),
+            entries: registry.list_tools_with_hints(),
         }
     }
 
-    fn search(&self, query: &str) -> Vec<(i32, &ToolEntry)> {
+    /// Build from explicit entries (used in tests).
+    #[cfg(test)]
+    fn from_entries(entries: Vec<ToolSearchMetadata>) -> Self {
+        Self { entries }
+    }
+
+    fn search(&self, query: &str) -> Vec<(i32, &ToolSearchMetadata)> {
+        if query.trim().is_empty() {
+            return Vec::new();
+        }
+
         let query_lower = query.to_lowercase();
         let query_words: Vec<&str> = query_lower.split_whitespace().collect();
 
-        let mut scored: Vec<(i32, &ToolEntry)> = self
+        let mut scored: Vec<(i32, &ToolSearchMetadata)> = self
             .entries
             .iter()
             .filter_map(|entry| {
@@ -167,28 +148,99 @@ impl Tool for ToolSearchTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry::{Tool, ToolRegistry};
+
+    fn entry(name: &str, description: &str, hint: &str) -> ToolSearchMetadata {
+        ToolSearchMetadata {
+            name: name.to_string(),
+            description: description.to_string(),
+            hint: hint.to_string(),
+        }
+    }
+
+    struct HintOnlyTool;
+
+    #[async_trait::async_trait]
+    impl Tool for HintOnlyTool {
+        fn name(&self) -> &str {
+            "hint_only"
+        }
+
+        fn description(&self) -> &str {
+            "No searchable words here"
+        }
+
+        fn parameters(&self) -> Value {
+            serde_json::json!({"type": "object"})
+        }
+
+        fn search_hint(&self) -> &str {
+            "needle"
+        }
+
+        async fn execute(&self, _args: Value) -> ava_types::Result<ToolResult> {
+            Ok(ToolResult {
+                call_id: String::new(),
+                content: "ok".to_string(),
+                is_error: false,
+            })
+        }
+    }
+
+    struct StaticRegistryTool {
+        name: &'static str,
+        description: &'static str,
+        hint: &'static str,
+    }
+
+    #[async_trait::async_trait]
+    impl Tool for StaticRegistryTool {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn description(&self) -> &str {
+            self.description
+        }
+
+        fn parameters(&self) -> Value {
+            serde_json::json!({"type": "object"})
+        }
+
+        fn search_hint(&self) -> &str {
+            self.hint
+        }
+
+        async fn execute(&self, _args: Value) -> ava_types::Result<ToolResult> {
+            Ok(ToolResult {
+                call_id: String::new(),
+                content: "ok".to_string(),
+                is_error: false,
+            })
+        }
+    }
 
     fn test_tool_search() -> ToolSearchTool {
         ToolSearchTool::from_entries(vec![
-            (
-                "read".into(),
-                "Read file content".into(),
-                "read file contents lines offset limit".into(),
+            entry(
+                "read",
+                "Read file content",
+                "read file contents lines offset limit",
             ),
-            (
-                "write".into(),
-                "Write content to a file".into(),
-                "create write new file content".into(),
+            entry(
+                "write",
+                "Write content to a file",
+                "create write new file content",
             ),
-            (
-                "bash".into(),
-                "Execute shell command".into(),
-                "run execute shell command terminal".into(),
+            entry(
+                "bash",
+                "Execute shell command",
+                "run execute shell command terminal",
             ),
-            (
-                "grep".into(),
-                "Search files by regex".into(),
-                "search content regex pattern ripgrep".into(),
+            entry(
+                "grep",
+                "Search files by regex",
+                "search content regex pattern ripgrep",
             ),
         ])
     }
@@ -202,10 +254,54 @@ mod tests {
     }
 
     #[test]
+    fn exact_name_ranks_above_partial_name_match() {
+        let ts = ToolSearchTool::from_entries(vec![entry("bread", "", ""), entry("read", "", "")]);
+
+        let results = ts.search("read");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].1.name, "read");
+        assert_eq!(results[1].1.name, "bread");
+    }
+
+    #[test]
     fn search_by_hint_keyword() {
         let ts = test_tool_search();
         // "terminal" is only in bash's hint
         let results = ts.search("terminal");
+        assert!(!results.is_empty());
+        assert_eq!(results[0].1.name, "bash");
+    }
+
+    #[test]
+    fn hint_match_ranks_above_description_match() {
+        let ts = ToolSearchTool::from_entries(vec![
+            entry("desc_only", "contains needle", ""),
+            entry("hint_only", "no keyword", "needle"),
+        ]);
+
+        let results = ts.search("needle");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].1.name, "hint_only");
+        assert_eq!(results[1].1.name, "desc_only");
+    }
+
+    #[test]
+    fn equal_scores_use_alphabetical_tie_break() {
+        let ts = ToolSearchTool::from_entries(vec![
+            entry("beta", "", "topic"),
+            entry("alpha", "", "topic"),
+        ]);
+
+        let results = ts.search("topic");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].1.name, "alpha");
+        assert_eq!(results[1].1.name, "beta");
+    }
+
+    #[test]
+    fn search_is_case_insensitive() {
+        let ts = test_tool_search();
+        let results = ts.search("TeRMiNaL");
         assert!(!results.is_empty());
         assert_eq!(results[0].1.name, "bash");
     }
@@ -235,6 +331,68 @@ mod tests {
         assert!(results.is_empty());
     }
 
+    #[test]
+    fn empty_query_returns_no_results() {
+        let ts = test_tool_search();
+        assert!(ts.search("").is_empty());
+        assert!(ts.search("   ").is_empty());
+    }
+
+    #[test]
+    fn from_registry_captures_search_hints() {
+        let mut registry = ToolRegistry::new();
+        registry.register(HintOnlyTool);
+
+        let ts = ToolSearchTool::from_registry(&registry);
+        let results = ts.search("needle");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1.name, "hint_only");
+    }
+
+    #[test]
+    fn from_registry_snapshot_is_complete_and_alphabetized() {
+        let mut registry = ToolRegistry::new();
+        registry.register(StaticRegistryTool {
+            name: "zeta",
+            description: "last",
+            hint: "hz",
+        });
+        registry.register(StaticRegistryTool {
+            name: "alpha",
+            description: "first",
+            hint: "ha",
+        });
+        registry.register(StaticRegistryTool {
+            name: "middle",
+            description: "middle",
+            hint: "hm",
+        });
+
+        let ts = ToolSearchTool::from_registry(&registry);
+
+        let snapshot: Vec<(&str, &str, &str)> = ts
+            .entries
+            .iter()
+            .map(|e| (e.name.as_str(), e.description.as_str(), e.hint.as_str()))
+            .collect();
+        assert_eq!(
+            snapshot,
+            vec![
+                ("alpha", "first", "ha"),
+                ("middle", "middle", "hm"),
+                ("zeta", "last", "hz"),
+            ]
+        );
+    }
+
+    #[test]
+    fn tool_search_has_non_empty_expected_search_hint() {
+        let ts = test_tool_search();
+        assert!(!ts.search_hint().is_empty());
+        assert_eq!(ts.search_hint(), "find discover tools available search");
+    }
+
     #[tokio::test]
     async fn execute_returns_results() {
         let ts = test_tool_search();
@@ -247,6 +405,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn execute_formats_hint_lines() {
+        let ts = test_tool_search();
+        let result = ts
+            .execute(serde_json::json!({ "query": "terminal" }))
+            .await
+            .unwrap();
+
+        assert!(result.content.contains("- **bash** (relevance:"));
+        assert!(result
+            .content
+            .contains("  hints: run execute shell command terminal"));
+    }
+
+    #[tokio::test]
     async fn execute_no_results() {
         let ts = test_tool_search();
         let result = ts
@@ -255,5 +427,17 @@ mod tests {
             .unwrap();
         assert!(!result.is_error);
         assert!(result.content.contains("No tools found"));
+    }
+
+    #[tokio::test]
+    async fn execute_empty_query_returns_no_results() {
+        let ts = test_tool_search();
+        let result = ts
+            .execute(serde_json::json!({ "query": "" }))
+            .await
+            .unwrap();
+
+        assert!(!result.is_error);
+        assert!(result.content.contains("No tools found matching ''"));
     }
 }

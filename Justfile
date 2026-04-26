@@ -40,6 +40,10 @@ cpp-build PRESET="cpp-debug" *ARGS:
 cpp-test PRESET="cpp-debug" *ARGS:
     CMAKE="$({{cpp_cmake}})" && CTEST="$(dirname "$CMAKE")/ctest" && if [ ! -x "$CTEST" ]; then CTEST=ctest; fi && cd cpp && "$CTEST" --preset {{ PRESET }} --output-on-failure {{ ARGS }}
 
+# Run C++ adoption Milestone 6 end-to-end evidence lane
+cpp-m6-e2e:
+    bash scripts/testing/cpp-m6-e2e.sh
+
 # Clean C++ build artifacts for preset
 cpp-clean PRESET="cpp-debug":
     CMAKE="$({{cpp_cmake}})" && cd cpp && "$CMAKE" --build --preset {{ PRESET }} --target clean

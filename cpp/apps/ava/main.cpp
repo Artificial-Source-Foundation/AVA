@@ -31,13 +31,15 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  spdlog::info(
-      "starting {} on {} (ftxui={}, cpr={})",
-      build.version,
-      ava::platform::platform_tag(),
-      ava::core::kWithFtxui,
-      ava::core::kWithCpr
-  );
+  if(!cli.json) {
+    spdlog::info(
+        "starting {} on {} (ftxui={}, cpr={})",
+        build.version,
+        ava::platform::platform_tag(),
+        ava::core::kWithFtxui,
+        ava::core::kWithCpr
+    );
+  }
 
   if(cli.smoke_mode) {
     fmt::print("foundation=types+control_plane+platform+config+session+llm+tools\n");

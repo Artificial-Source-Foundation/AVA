@@ -69,6 +69,8 @@ struct AgentEvent {
   std::optional<std::size_t> compacted_message_count;
   std::optional<std::size_t> compacted_token_estimate;
   std::optional<AgentCompletionReason> completion_reason;
+  // True when an AssistantResponse carries full text already emitted as
+  // AssistantResponseDelta events; visual consumers should not render it again.
   bool replays_stream_deltas{false};
 };
 

@@ -218,10 +218,7 @@ fn contains_forbidden_git_path_or_option(command: &str) -> bool {
         }
     }
     if tokens.first().is_some_and(|first| *first == "remote") {
-        let read_only_remote = match tokens.get(1).copied() {
-            Some("-v" | "show" | "get-url") => true,
-            _ => false,
-        };
+        let read_only_remote = matches!(tokens.get(1).copied(), Some("-v" | "show" | "get-url"));
         if !read_only_remote {
             return true;
         }

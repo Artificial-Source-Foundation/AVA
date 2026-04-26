@@ -767,6 +767,34 @@ TEST_CASE("agent runtime appends and prompts from active branch head", "[ava_age
   REQUIRE(std::find(prompt_contents.begin(), prompt_contents.end(), "inactive fork") == prompt_contents.end());
 }
 
+TEST_CASE("agent runtime reports corrupted active branch cycles", "[ava_agent]") {
+  CapturingProvider provider({ava::llm::LlmResponse{.content = "should not run"}});
+  ava::tools::ToolRegistry tools;
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 1});
+
+  ava::types::SessionRecord session{
+      .id = "session_branch_cycle",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {ava::types::SessionMessage{
+          .id = "m7_msg_1",
+          .role = "user",
+          .content = "corrupted branch",
+          .timestamp = "2026-01-01T00:00:00Z",
+          .parent_id = std::optional<std::string>{"m7_msg_1"},
+      }},
+      .branch_head = std::optional<std::string>{"m7_msg_1"},
+  };
+
+  const auto result = runtime.run(session, ava::agent::AgentRunInput{.goal = "continue", .stream = false});
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Error);
+  REQUIRE(result.error.has_value());
+  REQUIRE(result.error->find("cycle detected in active session branch") != std::string::npos);
+  REQUIRE(provider.captured_messages.empty());
+}
+
 TEST_CASE("agent runtime stops on simple stuck loop", "[ava_agent]") {
   ScriptedProvider provider({
       ava::llm::LlmResponse{
@@ -1844,6 +1872,27 @@ TEST_CASE("agent runtime estimates non-streaming usage when provider omits usage
   REQUIRE(result.usage.has_value());
   REQUIRE(result.usage->input_tokens > 0);
   REQUIRE(result.usage->output_tokens == std::string("estimated answer").size());
+}
+
+TEST_CASE("agent runtime estimates usage when streaming unsupported fallback omits usage", "[ava_agent]") {
+  CostingProvider provider({ava::llm::LlmResponse{.content = "fallback answer"}}, 0.001);
+  ava::tools::ToolRegistry tools;
+  ava::agent::AgentRuntime runtime(provider, tools, ava::agent::AgentConfig{.max_turns = 1, .max_budget_usd = 100.0});
+  ava::types::SessionRecord session{
+      .id = "session_stream_unsupported_budget_fallback",
+      .created_at = "2026-01-01T00:00:00Z",
+      .updated_at = "2026-01-01T00:00:00Z",
+      .metadata = nlohmann::json::object(),
+      .messages = {},
+      .branch_head = std::nullopt,
+  };
+
+  const auto result = runtime.run(session, ava::agent::AgentRunInput{.goal = "start", .stream = true});
+
+  REQUIRE(result.reason == ava::agent::AgentCompletionReason::Completed);
+  REQUIRE(result.usage.has_value());
+  REQUIRE(result.usage->input_tokens > 0);
+  REQUIRE(result.usage->output_tokens == std::string("fallback answer").size());
 }
 
 TEST_CASE("agent runtime promotes follow-up and post-complete queued messages", "[ava_agent]") {

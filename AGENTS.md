@@ -65,7 +65,7 @@ AVA is a Rust-first, solo-first AI coding assistant focused on real repository w
 - **Desktop**: Tauri 2 -- SolidJS frontend calls Rust via Tauri IPC (`src-tauri/src/commands/`)
 - **Web**: `ava serve` entrypoint in `crates/ava-tui/`, implemented by `crates/ava-web/`
 
-**All new features MUST be Rust.** No TypeScript backend logic.
+**All product feature work MUST be Rust.** The `cpp/` tree is the scoped migration/parity exception: C++ work may implement backend/headless/TUI migration parity, hardening, and evidence only within documented C++ milestone boundaries until an explicit adoption decision is made. No TypeScript backend logic.
 
 Current workspace Rust baseline: `rust-version = 1.86`.
 

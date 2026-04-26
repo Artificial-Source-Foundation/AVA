@@ -258,7 +258,7 @@ void AppState::apply_agent_event(const ava::agent::AgentEvent& event) {
       return;
     case ava::agent::AgentEventKind::AssistantResponse:
       assistant_delta_open_ = false;
-      if(!event.message.empty()) {
+      if(!event.replays_stream_deltas && !event.message.empty()) {
         append_message(MessageKind::Assistant, event.message);
       }
       return;

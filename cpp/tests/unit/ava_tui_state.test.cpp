@@ -281,6 +281,39 @@ TEST_CASE("tui state maps streaming assistant deltas and cancelled completion", 
   REQUIRE(state.messages().front().text == "partial");
 }
 
+TEST_CASE("tui state ignores final assistant response that replays stream deltas", "[ava_tui]") {
+  ava::tui::AppState state;
+  state.set_running(true);
+
+  state.apply_agent_event(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::AssistantResponseDelta,
+      .turn = 1,
+      .message = "par",
+  });
+  state.apply_agent_event(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::AssistantResponseDelta,
+      .turn = 1,
+      .message = "tial",
+  });
+  state.apply_agent_event(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::AssistantResponse,
+      .turn = 1,
+      .message = "partial",
+      .replays_stream_deltas = true,
+  });
+  state.apply_agent_event(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::Completion,
+      .turn = 1,
+      .message = "done",
+      .completion_reason = ava::agent::AgentCompletionReason::Completed,
+  });
+
+  REQUIRE_FALSE(state.running());
+  REQUIRE(state.messages().size() == 1);
+  REQUIRE(state.messages().front().kind == ava::tui::MessageKind::Assistant);
+  REQUIRE(state.messages().front().text == "partial");
+}
+
 TEST_CASE("tui state starts a new assistant message for new delta sequence", "[ava_tui]") {
   ava::tui::AppState state;
 

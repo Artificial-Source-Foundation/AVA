@@ -1,6 +1,6 @@
 # C++ Milestone 34 Boundaries — Hardening, Soak, And Final Evidence
 
-Milestone 34 is the final scoped hardening pass for the current C++ backend/headless migration lane. It should make the codebase look intentional to an expert C++ reviewer: no avoidable god files, no milestone-labelled runtime data, no vague names in new seams, and no unsupported parity claims.
+Milestone 34 is the final scoped hardening pass for the current C++ backend/headless migration lane. It should make the codebase look intentional to an expert C++ reviewer: fix avoidable god files when safe, document larger refactors explicitly, avoid milestone-labelled runtime data, avoid vague names in new seams, and avoid unsupported parity claims.
 
 ## In Scope
 
@@ -47,7 +47,7 @@ ionice -c 3 nice -n 15 ./build/cpp/debug/tests/ava_mcp_tests
 1. Web, desktop, plugin runtime, OAuth/keychain, browser tools, custom TOML tools, MCP HTTP/SSE/OAuth, and long-tail providers remain outside this scoped C++ backend/headless lane.
 2. Semantic/LLM summarization compaction, JSONL audit logging, bookmarks/search, and cross-runtime UUID normalization remain deferred.
 3. Live-provider soak remains opt-in; default evidence uses deterministic mock/provider-free lanes.
-4. `AgentRunLoop` is heap-allocated and split out of `runtime.cpp`, but deeper phase-level extraction remains a future refactor if the loop grows again.
+4. `AgentRunLoop` is split out of `runtime.cpp` and stack-allocated, but deeper phase-level extraction remains a future refactor if the loop grows again.
 5. `core_tools.cpp` remains a large multi-tool translation unit; splitting tools by file is a future maintainability refactor.
 6. SQLite session operations still open short-lived connections per operation; a persistent connection/pool is deferred until there is soak evidence that the current path is insufficient.
 7. Shell execution still uses the portable shell wrapper rather than a shared direct process-runner abstraction; stdout/stderr split and fully portable timeout enforcement remain future work.

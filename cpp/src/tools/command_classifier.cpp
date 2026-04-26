@@ -37,7 +37,7 @@ namespace {
   }
 
   static const std::regex low_command(
-      R"re(^[[:space:]]*((ls|pwd)([[:space:]].*)?|cargo[[:space:]]+(test|check|build)([[:space:]].*)?|pnpm[[:space:]]+(lint|typecheck|test)([[:space:]].*)?|git[[:space:]]+(status|diff|log)([[:space:]].*)?)[[:space:]]*$)re"
+      R"re(^[[:space:]]*((ls|pwd)([[:space:]].*)?)[[:space:]]*$)re"
   );
   return matches_regex(value, low_command);
 }
@@ -99,6 +99,20 @@ CommandClassification classify_bash_command(const std::string& command) {
   }
   if(contains_any(lower, {".ava/mcp.json", ".ava/tools", "credentials.json", "trusted_projects.json", "permissions.toml"})) {
     return CommandClassification{.risk_level = RiskLevel::Critical, .reason = "modifies AVA trust or credential surfaces"};
+  }
+
+  static const std::regex workspace_code_execution(
+      R"re((^|[;&|[:space:]])(cargo[[:space:]]+(test|check|build)|pnpm[[:space:]]+(lint|typecheck|test))([[:space:]]|$))re"
+  );
+  if(matches_regex(lower, workspace_code_execution)) {
+    return CommandClassification{.risk_level = RiskLevel::High, .reason = "runs workspace-controlled build, test, or package scripts"};
+  }
+
+  static const std::regex shell_git_read(
+      R"re((^|[;&|[:space:]])git[[:space:]]+(status|diff|log)([[:space:]]|$))re"
+  );
+  if(matches_regex(lower, shell_git_read)) {
+    return CommandClassification{.risk_level = RiskLevel::High, .reason = "uses shell git; prefer the read-only git tool"};
   }
 
   static const std::regex high_risk_command(

@@ -5,6 +5,10 @@
 
 namespace ava::tools {
 
+inline constexpr const char* kAvaDirectoryName = ".ava";
+// Existing backup stores use this directory name; keep it stable for persisted workspaces.
+inline constexpr const char* kFileHistoryDirectoryName = "file-history-m6";
+
 class FileBackupSession {
  public:
   explicit FileBackupSession(std::filesystem::path workspace_root);

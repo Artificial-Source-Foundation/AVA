@@ -16,6 +16,8 @@
 namespace ava::tools {
 namespace {
 
+const std::string kFileHistoryPathFragment = std::string{kAvaDirectoryName} + "/" + kFileHistoryDirectoryName;
+
 [[nodiscard]] std::string lowercase(std::string value) {
   std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
     return static_cast<char>(std::tolower(c));
@@ -29,7 +31,7 @@ namespace {
   std::string line;
   bool first = true;
   while(std::getline(stream, line)) {
-    if(line.find(".ava/file-history-m6") != std::string::npos) {
+    if(line.find(kFileHistoryPathFragment) != std::string::npos) {
       continue;
     }
     if(!first) {
@@ -81,7 +83,8 @@ namespace {
       return true;
     }
     if(token.starts_with('/') || token == ".." || token.starts_with("../") || token.find("/../") != std::string::npos ||
-       lower.find(".ava/file-history-m6") != std::string::npos || lower.find("file-history-m6") != std::string::npos ||
+       lower.find(kFileHistoryPathFragment) != std::string::npos ||
+       lower.find(kFileHistoryDirectoryName) != std::string::npos ||
        token.find('*') != std::string::npos || token.find('?') != std::string::npos || token.starts_with('~')) {
       return true;
     }

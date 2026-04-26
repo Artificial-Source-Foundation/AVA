@@ -6,7 +6,7 @@ It remains intentionally scoped and honest:
 
 - It creates a real CMake workspace and dependency wiring.
 - It now includes real foundational implementations in `ava_types`, `ava_control_plane`, `ava_platform`, `ava_config`, `ava_session`, `ava_llm`, `ava_tools`, a scoped runtime-core `ava_agent`, and a smallest-honest `ava_orchestration` contracts/data slice.
-- The current `ava_runtime` aggregate includes all implemented Milestone 10 foundations, Milestone 11 adds a smallest-honest interactive terminal lane (`ava_tui`) on top of that blocking runtime stack, Milestone 12 tightens that lane with bounded parity-validation/cleanup work, Milestone 13 adds a shared orchestration-owned runtime composition seam plus native blocking subagent spawning baseline, Milestone 14 adds a first narrow interactive control-plane ownership seam with orchestration bridge wiring for approval/question/plan request lifecycles, Milestone 15 adds narrow run-identity + streaming/cancellation ownership seams, and Milestone 16 adds narrow TUI workflow parity basics (slash-command basics, input history, message/status visibility, and adapter-facing interactive request visibility) while keeping orchestration/runtime ownership intact.
+- The current `ava_runtime` aggregate includes the implemented M10-M34 scoped backend/headless/TUI migration slices: blocking headless execution, an FTXUI TUI lane, orchestration-owned runtime composition, native blocking subagents, interactive request lifecycle seams, streaming/cancellation events, MCP stdio MVP wiring, budget/queue/compaction controls, session recovery checkpoints, provider streaming slices, daily-use headless CLI polish, deterministic headless evidence, and final hardening cleanup.
 - It still does **not** claim runtime parity or a production C++ backend port.
 
 ## Included Targets
@@ -32,16 +32,20 @@ Executables:
 
 Tests:
 
-1. `ava_cpp_tests` (Catch2-based unit tests for type/control-plane/platform/config/session foundations)
+1. `ava_cpp_tests` (Catch2 aggregate covering foundational unit tests)
 2. `ava_llm_tests` (leaf-target Catch2 tests for the scoped `ava_llm` slice)
 3. `ava_tools_tests` (leaf-target Catch2 tests for the scoped `ava_tools` slice)
 4. `ava_agent_tests` (leaf-target Catch2 tests for the scoped `ava_agent` runtime-core slice)
 5. `ava_orchestration_tests` (leaf-target Catch2 tests for the scoped `ava_orchestration` contracts/data slice)
-6. `ava_app_tests` (focused Catch2 tests for Milestone 9 headless CLI parsing/session/event seams)
-7. `ava_app_integration_tests` (focused Milestone 10 integration tests for scripted tool loops, approval rejection, and optional env-gated live-provider smoke)
-8. `ava_tui_tests` (focused Milestone 11 + 12 tests for bounded TUI state/event/scroll behavior)
+6. `ava_app_tests` (focused Catch2 tests for headless CLI parsing/session/event seams)
+7. `ava_app_integration_tests` (focused integration tests for scripted headless tool loops, workspace/trust/resume behavior, approval rejection, and optional env-gated live-provider smoke)
+8. `ava_tui_tests` (focused TUI state/event/dock/scroll behavior tests)
+9. `ava_config_tests` (leaf-target tests for config, trust, credentials, agents, and model registry behavior)
+10. `ava_session_tests` (leaf-target tests for SQLite-backed session persistence and tree behavior)
+11. `ava_mcp_tests` (leaf-target tests for scoped MCP protocol/config/client/manager/transport behavior)
+12. `ava_m3_foundation_tests` (targeted M3 foundation regression lane)
 
-## Milestone 13 Implemented Foundations
+## Implemented Foundations
 
 1. **`ava_types`**
    - Build metadata (`BuildInfo`, `current_build_info()`)
@@ -87,7 +91,7 @@ Tests:
     - Real `MockProvider` implementation.
      - Two scoped production providers in the current milestone lane:
        - `OpenAI` (blocking HTTP + SSE chunk collection via CPR when enabled).
-       - `Anthropic` (blocking Messages API generation when `AVA_WITH_CPR=ON` + non-streaming response parsing; default no-CPR builds fail transport explicitly, and streaming remains explicitly deferred in this slice).
+        - `Anthropic` (Messages API generation and CPR-gated SSE streaming; default no-CPR builds fail transport explicitly).
 
 7. **`ava_tools` (scoped Milestone 6 core-tool-system slice)**
      - Real tool registry with tool interface, tool metadata/schema exposure, tier/source tracking, middleware chain, and call-id normalization.
@@ -101,7 +105,7 @@ Tests:
      - Minimal agent runtime loop capable of prompt assembly, provider turn execution, tool-call parsing, tool execution, session transcript mutation, and bounded completion.
      - Deterministic event emission seam (`AgentEvent`) for future headless/TUI consumers.
      - Practical minimal message queue and stuck detector baselines adapted from Rust intent.
-      - Blocking execution model only; async/streaming/orchestration parity is deferred.
+       - Blocking execution model with scoped streaming/cancellation/budget/queue/compaction/session-recovery seams; broad async/background orchestration parity remains deferred.
 
 9. **`ava_orchestration` (scoped Milestones 8 + 13 + 14 slice)**
      - Real C++ orchestration library under `cpp/include/ava/orchestration` + `cpp/src/orchestration`.
@@ -113,7 +117,7 @@ Tests:
       - Task contracts now include a real native blocking execution path (`NativeBlockingTaskSpawner`) with depth + spawn-budget checks, disabled-agent rejection, provider/model/max-turns resolution (including parent-ceiling turn capping), read-only runtime-profile tool filtering, and child-session lineage/completion metadata persistence.
       - `TaskResult` now separates successful output from errors (`output` vs `error`) instead of overloading one text field.
       - Lightweight stack DTO contracts remain in place (`AgentStackConfig`, `AgentRunResult`, `TaskResult`, `TaskSpawner`).
-       - Intentionally still no MCP/plugin-manager parity, no async/background subagent spawning in C++, and no full Rust runtime-streaming parity.
+        - Intentionally still no full MCP/plugin-manager parity, no async/background subagent spawning in C++, and no full Rust runtime-streaming parity.
 
 ## Dependencies
 

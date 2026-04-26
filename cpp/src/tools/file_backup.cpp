@@ -59,7 +59,7 @@ void reject_symlinked_backup_component(const std::filesystem::path& path) {
 FileBackupSession::FileBackupSession(std::filesystem::path workspace_root)
     : workspace_root_(normalize_workspace_root(std::move(workspace_root))),
       session_id_(unique_token()) {
-  backup_root_ = workspace_root_ / ".ava" / "file-history-m6" / session_id_;
+  backup_root_ = workspace_root_ / kAvaDirectoryName / kFileHistoryDirectoryName / session_id_;
 }
 
 void FileBackupSession::backup_file_before_edit(const std::filesystem::path& file_path) const {
@@ -72,8 +72,8 @@ void FileBackupSession::backup_file_before_edit(const std::filesystem::path& fil
     throw std::runtime_error("Backup source is too large: " + file_path.string());
   }
 
-  const auto ava_dir = workspace_root_ / ".ava";
-  const auto history_dir = ava_dir / "file-history-m6";
+  const auto ava_dir = workspace_root_ / kAvaDirectoryName;
+  const auto history_dir = ava_dir / kFileHistoryDirectoryName;
   reject_symlinked_backup_component(ava_dir);
   reject_symlinked_backup_component(history_dir);
   reject_symlinked_backup_component(backup_root_);

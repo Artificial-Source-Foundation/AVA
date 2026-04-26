@@ -6,6 +6,7 @@
 #include <cctype>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -71,8 +72,7 @@ constexpr std::array<std::string_view, 2> kGeneratedMessageIdPrefixes{
   std::vector<const ava::types::SessionMessage*> branch;
   while(current.has_value()) {
     if(!visited.insert(*current).second) {
-      branch.clear();
-      break;
+      throw std::runtime_error("cycle detected in active session branch: " + *current);
     }
     const auto it = by_id.find(*current);
     if(it == by_id.end()) {

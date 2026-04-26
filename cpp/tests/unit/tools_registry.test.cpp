@@ -493,7 +493,14 @@ TEST_CASE("default headless permission inspector allows reads and asks for mutat
 
 TEST_CASE("bash command classifier identifies critical and high-risk commands", "[ava_tools]") {
   REQUIRE(ava::tools::classify_bash_command("ls").risk_level == ava::tools::RiskLevel::Low);
-  REQUIRE(ava::tools::classify_bash_command("cargo test -p ava-tools").risk_level == ava::tools::RiskLevel::Low);
+  REQUIRE(ava::tools::classify_bash_command("pwd").risk_level == ava::tools::RiskLevel::Low);
+  REQUIRE(ava::tools::classify_bash_command("cargo test -p ava-tools").risk_level == ava::tools::RiskLevel::High);
+  REQUIRE(ava::tools::classify_bash_command("cargo check --workspace").risk_level == ava::tools::RiskLevel::High);
+  REQUIRE(ava::tools::classify_bash_command("pnpm lint").risk_level == ava::tools::RiskLevel::High);
+  REQUIRE(ava::tools::classify_bash_command("pnpm test -- --runInBand").risk_level == ava::tools::RiskLevel::High);
+  REQUIRE(ava::tools::classify_bash_command("git status").risk_level == ava::tools::RiskLevel::High);
+  REQUIRE(ava::tools::classify_bash_command("git diff --no-index /etc/passwd README.md").risk_level == ava::tools::RiskLevel::High);
+  REQUIRE(ava::tools::classify_bash_command("git log --oneline -5").risk_level == ava::tools::RiskLevel::High);
   REQUIRE(ava::tools::classify_bash_command("rm -rf /").risk_level == ava::tools::RiskLevel::Critical);
   REQUIRE(ava::tools::classify_bash_command("rm -fr '/'").risk_level == ava::tools::RiskLevel::Critical);
   REQUIRE(ava::tools::classify_bash_command("rm --recursive --force /").risk_level == ava::tools::RiskLevel::Critical);
@@ -529,9 +536,19 @@ TEST_CASE("default headless inspector denies critical bash before approval", "[a
   REQUIRE(critical.action == ava::tools::PermissionAction::Deny);
   REQUIRE(critical.risk_level == "critical");
 
-  const auto low = inspector.inspect("bash", nlohmann::json{{"command", "cargo test -p ava-tools"}});
+  const auto low = inspector.inspect("bash", nlohmann::json{{"command", "pwd"}});
   REQUIRE(low.action == ava::tools::PermissionAction::Ask);
   REQUIRE(low.risk_level == "low");
+
+  const auto workspace_script = inspector.inspect("bash", nlohmann::json{{"command", "cargo test -p ava-tools"}});
+  REQUIRE(workspace_script.action == ava::tools::PermissionAction::Ask);
+  REQUIRE(workspace_script.risk_level == "high");
+  REQUIRE(workspace_script.reason.find("workspace-controlled") != std::string::npos);
+
+  const auto shell_git = inspector.inspect("bash", nlohmann::json{{"command", "git diff --no-index /etc/passwd README.md"}});
+  REQUIRE(shell_git.action == ava::tools::PermissionAction::Ask);
+  REQUIRE(shell_git.risk_level == "high");
+  REQUIRE(shell_git.reason.find("read-only git tool") != std::string::npos);
 }
 
 TEST_CASE("default headless inspector asks for custom tools by source", "[ava_tools]") {

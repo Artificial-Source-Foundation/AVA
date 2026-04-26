@@ -737,7 +737,10 @@ struct NormalizedQuoteText {
   if(ec) {
     return false;
   }
-  const auto history_root = std::filesystem::weakly_canonical(workspace_root / ".ava" / "file-history-m6", ec);
+  const auto history_root = std::filesystem::weakly_canonical(
+      workspace_root / kAvaDirectoryName / kFileHistoryDirectoryName,
+      ec
+  );
   if(ec) {
     return false;
   }

@@ -1,1 +1,0 @@
-- Use Kimi's thinking mode for complex analysis. Thinking is the default for hard tasks.

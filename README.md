@@ -1,267 +1,85 @@
-<div align="center">
-
 # AVA
 
-**A practical solo-first AI coding agent for terminal and desktop.**
+AVA is a native C++23 agentic coding tool. This branch is a ground-up 0.1 implementation: one terminal binary, OpenAI first, safe built-in tools, build/plan modes, a simple TUI, and append-only JSONL sessions.
 
-[![Rust](https://img.shields.io/badge/Rust-100%25-dea584?style=flat-square&logo=rust)](https://www.rust-lang.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
+## Build
 
-AVA reads code, edits files, runs commands, and helps you finish software work without leaving your repo.
-</div>
-
-AVA is a Rust-first, solo-first coding agent built for real repository work.
-
-- Use the `ava` CLI for terminal work: TUI by default, headless with `--headless`
-- Use AVA Desktop for a native desktop shell on top of the same backend
-- Use web mode with `ava serve` only when you need the feature-gated advanced web surface
-
-## Get Started
-
-### Choose Your Path
-
-| I want to... | Use this | Notes |
-|---|---|---|
-| Try AVA quickly in the terminal on Linux/macOS | `curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh` | Prebuilt CLI binary, no Rust toolchain required |
-| Try AVA quickly in the terminal on Windows | [GitHub Releases](https://github.com/Artificial-Source/AVA/releases) | Download the Windows CLI asset |
-| Build the CLI from source | `cargo build --manifest-path /path/to/AVA/Cargo.toml --bin ava` | Works from any directory; add `--release` for optimized builds |
-| Install the CLI from source | `cargo install --path /path/to/AVA/crates/ava-tui --bin ava` | Works from any directory and installs `ava` onto your `PATH` |
-| Use the desktop app | [GitHub Releases](https://github.com/Artificial-Source/AVA/releases) or [desktop guide](docs/how-to/download-desktop.md) | Desktop bundles are not published on every release |
-
-### Quick Start
-
-Install the `ava` CLI on Linux/macOS:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh
+```sh
+cmake -S . -B build -DAVA_BUILD_TESTS=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-On Windows, use <https://github.com/Artificial-Source/AVA/releases> and download the CLI asset for your platform.
+Sanitizer build:
 
-Requires:
-
-1. Linux or macOS plus `curl` and `tar` for the one-line installer
-2. GitHub Releases download for Windows
-
-Add credentials:
-
-```bash
-ava auth login openrouter
+```sh
+cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
+cmake --build build-sanitize
+ctest --test-dir build-sanitize --output-on-failure
 ```
 
-Run AVA:
+## Run
 
-```bash
-ava
-ava "fix the login bug" --headless
-ava --cwd /path/to/project "fix the login bug" --headless
-AVA_WORKING_DIRECTORY=/path/to/project ava "fix the login bug" --headless
+```sh
+./build/ava
+./build/ava --mode plan
+./build/ava --continue
+./build/ava --session <id-or-prefix>
 ```
 
-To verify the install:
+When stdin/stdout are not a terminal, AVA falls back to a line-oriented shell for scripting:
 
-```bash
-ava --help
+```sh
+printf '/glob **/*.cpp\n/quit\n' | ./build/ava --continue
 ```
-
-Web mode is available through `ava serve`, but it requires a web-enabled source build. See [docs/how-to/install.md](docs/how-to/install.md#install-with-web-support).
-
-### Products
-
-AVA's main products are:
-
-1. `ava` CLI for terminal use
-2. AVA Desktop for a native Tauri app
-
-If you only want the terminal app, use the CLI install path above. A full repo clone or source build also includes desktop and optional web frontend files because this repository contains the full product tree.
-
-### CLI Install Options
-
-1. Binary install on Linux/macOS:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh
-```
-
-2. Manual binary download on Windows, Linux, or macOS from <https://github.com/Artificial-Source/AVA/releases>
-3. Source build without installing:
-
-```bash
-git clone https://github.com/Artificial-Source/AVA.git && cd AVA
-cargo build --manifest-path /absolute/path/to/AVA/Cargo.toml --bin ava
-/absolute/path/to/AVA/target/debug/ava
-```
-
-Optional compiler-cache variant for repeat source builds:
-
-```bash
-git clone https://github.com/Artificial-Source/AVA.git && cd AVA
-CARGO_BUILD_JOBS=16 RUSTC_WRAPPER=sccache cargo build --release --manifest-path /absolute/path/to/AVA/Cargo.toml --bin ava
-/absolute/path/to/AVA/target/release/ava
-```
-
-Use plain `cargo build` for the normal dev profile with debug info and faster incremental builds. Add `--release` when you want an optimized binary that behaves more like published release artifacts. Cargo does not have a built-in `--debug` or CMake-style `RelWithDebInfo` flag; use `cargo build --profile <name>` if you define an additional profile.
-
-On Windows, use the same commands with Windows paths, for example `C:\src\AVA\Cargo.toml` and `C:\src\AVA\target\debug\ava.exe`.
-
-4. Source install:
-
-```bash
-git clone https://github.com/Artificial-Source/AVA.git && cd AVA
-CARGO_TARGET_DIR=/absolute/path/to/build cargo install --path /absolute/path/to/AVA/crates/ava-tui --bin ava
-```
-
-5. Optional source-build helper:
-
-```bash
-./install-from-source.sh --help
-```
-
-Use `install-from-source.sh` only if you want a repo-provided convenience wrapper. For explicit control, use the Cargo commands above.
-
-The source-install helper is intentionally end-user oriented: it builds the CLI in `--release` mode and installs it to `~/.local/bin/ava`.
-
-Full CLI install details: [docs/how-to/install.md](docs/how-to/install.md)
-
-### Desktop
-
-Desktop is the native desktop shell for AVA.
-
-Quick path when a release includes desktop bundles:
-
-1. Open <https://github.com/Artificial-Source/AVA/releases>
-2. Download the desktop bundle for your platform when that release includes one
-
-Desktop bundles are not published on every release. If the release you want does not include one, build it from source instead:
-
-```bash
-./install-from-source.sh --desktop
-```
-
-Desktop build and release details: [docs/how-to/download-desktop.md](docs/how-to/download-desktop.md), [docs/reference/install-and-release-paths.md](docs/reference/install-and-release-paths.md)
-
-Release-repo note: release-related links in this checkout are aligned to `Artificial-Source/AVA`.
-
-Security note:
-
-1. Prefer AVA's connect flow, environment variables, or keychain-backed credential storage.
-2. Avoid manually editing `$XDG_DATA_HOME/ava/credentials.json` unless you intentionally want plaintext local storage.
-
-## What AVA Includes
-
-- Solo-first coding agent
-- 9 default built-in tools: `read`, `write`, `edit`, `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
-- Works in TUI, desktop, and feature-gated web mode
-- Curated provider support with benchmark-driven prompt tuning
-- Commands and Skills support
-- Optional advanced capability through MCP and plugins
-- Session persistence and safety features for real repo work
-
-## What AVA Is Not
-
-- Not an AI dev-team product by default
-- Not a plugin-heavy platform you must configure before it becomes useful
-- Not a minimal barebones coding harness; the default product is intentionally more complete than that
-
-## Supported Providers
-
-AVA 0.6 actively supports and tunes these providers on purpose:
-
-1. Anthropic
-2. OpenAI
-3. Google Gemini
-4. Ollama
-5. OpenRouter
-6. GitHub Copilot
-7. Inception
-8. Alibaba
-9. ZAI / ZhipuAI
-10. Kimi
-11. MiniMax
-
-Provider variants should appear as routing or region options inside a provider, not as separate providers.
-
-## Customization
-
-The main default customization surface is:
-
-1. MCPs
-2. Commands
-3. Skills
-
-Most users do not need more than these. Plugins and deeper extension paths are for advanced setups.
 
 ## Configuration
 
-Most users only need provider auth, `config.yaml`, and optional trusted project config. The rest of the extension directories are advanced surfaces.
+AVA follows XDG paths on Linux:
 
-Fresh installs use the lowercase XDG paths below. Existing `~/.ava` installs are still read from the legacy location for compatibility until you migrate that data.
+- Config: `$XDG_CONFIG_HOME/ava/`, fallback `~/.config/ava/`
+- Auth: `$XDG_CONFIG_HOME/ava/auth.json`, fallback `~/.config/ava/auth.json`
+- Sessions: `$XDG_STATE_HOME/ava/sessions/`, fallback `~/.local/state/ava/sessions/`
 
-```text
-$XDG_CONFIG_HOME/ava/
-├── AGENTS.md            # global instructions
-├── config.yaml          # core settings
-├── commands/            # custom commands
-├── hooks/               # global hooks
-├── mcp.json             # MCP servers
-├── plugins/             # installed plugins
-├── skills/              # global AVA skills
-├── subagents.toml       # global subagent config
-├── themes/              # custom themes
-├── trusted_projects.json# trust decisions
-└── tools/               # custom tool definitions
+OpenAI auth supports OAuth-style tokens and API keys:
 
-$XDG_DATA_HOME/ava/
-├── credentials.enc      # encrypted credentials fallback
-├── credentials.json     # plaintext credentials fallback
-├── data.db              # sessions/runtime data
-└── models/              # local speech/model assets
-
-$XDG_STATE_HOME/ava/
-├── logs/                # app/frontend/crash/per-session JSONL logs
-└── traces/              # run traces
-
-$XDG_CACHE_HOME/ava/
-├── benchmarks/          # benchmark workspace + reports
-└── update-check.json    # updater cache
+```json
+{"openai":{"type":"oauth","access_token":"...","refresh_token":"...","expires_at":1893456000}}
 ```
 
-## Documentation
-
-User docs:
-
-- [docs/index.md](docs/index.md) - public docs entrypoint
-- [docs/how-to/install.md](docs/how-to/install.md) - install AVA for CLI or desktop use
-- [docs/tutorials/first-run.md](docs/tutorials/first-run.md) - first success path
-- [docs/how-to/configure.md](docs/how-to/configure.md) - provider auth and local settings
-- [docs/how-to/run-locally.md](docs/how-to/run-locally.md) - run AVA in TUI, headless, desktop, or web mode
-- [docs/troubleshooting/common-errors.md](docs/troubleshooting/common-errors.md) - common setup and runtime fixes
-- [docs/reference/README.md](docs/reference/README.md) - commands, providers, configuration, and storage reference
-
-Internal contributor and maintainer docs:
-
-- [docs/README.md](docs/README.md) - internal docs map
-- [AGENTS.md](AGENTS.md) - repo workflow, conventions, and architecture for contributors and AI coding agents
-- [docs/contributing/README.md](docs/contributing/README.md) - contributor workflow and release docs
-- [docs/testing/README.md](docs/testing/README.md) - testing and verification
-- [docs/project/roadmap.md](docs/project/roadmap.md)
-- [docs/project/backlog.md](docs/project/backlog.md)
-- [docs/architecture/README.md](docs/architecture/README.md)
-- [docs/extend/README.md](docs/extend/README.md)
-- [CLAUDE.md](CLAUDE.md)
-
-## Contributing
-
-```bash
-just check
+```json
+{"openai":{"type":"api_key","api_key":"sk-..."}}
 ```
 
-For the fuller verification flow and PR-era check policy (including hook behavior and desktop/frontend split), see:
+The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME/ava/models.json`, and prompts with `$XDG_CONFIG_HOME/ava/prompts/<provider>/<family>/<mode>.txt`.
 
-- [How to run tests and checks](docs/how-to/test.md)
-- [Development workflow](docs/contributing/development-workflow.md)
-- [Testing and verification](docs/testing/README.md)
+## Interactive Commands
 
-## License
+- `/help`: show commands
+- `/mode`: toggle build/plan mode
+- `/sessions`: list resumable sessions for the current workspace
+- `/read <path>`: read a file through permissions
+- `/write <path> <text>`: write a file through permissions
+- `/glob <pattern>`: list readable matching files
+- `/grep <text> [glob]`: literal text search
+- `/bash <command>`: run an argv-style permissioned command
+- `/quit`: exit and print a resume command
 
-[MIT](LICENSE)
+## 0.1 Notes
+
+- Real OpenAI requests use the local `curl` executable as the HTTP transport.
+- Tool calling is implemented through the provider contract and the built-in dispatcher.
+- `apply_patch` currently supports up to 32 exact text replacements through an `edits` array.
+- `question` is exposed as a tool, but AVA 0.1 does not yet have a modal user-question workflow; the assistant is instructed to ask directly.
+- Deferred: multiple providers, plugins, MCP, full session tree UI, compaction, LSP, web fetch, and polished permission modals.
+
+## Planning Docs
+
+- `docs/versions/0.1.md`
+- `docs/CONFIG.md`
+- `docs/USAGE.md`
+- `docs/TESTING.md`
+- `docs/product/product-plan.md`
+- `docs/product/tooling-plan.md`
+- `docs/product/architecture-plan.md`
+- `docs/engineering/cpp-safety-rules.md`

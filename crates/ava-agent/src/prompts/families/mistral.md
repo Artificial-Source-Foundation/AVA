@@ -1,2 +1,0 @@
-- Keep tool arguments concise. Mistral models work best with clear, direct instructions.
-- Prefer one tool call at a time for complex chains. Parallel calls for independent reads.

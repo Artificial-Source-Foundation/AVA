@@ -1,1 +1,0 @@
-- MiniMax reasoning is SWE-bench competitive. Use it for complex refactors and bug fixes.

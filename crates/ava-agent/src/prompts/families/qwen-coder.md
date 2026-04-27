@@ -1,1 +1,0 @@
-- Qwen-Coder is optimized for code. Favor code output over explanations.

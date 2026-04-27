@@ -1,1 +1,0 @@
-- OpenRouter routes to different backends. Keep tool calls schema-accurate because some backends are stricter.

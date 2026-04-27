@@ -1,1 +1,0 @@
-- Use extended thinking for hard tasks only. For simple edits, think briefly and act.

@@ -1,1 +1,0 @@
-- Use thinking for planning-heavy work. For trivial edits, skip thinking and act directly.

@@ -1,1 +1,0 @@
-- GLM reasoning excels at system engineering and long-range agent tasks. Use it for complex multi-file work.

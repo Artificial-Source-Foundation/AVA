@@ -1,0 +1,15 @@
+Checks: >
+  bugprone-*,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-type-vararg,
+  -readability-magic-numbers
+WarningsAsErrors: '*'
+HeaderFilterRegex: 'src/ava/.*'
+FormatStyle: file

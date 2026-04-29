@@ -1,5 +1,7 @@
 #include <iostream>
 #include <sstream>
+#include <cctype>
+#include <cstring>
 #include <locale.h>
 #include <curses.h>
 
@@ -17,8 +19,41 @@ int main()
   // when a window-resizing event has occurred.  The library checks for
   // this notification.
   initscr();
+
+  // IMPORTANT: if `nocbreak()` is used then *instead* of returning KEY_RESIZE,
+  // the input buffer in flushed with a synthesized newline added.
   nocbreak();
+  echo();
+  addstr("Testing with nocbreak/echo - type \"quit<Enter>\" - to switch to cbreak/noecho\n");
+
+  int rows;
+  int cols;
+  int last_rows = -1;
+  int last_cols = -1;
+
+  // This limits the number of characters that can be *typed* to 7 (what is passed to wgetnstr below).
+  char input_buf[8];
+  do
+  {
+    std::ostringstream text;
+    // Get current terminal size and print it.
+    getmaxyx(stdscr, rows, cols);
+    if (rows != last_rows || cols != last_cols)
+    {
+      text << "cols = " << cols << ", rows = " << rows << '\n';
+      addstr(text.str().c_str());
+      refresh();
+    }
+    wgetnstr(stdscr, input_buf, sizeof(input_buf) - 1);
+    addstr("Received: [");
+    addstr(input_buf);
+    addstr("]\n");
+  }
+  while (std::strcmp(input_buf, "quit") != 0);
+
+  cbreak();
   noecho();
+  addstr("Testing with cbreak/noecho - type q - to stop\n");
 
   //---------------------------------------------------------------------------
   // From https://man7.org/linux/man-pages/man3/curs_getch.3x.html:
@@ -31,32 +66,41 @@ int main()
 
   //keypad(stdscr, TRUE);       // Not necessary for KEY_RESIZE.
 
-  int ch;
-  int line_feed_count = 0;
+  // In cbreak mode we receive one character at a time, including KEY_RESIZE.
+  int ch = 0;
   do
   {
-    // Get current terminal size and print it.
-    int rows;
-    int cols;
-    getmaxyx(stdscr, rows, cols);
     std::ostringstream text;
-    text << "cols = " << cols << ", rows = " << rows << '\n';
+    if (ch != 0)
+    {
+      text << "ch = ";
+      if (ch == KEY_RESIZE)
+        text << "KEY_RESIZE";
+      else if (std::isprint(ch))
+        text << '\'' << static_cast<char>(ch) << '\'';
+      else
+        text << ch;
+      text << ", ";
+    }
+    if (ch == 0 || ch == KEY_RESIZE)
+    {
+      // Get current terminal size and print it.
+      getmaxyx(stdscr, rows, cols);
+      text << "cols = " << cols << ", rows = " << rows << '\n';
+    }
+    else
+      text << '\n';
     // Show new values on the screen.
     addstr(text.str().c_str());
     refresh();
     // getch() is the same as wgetch(stdscr).
     ch = getch();
-    if (ch == 10)
-      ++line_feed_count;
   }
-  while (ch == KEY_RESIZE || ch == 10);
+  while (ch != 'q');
   // Note that KEY_RESIZE is delivered despite the nocbreak() because it doesn't originate from the terminal.
 
   //---------------------------------------------------------------------------
 
   // See linux00-initialization.cpp
   endwin();
-
-  std::cout << "Terminated due to character " << ch << std::endl;
-  std::cout << "line_feed_count = " << line_feed_count << std::endl;
 }

@@ -1,3 +1,4 @@
+#include <iostream>
 #include <locale.h>
 #include <curses.h>
 
@@ -11,6 +12,21 @@ int main()
   // The initscr code determines the terminal type and initializes all curses data structures.
   // initscr also causes the first call to refresh to clear the screen (after creating an empty `stdscr` that fills the screen).
   initscr();
+
+  if (has_colors())
+  {
+    // From https://linux.die.net/man/3/init_color
+    // The start_color routine requires no arguments. It must be called if the programmer wants to use colors,
+    // and before any other color manipulation routine is called. It is good practice to call this routine right after initscr.
+    start_color();
+
+    // start_color initializes eight basic colors (black, red, green, yellow, blue, magenta, cyan, and white),
+    // and two global variables, COLORS and COLOR_PAIRS (respectively defining the maximum number of colors and
+    // color-pairs the terminal can support).
+    std::cout << "COLORS = " << COLORS << ", COLOR_PAIRS = " << COLOR_PAIRS << "\r\n";
+  }
+  if (can_change_color())
+    std::cout << "Colors can be changed.\r\n";
 
   // From https://man7.org/linux/man-pages/man3/curs_inopts.3x.html:
   //

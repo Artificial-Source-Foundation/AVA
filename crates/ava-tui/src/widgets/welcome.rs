@@ -10,7 +10,7 @@ use ratatui::Frame;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const ASCII_ART: &[&str] = &[
-    "   _   __   __  _   ",
+    "   _  __   __  _   ",
     "  /_\\ \\ \\ / / /_\\  ",
     " / _ \\ \\ V / / _ \\ ",
     "/_/ \\_\\ \\_/ /_/ \\_\\",

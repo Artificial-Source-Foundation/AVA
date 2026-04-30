@@ -20,6 +20,8 @@ find_library(CURSES_PANELW_LIBRARY
   REQUIRED
 )
 
+add_subdirectory(terminal)
+
 add_executable(linux00 linux00-initialization.cpp)
 target_include_directories(linux00 PRIVATE ${CURSES_INCLUDE_DIRS})
 target_link_libraries(linux00 PRIVATE ${CURSES_LIBRARIES})
@@ -36,14 +38,5 @@ add_executable(linux03 linux03-panels.cpp)
 target_include_directories(linux03 PRIVATE ${CURSES_INCLUDE_DIRS})
 target_link_libraries(linux03 PRIVATE ${CURSES_LIBRARIES} ${CURSES_PANELW_LIBRARY})
 
-add_executable(linux04 linux04-window.cpp)
-target_include_directories(linux04 PRIVATE ${CURSES_INCLUDE_DIRS})
-target_link_libraries(linux04 PRIVATE ${CURSES_LIBRARIES})
-
-add_executable(linux05 linux05-colors.cpp)
-target_include_directories(linux05 PRIVATE ${CURSES_INCLUDE_DIRS})
-target_link_libraries(linux05 PRIVATE ${CURSES_LIBRARIES})
-
-add_executable(linux06 linux06-wrapping.cpp)
-target_include_directories(linux06 PRIVATE ${CURSES_INCLUDE_DIRS})
-target_link_libraries(linux06 PRIVATE ${CURSES_LIBRARIES})
+add_executable(linux04 linux04-wrapping.cpp)
+target_link_libraries(linux04 PRIVATE AVA::terminal)

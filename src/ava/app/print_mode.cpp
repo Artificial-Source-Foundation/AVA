@@ -158,7 +158,10 @@ int run_print_mode(const PrintModeOptions& options, std::istream& in, std::ostre
         << '\n';
     return 1;
   }
-  ava::provider::CurlCliTransport transport;
+  ava::provider::CurlCliTransport default_transport;
+  ava::provider::Transport& transport = options.transport_override
+                                            ? options.transport_override->get()
+                                            : static_cast<ava::provider::Transport&>(default_transport);
   auto request_credential = ava::config::openai_credential_for_request(session->paths, **credential, transport);
   if (!request_credential) {
     err << request_credential.error().format() << '\n';
@@ -175,7 +178,10 @@ int run_print_mode(const PrintModeOptions& options, std::istream& in, std::ostre
     openai_account_id = ava::config::openai_oauth_account_id_from_token(request_credential->access_token).value_or("");
   }
 
-  ava::provider::OpenAIProvider provider;
+  const ava::provider::OpenAIProvider default_provider;
+  const ava::provider::Provider& provider = options.provider_override
+                                                ? options.provider_override->get()
+                                                : static_cast<const ava::provider::Provider&>(default_provider);
   RuntimeRunOptions runtime_options;
   runtime_options.access_token = *token;
   runtime_options.openai_oauth = request_credential->type == ava::config::OpenAICredentialType::OAuth;

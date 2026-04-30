@@ -995,14 +995,17 @@ void test_file_tools() {
     return false;
   };
   const auto permission_bits = [](const std::filesystem::path& permission_path) {
-    constexpr auto mask = std::filesystem::perms::owner_all | std::filesystem::perms::group_all |
-                          std::filesystem::perms::others_all;
+    constexpr auto mask =
+        std::filesystem::perms::owner_all | std::filesystem::perms::group_all | std::filesystem::perms::others_all;
     std::error_code status_error;
     return std::filesystem::status(permission_path, status_error).permissions() & mask;
   };
 
   auto write = ava::tools::write_file(build_context, source_path, "hello world");
   expect(write.has_value(), "write_file writes in build mode");
+  expect(write && permission_bits(source_path) == (std::filesystem::perms::owner_read |
+                                                   std::filesystem::perms::owner_write),
+         "write_file creates new files with 0600 permissions");
 
   auto read = ava::tools::read_file(build_context, source_path, ava::tools::ReadOptions{.max_bytes = 5});
   expect(read.has_value(), "read_file reads content");
@@ -1038,10 +1041,10 @@ void test_file_tools() {
   expect(!chmod_error, "test can set private file permissions");
   auto protected_write = ava::tools::write_file(build_context, protected_path, "private replacement");
   auto protected_read = ava::tools::read_file(build_context, protected_path);
-  expect(protected_write && protected_read && protected_read->content == "private replacement" &&
-             permission_bits(protected_path) ==
-                 (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write),
-         "write_file preserves 0600 permissions when overwriting a file");
+  expect(
+      protected_write && protected_read && protected_read->content == "private replacement" &&
+          permission_bits(protected_path) == (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write),
+      "write_file preserves 0600 permissions when overwriting a file");
 
   const auto edit_private_path = workspace / "edit-private.txt";
   {
@@ -1059,6 +1062,25 @@ void test_file_tools() {
              permission_bits(edit_private_path) ==
                  (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write),
          "edit_file preserves 0600 permissions through atomic write_file");
+
+  const auto audit_edit_path = workspace / "audit-edit.txt";
+  {
+    std::ofstream audit_edit_file(audit_edit_path, std::ios::binary | std::ios::trunc);
+    audit_edit_file << "read then edit";
+  }
+  std::vector<ava::tools::PermissionAuditEvent> edit_audits;
+  const ava::tools::ToolContext audit_edit_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_audit_sink = [&edit_audits](const ava::tools::PermissionAuditEvent& event) -> ava::core::VoidResult {
+        edit_audits.push_back(event);
+        return {};
+      }};
+  auto audited_edit = ava::tools::edit_file(audit_edit_context, audit_edit_path, "then", "before");
+  expect(audited_edit && edit_audits.size() == 2 &&
+             edit_audits[0].operation == ava::permissions::Operation::ReadFile &&
+             edit_audits[1].operation == ava::permissions::Operation::EditFile,
+         "edit_file audits read permission before edit permission");
 
   const auto rename_failure_path = workspace / "rename-failure-target";
   std::filesystem::create_directories(rename_failure_path);
@@ -1237,7 +1259,8 @@ void test_file_tools() {
       .permission_resolver = [&edit_prompts](const ava::permissions::PermissionPrompt& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++edit_prompts;
-        expect(prompt.operation == ava::permissions::Operation::EditFile, "edit_file resolver sees one edit operation");
+        expect(prompt.operation == ava::permissions::Operation::ReadFile,
+               "edit_file resolver sees read operation before denied external edit");
         return ava::permissions::PermissionResolution::Deny;
       }};
   auto outside_edit_denied = ava::tools::edit_file(edit_deny_context, outside_path, "outside", "bad");
@@ -1245,7 +1268,7 @@ void test_file_tools() {
   expect(!outside_edit_denied && edit_prompts == 1 && outside_after_denied_edit &&
              outside_after_denied_edit->content == "outside content" &&
              outside_edit_denied.error().format().find("resolution: deny") != std::string::npos,
-         "edit_file performs one logical external edit permission resolution and leaves content unchanged on deny");
+         "edit_file leaves content unchanged when external read permission is denied");
 
   int edit_fail_prompts = 0;
   ava::tools::ToolContext edit_fail_context{
@@ -1254,8 +1277,8 @@ void test_file_tools() {
       .permission_resolver = [&edit_fail_prompts](const ava::permissions::PermissionPrompt& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++edit_fail_prompts;
-        expect(prompt.operation == ava::permissions::Operation::EditFile,
-               "edit_file failure resolver sees edit operation");
+        expect(prompt.operation == ava::permissions::Operation::ReadFile,
+               "edit_file failure resolver sees read operation before external edit");
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "resolver failed"));
       }};
   auto outside_edit_failed = ava::tools::edit_file(edit_fail_context, outside_path, "outside", "bad");
@@ -1265,22 +1288,22 @@ void test_file_tools() {
              outside_edit_failed.error().format().find("resolution: resolver_failed") != std::string::npos,
          "edit_file fails closed when resolver fails and leaves content unchanged");
 
-  int edit_allow_prompts = 0;
+  std::vector<ava::permissions::Operation> edit_allow_prompts;
   ava::tools::ToolContext edit_allow_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&edit_allow_prompts](const ava::permissions::PermissionPrompt& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
-        ++edit_allow_prompts;
-        expect(prompt.operation == ava::permissions::Operation::EditFile,
-               "edit_file allow resolver sees edit operation");
+        edit_allow_prompts.push_back(prompt.operation);
         return ava::permissions::PermissionResolution::Allow;
       }};
   auto outside_edit_allowed = ava::tools::edit_file(edit_allow_context, outside_path, "outside", "external");
   auto outside_after_allowed_edit = ava::tools::read_file(allow_context, outside_path);
-  expect(outside_edit_allowed && edit_allow_prompts == 1 && outside_after_allowed_edit &&
+  expect(outside_edit_allowed && edit_allow_prompts.size() == 2 &&
+             edit_allow_prompts[0] == ava::permissions::Operation::ReadFile &&
+             edit_allow_prompts[1] == ava::permissions::Operation::EditFile && outside_after_allowed_edit &&
              outside_after_allowed_edit->content == "external content",
-         "edit_file allows external edit with a single resolver prompt");
+         "edit_file resolves external read permission before edit permission");
 }
 
 void test_permission_audit_persistence() {
@@ -1513,8 +1536,7 @@ void test_search_tools() {
         denied_glob && std::ranges::none_of(denied_glob->paths, [&outside_search_link](const auto& path) {
           return path == outside_search_link;
         });
-    expect(denied_excludes_link && denied_search_prompts == 1,
-           "glob_files keeps resolver-denied ask matches excluded");
+    expect(denied_excludes_link && denied_search_prompts == 1, "glob_files keeps resolver-denied ask matches excluded");
 
     int failing_search_prompts = 0;
     const ava::tools::ToolContext failing_search_context{
@@ -2088,6 +2110,25 @@ void test_openai_oauth_refresh() {
   expect(preserved && preserved->access_token == "preserved-access" && preserved->refresh_token == "stable-refresh" &&
              preserved->expires_at == 2222 && preserved->account_id == "acct_stable",
          "OpenAI OAuth refresh preserves existing refresh token when response omits rotation");
+
+  ava::tests::FakeTransport id_token_transport({ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = "{\"access_token\":\"id-token-access\",\"refresh_token\":\"id-token-refresh\","
+              "\"expires_in\":120,\"id_token\":\"header."
+              "eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdF8xMjMifX0.sig\"}",
+  }});
+  const auto id_token_refreshed = ava::config::refresh_openai_oauth_credential(
+      ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
+                                    .access_token = "old-access",
+                                    .refresh_token = "id-token-refresh-input",
+                                    .expires_at = 900,
+                                    .account_id = "",
+                                    .source_path = {}},
+      id_token_transport, 1000);
+  expect(id_token_refreshed && id_token_refreshed->account_id == "acct_123",
+         "OpenAI OAuth refresh falls back to id_token account id when account_id is absent");
+
   ava::tests::FakeTransport malformed_transport({ava::provider::HttpResponse{
       .status_code = 200,
       .headers = {},
@@ -2694,6 +2735,64 @@ void test_app_print_mode_uses_headless_permission_policy() {
          "print mode continuation includes allow-tool-approved read_file result");
 }
 
+void test_app_print_mode_refreshes_expired_oauth_before_provider_request() {
+  const auto root = temp_root() / "app-print-oauth-refresh";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  const auto paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  auto stored = ava::config::store_openai_credential(
+      paths, ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
+                                           .access_token = "expired-print-access",
+                                           .refresh_token = "print-refresh",
+                                           .expires_at = 100,
+                                           .account_id = "acct_old",
+                                           .source_path = {}});
+  expect(stored.has_value(), "print OAuth refresh test stores expired credential");
+
+  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+                                           .status_code = 200,
+                                           .headers = {},
+                                           .body = "{\"access_token\":\"print-refreshed-access\","
+                                                   "\"refresh_token\":\"print-rotated-refresh\","
+                                                   "\"expires_in\":3600,\"account_id\":\"acct_print\"}",
+                                       },
+                                       ava::provider::HttpResponse{
+                                           .status_code = 200,
+                                           .headers = {},
+                                           .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":"
+                                                   "\"print refreshed answer\"}\n\n"
+                                                   "data: [DONE]\n\n",
+                                       }});
+
+  ava::app::PrintModeOptions options;
+  options.open_options.workspace_dir = workspace;
+  options.open_options.current_dir = workspace;
+  options.open_options.mode = ava::agent::Mode::Build;
+  options.open_options.paths = paths;
+  options.explicit_prompt = "hello refreshed print";
+  options.provider_override = std::cref(provider);
+  options.transport_override = std::ref(transport);
+
+  std::istringstream in;
+  std::ostringstream out;
+  std::ostringstream err;
+  const auto exit_code = ava::app::run_print_mode(options, in, out, err);
+  expect(exit_code == 0 && out.str() == "print refreshed answer" && err.str().empty(),
+         "print mode completes after refreshing expired OAuth credentials");
+  expect(transport.requests().size() == 2 && transport.requests()[0].url == "https://auth.openai.com/oauth/token" &&
+             transport.requests()[1].headers.at("Authorization") == "Bearer print-refreshed-access" &&
+             transport.requests()[1].headers.at("ChatGPT-Account-Id") == "acct_print" &&
+             transport.requests()[1].body.find("hello refreshed print") != std::string::npos,
+         "print mode refreshes OAuth before sending provider request");
+  auto persisted = ava::config::load_openai_credential(paths);
+  expect(persisted && persisted->has_value() && (*persisted)->access_token == "print-refreshed-access" &&
+             (*persisted)->refresh_token == "print-rotated-refresh",
+         "print mode OAuth preflight persists refreshed credential before provider startup");
+}
+
 void test_app_print_json_mode_outputs_runtime_events() {
   const auto root = temp_root() / "app-print-json";
   std::error_code remove_error;
@@ -3288,6 +3387,12 @@ void test_tool_dispatcher() {
   std::filesystem::remove_all(root, remove_error);
   const auto workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
+  const auto permission_bits = [](const std::filesystem::path& permission_path) {
+    constexpr auto mask =
+        std::filesystem::perms::owner_all | std::filesystem::perms::group_all | std::filesystem::perms::others_all;
+    std::error_code status_error;
+    return std::filesystem::status(permission_path, status_error).permissions() & mask;
+  };
   {
     std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
     file << "hello dispatcher";
@@ -3352,6 +3457,51 @@ void test_tool_dispatcher() {
   expect(patched_read && patched_read->result_text.find("hello patch") != std::string::npos,
          "apply_patch updates file content through file tools");
 
+  const auto private_patch_path = workspace / "private-patch.txt";
+  {
+    std::ofstream file(private_patch_path, std::ios::binary | std::ios::trunc);
+    file << "private old";
+  }
+  std::error_code chmod_error;
+  std::filesystem::permissions(private_patch_path,
+                               std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+                               std::filesystem::perm_options::replace, chmod_error);
+  expect(!chmod_error, "test can set private patch file permissions");
+  auto private_patch = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_private_patch",
+      .name = "apply_patch",
+      .arguments_json = "{\"edits\":[{\"path\":\"private-patch.txt\",\"old_text\":\"old\",\"new_text\":\"new\"}]}"});
+  auto private_patch_read = ava::tools::read_file(
+      ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build}, private_patch_path);
+  expect(private_patch && private_patch->success && private_patch_read && private_patch_read->content == "private new" &&
+             permission_bits(private_patch_path) ==
+                 (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write),
+         "apply_patch preserves 0600 permissions when replacing an existing file");
+
+  const auto audit_patch_path = workspace / "audit-patch.txt";
+  {
+    std::ofstream file(audit_patch_path, std::ios::binary | std::ios::trunc);
+    file << "audit old";
+  }
+  std::vector<ava::tools::PermissionAuditEvent> patch_audits;
+  const ava::agent::ToolDispatcher audit_patch_dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_audit_sink = [&patch_audits](const ava::tools::PermissionAuditEvent& event) -> ava::core::VoidResult {
+        patch_audits.push_back(event);
+        return {};
+      }});
+  auto audited_patch = audit_patch_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_audit_patch",
+      .name = "apply_patch",
+      .arguments_json = "{\"edits\":[{\"path\":\"audit-patch.txt\",\"old_text\":\"old\",\"new_text\":\"new\"}]}"});
+  expect(audited_patch && audited_patch->success && patch_audits.size() == 2 &&
+             patch_audits[0].operation == ava::permissions::Operation::ReadFile &&
+             patch_audits[0].tool_name == "apply_patch" &&
+             patch_audits[1].operation == ava::permissions::Operation::EditFile &&
+             patch_audits[1].tool_name == "apply_patch",
+         "apply_patch audits read permission before edit permission");
+
   {
     std::ofstream file(workspace / "sequential.txt", std::ios::binary | std::ios::trunc);
     file << "one two";
@@ -3376,9 +3526,8 @@ void test_tool_dispatcher() {
       .name = "apply_patch",
       .arguments_json = "{\"edits\":[{\"path\":\"overlap.txt\",\"old_text\":\"abc\",\"new_text\":\"x\"},"
                         "{\"path\":\"overlap.txt\",\"old_text\":\"cde\",\"new_text\":\"y\"}]}"});
-  auto overlap_read =
-      ava::tools::read_file(ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build},
-                            workspace / "overlap.txt");
+  auto overlap_read = ava::tools::read_file(
+      ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build}, workspace / "overlap.txt");
   expect(overlap_patch && !overlap_patch->success && overlap_read && overlap_read->content == "abcde" &&
              overlap_patch->result_text.find("patch edits overlap") != std::string::npos,
          "apply_patch rejects overlapping same-file edits before writing");
@@ -3419,16 +3568,14 @@ void test_tool_dispatcher() {
     std::ofstream outside_patch_file(outside_patch_path, std::ios::binary | std::ios::trunc);
     outside_patch_file << "outside old";
   }
-  int apply_patch_prompts = 0;
+  std::vector<ava::permissions::Operation> apply_patch_prompts;
   const ava::agent::ToolDispatcher patch_resolving_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&apply_patch_prompts](const ava::permissions::PermissionPrompt& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
-        ++apply_patch_prompts;
+        apply_patch_prompts.push_back(prompt.operation);
         expect(prompt.tool_name == "apply_patch", "apply_patch resolver receives tool name");
-        expect(prompt.operation == ava::permissions::Operation::EditFile,
-               "apply_patch resolver receives edit operation");
         return ava::permissions::PermissionResolution::Allow;
       }});
   auto outside_patch = patch_resolving_dispatcher.dispatch(ava::agent::ProviderToolCall{
@@ -3441,8 +3588,9 @@ void test_tool_dispatcher() {
   auto outside_patch_read = ava::tools::read_file(
       ava::tools::ToolContext{.workspace_dir = root, .mode = ava::agent::Mode::Build}, outside_patch_path);
   expect(outside_patch && outside_patch->success && outside_patch_read && outside_patch_read->content == "inside new" &&
-             apply_patch_prompts == 1,
-         "apply_patch asks resolver once per external target before internal reads and writes");
+             apply_patch_prompts.size() == 2 && apply_patch_prompts[0] == ava::permissions::Operation::ReadFile &&
+             apply_patch_prompts[1] == ava::permissions::Operation::EditFile,
+         "apply_patch resolves external read permission before edit permission");
 
   const auto outside_no_resolver_path = root / "outside-patch-no-resolver.txt";
   {
@@ -3471,9 +3619,12 @@ void test_tool_dispatcher() {
   const ava::agent::ToolDispatcher patch_denying_dispatcher(
       ava::tools::ToolContext{.workspace_dir = workspace,
                               .mode = ava::agent::Mode::Build,
-                              .permission_resolver = [&denied_patch_prompts](const ava::permissions::PermissionPrompt&)
+                              .permission_resolver = [&denied_patch_prompts](
+                                                         const ava::permissions::PermissionPrompt& prompt)
                                   -> ava::core::Result<ava::permissions::PermissionResolution> {
                                 ++denied_patch_prompts;
+                                expect(prompt.operation == ava::permissions::Operation::ReadFile,
+                                       "apply_patch resolver sees read operation before denied external patch");
                                 return ava::permissions::PermissionResolution::Deny;
                               }});
   auto outside_patch_denied = patch_denying_dispatcher.dispatch(ava::agent::ProviderToolCall{
@@ -3487,7 +3638,7 @@ void test_tool_dispatcher() {
   expect(outside_patch_denied && !outside_patch_denied->success && denied_patch_prompts == 1 &&
              outside_denied_patch_read && outside_denied_patch_read->content == "keep old" &&
              outside_patch_denied->result_text.find("resolution: deny") != std::string::npos,
-         "apply_patch resolver denial prevents all external writes");
+         "apply_patch resolver read denial prevents all external writes");
 
   const auto outside_failed_patch_path = root / "outside-patch-failed.txt";
   {
@@ -5946,6 +6097,7 @@ int main() {
   test_app_print_text_mode_outputs_final_text_only();
   test_app_print_text_mode_reports_stdout_write_failure();
   test_app_print_mode_uses_headless_permission_policy();
+  test_app_print_mode_refreshes_expired_oauth_before_provider_request();
   test_app_print_json_mode_outputs_runtime_events();
   test_app_command_dispatcher();
   test_app_rpc_parsing_and_response_serialization();

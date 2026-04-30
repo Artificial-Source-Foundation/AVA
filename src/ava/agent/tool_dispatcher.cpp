@@ -180,6 +180,32 @@ void cleanup_staged_patch_writes(const std::vector<StagedPatchWrite>& writes, st
   }
 }
 
+ava::core::VoidResult apply_existing_target_permissions_to_staged_file(const std::filesystem::path& target,
+                                                                       const std::filesystem::path& temp) {
+  std::error_code status_error;
+  const auto target_status = std::filesystem::status(target, status_error);
+  if (status_error) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to read target permissions for patch write");
+    error.with_context("path", target.string());
+    error.with_context("temp_path", temp.string());
+    error.with_context("cause", status_error.message());
+    return std::unexpected(std::move(error));
+  }
+  if (!std::filesystem::exists(target_status)) return {};
+
+  std::error_code permissions_error;
+  std::filesystem::permissions(temp, target_status.permissions(), std::filesystem::perm_options::replace,
+                               permissions_error);
+  if (permissions_error) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to apply target permissions to patch write");
+    error.with_context("path", target.string());
+    error.with_context("temp_path", temp.string());
+    error.with_context("cause", permissions_error.message());
+    return std::unexpected(std::move(error));
+  }
+  return {};
+}
+
 ava::core::Result<std::vector<StagedPatchWrite>> stage_patch_writes(
     const ava::tools::ToolContext& context, const std::vector<std::filesystem::path>& paths,
     const std::map<std::filesystem::path, std::string>& final_contents) {
@@ -205,6 +231,14 @@ ava::core::Result<std::vector<StagedPatchWrite>> stage_patch_writes(
       error.with_context("stage", "temporary_patch_write");
       error.with_context("target_path", path.string());
       error.with_context("temp_path", temp.string());
+      return std::unexpected(std::move(error));
+    }
+
+    if (auto permissions = apply_existing_target_permissions_to_staged_file(path, temp); !permissions) {
+      ava::tools::remove_staged_file_best_effort(temp);
+      cleanup_staged_patch_writes(staged);
+      auto error = permissions.error();
+      error.with_context("stage", "temporary_patch_permissions");
       return std::unexpected(std::move(error));
     }
 
@@ -396,6 +430,11 @@ ToolDispatchResult apply_patch_result(const ava::tools::ToolContext& context, co
 
   for (const auto& [dedupe_path, target] : permission_targets) {
     static_cast<void>(dedupe_path);
+    if (auto permission = ava::tools::ensure_permission(context, ava::permissions::Operation::ReadFile, target, "",
+                                                        call.name, "patch read requires permission");
+        !permission) {
+      return tool_error_result(call, permission.error());
+    }
     if (auto permission = ava::tools::ensure_permission(context, ava::permissions::Operation::EditFile, target, "",
                                                         call.name, "patch edit requires permission");
         !permission) {

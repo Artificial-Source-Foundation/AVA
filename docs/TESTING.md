@@ -45,11 +45,12 @@ The current single test binary covers:
 - mode parsing
 - session JSONL storage, resume, listing, corruption handling, and permissions
 - XDG path handling
-- OpenAI auth loading/storage
+- OpenAI auth loading/storage and OAuth refresh preflight
 - model and prompt configuration
 - provider request/SSE parsing
-- file/search/bash tools
+- permission audit persistence, file/search/bash tools, and atomic file writes
 - tool dispatcher and agent loop
+- print mode and JSONL RPC success, denial/recovery, malformed input, cancellation, and refresh paths
 - minimal TUI rendering/input helpers
 
 Add regression tests for every safety-sensitive bug fix.

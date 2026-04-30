@@ -183,8 +183,7 @@ Suggested locations:
 
 - `$XDG_CONFIG_HOME/ava/` or `~/.config/ava/`
 - `.ava/config.toml`
-- `AGENTS.md` loading is deferred after 0.1.
-- Project `AGENTS.md` files discovered from repository root to current directory.
+- Global and project `AGENTS.md` files discovered from repository root to current directory.
 - `.ava/SYSTEM.md` for project-specific system prompt replacement.
 - `.ava/prompts/` for prompt templates.
 - `.ava/skills/` for skills.
@@ -282,14 +281,14 @@ Deferred:
 
 These items were deferred from 0.1 and remain post-0.2 unless the 0.2 scope explicitly reclassifies them. See `docs/versions/0.2.md` for the 0.2 backlog boundary and hard deferrals.
 
-- One-shot and `--print` modes.
+- Print mode and the JSONL RPC MVP are implemented; richer protocol controls remain on the backend roadmap.
 - Persistent allow/deny rule management.
 - Diff previews and richer patch UI.
-- AGENTS.md loading and skills.
-- Manual and automatic compaction.
+- Structured skills and prompt templates beyond `AGENTS.md`.
+- Provider-generated and automatic compaction.
 - LSP diagnostics/symbols/definitions.
 - Web fetch.
-- Session export.
+- Session tree/fork/clone workflows.
 
 ## Core Product Rule
 

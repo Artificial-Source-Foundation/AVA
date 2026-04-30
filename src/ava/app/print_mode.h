@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <iosfwd>
 #include <optional>
 #include <string>
@@ -32,6 +33,8 @@ struct PrintModeOptions {
   bool read_stdin = false;
   PrintOutputFormat output_format = PrintOutputFormat::Text;
   HeadlessPermissionPolicyOptions permission_policy;
+  std::optional<std::reference_wrapper<const ava::provider::Provider>> provider_override;
+  std::optional<std::reference_wrapper<ava::provider::Transport>> transport_override;
 };
 
 [[nodiscard]] ava::core::Result<std::string> merge_print_prompt(const PrintPromptInputs& inputs);

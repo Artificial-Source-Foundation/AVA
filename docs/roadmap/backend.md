@@ -15,7 +15,7 @@ AVA 1.0 should be a reliable local coding-agent backend that supports:
 - Provider/model metadata for context windows, cost, tool support, streaming, and reasoning controls.
 - Safe, high-quality file/search/edit/shell tools with permission audit trails.
 - Context management that prevents long sessions from failing because the window filled up.
-- A small extension surface for tools, commands, and event hooks after core safety is stable.
+- A stable local plugin foundation for tools, commands, prompt resources, event hooks, and MCP servers after core safety is stable.
 
 ## Reference: PI Backend Capabilities
 
@@ -48,6 +48,18 @@ AVA already has important backend pieces:
 
 The gap is not that AVA lacks a backend. The gap is that AVA's backend is still a single-provider, mostly-linear, synchronous local agent backend. PI's power comes from richer runtime events, deeper session semantics, provider breadth, compaction, extensibility, and stronger tool operations.
 
+## Milestone Audit Summary
+
+Explorer agents checked each roadmap phase against the current AVA code and PI reference lessons on 2026-04-30.
+
+- Phase 0 is still needed because product/version docs under-report implemented backend features such as print/RPC mode, `AGENTS.md` loading, manual compaction entries, export, OAuth refresh, permission audit persistence, and atomic writes.
+- Phase 1 is mostly implemented in code. Its remaining work is closure work: docs reconciliation, release verification docs, and any missing edge-case coverage discovered during Phase 2.
+- Phase 2 is the next major engineering step. AVA has a basic runtime event sink, but not the rich turn/message/provider/tool event taxonomy, true incremental provider streaming, protocol versioning, async cancellation, or full RPC command set needed for editor integrations.
+- Phase 3 has append-only sessions and compaction entry foundations, but still needs provider-generated summaries, automatic compaction integration, context-overflow retry, usage/cost records, stats, migrations, and optional tree/fork operations.
+- Phase 4 has safe built-in tools, but still needs PI-level edit/search ergonomics: `.gitignore` semantics, diff previews, CRLF/BOM/fuzzy edit handling, mutation queues, spill files, streaming progress, web fetch, and LSP.
+- Phase 5 has a provider interface but not a provider registry or model capability catalog. OpenAI remains hard-coded in several paths and the second production provider path is not started.
+- Phase 6 is well-scoped as a safe local plugin/MCP foundation, but it depends on earlier tool registry, event bus, permission, session, provider, and RPC seams.
+
 ## 1.0 Gap Inventory
 
 ### Runtime And Events
@@ -73,11 +85,10 @@ Missing or incomplete:
 
 ### Providers And Auth
 
-AVA's provider layer is currently OpenAI-first and OpenAI-shaped.
+AVA's provider layer is currently OpenAI-first and OpenAI-shaped. OpenAI OAuth credentials refresh before use when a refresh token is available.
 
 Missing or incomplete:
 
-- Automatic OAuth refresh.
 - Multi-provider registry.
 - Provider capability metadata, including tool-call support, context window, reasoning controls, streaming support, image input, and usage accounting support.
 - Model catalog fields for cost, max output tokens, context windows, cache pricing, and provider compatibility quirks.
@@ -97,11 +108,10 @@ Missing or incomplete:
 
 ### Sessions And Context
 
-AVA has append-only session storage, but not PI-level session lifecycle management.
+AVA has append-only session storage and persisted permission audit entries, but not PI-level session lifecycle management.
 
 Missing or incomplete:
 
-- Permission decision entries are never appended; the session entry type and export path exist, but no tool path writes them.
 - Provider-generated manual compaction summaries.
 - Automatic compaction trigger using the existing estimator and threshold logic.
 - Context overflow detection and retry after compaction.
@@ -120,12 +130,11 @@ Missing or incomplete:
 
 ### Tools And Operations
 
-AVA has a strong small tool set, but PI has more mature tool internals.
+AVA has a strong small tool set with permissioned atomic file writes where practical, but PI has more mature tool internals.
 
 Missing or incomplete:
 
 - Dedicated filesystem and process operation interfaces beneath tools.
-- Atomic writes for normal file writes.
 - Per-path file mutation queue for concurrent edits.
 - Robust edit behavior around line endings, BOM, Unicode normalization, and fuzzy fallback.
 - Unified diff output and safer patch preview flow.
@@ -147,17 +156,16 @@ Missing or incomplete:
 
 ### Permissions And Audit
 
-AVA's permission model is a differentiator, but it needs persistence and broader UX semantics.
+AVA's permission model is a differentiator. Tool permission decisions are persisted as session audit entries, but persistent rules and broader UX semantics remain deferred.
 
 Missing or incomplete:
 
-- Permission decision entries are never appended today; audit persistence must cover every allow, ask, deny, and resolved prompt.
 - Persistent allow/deny rules.
 - Session-wide grants.
 - Deny reasons surfaced consistently to users and headless clients.
 - Permission prompts over RPC.
-- Audit trail that connects request, decision, actor, and executed operation.
-- Policy categories for network fetch, delete/move, LSP, extension tools, and external directories.
+- Richer audit views that connect request, decision, actor, and executed operation.
+- Policy categories for network fetch, delete/move, LSP, plugin tools, and external directories.
 
 1.0 target:
 
@@ -189,9 +197,11 @@ Missing or incomplete:
 - Print mode stays simple and script-friendly.
 - Server mode remains deferred until stdio RPC is proven.
 
-### Extensibility
+### Extensibility And Plugin System
 
-AVA should not jump straight into a large plugin platform, but PI shows where backend seams need to exist.
+AVA should not jump straight into a marketplace-scale platform, but a serious 1.0 backend should include a small, stable plugin foundation. Users should be able to create a plugin with docs, examples, or AI assistance without writing C++, and a bad plugin should fail as a contained plugin failure instead of crashing or corrupting AVA's core state. The plugin/MCP contract is expanded in `docs/plugin-system.md`.
+
+The safest 1.0 shape is an out-of-process plugin protocol: AVA launches a plugin executable, performs a versioned handshake, exchanges bounded JSONL messages, and routes plugin contributions through the same validation, permission, event, audit, cancellation, and session paths used by built-in features. AVA should avoid in-process native shared-library plugins for 1.0 because they can crash the process, corrupt memory, and create a C++ ABI support burden.
 
 Missing or incomplete:
 
@@ -200,13 +210,29 @@ Missing or incomplete:
 - Custom slash/backend commands.
 - Skill and prompt-template resources beyond current `AGENTS.md` loading.
 - Extension-scoped permissions and audit labels.
+- Plugin manifest schema with plugin id, display name, version, API version, entrypoint, contribution declarations, requested capabilities, and default enabled/disabled state.
+- Plugin discovery under explicit global/project config paths, with project plugins requiring explicit enablement before executable code runs.
+- Versioned plugin handshake and capability negotiation so old cores and new plugins fail clearly.
+- Out-of-process plugin runner with startup timeout, per-request timeout, cancellation, stderr capture, bounded stdout, malformed-record handling, restart/disable behavior, and terminal error events.
+- JSON-schema-like contracts for plugin tool and command inputs/results, with core-side validation before and after plugin calls.
+- Plugin permission categories for file, shell, network, external-directory, session, and event access.
+- Core service proxy for plugin-requested file/search/shell/network operations so those operations go through AVA policy instead of ad hoc plugin behavior.
+- Plugin audit records that include plugin id, plugin version, contribution id, requested capability, decision, and executed core operation.
+- Plugin diagnostics and developer UX: list/enable/disable/inspect commands, manifest validation, a minimal sample plugin, protocol golden tests, and AI-friendly authoring docs.
+- MCP host support for configured stdio servers, with server lifecycle, tool/resource/prompt adaptation, permission checks, audit entries, and fake-server tests.
 - Subagent/task execution as isolated AVA worker processes.
 
 1.0 target:
 
 - Core modules expose narrow extension seams.
-- Built-in tools use the same registry shape future tools will use.
-- Subagents and MCP remain optional until the core extension and permission model can contain them.
+- Built-in tools and plugin tools use the same registry, validation, permission, event, audit, and cancellation shape.
+- A simple plugin can add a tool, slash command, prompt template, or non-mutating event hook without requiring C++ changes.
+- Plugin process crashes, hangs, malformed JSONL, unsupported API versions, or invalid results produce contained plugin errors and do not kill AVA or corrupt session files.
+- Plugin-contributed operations cannot bypass AVA permissions when they request file, shell, network, external-directory, or session access through AVA.
+- MCP servers are launched or connected through explicit permissioned configuration, and MCP tools/resources/prompts are exposed through bounded AVA registry paths.
+- The v1 plugin API has an explicit compatibility policy, deprecation path, and contract tests.
+- Subagents remain optional until the core extension and permission model can contain worker processes; MCP stays bounded to the explicit 1.0 host scope in `docs/plugin-system.md`.
+- Full untrusted-code sandboxing remains a separate hardening layer; arbitrary plugin executables must be treated as local code the user chose to run unless AVA later adds OS-level sandboxing.
 
 ## Roadmap Phases
 
@@ -217,13 +243,19 @@ Purpose: make the planning base truthful before deeper work.
 Scope:
 
 - Update stale product/version docs that still describe print, RPC, AGENTS loading, manual compaction records, and export as deferred.
+- Update stale docs that still describe OAuth refresh, permission audit persistence, and atomic file writes as future work.
 - Keep `docs/headless-protocol.md` as the current contract for the RPC MVP.
 - Add an explicit 1.0 backend capability checklist to product planning.
+- Make version docs clearly historical when they describe old deferred status.
+- Cross-check `README.md`, `docs/CONFIG.md`, `docs/USAGE.md`, `docs/TESTING.md`, `docs/headless-protocol.md`, and `docs/product/*.md` against current code before starting Phase 2.
 
 Acceptance criteria:
 
 - Docs agree on what is implemented, deferred, and required for 1.0.
 - The backend roadmap is the source of truth for backend sequencing.
+- `docs/product/backend-capabilities-1.0.md` exists and maps each 1.0 backend capability to current status and roadmap phase.
+- Documented commands and protocol examples match app command/RPC handlers or are explicitly marked planned.
+- `git --no-pager diff --check` passes after documentation reconciliation.
 
 ### Phase 1: Backend Hardening
 
@@ -231,13 +263,15 @@ Purpose: make the current backend reliable before expanding it.
 
 Scope:
 
-- Implement OpenAI OAuth refresh token exchange and wire automatic refresh before provider startup fails on expiry.
-- Persist permission decision entries for every allow, ask, and deny resolution.
+- Keep OpenAI OAuth refresh token exchange covered by tests and wired before provider startup fails on expiry.
+- Keep permission decision entries persisted for every allow, ask, and deny resolution.
 - Split or extend focused regression tests for permissions, file tools, search tools, bash, sessions, print mode, and RPC mode.
-- Introduce safe filesystem/process operation boundaries under existing tools.
-- Make `write_file` and `edit_file` atomic via temp-file plus rename; `apply_patch` already uses staged replacement.
-- Improve bash cancellation and timeout cleanup.
+- Keep safe filesystem/process operation boundaries under existing tools and document any remaining seams that Phase 4 must extract.
+- Keep `write_file` and `edit_file` atomic via temp-file plus rename; `apply_patch` already uses staged replacement.
+- Keep bash cancellation and timeout cleanup covered by regression tests.
 - Add `git --no-pager diff --check` and sanitizer runs to release verification docs.
+- Verify permission audit export includes operation, path/command, decision, resolver source, and denial reason where applicable.
+- Add or keep headless coverage for malformed input, cancellation, permission denial, and successful fake-provider prompt flow.
 
 Acceptance criteria:
 
@@ -245,6 +279,7 @@ Acceptance criteria:
 - Permission audit entries appear in session export.
 - File writes do not leave obvious partial writes on normal failure paths.
 - Headless tests cover malformed input, cancellation, permission denial, and successful prompt flow with a fake provider.
+- Release verification docs include normal, sanitizer, and whitespace-check commands from `AGENTS.md`.
 
 ### Phase 2: Evented Runtime And Protocol
 
@@ -252,22 +287,28 @@ Purpose: turn the backend into a shared runtime for TUI and automation clients.
 
 Scope:
 
-- Define a runtime event taxonomy for session, turn, message, provider, tool, permission, compaction, and error events.
+- Define a runtime event taxonomy for session, run, turn, message, provider, tool, permission, queue, compaction, retry, cancellation, and error events.
+- Define a stable event envelope with schema version, event type, event id, session id, run id, turn id where applicable, timestamp, correlation ids, payload, and error fields.
 - Include agent, turn, message start/update/end, thinking update, tool start/update/end, permission, queue, compaction, retry, cancellation, and error event types in that taxonomy.
+- Add a subscription-style event bus that can feed TUI, print JSON, RPC, tests, and future plugins without each mode reading private loop state.
 - Redesign the transport/provider boundary to support incremental stream event delivery instead of only returning a complete HTTP response.
 - Route TUI, print JSON, and RPC through the same event stream.
 - Add message delta events when provider streaming is available.
-- Add async cancellation tied to active runs.
-- Add RPC protocol versioning.
+- Add thinking/reasoning delta events when provider capabilities expose them.
+- Add async cancellation tied to active provider/tool runs, including a terminal cancellation event.
+- Add RPC protocol versioning and a compatibility rule for unknown request/event fields.
 - Add RPC `steer`, `follow_up`, `get_messages`, `get_session_stats`, `new_session`, `switch_session`, `set_model`, `cycle_model`, and `get_available_models` commands.
 - Add RPC question and permission resolver flows.
+- Add subprocess-level RPC tests that feed JSONL requests and assert response/event order with fake provider transport.
 
 Acceptance criteria:
 
 - A client can observe a full turn without reading session internals.
+- Message deltas, tool start/update/end, permission prompts, and final terminal events are visible over RPC.
 - A client can cancel an active provider/tool run and receive a terminal event.
 - The event envelope can add future compaction, retry, provider, and extension events without breaking existing clients.
 - TUI behavior does not depend on private agent-loop state.
+- RPC tests cover malformed JSONL, unknown commands, prompt success, permission/question resolver flows, cancellation, and session commands.
 
 ### Phase 3: Context, Usage, And Sessions
 
@@ -276,19 +317,26 @@ Purpose: support long-running real projects.
 Scope:
 
 - Implement provider-generated compaction summaries.
+- Define a structured compaction prompt and result shape that captures goal, constraints, decisions, modified/read files, unresolved tasks, and next steps.
 - Wire `should_auto_compact` into the agent loop using token estimates and provider context windows.
 - Detect context overflow and retry after compaction when safe.
 - Store provider usage and cost metadata on assistant messages.
+- Extract provider usage data when available and fall back to estimator-marked values when it is not.
 - Add session stats aggregation.
 - Add session schema versioning and migration hooks.
-- Design tree entries with `id` and `parent_id` compatibility, even if UI branching follows later.
+- Design tree entries with `id` and `parent_id` compatibility, branch validation, and migration rules even if UI branching follows later.
 - Implement fork/clone and branch summary if tree sessions are included in 1.0.
+- Add model-change and thinking-level-change session entries before mid-session model controls ship.
+- Add RPC/session APIs for messages, stats, compaction status, and branch/tree data when available.
 
 Acceptance criteria:
 
 - Long sessions compact automatically before they fail from context pressure.
 - `/compact` produces useful provider summaries, not empty placeholders.
 - Session exports show usage, cost, compaction, and permission audit information.
+- Session stats are available to TUI and RPC without reparsing JSONL in clients.
+- Context-overflow retry has a max retry count and cannot loop forever.
+- Session files remain inspectable JSONL and old entries can be migrated or rejected with actionable errors.
 
 ### Phase 4: Tool Quality And Code Intelligence
 
@@ -296,20 +344,26 @@ Purpose: make AVA's tools feel dependable on real repositories.
 
 Scope:
 
-- Improve `edit_file` and `apply_patch` with diff previews, line-ending preservation, BOM handling, and clearer failure messages.
+- Improve `edit_file` and `apply_patch` with unified diff previews, line-ending preservation, BOM handling, Unicode-normalization awareness, fuzzy fallback, and clearer failure messages.
+- Add multi-edit support to `edit_file` if it remains distinct from `apply_patch`, with overlap detection and per-edit diagnostics.
 - Add per-path mutation serialization for writes/edits/patches.
 - Respect `.gitignore` by default, prune ignored directories before traversal, and support an explicit `no_ignore` option for search tools.
+- Decide whether search is backed by `rg`, libgit2 ignore parsing, or a small internal ignore matcher, then document the portability tradeoff.
 - Add tool output spill files for truncated shell/search output.
 - Add streaming tool progress events.
-- Add `webfetch` behind network permission policy.
-- Add LSP diagnostics, symbols, definitions, and references.
+- Add `webfetch` behind network permission policy with URL validation, content-type handling, size limits, timeout, and redirect policy.
+- Add an LSP lifecycle manager, starting with diagnostics and then symbols, definitions, and references.
 - Decide whether image reading belongs in core for multimodal support.
+- Add tool registry metadata for name, description, input schema, output bounds, permission category, execution mode, and event rendering hints.
 
 Acceptance criteria:
 
 - Edits explain why they failed and show safe previews when they will change files.
 - Search results match developer expectations in common repositories.
 - Web and LSP tools are permissioned, bounded, and covered by tests.
+- Truncated shell/search output points to bounded spill files when full output is useful.
+- Concurrent mutations to the same path are serialized or rejected deterministically.
+- Tool metadata is centralized enough for Phase 6 plugin and MCP tools to reuse the same registry shape.
 
 ### Phase 5: Provider And Model Breadth
 
@@ -317,13 +371,16 @@ Purpose: make AVA provider-flexible without weakening the core loop.
 
 Scope:
 
-- Introduce provider registry and model capability metadata.
+- Introduce a provider registry with provider factories and no hard-coded provider selection in app modes.
+- Expand model capability metadata to include API family, context window, max output tokens, input modalities, tool support, streaming support, reasoning support, usage support, pricing, cache pricing, and compatibility quirks.
 - Add at least one non-OpenAI provider with streaming, tool calls, usage handling, and tests.
 - Add model catalog fields for context window, max output, input modalities, cost, cache pricing, and provider compatibility quirks.
-- Add environment credential discovery.
+- Add environment credential discovery beyond OpenAI, with a documented resolution order for CLI/config/auth-file/env sources.
+- Refactor OpenAI-shaped auth state only as far as needed for a second provider; do not broaden credential storage without tests.
 - Normalize provider errors, including context overflow, auth, quota, invalid request, refusal/content filter, and transient transport failures.
 - Add retry/backoff/rate-limit handling, including `Retry-After` parsing where available.
 - Add reasoning/thinking controls only where provider capabilities support them.
+- Add model-change and reasoning-control validation before a run starts and when RPC changes the active model.
 
 Acceptance criteria:
 
@@ -331,25 +388,43 @@ Acceptance criteria:
 - Model capabilities are checked before enabling tools, streaming, reasoning, or context thresholds.
 - Usage and cost are calculated from provider usage data and model pricing metadata.
 - Provider failures produce actionable user-facing errors.
+- Tests can register a fake provider through the registry without using OpenAI-specific code paths.
+- A non-tool-capable model does not receive tool definitions.
+- Auth discovery and refresh failures preserve existing credentials and produce safe, actionable errors.
 
-### Phase 6: Controlled Extensibility
+### Phase 6: Stable Plugin Foundation
 
-Purpose: open backend seams without creating an unsafe plugin platform too early.
+Purpose: open backend seams as a small, safe plugin system without turning AVA into a marketplace or letting plugins destabilize the core.
 
 Scope:
 
 - Move built-in tools behind a registry interface.
-- Add event hooks for provider request/response, tool call/result, session lifecycle, and command handling.
+- Treat the registry and event bus as prerequisites; do not implement external plugin execution before built-in tools and events use those seams.
+- Define the plugin manifest schema, discovery paths, enable/disable rules, API versioning, and compatibility policy.
+- Implement an out-of-process JSONL plugin runner with handshake, capability negotiation, timeout, cancellation, stderr capture, bounded output, malformed-record handling, restart/disable behavior, and contract tests.
+- Add plugin tool contributions through the same registry used by built-in tools.
 - Add custom backend slash commands through the registry.
 - Add prompt templates and structured skills under global/project config paths.
+- Add non-mutating event hooks for provider request/response metadata, tool call/result metadata, session lifecycle, and command handling.
 - Add extension-scoped permission categories.
+- Add plugin and MCP audit fields for plugin id/version, contribution id/type, MCP server id, requested capability, decision, resolver source, and executed core operation.
+- Add plugin diagnostics: list, inspect, enable, disable, validate manifest, and show last failure.
+- Add AI-friendly plugin authoring docs plus one minimal sample plugin that can be used in regression tests.
+- Add MCP server support as a plugin contribution type, starting with stdio transport, `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, and `prompts/get`.
+- Add MCP diagnostics and tests with a fake server for launch, initialize, list, call, errors, malformed records, timeout, cancellation, restart, and shutdown.
 - Design the permission and process boundaries that a future task/subagent worker would need, without shipping built-in orchestration in this phase.
 
 Acceptance criteria:
 
-- Built-in tools and extension tools share validation, permission, event, and audit paths.
-- Extensions cannot mutate files, run commands, or fetch network resources without policy coverage.
+- Built-in tools and plugin tools share validation, permission, event, and audit paths.
+- Plugins cannot mutate files, run commands, or fetch network resources without policy coverage.
+- Project plugin code does not execute until the user explicitly enables that plugin and can inspect its requested capabilities.
+- Plugin crashes, hangs, malformed records, invalid schemas, and unsupported API versions are reported as plugin failures without crashing AVA or corrupting session JSONL.
+- A fake plugin subprocess is covered by tests for registration, successful tool call, permission denial, timeout, cancellation, malformed output, and disable behavior.
+- A fake MCP server is covered by tests for initialization, tool listing, tool calls, resource reads, prompt reads, permission denial, timeout, cancellation, malformed output, and restart behavior.
+- A developer or AI assistant can create a minimal plugin from the docs without reading AVA C++ internals.
 - Future subagent/task workers have documented session, permission, and cancellation constraints before implementation starts.
+- Plugin enablement storage, MCP naming, restart backoff, stderr capture limits, and collision handling are documented before the runner is treated as stable.
 
 ## 1.0 Cut Line
 
@@ -366,6 +441,7 @@ Required for 1.0:
 - Provider registry with OpenAI plus one additional high-quality provider, backed by model capability and pricing metadata.
 - Mid-session model switching, model-change session entries, and session stats exposed over RPC.
 - Thinking/reasoning controls for providers and models that support them.
+- Stable local plugin foundation with manifest schema, versioned out-of-process JSONL protocol, tool/command/prompt/event/MCP contributions, diagnostics, docs, and regression tests.
 
 Strongly desired for 1.0:
 
@@ -375,25 +451,19 @@ Strongly desired for 1.0:
 - Diff previews for edits and patches.
 - Search behavior matching `.gitignore` expectations.
 - Prompt templates and structured skills.
+- Optional OS-level sandbox integration for plugin processes where it can be implemented without weakening portability.
 
 Defer unless earlier phases finish cleanly:
 
 - HTTP/server daemon mode.
-- MCP.
-- Broad third-party plugin runtime.
-- Package manager for extensions.
+- Plugin package manager, marketplace, or remote install flow.
+- In-process native plugin ABI.
+- Provider/message-interception plugins that can alter core prompts or provider requests before the event, permission, and audit model proves safe.
+- MCP marketplace/discovery, complex remote MCP OAuth flows, and MCP sampling callbacks.
+- Cross-platform hard sandbox guarantees for arbitrary untrusted plugin executables.
 - Full theme/UI extension system.
 - Built-in multi-agent orchestration, including `task` workers and subagents.
 
 ## Immediate Next Work
 
-The next implementation planning slice should be Phase 1.
-
-Recommended first tickets:
-
-1. Persist permission decisions whenever a tool permission is resolved.
-2. Add OpenAI OAuth refresh before provider startup fails on expired credentials.
-3. Add focused headless RPC tests with fake provider credentials/transport.
-4. Introduce a small safe filesystem operation layer used by `read_file`, `write_file`, `edit_file`, and `apply_patch`.
-5. Make `write_file` and `edit_file` atomic and add regression coverage for write failure behavior.
-6. Update stale product docs to align with the current backend baseline.
+Finish Phase 1 by keeping regression tests and docs aligned with the backend hardening that has landed, then plan the Phase 2 evented-runtime and protocol work.

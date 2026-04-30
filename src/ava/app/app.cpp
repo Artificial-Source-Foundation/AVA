@@ -224,7 +224,9 @@ int run(int argc, char** argv) {
                                    .explicit_prompt = print_prompt,
                                    .read_stdin = !stdin_is_tty(),
                                    .output_format = print_output_format,
-                                   .permission_policy = std::move(headless_permission_policy)},
+                                   .permission_policy = std::move(headless_permission_policy),
+                                   .provider_override = std::nullopt,
+                                   .transport_override = std::nullopt},
         std::cin, std::cout, std::cerr);
   }
 

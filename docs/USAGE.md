@@ -41,7 +41,7 @@ Interactive permission requests replace the composer with an approval dock. The 
 - `Esc`: deny
 - Tab, Left, or Right: move selection
 
-`Deny` is the default focused action. Permission prompts do not create persistent allow rules or session-wide grants.
+`Deny` is the default focused action. Permission decisions are recorded in the session audit trail and export when a session is active, but prompts do not create persistent allow/deny rules or session-wide grants.
 
 ## Commands
 
@@ -49,7 +49,7 @@ Interactive permission requests replace the composer with an approval dock. The 
 - `/mode`: toggle build/plan mode
 - `/sessions`: list sessions for this workspace
 - `/read <path>`: read a file
-- `/write <path> <text>`: write a file
+- `/write <path> <text>`: write a file through permission checks using atomic replacement where practical
 - `/glob <pattern>`: list readable matching files
 - `/grep <text> [glob]`: search readable files for literal text
 - `/bash <command>`: run a conservative permissioned command

@@ -312,6 +312,15 @@ ava::core::Result<FileMutationResult> write_file(const ToolContext& context, con
     if (permissions_error) {
       remove_staged_file_best_effort(temp_path);
       return std::unexpected(staged_io_error("failed to apply target permissions to temporary file", path, temp_path,
+                                              permissions_error.message()));
+    }
+  } else {
+    std::error_code permissions_error;
+    std::filesystem::permissions(temp_path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::replace, permissions_error);
+    if (permissions_error) {
+      remove_staged_file_best_effort(temp_path);
+      return std::unexpected(staged_io_error("failed to apply new file permissions to temporary file", path, temp_path,
                                              permissions_error.message()));
     }
   }
@@ -326,6 +335,11 @@ ava::core::Result<FileMutationResult> write_file(const ToolContext& context, con
 
 ava::core::Result<FileMutationResult> edit_file(const ToolContext& context, const std::filesystem::path& path,
                                                 std::string_view old_text, std::string_view new_text) {
+  if (auto permission = ensure_permission(context, ava::permissions::Operation::ReadFile, path, "", "",
+                                          "tool requires permission");
+      !permission) {
+    return std::unexpected(permission.error());
+  }
   if (auto permission = ensure_permission(context, ava::permissions::Operation::EditFile, path, "", "",
                                           "tool requires permission");
       !permission) {

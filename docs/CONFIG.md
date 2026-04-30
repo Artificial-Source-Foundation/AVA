@@ -32,7 +32,7 @@ API key format:
 
 Auth files are written owner-only. AVA also attempts to read legacy `~/.ava/credentials.json` and opencode's XDG auth file for migration.
 
-OAuth refresh is not automatic yet. If an OAuth token expires, rerun `ava connect openai`.
+OAuth credentials refresh automatically before use when a refresh token is present. If refresh fails or the credential has no refresh token, rerun `ava connect openai`.
 
 ## Models
 

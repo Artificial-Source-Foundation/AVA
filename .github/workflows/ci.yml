@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - zero
+  pull_request:
+    branches:
+      - zero
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libncursesw5-dev pkg-config
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DAVA_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  sanitizer:
+    name: Sanitizers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libncursesw5-dev pkg-config
+
+      - name: Configure
+        run: cmake -S . -B build-sanitize -G Ninja -DAVA_BUILD_TESTS=ON -DAVA_ENABLE_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build-sanitize --parallel
+
+      - name: Test
+        run: ctest --test-dir build-sanitize --output-on-failure

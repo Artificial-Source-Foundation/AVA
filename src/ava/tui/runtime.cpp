@@ -251,9 +251,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
                             .model = options.model,
                             .session_id = options.session_id,
                             .input = "",
-                            .status =
-                                "Enter submits. Ctrl-J/Shift+Enter inserts newline. / opens commands. ↑/↓ select. "
-                                "Page/wheel scroll. Esc twice clears.",
+                            .status = "",
                             .transcript = {},
                             .slash_commands = std::move(options.slash_commands)};
 
@@ -434,14 +432,11 @@ int run_interactive_composer(TuiRuntimeOptions options) {
                                         ? std::size_t{0}
                                         : kMaxTranscriptScrollOffsetRequest - transcript_scroll_offset;
       transcript_scroll_offset += std::min(amount, remaining_scroll);
-      snapshot.status =
-          remaining_scroll < amount ? "transcript: scrollback request capped" : "transcript: scrollback requested";
+      static_cast<void>(remaining_scroll);
     };
     auto scroll_down = [&](std::size_t amount) {
       pending_escape_clear = false;
       transcript_scroll_offset = amount >= transcript_scroll_offset ? 0 : transcript_scroll_offset - amount;
-      snapshot.status =
-          transcript_scroll_offset == 0 ? "transcript: latest messages" : "transcript: scrollback requested";
     };
     auto select_slash_command = [&]() {
       selected_slash_command_index =

@@ -1,6 +1,6 @@
-#include "ava/tui/composer_internal.h"
-
 #include <algorithm>
+
+#include "ava/tui/composer_internal.h"
 
 namespace ava::tui::detail {
 namespace {
@@ -28,20 +28,16 @@ std::string render_status_line(const ComposerSnapshot& snapshot, std::size_t wid
   if (!model.empty()) {
     line += "  " + std::string(kSgrMuted) + model + std::string(kSgrReset) + std::string(kSgrComposerBg);
   }
-  const auto status = sanitize_terminal_text(snapshot.status);
-  if (status.find("scroll") != std::string::npos || status.find("latest") != std::string::npos) {
-    line += "  " + std::string(kSgrTextDimmed) + status + std::string(kSgrReset) + std::string(kSgrComposerBg);
-  }
+  static_cast<void>(snapshot.status);
 
   return composer_surface_line(std::move(line), width);
 }
 
 std::string render_input_line(const ComposerSnapshot& snapshot, std::size_t width) {
-  std::string line = composer_bar() + std::string(kSgrBold) + std::string(kSgrAccent) +
-                     std::string(kComposerPrompt) + std::string(kSgrReset) + std::string(kSgrComposerBg) + " ";
+  std::string line = composer_bar() + std::string(kSgrBold) + std::string(kSgrAccent) + std::string(kComposerPrompt) +
+                     std::string(kSgrReset) + std::string(kSgrComposerBg) + " ";
   if (snapshot.input.empty()) {
-    line += std::string(kSgrTextDimmed) + "Type a message..." + std::string(kSgrReset) +
-            std::string(kSgrComposerBg);
+    line += std::string(kSgrTextDimmed) + "Type a message..." + std::string(kSgrReset) + std::string(kSgrComposerBg);
   } else {
     line += std::string(kSgrText) + sanitize_terminal_text(snapshot.input) + std::string(kSgrReset) +
             std::string(kSgrComposerBg);
@@ -81,8 +77,9 @@ std::size_t composer_block_line_count(const ComposerSnapshot& snapshot, std::siz
 }
 
 ComposerInputLayout composer_input_layout(std::size_t input_line_count, std::size_t max_lines) {
-  if (max_lines <= 1) return {.top_padding = 0, .first_visible = input_line_count > 1 ? input_line_count - 1 : 0,
-                              .visible_input_lines = 1};
+  if (max_lines <= 1)
+    return {
+        .top_padding = 0, .first_visible = input_line_count > 1 ? input_line_count - 1 : 0, .visible_input_lines = 1};
   const auto input_budget = max_lines - 1;
   const auto visible_input_lines = std::min(std::max<std::size_t>(input_line_count, 1), input_budget);
   const auto first_visible = input_line_count > visible_input_lines ? input_line_count - visible_input_lines : 0;
@@ -91,9 +88,8 @@ ComposerInputLayout composer_input_layout(std::size_t input_line_count, std::siz
   return {.top_padding = padding / 2, .first_visible = first_visible, .visible_input_lines = visible_input_lines};
 }
 
-std::vector<std::string> render_composer_block(const ComposerSnapshot& snapshot,
-                                                std::size_t width,
-                                                std::size_t max_lines) {
+std::vector<std::string> render_composer_block(const ComposerSnapshot& snapshot, std::size_t width,
+                                               std::size_t max_lines) {
   if (max_lines == 0) return {};
   if (snapshot.input.empty()) {
     if (max_lines == 1) return {render_input_line(snapshot, width)};
@@ -132,7 +128,8 @@ std::size_t input_cursor_column(const ComposerSnapshot& snapshot, std::size_t wi
   const auto cursor = effective_input_cursor(snapshot);
   const auto before_cursor = snapshot.input.substr(0, cursor);
   const auto line_start = before_cursor.rfind('\n');
-  const auto line_before_cursor = line_start == std::string::npos ? before_cursor : before_cursor.substr(line_start + 1);
+  const auto line_before_cursor =
+      line_start == std::string::npos ? before_cursor : before_cursor.substr(line_start + 1);
   const auto prefix = std::string(kComposerBar) + "  " + std::string(kComposerPrompt) + " ";
   auto column = terminal_text_columns(sanitize_terminal_text(prefix)) +
                 terminal_text_columns(sanitize_terminal_text(line_before_cursor)) + 1;
@@ -142,9 +139,8 @@ std::size_t input_cursor_column(const ComposerSnapshot& snapshot, std::size_t wi
 
 std::size_t input_cursor_line(const ComposerSnapshot& snapshot) {
   const auto cursor = effective_input_cursor(snapshot);
-  return static_cast<std::size_t>(std::count(snapshot.input.begin(), snapshot.input.begin() +
-                                                                    static_cast<std::ptrdiff_t>(cursor),
-                                            '\n'));
+  return static_cast<std::size_t>(
+      std::count(snapshot.input.begin(), snapshot.input.begin() + static_cast<std::ptrdiff_t>(cursor), '\n'));
 }
 
 }  // namespace ava::tui::detail

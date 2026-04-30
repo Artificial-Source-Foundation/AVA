@@ -5070,7 +5070,7 @@ void test_tui_composer_rendering_and_input() {
                  rows_transcript,
                  [](const std::string& line) { return strip_sgr(line).find("· /help") != std::string::npos; }),
          "tui keeps errors and generic command rows distinct from message blocks");
-  const auto newline_help = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+  const auto compact_status = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
       .provider = "openai",
       .model = "gpt-5.5",
@@ -5080,11 +5080,11 @@ void test_tui_composer_rendering_and_input() {
       .transcript = {},
       .width = 120,
       .height = 8});
-  expect(std::ranges::any_of(newline_help,
-                             [](const std::string& line) {
-                               return strip_sgr(line).find("Ctrl-J/Shift+Enter inserts newline") != std::string::npos;
-                             }),
-         "tui status help documents Ctrl-J/Shift+Enter newline insertion");
+  expect(std::ranges::none_of(compact_status,
+                              [](const std::string& line) {
+                                return strip_sgr(line).find("Ctrl-J/Shift+Enter inserts newline") != std::string::npos;
+                              }),
+         "tui keeps the composer status compact instead of rendering verbose help");
 
   const auto minimum_width = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                   .provider = "openai",

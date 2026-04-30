@@ -10,6 +10,8 @@
 namespace ava::provider {
 namespace {
 
+constexpr std::string_view kCodexResponsesUrl = "https://chatgpt.com/backend-api/codex/responses";
+
 std::string input_item_json(const ChatMessage& message) {
   return "{\"role\":\"" + ava::core::json::escape(message.role) + "\",\"content\":\"" +
          ava::core::json::escape(message.content) + "\"}";
@@ -86,6 +88,15 @@ std::string request_body_json(const ProviderRequest& request) {
   return body;
 }
 
+void apply_codex_oauth_request_options(HttpRequest& request) {
+  request.url = std::string(kCodexResponsesUrl);
+  request.headers["OpenAI-Beta"] = "responses=experimental";
+  request.headers["originator"] = "ava";
+  if (!request.body.empty() && request.body.back() == '}') {
+    request.body.insert(request.body.size() - 1, ",\"store\":false");
+  }
+}
+
 void append_unknown_event(std::vector<StreamEvent>& events, std::string_view type) {
   events.push_back(StreamEvent{
       .type = StreamEventType::Error,
@@ -93,6 +104,13 @@ void append_unknown_event(std::vector<StreamEvent>& events, std::string_view typ
       .tool_call_id = "",
       .tool_name = "",
       .error_message = "unknown OpenAI SSE event" + (type.empty() ? std::string{} : ": " + std::string(type))});
+}
+
+bool is_ignored_lifecycle_event(std::string_view type) {
+  return type == "response.created" || type == "response.in_progress" || type == "response.output_item.added" ||
+         type == "response.output_item.done" || type == "response.content_part.added" ||
+         type == "response.content_part.done" || type == "response.output_text.done" ||
+         type == "response.function_call_arguments.done";
 }
 
 void redact_json_string_value(std::string& snippet, std::string_view key) {
@@ -158,6 +176,7 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     return;
   }
   const auto type = ava::core::json::string_field(data, "type").value_or("");
+  if (is_ignored_lifecycle_event(type)) return;
   if (type == "response.output_text.delta" || type == "response.text.delta") {
     events.push_back(StreamEvent{.type = StreamEventType::TextDelta,
                                  .text = ava::core::json::string_field(data, "delta")
@@ -249,11 +268,19 @@ ava::core::Result<HttpRequest> OpenAIProvider::build_request(const ProviderReque
 }
 
 ava::core::Result<HttpRequest> OpenAIProvider::build_request(const ProviderRequest& request,
-                                                             const ava::config::OpenAICredential& credential,
-                                                             long long now_seconds) const {
+                                                              const ava::config::OpenAICredential& credential,
+                                                              long long now_seconds) const {
   auto access_token = ava::config::openai_access_token_for_request(credential, now_seconds);
   if (!access_token) return std::unexpected(std::move(access_token.error()));
-  return build_request(request, *access_token);
+  auto http_request = build_request(request, *access_token);
+  if (!http_request || credential.type != ava::config::OpenAICredentialType::OAuth) return http_request;
+
+  apply_codex_oauth_request_options(*http_request);
+  if (!credential.account_id.empty()) {
+    http_request->headers["ChatGPT-Account-Id"] = credential.account_id;
+    http_request->headers["chatgpt-account-id"] = credential.account_id;
+  }
+  return http_request;
 }
 
 ava::core::Result<HttpRequest> OpenAIProvider::build_request(const ProviderRequest& request,

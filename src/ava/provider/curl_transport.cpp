@@ -19,6 +19,8 @@
 namespace ava::provider {
 namespace {
 
+constexpr char kTrustedExecPath[] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
 class UniqueFd {
  public:
   explicit UniqueFd(int fd = -1) : fd_(fd) {}
@@ -265,6 +267,7 @@ ava::core::Result<HttpResponse> CurlCliTransport::send(const HttpRequest& reques
     close(stdin_read.get());
     close(stdout_write.get());
     close_nonstandard_fds();
+    if (setenv("PATH", kTrustedExecPath, 1) != 0) _exit(127);
     execlp("curl", "curl", "-q", "--config", "-", "--write-out", "\nAVA_HTTP_STATUS:%{http_code}",
            static_cast<char*>(nullptr));
     _exit(127);

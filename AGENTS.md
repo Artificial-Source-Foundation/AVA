@@ -1,45 +1,67 @@
 # AVA Agent Guide
 
-AVA is being rebuilt from zero as a lean native C++ agentic coding tool.
+AVA is a native C++23 terminal coding agent. Treat the codebase as a small systems program: keep interfaces narrow, preserve backend safety boundaries, and make local behavior easy to verify with CMake tests.
 
-## Current Direction
+## Source Map
 
-- Build one C++23 CLI binary first.
-- Keep the backend correct before polishing the TUI.
-- Start with OpenAI as the only provider.
-- Implement `build` and `plan` modes with backend-enforced permissions.
-- Use pi-mono and OpenCode only as product/behavior references, not as code to copy.
+- `src/main.cpp`: application entry point, CLI argument handling, OpenAI connect flow, TUI startup, and non-TTY line shell wiring.
+- `src/ava/core/`: shared primitives such as `Result<T>`, errors, JSON helpers, and IDs.
+- `src/ava/config/`: XDG paths, auth storage, model configuration, prompt configuration, and OpenAI OAuth support.
+- `src/ava/provider/`: provider contracts plus the OpenAI provider and `curl` transport.
+- `src/ava/agent/`: agent loop, mode handling, tool dispatch, and user-question plumbing.
+- `src/ava/permissions/`: backend permission policy and prompt/decision types.
+- `src/ava/tools/`: built-in file, search, and shell tools. Keep filesystem and process safety checks here or in clearly permissioned call paths.
+- `src/ava/session/`: append-only JSONL session storage and session-level formatting/lifecycle helpers.
+- `src/ava/context/`: project/global instruction loading for provider context.
+- `src/ava/tui/`: custom terminal UI rendering, input handling, runtime glue, and terminal abstraction.
+- `tests/core_tests.cpp`: current single test binary. Add focused regression coverage near the related subsystem section until tests are split by module.
 
-## 0.1 Target
+## Local Workflow
 
-- Simple terminal interface.
-- Append-only JSONL sessions.
-- Permissioned tools for file reads, file writes, exact edits, glob, grep, patching, questions, and shell commands.
-- A provider abstraction with OpenAI wired first.
-- Tests around sessions, permissions, tools, filesystem writes, and process execution.
+```sh
+cmake -S . -B build -DAVA_BUILD_TESTS=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
 
-## Current 0.1 Status
+Sanitizers:
 
-- Complete: provider/model/auth foundation, agent tool loop, session resume, simple TUI composer, and XDG config/state paths.
-- Current hardening focus: keep docs accurate, keep tests/sanitizers passing, and avoid adding post-0.1 subsystems.
-- Known deferrals: multiple providers, plugins, MCP, compaction, full permission modals, LSP, web fetch, and session tree UI.
+```sh
+cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
+cmake --build build-sanitize
+ctest --test-dir build-sanitize --output-on-failure
+```
+
+Before handing work off, also run:
+
+```sh
+git --no-pager diff --check
+```
 
 ## Engineering Rules
 
-- Follow `docs/engineering/cpp-safety-rules.md` for all C++ work.
+- Follow `docs/engineering/cpp-safety-rules.md` for C++ work.
 - Use C++23 and CMake.
-- Prefer small modules and narrow interfaces.
+- Prefer small modules, narrow interfaces, and explicit ownership.
 - No raw owning pointers, manual `new`, or manual `delete` in application code.
 - Use RAII and explicit `Result<T>`/`VoidResult` errors for fallible core APIs.
-- All filesystem writes must go through the approved file tool layer.
-- All command execution must go through the approved permissioned process layer.
+- Keep filesystem writes behind the approved file/session/config layers.
+- Keep command execution behind the permissioned process/tool layer.
 - Keep destructive operations behind explicit policy checks.
-- Treat model output, terminal input, paths, JSON, and shell text as untrusted.
+- Treat model output, terminal input, paths, JSON, session files, auth files, and shell text as untrusted.
+- Preserve actionable error context: operation, path/provider/tool name, and underlying cause.
 
-## Collaboration Notes
+## Change Guidelines
 
-- The `zero` branch intentionally deleted the old codebase. Do not restore old tracked files unless explicitly asked.
-- Reference repositories live in `docs/reference-code/` and may contain their own `.git` directories.
-- Planning documents live in `docs/product/`, `docs/engineering/`, and `docs/versions/`.
-- Before substantial C++ changes, check the safety rules and keep the implementation minimal.
-- After implementation milestones, run a reviewer agent against the C++ safety rules before considering the work complete.
+- Prefer the smallest correct change over broad rewrites.
+- Keep `main.cpp` from growing further when a change has a clear subsystem home.
+- Keep TUI code as presentation/runtime glue; backend modules own permissions, sessions, provider messages, and tool semantics.
+- Keep public headers focused on APIs needed across modules. Move test-only or implementation-only helpers out of production interfaces when practical.
+- Add regression tests for safety-sensitive fixes, permission behavior, session persistence, provider parsing, and tool execution.
+- Format changed C++ with the repo `.clang-format` and keep `.clang-tidy` warnings actionable.
+
+## Reference Code
+
+- Reference repositories may live under `docs/reference-code/` and can contain their own `.git` directories.
+- Use reference code only for product and behavior comparison. Do not copy architecture or source code into AVA.
+- Do not include reference repositories in builds, tests, formatting, or source searches unless the task explicitly asks for reference analysis.

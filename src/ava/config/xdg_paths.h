@@ -11,6 +11,8 @@ struct XdgPaths {
   std::filesystem::path ava_config_dir;
   std::filesystem::path ava_state_dir;
   std::filesystem::path auth_file;
+  std::filesystem::path compaction_file;
+  std::filesystem::path global_agents_file;
   std::filesystem::path models_file;
   std::filesystem::path prompts_dir;
   std::filesystem::path sessions_dir;

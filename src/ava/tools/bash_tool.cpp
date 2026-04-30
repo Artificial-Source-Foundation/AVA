@@ -1,22 +1,26 @@
 #include "ava/tools/bash_tool.h"
 
-#include <array>
-#include <cerrno>
-#include <chrono>
-#include <cctype>
-#include <cstring>
 #include <fcntl.h>
 #include <signal.h>
-#include <string_view>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
+
+#include <array>
+#include <cctype>
+#include <cerrno>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
+#include <string_view>
+#include <thread>
 #include <vector>
 
 namespace ava::tools {
 
 namespace {
+
+constexpr char kTrustedExecPath[] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 class UniqueFd {
  public:
@@ -125,28 +129,6 @@ ava::core::Result<std::vector<std::string>> parse_command_argv(std::string_view 
   return argv;
 }
 
-ava::core::VoidResult ensure_command_permission(const ToolContext& context, std::string_view command) {
-  auto decision = ava::permissions::classify_command(command);
-  if (decision.action == ava::permissions::PermissionAction::Allow) {
-    decision = ava::permissions::decide(ava::permissions::PermissionRequest{
-        .operation = ava::permissions::Operation::RunCommand,
-        .mode = context.mode,
-        .workspace_dir = context.workspace_dir,
-        .target_path = context.workspace_dir,
-        .command = std::string(command),
-    });
-  }
-  if (decision.action == ava::permissions::PermissionAction::Allow) {
-    return {};
-  }
-
-  auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "command requires permission");
-  error.with_context("action", ava::permissions::to_string(decision.action));
-  error.with_context("reason", decision.reason);
-  error.with_context("command", std::string(command));
-  return std::unexpected(std::move(error));
-}
-
 void append_tail(BashResult& result, std::string_view chunk, std::size_t max_bytes) {
   result.total_bytes += chunk.size();
   if (max_bytes == 0) {
@@ -227,7 +209,10 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "command must not be empty");
     return std::unexpected(std::move(error));
   }
-  if (auto permission = ensure_command_permission(context, command); !permission) {
+  const auto tool_name = context.permission_tool_name.empty() ? std::string("bash") : context.permission_tool_name;
+  if (auto permission = ensure_permission(context, ava::permissions::Operation::RunCommand, context.workspace_dir,
+                                          command, tool_name, "command requires permission");
+      !permission) {
     return std::unexpected(permission.error());
   }
 
@@ -265,6 +250,9 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
     dup2(write_fd.get(), STDERR_FILENO);
     close(write_fd.get());
     if (chdir(workspace_text.c_str()) != 0) {
+      _exit(127);
+    }
+    if (setenv("PATH", kTrustedExecPath, 1) != 0) {
       _exit(127);
     }
     close_nonstandard_fds();

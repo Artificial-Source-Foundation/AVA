@@ -4,6 +4,7 @@
 
 ```sh
 ava
+ava connect openai
 ava --mode plan
 ava --continue
 ava --session <id-or-prefix>
@@ -17,6 +18,30 @@ ava --session <id-or-prefix>
 - Plan mode: read/search is allowed, but source-code mutation is denied. Planning markdown may be written.
 
 Press Tab in the TUI or use `/mode` to switch.
+
+## TUI Layout
+
+The interactive TUI runs on wide-character ncurses (`ncursesw`) for terminal mode, keyboard/mouse input, resize handling, and screen drawing. The layout is composer-first:
+
+- The top strip shows AVA identity, mode, provider, model, and basic help.
+- The transcript renders user, assistant, tool, and error entries with distinct text markers.
+- Tool activity appears as compact cards with running, success, and error status markers.
+- The bottom composer is fixed to the bottom rows and uses the old AVA visual language: elevated `#1A1F2E` surface, primary-blue left rail, `❯` prompt glyph, mode badge, provider/model metadata, and status text.
+- Enter submits, Ctrl-J/Shift+Enter inserts a newline, Page Up/Page Down or mouse wheel scroll transcript history, and Esc twice clears composer input.
+
+The slash palette opens above the composer while typing `/`. Use arrows or Tab to move focus, then Enter to insert the selected command. The selected item has a `>` marker and readable `selected` text when width permits.
+
+## Permission Prompts
+
+Interactive permission requests replace the composer with an approval dock. The dock shows the tool, command or path summary, selected action, and key help.
+
+- `A`: allow once
+- `D`: deny
+- `Enter` or Space: confirm the selected action
+- `Esc`: deny
+- Tab, Left, or Right: move selection
+
+`Deny` is the default focused action. Permission prompts do not create persistent allow rules or session-wide grants.
 
 ## Commands
 
@@ -38,10 +63,10 @@ When stdin/stdout are not both terminals, AVA uses a line shell instead of the T
 printf '/sessions\n/quit\n' | ava --continue
 ```
 
-## Current 0.1 Limits
+## Current Limits
 
 - OpenAI is the only provider.
 - The HTTP transport uses the local `curl` executable.
 - Tool results are returned after the provider turn completes; there is no async streaming UI yet.
-- Permission `ask` decisions are currently denied by backend tools until a future prompt UI exists.
-- `question` does not open a modal in 0.1; the assistant should ask the user directly.
+- Permission `ask` decisions open a TUI prompt in interactive mode and fail closed in non-TTY mode.
+- `question` does not open a modal yet; the assistant should ask the user directly.

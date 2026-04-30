@@ -18,6 +18,26 @@ ctest --test-dir build-sanitize --output-on-failure
 
 The sanitizer preset enables AddressSanitizer and UndefinedBehaviorSanitizer for supported non-MSVC builds.
 
+## Formatting And Static Checks
+
+Format changed C++ files with the repository `.clang-format`:
+
+```sh
+clang-format -i <changed-cpp-or-header-files>
+```
+
+Run clang-tidy against changed implementation files after configuring the build:
+
+```sh
+clang-tidy <changed-cpp-files> -p build
+```
+
+Before handing work off, check for whitespace and patch-format issues:
+
+```sh
+git --no-pager diff --check
+```
+
 ## Coverage Areas
 
 The current single test binary covers:

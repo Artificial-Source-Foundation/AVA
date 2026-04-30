@@ -1,0 +1,292 @@
+#include <algorithm>
+#include <climits>
+#include <cwchar>
+
+#include "ava/tui/composer_internal.h"
+
+namespace ava::tui {
+
+std::string sanitize_terminal_text(std::string_view text) {
+  std::string sanitized;
+  sanitized.reserve(text.size());
+  for (std::size_t index = 0; index < text.size();) {
+    const auto byte = static_cast<unsigned char>(text[index]);
+    if (byte < 0x20 || byte == 0x7F) {
+      if (byte == '\t') {
+        sanitized += "  ";
+      } else {
+        sanitized.push_back('?');
+      }
+      ++index;
+      continue;
+    }
+
+    const auto length = detail::utf8_sequence_length(byte);
+    char32_t codepoint = 0;
+    if (!detail::decode_utf8_codepoint(text, index, length, codepoint)) {
+      sanitized.push_back('?');
+      ++index;
+      continue;
+    }
+
+    if (codepoint >= 0x80 && codepoint <= 0x9F) {
+      sanitized.push_back('?');
+    } else {
+      sanitized.append(text.substr(index, length));
+    }
+    index += length;
+  }
+  return sanitized;
+}
+
+std::vector<std::string> split_lines(std::string_view text) {
+  std::vector<std::string> lines;
+  std::size_t start = 0;
+  for (std::size_t index = 0; index <= text.size(); ++index) {
+    if (index == text.size()) {
+      lines.emplace_back(text.substr(start, index - start));
+      break;
+    }
+    if (text[index] != '\n' && text[index] != '\r') continue;
+
+    lines.emplace_back(text.substr(start, index - start));
+    if (text[index] == '\r' && index + 1 < text.size() && text[index + 1] == '\n') {
+      ++index;
+    }
+    start = index + 1;
+  }
+  if (lines.empty()) lines.emplace_back();
+  return lines;
+}
+
+namespace detail {
+
+bool is_utf8_continuation(unsigned char byte) { return (byte & 0xC0U) == 0x80U; }
+
+std::size_t utf8_sequence_length(unsigned char byte) {
+  if ((byte & 0x80U) == 0) return 1;
+  if (byte >= 0xC2U && byte <= 0xDFU) return 2;
+  if ((byte & 0xF0U) == 0xE0U) return 3;
+  if (byte >= 0xF0U && byte <= 0xF4U) return 4;
+  return 0;
+}
+
+bool decode_utf8_codepoint(std::string_view text, std::size_t start, std::size_t length, char32_t& codepoint) {
+  if (start + length > text.size() || length == 0) return false;
+  const auto first = static_cast<unsigned char>(text[start]);
+  if (utf8_sequence_length(first) != length) return false;
+  if (length == 1) {
+    codepoint = first;
+    return true;
+  }
+  codepoint = first & ((1U << (7 - length)) - 1U);
+  for (std::size_t offset = 1; offset < length; ++offset) {
+    const auto byte = static_cast<unsigned char>(text[start + offset]);
+    if (!is_utf8_continuation(byte)) return false;
+    codepoint = (codepoint << 6U) | (byte & 0x3FU);
+  }
+  if (length == 2 && codepoint < 0x80) return false;
+  if (length == 3 && codepoint < 0x800) return false;
+  if (length == 4 && codepoint < 0x10000) return false;
+  if (codepoint >= 0xD800 && codepoint <= 0xDFFF) return false;
+  if (codepoint > 0x10FFFF) return false;
+  return true;
+}
+
+bool is_wide_codepoint(char32_t codepoint) {
+  return (codepoint >= 0x1100 && codepoint <= 0x115F) || (codepoint >= 0x2329 && codepoint <= 0x232A) ||
+         (codepoint >= 0x2E80 && codepoint <= 0xA4CF) || (codepoint >= 0xAC00 && codepoint <= 0xD7A3) ||
+         (codepoint >= 0xF900 && codepoint <= 0xFAFF) || (codepoint >= 0xFE10 && codepoint <= 0xFE19) ||
+         (codepoint >= 0xFE30 && codepoint <= 0xFE6F) || (codepoint >= 0xFF00 && codepoint <= 0xFF60) ||
+         (codepoint >= 0xFFE0 && codepoint <= 0xFFE6) || (codepoint >= 0x1F300 && codepoint <= 0x1FAFF) ||
+         (codepoint >= 0x20000 && codepoint <= 0x3FFFD);
+}
+
+std::size_t codepoint_columns(char32_t codepoint) {
+  if (codepoint == 0 || codepoint > static_cast<char32_t>(WCHAR_MAX)) return 1;
+  const auto width = ::wcwidth(static_cast<wchar_t>(codepoint));
+  if (width > 0) return static_cast<std::size_t>(width);
+  return is_wide_codepoint(codepoint) ? std::size_t{2} : std::size_t{1};
+}
+
+bool skip_sgr_sequence(std::string_view text, std::size_t& index) {
+  if (index + 1 >= text.size() || text[index] != '\x1b' || text[index + 1] != '[') {
+    return false;
+  }
+  auto end = index + 2;
+  while (end < text.size() && text[end] != 'm') {
+    ++end;
+  }
+  if (end >= text.size()) {
+    return false;
+  }
+  index = end + 1;
+  return true;
+}
+
+std::size_t terminal_text_columns(std::string_view text) {
+  std::size_t columns = 0;
+  for (std::size_t index = 0; index < text.size();) {
+    if (skip_sgr_sequence(text, index)) {
+      continue;
+    }
+    const auto length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
+    char32_t codepoint = 0;
+    if (decode_utf8_codepoint(text, index, length, codepoint)) {
+      index += length;
+      columns += codepoint_columns(codepoint);
+    } else {
+      ++index;
+      ++columns;
+    }
+  }
+  return columns;
+}
+
+std::string fit_line(std::string text, std::size_t width) {
+  if (width == 0) return {};
+  text = sanitize_terminal_text(text);
+  if (terminal_text_columns(text) <= width) return text;
+  if (width <= 3) {
+    std::string output;
+    std::size_t visible = 0;
+    for (std::size_t index = 0; index < text.size() && visible < width;) {
+      const auto length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
+      char32_t cp = 0;
+      if (decode_utf8_codepoint(text, index, length, cp)) {
+        const auto cp_width = codepoint_columns(cp);
+        if (visible + cp_width > width) break;
+        output.append(text.substr(index, length));
+        index += length;
+        visible += cp_width;
+      } else {
+        output.push_back('?');
+        ++index;
+        ++visible;
+      }
+    }
+    return output;
+  }
+
+  const auto visible_budget = width - 3;
+  std::string output;
+  std::size_t visible = 0;
+  for (std::size_t index = 0; index < text.size() && visible < visible_budget;) {
+    const auto length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
+    char32_t cp = 0;
+    if (decode_utf8_codepoint(text, index, length, cp)) {
+      const auto cp_width = codepoint_columns(cp);
+      if (visible + cp_width > visible_budget) break;
+      output.append(text.substr(index, length));
+      index += length;
+      visible += cp_width;
+    } else {
+      output.push_back('?');
+      ++index;
+      ++visible;
+    }
+  }
+  output += "...";
+  return output;
+}
+
+std::string fit_line_preserving_sgr(std::string text, std::size_t width) {
+  if (width == 0) return {};
+  const auto cols = terminal_text_columns(text);
+  if (cols <= width) return text;
+  if (width <= 3) {
+    return std::string(width, '.');
+  }
+
+  const auto visible_budget = width - 3;
+  std::size_t visible = 0;
+  bool emitted_sgr = false;
+  std::string output;
+  for (std::size_t index = 0; index < text.size() && visible < visible_budget;) {
+    const auto before_sgr = index;
+    if (skip_sgr_sequence(text, index)) {
+      output.append(text.substr(before_sgr, index - before_sgr));
+      emitted_sgr = true;
+      continue;
+    }
+
+    const auto length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
+    char32_t cp = 0;
+    if (decode_utf8_codepoint(text, index, length, cp)) {
+      const auto cp_width = codepoint_columns(cp);
+      if (visible + cp_width > visible_budget) break;
+      output.append(text.substr(index, length));
+      index += length;
+      visible += cp_width;
+    } else {
+      output.push_back('?');
+      ++index;
+      ++visible;
+    }
+  }
+  output += "...";
+  if (emitted_sgr) output += kSgrReset;
+  return output;
+}
+
+std::string surface_line(std::string_view background_sgr, std::string line, std::size_t width) {
+  const auto background = std::string(background_sgr);
+  std::string painted;
+  painted.reserve(background.size() + line.size());
+  painted += background;
+  for (std::size_t index = 0; index < line.size();) {
+    if (line.compare(index, kSgrReset.size(), kSgrReset) == 0) {
+      painted += std::string(kSgrReset);
+      painted += background;
+      index += kSgrReset.size();
+      continue;
+    }
+    painted.push_back(line[index]);
+    ++index;
+  }
+
+  line = fit_line_preserving_sgr(std::move(painted), width);
+  const auto cols = terminal_text_columns(line);
+  if (cols < width) {
+    line += background + std::string(width - cols, ' ');
+  }
+  line += std::string(kSgrReset);
+  return line;
+}
+
+std::string screen_surface_line(std::string line, std::size_t width) {
+  return surface_line(kSgrScreenBg, std::move(line), width);
+}
+
+std::string composer_surface_line(std::string line, std::size_t width) {
+  return surface_line(kSgrComposerBg, std::move(line), width);
+}
+
+std::vector<std::string> wrap_transcript_text(std::string_view text, std::size_t width) {
+  const auto sanitized = sanitize_terminal_text(text);
+  const auto content_width = std::max<std::size_t>(1, width > 4 ? width - 4 : width);
+  std::vector<std::string> wrapped;
+  std::string current;
+  std::size_t columns = 0;
+  for (std::size_t index = 0; index < sanitized.size();) {
+    const auto byte = static_cast<unsigned char>(sanitized[index]);
+    const auto length = utf8_sequence_length(byte);
+    char32_t codepoint = 0;
+    const auto valid = decode_utf8_codepoint(sanitized, index, length, codepoint);
+    const auto chunk_length = valid ? length : std::size_t{1};
+    const auto chunk_columns = valid ? codepoint_columns(codepoint) : std::size_t{1};
+    if (columns + chunk_columns > content_width && !current.empty()) {
+      wrapped.push_back(std::move(current));
+      current.clear();
+      columns = 0;
+    }
+    current.append(sanitized.substr(index, chunk_length));
+    columns += chunk_columns;
+    index += chunk_length;
+  }
+  if (!current.empty() || wrapped.empty()) wrapped.push_back(std::move(current));
+  return wrapped;
+}
+
+}  // namespace detail
+}  // namespace ava::tui

@@ -57,6 +57,10 @@ What AVA should not copy initially:
 - MCP as a core requirement.
 - Broad plugin/runtime system before core safety and sessions are stable.
 
+### Old Rust AVA Reference
+
+Old Rust AVA is a historical reference for tool card and permission modal ideas only; do not restore its architecture or code.
+
 ## Design Principles
 
 - Native first: AVA ships as one fast C++ binary.
@@ -217,6 +221,7 @@ Required:
 - Input editor with multiline support.
 - Abort current turn.
 - Show current model, directory, session, and mode.
+- The slash-command palette owns input collection, candidate display, and rendering only; parsing, authorization, session mutation, tool execution, and mode changes stay in app command handlers outside the TUI.
 
 Deferred:
 
@@ -262,10 +267,23 @@ Deferred:
 - Simple TUI composer with non-TTY line-shell fallback.
 - Tests and sanitizer builds.
 
-### Deferred After 0.1
+### Planned 0.2 Focus
+
+- Polish the interactive TUI until it is comfortable for daily coding sessions.
+- Use OpenCode as the primary TUI visual/interaction reference; use pi-mono and old Rust AVA only as secondary references for compact tool cards and permission prompts.
+- Decide whether to keep the custom terminal path or adopt FTXUI before adding a new TUI dependency.
+- Make agent tool calls, results, failures, and truncation visible in the transcript.
+- Add OpenCode-like slash command palette discovery and readable thinking/progress visibility.
+- Add interactive permission prompts for `ask` decisions while keeping non-interactive mode fail-closed.
+- Verify the existing 0.1 tools through real agent workflows before adding more providers or automation modes.
+- Keep additional providers, MCP/plugins, subagents, LSP, web fetch, and automation CLI modes deferred to later versions.
+
+### Deferred Beyond 0.2 / 0.3+ Backlog
+
+These items were deferred from 0.1 and remain post-0.2 unless the 0.2 scope explicitly reclassifies them. See `docs/versions/0.2.md` for the 0.2 backlog boundary and hard deferrals.
 
 - One-shot and `--print` modes.
-- Permission prompt modal and persistent allow/deny rules.
+- Persistent allow/deny rule management.
 - Diff previews and richer patch UI.
 - AGENTS.md loading and skills.
 - Manual and automatic compaction.

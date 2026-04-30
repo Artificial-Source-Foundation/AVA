@@ -50,6 +50,8 @@ XdgPaths xdg_paths() {
       .ava_config_dir = ava_config,
       .ava_state_dir = ava_state,
       .auth_file = ava_config / "auth.json",
+      .compaction_file = ava_config / "compaction.json",
+      .global_agents_file = ava_config / "AGENTS.md",
       .models_file = ava_config / "models.json",
       .prompts_dir = ava_config / "prompts",
       .sessions_dir = ava_state / "sessions",

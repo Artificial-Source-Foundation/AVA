@@ -5,29 +5,11 @@
 #include <regex>
 #include <string>
 #include <system_error>
+#include <utility>
 
 namespace ava::tools {
 
 namespace {
-
-ava::core::VoidResult ensure_search_permission(const ToolContext& context) {
-  const auto decision = ava::permissions::decide(ava::permissions::PermissionRequest{
-      .operation = ava::permissions::Operation::SearchFiles,
-      .mode = context.mode,
-      .workspace_dir = context.workspace_dir,
-      .target_path = context.workspace_dir,
-      .command = "",
-  });
-  if (decision.action == ava::permissions::PermissionAction::Allow) {
-    return {};
-  }
-
-  auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "tool requires permission");
-  error.with_context("action", ava::permissions::to_string(decision.action));
-  error.with_context("reason", decision.reason);
-  error.with_context("path", context.workspace_dir.string());
-  return std::unexpected(std::move(error));
-}
 
 bool is_hidden_or_generated(const std::filesystem::path& path) {
   for (const auto& part : path) {
@@ -48,6 +30,13 @@ std::string regex_escape(char ch) {
 }
 
 ava::core::Result<std::regex> glob_to_regex(std::string_view pattern) {
+  if (pattern.find('[') != std::string_view::npos || pattern.find(']') != std::string_view::npos) {
+    auto error =
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "glob bracket character classes are not supported");
+    error.with_context("pattern", std::string(pattern));
+    return std::unexpected(std::move(error));
+  }
+
   std::string out = "^";
   for (std::size_t i = 0; i < pattern.size(); ++i) {
     const char ch = pattern[i];
@@ -90,11 +79,13 @@ std::string relative_slash_path(const std::filesystem::path& root, const std::fi
   return relative.generic_string();
 }
 
-bool looks_binary(std::string_view line) {
-  return line.find('\0') != std::string_view::npos;
+bool looks_binary(std::string_view line) { return line.find('\0') != std::string_view::npos; }
+
+std::string search_permission_tool_name(const ToolContext& context) {
+  return context.permission_tool_name.empty() ? std::string("search") : context.permission_tool_name;
 }
 
-bool can_read_search_match(const ToolContext& context, const std::filesystem::path& path) {
+ava::core::Result<bool> can_read_search_match(const ToolContext& context, const std::filesystem::path& path) {
   const auto decision = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::ReadFile,
       .mode = context.mode,
@@ -102,22 +93,31 @@ bool can_read_search_match(const ToolContext& context, const std::filesystem::pa
       .target_path = path,
       .command = "",
   });
-  return decision.action == ava::permissions::PermissionAction::Allow;
+  if (decision.action == ava::permissions::PermissionAction::Allow) return true;
+  if (decision.action == ava::permissions::PermissionAction::Deny) return false;
+
+  auto permission = ensure_permission(context, ava::permissions::Operation::ReadFile, path, "",
+                                      search_permission_tool_name(context), "search match requires permission");
+  if (permission) return true;
+  // Search is best-effort per matched file: if an Ask resolver or audit sink fails,
+  // skip only this match instead of failing the whole glob/grep operation.
+  return false;
 }
 
-ava::core::Result<bool> read_limited_line(std::ifstream& file,
-                                          std::string& line,
-                                          const std::filesystem::path& path,
-                                          std::size_t max_line_length,
-                                          bool& line_truncated) {
+ava::core::Result<bool> read_limited_line(std::ifstream& file, std::string& line, const std::filesystem::path& path,
+                                          std::size_t max_line_length, bool& line_truncated, bool& line_binary) {
   line.clear();
   line_truncated = false;
+  line_binary = false;
   bool saw_character = false;
   char ch = '\0';
   while (file.get(ch)) {
     saw_character = true;
     if (ch == '\n') {
       return true;
+    }
+    if (ch == '\0') {
+      line_binary = true;
     }
     if (line.size() < max_line_length) {
       line.push_back(ch);
@@ -135,14 +135,15 @@ ava::core::Result<bool> read_limited_line(std::ifstream& file,
 
 }  // namespace
 
-ava::core::Result<GlobResult> glob_files(const ToolContext& context,
-                                         std::string_view pattern,
-                                         GlobOptions options) {
+ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string_view pattern, GlobOptions options) {
   if (pattern.empty()) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "glob pattern must not be empty");
     return std::unexpected(std::move(error));
   }
-  if (auto permission = ensure_search_permission(context); !permission) {
+  const auto tool_name = context.permission_tool_name.empty() ? std::string("search") : context.permission_tool_name;
+  if (auto permission = ensure_permission(context, ava::permissions::Operation::SearchFiles, context.workspace_dir, "",
+                                          tool_name, "tool requires permission");
+      !permission) {
     return std::unexpected(permission.error());
   }
 
@@ -194,7 +195,9 @@ ava::core::Result<GlobResult> glob_files(const ToolContext& context,
       continue;
     }
 
-    if (!can_read_search_match(context, entry.path())) {
+    auto can_read = can_read_search_match(context, entry.path());
+    if (!can_read) return std::unexpected(can_read.error());
+    if (!*can_read) {
       continue;
     }
     ++result.total_matches;
@@ -204,14 +207,12 @@ ava::core::Result<GlobResult> glob_files(const ToolContext& context,
       result.truncated = true;
     }
   }
-  std::ranges::sort(result.paths);
+  std::ranges::sort(result.paths, {}, [](const std::filesystem::path& path) { return path.generic_string(); });
   return result;
 }
 
-ava::core::Result<GrepResult> grep_files(const ToolContext& context,
-                                         std::string_view literal_pattern,
-                                         std::string_view include_glob,
-                                         GrepOptions options) {
+ava::core::Result<GrepResult> grep_files(const ToolContext& context, std::string_view literal_pattern,
+                                         std::string_view include_glob, GrepOptions options) {
   if (literal_pattern.empty()) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "grep pattern must not be empty");
     return std::unexpected(std::move(error));
@@ -225,10 +226,6 @@ ava::core::Result<GrepResult> grep_files(const ToolContext& context,
   GrepResult result;
   result.truncated = files->truncated;
   for (const auto& path : files->paths) {
-    if (!can_read_search_match(context, path)) {
-      continue;
-    }
-
     std::ifstream file(path, std::ios::binary);
     if (!file) {
       continue;
@@ -236,9 +233,14 @@ ava::core::Result<GrepResult> grep_files(const ToolContext& context,
 
     std::string line;
     std::size_t line_number = 0;
+    std::size_t file_total_matches = 0;
+    std::vector<GrepMatch> file_matches;
+    file_matches.reserve(std::min<std::size_t>(options.max_matches, 64));
+    bool file_is_binary = false;
     while (true) {
       bool line_truncated = false;
-      auto line_read = read_limited_line(file, line, path, options.max_line_length, line_truncated);
+      bool line_binary = false;
+      auto line_read = read_limited_line(file, line, path, options.max_line_length, line_truncated, line_binary);
       if (!line_read) {
         return std::unexpected(line_read.error());
       }
@@ -246,23 +248,40 @@ ava::core::Result<GrepResult> grep_files(const ToolContext& context,
         break;
       }
       ++line_number;
+      if (line_binary || looks_binary(line)) {
+        file_is_binary = true;
+        break;
+      }
       const bool matched = line.find(literal_pattern) != std::string::npos;
-      if (looks_binary(line) || !matched) {
+      if (!matched) {
         continue;
       }
 
-      ++result.total_matches;
-      if (result.matches.size() >= options.max_matches) {
-        result.truncated = true;
-        continue;
-      }
+      ++file_total_matches;
+      if (file_matches.size() >= options.max_matches) continue;
 
-      result.matches.push_back(GrepMatch{
+      file_matches.push_back(GrepMatch{
           .path = path,
           .line_number = line_number,
           .line = line,
           .line_truncated = line_truncated,
       });
+    }
+
+    if (file_is_binary) {
+      continue;
+    }
+
+    if (result.total_matches + file_total_matches > options.max_matches) {
+      result.truncated = true;
+    }
+    result.total_matches += file_total_matches;
+    for (auto& match : file_matches) {
+      if (result.matches.size() >= options.max_matches) {
+        result.truncated = true;
+        break;
+      }
+      result.matches.push_back(std::move(match));
     }
   }
 

@@ -557,6 +557,8 @@ std::string to_string(EntryType type) {
       return "permission_decision";
     case EntryType::ModeChange:
       return "mode_change";
+    case EntryType::Compaction:
+      return "compaction";
     case EntryType::Error:
       return "error";
     case EntryType::Cancel:
@@ -573,6 +575,7 @@ ava::core::Result<EntryType> parse_entry_type(std::string_view value) {
   if (value == "tool_result") return EntryType::ToolResult;
   if (value == "permission_decision") return EntryType::PermissionDecision;
   if (value == "mode_change") return EntryType::ModeChange;
+  if (value == "compaction") return EntryType::Compaction;
   if (value == "error") return EntryType::Error;
   if (value == "cancel") return EntryType::Cancel;
 

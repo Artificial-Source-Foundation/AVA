@@ -67,17 +67,6 @@ class Transport {
   [[nodiscard]] virtual ava::core::Result<HttpResponse> send(const HttpRequest& request) = 0;
 };
 
-class FakeTransport final : public Transport {
- public:
-  explicit FakeTransport(std::vector<HttpResponse> responses);
-  [[nodiscard]] ava::core::Result<HttpResponse> send(const HttpRequest& request) override;
-  [[nodiscard]] const std::vector<HttpRequest>& requests() const noexcept;
-
- private:
-  std::vector<HttpResponse> responses_;
-  std::vector<HttpRequest> requests_;
-};
-
 [[nodiscard]] std::string to_string(StreamEventType type);
 
 }  // namespace ava::provider

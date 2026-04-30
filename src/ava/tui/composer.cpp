@@ -1,152 +1,330 @@
 #include "ava/tui/composer.h"
 
+#include <curses.h>
+
 #include <algorithm>
-#include <sstream>
+#include <array>
+#include <cstdlib>
+#include <string_view>
+#include <vector>
+
+#include "ava/tui/composer_internal.h"
 
 namespace ava::tui {
 namespace {
 
-constexpr std::size_t kMinWidth = 20;
-constexpr std::size_t kMinHeight = 8;
-constexpr std::size_t kHeaderFooterLines = 5;
-constexpr std::string_view kHideCursor = "\x1b[?25l";
-constexpr std::string_view kShowCursor = "\x1b[?25h";
-constexpr std::string_view kHomeCursor = "\x1b[H";
-constexpr std::string_view kClearLine = "\x1b[2K";
+constexpr short kPairText = 1;
+constexpr short kPairMuted = 2;
+constexpr short kPairSuccess = 3;
+constexpr short kPairWarning = 4;
+constexpr short kPairError = 5;
+constexpr short kPairAccent = 6;
+constexpr short kPairScreen = 7;
+constexpr short kPairComposer = 8;
+constexpr short kPairComposerText = 9;
+constexpr short kPairComposerMuted = 10;
+constexpr short kPairComposerSuccess = 11;
+constexpr short kPairComposerWarning = 12;
+constexpr short kPairComposerError = 13;
+constexpr short kPairComposerAccent = 14;
 
-bool is_utf8_continuation(unsigned char byte) { return (byte & 0xC0U) == 0x80U; }
+constexpr short kColorScreenBg = 16;
+constexpr short kColorComposerBg = 17;
 
-std::size_t utf8_sequence_length(unsigned char byte) {
-  if ((byte & 0x80U) == 0) return 1;
-  if ((byte & 0xE0U) == 0xC0U) return 2;
-  if ((byte & 0xF0U) == 0xE0U) return 3;
-  if ((byte & 0xF8U) == 0xF0U) return 4;
-  return 0;
+enum class ColorRole {
+  Text,
+  Muted,
+  Success,
+  Warning,
+  Error,
+  Accent,
+};
+
+enum class BackgroundRole {
+  Screen,
+  Composer,
+};
+
+struct CursesStyle {
+  attr_t attributes = A_NORMAL;
+  ColorRole color = ColorRole::Text;
+  BackgroundRole background = BackgroundRole::Screen;
+};
+
+struct CursorPlacement {
+  std::size_t row = 0;
+  std::size_t column = 0;
+};
+
+void initialize_color_pairs() {
+  static bool initialized = false;
+  if (initialized || !has_colors()) return;
+  initialized = true;
+  auto screen_bg = COLOR_BLACK;
+  auto composer_bg = COLOR_BLACK;
+  if (can_change_color() && COLORS > kColorComposerBg) {
+    static_cast<void>(init_color(kColorScreenBg, 43, 55, 78));
+    static_cast<void>(init_color(kColorComposerBg, 102, 122, 180));
+    screen_bg = kColorScreenBg;
+    composer_bg = kColorComposerBg;
+  }
+  static_cast<void>(init_pair(kPairText, COLOR_WHITE, screen_bg));
+  static_cast<void>(init_pair(kPairMuted, COLOR_CYAN, screen_bg));
+  static_cast<void>(init_pair(kPairSuccess, COLOR_GREEN, screen_bg));
+  static_cast<void>(init_pair(kPairWarning, COLOR_YELLOW, screen_bg));
+  static_cast<void>(init_pair(kPairError, COLOR_RED, screen_bg));
+  static_cast<void>(init_pair(kPairAccent, COLOR_CYAN, screen_bg));
+  static_cast<void>(init_pair(kPairScreen, COLOR_WHITE, screen_bg));
+  static_cast<void>(init_pair(kPairComposer, COLOR_WHITE, composer_bg));
+  static_cast<void>(init_pair(kPairComposerText, COLOR_WHITE, composer_bg));
+  static_cast<void>(init_pair(kPairComposerMuted, COLOR_CYAN, composer_bg));
+  static_cast<void>(init_pair(kPairComposerSuccess, COLOR_GREEN, composer_bg));
+  static_cast<void>(init_pair(kPairComposerWarning, COLOR_YELLOW, composer_bg));
+  static_cast<void>(init_pair(kPairComposerError, COLOR_RED, composer_bg));
+  static_cast<void>(init_pair(kPairComposerAccent, COLOR_CYAN, composer_bg));
 }
 
-bool decode_utf8_codepoint(std::string_view text, std::size_t start, std::size_t length, char32_t& codepoint) {
-  if (start + length > text.size() || length == 0) return false;
-  const auto first = static_cast<unsigned char>(text[start]);
-  if (length == 1) {
-    codepoint = first;
-    return true;
+short color_pair_for(const CursesStyle& style) {
+  if (style.background == BackgroundRole::Composer) {
+    switch (style.color) {
+      case ColorRole::Muted:
+        return kPairComposerMuted;
+      case ColorRole::Success:
+        return kPairComposerSuccess;
+      case ColorRole::Warning:
+        return kPairComposerWarning;
+      case ColorRole::Error:
+        return kPairComposerError;
+      case ColorRole::Accent:
+        return kPairComposerAccent;
+      case ColorRole::Text:
+        return kPairComposerText;
+    }
   }
-  codepoint = first & ((1U << (7 - length - 1)) - 1U);
-  for (std::size_t offset = 1; offset < length; ++offset) {
-    const auto byte = static_cast<unsigned char>(text[start + offset]);
-    if (!is_utf8_continuation(byte)) return false;
-    codepoint = (codepoint << 6U) | (byte & 0x3FU);
+
+  switch (style.color) {
+    case ColorRole::Muted:
+      return kPairMuted;
+    case ColorRole::Success:
+      return kPairSuccess;
+    case ColorRole::Warning:
+      return kPairWarning;
+    case ColorRole::Error:
+      return kPairError;
+    case ColorRole::Accent:
+      return kPairAccent;
+    case ColorRole::Text:
+      return kPairText;
+  }
+  return kPairText;
+}
+
+attr_t curses_attributes(const CursesStyle& style) {
+  if (!has_colors()) return style.attributes;
+  return style.attributes | COLOR_PAIR(color_pair_for(style));
+}
+
+bool parse_sgr_codes(std::string_view sequence, std::vector<int>& codes) {
+  codes.clear();
+  if (sequence.empty()) return false;
+  std::size_t start = 0;
+  while (start <= sequence.size()) {
+    const auto end = sequence.find(';', start);
+    const auto token = sequence.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start);
+    if (token.empty()) {
+      codes.push_back(0);
+    } else {
+      char* parsed_end = nullptr;
+      const auto value = std::strtol(std::string(token).c_str(), &parsed_end, 10);
+      if (parsed_end == nullptr || *parsed_end != '\0') return false;
+      codes.push_back(static_cast<int>(value));
+    }
+    if (end == std::string_view::npos) break;
+    start = end + 1;
   }
   return true;
 }
 
-std::string fit_line(std::string text, std::size_t width) {
-  if (width == 0) return {};
-  text = sanitize_terminal_text(text);
-  if (text.size() <= width) return text;
-  if (width <= 3) {
-    auto cut = std::min(width, text.size());
-    while (cut > 0 && cut < text.size() && is_utf8_continuation(static_cast<unsigned char>(text[cut]))) {
-      --cut;
+void apply_sgr_codes(const std::vector<int>& codes, CursesStyle& style) {
+  if (codes.empty()) {
+    style = CursesStyle{};
+    return;
+  }
+  for (std::size_t index = 0; index < codes.size(); ++index) {
+    switch (codes[index]) {
+      case 0:
+        style = CursesStyle{};
+        break;
+      case 1:
+        style.attributes |= A_BOLD;
+        break;
+      case 7:
+        style.attributes |= A_REVERSE;
+        break;
+      case 38:
+        if (index + 4 < codes.size() && codes[index + 1] == 2) {
+          const auto red = codes[index + 2];
+          const auto green = codes[index + 3];
+          const auto blue = codes[index + 4];
+          if (red > 220 && green > 180 && blue < 80) {
+            style.color = ColorRole::Warning;
+          } else if (red > 220 && green < 150 && blue < 150) {
+            style.color = ColorRole::Error;
+          } else if (red < 100 && green > 180 && blue > 120) {
+            style.color = ColorRole::Success;
+          } else if (blue > red && blue > green) {
+            style.color = ColorRole::Accent;
+          } else if (red < 180 && green < 180 && blue < 190) {
+            style.color = ColorRole::Muted;
+          } else {
+            style.color = ColorRole::Text;
+          }
+          index += 4;
+        }
+        break;
+      case 48:
+        if (index + 4 < codes.size() && codes[index + 1] == 2) {
+          const auto red = codes[index + 2];
+          const auto green = codes[index + 3];
+          const auto blue = codes[index + 4];
+          style.background = (red > 15 || green > 20 || blue > 30) ? BackgroundRole::Composer : BackgroundRole::Screen;
+          index += 4;
+        }
+        break;
+      default:
+        break;
     }
-    return text.substr(0, cut);
   }
-  auto cut = width - 3;
-  while (cut > 0 && cut < text.size() && is_utf8_continuation(static_cast<unsigned char>(text[cut]))) {
-    --cut;
+}
+
+void add_text_chunk(std::string_view text, CursesStyle style) {
+  if (text.empty()) return;
+  attrset(curses_attributes(style));
+  static_cast<void>(addnstr(text.data(), static_cast<int>(std::min<std::size_t>(text.size(), INT_MAX))));
+}
+
+void draw_styled_line(std::string_view line) {
+  CursesStyle style{.attributes = A_NORMAL, .color = ColorRole::Text, .background = BackgroundRole::Screen};
+  std::vector<int> codes;
+  std::size_t chunk_start = 0;
+  for (std::size_t index = 0; index < line.size();) {
+    if (line[index] != '\x1b' || index + 1 >= line.size() || line[index + 1] != '[') {
+      ++index;
+      continue;
+    }
+    const auto end = line.find('m', index + 2);
+    if (end == std::string_view::npos) {
+      ++index;
+      continue;
+    }
+    add_text_chunk(line.substr(chunk_start, index - chunk_start), style);
+    if (parse_sgr_codes(line.substr(index + 2, end - index - 2), codes)) {
+      apply_sgr_codes(codes, style);
+    }
+    index = end + 1;
+    chunk_start = index;
   }
-  text.resize(cut);
-  text += "...";
-  return text;
+  add_text_chunk(line.substr(chunk_start), style);
+  attrset(curses_attributes(
+      CursesStyle{.attributes = A_NORMAL, .color = ColorRole::Text, .background = BackgroundRole::Screen}));
+  clrtoeol();
+}
+
+CursorPlacement input_cursor_placement(const ComposerSnapshot& snapshot, std::size_t rendered_line_count,
+                                       std::size_t width) {
+  const auto input_lines = detail::input_render_lines(snapshot.input);
+  const auto composer_lines = detail::composer_block_line_count(snapshot, rendered_line_count);
+  const auto layout = detail::composer_input_layout(input_lines.size(), composer_lines);
+  const auto cursor_line = detail::input_cursor_line(snapshot);
+  const auto visible_cursor_line =
+      cursor_line < layout.first_visible ? std::size_t{0} : cursor_line - layout.first_visible;
+  const auto composer_start_row =
+      rendered_line_count >= composer_lines ? rendered_line_count - composer_lines : std::size_t{0};
+  const auto visible_line =
+      std::min(visible_cursor_line, layout.visible_input_lines == 0 ? std::size_t{0} : layout.visible_input_lines - 1);
+  const auto column = detail::input_cursor_column(snapshot, width);
+  return {.row = composer_start_row + layout.top_padding + visible_line,
+          .column = column == 0 ? std::size_t{0} : column - 1};
 }
 
 }  // namespace
 
-std::string sanitize_terminal_text(std::string_view text) {
-  std::string sanitized;
-  sanitized.reserve(text.size());
-  for (std::size_t index = 0; index < text.size();) {
-    const auto byte = static_cast<unsigned char>(text[index]);
-    if (byte < 0x20 || byte == 0x7F) {
-      sanitized.push_back(byte == '\t' ? '\t' : '?');
-      ++index;
-      continue;
-    }
-
-    const auto length = utf8_sequence_length(byte);
-    char32_t codepoint = 0;
-    if (!decode_utf8_codepoint(text, index, length, codepoint)) {
-      sanitized.push_back('?');
-      ++index;
-      continue;
-    }
-
-    if (codepoint >= 0x80 && codepoint <= 0x9F) {
-      sanitized.push_back('?');
-    } else {
-      sanitized.append(text.substr(index, length));
-    }
-    index += length;
-  }
-  return sanitized;
-}
-
-std::vector<std::string> split_lines(std::string_view text) {
-  std::vector<std::string> lines;
-  std::size_t start = 0;
-  while (start <= text.size()) {
-    const auto end = text.find('\n', start);
-    if (end == std::string_view::npos) {
-      lines.emplace_back(text.substr(start));
-      break;
-    }
-    lines.emplace_back(text.substr(start, end - start));
-    start = end + 1;
-  }
-  if (lines.empty()) lines.emplace_back();
-  return lines;
-}
-
 std::vector<std::string> render_composer(const ComposerSnapshot& snapshot) {
-  const auto width = std::max<std::size_t>(kMinWidth, snapshot.width);
-  const auto height = std::max<std::size_t>(kMinHeight, snapshot.height);
+  const auto width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
+  const auto height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
   std::vector<std::string> lines;
   lines.reserve(height);
 
-  lines.push_back(fit_line("AVA 0.1  mode=" + snapshot.mode + "  provider=" + snapshot.provider + "  model=" +
-                               snapshot.model,
-                           width));
-  lines.push_back(fit_line("session=" + snapshot.session_id + "  Tab mode  Enter send  Ctrl+C clear/quit", width));
+  const auto normal_composer_lines = detail::composer_block_line_count(snapshot, height);
+  const auto fixed_lines = snapshot.permission_prompt ? std::size_t{0} : normal_composer_lines;
+  const auto max_prompt_lines = height > fixed_lines ? height - fixed_lines : 0;
+  const auto prompt_line_budget = snapshot.permission_prompt ? std::min<std::size_t>({5, max_prompt_lines}) : 0;
+  auto permission_lines = snapshot.permission_prompt
+                              ? detail::render_permission_prompt(*snapshot.permission_prompt, width, prompt_line_budget)
+                              : std::vector<std::string>{};
+  const auto fixed_and_prompt_lines = fixed_lines + permission_lines.size();
+  const auto palette_line_budget = (height > fixed_and_prompt_lines && !snapshot.permission_prompt)
+                                       ? std::min(detail::kMaxPaletteLines, height - fixed_and_prompt_lines)
+                                       : 0;
+  auto palette_lines = detail::render_slash_palette(snapshot, width, palette_line_budget);
 
-  const auto transcript_height = height > kHeaderFooterLines ? height - kHeaderFooterLines : 1;
-  std::vector<std::string> rendered_transcript;
-  for (const auto& item : snapshot.transcript) {
-    const auto prefix = item.label.empty() ? std::string{} : item.label + ": ";
-    for (const auto& part : split_lines(item.text)) {
-      rendered_transcript.push_back(fit_line(prefix + part, width));
-    }
-  }
-  const auto start = rendered_transcript.size() > transcript_height ? rendered_transcript.size() - transcript_height : 0;
-  for (std::size_t index = start; index < rendered_transcript.size(); ++index) {
-    lines.push_back(rendered_transcript[index]);
-  }
-  while (lines.size() < 2 + transcript_height) {
-    lines.emplace_back();
-  }
+  const auto non_transcript_lines = fixed_lines + palette_lines.size() + permission_lines.size();
+  const auto transcript_height = height > non_transcript_lines ? height - non_transcript_lines : 0;
+  const auto rendered_transcript = detail::render_transcript_lines(snapshot.transcript, width);
+  const auto visible_transcript = detail::visible_transcript_lines(rendered_transcript, width, transcript_height,
+                                                                   snapshot.transcript_scroll_offset);
 
-  lines.push_back(fit_line(snapshot.status, width));
-  lines.push_back(fit_line("[" + snapshot.mode + "] ava> " + snapshot.input, width));
+  const auto transcript_padding =
+      transcript_height > visible_transcript.size() ? transcript_height - visible_transcript.size() : std::size_t{0};
+  for (std::size_t index = 0; index < transcript_padding; ++index) {
+    lines.push_back("");
+  }
+  lines.insert(lines.end(), visible_transcript.begin(), visible_transcript.end());
+
+  for (const auto& line : palette_lines) {
+    lines.push_back(line);
+  }
+  for (const auto& line : permission_lines) {
+    lines.push_back(line);
+  }
+  if (!snapshot.permission_prompt) {
+    const auto composer_lines = detail::render_composer_block(snapshot, width, normal_composer_lines);
+    lines.insert(lines.end(), composer_lines.begin(), composer_lines.end());
+  }
   return lines;
 }
 
-std::string render_screen(const ComposerSnapshot& snapshot) {
-  std::ostringstream output;
-  output << kHideCursor << kHomeCursor;
-  for (const auto& line : render_composer(snapshot)) {
-    output << kClearLine << line << "\r\n";
+bool draw_screen(const ComposerSnapshot& snapshot) {
+  initialize_color_pairs();
+  if (has_colors()) {
+    static_cast<void>(
+        bkgd(curses_attributes(
+                 CursesStyle{.attributes = A_NORMAL, .color = ColorRole::Text, .background = BackgroundRole::Screen}) |
+             ' '));
   }
-  output << kShowCursor;
-  return output.str();
+  const auto width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
+  const auto lines = render_composer(snapshot);
+
+  if (snapshot.permission_prompt) {
+    static_cast<void>(curs_set(0));
+  } else {
+    static_cast<void>(curs_set(1));
+  }
+
+  erase();
+  for (std::size_t index = 0; index < lines.size(); ++index) {
+    if (index > static_cast<std::size_t>(LINES > 0 ? LINES - 1 : 0)) break;
+    move(static_cast<int>(index), 0);
+    draw_styled_line(detail::screen_surface_line(lines[index], width));
+  }
+
+  if (!snapshot.permission_prompt) {
+    const auto cursor = input_cursor_placement(snapshot, lines.size(), width);
+    move(static_cast<int>(std::min<std::size_t>(cursor.row, LINES > 0 ? LINES - 1 : 0)),
+         static_cast<int>(std::min<std::size_t>(cursor.column, COLS > 0 ? COLS - 1 : 0)));
+  }
+
+  return refresh() != ERR;
 }
 
 }  // namespace ava::tui

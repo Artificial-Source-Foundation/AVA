@@ -1,11 +1,15 @@
 #include "ava/tui/terminal.h"
 
+#include <curses.h>
 #include <unistd.h>
 
-#include <cerrno>
-#include <cstring>
+#if !defined(NCURSES_WIDECHAR) || NCURSES_WIDECHAR != 1
+#error "AVA requires ncursesw with wide-character support."
+#endif
+
+#include <clocale>
 #include <csignal>
-#include <string_view>
+#include <cstdio>
 #include <utility>
 
 #include "ava/core/error.h"
@@ -13,130 +17,163 @@
 namespace ava::tui {
 namespace {
 
-termios g_original_termios{};
-int g_original_fd = -1;
-volatile sig_atomic_t g_restore_terminal = 0;
-struct sigaction g_previous_sigint {};
-struct sigaction g_previous_sigterm {};
+volatile sig_atomic_t g_terminal_signal = 0;
+struct sigaction g_curses_previous_sigint {};
+struct sigaction g_curses_previous_sigterm {};
 
-void restore_terminal_for_signal(int signal_number) {
-  if (g_restore_terminal != 0 && g_original_fd >= 0) {
-    static_cast<void>(tcsetattr(g_original_fd, TCSAFLUSH, &g_original_termios));
-  }
-  signal(signal_number, SIG_DFL);
-  raise(signal_number);
-}
+void mark_terminal_signal(int signal_number) { g_terminal_signal = signal_number; }
 
-void install_signal_restore(int input_fd, const termios& original) {
-  g_original_termios = original;
-  g_original_fd = input_fd;
-  g_restore_terminal = 1;
-
+void install_curses_signal_flags() {
   struct sigaction action {};
-  action.sa_handler = restore_terminal_for_signal;
+  action.sa_handler = mark_terminal_signal;
   sigemptyset(&action.sa_mask);
+  sigaddset(&action.sa_mask, SIGINT);
+  sigaddset(&action.sa_mask, SIGTERM);
   action.sa_flags = 0;
-  static_cast<void>(sigaction(SIGINT, &action, &g_previous_sigint));
-  static_cast<void>(sigaction(SIGTERM, &action, &g_previous_sigterm));
+  static_cast<void>(sigaction(SIGINT, &action, &g_curses_previous_sigint));
+  static_cast<void>(sigaction(SIGTERM, &action, &g_curses_previous_sigterm));
 }
 
-void uninstall_signal_restore() {
-  if (g_restore_terminal == 0) return;
-  static_cast<void>(sigaction(SIGINT, &g_previous_sigint, nullptr));
-  static_cast<void>(sigaction(SIGTERM, &g_previous_sigterm, nullptr));
-  g_restore_terminal = 0;
-  g_original_fd = -1;
+void uninstall_curses_signal_flags() {
+  static_cast<void>(sigaction(SIGINT, &g_curses_previous_sigint, nullptr));
+  static_cast<void>(sigaction(SIGTERM, &g_curses_previous_sigterm, nullptr));
+}
+
+void configure_curses_colors() {
+  if (!has_colors()) return;
+  static_cast<void>(start_color());
+  static_cast<void>(use_default_colors());
+}
+
+void configure_curses_mouse() {
+#ifdef NCURSES_MOUSE_VERSION
+  if (!has_mouse()) return;
+  mmask_t previous_mask = 0;
+  static_cast<void>(mousemask(BUTTON1_CLICKED | BUTTON4_PRESSED | BUTTON5_PRESSED, &previous_mask));
+#endif
+}
+
+bool is_utf8_continuation(unsigned char byte) { return (byte & 0xC0U) == 0x80U; }
+
+std::size_t utf8_sequence_length(unsigned char byte) {
+  if ((byte & 0x80U) == 0) return 1;
+  if (byte >= 0xC2U && byte <= 0xDFU) return 2;
+  if ((byte & 0xF0U) == 0xE0U) return 3;
+  if (byte >= 0xF0U && byte <= 0xF4U) return 4;
+  return 0;
 }
 
 }  // namespace
 
-RawTerminalGuard::RawTerminalGuard(int input_fd, termios original) : input_fd_(input_fd), original_(original), active_(true) {}
+CursesSession::CursesSession(void* screen) : screen_(screen), active_(screen != nullptr) {}
 
-RawTerminalGuard::RawTerminalGuard(RawTerminalGuard&& other) noexcept
-    : input_fd_(std::exchange(other.input_fd_, -1)),
-      original_(other.original_),
+CursesSession::CursesSession(CursesSession&& other) noexcept
+    : screen_(std::move(other.screen_)),
+      previous_locale_(std::move(other.previous_locale_)),
       active_(std::exchange(other.active_, false)) {}
 
-RawTerminalGuard& RawTerminalGuard::operator=(RawTerminalGuard&& other) noexcept {
+CursesSession& CursesSession::operator=(CursesSession&& other) noexcept {
   if (this == &other) return *this;
-  if (active_) {
-    static_cast<void>(tcsetattr(input_fd_, TCSAFLUSH, &original_));
-    uninstall_signal_restore();
-  }
-  input_fd_ = std::exchange(other.input_fd_, -1);
-  original_ = other.original_;
+  restore();
+  screen_ = std::move(other.screen_);
+  previous_locale_ = std::move(other.previous_locale_);
   active_ = std::exchange(other.active_, false);
   return *this;
 }
 
-RawTerminalGuard::~RawTerminalGuard() {
-  if (active_) {
-    static_cast<void>(tcsetattr(input_fd_, TCSAFLUSH, &original_));
-    uninstall_signal_restore();
+CursesSession::~CursesSession() { restore(); }
+
+ava::core::Result<CursesSession> CursesSession::enter() {
+  const char* current_locale = std::setlocale(LC_ALL, nullptr);
+  const std::string previous_locale = current_locale == nullptr ? "C" : current_locale;
+  if (std::setlocale(LC_ALL, "") == nullptr) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to configure terminal locale"));
   }
+
+  sigset_t blocked_signals{};
+  sigset_t previous_mask{};
+  sigemptyset(&blocked_signals);
+  sigaddset(&blocked_signals, SIGINT);
+  sigaddset(&blocked_signals, SIGTERM);
+  const bool blocked = sigprocmask(SIG_BLOCK, &blocked_signals, &previous_mask) == 0;
+  auto restore_signal_mask = [&]() {
+    if (blocked) static_cast<void>(sigprocmask(SIG_SETMASK, &previous_mask, nullptr));
+  };
+
+  SCREEN* screen = newterm(nullptr, stdout, stdin);
+  if (screen == nullptr) {
+    restore_signal_mask();
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to initialize ncurses screen"));
+  }
+
+  CursesSession session(screen);
+  session.previous_locale_ = previous_locale;
+  static_cast<void>(set_term(screen));
+  install_curses_signal_flags();
+
+  if (cbreak() == ERR || noecho() == ERR || keypad(stdscr, TRUE) == ERR) {
+    session.restore();
+    restore_signal_mask();
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to configure ncurses terminal mode"));
+  }
+
+  noqiflush();
+  static_cast<void>(nonl());
+#ifdef NCURSES_VERSION
+  static_cast<void>(set_escdelay(100));
+#endif
+  configure_curses_colors();
+  configure_curses_mouse();
+  restore_signal_mask();
+  return session;
 }
 
-ava::core::Result<RawTerminalGuard> RawTerminalGuard::enable(int input_fd) {
-  termios original{};
-  if (tcgetattr(input_fd, &original) != 0) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to read terminal mode");
-    error.with_context("errno", std::strerror(errno));
-    return std::unexpected(std::move(error));
-  }
-
-  termios raw = original;
-  raw.c_lflag &= static_cast<tcflag_t>(~(ECHO | ICANON | IEXTEN | ISIG));
-  raw.c_iflag &= static_cast<tcflag_t>(~(IXON | ICRNL));
-  raw.c_cc[VMIN] = 1;
-  raw.c_cc[VTIME] = 0;
-  if (tcsetattr(input_fd, TCSAFLUSH, &raw) != 0) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to enable terminal raw mode");
-    error.with_context("errno", std::strerror(errno));
-    return std::unexpected(std::move(error));
-  }
-  install_signal_restore(input_fd, original);
-  return RawTerminalGuard(input_fd, original);
+void CursesSession::restore() noexcept {
+  if (!active_) return;
+  static_cast<void>(set_term(static_cast<SCREEN*>(screen_.get())));
+  static_cast<void>(curs_set(1));
+  static_cast<void>(endwin());
+  uninstall_curses_signal_flags();
+  active_ = false;
+  screen_.reset();
+  if (!previous_locale_.empty()) static_cast<void>(std::setlocale(LC_ALL, previous_locale_.c_str()));
 }
 
-InputEvent parse_input_byte(unsigned char byte) {
-  if (byte == '\r' || byte == '\n') return InputEvent{.key = Key::Enter};
-  if (byte == '\t') return InputEvent{.key = Key::Tab};
-  if (byte == 0x1B) return InputEvent{.key = Key::Escape};
-  if (byte == 0x03) return InputEvent{.key = Key::CtrlC};
-  if (byte == 0x04) return InputEvent{.key = Key::CtrlD};
-  if (byte == 0x7F || byte == 0x08) return InputEvent{.key = Key::Backspace};
-  if (byte >= 0x20) return InputEvent{.key = Key::Character, .character = static_cast<char>(byte)};
-  return InputEvent{.key = Key::Unknown};
+void CursesSession::ScreenDeleter::operator()(void* screen) const noexcept {
+  if (screen == nullptr) return;
+  delscreen(static_cast<SCREEN*>(screen));
 }
 
 void erase_last_utf8_codepoint(std::string& text) {
   if (text.empty()) return;
-  if ((static_cast<unsigned char>(text.back()) & 0xC0U) != 0x80U) {
+  if (!is_utf8_continuation(static_cast<unsigned char>(text.back()))) {
     text.pop_back();
     return;
   }
-  while (!text.empty() && (static_cast<unsigned char>(text.back()) & 0xC0U) == 0x80U) {
-    text.pop_back();
+
+  auto start = text.size();
+  while (start > 0 && is_utf8_continuation(static_cast<unsigned char>(text[start - 1]))) {
+    --start;
   }
-  if (!text.empty()) {
+  if (start == 0) {
+    text.pop_back();
+    return;
+  }
+
+  const auto expected_length = utf8_sequence_length(static_cast<unsigned char>(text[start - 1]));
+  const auto actual_length = text.size() - (start - 1);
+  if (expected_length > 1 && expected_length == actual_length) {
+    text.erase(start - 1);
+  } else {
     text.pop_back();
   }
 }
 
 bool terminal_is_tty() { return isatty(STDIN_FILENO) != 0 && isatty(STDOUT_FILENO) != 0; }
 
-ava::core::VoidResult write_terminal(std::string_view text) {
-  while (!text.empty()) {
-    const auto written = write(STDOUT_FILENO, text.data(), text.size());
-    if (written < 0 && errno == EINTR) continue;
-    if (written <= 0) {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to write terminal output");
-      if (written < 0) error.with_context("errno", std::strerror(errno));
-      return std::unexpected(std::move(error));
-    }
-    text.remove_prefix(static_cast<std::size_t>(written));
-  }
-  return {};
-}
+bool terminal_signal_received() { return g_terminal_signal != 0; }
+
+void clear_terminal_signal() { g_terminal_signal = 0; }
 
 }  // namespace ava::tui

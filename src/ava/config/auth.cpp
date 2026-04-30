@@ -12,11 +12,13 @@
 #include <utility>
 
 #include "ava/core/json.h"
+#include "ava/config/openai_oauth.h"
 
 namespace ava::config {
 namespace {
 
 constexpr std::size_t max_auth_file_bytes = 1024 * 1024;
+constexpr long long kOAuthRefreshSkewSeconds = 300;
 
 class ScopedFd {
  public:
@@ -47,6 +49,37 @@ struct CandidateRead {
   std::optional<std::string> content;
 };
 
+class TempPathCleanup {
+ public:
+  explicit TempPathCleanup(std::filesystem::path path) : path_(std::move(path)) {}
+  TempPathCleanup(const TempPathCleanup&) = delete;
+  TempPathCleanup& operator=(const TempPathCleanup&) = delete;
+  TempPathCleanup(TempPathCleanup&& other) noexcept
+      : path_(std::move(other.path_)), active_(std::exchange(other.active_, false)) {}
+  TempPathCleanup& operator=(TempPathCleanup&& other) noexcept {
+    if (this != &other) {
+      cleanup();
+      path_ = std::move(other.path_);
+      active_ = std::exchange(other.active_, false);
+    }
+    return *this;
+  }
+  ~TempPathCleanup() { cleanup(); }
+
+  void dismiss() noexcept { active_ = false; }
+
+ private:
+  void cleanup() noexcept {
+    if (!active_) return;
+    std::error_code remove_error;
+    std::filesystem::remove(path_, remove_error);
+    active_ = false;
+  }
+
+  std::filesystem::path path_;
+  bool active_ = true;
+};
+
 std::string errno_message() { return std::strerror(errno); }
 
 bool is_symlink_mode(mode_t mode) { return S_ISLNK(mode); }
@@ -59,6 +92,108 @@ ava::core::Error auth_file_error(ava::core::ErrorCategory category,
   return error;
 }
 
+ava::core::VoidResult reject_unsafe_auth_replace_target(const std::filesystem::path& path) {
+  std::error_code status_error;
+  const auto status = std::filesystem::symlink_status(path, status_error);
+  if (status_error) {
+    if (status_error.default_error_condition() == std::errc::no_such_file_or_directory) return {};
+    auto error = auth_file_error(ava::core::ErrorCategory::Io, "failed to inspect auth file before writing", path);
+    error.with_context("cause", status_error.message());
+    return std::unexpected(std::move(error));
+  }
+  if (!std::filesystem::exists(status)) return {};
+  if (std::filesystem::is_symlink(status)) {
+    return std::unexpected(auth_file_error(ava::core::ErrorCategory::PermissionDenied,
+                                           "auth file is a symbolic link", path));
+  }
+  if (!std::filesystem::is_regular_file(status)) {
+    return std::unexpected(auth_file_error(ava::core::ErrorCategory::PermissionDenied,
+                                           "auth file is not a regular file", path));
+  }
+  return {};
+}
+
+ava::core::VoidResult write_all_to_fd(int fd, std::string_view body, const std::filesystem::path& path) {
+  std::size_t offset = 0;
+  while (offset < body.size()) {
+    const auto written = ::write(fd, body.data() + offset, body.size() - offset);
+    if (written < 0) {
+      auto error = auth_file_error(ava::core::ErrorCategory::Io, "failed to write auth file", path);
+      error.with_context("cause", errno_message());
+      return std::unexpected(std::move(error));
+    }
+    if (written == 0) {
+      return std::unexpected(auth_file_error(ava::core::ErrorCategory::Io, "auth file write made no progress", path));
+    }
+    offset += static_cast<std::size_t>(written);
+  }
+  return {};
+}
+
+ava::core::VoidResult fsync_fd(int fd, const std::filesystem::path& path, std::string_view message) {
+  if (::fsync(fd) == 0) return {};
+  auto error = auth_file_error(ava::core::ErrorCategory::Io, std::string(message), path);
+  error.with_context("cause", errno_message());
+  return std::unexpected(std::move(error));
+}
+
+ava::core::VoidResult fsync_parent_dir(const std::filesystem::path& path) {
+  const auto parent = path.parent_path();
+  const ScopedFd dir_fd(::open(parent.c_str(), O_RDONLY | O_CLOEXEC));
+  if (dir_fd.get() < 0) {
+    auto error = auth_file_error(ava::core::ErrorCategory::Io, "failed to open auth directory for sync", parent);
+    error.with_context("cause", errno_message());
+    return std::unexpected(std::move(error));
+  }
+  return fsync_fd(dir_fd.get(), parent, "failed to sync auth directory");
+}
+
+ava::core::VoidResult write_auth_file_atomic(const std::filesystem::path& path, std::string_view body) {
+  auto replace_check = reject_unsafe_auth_replace_target(path);
+  if (!replace_check) return std::unexpected(replace_check.error());
+
+  const auto parent = path.parent_path();
+  const auto basename = path.filename().string();
+  for (int attempt = 0; attempt < 100; ++attempt) {
+    const auto temp_path = parent / (basename + ".tmp." + std::to_string(::getpid()) + "." + std::to_string(attempt));
+    const ScopedFd fd(::open(temp_path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, S_IRUSR | S_IWUSR));
+    if (fd.get() < 0) {
+      if (errno == EEXIST) continue;
+      auto error = auth_file_error(ava::core::ErrorCategory::Io, "failed to create temporary auth file", temp_path);
+      error.with_context("cause", errno_message());
+      return std::unexpected(std::move(error));
+    }
+    TempPathCleanup cleanup(temp_path);
+    struct stat opened_st {};
+    if (::fstat(fd.get(), &opened_st) != 0) {
+      auto error = auth_file_error(ava::core::ErrorCategory::Io, "failed to inspect temporary auth file", temp_path);
+      error.with_context("cause", errno_message());
+      return std::unexpected(std::move(error));
+    }
+    if (!S_ISREG(opened_st.st_mode)) {
+      return std::unexpected(auth_file_error(ava::core::ErrorCategory::PermissionDenied,
+                                             "temporary auth file is not regular", temp_path));
+    }
+    if (::fchmod(fd.get(), S_IRUSR | S_IWUSR) != 0) {
+      auto error = auth_file_error(ava::core::ErrorCategory::Io, "failed to set auth file permissions", temp_path);
+      error.with_context("cause", errno_message());
+      return std::unexpected(std::move(error));
+    }
+    if (auto written = write_all_to_fd(fd.get(), body, temp_path); !written) return written;
+    if (auto synced = fsync_fd(fd.get(), temp_path, "failed to sync auth file"); !synced) return synced;
+    if (::rename(temp_path.c_str(), path.c_str()) != 0) {
+      auto error = auth_file_error(ava::core::ErrorCategory::Io, "failed to replace auth file", path);
+      error.with_context("cause", errno_message());
+      return std::unexpected(std::move(error));
+    }
+    cleanup.dismiss();
+    static_cast<void>(fsync_parent_dir(path));
+    return {};
+  }
+  return std::unexpected(auth_file_error(ava::core::ErrorCategory::Io,
+                                        "failed to create unique temporary auth file", path));
+}
+
 ava::core::Result<CandidateRead> missing_or_ignored_auth_file(const std::filesystem::path& path,
                                                               bool explicit_ava_auth_file,
                                                               std::string_view message,
@@ -68,23 +203,6 @@ ava::core::Result<CandidateRead> missing_or_ignored_auth_file(const std::filesys
   if (!cause.empty()) error.with_context("cause", std::string(cause));
   return std::unexpected(std::move(error));
 }
-
-#ifndef O_NOFOLLOW
-ava::core::VoidResult reject_existing_auth_symlink(const std::filesystem::path& path) {
-  struct stat st {};
-  if (::lstat(path.c_str(), &st) != 0) {
-    if (errno == ENOENT) return {};
-    auto error = auth_file_error(ava::core::ErrorCategory::Io, "failed to inspect auth file before writing", path);
-    error.with_context("cause", errno_message());
-    return std::unexpected(std::move(error));
-  }
-  if (is_symlink_mode(st.st_mode)) {
-    auto error = auth_file_error(ava::core::ErrorCategory::PermissionDenied, "auth file is a symbolic link", path);
-    return std::unexpected(std::move(error));
-  }
-  return {};
-}
-#endif
 
 ava::core::Result<CandidateRead> read_text_if_exists(const std::filesystem::path& path, bool explicit_ava_auth_file) {
   std::error_code status_error;
@@ -188,12 +306,15 @@ std::optional<OpenAICredential> parse_oauth_credential(std::string_view scope,
   if (!refresh) refresh = ava::core::json::string_field(scope, "refresh");
   auto expires = ava::core::json::integer_field(scope, "expires_at");
   if (!expires) expires = ava::core::json::integer_field(scope, "expires");
+  auto account_id = ava::core::json::string_field(scope, "account_id");
+  if (!account_id) account_id = ava::core::json::string_field(scope, "accountId");
 
   return OpenAICredential{
       .type = OpenAICredentialType::OAuth,
       .access_token = *access,
       .refresh_token = refresh.value_or(""),
       .expires_at = expires.value_or(0),
+      .account_id = account_id.value_or(""),
       .source_path = source_path,
   };
 }
@@ -207,12 +328,18 @@ std::optional<OpenAICredential> parse_api_key_credential(std::string_view scope,
       .access_token = *key,
       .refresh_token = "",
       .expires_at = 0,
+      .account_id = "",
       .source_path = source_path,
   };
 }
 
 long long unix_time_seconds() {
   return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+bool should_refresh_openai_credential(const OpenAICredential& credential, long long now_seconds) {
+  return credential.type == OpenAICredentialType::OAuth && credential.expires_at > 0 &&
+         credential.expires_at <= now_seconds + kOAuthRefreshSkewSeconds;
 }
 
 }  // namespace
@@ -274,73 +401,14 @@ ava::core::VoidResult store_openai_credential(const XdgPaths& paths, const OpenA
     body = "{\n  \"openai\": {\n    \"type\": \"oauth\",\n    \"access_token\": \"" +
            ava::core::json::escape(credential.access_token) + "\",\n    \"refresh_token\": \"" +
            ava::core::json::escape(credential.refresh_token) +
-           "\",\n    \"expires_at\": " + std::to_string(credential.expires_at) + "\n  }\n}\n";
+           "\",\n    \"expires_at\": " + std::to_string(credential.expires_at);
+    if (!credential.account_id.empty()) {
+      body += ",\n    \"account_id\": \"" + ava::core::json::escape(credential.account_id) + "\"";
+    }
+    body += "\n  }\n}\n";
   }
 
-  int flags = O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC;
-#ifdef O_NOFOLLOW
-  flags |= O_NOFOLLOW;
-#else
-  auto symlink_check = reject_existing_auth_symlink(paths.auth_file);
-  if (!symlink_check) return std::unexpected(symlink_check.error());
-#endif
-  const ScopedFd fd(::open(paths.auth_file.c_str(), flags, S_IRUSR | S_IWUSR));
-  if (fd.get() < 0) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to open auth file for writing");
-    error.with_context("path", paths.auth_file.string());
-    error.with_context("cause", errno_message());
-    return std::unexpected(std::move(error));
-  }
-  struct stat opened_st {};
-  if (::fstat(fd.get(), &opened_st) != 0) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect opened auth file");
-    error.with_context("path", paths.auth_file.string());
-    error.with_context("cause", errno_message());
-    return std::unexpected(std::move(error));
-  }
-  if (!S_ISREG(opened_st.st_mode)) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "opened auth file is not regular");
-    error.with_context("path", paths.auth_file.string());
-    return std::unexpected(std::move(error));
-  }
-#ifndef O_NOFOLLOW
-  struct stat path_st {};
-  if (::lstat(paths.auth_file.c_str(), &path_st) != 0) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect auth file after open");
-    error.with_context("path", paths.auth_file.string());
-    error.with_context("cause", errno_message());
-    return std::unexpected(std::move(error));
-  }
-  if (is_symlink_mode(path_st.st_mode) || path_st.st_dev != opened_st.st_dev || path_st.st_ino != opened_st.st_ino) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "auth file changed during open");
-    error.with_context("path", paths.auth_file.string());
-    return std::unexpected(std::move(error));
-  }
-#endif
-  if (::fchmod(fd.get(), S_IRUSR | S_IWUSR) != 0) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to set auth file permissions");
-    error.with_context("path", paths.auth_file.string());
-    error.with_context("cause", errno_message());
-    return std::unexpected(std::move(error));
-  }
-
-  std::size_t offset = 0;
-  while (offset < body.size()) {
-    const auto written = ::write(fd.get(), body.data() + offset, body.size() - offset);
-    if (written < 0) {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to write auth file");
-      error.with_context("path", paths.auth_file.string());
-      error.with_context("cause", errno_message());
-      return std::unexpected(std::move(error));
-    }
-    if (written == 0) {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "auth file write made no progress");
-      error.with_context("path", paths.auth_file.string());
-      return std::unexpected(std::move(error));
-    }
-    offset += static_cast<std::size_t>(written);
-  }
-  return {};
+  return write_auth_file_atomic(paths.auth_file, body);
 }
 
 bool is_openai_credential_expired(const OpenAICredential& credential, long long now_seconds) {
@@ -365,6 +433,56 @@ ava::core::Result<std::string> openai_access_token_for_request(const OpenAICrede
 
 ava::core::Result<std::string> openai_access_token_for_request(const OpenAICredential& credential) {
   return openai_access_token_for_request(credential, unix_time_seconds());
+}
+
+ava::core::Result<OpenAICredential> openai_credential_for_request(const XdgPaths& paths,
+                                                                  const OpenAICredential& credential,
+                                                                  ava::provider::Transport& transport,
+                                                                  long long now_seconds) {
+  if (credential.type == OpenAICredentialType::ApiKey) {
+    auto token = openai_access_token_for_request(credential, now_seconds);
+    if (!token) return std::unexpected(token.error());
+    return credential;
+  }
+
+  if (!should_refresh_openai_credential(credential, now_seconds)) {
+    auto token = openai_access_token_for_request(credential, now_seconds);
+    if (!token) return std::unexpected(token.error());
+    return credential;
+  }
+
+  if (credential.refresh_token.empty()) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
+                                  "OpenAI OAuth credential needs refresh but has no refresh token; run `ava connect "
+                                  "openai` to re-authenticate");
+    error.with_context("expires_at", std::to_string(credential.expires_at));
+    if (!credential.source_path.empty()) error.with_context("source", credential.source_path.string());
+    return std::unexpected(std::move(error));
+  }
+
+  auto refreshed = refresh_openai_oauth_credential(credential, transport, now_seconds);
+  if (!refreshed) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
+                                  "failed to refresh OpenAI OAuth credential; run `ava connect openai` to "
+                                  "re-authenticate");
+    error.with_context("cause", refreshed.error().format());
+    if (!credential.source_path.empty()) error.with_context("source", credential.source_path.string());
+    return std::unexpected(std::move(error));
+  }
+
+  refreshed->source_path = paths.auth_file;
+  auto stored = store_openai_credential(paths, *refreshed);
+  if (!stored) return std::unexpected(stored.error());
+
+  auto token = openai_access_token_for_request(*refreshed, now_seconds);
+  if (!token) return std::unexpected(token.error());
+  return refreshed;
+}
+
+ava::core::Result<OpenAICredential> openai_credential_for_request(const XdgPaths& paths,
+                                                                  const OpenAICredential& credential,
+                                                                  ava::provider::Transport& transport) {
+  return openai_credential_for_request(paths, credential, transport, unix_time_seconds());
 }
 
 std::string authorization_header_value(const OpenAICredential& credential) {

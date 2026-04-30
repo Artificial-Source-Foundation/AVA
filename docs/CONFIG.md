@@ -10,6 +10,14 @@ AVA uses XDG paths on Linux.
 
 ## Auth
 
+Create an OpenAI OAuth credential with:
+
+```sh
+ava connect openai
+```
+
+The command prints an OpenAI authorization URL, waits for the browser callback on `http://localhost:1455/auth/callback`, and stores the resulting credential owner-only at the AVA auth path.
+
 OAuth token format:
 
 ```json
@@ -23,6 +31,8 @@ API key format:
 ```
 
 Auth files are written owner-only. AVA also attempts to read legacy `~/.ava/credentials.json` and opencode's XDG auth file for migration.
+
+OAuth refresh is not automatic yet. If an OAuth token expires, rerun `ava connect openai`.
 
 ## Models
 
@@ -51,6 +61,6 @@ $XDG_CONFIG_HOME/ava/prompts/<provider>/<family>/<mode>.txt
 Examples:
 
 ```text
-~/.config/ava/prompts/openai/gpt-5/build.txt
-~/.config/ava/prompts/openai/gpt-5/plan.txt
+~/.config/ava/prompts/openai/gpt-5.5/build.txt
+~/.config/ava/prompts/openai/gpt-5.5/plan.txt
 ```

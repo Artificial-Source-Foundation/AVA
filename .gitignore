@@ -1,0 +1,9 @@
+# CMake build trees
+build*/
+
+# Local compiler tooling output
+compile_commands.json
+.cache/
+
+# Local reference repositories used for comparison only
+docs/reference-code/

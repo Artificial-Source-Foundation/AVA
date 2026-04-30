@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(ava VERSION 0.1.0 LANGUAGES CXX)
+project(ava VERSION 0.32.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,6 +8,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(AVA_BUILD_TESTS "Build AVA tests" ON)
 option(AVA_ENABLE_SANITIZERS "Build AVA with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+
+set(CURSES_NEED_NCURSES TRUE)
+set(CURSES_NEED_WIDE TRUE)
+find_package(Curses QUIET)
+if(NOT CURSES_FOUND)
+  message(FATAL_ERROR "AVA requires ncursesw (wide-character ncurses) for ava_tui")
+endif()
 
 function(ava_apply_warnings target)
   if(MSVC)
@@ -27,11 +34,14 @@ endfunction()
 add_library(ava_core
   src/ava/agent/agent_loop.cpp
   src/ava/agent/mode.cpp
+  src/ava/agent/question.cpp
   src/ava/agent/tool_dispatcher.cpp
   src/ava/config/auth.cpp
   src/ava/config/model_config.cpp
+  src/ava/config/openai_oauth.cpp
   src/ava/config/prompt_config.cpp
   src/ava/config/xdg_paths.cpp
+  src/ava/context/context_loader.cpp
   src/ava/core/error.cpp
   src/ava/core/ids.cpp
   src/ava/core/json.cpp
@@ -39,29 +49,70 @@ add_library(ava_core
   src/ava/provider/curl_transport.cpp
   src/ava/provider/openai_provider.cpp
   src/ava/provider/provider.cpp
+  src/ava/session/compaction.cpp
+  src/ava/session/export.cpp
   src/ava/session/session_store.cpp
   src/ava/tools/bash_tool.cpp
   src/ava/tools/file_tools.cpp
   src/ava/tools/search_tools.cpp
-  src/ava/tui/composer.cpp
-  src/ava/tui/terminal.cpp
 )
 
 target_include_directories(ava_core PUBLIC src)
 ava_apply_warnings(ava_core)
 ava_apply_sanitizers(ava_core)
 
+add_library(ava_tui
+  src/ava/tui/composer.cpp
+  src/ava/tui/composer_input.cpp
+  src/ava/tui/composer_palette.cpp
+  src/ava/tui/composer_permission.cpp
+  src/ava/tui/composer_text.cpp
+  src/ava/tui/composer_transcript.cpp
+  src/ava/tui/runtime.cpp
+  src/ava/tui/terminal.cpp
+)
+
+target_link_libraries(ava_tui PUBLIC ava_core PRIVATE ${CURSES_LIBRARIES})
+target_include_directories(ava_tui PUBLIC src PRIVATE ${CURSES_INCLUDE_DIRS})
+ava_apply_warnings(ava_tui)
+ava_apply_sanitizers(ava_tui)
+
+add_library(ava_app
+  src/ava/app/app.cpp
+  src/ava/app/commands.cpp
+  src/ava/app/connect_openai.cpp
+  src/ava/app/events.cpp
+  src/ava/app/headless_policy.cpp
+  src/ava/app/line_shell.cpp
+  src/ava/app/print_mode.cpp
+  src/ava/app/rpc_mode.cpp
+  src/ava/app/runtime.cpp
+)
+
+target_link_libraries(ava_app PUBLIC ava_core ava_tui)
+target_include_directories(ava_app PUBLIC src)
+ava_apply_warnings(ava_app)
+ava_apply_sanitizers(ava_app)
+
 add_executable(ava src/main.cpp)
-target_link_libraries(ava PRIVATE ava_core)
+target_link_libraries(ava PRIVATE ava_app)
 ava_apply_warnings(ava)
 ava_apply_sanitizers(ava)
 
 if(AVA_BUILD_TESTS)
   enable_testing()
+  add_library(ava_test_support
+    tests/support/fake_transport.cpp
+  )
+  target_link_libraries(ava_test_support PUBLIC ava_core)
+  target_include_directories(ava_test_support PUBLIC .)
+  ava_apply_warnings(ava_test_support)
+  ava_apply_sanitizers(ava_test_support)
+
   add_executable(ava_tests
     tests/core_tests.cpp
   )
-  target_link_libraries(ava_tests PRIVATE ava_core)
+  target_link_libraries(ava_tests PRIVATE ava_core ava_tui ava_app ava_test_support)
   ava_apply_warnings(ava_tests)
   ava_apply_sanitizers(ava_tests)
   add_test(NAME ava_tests COMMAND ava_tests)

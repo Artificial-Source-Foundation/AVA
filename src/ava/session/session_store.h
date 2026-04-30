@@ -17,6 +17,7 @@ enum class EntryType {
   ToolResult,
   PermissionDecision,
   ModeChange,
+  Compaction,
   Error,
   Cancel,
 };

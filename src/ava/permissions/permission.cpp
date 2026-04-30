@@ -255,15 +255,15 @@ bool is_simple_number(std::string_view value) {
 }  // namespace
 
 PermissionDecision decide(const PermissionRequest& request) {
-  if (!is_within_workspace(request.workspace_dir, request.target_path)) {
-    return {.action = PermissionAction::Ask, .reason = "target is outside the workspace"};
-  }
-
   const auto checked_path = policy_path(request.target_path);
 
   if ((request.operation == Operation::ReadFile || request.operation == Operation::EditFile) &&
       is_secret_path(checked_path)) {
     return {.action = PermissionAction::Deny, .reason = "target looks like a secret file"};
+  }
+
+  if (!is_within_workspace(request.workspace_dir, request.target_path)) {
+    return {.action = PermissionAction::Ask, .reason = "target is outside the workspace"};
   }
 
   if (request.operation == Operation::EditFile && request.mode == ava::agent::Mode::Plan &&
@@ -301,9 +301,11 @@ PermissionDecision classify_command(std::string_view command) {
     return {.action = PermissionAction::Ask, .reason = "command can change external or destructive state"};
   }
 
-  if (executable == "git" && argv.size() >= 2 && (argv[1] == "status" || argv[1] == "diff" || argv[1] == "log") &&
-      !has_unsafe_path_arg(parsed.argv, 2)) {
-    return {.action = PermissionAction::Allow, .reason = "command is read-only or local verification"};
+  if (executable == "git" && argv.size() >= 2 && (argv[1] == "status" || argv[1] == "diff" || argv[1] == "log")) {
+    if (!has_unsafe_path_arg(parsed.argv, 2)) {
+      return {.action = PermissionAction::Allow, .reason = "command is read-only or local verification"};
+    }
+    return {.action = PermissionAction::Ask, .reason = "git command includes unsafe path or output options"};
   }
   if (executable == "cmake") {
     for (const auto& arg : argv) {
@@ -348,6 +350,16 @@ std::string to_string(PermissionAction action) {
     case PermissionAction::Ask:
       return "ask";
     case PermissionAction::Deny:
+      return "deny";
+  }
+  return "deny";
+}
+
+std::string to_string(PermissionResolution resolution) {
+  switch (resolution) {
+    case PermissionResolution::Allow:
+      return "allow";
+    case PermissionResolution::Deny:
       return "deny";
   }
   return "deny";

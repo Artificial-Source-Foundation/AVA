@@ -40,3 +40,6 @@ target_link_libraries(linux03 PRIVATE ${CURSES_LIBRARIES} ${CURSES_PANELW_LIBRAR
 
 add_executable(linux04 linux04-wrapping.cpp)
 target_link_libraries(linux04 PRIVATE AVA::terminal)
+
+add_executable(linux05 linux05-attributes.cpp)
+target_link_libraries(linux05 PRIVATE AVA::terminal)

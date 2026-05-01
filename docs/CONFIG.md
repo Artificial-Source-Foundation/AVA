@@ -45,10 +45,45 @@ Optional model override file: `$XDG_CONFIG_HOME/ava/models.json`.
   "default_provider": "openai",
   "default_model": "gpt-5.5",
   "models": [
-    {"provider":"openai","id":"gpt-5.5","family":"gpt-5","supports_tools":true,"supports_streaming":true}
+    {
+      "provider": "openai",
+      "id": "gpt-5.5",
+      "family": "gpt-5",
+      "context_window_tokens": 200000,
+      "max_output_tokens": 16384,
+      "pricing": {
+        "input_per_million": 1.25,
+        "output_per_million": 10.0,
+        "cache_read_per_million": 0.125,
+        "cache_write_per_million": 1.25,
+        "reasoning_per_million": 10.0
+      }
+    }
   ]
 }
 ```
+
+Model entries are additive overrides. `provider` and `id` are required; `name`, `family`, `context_window_tokens`, `max_output_tokens`, and `pricing` are optional. Pricing values are USD per one million tokens and are local static metadata; AVA does not fetch live prices. Cost is reported only when the saved provider usage and configured pricing are complete for the billable token types in that assistant response.
+
+Accepted pricing aliases include `input_usd_per_1m`, `output_usd_per_1m`, `cache_read_usd_per_1m`, `cache_write_usd_per_1m`, and `reasoning_usd_per_1m`.
+
+## Compaction
+
+Optional compaction config file: `$XDG_CONFIG_HOME/ava/compaction.json`.
+
+```json
+{
+  "model": "gpt-5.5",
+  "auto_threshold_tokens": 0,
+  "keep_recent_tokens": 2048,
+  "keep_recent_messages": 6,
+  "max_summary_bytes": 16384
+}
+```
+
+`/compact` generates a provider-backed summary and records a compaction boundary in the session. Automatic compaction runs before a provider request when the active context estimate reaches the effective threshold. If `auto_threshold_tokens` is omitted, AVA uses about 80% of the configured model context window, or an 80,000-token fallback when the model window is unknown. If `auto_threshold_tokens` is present with value `0`, automatic compaction is explicitly disabled.
+
+`keep_recent_messages` and `keep_recent_tokens` bound the recent transcript tail stored with a compaction entry. The tail is best-effort continuation context and may be truncated with a marker. `max_summary_bytes` rejects unexpectedly large provider summaries before they are appended to the session.
 
 ## Prompts
 

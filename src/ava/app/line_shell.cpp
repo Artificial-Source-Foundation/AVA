@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -28,7 +29,7 @@ std::vector<ava::tui::SlashCommandItem> slash_command_palette_items() {
       ava::tui::SlashCommandItem{
           .command = "/context", .description = "List loaded context sources", .category = "Sessions"},
       ava::tui::SlashCommandItem{.command = "/compact",
-                                 .description = "Record a manual compaction entry",
+                                 .description = "Generate and record a provider summary",
                                  .hint = "[instructions]",
                                  .category = "Sessions"},
       ava::tui::SlashCommandItem{
@@ -83,6 +84,10 @@ void print_resume_command(const ava::session::SessionStore& store) {
   std::cout << "Resume this session with: ava --session " << store.session_id() << '\n';
 }
 
+bool is_compact_command(std::string_view line) noexcept {
+  return line == "/compact" || (line.starts_with("/compact") && line.size() > 8 && line[8] == ' ');
+}
+
 struct ShellState {
   // Lifetime contract: references are stack-scoped and must outlive each run loop invocation.
   ava::app::RuntimeSession& session;
@@ -96,11 +101,73 @@ struct LineResult {
 
 void add_output(LineResult& result, std::string text) { result.output.push_back(std::move(text)); }
 
+template <typename Callback>
+LineResult with_openai_runtime(ShellState& state, std::string_view offline_suffix, Callback callback) {
+  LineResult line_result;
+  auto credential = ava::config::load_openai_credential(state.session.paths);
+  if (!credential) {
+    add_output(line_result, credential.error().format() + std::string(offline_suffix));
+    return line_result;
+  }
+  if (!*credential) {
+    add_output(line_result, "OpenAI auth is required. Configure an OpenAI credential in " +
+                                state.session.paths.auth_file.string() + std::string(offline_suffix));
+    return line_result;
+  }
+  ava::provider::CurlCliTransport transport;
+  auto request_credential = ava::config::openai_credential_for_request(state.session.paths, **credential, transport);
+  if (!request_credential) {
+    add_output(line_result, request_credential.error().format() + std::string(offline_suffix));
+    return line_result;
+  }
+  auto token = ava::config::openai_access_token_for_request(*request_credential);
+  if (!token) {
+    add_output(line_result, token.error().format() + std::string(offline_suffix));
+    return line_result;
+  }
+  std::string openai_account_id = request_credential->account_id;
+  if (request_credential->type == ava::config::OpenAICredentialType::OAuth && openai_account_id.empty()) {
+    openai_account_id = ava::config::openai_oauth_account_id_from_token(request_credential->access_token).value_or("");
+  }
+  ava::provider::OpenAIProvider provider;
+  ava::app::RuntimeRunOptions run_options;
+  run_options.access_token = *token;
+  run_options.openai_oauth = request_credential->type == ava::config::OpenAICredentialType::OAuth;
+  run_options.openai_account_id = openai_account_id;
+  return callback(provider, transport, run_options);
+}
+
 LineResult handle_line(ShellState& state, const std::string& line,
                        ava::permissions::PermissionResolver permission_resolver = nullptr) {
   LineResult line_result;
   if (line.empty()) return line_result;
   if (ava::app::is_backend_command(line)) {
+    if (is_compact_command(line)) {
+      return with_openai_runtime(
+          state, "\nother slash tool commands still work offline.",
+          [&](const ava::provider::Provider& provider, ava::provider::Transport& transport,
+              ava::app::RuntimeRunOptions run_options) {
+            auto command_result = ava::app::run_command(
+                state.session,
+                ava::app::CommandRequest{
+                    .command = line,
+                    .permission_resolver = permission_resolver,
+                    .compaction_summary_generator = [&](const std::vector<ava::session::SessionEntry>& entries,
+                                                        const ava::session::CompactionConfig& config,
+                                                        std::string_view instructions, std::size_t estimated_tokens) {
+                      return ava::app::generate_compaction_summary(state.session, entries, config, instructions,
+                                                                   estimated_tokens, provider, transport, run_options);
+                    }});
+            if (!command_result) {
+              LineResult compact_result;
+              add_output(compact_result, command_result.error().format());
+              return compact_result;
+            }
+            return LineResult{.quit = command_result->quit,
+                              .output = std::move(command_result->output),
+                              .tool_timeline = std::move(command_result->tool_timeline)};
+          });
+    }
     auto command_result = ava::app::run_command(
         state.session, ava::app::CommandRequest{.command = line, .permission_resolver = permission_resolver});
     if (!command_result) {
@@ -113,49 +180,25 @@ LineResult handle_line(ShellState& state, const std::string& line,
     return line_result;
   }
 
-  auto credential = ava::config::load_openai_credential(state.session.paths);
-  if (!credential) {
-    add_output(line_result, credential.error().format());
-    return line_result;
-  }
-  if (!*credential) {
-    add_output(line_result, "chat requires OpenAI auth. Configure an OpenAI credential in " +
-                                state.session.paths.auth_file.string() + "; slash tool commands still work offline.");
-    return line_result;
-  }
-  ava::provider::CurlCliTransport transport;
-  auto request_credential = ava::config::openai_credential_for_request(state.session.paths, **credential, transport);
-  if (!request_credential) {
-    add_output(line_result, request_credential.error().format() + "\nslash tool commands still work offline.");
-    return line_result;
-  }
-  auto token = ava::config::openai_access_token_for_request(*request_credential);
-  if (!token) {
-    add_output(line_result, token.error().format() + "\nslash tool commands still work offline.");
-    return line_result;
-  }
-  std::string openai_account_id = request_credential->account_id;
-  if (request_credential->type == ava::config::OpenAICredentialType::OAuth && openai_account_id.empty()) {
-    openai_account_id = ava::config::openai_oauth_account_id_from_token(request_credential->access_token).value_or("");
-  }
-  ava::provider::OpenAIProvider provider;
-  ava::app::RuntimeRunOptions run_options;
-  run_options.access_token = *token;
-  run_options.openai_oauth = request_credential->type == ava::config::OpenAICredentialType::OAuth;
-  run_options.openai_account_id = openai_account_id;
-  run_options.permission_resolver = permission_resolver;
-  auto result = ava::app::run_prompt(state.session, line, provider, transport, run_options);
-  if (!result) {
-    add_output(line_result, result.error().format());
-    return line_result;
-  }
-  line_result.tool_timeline = std::move(result->tool_timeline);
-  if (!result->final_text.empty()) {
-    add_output(line_result, result->final_text);
-  } else {
-    add_output(line_result, "done");
-  }
-  return line_result;
+  return with_openai_runtime(state, "\nslash tool commands still work offline.",
+                             [&](const ava::provider::Provider& provider, ava::provider::Transport& transport,
+                                 ava::app::RuntimeRunOptions run_options) {
+                               run_options.permission_resolver = permission_resolver;
+                               auto result =
+                                   ava::app::run_prompt(state.session, line, provider, transport, run_options);
+                               LineResult prompt_result;
+                               if (!result) {
+                                 add_output(prompt_result, result.error().format());
+                                 return prompt_result;
+                               }
+                               prompt_result.tool_timeline = std::move(result->tool_timeline);
+                               if (!result->final_text.empty()) {
+                                 add_output(prompt_result, result->final_text);
+                               } else {
+                                 add_output(prompt_result, "done");
+                               }
+                               return prompt_result;
+                             });
 }
 
 int run_line_shell(ShellState state) {

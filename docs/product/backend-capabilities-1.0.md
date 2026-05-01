@@ -12,13 +12,13 @@ Status legend: `Done` means implemented with regression coverage, `Partial` mean
 | Print mode and JSONL RPC MVP | Done | Phase 0/1 | RPC still needs Phase 2 protocol expansion. |
 | Project/global `AGENTS.md` context loading | Done | Phase 0/3 | Structured skills and prompt templates remain future work. |
 | Manual compaction entries and session export | Done | Phase 0/3 | Provider-generated summaries and automatic compaction are still planned. |
-| Stable shared runtime event stream | Partial | Phase 2 | Basic events exist; rich turn/message/tool/provider deltas and event bus are planned. |
-| Async cancellation for active provider and tool runs | Partial | Phase 2 | Bash timeout cleanup exists; full active-run RPC cancellation is planned. |
-| Versioned stable RPC protocol for editor integrations | Partial | Phase 2 | Current JSONL RPC is MVP; protocol versioning and resolver flows are planned. |
-| Provider-generated manual and automatic compaction | Planned | Phase 3 | Requires usage/context metadata and provider summary calls. |
-| Usage, cost, and context accounting | Planned | Phase 3/5 | Requires provider usage extraction and model pricing metadata. |
-| Session stats over TUI/RPC | Planned | Phase 3 | Should aggregate from session entries, not require clients to parse JSONL. |
-| Session tree storage, fork, clone, and branch summaries | Strongly desired | Phase 3 | Storage has `id`/`parent_id` foundations; full branching can follow if time allows. |
+| Stable shared runtime event stream | Done | Phase 2 | Versioned runtime envelopes and provider/tool/queue events are implemented; richer reasoning-specific events remain provider-track work. |
+| Async cancellation for active provider and tool runs | Partial | Phase 2 | RPC active-run cancellation and queue cleanup exist; provider transport calls are still cooperative rather than interrupted mid-request. |
+| Versioned stable RPC protocol for editor integrations | Done | Phase 2 | Protocol versioning, resolver replies, session commands, steering, and follow-up queues are implemented for protocol version 1. |
+| Provider-generated manual and automatic compaction | Done | Phase 3 | `/compact`, automatic compaction, retained recent context, and one context-overflow compaction retry are implemented. |
+| Usage, cost, and context accounting | Partial | Phase 3/5 | Provider usage extraction, conservative cost accounting, and local model pricing metadata exist; broader provider catalog/pricing coverage remains Phase 5. |
+| Session stats over TUI/RPC | Done | Phase 3 | RPC stats aggregate counts, exact provider usage, estimated fallback bytes, and conservative cost completeness from session entries. |
+| Session tree storage, fork, clone, and branch summaries | Partial | Phase 3 | Storage has `id`/`parent_id` foundations and validation; full fork/clone/tree UI and branch summaries are deferred. |
 | `.gitignore`-aware search | Strongly desired | Phase 4 | Current search has hardcoded exclusions, not full ignore semantics. |
 | Diff previews, fuzzy edit matching, CRLF/BOM handling | Strongly desired | Phase 4 | Needed for PI-level edit ergonomics. |
 | Web fetch tool behind network permission | Strongly desired | Phase 4 | Requires a `network.fetch` policy category and bounded fetch implementation. |

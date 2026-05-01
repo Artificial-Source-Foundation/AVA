@@ -2,6 +2,8 @@
 
 This roadmap defines the backend work needed for AVA 1.0 to feel as capable as PI while keeping AVA's product constraints: native C++23, one binary, terminal first, explicit safety boundaries, and inspectable local files.
 
+The companion frontend/TUI sequencing lives in `docs/roadmap/frontend-tui.md`.
+
 PI is a reference target for backend power, not an architecture to copy directly. AVA should borrow the capability shape, then implement it with narrow C++ modules and clear permission boundaries.
 
 ## 1.0 Backend Goal
@@ -55,7 +57,7 @@ Explorer agents checked each roadmap phase against the current AVA code and PI r
 - Phase 0 documentation reconciliation is closed for the known under-reported backend features: current docs now surface print/RPC mode, `AGENTS.md` loading, manual compaction entries, export, OAuth refresh, permission audit persistence, and atomic writes, while older version plans with superseded deferrals are marked historical.
 - Phase 1 is implemented and verified for the current single-provider backend. Keep edge-case coverage aligned as Phase 2 exposes new event/protocol boundaries.
 - Phase 2 is implemented and verified for the approved evented-runtime scope: versioned event envelopes, shared event bus routing for headless modes, incremental provider streaming, RPC protocol versioning/session commands, active-run cancellation, permission/question resolver replies, and bounded `steer`/`follow_up` queues. Provider/model registry commands and richer reasoning-specific events remain aligned with Phase 5 provider capability work.
-- Phase 3 has append-only sessions and compaction entry foundations, but still needs provider-generated summaries, automatic compaction integration, context-overflow retry, usage/cost records, stats, migrations, and optional tree/fork operations.
+- Phase 3 core context/session work is implemented for the approved scope: provider-generated `/compact`, automatic compaction, one bounded context-overflow retry, provider usage/cost records, RPC stats, additive session version checks, and branching-ready `id`/`parent_id` validation. Full fork/clone/tree UI, branch summaries, and mid-session model/thinking entries remain deferred to later phases.
 - Phase 4 has safe built-in tools, but still needs PI-level edit/search ergonomics: `.gitignore` semantics, diff previews, CRLF/BOM/fuzzy edit handling, mutation queues, spill files, streaming progress, web fetch, and LSP.
 - Phase 5 has a provider interface but not a provider registry or model capability catalog. OpenAI remains hard-coded in several paths and the second production provider path is not started.
 - Phase 6 is well-scoped as a safe local plugin/MCP foundation, but it depends on earlier tool registry, event bus, permission, session, provider, and RPC seams.
@@ -87,13 +89,13 @@ AVA's provider layer is currently OpenAI-first and OpenAI-shaped. OpenAI OAuth c
 Missing or incomplete:
 
 - Multi-provider registry.
-- Provider capability metadata, including tool-call support, context window, reasoning controls, streaming support, image input, and usage accounting support.
-- Model catalog fields for cost, max output tokens, context windows, cache pricing, and provider compatibility quirks.
+- Provider capability metadata beyond the current OpenAI-focused model context/pricing fields, including reasoning controls, image input, and provider compatibility quirks.
+- A full model catalog for multiple providers. The current local model metadata can declare context windows, max output tokens, and pricing/cache pricing for configured models.
 - Environment credential discovery beyond the current OpenAI-focused path.
 - Retry, backoff, and rate-limit handling.
 - Retry-after header parsing where providers expose it.
 - Normalized provider errors for context overflow, auth failure, quota, invalid request, and transient transport failure.
-- Usage and cost extraction from provider responses.
+- Provider-neutral usage and cost extraction beyond the current OpenAI Responses API usage handling.
 
 1.0 target:
 
@@ -105,18 +107,13 @@ Missing or incomplete:
 
 ### Sessions And Context
 
-AVA has append-only session storage and persisted permission audit entries, but not PI-level session lifecycle management.
+AVA has append-only session storage, persisted permission audit entries, provider-generated compaction, automatic compaction, bounded context-overflow retry, usage/cost records, and RPC stats. It does not yet have PI-level tree navigation or fork/clone UI.
 
 Missing or incomplete:
 
-- Provider-generated manual compaction summaries.
-- Automatic compaction trigger using the existing estimator and threshold logic.
-- Context overflow detection and retry after compaction.
-- Token, usage, and cost records per assistant response.
 - Mid-session model and thinking-level changes with session entries.
 - Session tree structure, branching, fork, clone, and branch summaries.
-- Session migrations for future schema changes.
-- Strong session stats for UI and headless clients.
+- Full rewrite-style migrations for future schema changes beyond the current additive version checks and actionable future-version rejection.
 
 1.0 target:
 
@@ -296,7 +293,7 @@ Scope:
 - Add thinking/reasoning delta events when provider capabilities expose them.
 - Add async cancellation tied to active provider/tool runs, including a terminal cancellation event.
 - Add RPC protocol versioning and a compatibility rule for unknown request/event fields.
-- Add RPC `steer`, `follow_up`, `get_messages`, `get_session_stats`, `new_session`, `switch_session`, `set_model`, `cycle_model`, and `get_available_models` commands.
+- Add RPC `steer`, `follow_up`, `get_messages`, `get_session_stats`, `new_session`, and `switch_session` commands. Model selection commands such as `set_model`, `cycle_model`, and `get_available_models` are deferred to the Phase 5 provider/model catalog work.
 - Add RPC question and permission resolver flows.
 - Add subprocess-level RPC tests that feed JSONL requests and assert response/event order with fake provider transport.
 
@@ -313,20 +310,20 @@ Acceptance criteria:
 
 Purpose: support long-running real projects.
 
+Status: implemented and verified for the approved core scope on 2026-05-01. Full fork/clone/tree UI, branch summaries, and mid-session model/thinking entries are deferred to later phases.
+
 Scope:
 
-- Implement provider-generated compaction summaries.
-- Define a structured compaction prompt and result shape that captures goal, constraints, decisions, modified/read files, unresolved tasks, and next steps.
-- Wire `should_auto_compact` into the agent loop using token estimates and provider context windows.
-- Detect context overflow and retry after compaction when safe.
-- Store provider usage and cost metadata on assistant messages.
-- Extract provider usage data when available and fall back to estimator-marked values when it is not.
-- Add session stats aggregation.
-- Add session schema versioning and migration hooks.
-- Design tree entries with `id` and `parent_id` compatibility, branch validation, and migration rules even if UI branching follows later.
-- Implement fork/clone and branch summary if tree sessions are included in 1.0.
-- Add model-change and thinking-level-change session entries before mid-session model controls ship.
-- Add RPC/session APIs for messages, stats, compaction status, and branch/tree data when available.
+- Implemented provider-generated compaction summaries for `/compact` and automatic compaction.
+- Implemented a structured compaction prompt that captures goal, constraints/preferences, decisions, files read/modified, unresolved tasks, and next steps.
+- Wired automatic compaction into the agent loop using token estimates, configured model context windows, and a safe fallback threshold.
+- Implemented one bounded context-overflow retry after compaction.
+- Stored provider usage metadata and conservative cost metadata on assistant messages.
+- Extracted OpenAI provider usage data when available and stored byte-estimate fallback metadata separately when it is not.
+- Added session stats aggregation for RPC/UI consumers without requiring clients to parse JSONL.
+- Added additive session version checks, future-version rejection, and branching-ready `id`/`parent_id` validation.
+- Deferred full fork/clone/tree UI, branch summaries, and mid-session model/thinking entries.
+- Added RPC/session APIs for messages, stats, provider-backed compaction, export, and context inspection. Branch/tree APIs remain deferred until tree UI work starts.
 
 Acceptance criteria:
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 
 #include "ava/config/auth.h"
@@ -12,10 +13,10 @@ class OpenAIStreamParser {
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> append(std::string_view chunk);
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> finish();
 
-  private:
-   std::string pending_line_;
-   std::string data_;
-   std::size_t scan_offset_ = 0;
+ private:
+  std::string pending_line_;
+  std::string data_;
+  std::size_t scan_offset_ = 0;
 };
 
 class OpenAIProvider final : public Provider {
@@ -36,6 +37,7 @@ class OpenAIProvider final : public Provider {
 [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_openai_sse(std::string_view sse);
 [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_openai_sse_response(const HttpResponse& response);
 [[nodiscard]] ava::core::Result<std::string> parse_openai_response_text(std::string_view body);
+[[nodiscard]] std::optional<TokenUsage> parse_openai_usage(std::string_view body);
 [[nodiscard]] bool is_retryable_status(int status_code) noexcept;
 [[nodiscard]] bool is_auth_status(int status_code) noexcept;
 

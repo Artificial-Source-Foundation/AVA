@@ -5,6 +5,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "ava/agent/agent_loop.h"
@@ -15,6 +16,7 @@
 #include "ava/context/context_loader.h"
 #include "ava/permissions/permission.h"
 #include "ava/provider/provider.h"
+#include "ava/session/compaction.h"
 #include "ava/session/session_store.h"
 
 namespace ava::app {
@@ -67,6 +69,10 @@ struct RuntimeRunOptions {
   std::mutex* session_mutex = nullptr;
 };
 
+using CompactionSummaryGenerator = std::function<ava::core::Result<std::string>(
+    const std::vector<ava::session::SessionEntry>& entries, const ava::session::CompactionConfig& config,
+    std::string_view instructions, std::size_t estimated_tokens)>;
+
 [[nodiscard]] ava::core::Result<RuntimeSession> open_runtime_session(const RuntimeOpenOptions& options);
 
 [[nodiscard]] ava::core::Result<RuntimePromptState> select_runtime_prompt_state(const RuntimeSession& session,
@@ -79,5 +85,21 @@ void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prom
                                                                         const ava::provider::Provider& provider,
                                                                         ava::provider::Transport& transport,
                                                                         const RuntimeRunOptions& options);
+
+[[nodiscard]] bool same_session_snapshot(const std::vector<ava::session::SessionEntry>& expected,
+                                         const std::vector<ava::session::SessionEntry>& actual);
+
+[[nodiscard]] ava::core::Error stale_compaction_snapshot_error(std::string_view trigger,
+                                                               std::size_t snapshot_entries,
+                                                               std::size_t current_entries);
+
+[[nodiscard]] std::string build_compaction_summary_prompt(const std::vector<ava::session::SessionEntry>& entries,
+                                                          const ava::session::CompactionConfig& config,
+                                                          std::string_view instructions, std::size_t estimated_tokens);
+
+[[nodiscard]] ava::core::Result<std::string> generate_compaction_summary(
+    const RuntimeSession& session, const std::vector<ava::session::SessionEntry>& entries,
+    const ava::session::CompactionConfig& config, std::string_view instructions, std::size_t estimated_tokens,
+    const ava::provider::Provider& provider, ava::provider::Transport& transport, const RuntimeRunOptions& options);
 
 }  // namespace ava::app

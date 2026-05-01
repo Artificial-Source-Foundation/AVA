@@ -175,6 +175,17 @@ void test_openai_provider_contract() {
   auto completed = ava::provider::parse_openai_sse("data: {\"type\":\"response.completed\"}\n\n");
   expect(completed && completed->size() == 1 && (*completed)[0].type == ava::provider::StreamEventType::Done,
          "OpenAI response.completed event produces done event");
+  auto completed_with_usage = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,"
+      "\"output_tokens\":7,\"total_tokens\":18,\"input_tokens_details\":{\"cached_tokens\":3},"
+      "\"output_tokens_details\":{\"reasoning_tokens\":2}}}}\n\n");
+  expect(completed_with_usage && completed_with_usage->size() == 1 && (*completed_with_usage)[0].usage &&
+             (*completed_with_usage)[0].usage->input_tokens == 11 &&
+             (*completed_with_usage)[0].usage->output_tokens == 7 &&
+             (*completed_with_usage)[0].usage->total_tokens == 18 &&
+             (*completed_with_usage)[0].usage->cache_read_tokens == 3 &&
+             (*completed_with_usage)[0].usage->reasoning_tokens == 2,
+         "OpenAI response.completed event preserves Responses API usage details");
   auto lifecycle = ava::provider::parse_openai_sse(
       "data: {\"type\":\"response.created\"}\n\n"
       "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"
@@ -219,6 +230,12 @@ void test_openai_provider_contract() {
          "OpenAI unknown SSE events do not suppress final assistant content");
   auto text = ava::provider::parse_openai_response_text("{\"output_text\":\"done\"}");
   expect(text && *text == "done", "OpenAI non-stream response text parses");
+  auto non_stream_usage = ava::provider::parse_openai_usage(
+      "{\"output_text\":\"done\",\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":6,"
+      "\"total_tokens\":11,\"completion_tokens_details\":{\"reasoning_tokens\":4}}}");
+  expect(non_stream_usage && non_stream_usage->input_tokens == 5 && non_stream_usage->output_tokens == 6 &&
+             non_stream_usage->total_tokens == 11 && non_stream_usage->reasoning_tokens == 4,
+         "OpenAI non-stream usage parser accepts prompt/completion aliases");
   auto missing_text = ava::provider::parse_openai_response_text("{\"id\":\"resp_1\"}");
   expect(!missing_text, "OpenAI non-stream response requires expected text field");
 

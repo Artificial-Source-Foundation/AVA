@@ -1,18 +1,31 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "ava/config/xdg_paths.h"
 #include "ava/core/result.h"
+#include "ava/provider/provider.h"
 
 namespace ava::config {
+
+struct ModelPricing {
+  std::optional<long double> input_per_million;
+  std::optional<long double> output_per_million;
+  std::optional<long double> cache_read_per_million;
+  std::optional<long double> cache_write_per_million;
+  std::optional<long double> reasoning_per_million;
+};
 
 struct ModelInfo {
   std::string provider_id;
   std::string model_id;
   std::string display_name;
   std::string family;
+  std::optional<long long> context_window_tokens = std::nullopt;
+  std::optional<long long> max_output_tokens = std::nullopt;
+  std::optional<ModelPricing> pricing = std::nullopt;
 };
 
 struct ModelRegistry {
@@ -25,5 +38,7 @@ struct ModelRegistry {
 [[nodiscard]] ModelRegistry parse_model_registry(std::string_view content);
 [[nodiscard]] ava::core::Result<ModelRegistry> load_model_registry(const XdgPaths& paths);
 [[nodiscard]] ModelInfo select_default_model(const ModelRegistry& registry);
+[[nodiscard]] std::optional<long double> usage_cost_usd(const ModelPricing& pricing,
+                                                        const ava::provider::TokenUsage& usage);
 
 }  // namespace ava::config

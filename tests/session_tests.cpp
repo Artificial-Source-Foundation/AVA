@@ -320,17 +320,28 @@ void test_session_stats_helper() {
                                  .timestamp = "2026-04-29T00:00:00Z",
                                  .data_json = "{}"},
       ava::session::SessionEntry{.id = "user_1",
-                                 .parent_id = "start_1",
-                                 .type = ava::session::EntryType::UserMessage,
-                                 .timestamp = "2026-04-29T00:00:01Z",
-                                 .data_json = "{\"usage\":{\"input_tokens\":3,\"output_tokens\":2,"
-                                              "\"total_tokens\":5,\"cost_usd\":0.001}}"},
+                                  .parent_id = "start_1",
+                                  .type = ava::session::EntryType::UserMessage,
+                                  .timestamp = "2026-04-29T00:00:01Z",
+                                  .data_json = "{\"usage\":{\"input_tokens\":3,\"output_tokens\":2,"
+                                               "\"reasoning_tokens\":1,\"cache_read_tokens\":2,"
+                                               "\"total_tokens\":5,\"cost_usd\":0.001,"
+                                               "\"source\":\"provider\"}}"},
+      ava::session::SessionEntry{.id = "user_1_replay",
+                                  .parent_id = "start_1",
+                                  .type = ava::session::EntryType::UserMessage,
+                                  .timestamp = "2026-04-29T00:00:01Z",
+                                  .data_json = "{\"text\":\"hidden replay\",\"internal_replay\":true,"
+                                               "\"replay_of\":\"user_1\",\"reason\":\"test\"}"},
       ava::session::SessionEntry{.id = "assistant_1",
                                  .parent_id = "user_1",
                                  .type = ava::session::EntryType::AssistantMessage,
                                  .timestamp = "2026-04-29T00:00:02Z",
-                                 .data_json = "{\"input_tokens\":1,\"output_tokens\":4,\"total_tokens\":5,"
-                                              "\"total_cost_usd\":0.0025}"},
+                                 .data_json = "{\"usage\":{\"input_tokens\":1,\"output_tokens\":4,"
+                                              "\"cache_write_tokens\":3,\"total_tokens\":5,"
+                                              "\"estimated_input_bytes\":10,\"estimated_output_bytes\":20,"
+                                              "\"estimated_total_bytes\":30,"
+                                              "\"cost_usd\":0.0025,\"estimated\":true}}"},
       ava::session::SessionEntry{.id = "mode_1",
                                  .parent_id = "assistant_1",
                                  .type = ava::session::EntryType::ModeChange,
@@ -358,18 +369,72 @@ void test_session_stats_helper() {
              stats.last_timestamp == "2026-04-29T00:00:06Z",
          "session stats helper reports entry count and timestamps");
   expect(stats.counts.session_start == 1 && stats.counts.user_message == 1 && stats.counts.assistant_message == 1 &&
-             stats.counts.mode_change == 1 && stats.counts.compaction == 1 && stats.counts.cancel == 1 &&
-             stats.counts.error == 1,
-         "session stats helper reports current and Phase 3 foundation counts");
-  expect(stats.input_tokens && *stats.input_tokens == 4 && stats.output_tokens && *stats.output_tokens == 6 &&
-             stats.total_tokens && *stats.total_tokens == 10,
-         "session stats helper aggregates only token fields already present in entry JSON");
-  expect(stats.total_cost_usd && *stats.total_cost_usd > 0.0034L && *stats.total_cost_usd < 0.0036L,
-         "session stats helper aggregates cost fields only when present in entry JSON");
+              stats.counts.mode_change == 1 && stats.counts.compaction == 1 && stats.counts.cancel == 1 &&
+              stats.counts.error == 1,
+          "session stats helper reports current counts without durable internal replay user messages");
+  expect(stats.input_tokens && *stats.input_tokens == 3 && stats.output_tokens && *stats.output_tokens == 2 &&
+             stats.total_tokens && *stats.total_tokens == 5,
+         "session stats helper aggregates exact token fields only from provider usage");
+  expect(stats.reasoning_tokens && *stats.reasoning_tokens == 1 && stats.cache_read_tokens &&
+             *stats.cache_read_tokens == 2 && !stats.cache_write_tokens,
+         "session stats helper keeps estimated cache token fields out of exact totals");
+  expect(stats.estimated_input_bytes && *stats.estimated_input_bytes == 10 && stats.estimated_output_bytes &&
+             *stats.estimated_output_bytes == 20 && stats.estimated_total_bytes && *stats.estimated_total_bytes == 30,
+         "session stats helper aggregates separate estimated byte totals");
+  expect(stats.total_cost_usd && *stats.total_cost_usd > 0.0009L && *stats.total_cost_usd < 0.0011L,
+         "session stats helper aggregates exact cost fields without estimated fallback cost");
+  expect(stats.exact_usage_entries == 1 && stats.estimated_usage_entries == 1,
+         "session stats helper counts exact and estimated usage entries");
 
   const auto empty_stats = ava::session::compute_session_stats({});
   expect(!empty_stats.input_tokens && !empty_stats.total_cost_usd,
          "session stats helper leaves token and cost totals absent when no entry JSON supplies them");
+}
+
+void test_session_stats_omits_incomplete_cost_total() {
+  const std::vector<ava::session::SessionEntry> entries = {
+      ava::session::SessionEntry{.id = "assistant_priced",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-04-29T00:00:00Z",
+                                 .data_json = "{\"usage\":{\"input_tokens\":3,\"output_tokens\":2,"
+                                              "\"total_tokens\":5,\"cost_usd\":0.001,"
+                                              "\"source\":\"provider\"}}"},
+      ava::session::SessionEntry{.id = "assistant_unpriced",
+                                 .parent_id = "assistant_priced",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-04-29T00:00:01Z",
+                                 .data_json = "{\"usage\":{\"input_tokens\":4,\"cache_read_tokens\":4,"
+                                              "\"total_tokens\":4,\"source\":\"provider\"}}"},
+  };
+
+  const auto stats = ava::session::compute_session_stats(entries);
+  expect(stats.exact_usage_entries == 2 && stats.estimated_usage_entries == 0,
+         "session stats counts mixed exact usage entries");
+  expect(stats.known_cost_usd && *stats.known_cost_usd > 0.0009L && *stats.known_cost_usd < 0.0011L,
+         "session stats preserves the known portion of incomplete cost totals");
+  expect(!stats.total_cost_usd && !stats.cost_complete && stats.unknown_cost_entries == 1,
+         "session stats omits total cost when exact billable usage has unknown cost");
+}
+
+void test_session_stats_flags_legacy_assistant_tokens_without_cost() {
+  const std::vector<ava::session::SessionEntry> entries = {
+      ava::session::SessionEntry{.id = "assistant_legacy_tokens",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-04-29T00:00:00Z",
+                                 .data_json = "{\"text\":\"legacy\",\"input_tokens\":7,"
+                                              "\"output_tokens\":3,\"total_tokens\":10}"},
+  };
+
+  const auto stats = ava::session::compute_session_stats(entries);
+  expect(stats.input_tokens && *stats.input_tokens == 7 && stats.output_tokens && *stats.output_tokens == 3 &&
+             stats.total_tokens && *stats.total_tokens == 10,
+         "session stats still aggregates legacy top-level assistant token totals");
+  expect(stats.exact_usage_entries == 0 && stats.estimated_usage_entries == 0,
+         "legacy top-level assistant token stats do not masquerade as usage objects");
+  expect(!stats.total_cost_usd && !stats.cost_complete && stats.unknown_cost_entries == 1,
+         "legacy top-level assistant tokens without cost make cost stats incomplete");
 }
 
 void test_session_resume_and_listing() {
@@ -434,6 +499,22 @@ void test_session_resume_and_listing() {
   }
   listed = ava::session::SessionStore::list_sessions(workspace, session_root);
   expect(listed && listed->size() == 2, "session listing skips one corrupt session file");
+
+  ava::session::SessionStore future_store(ava::session::SessionStoreOptions{
+      .root_dir = session_root,
+      .workspace_dir = workspace,
+      .session_id = "future",
+  });
+  std::filesystem::create_directories(future_store.session_path().parent_path());
+  {
+    std::ofstream file(future_store.session_path(), std::ios::binary | std::ios::trunc);
+    file << "{\"version\":99,\"id\":\"entry_future\",\"parent_id\":\"\",\"type\":\"user_message\","
+            "\"timestamp\":\"2026-04-27T00:02:00Z\",\"data\":{\"text\":\"future\"}}\n";
+  }
+  listed = ava::session::SessionStore::list_sessions(workspace, session_root);
+  expect(!listed && listed.error().message().find("unsupported session entry version") != std::string::npos,
+         "session listing reports unsupported future-version session files instead of hiding them");
+  std::filesystem::remove(future_store.session_path());
 
   ava::session::SessionStore crlf_store(ava::session::SessionStoreOptions{
       .root_dir = session_root,
@@ -501,7 +582,10 @@ void test_session_compaction_entry_round_trip() {
       store, ava::session::ManualCompactionRequest{.summary = "Prior work summary",
                                                    .instructions = "Keep the recent plan.",
                                                    .config = config,
-                                                   .estimated_tokens = 1300});
+                                                   .estimated_tokens = 1300,
+                                                   .threshold_tokens = 0,
+                                                   .trigger = "manual",
+                                                   .recent_context = ""});
   expect(appended.has_value(), "manual compaction entry appends");
 
   auto loaded = store.load();
@@ -521,7 +605,13 @@ void test_session_compaction_entry_round_trip() {
   ava::session::SessionStore unavailable_store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "compact-unavailable"});
   auto unavailable = ava::session::append_manual_compaction(
-      unavailable_store, ava::session::ManualCompactionRequest{.summary = "", .instructions = "", .config = config});
+      unavailable_store, ava::session::ManualCompactionRequest{.summary = "",
+                                                               .instructions = "",
+                                                               .config = config,
+                                                               .estimated_tokens = 0,
+                                                               .threshold_tokens = 0,
+                                                               .trigger = "manual",
+                                                               .recent_context = ""});
   auto unavailable_loaded = unavailable_store.load();
   std::optional<std::string> unavailable_summary;
   if (unavailable_loaded && !unavailable_loaded->empty()) {
@@ -535,8 +625,13 @@ void test_session_compaction_entry_round_trip() {
   ava::session::SessionStore tiny_unavailable_store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "compact-tiny-unavailable"});
   auto tiny_unavailable = ava::session::append_manual_compaction(
-      tiny_unavailable_store,
-      ava::session::ManualCompactionRequest{.summary = "", .instructions = "", .config = tiny_config});
+      tiny_unavailable_store, ava::session::ManualCompactionRequest{.summary = "",
+                                                                    .instructions = "",
+                                                                    .config = tiny_config,
+                                                                    .estimated_tokens = 0,
+                                                                    .threshold_tokens = 0,
+                                                                    .trigger = "manual",
+                                                                    .recent_context = ""});
   auto tiny_loaded = tiny_unavailable_store.load();
   std::optional<std::string> tiny_summary;
   if (tiny_loaded && !tiny_loaded->empty()) {
@@ -548,8 +643,13 @@ void test_session_compaction_entry_round_trip() {
   ava::session::SessionStore oversized_summary_store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "compact-oversized-summary"});
   auto oversized_summary = ava::session::append_manual_compaction(
-      oversized_summary_store,
-      ava::session::ManualCompactionRequest{.summary = "xx", .instructions = "", .config = tiny_config});
+      oversized_summary_store, ava::session::ManualCompactionRequest{.summary = "xx",
+                                                                     .instructions = "",
+                                                                     .config = tiny_config,
+                                                                     .estimated_tokens = 0,
+                                                                     .threshold_tokens = 0,
+                                                                     .trigger = "manual",
+                                                                     .recent_context = ""});
   expect(!oversized_summary && oversized_summary.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "manual compaction rejects oversized user summary with tiny summary limit");
 }
@@ -562,15 +662,23 @@ void test_session_markdown_export() {
                                  .timestamp = "2026-04-29T00:00:00Z",
                                  .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-5.5\"}"},
       ava::session::SessionEntry{.id = "user_1",
-                                 .parent_id = "",
-                                 .type = ava::session::EntryType::UserMessage,
-                                 .timestamp = "2026-04-29T00:00:01Z",
-                                 .data_json = "{\"text\":\"Hello AVA\"}"},
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::UserMessage,
+                                  .timestamp = "2026-04-29T00:00:01Z",
+                                  .data_json = "{\"text\":\"Hello AVA\"}"},
+      ava::session::SessionEntry{.id = "user_1_replay",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::UserMessage,
+                                  .timestamp = "2026-04-29T00:00:01Z",
+                                  .data_json = "{\"text\":\"Hello AVA\",\"internal_replay\":true,"
+                                               "\"replay_of\":\"user_1\",\"reason\":\"test\"}"},
       ava::session::SessionEntry{.id = "assistant_1",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::AssistantMessage,
                                  .timestamp = "2026-04-29T00:00:02Z",
-                                 .data_json = "{\"text\":\"Hello human\",\"tool_calls\":1}"},
+                                 .data_json = "{\"text\":\"Hello human\",\"tool_calls\":1,"
+                                              "\"usage\":{\"input_tokens\":10,\"output_tokens\":5,"
+                                              "\"total_tokens\":15,\"source\":\"provider\"}}"},
       ava::session::SessionEntry{
           .id = "tool_call_1",
           .parent_id = "",
@@ -619,9 +727,14 @@ void test_session_markdown_export() {
   const auto basic = ava::session::format_session_markdown(entries);
   expect(basic.find("# AVA Session Export") != std::string::npos, "markdown export has deterministic title");
   expect(basic.find("## User") != std::string::npos && basic.find("Hello AVA") != std::string::npos,
-         "markdown export renders user messages");
+          "markdown export renders user messages");
+  expect(basic.find("internal_replay") == std::string::npos &&
+             basic.find("replay_of") == std::string::npos,
+         "markdown export hides internal replay user messages");
   expect(basic.find("## Assistant") != std::string::npos && basic.find("Hello human") != std::string::npos,
          "markdown export renders assistant messages");
+  expect(basic.find("Usage:") != std::string::npos && basic.find("input_tokens") != std::string::npos,
+         "markdown export renders assistant usage when present");
   expect(basic.find("## Tool Call") == std::string::npos && basic.find("README.md") == std::string::npos,
          "markdown export omits tool details by default");
   expect(basic.find("## Compaction") != std::string::npos && basic.find("Prior summary") != std::string::npos &&
@@ -679,6 +792,9 @@ void test_compaction_config_and_thresholds() {
   auto missing = ava::session::load_compaction_config(paths);
   expect(missing && missing->model_id == "gpt-5.5" && missing->auto_threshold_tokens == 0,
          "missing compaction config uses safe defaults");
+  const auto fallback_threshold = ava::session::effective_auto_threshold_tokens(*missing, std::nullopt);
+  expect(fallback_threshold > 0,
+         "missing compaction config uses a nonzero effective auto-compaction threshold without model metadata");
 
   std::filesystem::create_directories(paths.ava_config_dir);
   {
@@ -718,6 +834,18 @@ void test_compaction_config_and_thresholds() {
   config.auto_threshold_tokens = 0;
   expect(!ava::session::should_auto_compact(entries, config).should_compact,
          "auto compaction threshold zero disables automatic compaction");
+  config.auto_threshold_tokens_explicit = false;
+  const std::vector<ava::session::SessionEntry> fallback_entries = {
+      ava::session::SessionEntry{.id = "fallback_big",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-04-27T00:00:00Z",
+                                 .data_json = "{\"text\":\"" + std::string(fallback_threshold * 4, 'x') + "\"}"}};
+  expect(ava::session::should_auto_compact(fallback_entries, config, std::nullopt).should_compact,
+         "default auto compaction can trigger when model context-window metadata is absent");
+  config.auto_threshold_tokens_explicit = true;
+  expect(!ava::session::should_auto_compact(fallback_entries, config, std::nullopt).should_compact,
+         "explicit auto_threshold_tokens zero remains disabled without model metadata");
 }
 
 void test_compaction_context_reconstruction() {
@@ -754,30 +882,55 @@ void test_compaction_context_reconstruction() {
                                  .timestamp = "2026-04-27T00:00:05Z",
                                  .data_json = "{\"summary\":\"latest summary\",\"instructions\":\"carry this\"}"},
       ava::session::SessionEntry{.id = "new_user",
-                                 .parent_id = "",
-                                 .type = ava::session::EntryType::UserMessage,
-                                 .timestamp = "2026-04-27T00:00:06Z",
-                                 .data_json = "{\"text\":\"new user\"}"},
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::UserMessage,
+                                  .timestamp = "2026-04-27T00:00:06Z",
+                                  .data_json = "{\"text\":\"new user\"}"},
+      ava::session::SessionEntry{.id = "new_user_replay",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::UserMessage,
+                                  .timestamp = "2026-04-27T00:00:06Z",
+                                  .data_json = "{\"text\":\"new user\",\"internal_replay\":true,"
+                                               "\"replay_of\":\"new_user\",\"reason\":\"test\"}"},
       ava::session::SessionEntry{.id = "new_assistant",
-                                 .parent_id = "",
-                                 .type = ava::session::EntryType::AssistantMessage,
-                                 .timestamp = "2026-04-27T00:00:07Z",
-                                 .data_json = "{\"text\":\"new assistant\"}"}};
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::AssistantMessage,
+                                  .timestamp = "2026-04-27T00:00:07Z",
+                                  .data_json = "{\"text\":\"new assistant\"}"},
+      ava::session::SessionEntry{.id = "new_tool_call",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolCall,
+                                  .timestamp = "2026-04-27T00:00:08Z",
+                                  .data_json = "{\"call_id\":\"call_read\",\"name\":\"read_file\","
+                                               "\"arguments\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}"},
+      ava::session::SessionEntry{.id = "new_tool_result",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolResult,
+                                  .timestamp = "2026-04-27T00:00:09Z",
+                                  .data_json = "{\"call_id\":\"call_read\",\"name\":\"read_file\","
+                                               "\"result\":\"note contents\"}"}};
 
   auto messages = ava::agent::build_provider_messages_from_entries(entries);
-  expect(messages && messages->size() == 3, "compacted context reconstructs summary plus post-compaction turns");
+  expect(messages && messages->size() == 6, "compacted context reconstructs summary plus post-compaction turns");
   if (!messages) return;
   expect((*messages)[0].role == "user" && (*messages)[0].content.find("latest summary") != std::string::npos &&
              (*messages)[0].content.find("carry this") != std::string::npos,
          "latest compaction summary becomes provider-visible context");
-  const std::string joined = (*messages)[0].content + (*messages)[1].content + (*messages)[2].content;
+  const std::string joined = (*messages)[0].content + (*messages)[1].content + (*messages)[2].content +
+                             (*messages)[3].content + (*messages)[4].content + (*messages)[5].content;
   expect(joined.find("old raw user") == std::string::npos && joined.find("old raw assistant") == std::string::npos &&
              joined.find("old raw tool") == std::string::npos && joined.find("middle raw user") == std::string::npos &&
              joined.find("first summary") == std::string::npos,
          "context reconstruction omits raw messages and tool results before latest compaction");
-  expect((*messages)[1].role == "user" && (*messages)[1].content == "new user" && (*messages)[2].role == "assistant" &&
-             (*messages)[2].content == "new assistant",
-         "post-compaction entries remain normal provider messages");
+  expect((*messages)[1].role == "user" && (*messages)[1].content == "new user" &&
+              (*messages)[2].role == "user" && (*messages)[2].content == "new user" &&
+              (*messages)[3].role == "assistant" && (*messages)[3].content == "new assistant",
+          "post-compaction entries include internal replays as normal provider messages");
+  expect((*messages)[4].role == "assistant" && (*messages)[4].content.find("Tool call requested by assistant") !=
+                                                  std::string::npos &&
+             (*messages)[4].content.find("read_file") != std::string::npos &&
+             (*messages)[5].role == "user" && (*messages)[5].content.find("note contents") != std::string::npos,
+         "post-compaction context includes tool-call metadata before tool result data");
 }
 
 }  // namespace
@@ -785,6 +938,8 @@ void test_compaction_context_reconstruction() {
 void run_session_tests() {
   test_session_store_round_trip();
   test_session_stats_helper();
+  test_session_stats_omits_incomplete_cost_total();
+  test_session_stats_flags_legacy_assistant_tokens_without_cost();
   test_session_resume_and_listing();
   test_session_compaction_entry_round_trip();
   test_session_markdown_export();

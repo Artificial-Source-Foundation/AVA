@@ -4,11 +4,13 @@
 #include <filesystem>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "ava/agent/mode.h"
 #include "ava/agent/question.h"
+#include "ava/config/model_config.h"
 #include "ava/core/result.h"
 #include "ava/permissions/permission.h"
 #include "ava/provider/provider.h"
@@ -53,11 +55,17 @@ struct AgentLoopOptions {
   QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
+  std::function<ava::core::Result<bool>(ava::session::SessionStore&, std::string_view,
+                                        const std::vector<std::string>& replayed_user_messages)>
+      compact_context = nullptr;
   std::mutex* session_mutex = nullptr;
+  std::optional<ava::config::ModelPricing> model_pricing = std::nullopt;
 };
 
 struct AgentLoopResult {
   std::string final_text;
+  std::optional<ava::provider::TokenUsage> usage = std::nullopt;
+  std::optional<long double> cost_usd = std::nullopt;
   std::size_t provider_iterations = 0;
   std::size_t tool_calls = 0;
   std::size_t initial_context_messages = 0;

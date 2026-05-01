@@ -44,7 +44,6 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/terminal.h"
 #include "tests/support/fake_transport.h"
-
 #include "tests/support/test_harness.h"
 
 namespace {
@@ -77,6 +76,25 @@ class CallbackTransport final : public ava::provider::Transport {
   std::vector<ava::provider::HttpResponse> responses_;
   std::function<void()> after_send_;
   std::vector<ava::provider::HttpRequest> requests_;
+};
+
+class OverflowOnceProvider final : public ava::provider::Provider {
+ public:
+  explicit OverflowOnceProvider(std::string base_url) : delegate_(std::move(base_url)) {}
+
+  [[nodiscard]] ava::core::Result<ava::provider::HttpRequest> build_request(
+      const ava::provider::ProviderRequest& request, std::string_view access_token) const override {
+    ++build_calls_;
+    if (build_calls_ == 1) {
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::Provider, "context window exceeds token limit"));
+    }
+    return delegate_.build_request(request, access_token);
+  }
+
+ private:
+  ava::provider::OpenAIProvider delegate_;
+  mutable int build_calls_ = 0;
 };
 
 void test_tool_dispatcher() {
@@ -171,7 +189,8 @@ void test_tool_dispatcher() {
       .arguments_json = "{\"edits\":[{\"path\":\"private-patch.txt\",\"old_text\":\"old\",\"new_text\":\"new\"}]}"});
   auto private_patch_read = ava::tools::read_file(
       ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build}, private_patch_path);
-  expect(private_patch && private_patch->success && private_patch_read && private_patch_read->content == "private new" &&
+  expect(private_patch && private_patch->success && private_patch_read &&
+             private_patch_read->content == "private new" &&
              permission_bits(private_patch_path) ==
                  (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write),
          "apply_patch preserves 0600 permissions when replacing an existing file");
@@ -314,17 +333,16 @@ void test_tool_dispatcher() {
     file << "keep old";
   }
   int denied_patch_prompts = 0;
-  const ava::agent::ToolDispatcher patch_denying_dispatcher(
-      ava::tools::ToolContext{.workspace_dir = workspace,
-                              .mode = ava::agent::Mode::Build,
-                              .permission_resolver = [&denied_patch_prompts](
-                                                         const ava::permissions::PermissionPrompt& prompt)
-                                  -> ava::core::Result<ava::permissions::PermissionResolution> {
-                                ++denied_patch_prompts;
-                                expect(prompt.operation == ava::permissions::Operation::ReadFile,
-                                       "apply_patch resolver sees read operation before denied external patch");
-                                return ava::permissions::PermissionResolution::Deny;
-                              }});
+  const ava::agent::ToolDispatcher patch_denying_dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&denied_patch_prompts](const ava::permissions::PermissionPrompt& prompt)
+          -> ava::core::Result<ava::permissions::PermissionResolution> {
+        ++denied_patch_prompts;
+        expect(prompt.operation == ava::permissions::Operation::ReadFile,
+               "apply_patch resolver sees read operation before denied external patch");
+        return ava::permissions::PermissionResolution::Deny;
+      }});
   auto outside_patch_denied = patch_denying_dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "call_outside_patch_denied",
       .name = "apply_patch",
@@ -663,6 +681,82 @@ void test_agent_loop_text_only_turn() {
          "agent loop persists user and assistant entries for text-only turn");
 }
 
+void test_agent_loop_usage_and_cost_persistence() {
+  const auto root = temp_root() / "agent-usage";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  const ava::config::ModelPricing pricing{.input_per_million = 10.0L,
+                                          .output_per_million = 20.0L,
+                                          .cache_read_per_million = std::nullopt,
+                                          .cache_write_per_million = std::nullopt,
+                                          .reasoning_per_million = std::nullopt};
+
+  ava::session::SessionStore exact_store(ava::session::SessionStoreOptions{
+      .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "exact"});
+  ava::tests::FakeTransport exact_transport(
+      {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"priced\"}\n\n"
+                    "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1000,"
+                    "\"output_tokens\":2000,\"total_tokens\":3000}}}\n\n")});
+  ava::agent::AgentLoop exact_loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                                .mode = ava::agent::Mode::Build,
+                                                                .provider_id = "openai",
+                                                                .model_id = "gpt-5.5",
+                                                                .system_prompt = "system prompt",
+                                                                .access_token = "token",
+                                                                .model_pricing = pricing});
+  auto exact_result = exact_loop.run_turn("hi", exact_store, provider, exact_transport);
+  expect(exact_result && exact_result->usage && !exact_result->usage->estimated && exact_result->cost_usd &&
+             *exact_result->cost_usd > 0.049L && *exact_result->cost_usd < 0.051L,
+         "agent loop calculates cost from provider usage when pricing is known");
+  auto exact_entries = exact_store.load();
+  expect(exact_entries && exact_entries->size() == 2 &&
+             (*exact_entries)[1].data_json.find("\"source\":\"provider\"") != std::string::npos &&
+             (*exact_entries)[1].data_json.find("\"cost_usd\":0.05") != std::string::npos,
+         "agent loop persists exact provider usage and known cost on assistant messages");
+
+  ava::session::SessionStore unknown_price_store(ava::session::SessionStoreOptions{
+      .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "unknown-price"});
+  ava::tests::FakeTransport unknown_price_transport(
+      {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"unknown\"}\n\n"
+                    "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,"
+                    "\"output_tokens\":1,\"total_tokens\":2}}}\n\n")});
+  ava::agent::AgentLoop unknown_price_loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                                        .mode = ava::agent::Mode::Build,
+                                                                        .provider_id = "openai",
+                                                                        .model_id = "unknown-model",
+                                                                        .system_prompt = "system prompt",
+                                                                        .access_token = "token"});
+  auto unknown_price_result = unknown_price_loop.run_turn("hi", unknown_price_store, provider, unknown_price_transport);
+  auto unknown_price_entries = unknown_price_store.load();
+  expect(unknown_price_result && unknown_price_entries &&
+             (*unknown_price_entries)[1].data_json.find("cost_usd") == std::string::npos,
+         "agent loop does not persist fake cost when model pricing is unknown");
+
+  ava::session::SessionStore estimated_store(ava::session::SessionStoreOptions{
+      .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "estimated"});
+  ava::tests::FakeTransport estimated_transport(
+      {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"estimated\"}\n\n"
+                    "data: [DONE]\n\n")});
+  ava::agent::AgentLoop estimated_loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                                    .mode = ava::agent::Mode::Build,
+                                                                    .provider_id = "openai",
+                                                                    .model_id = "gpt-5.5",
+                                                                    .system_prompt = "system prompt",
+                                                                    .access_token = "token",
+                                                                    .model_pricing = pricing});
+  auto estimated_result = estimated_loop.run_turn("hi", estimated_store, provider, estimated_transport);
+  auto estimated_entries = estimated_store.load();
+  expect(estimated_result && estimated_result->usage && estimated_result->usage->estimated && estimated_entries &&
+             (*estimated_entries)[1].data_json.find("\"source\":\"estimated\"") != std::string::npos &&
+             (*estimated_entries)[1].data_json.find("\"estimation_method\":\"byte_count\"") != std::string::npos &&
+             (*estimated_entries)[1].data_json.find("\"estimated_input_bytes\":") != std::string::npos &&
+             (*estimated_entries)[1].data_json.find("cost_usd") == std::string::npos,
+         "agent loop estimates byte usage without persisting fake cost when provider usage is unavailable");
+}
+
 void test_agent_loop_tool_turn_and_continuation() {
   const auto root = temp_root() / "agent-tool";
   std::error_code remove_error;
@@ -676,6 +770,11 @@ void test_agent_loop_tool_turn_and_continuation() {
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "tool"});
   const ava::provider::OpenAIProvider provider("https://api.example.test");
+  const ava::config::ModelPricing pricing{.input_per_million = 10.0L,
+                                          .output_per_million = 20.0L,
+                                          .cache_read_per_million = std::nullopt,
+                                          .cache_write_per_million = std::nullopt,
+                                          .reasoning_per_million = std::nullopt};
   ava::tests::FakeTransport transport(
       {sse_response(
            "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_1\",\"name\":\"read_file\"}\n\n"
@@ -683,18 +782,21 @@ void test_agent_loop_tool_turn_and_continuation() {
            "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_1\",\"delta\":\"{\\\"path\\\":"
            "\\\"note.txt\\\"}\"}\n\n"
            "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_1\"}\n\n"
-           "data: [DONE]\n\n"),
+           "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,"
+           "\"output_tokens\":2,\"total_tokens\":12}}}\n\n"),
        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"read it\"}\n\n"
-                    "data: [DONE]\n\n")});
+                    "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":5,"
+                    "\"output_tokens\":3,\"total_tokens\":8}}}\n\n")});
   std::vector<ava::agent::ToolTimelineEntry> tool_events;
-  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
-      .workspace_dir = workspace,
-      .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
-      .access_token = "token",
-      .on_tool_event = [&tool_events](const auto& entry) { tool_events.push_back(entry); }});
+  ava::agent::AgentLoop loop(
+      ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                   .mode = ava::agent::Mode::Build,
+                                   .provider_id = "openai",
+                                   .model_id = "gpt-5.5",
+                                   .system_prompt = "system prompt",
+                                   .access_token = "token",
+                                   .on_tool_event = [&tool_events](const auto& entry) { tool_events.push_back(entry); },
+                                   .model_pricing = pricing});
   auto result = loop.run_turn("read note", store, provider, transport);
   expect(result && result->final_text == "read it" && result->tool_calls == 1 && result->provider_iterations == 2 &&
              result->initial_context_messages == 1 && result->tool_iterations == 1 &&
@@ -713,6 +815,10 @@ void test_agent_loop_tool_turn_and_continuation() {
   expect(tool_events.size() == 2 && tool_events.front().status == ava::agent::ToolTimelineStatus::Running &&
              tool_events.back().status == ava::agent::ToolTimelineStatus::Success,
          "agent loop publishes running and completed tool timeline events");
+  expect(result && result->usage && !result->usage->estimated && result->usage->input_tokens == 15 &&
+             result->usage->output_tokens == 5 && result->usage->total_tokens == 20 && result->cost_usd &&
+             *result->cost_usd > 0.00024L && *result->cost_usd < 0.00026L,
+         "agent loop accumulates usage and cost across provider iterations");
 
   auto entries = store.load();
   expect(entries.has_value(), "agent tool turn session loads");
@@ -1007,6 +1113,128 @@ void test_agent_loop_compaction_status_metadata() {
   expect(transport.requests().size() == 1 &&
              transport.requests()[0].body.find("Compacted prior conversation summary") != std::string::npos,
          "agent loop sends compacted context in initial provider request");
+}
+
+void test_agent_loop_replays_steering_after_mid_turn_auto_compaction() {
+  const auto root = temp_root() / "agent-steering-compaction-replay";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{
+      .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "steering-replay"});
+  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n"
+                    "data: [DONE]\n\n")});
+  int compact_calls = 0;
+  bool steering_taken = false;
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .take_steering_messages = [&steering_taken]() -> ava::core::Result<std::vector<std::string>> {
+        if (steering_taken) return std::vector<std::string>{};
+        steering_taken = true;
+        return std::vector<std::string>{"mid-turn steering"};
+      },
+      .compact_context = [&compact_calls](ava::session::SessionStore& compact_store, std::string_view trigger,
+                                          const std::vector<std::string>&) -> ava::core::Result<bool> {
+        ++compact_calls;
+        if (trigger == "auto" && compact_calls == 2) {
+          auto appended = compact_store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                                          .parent_id = "",
+                                                                          .type = ava::session::EntryType::Compaction,
+                                                                          .timestamp = ava::session::now_timestamp(),
+                                                                          .data_json = "{\"summary\":\"mid turn\"}"});
+          if (!appended) return std::unexpected(std::move(appended.error()));
+          return true;
+        }
+        return false;
+      }});
+
+  auto result = loop.run_turn("initial prompt", store, provider, transport);
+  expect(result && result->final_text == "ok", "agent loop succeeds after mid-turn auto compaction");
+  expect(transport.requests().size() == 1 && transport.requests()[0].body.find("initial prompt") != std::string::npos &&
+             transport.requests()[0].body.find("mid-turn steering") != std::string::npos,
+         "mid-turn auto compaction replays both the initial prompt and consumed steering messages");
+}
+
+void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction() {
+  const auto root = temp_root() / "agent-overflow-skip-auto";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{
+      .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "overflow-skip-auto"});
+  const OverflowOnceProvider provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"retry ok\"}\n\n"
+                    "data: [DONE]\n\n")});
+  bool overflow_compacted = false;
+  std::vector<std::string> triggers;
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .compact_context = [&](ava::session::SessionStore& compact_store, std::string_view trigger,
+                             const std::vector<std::string>&) -> ava::core::Result<bool> {
+        triggers.push_back(std::string(trigger));
+        if (trigger == "context_overflow") {
+          overflow_compacted = true;
+          auto appended =
+              compact_store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                              .parent_id = "",
+                                                              .type = ava::session::EntryType::Compaction,
+                                                              .timestamp = ava::session::now_timestamp(),
+                                                              .data_json = "{\"summary\":\"overflow summary\"}"});
+          if (!appended) return std::unexpected(std::move(appended.error()));
+          return true;
+        }
+        if (trigger == "auto" && overflow_compacted) {
+          auto appended = compact_store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                                          .parent_id = "",
+                                                                          .type = ava::session::EntryType::Compaction,
+                                                                          .timestamp = ava::session::now_timestamp(),
+                                                                          .data_json = "{\"summary\":\"duplicate\"}"});
+          if (!appended) return std::unexpected(std::move(appended.error()));
+          return true;
+        }
+        return false;
+      }});
+
+  auto result = loop.run_turn("overflow prompt", store, provider, transport);
+  auto entries = store.load();
+  const auto compactions =
+      entries
+          ? static_cast<std::size_t>(std::ranges::count_if(*entries,
+                                                           [](const ava::session::SessionEntry& entry) {
+                                                             return entry.type == ava::session::EntryType::Compaction;
+                                                           }))
+          : 0;
+  const auto user_messages =
+      entries
+          ? static_cast<std::size_t>(std::ranges::count_if(*entries,
+                                                           [](const ava::session::SessionEntry& entry) {
+                                                             return entry.type == ava::session::EntryType::UserMessage;
+                                                           }))
+          : 0;
+  expect(result && result->final_text == "retry ok", "context overflow retry succeeds after compaction");
+  expect(triggers == std::vector<std::string>({"auto", "auto", "context_overflow"}),
+         "context overflow retry skips immediate duplicate auto compaction");
+  expect(entries && compactions == 1 && user_messages == 2,
+         "context overflow retry appends one compaction and replays the active prompt once");
+  expect(transport.requests().size() == 1 &&
+             transport.requests()[0].body.find("overflow summary") != std::string::npos &&
+             transport.requests()[0].body.find("overflow prompt") != std::string::npos,
+         "context overflow retry rebuilds context from the overflow compaction boundary");
 }
 
 void test_agent_loop_cancellation_boundaries() {
@@ -1554,11 +1782,14 @@ void run_agent_tool_dispatcher_tests() {
   test_tool_dispatcher();
   test_tool_dispatcher_plan_mode_denies_mutation();
   test_agent_loop_text_only_turn();
+  test_agent_loop_usage_and_cost_persistence();
   test_agent_loop_tool_turn_and_continuation();
   test_agent_loop_permission_resolver_threads_to_tools();
   test_agent_loop_question_resolver_threads_to_tools();
   test_agent_loop_non_stream_response();
   test_agent_loop_compaction_status_metadata();
+  test_agent_loop_replays_steering_after_mid_turn_auto_compaction();
+  test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction();
   test_agent_loop_cancellation_boundaries();
   test_agent_loop_error_paths_and_bounds();
   test_agent_loop_multiple_tools_and_denied_continuation();

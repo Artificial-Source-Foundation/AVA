@@ -214,6 +214,8 @@ Avoid building a large model registry before the first loop works.
 
 MVP interface should be usable but not fancy.
 
+Frontend sequencing from the current TUI through AVA 1.0 is tracked in `docs/roadmap/frontend-tui.md`.
+
 Required:
 
 - Message transcript.

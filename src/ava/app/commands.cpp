@@ -1,6 +1,7 @@
 #include "ava/app/commands.h"
 
 #include <filesystem>
+#include <mutex>
 #include <utility>
 
 #include "ava/core/ids.h"
@@ -23,21 +24,21 @@ std::string display_path(const std::filesystem::path& path, const std::filesyste
 }
 
 ava::tools::ToolContext make_tool_context(RuntimeSession& session,
-                                           ava::permissions::PermissionResolver permission_resolver) {
-  return ava::tools::ToolContext{.workspace_dir = session.workspace_dir,
-                                  .mode = session.mode,
-                                  .permission_resolver = std::move(permission_resolver),
-                                  .permission_audit_sink = [&store = session.store](
-                                                               const ava::tools::PermissionAuditEvent& event)
-                                      -> ava::core::VoidResult {
-                                    return store.append(ava::session::SessionEntry{
-                                        .id = ava::core::make_id("entry"),
-                                        .parent_id = "",
-                                        .type = ava::session::EntryType::PermissionDecision,
-                                        .timestamp = ava::session::now_timestamp(),
-                                        .data_json = ava::tools::permission_audit_data_json(event),
-                                    });
-                                  }};
+                                          ava::permissions::PermissionResolver permission_resolver) {
+  return ava::tools::ToolContext{
+      .workspace_dir = session.workspace_dir,
+      .mode = session.mode,
+      .permission_resolver = std::move(permission_resolver),
+      .permission_audit_sink =
+          [&store = session.store](const ava::tools::PermissionAuditEvent& event) -> ava::core::VoidResult {
+        return store.append(ava::session::SessionEntry{
+            .id = ava::core::make_id("entry"),
+            .parent_id = "",
+            .type = ava::session::EntryType::PermissionDecision,
+            .timestamp = ava::session::now_timestamp(),
+            .data_json = ava::tools::permission_audit_data_json(event),
+        });
+      }};
 }
 
 ava::core::VoidResult append_mode_change(ava::session::SessionStore& store, ava::agent::Mode mode) {
@@ -82,8 +83,8 @@ ava::core::VoidResult record_tool_event(const RuntimeSession& session, const Run
 }
 
 ava::core::VoidResult record_tool_start(const RuntimeSession& session, const RuntimeEventSink& sink,
-                                        CommandResult& result,
-                                        const std::string& call_id, std::string name, std::string argument_summary) {
+                                        CommandResult& result, const std::string& call_id, std::string name,
+                                        std::string argument_summary) {
   return record_tool_event(session, sink, result,
                            ava::agent::ToolTimelineEntry{.status = ava::agent::ToolTimelineStatus::Running,
                                                          .call_id = call_id,
@@ -310,7 +311,7 @@ std::string command_help_text() {
   return "Commands:\n  /help                 Show this help\n  /mode                 Toggle build/plan mode\n  "
          "/sessions             List sessions for this workspace\n  /context              List loaded context "
          "sources\n  "
-         "/compact [text]       Record a manual compaction entry\n  /export               Export this session as "
+         "/compact [text]       Generate and record a provider summary\n  /export               Export this session as "
          "markdown\n  "
          "/glob <pattern>       List files matching a glob pattern\n  /grep <text> [glob]   Search matching files "
          "for literal text\n  /read <path>          Read a file through the permissioned read tool\n  "
@@ -380,28 +381,88 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
   }
   if (starts_with_command(request.command, "/compact")) {
     result.handled = true;
-    const auto instructions = command_argument(request.command, "/compact");
-    auto entries = session.store.load();
-    if (!entries) {
-      add_output(result, entries.error().format());
+    auto fail_compaction = [&](ava::core::Error error) -> ava::core::Result<CommandResult> {
+      if (request.propagate_compaction_errors) return std::unexpected(std::move(error));
+      add_output(result, error.format());
       return result;
+    };
+    const auto instructions = command_argument(request.command, "/compact");
+    if (!request.compaction_summary_generator) {
+      return fail_compaction(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                             "/compact requires provider-backed summary generation"));
     }
     auto config = ava::session::load_compaction_config(session.paths);
     if (!config) {
-      add_output(result, config.error().format());
-      return result;
+      return fail_compaction(std::move(config.error()));
     }
-    const auto estimated_tokens = ava::session::estimate_session_tokens(*entries);
-    auto appended = ava::session::append_manual_compaction(
-        session.store,
-        ava::session::ManualCompactionRequest{
-            .summary = "", .instructions = instructions, .config = *config, .estimated_tokens = estimated_tokens});
-    if (!appended) {
-      add_output(result, appended.error().format());
-      return result;
+
+    constexpr std::size_t max_compaction_attempts = 2;
+    std::size_t last_snapshot_entries = 0;
+    std::size_t last_current_entries = 0;
+    for (std::size_t attempt = 0; attempt < max_compaction_attempts; ++attempt) {
+      ava::core::Result<std::vector<ava::session::SessionEntry>> entries =
+          std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session entries were not loaded"));
+      if (request.session_mutex) {
+        std::lock_guard lock(*request.session_mutex);
+        entries = session.store.load();
+      } else {
+        entries = session.store.load();
+      }
+      if (!entries) {
+        return fail_compaction(std::move(entries.error()));
+      }
+      const auto estimated_tokens = ava::session::estimate_session_tokens(*entries);
+      auto summary = request.compaction_summary_generator(*entries, *config, instructions, estimated_tokens);
+      if (!summary) {
+        return fail_compaction(std::move(summary.error()));
+      }
+      if (summary->empty()) {
+        return fail_compaction(ava::core::Error(ava::core::ErrorCategory::Provider,
+                                               "compaction summary generation returned an empty summary"));
+      }
+      if (summary->size() > config->max_summary_bytes) {
+        auto error =
+            ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "generated compaction summary is too large");
+        error.with_context("max_summary_bytes", std::to_string(config->max_summary_bytes));
+        error.with_context("summary_bytes", std::to_string(summary->size()));
+        return fail_compaction(std::move(error));
+      }
+
+      bool snapshot_stale = false;
+      auto validate_and_append = [&]() -> ava::core::VoidResult {
+        auto current_entries = session.store.load();
+        if (!current_entries) return std::unexpected(std::move(current_entries.error()));
+        if (!same_session_snapshot(*entries, *current_entries)) {
+          snapshot_stale = true;
+          last_snapshot_entries = entries->size();
+          last_current_entries = current_entries->size();
+          return {};
+        }
+        return ava::session::append_manual_compaction(
+            session.store, ava::session::ManualCompactionRequest{.summary = *summary,
+                                                                 .instructions = instructions,
+                                                                 .config = *config,
+                                                                 .estimated_tokens = estimated_tokens,
+                                                                 .threshold_tokens = 0,
+                                                                 .trigger = "manual",
+                                                                 .recent_context = ""});
+      };
+      ava::core::VoidResult appended;
+      if (request.session_mutex) {
+        std::lock_guard lock(*request.session_mutex);
+        appended = validate_and_append();
+      } else {
+        appended = validate_and_append();
+      }
+      if (!appended) {
+        return fail_compaction(std::move(appended.error()));
+      }
+      if (!snapshot_stale) {
+        add_output(result, "compaction summary recorded");
+        return result;
+      }
     }
-    add_output(result, "manual compaction recorded");
-    return result;
+    return fail_compaction(stale_compaction_snapshot_error("manual", last_snapshot_entries, last_current_entries));
   }
   if (request.command == "/export") {
     result.handled = true;

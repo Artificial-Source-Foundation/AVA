@@ -44,7 +44,6 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/terminal.h"
 #include "tests/support/fake_transport.h"
-
 #include "tests/support/test_harness.h"
 
 namespace {
@@ -591,12 +590,21 @@ void test_model_and_prompt_config() {
   const auto builtin = ava::config::builtin_model_registry();
   auto selected = ava::config::select_default_model(builtin);
   expect(selected.provider_id == "openai" && selected.model_id == "gpt-5.5", "default model is OpenAI GPT-5.5");
+  bool saw_priced_builtin = false;
+  for (const auto& model : builtin.models) {
+    saw_priced_builtin = saw_priced_builtin || (model.model_id == "gpt-4.1-mini" && model.context_window_tokens &&
+                                                model.pricing && *model.context_window_tokens == 1'048'576 &&
+                                                model.pricing->input_per_million && model.pricing->output_per_million);
+  }
+  expect(saw_priced_builtin, "builtin model registry carries static pricing and context metadata where known");
 
   std::filesystem::create_directories(paths.ava_config_dir);
   {
     std::ofstream file(paths.models_file, std::ios::binary | std::ios::trunc);
     file << "{\"default_provider\":\"openai\",\"default_model\":\"gpt-5.5-mini\","
-            "\"models\":[{\"provider\":\"openai\",\"id\":\"gpt-5.5-mini\",\"name\":\"Mini\",\"family\":\"gpt-5\"}]}";
+            "\"models\":[{\"provider\":\"openai\",\"id\":\"gpt-5.5-mini\",\"name\":\"Mini\","
+            "\"family\":\"gpt-5\",\"context_window_tokens\":12345,\"max_output_tokens\":678,"
+            "\"pricing\":{\"input_per_million\":1.5,\"output_per_million\":2.5}}]}";
   }
   auto registry = ava::config::load_model_registry(paths);
   expect(registry.has_value(), "model registry loads XDG override");
@@ -604,6 +612,34 @@ void test_model_and_prompt_config() {
     selected = ava::config::select_default_model(*registry);
     expect(selected.model_id == "gpt-5.5-mini" && selected.display_name == "Mini",
            "default model override selects user model");
+    const ava::provider::TokenUsage usage{.input_tokens = 1000,
+                                          .output_tokens = 2000,
+                                          .reasoning_tokens = std::nullopt,
+                                          .cache_read_tokens = std::nullopt,
+                                          .cache_write_tokens = std::nullopt,
+                                          .total_tokens = 3000,
+                                          .estimated_input_bytes = std::nullopt,
+                                          .estimated_output_bytes = std::nullopt,
+                                          .estimated_total_bytes = std::nullopt,
+                                          .estimated = false};
+    auto cost = selected.pricing ? ava::config::usage_cost_usd(*selected.pricing, usage) : std::nullopt;
+    expect(selected.context_window_tokens == 12345 && selected.max_output_tokens == 678 && cost && *cost > 0.0064L &&
+               *cost < 0.0066L,
+           "model registry parses local pricing metadata and calculates cost");
+    expect(!ava::config::usage_cost_usd(ava::config::ModelPricing{}, usage),
+           "usage cost remains unknown when pricing rates are absent");
+    const ava::provider::TokenUsage cached_usage{.input_tokens = 1000,
+                                                 .output_tokens = 0,
+                                                 .reasoning_tokens = std::nullopt,
+                                                 .cache_read_tokens = 100,
+                                                 .cache_write_tokens = std::nullopt,
+                                                 .total_tokens = 1000,
+                                                 .estimated_input_bytes = std::nullopt,
+                                                 .estimated_output_bytes = std::nullopt,
+                                                 .estimated_total_bytes = std::nullopt,
+                                                 .estimated = false};
+    expect(!ava::config::usage_cost_usd(*selected.pricing, cached_usage),
+           "usage cost remains unknown when present cache usage has no cache pricing");
   }
 
   auto inferred_family = ava::config::select_default_model(

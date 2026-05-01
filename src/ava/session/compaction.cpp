@@ -1,5 +1,6 @@
 #include "ava/session/compaction.h"
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -12,6 +13,7 @@ namespace ava::session {
 namespace {
 
 constexpr std::size_t max_compaction_config_bytes = 64 * 1024;
+constexpr std::size_t fallback_auto_threshold_tokens = 80'000;
 constexpr std::string_view unavailable_summary =
     "Prior context was compacted manually; provider-generated summary unavailable.";
 
@@ -65,7 +67,8 @@ ava::core::VoidResult assign_size_field(std::string_view content, std::string_vi
   const auto value = ava::core::json::integer_field(content, field);
   if (!value) return {};
   if (*value < 0) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "compaction config field must not be negative");
+    auto error =
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "compaction config field must not be negative");
     error.with_context("field", std::string(field));
     return std::unexpected(std::move(error));
   }
@@ -75,16 +78,18 @@ ava::core::VoidResult assign_size_field(std::string_view content, std::string_vi
 
 std::string compaction_data_json(const ManualCompactionRequest& request, std::string_view summary,
                                  bool summary_unavailable) {
-  return "{\"trigger\":\"manual\",\"status\":\"recorded\",\"summary_unavailable\":" +
+  const auto trigger = request.trigger.empty() ? std::string("manual") : request.trigger;
+  const auto threshold = request.threshold_tokens > 0 ? request.threshold_tokens : request.config.auto_threshold_tokens;
+  return "{\"trigger\":\"" + ava::core::json::escape(trigger) + "\",\"status\":\"recorded\",\"summary_unavailable\":" +
          (summary_unavailable ? std::string("true") : std::string("false")) + ",\"summary\":\"" +
-         ava::core::json::escape(summary) + "\",\"instructions\":\"" +
-         ava::core::json::escape(request.instructions) + "\",\"model\":\"" +
-         ava::core::json::escape(request.config.model_id) + "\",\"threshold_tokens\":" +
-         std::to_string(request.config.auto_threshold_tokens) + ",\"estimated_tokens\":" +
-         std::to_string(request.estimated_tokens) + ",\"keep_recent_tokens\":" +
-         std::to_string(request.config.keep_recent_tokens) + ",\"keep_recent_messages\":" +
-         std::to_string(request.config.keep_recent_messages) + ",\"max_summary_bytes\":" +
-         std::to_string(request.config.max_summary_bytes) + "}";
+         ava::core::json::escape(summary) + "\",\"instructions\":\"" + ava::core::json::escape(request.instructions) +
+         "\",\"model\":\"" + ava::core::json::escape(request.config.model_id) +
+         "\",\"threshold_tokens\":" + std::to_string(threshold) +
+         ",\"estimated_tokens\":" + std::to_string(request.estimated_tokens) +
+         ",\"keep_recent_tokens\":" + std::to_string(request.config.keep_recent_tokens) +
+         ",\"keep_recent_messages\":" + std::to_string(request.config.keep_recent_messages) +
+         ",\"max_summary_bytes\":" + std::to_string(request.config.max_summary_bytes) + ",\"recent_context\":\"" +
+         ava::core::json::escape(request.recent_context) + "\"}";
 }
 
 }  // namespace
@@ -96,6 +101,9 @@ ava::core::Result<CompactionConfig> parse_compaction_config(std::string_view con
   if (auto model = ava::core::json::string_field(content, "model")) config.model_id = *model;
   if (auto model = ava::core::json::string_field(content, "compaction_model")) config.model_id = *model;
 
+  if (ava::core::json::field_value_start(content, "auto_threshold_tokens")) {
+    config.auto_threshold_tokens_explicit = true;
+  }
   if (auto assigned = assign_size_field(content, "auto_threshold_tokens", config.auto_threshold_tokens); !assigned) {
     return std::unexpected(std::move(assigned.error()));
   }
@@ -144,12 +152,40 @@ std::size_t estimate_session_tokens(const std::vector<SessionEntry>& entries) no
   return tokens;
 }
 
+std::size_t effective_auto_threshold_tokens(const CompactionConfig& config,
+                                            std::optional<long long> context_window_tokens) noexcept {
+  if (config.auto_threshold_tokens > 0) return config.auto_threshold_tokens;
+  if (config.auto_threshold_tokens_explicit) return 0;
+  if (!context_window_tokens || *context_window_tokens <= 0) return fallback_auto_threshold_tokens;
+  const auto window = static_cast<std::size_t>(*context_window_tokens);
+  return std::max<std::size_t>(1, (window * 4) / 5);
+}
+
+std::size_t estimate_active_context_tokens(const std::vector<SessionEntry>& entries) noexcept {
+  std::size_t tokens = 0;
+  for (const auto& entry : entries) {
+    if (entry.type == EntryType::Compaction) {
+      tokens = estimate_tokens(entry.data_json);
+    } else if (entry.type == EntryType::UserMessage || entry.type == EntryType::AssistantMessage ||
+               entry.type == EntryType::ToolCall || entry.type == EntryType::ToolResult) {
+      tokens += estimate_tokens(entry.data_json);
+    }
+  }
+  return tokens;
+}
+
 CompactionDecision should_auto_compact(const std::vector<SessionEntry>& entries,
                                        const CompactionConfig& config) noexcept {
-  const auto estimated = estimate_session_tokens(entries);
-  return CompactionDecision{.should_compact = config.auto_threshold_tokens > 0 && estimated >= config.auto_threshold_tokens,
+  return should_auto_compact(entries, config, std::nullopt);
+}
+
+CompactionDecision should_auto_compact(const std::vector<SessionEntry>& entries, const CompactionConfig& config,
+                                       std::optional<long long> context_window_tokens) noexcept {
+  const auto estimated = estimate_active_context_tokens(entries);
+  const auto threshold = effective_auto_threshold_tokens(config, context_window_tokens);
+  return CompactionDecision{.should_compact = threshold > 0 && estimated >= threshold,
                             .estimated_tokens = estimated,
-                            .threshold_tokens = config.auto_threshold_tokens};
+                            .threshold_tokens = threshold};
 }
 
 ava::core::VoidResult append_manual_compaction(SessionStore& store, ManualCompactionRequest request) {

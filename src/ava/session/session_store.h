@@ -70,6 +70,7 @@ class SessionStore {
 
 [[nodiscard]] std::string to_string(EntryType type);
 [[nodiscard]] ava::core::Result<EntryType> parse_entry_type(std::string_view value);
+[[nodiscard]] bool is_internal_replay_user_message(const SessionEntry& entry);
 [[nodiscard]] std::string now_timestamp();
 [[nodiscard]] std::string json_escape(std::string_view value);
 

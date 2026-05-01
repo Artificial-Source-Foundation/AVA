@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -22,6 +23,19 @@ struct ProviderRequest {
   std::vector<ChatMessage> messages;
   std::vector<std::string> tools_json;
   bool stream = true;
+};
+
+struct TokenUsage {
+  std::optional<long long> input_tokens;
+  std::optional<long long> output_tokens;
+  std::optional<long long> reasoning_tokens;
+  std::optional<long long> cache_read_tokens;
+  std::optional<long long> cache_write_tokens;
+  std::optional<long long> total_tokens;
+  std::optional<long long> estimated_input_bytes;
+  std::optional<long long> estimated_output_bytes;
+  std::optional<long long> estimated_total_bytes;
+  bool estimated = false;
 };
 
 struct HttpRequest {
@@ -54,6 +68,7 @@ struct StreamEvent {
   std::string tool_call_id;
   std::string tool_name;
   std::string error_message;
+  std::optional<TokenUsage> usage;
 };
 
 class Provider {
@@ -77,5 +92,6 @@ class Transport {
 };
 
 [[nodiscard]] std::string to_string(StreamEventType type);
+[[nodiscard]] bool is_context_overflow_error(const ava::core::Error& error);
 
 }  // namespace ava::provider

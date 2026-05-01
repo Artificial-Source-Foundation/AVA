@@ -185,6 +185,11 @@ ava::core::VoidResult validate_entry_version(std::string_view line, const std::f
   return std::unexpected(std::move(error));
 }
 
+bool is_unsupported_session_version_error(const ava::core::Error& error) {
+  return error.category() == ava::core::ErrorCategory::Session &&
+         error.message() == "unsupported session entry version";
+}
+
 std::string extract_json_string(std::string_view line, std::string_view key) {
   const auto start = ava::core::json::field_value_start(line, key);
   if (!start || *start >= line.size() || line[*start] != '"') {
@@ -605,6 +610,11 @@ ava::core::Result<std::vector<SessionSummary>> SessionStore::list_sessions(const
     }
     auto entries = store->load();
     if (!entries) {
+      if (is_unsupported_session_version_error(entries.error())) {
+        auto error = std::move(entries.error());
+        error.with_context("session_id", session_id);
+        return std::unexpected(std::move(error));
+      }
       continue;
     }
     std::string last_updated;
@@ -674,6 +684,12 @@ ava::core::Result<EntryType> parse_entry_type(std::string_view value) {
   auto error = ava::core::Error(ava::core::ErrorCategory::Session, "unknown session entry type");
   error.with_context("type", std::string(value));
   return std::unexpected(std::move(error));
+}
+
+bool is_internal_replay_user_message(const SessionEntry& entry) {
+  if (entry.type != EntryType::UserMessage) return false;
+  const auto start = ava::core::json::field_value_start(entry.data_json, "internal_replay");
+  return start && entry.data_json.substr(*start, 4) == "true";
 }
 
 std::string now_timestamp() {

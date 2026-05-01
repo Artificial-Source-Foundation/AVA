@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -16,6 +17,9 @@ struct CommandRequest {
   std::string command;
   RuntimeEventSink event_sink = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
+  CompactionSummaryGenerator compaction_summary_generator = nullptr;
+  std::mutex* session_mutex = nullptr;
+  bool propagate_compaction_errors = false;
 };
 
 struct CommandResult {

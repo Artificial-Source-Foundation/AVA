@@ -90,6 +90,10 @@ std::optional<long long> integer_field(const SessionEntry& entry, std::string_vi
   return ava::core::json::integer_field(entry.data_json, key);
 }
 
+std::optional<std::string> object_field(const SessionEntry& entry, std::string_view key) {
+  return ava::core::json::object_field(entry.data_json, key);
+}
+
 bool bool_field_is_true(const SessionEntry& entry, std::string_view key) {
   const auto start = ava::core::json::field_value_start(entry.data_json, key);
   return start && entry.data_json.substr(*start, 4) == "true";
@@ -113,6 +117,7 @@ void append_assistant_message(std::string& out, const SessionEntry& entry, const
   append_heading(out, "Assistant");
   append_metadata(out, entry, options);
   append_fenced_block(out, "Message", string_field(entry, "text").value_or(""));
+  append_optional_fenced_block(out, "Usage", object_field(entry, "usage"), "json");
 }
 
 void append_tool_call(std::string& out, const SessionEntry& entry, const ExportOptions& options) {
@@ -146,7 +151,8 @@ void append_session_start(std::string& out, const SessionEntry& entry, const Exp
   append_optional_fenced_block(out, "Model", string_field(entry, "model"));
 }
 
-void append_compaction_number(std::string& out, const SessionEntry& entry, std::string_view label, std::string_view key) {
+void append_compaction_number(std::string& out, const SessionEntry& entry, std::string_view label,
+                              std::string_view key) {
   if (const auto value = integer_field(entry, key)) append_fenced_block(out, label, std::to_string(*value));
 }
 
@@ -161,7 +167,8 @@ void append_compaction(std::string& out, const SessionEntry& entry, const Export
     append_optional_fenced_block(out, "Trigger", string_field(entry, "trigger"));
     append_optional_fenced_block(out, "Status", string_field(entry, "status"));
     append_optional_fenced_block(out, "Model", string_field(entry, "model"));
-    append_fenced_block(out, "Summary unavailable", bool_field_is_true(entry, "summary_unavailable") ? "true" : "false");
+    append_fenced_block(out, "Summary unavailable",
+                        bool_field_is_true(entry, "summary_unavailable") ? "true" : "false");
     append_compaction_number(out, entry, "Estimated tokens", "estimated_tokens");
     append_compaction_number(out, entry, "Threshold tokens", "threshold_tokens");
     append_compaction_number(out, entry, "Keep recent tokens", "keep_recent_tokens");
@@ -195,6 +202,7 @@ std::string format_session_markdown(const std::vector<SessionEntry>& entries, co
   std::string out = "# AVA Session Export\n\n";
 
   for (const auto& entry : entries) {
+    if (is_internal_replay_user_message(entry)) continue;
     switch (entry.type) {
       case EntryType::SessionStart:
         append_session_start(out, entry, options);

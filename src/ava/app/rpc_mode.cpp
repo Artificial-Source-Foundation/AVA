@@ -1,5 +1,6 @@
 #include "ava/app/rpc_mode.h"
 
+#include <atomic>
 #include <cctype>
 #include <condition_variable>
 #include <deque>
@@ -98,7 +99,7 @@ std::string integer_field_json(std::string_view key, long long value) {
 
 std::string decimal_field_json(std::string_view key, long double value) {
   std::ostringstream out;
-  out << std::fixed << std::setprecision(6) << value;
+  out << std::setprecision(12) << value;
   return "\"" + std::string(key) + "\":" + out.str();
 }
 
@@ -266,6 +267,7 @@ ava::core::Result<std::string> messages_result_json(const RuntimeSession& sessio
   bool truncated = false;
   std::size_t included = 0;
   for (const auto& entry : *entries) {
+    if (ava::session::is_internal_replay_user_message(entry)) continue;
     if (entry.type != ava::session::EntryType::UserMessage && entry.type != ava::session::EntryType::AssistantMessage &&
         entry.type != ava::session::EntryType::ToolCall && entry.type != ava::session::EntryType::ToolResult) {
       continue;
@@ -316,14 +318,50 @@ ava::core::Result<std::string> session_stats_result_json(const RuntimeSession& s
     json += ',';
     json += integer_field_json("output_tokens", *stats.output_tokens);
   }
+  if (stats.reasoning_tokens) {
+    json += ',';
+    json += integer_field_json("reasoning_tokens", *stats.reasoning_tokens);
+  }
+  if (stats.cache_read_tokens) {
+    json += ',';
+    json += integer_field_json("cache_read_tokens", *stats.cache_read_tokens);
+  }
+  if (stats.cache_write_tokens) {
+    json += ',';
+    json += integer_field_json("cache_write_tokens", *stats.cache_write_tokens);
+  }
   if (stats.total_tokens) {
     json += ',';
     json += integer_field_json("total_tokens", *stats.total_tokens);
+  }
+  if (stats.estimated_input_bytes) {
+    json += ',';
+    json += integer_field_json("estimated_input_bytes", *stats.estimated_input_bytes);
+  }
+  if (stats.estimated_output_bytes) {
+    json += ',';
+    json += integer_field_json("estimated_output_bytes", *stats.estimated_output_bytes);
+  }
+  if (stats.estimated_total_bytes) {
+    json += ',';
+    json += integer_field_json("estimated_total_bytes", *stats.estimated_total_bytes);
   }
   if (stats.total_cost_usd) {
     json += ',';
     json += decimal_field_json("total_cost_usd", *stats.total_cost_usd);
   }
+  if (stats.known_cost_usd) {
+    json += ',';
+    json += decimal_field_json("known_cost_usd", *stats.known_cost_usd);
+  }
+  json += ',';
+  json += bool_field_json("cost_complete", stats.cost_complete);
+  json += ',';
+  json += number_field_json("unknown_cost_entries", stats.unknown_cost_entries);
+  json += ',';
+  json += number_field_json("exact_usage_entries", stats.exact_usage_entries);
+  json += ',';
+  json += number_field_json("estimated_usage_entries", stats.estimated_usage_entries);
   json += ",\"counts\":{";
   json += number_field_json("session_start", stats.counts.session_start);
   json += ',';
@@ -378,7 +416,7 @@ struct QueuedRpcMessage {
 
 struct RpcRunState {
   std::mutex mutex;
-  bool cancel_requested = false;
+  std::atomic_bool cancel_requested = false;
   bool active_run = false;
   bool input_closed = false;
   std::string active_request_id;
@@ -426,7 +464,7 @@ ava::core::Error no_pending_request_error(std::string_view request_id) {
 
 bool cancel_requested(RpcRunState& state) {
   std::lock_guard lock(state.mutex);
-  return state.cancel_requested;
+  return state.cancel_requested.load(std::memory_order_relaxed);
 }
 
 bool active_run(RpcRunState& state) {
@@ -517,7 +555,7 @@ ava::core::Result<QueuedRpcMessage> queue_rpc_message(std::deque<QueuedRpcMessag
                                                       std::string message) {
   std::lock_guard lock(state.mutex);
   if (state.input_closed) return std::unexpected(input_closed_error(command_type));
-  if (state.cancel_requested) return std::unexpected(canceled_error());
+  if (state.cancel_requested.load(std::memory_order_relaxed)) return std::unexpected(canceled_error());
   if (!state.active_run || state.active_request_id.empty()) {
     return std::unexpected(requires_active_prompt_error(command_type));
   }
@@ -549,7 +587,7 @@ std::vector<QueuedRpcMessage> take_queued_steering_messages(RpcRunState& state, 
 
 std::optional<QueuedRpcMessage> take_next_follow_up_message(RpcRunState& state) {
   std::lock_guard lock(state.mutex);
-  if (state.cancel_requested || state.input_closed) return std::nullopt;
+  if (state.cancel_requested.load(std::memory_order_relaxed) || state.input_closed) return std::nullopt;
   if (state.follow_up_messages.empty()) return std::nullopt;
   auto queued = std::move(state.follow_up_messages.front());
   state.follow_up_messages.pop_front();
@@ -847,13 +885,15 @@ ava::core::VoidResult write_error(RpcOutput& output, std::string_view id, const 
 
 ava::core::Result<RuntimeRunOptions> ensure_prompt_runtime_options(const ava::config::XdgPaths& paths,
                                                                    RuntimeRunOptions options,
-                                                                   ava::provider::Transport& transport) {
+                                                                   ava::provider::Transport& transport,
+                                                                   std::string_view purpose) {
   if (!options.access_token.empty()) return options;
 
   auto credential = ava::config::load_openai_credential(paths);
   if (!credential) return std::unexpected(credential.error());
   if (!*credential) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "RPC prompt requires OpenAI auth");
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                  "RPC " + std::string(purpose) + " requires OpenAI auth");
     error.with_context("auth_file", paths.auth_file.string());
     return std::unexpected(std::move(error));
   }
@@ -1174,7 +1214,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
   auto cancel_and_clear_queued = [&] {
     std::lock_guard lock(run_state.mutex);
     run_state.input_closed = true;
-    run_state.cancel_requested = true;
+    run_state.cancel_requested.store(true, std::memory_order_relaxed);
     ClearedRpcQueues cleared;
     cleared.steering_messages.reserve(run_state.steering_messages.size());
     while (!run_state.steering_messages.empty()) {
@@ -1288,7 +1328,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
       session = std::move(*created);
       {
         std::lock_guard state_lock(run_state.mutex);
-        run_state.cancel_requested = false;
+        run_state.cancel_requested.store(false, std::memory_order_relaxed);
       }
       if (auto written = write_success(output, command->id, state_result_json(session, false)); !written) {
         return written;
@@ -1319,7 +1359,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
       session = std::move(*opened);
       {
         std::lock_guard state_lock(run_state.mutex);
-        run_state.cancel_requested = false;
+        run_state.cancel_requested.store(false, std::memory_order_relaxed);
       }
       if (auto written = write_success(output, command->id, state_result_json(session, false)); !written) {
         return written;
@@ -1433,7 +1473,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
       ClearedRpcQueues cleared;
       {
         std::lock_guard lock(run_state.mutex);
-        run_state.cancel_requested = true;
+        run_state.cancel_requested.store(true, std::memory_order_relaxed);
         was_active = run_state.active_run;
         cleared.steering_messages.reserve(run_state.steering_messages.size());
         while (!run_state.steering_messages.empty()) {
@@ -1465,12 +1505,36 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
     }
 
     if (command->type == "context" || command->type == "export" || command->type == "compact") {
-      if (active_run(run_state)) {
-        if (auto written = write_error(output, command->id, active_run_reject_error(command->type)); !written) {
-          return written;
+      bool compact_active_run = false;
+      {
+        std::lock_guard lock(run_state.mutex);
+        if (run_state.active_run) {
+          if (auto written = write_error(output, command->id, active_run_reject_error(command->type)); !written) {
+            return written;
+          }
+          continue;
         }
-        continue;
+        if (command->type == "compact") {
+          run_state.active_run = true;
+          run_state.active_request_id = command->id;
+          run_state.cancel_requested.store(false, std::memory_order_relaxed);
+          compact_active_run = true;
+        }
       }
+      auto clear_compact_active_run = [&] {
+        if (compact_active_run) {
+          set_active_run(run_state, false);
+          compact_active_run = false;
+        }
+      };
+      auto write_command_error = [&](ava::core::Error error) -> ava::core::VoidResult {
+        clear_compact_active_run();
+        return write_error(output, command->id, std::move(error));
+      };
+      auto write_command_success = [&](std::string json) -> ava::core::VoidResult {
+        clear_compact_active_run();
+        return write_success(output, command->id, std::move(json));
+      };
       std::string slash_command;
       if (command->type == "context") {
         slash_command = "/context";
@@ -1480,18 +1544,45 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
         slash_command = "/compact";
         if (command->instructions) slash_command += " " + *command->instructions;
       }
+      std::optional<RuntimeRunOptions> compact_runtime_options;
+      if (command->type == "compact") {
+        ava::config::XdgPaths paths;
+        {
+          std::lock_guard lock(session_mutex);
+          paths = session.paths;
+        }
+        auto ensured = ensure_prompt_runtime_options(paths, runtime_options, transport, "compact");
+        if (!ensured) {
+          if (auto written = write_command_error(ensured.error()); !written) return written;
+          continue;
+        }
+        compact_runtime_options = std::move(*ensured);
+      }
       EventBus event_bus;
       subscribe_event_envelope_writer(event_bus, output);
-      std::lock_guard lock(session_mutex);
+      std::unique_lock lock(session_mutex, std::defer_lock);
+      if (command->type != "compact") lock.lock();
+      auto summary_generator =
+          command->type == "compact"
+              ? CompactionSummaryGenerator([&](const std::vector<ava::session::SessionEntry>& entries,
+                                               const ava::session::CompactionConfig& config,
+                                               std::string_view instructions, std::size_t estimated_tokens) {
+                  return generate_compaction_summary(session, entries, config, instructions, estimated_tokens, provider,
+                                                     transport, *compact_runtime_options);
+                })
+              : CompactionSummaryGenerator{};
       auto result = run_command(session, CommandRequest{.command = std::move(slash_command),
                                                         .event_sink = make_runtime_event_bus_adapter(
                                                             event_bus, rpc_event_context(command->id)),
-                                                        .permission_resolver = runtime_options.permission_resolver});
+                                                         .permission_resolver = runtime_options.permission_resolver,
+                                                         .compaction_summary_generator = std::move(summary_generator),
+                                                         .session_mutex = &session_mutex,
+                                                          .propagate_compaction_errors = command->type == "compact"});
       if (!result) {
-        if (auto written = write_error(output, command->id, result.error()); !written) return written;
+        if (auto written = write_command_error(result.error()); !written) return written;
         continue;
       }
-      if (auto written = write_success(output, command->id, command_result_json(*result)); !written) return written;
+      if (auto written = write_command_success(command_result_json(*result)); !written) return written;
       continue;
     }
 
@@ -1532,7 +1623,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
           }
         };
 
-        auto prompt_options = ensure_prompt_runtime_options(paths, std::move(prompt_base_options), transport);
+        auto prompt_options = ensure_prompt_runtime_options(paths, std::move(prompt_base_options), transport, "prompt");
         if (!prompt_options) {
           if (auto written = write_error(output, prompt_id, prompt_options.error()); !written) {
             record_async_error(run_state, std::move(written.error()));

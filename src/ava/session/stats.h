@@ -29,8 +29,19 @@ struct SessionStats {
   SessionEntryCounts counts;
   std::optional<long long> input_tokens;
   std::optional<long long> output_tokens;
+  std::optional<long long> reasoning_tokens;
+  std::optional<long long> cache_read_tokens;
+  std::optional<long long> cache_write_tokens;
   std::optional<long long> total_tokens;
+  std::optional<long long> estimated_input_bytes;
+  std::optional<long long> estimated_output_bytes;
+  std::optional<long long> estimated_total_bytes;
   std::optional<long double> total_cost_usd;
+  std::optional<long double> known_cost_usd;
+  bool cost_complete = true;
+  std::size_t unknown_cost_entries = 0;
+  std::size_t exact_usage_entries = 0;
+  std::size_t estimated_usage_entries = 0;
 };
 
 [[nodiscard]] SessionStats compute_session_stats(const std::vector<SessionEntry>& entries);

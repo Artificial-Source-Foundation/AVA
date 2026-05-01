@@ -21,7 +21,7 @@ Print mode accepts an optional prompt argument after `--print`/`-p`. If no promp
 
 Text output is the default. In text output, stdout contains the final assistant text only; diagnostics, tool progress, and errors go to stderr. JSONL output is selected with `--json` or `--output json`; stdout contains serialized event envelopes and ends with either a `done` or `error` event for turns that reach the runtime. Credentials and startup failures are reported on stderr.
 
-`--no-session` is not implemented because the shared runtime currently opens a session for every turn. Sessionless print mode is deferred until the runtime supports it directly.
+`--no-session` is not implemented because the shared runtime currently opens a session for every turn. Sessionless print mode is deferred in the product plan until the runtime supports it directly.
 
 ## Headless Permission Flags
 
@@ -162,7 +162,7 @@ State:
 
 Returns the active protocol version, session id/path, mode, provider/model, workspace/current directory, cancel flag, and loaded context source summary.
 
-`get_state` and `list_sessions` remain available while a prompt is active. `get_messages` and `get_session_stats` materialize session history and are rejected while a prompt is active.
+`get_state` and `list_sessions` remain available while a prompt is active. `get_messages`, `get_session_stats`, `compact`, `export`, and `context` materialize or mutate session history and are rejected while a prompt is active. RPC `/compact` also marks the session busy while it generates and records the provider summary, so a prompt cannot start midway through compaction.
 
 Messages:
 
@@ -170,7 +170,7 @@ Messages:
 {"id":"3a","type":"get_messages"}
 ```
 
-Returns durable message-like session entries for the active session in append order. The current response is `{session_id,messages,truncated,message_count}` where each message includes `id`, `parent_id`, `type`, `timestamp`, and raw object-shaped `data` unless the individual entry is too large, in which case the entry is marked `truncated`. Responses are capped to protect headless clients and the AVA process. This intentionally excludes non-message bookkeeping entries such as `session_start`, `compaction`, and permission audit rows.
+Returns durable message-like session entries for the active session in append order. The current response is `{session_id,messages,truncated,message_count}` where each message includes `id`, `parent_id`, `type`, `timestamp`, and raw object-shaped `data` unless the individual entry is too large, in which case the entry is marked `truncated`. Responses are capped to protect headless clients and the AVA process. This intentionally excludes non-message bookkeeping entries such as `session_start`, `compaction`, and permission audit rows. Internal replay user messages inserted after context compaction are also hidden because they are provider-context repair entries, not user-visible transcript turns.
 
 Session stats:
 
@@ -178,7 +178,11 @@ Session stats:
 {"id":"3b","type":"get_session_stats"}
 ```
 
-Returns `session_id`, `session_path`, `entry_count`, first/last timestamps, and small counts for user/assistant/tool/permission/error entries.
+Returns `session_id`, `session_path`, `entry_count`, first/last timestamps, usage/cost totals when known, and counts for session entry types. User-message counts exclude internal replay entries.
+
+Usage fields are additive and appear only when present in saved assistant entries: `input_tokens`, `output_tokens`, `reasoning_tokens`, `cache_read_tokens`, `cache_write_tokens`, and `total_tokens`. Exact provider token totals are kept separate from byte-count fallback estimates: `estimated_input_bytes`, `estimated_output_bytes`, and `estimated_total_bytes` report fallback byte estimates when provider usage was unavailable. `exact_usage_entries` and `estimated_usage_entries` show how many assistant entries contributed to each category.
+
+Cost fields are conservative. `known_cost_usd` is the sum of assistant entries whose model pricing was known. `total_cost_usd` is emitted only when `cost_complete:true`, meaning every exact billable usage entry had known pricing. If any exact billable entry lacks pricing, `cost_complete:false`, `unknown_cost_entries` is greater than zero, and clients should treat `known_cost_usd` as a partial subtotal.
 
 List sessions:
 
@@ -195,7 +199,7 @@ Open a session by id or unambiguous prefix:
 {"id":"5b","type":"switch_session","session_id":"session-prefix"}
 ```
 
-Switches the active runtime session and returns the same state shape as `get_state`. `switch_session` is the preferred Phase 2 name; `open_session` remains supported for compatibility. Session-switching commands are rejected while a prompt is active.
+Switches the active runtime session and returns the same state shape as `get_state`. Use `switch_session` for new integrations; `open_session` remains supported as a compatibility alias. Session-switching commands are rejected while a prompt is active.
 
 New session:
 
@@ -214,6 +218,8 @@ Backend slash-command equivalents:
 ```
 
 These dispatch `/compact`, `/export`, and `/context` through the shared backend command dispatcher. Responses include `handled`, `quit`, `output` (array of strings), and `text` (joined output).
+
+`compact` requires OpenAI auth/runtime access and asks the provider to generate the compaction summary before appending a compaction boundary. It returns `success:false` for missing auth, provider summary failure, empty or oversized summaries, stale-session append failures, or active-run conflicts. On success, the recorded compaction entry contains summary metadata such as trigger, estimated tokens, threshold, retained recent context, and keep-recent settings.
 
 Unknown command types return an error response and do not terminate the RPC loop.
 

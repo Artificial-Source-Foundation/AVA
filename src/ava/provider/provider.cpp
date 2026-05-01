@@ -1,8 +1,37 @@
 #include "ava/provider/provider.h"
 
+#include <algorithm>
+#include <cctype>
+#include <initializer_list>
+#include <string>
+#include <string_view>
 #include <utility>
 
 namespace ava::provider {
+namespace {
+
+std::string lower_copy(std::string_view value) {
+  std::string lowered(value);
+  std::ranges::transform(lowered, lowered.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  return lowered;
+}
+
+bool has_any(std::string_view haystack, std::initializer_list<std::string_view> needles) {
+  for (const auto needle : needles) {
+    if (haystack.find(needle) != std::string_view::npos) return true;
+  }
+  return false;
+}
+
+bool looks_like_context_overflow(std::string_view text) {
+  const auto lowered = lower_copy(text);
+  const bool mentions_context = has_any(lowered, {"context", "window", "token", "tokens", "prompt"});
+  const bool mentions_overflow = has_any(lowered, {"too many", "too much", "exceed", "exceeded", "exceeds",
+                                                   "maximum", "max", "limit", "length", "larger than"});
+  return mentions_context && mentions_overflow;
+}
+
+}  // namespace
 
 bool Transport::supports_streaming() const noexcept { return false; }
 
@@ -42,6 +71,15 @@ std::string to_string(StreamEventType type) {
       return "error";
   }
   return "error";
+}
+
+bool is_context_overflow_error(const ava::core::Error& error) {
+  if (error.category() != ava::core::ErrorCategory::Provider) return false;
+  if (looks_like_context_overflow(error.message())) return true;
+  for (const auto& item : error.context()) {
+    if (looks_like_context_overflow(item.value)) return true;
+  }
+  return false;
 }
 
 }  // namespace ava::provider

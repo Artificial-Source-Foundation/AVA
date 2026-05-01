@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <initializer_list>
+#include <optional>
 #include <sstream>
 #include <utility>
 
@@ -104,6 +106,64 @@ bool is_ignored_lifecycle_event(std::string_view type) {
          type == "response.function_call_arguments.done";
 }
 
+std::optional<long long> non_negative_integer_field(std::string_view object, std::string_view key) {
+  const auto value = ava::core::json::integer_field(object, key);
+  if (!value || *value < 0) return std::nullopt;
+  return value;
+}
+
+std::optional<long long> first_integer_field(std::string_view object, std::initializer_list<std::string_view> keys) {
+  for (const auto key : keys) {
+    if (const auto value = non_negative_integer_field(object, key)) return value;
+  }
+  return std::nullopt;
+}
+
+std::optional<TokenUsage> usage_from_object(std::string_view usage_object) {
+  TokenUsage usage;
+  usage.input_tokens = first_integer_field(usage_object, {"input_tokens", "prompt_tokens"});
+  usage.output_tokens = first_integer_field(usage_object, {"output_tokens", "completion_tokens"});
+  usage.total_tokens = first_integer_field(usage_object, {"total_tokens"});
+
+  if (const auto output_details = ava::core::json::object_field(usage_object, "output_tokens_details")) {
+    usage.reasoning_tokens = first_integer_field(*output_details, {"reasoning_tokens"});
+  }
+  if (!usage.reasoning_tokens) {
+    if (const auto completion_details = ava::core::json::object_field(usage_object, "completion_tokens_details")) {
+      usage.reasoning_tokens = first_integer_field(*completion_details, {"reasoning_tokens"});
+    }
+  }
+  if (!usage.reasoning_tokens) usage.reasoning_tokens = first_integer_field(usage_object, {"reasoning_tokens"});
+
+  if (const auto input_details = ava::core::json::object_field(usage_object, "input_tokens_details")) {
+    usage.cache_read_tokens = first_integer_field(*input_details, {"cached_tokens", "cache_read_tokens"});
+    usage.cache_write_tokens = first_integer_field(*input_details, {"cache_creation_tokens", "cache_write_tokens"});
+  }
+  if (!usage.cache_read_tokens || !usage.cache_write_tokens) {
+    if (const auto prompt_details = ava::core::json::object_field(usage_object, "prompt_tokens_details")) {
+      if (!usage.cache_read_tokens) {
+        usage.cache_read_tokens = first_integer_field(*prompt_details, {"cached_tokens", "cache_read_tokens"});
+      }
+      if (!usage.cache_write_tokens) {
+        usage.cache_write_tokens =
+            first_integer_field(*prompt_details, {"cache_creation_tokens", "cache_write_tokens"});
+      }
+    }
+  }
+  if (!usage.cache_read_tokens) {
+    usage.cache_read_tokens = first_integer_field(usage_object, {"cache_read_tokens", "cache_read_input_tokens"});
+  }
+  if (!usage.cache_write_tokens) {
+    usage.cache_write_tokens = first_integer_field(usage_object, {"cache_write_tokens", "cache_creation_input_tokens"});
+  }
+
+  if (!usage.input_tokens && !usage.output_tokens && !usage.reasoning_tokens && !usage.cache_read_tokens &&
+      !usage.cache_write_tokens && !usage.total_tokens) {
+    return std::nullopt;
+  }
+  return usage;
+}
+
 void redact_json_string_value(std::string& snippet, std::string_view key) {
   const std::string needle = "\"" + std::string(key) + "\"";
   std::size_t position = 0;
@@ -162,8 +222,12 @@ std::string sanitized_body_snippet(std::string_view body) {
 
 void append_event_for_data(std::vector<StreamEvent>& events, std::string_view data) {
   if (data == "[DONE]") {
-    events.push_back(StreamEvent{
-        .type = StreamEventType::Done, .text = "", .tool_call_id = "", .tool_name = "", .error_message = ""});
+    events.push_back(StreamEvent{.type = StreamEventType::Done,
+                                 .text = "",
+                                 .tool_call_id = "",
+                                 .tool_name = "",
+                                 .error_message = "",
+                                 .usage = std::nullopt});
     return;
   }
   if (!is_json_object_shape(data)) {
@@ -171,7 +235,8 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
                                  .text = "",
                                  .tool_call_id = "",
                                  .tool_name = "",
-                                 .error_message = "malformed OpenAI SSE event"});
+                                 .error_message = "malformed OpenAI SSE event",
+                                 .usage = std::nullopt});
     return;
   }
   const auto type = ava::core::json::string_field(data, "type").value_or("");
@@ -183,7 +248,8 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
                                              .value_or(""),
                                  .tool_call_id = "",
                                  .tool_name = "",
-                                 .error_message = ""});
+                                 .error_message = "",
+                                 .usage = std::nullopt});
     return;
   }
   if (type == "response.function_call_arguments.delta") {
@@ -194,7 +260,8 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
                                         .or_else([&data]() { return ava::core::json::string_field(data, "call_id"); })
                                         .value_or(""),
                     .tool_name = "",
-                    .error_message = ""});
+                    .error_message = "",
+                    .usage = std::nullopt});
     return;
   }
   if (type == "response.function_call.added") {
@@ -205,7 +272,8 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
                                         .or_else([&data]() { return ava::core::json::string_field(data, "call_id"); })
                                         .value_or(""),
                     .tool_name = ava::core::json::string_field(data, "name").value_or(""),
-                    .error_message = ""});
+                    .error_message = "",
+                    .usage = std::nullopt});
     return;
   }
   if (type == "response.function_call.done" || type == "response.function_call.completed") {
@@ -216,12 +284,17 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
                                         .or_else([&data]() { return ava::core::json::string_field(data, "call_id"); })
                                         .value_or(""),
                     .tool_name = "",
-                    .error_message = ""});
+                    .error_message = "",
+                    .usage = std::nullopt});
     return;
   }
   if (type == "response.completed") {
-    events.push_back(StreamEvent{
-        .type = StreamEventType::Done, .text = "", .tool_call_id = "", .tool_name = "", .error_message = ""});
+    events.push_back(StreamEvent{.type = StreamEventType::Done,
+                                 .text = "",
+                                 .tool_call_id = "",
+                                 .tool_name = "",
+                                 .error_message = "",
+                                 .usage = parse_openai_usage(data)});
     return;
   }
   if (type == "response.error" || type == "response.failed") {
@@ -232,7 +305,8 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
                     .tool_call_id = "",
                     .tool_name = "",
                     .error_message = error_object ? ava::core::json::string_field(*error_object, "message").value_or("")
-                                                  : ava::core::json::string_field(data, "message").value_or("")});
+                                                  : ava::core::json::string_field(data, "message").value_or(""),
+                    .usage = std::nullopt});
     return;
   }
   // OpenAI may add non-content lifecycle events without changing the assistant turn.
@@ -363,6 +437,14 @@ ava::core::Result<std::string> parse_openai_response_text(std::string_view body)
   if (auto output = ava::core::json::string_field(body, "output_text")) return *output;
   if (auto text = ava::core::json::string_field(body, "text")) return *text;
   return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI response text is missing"));
+}
+
+std::optional<TokenUsage> parse_openai_usage(std::string_view body) {
+  if (const auto usage = ava::core::json::object_field(body, "usage")) return usage_from_object(*usage);
+  if (const auto response = ava::core::json::object_field(body, "response")) {
+    if (const auto usage = ava::core::json::object_field(*response, "usage")) return usage_from_object(*usage);
+  }
+  return usage_from_object(body);
 }
 
 bool is_retryable_status(int status_code) noexcept {

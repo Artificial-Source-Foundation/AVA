@@ -1160,9 +1160,9 @@ void test_app_command_dispatcher() {
   expect(manual_stale_generator_calls == 2, "manual /compact regenerates summary after a stale snapshot");
   expect(entries && count_compaction_entries(*entries) == compactions_before_stale + 1 &&
              std::ranges::any_of(*entries,
-                                  [](const ava::session::SessionEntry& entry) {
-                                    return entry.data_json.find("manual compact concurrent change") != std::string::npos;
-                                  }),
+                                 [](const ava::session::SessionEntry& entry) {
+                                   return entry.data_json.find("manual compact concurrent change") != std::string::npos;
+                                 }),
          "manual /compact stale snapshot preserves concurrent changes and appends one retried compaction");
 
   auto exported = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/export"});
@@ -1234,6 +1234,49 @@ void test_app_compact_provider_summary_success() {
                                                      std::string::npos;
                                         }),
          "/compact appends returned summary with summary_unavailable false");
+}
+
+void test_app_compact_openai_oauth_streaming_summary_success() {
+  const auto root = temp_root() / "app-compact-oauth-streaming";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  const auto paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "OAuth streaming /compact test opens runtime session");
+  if (!session) return;
+
+  const std::string summary = "# Goal\nLive compaction works.";
+  const std::string sse_body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"" +
+                               ava::core::json::escape(summary) +
+                               "\"}\n\n"
+                               "data: [DONE]\n\n";
+  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = sse_body}});
+  ava::app::RuntimeRunOptions run_options;
+  run_options.access_token = "token";
+  run_options.openai_oauth = true;
+  run_options.openai_account_id = "acct_test";
+
+  auto config = ava::session::default_compaction_config();
+  auto entries = session->store.load();
+  expect(entries.has_value(), "OAuth streaming /compact test loads entries");
+  if (!entries) return;
+  auto generated =
+      ava::app::generate_compaction_summary(*session, *entries, config, "live", 12, provider, transport, run_options);
+  expect(generated && *generated == summary, "OAuth streaming compaction summary parses SSE text deltas");
+  expect(transport.requests().size() == 1 &&
+             transport.requests()[0].url == "https://chatgpt.com/backend-api/codex/responses" &&
+             transport.requests()[0].body.find("\"stream\":true") != std::string::npos &&
+             transport.requests()[0].body.find("\"store\":false") != std::string::npos,
+         "OAuth compaction summary request uses Codex streaming request shape");
 }
 
 void test_app_compact_provider_failure_leaves_session_untouched() {
@@ -1323,10 +1366,10 @@ void test_app_compaction_prompt_builder_sections() {
   auto config = ava::session::default_compaction_config();
   const std::vector<ava::session::SessionEntry> entries = {
       ava::session::SessionEntry{.id = "entry_tool",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolResult,
-                                  .timestamp = "2026-05-01T00:00:00Z",
-                                  .data_json = "{\"name\":\"read\",\"result\":\"src/main.cpp contents\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-05-01T00:00:00Z",
+                                 .data_json = "{\"name\":\"read\",\"result\":\"src/main.cpp contents\"}"},
       ava::session::SessionEntry{.id = "entry_replay",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::UserMessage,
@@ -1425,13 +1468,12 @@ void test_app_auto_compaction_recent_context_respects_token_budget() {
   if (!session) return;
   session->model.context_window_tokens = 1000;
   for (int index = 0; index < 4; ++index) {
-    static_cast<void>(session->store.append(
-        ava::session::SessionEntry{.id = "entry_budget_" + std::to_string(index),
-                                   .parent_id = "",
-                                   .type = ava::session::EntryType::UserMessage,
-                                   .timestamp = ava::session::now_timestamp(),
-                                   .data_json = "{\"text\":\"budget filler " + std::to_string(index) + " " +
-                                                std::string(160, 'b') + "\"}"}));
+    static_cast<void>(session->store.append(ava::session::SessionEntry{
+        .id = "entry_budget_" + std::to_string(index),
+        .parent_id = "",
+        .type = ava::session::EntryType::UserMessage,
+        .timestamp = ava::session::now_timestamp(),
+        .data_json = "{\"text\":\"budget filler " + std::to_string(index) + " " + std::string(160, 'b') + "\"}"}));
   }
 
   const ava::provider::OpenAIProvider provider("https://api.example.test");
@@ -1449,7 +1491,7 @@ void test_app_auto_compaction_recent_context_respects_token_budget() {
   expect(result && result->final_text == "budget answer", "recent context token budget prompt succeeds");
   expect(recent_context && recent_context->find("recent context tail truncated") != std::string::npos &&
              ava::session::estimate_tokens(*recent_context) <= 20,
-          "auto compaction stores recent context bounded by keep_recent_tokens with an explicit marker");
+         "auto compaction stores recent context bounded by keep_recent_tokens with an explicit marker");
 }
 
 void test_app_auto_compaction_recent_context_truncates_utf8_safely() {
@@ -1718,9 +1760,9 @@ void test_app_context_overflow_compacts_and_retries_once_successfully() {
              compaction->data_json.find("OVERFLOW SUMMARY") != std::string::npos,
          "context overflow retry appends a context_overflow compaction summary");
   expect(transport.requests().size() == 3 &&
-              transport.requests()[2].body.find("OVERFLOW SUMMARY") != std::string::npos &&
-              transport.requests()[2].body.find("\"content\":\"overflow prompt\"") != std::string::npos &&
-              count_substrings(transport.requests()[2].body, "overflow prompt") == 1,
+             transport.requests()[2].body.find("OVERFLOW SUMMARY") != std::string::npos &&
+             transport.requests()[2].body.find("\"content\":\"overflow prompt\"") != std::string::npos &&
+             count_substrings(transport.requests()[2].body, "overflow prompt") == 1,
          "context overflow retry rebuilds provider context with one active prompt replay");
   const auto recent_context = compaction ? ava::core::json::string_field(compaction->data_json, "recent_context")
                                          : std::optional<std::string>{};
@@ -2125,10 +2167,10 @@ void test_app_rpc_protocol_version_and_session_commands() {
   const auto initial_id = session->store.session_id();
 
   auto appended_user = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                                         .parent_id = "",
-                                                                         .type = ava::session::EntryType::UserMessage,
-                                                                         .timestamp = ava::session::now_timestamp(),
-                                                                         .data_json = "{\"text\":\"hello\"}"});
+                                                                        .parent_id = "",
+                                                                        .type = ava::session::EntryType::UserMessage,
+                                                                        .timestamp = ava::session::now_timestamp(),
+                                                                        .data_json = "{\"text\":\"hello\"}"});
   auto appended_internal_replay =
       session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                        .parent_id = "",
@@ -2175,7 +2217,7 @@ void test_app_rpc_protocol_version_and_session_commands() {
   expect(appended_user.has_value() && appended_internal_replay.has_value() && appended_assistant.has_value() &&
              appended_unpriced_assistant.has_value() && appended_mode.has_value() && appended_compaction.has_value() &&
              appended_cancel.has_value(),
-          "RPC protocol/session test appends messages and stats foundation entries");
+         "RPC protocol/session test appends messages and stats foundation entries");
 
   const ava::provider::OpenAIProvider provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
@@ -2305,7 +2347,7 @@ void test_app_rpc_command_responses_for_context_compact_export() {
              jsonl.find("\"id\":\"exp\"") != std::string::npos &&
              jsonl.find("# AVA Session Export") != std::string::npos &&
              jsonl.find("remember rpc facts") != std::string::npos,
-          "RPC command responses expose command dispatcher output as JSONL protocol records");
+         "RPC command responses expose command dispatcher output as JSONL protocol records");
 }
 
 void test_app_rpc_compact_provider_failure_is_error_response() {
@@ -3129,6 +3171,7 @@ void run_app_runtime_tests() {
   test_app_print_json_mode_streams_provider_deltas_before_final_message();
   test_app_command_dispatcher();
   test_app_compact_provider_summary_success();
+  test_app_compact_openai_oauth_streaming_summary_success();
   test_app_compact_provider_failure_leaves_session_untouched();
   test_app_compact_oversized_summary_leaves_session_untouched();
   test_app_compaction_prompt_builder_sections();

@@ -30,9 +30,7 @@ std::string capped_entry_data(std::string_view data) {
          std::to_string(data.size()) + " bytes]";
 }
 
-bool is_utf8_continuation_byte(char value) {
-  return (static_cast<unsigned char>(value) & 0xC0U) == 0x80U;
-}
+bool is_utf8_continuation_byte(char value) { return (static_cast<unsigned char>(value) & 0xC0U) == 0x80U; }
 
 std::size_t utf8_suffix_start(std::string_view text, std::size_t suffix_bytes) {
   if (suffix_bytes >= text.size()) return 0;
@@ -45,8 +43,8 @@ std::string truncate_recent_context_to_token_budget(std::string tail, std::size_
   if (keep_recent_tokens == 0 || tail.empty()) return {};
   if (ava::session::estimate_tokens(tail) <= keep_recent_tokens) return tail;
 
-  const std::string marker = "[AVA: recent context tail truncated to keep_recent_tokens=" +
-                             std::to_string(keep_recent_tokens) + "]\n";
+  const std::string marker =
+      "[AVA: recent context tail truncated to keep_recent_tokens=" + std::to_string(keep_recent_tokens) + "]\n";
   const auto max_bytes = keep_recent_tokens * 4;
   if (max_bytes <= marker.size()) return marker;
   const auto suffix_bytes = max_bytes - marker.size();
@@ -118,7 +116,24 @@ ava::core::Result<std::string> parse_compaction_response_text(const ava::provide
     }
     return std::unexpected(std::move(error));
   }
-  return ava::provider::parse_openai_response_text(response.body);
+  auto text = ava::provider::parse_openai_response_text(response.body);
+  if (text) return *text;
+
+  auto events = ava::provider::parse_openai_sse_response(response);
+  if (!events) return std::unexpected(std::move(text.error()));
+
+  std::string streamed_text;
+  for (const auto& event : *events) {
+    if (event.type == ava::provider::StreamEventType::TextDelta) {
+      streamed_text += event.text;
+    } else if (event.type == ava::provider::StreamEventType::Error && !event.error_message.empty()) {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "compaction summary stream error");
+      error.with_context("provider_message", event.error_message);
+      return std::unexpected(std::move(error));
+    }
+  }
+  if (!streamed_text.empty()) return streamed_text;
+  return std::unexpected(std::move(text.error()));
 }
 
 ava::core::Result<std::filesystem::path> current_path_result() {
@@ -376,7 +391,7 @@ ava::core::Result<std::string> generate_compaction_summary(
       .system_prompt = std::string(system_prompt),
       .messages = {ava::provider::ChatMessage{.role = "user", .content = prompt}},
       .tools_json = {},
-      .stream = false};
+      .stream = options.openai_oauth && session.model.provider_id == "openai"};
   auto request = provider.build_request(provider_request, options.access_token);
   if (!request) return std::unexpected(std::move(request.error()));
   if (options.openai_oauth && session.model.provider_id == "openai") {
@@ -403,9 +418,9 @@ ava::core::Result<std::string> generate_compaction_summary(
 }
 
 ava::core::Result<bool> compact_runtime_context(RuntimeSession& session, ava::session::SessionStore& store,
-                                                 std::string_view trigger, const ava::provider::Provider& provider,
-                                                 ava::provider::Transport& transport, const RuntimeRunOptions& options,
-                                                 const std::vector<std::string>& replayed_user_messages) {
+                                                std::string_view trigger, const ava::provider::Provider& provider,
+                                                ava::provider::Transport& transport, const RuntimeRunOptions& options,
+                                                const std::vector<std::string>& replayed_user_messages) {
   if (options.access_token.empty()) {
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "compaction requires provider access token"));
@@ -558,11 +573,10 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
             return sink_error.has_value() || (options.cancel_requested && options.cancel_requested());
           },
       .take_steering_messages = options.take_steering_messages,
-      .compact_context =
-          options.access_token.empty()
-              ? decltype(ava::agent::AgentLoopOptions{}.compact_context){}
-              : [&](ava::session::SessionStore& store, std::string_view trigger,
-                    const std::vector<std::string>& replayed_user_messages) -> ava::core::Result<bool> {
+      .compact_context = options.access_token.empty()
+                             ? decltype(ava::agent::AgentLoopOptions{}.compact_context){}
+                             : [&](ava::session::SessionStore& store, std::string_view trigger,
+                                   const std::vector<std::string>& replayed_user_messages) -> ava::core::Result<bool> {
         return compact_runtime_context(session, store, trigger, provider, transport, options, replayed_user_messages);
       },
       .session_mutex = options.session_mutex,

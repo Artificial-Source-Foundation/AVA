@@ -1,6 +1,6 @@
 # AVA Headless Protocol
 
-This document defines the backend contract for AVA headless modes. Phase 5 adds the first JSONL RPC MVP over stdin/stdout.
+This document defines the current backend contract for AVA headless modes. AVA supports one-shot print mode and a JSONL RPC MVP over stdin/stdout; provider streaming is exposed through runtime event envelopes. Server mode remains deferred.
 
 ## Modes
 
@@ -19,13 +19,13 @@ Print mode accepts an optional prompt argument after `--print`/`-p`. If no promp
 <stdin content>
 ```
 
-Text output is the default. In text output, stdout contains the final assistant text only; diagnostics, tool progress, and errors go to stderr. JSONL output is selected with `--json` or `--output json`; stdout contains serialized runtime events and ends with either `done` or `error` for turns that reach the runtime. Credentials and startup failures are reported on stderr.
+Text output is the default. In text output, stdout contains the final assistant text only; diagnostics, tool progress, and errors go to stderr. JSONL output is selected with `--json` or `--output json`; stdout contains serialized event envelopes and ends with either a `done` or `error` event for turns that reach the runtime. Credentials and startup failures are reported on stderr.
 
-`--no-session` is not implemented in Phase 3 because the shared runtime currently opens a session for every turn. Sessionless print mode is deferred until the runtime supports it directly.
+`--no-session` is not implemented because the shared runtime currently opens a session for every turn. Sessionless print mode is deferred until the runtime supports it directly.
 
-## Print Permission Flags
+## Headless Permission Flags
 
-Print mode is fail-closed by default for backend permission decisions whose action is `ask`: AVA installs an explicit deny resolver when no policy flag is provided. Permission decisions whose action is already `deny` are never upgraded by these flags.
+Headless modes are fail-closed by default for backend permission decisions whose action is `ask`. Print mode installs an explicit deny resolver when no policy flag is provided. RPC mode emits a `permission_requested` event for ask prompts unless a supplied headless policy auto-allows the request. Permission decisions whose action is already `deny` are never upgraded by these flags.
 
 Supported policy flags:
 
@@ -38,42 +38,65 @@ Examples:
 ava --print "summarize the repo" --allow read-only
 ava --print "inspect this file" --allow-tool read_file
 ava --print "find symbols" --allow-tool glob,grep
+ava --rpc --allow read-only
 ```
 
-Invalid permission flag values exit with code `2` and write a usage error to stderr before provider/auth startup. AVA does not persist headless permission rules; every print invocation must provide the desired policy explicitly.
+Invalid permission flag values exit with code `2` and write a usage error to stderr before provider/auth startup. AVA does not persist headless permission rules; every headless invocation must provide the desired policy explicitly. In RPC mode, matching read/search prompts are auto-allowed before `permission_requested`; non-matching ask prompts still require an explicit `permission_reply`.
 
 ## Stdout / Stderr Contract
 
 - In headless `print` and `rpc` modes, stdout is protocol output only.
 - Human-readable diagnostics, startup warnings, and fatal errors go to stderr.
 - Protocol events are newline-delimited JSON objects. Writers must not emit partial JSON records.
-- Consumers should treat unknown event fields as forward-compatible metadata and unknown event types as non-fatal unless the enclosing request fails.
+- Consumers should treat unknown envelope fields as forward-compatible metadata and unknown event names as non-fatal unless the enclosing request fails.
 
 ## Exit Codes
 
-- `0`: success; the requested turn or RPC command completed.
-- `1`: runtime failure, provider failure, tool failure, permission denial, or unavailable headless interaction.
-- `2`: command-line usage error or malformed protocol request.
+- `0`: success; in RPC mode, the protocol loop exited cleanly, even if individual requests returned in-band `success:false` responses.
+- `1`: print-mode runtime/provider/tool/permission failure, unavailable headless interaction, RPC startup failure, or unrecoverable RPC stdio read/write failure.
+- `2`: command-line usage error. Recoverable malformed RPC request records produce `success:false` responses and do not change the process exit code by themselves.
 
-## Event Types
+## Event Envelope
 
-All events include at least `type`. Runtime emitters should include `timestamp` and `session_id` when available.
+Headless JSON event records are newline-delimited envelopes emitted by the shared runtime event bus:
+
+```json
+{"schema_version":1,"event_id":"event_...","timestamp":"2026-04-30T00:00:00Z","session_id":"session_...","name":"assistant_message","type":"assistant_message","payload":{"text":"hello"},"text":"hello"}
+```
+
+Envelope fields:
+
+- `schema_version`: integer schema version. The current value is `1`.
+- `event_id`: AVA-owned unique id for this emitted event record.
+- `timestamp`: event timestamp when available.
+- `session_id`: active runtime session id when available.
+- `run_id`, `turn_id`, `message_id`, `request_id`, `correlation_id`: optional correlation metadata. RPC prompt and command events include `request_id` for the client request that caused the event.
+- `name`: event name.
+- `payload`: event-specific object. Payloads are intentionally minimal and must not require clients to parse session JSONL internals.
+- `type` and documented legacy runtime fields such as `text`, `tool`, `status`, `category`, `message`, and `stop_reason`: compatibility aliases for the pre-envelope flat event shape. New clients should prefer `name` and `payload`; new payload fields are not automatically promoted to the top level.
+
+Current event names:
 
 - `session_start`: session/runtime metadata, including `mode`, `provider`, and `model`.
 - `user_message`: accepted user input for a turn.
+- `message_update`: live assistant text delta emitted while a streaming provider response is in progress; includes `text` and `status`.
+- `message_end`: live provider stream completion marker; includes `status`.
+- `provider_event`: live non-text provider stream event such as tool-call argument deltas or provider stream errors; includes `status`, and may include `call_id`, `tool`, `text`, or `message` depending on the provider event.
 - `assistant_message`: final assistant text for a completed turn.
 - `tool_start`: tool call began; includes `call_id`, `tool`, and a safe argument summary when available.
 - `tool_result`: tool call completed; includes `call_id`, `tool`, `status`, and a safe result summary when available.
 - `error`: runtime, provider, or tool boundary failure; includes `category`, `message`, and optional `details`.
 - `done`: terminal event for a successful turn; includes `stop_reason` and small counters when available.
-
-Event payloads are intentionally minimal and must not require clients to parse session JSONL internals.
+- `steer_queued`, `steer_applied`, `steer_skipped`: RPC steering queue lifecycle events. Payloads include `message` and skipped events include `reason`.
+- `follow_up_queued`, `follow_up_started`, `follow_up_skipped`: RPC follow-up queue lifecycle events. Payloads include `message` and skipped events include `reason`.
 
 ## RPC JSONL MVP
 
-RPC mode reads strict LF-delimited JSON objects from stdin and writes LF-delimited JSON protocol records to stdout. Diagnostics and fatal startup/read/write errors go to stderr. AVA keeps reading after malformed request lines when it can emit a protocol error response.
+RPC mode reads strict LF-delimited JSON objects from stdin and writes LF-delimited JSON protocol records to stdout. Diagnostics and fatal startup/read/write errors go to stderr. AVA keeps reading after malformed request lines when it can emit a protocol error response; those recoverable request errors are reported in-band rather than through the process exit code.
 
-Request ids are client-owned non-empty strings. Successful command responses use:
+RPC requests may include `"protocol_version":1`. Omitting the field keeps current-version behavior. Present values must be JSON integers. Unsupported or malformed protocol versions produce an in-band error response and do not terminate the loop.
+
+Request ids are client-owned non-empty strings capped at 256 bytes. Resolver `request_id` and `correlation_id` fields are also capped at 256 bytes; over-limit identifiers produce an in-band `success:false` response when a response id can be parsed, or `"id":""` for malformed/no-id records. Successful command responses use:
 
 ```json
 {"id":"req_1","type":"response","success":true,"result":{}}
@@ -89,13 +112,39 @@ Malformed lines that do not contain a valid id are answered with `"id":""`.
 
 ### Commands
 
+Protocol version:
+
+```json
+{"id":"0","type":"get_protocol","protocol_version":1}
+```
+
+Returns `protocol_version` and `supported_protocol_versions`.
+
 Prompt turn:
 
 ```json
 {"id":"1","type":"prompt","message":"hello"}
 ```
 
-AVA streams normal runtime events (`session_start`, `user_message`, `assistant_message`, tool events, `done`/`error`) to stdout while the turn runs, then writes a response with `final_text`, `stop_reason`, `provider_iterations`, `tool_calls`, and `session_id`. Prompt requests require configured OpenAI auth unless the embedding test harness supplies runtime credentials.
+AVA starts the prompt turn asynchronously inside the RPC session, keeps reading stdin while it runs, streams normal runtime event envelopes (`session_start`, `user_message`, streaming `message_update`/`message_end`/`provider_event`, final `assistant_message`, tool events, `done`/`error`) to stdout, then writes exactly one RPC response with `final_text`, `stop_reason`, `provider_iterations`, `tool_calls`, and `session_id` on success or `success:false` on failure. Failures before runtime startup, such as missing auth, may return only the `success:false` RPC response. Prompt event envelopes include the prompt command id as `request_id`. Only one prompt may be active per RPC session; a second `prompt` while one is active returns an in-band error. Prompt requests require configured OpenAI auth unless the embedding test harness supplies runtime credentials.
+
+Steer an active prompt:
+
+```json
+{"id":"1a","type":"steer","message":"adjust course"}
+```
+
+`steer` requires an active prompt. AVA queues the message, emits `steer_queued` with `request_id` set to the steer command id and `correlation_id` set to the active prompt/follow-up id, and returns `{"queued":true,"correlation_id":"..."}`. At the next safe provider boundary, AVA appends the steering text as an additional user message before building the next provider request and emits `steer_applied`. The current safe boundary is before a provider request, including the request after tool execution. If the active run completes before a queued steer reaches a safe boundary, AVA emits `steer_skipped` with reason `run_completed_before_safe_point`; it is not converted into a follow-up. Steering queues are bounded to 64 entries and 64 KiB of aggregate message bytes; once the queue is capped, canceled, or input is closed, new `steer` requests are rejected with `success:false` and no queue event. Queue lifecycle event payloads may truncate long `message` values and include `message_truncated:true` plus `message_bytes`.
+
+Queue a follow-up turn:
+
+```json
+{"id":"1b","type":"follow_up","message":"continue with this next"}
+```
+
+`follow_up` requires an active prompt. AVA queues the message and emits `follow_up_queued` with `request_id` set to the follow-up command id and `correlation_id` set to the currently active prompt/follow-up id. The command's RPC response is delayed until the queued follow-up runs or is skipped. After the current prompt response is written, AVA makes the follow-up the active request, emits `follow_up_started` with both `request_id` and `correlation_id` set to the follow-up command id, starts a normal prompt turn in the same session with the same provider/runtime options, streams runtime events with the follow-up id as their prompt correlation, and finally writes exactly one RPC response for the follow-up id. A `steer` accepted after `follow_up_started` targets that follow-up run. If no prompt is active, `follow_up` returns an in-band error; use `prompt` when idle.
+
+Follow-up queues are bounded to 64 entries and 64 KiB of aggregate message bytes. Once the queue is capped, canceled, or input is closed, new `follow_up` requests are rejected immediately with `success:false` and no queue event. Accepted queued follow-ups have these terminal outcomes: `follow_up_started` followed by a success or error response for the follow-up id; `follow_up_skipped` with `reason:"canceled"` plus a canceled error response; `follow_up_skipped` with `reason:"prompt_start_failed"` plus an error response; or `follow_up_skipped` with `reason:"run_completed_before_safe_point"` plus an error response. Queue lifecycle event payloads may truncate long `message` values and include `message_truncated:true` plus `message_bytes`.
 
 Cancel:
 
@@ -103,7 +152,7 @@ Cancel:
 {"id":"2","type":"cancel"}
 ```
 
-Sets the synchronous MVP cancel flag and returns `{"cancel_requested":true,"active_run":false}`. There is no asynchronous question/cancel reply protocol yet, so cancellation is observed at subsequent checked runtime boundaries.
+Sets the RPC session cancel flag and returns `{"cancel_requested":true,"active_run":true|false,"cleared_steer":N,"cleared_follow_up":N}`. When a prompt is active, pending permission/question resolver waits are unblocked fail-closed, queued steering/follow-up messages are cleared, skipped queue events are emitted, the cancel command response is written, and then queued follow-up commands receive `success:false` canceled responses. RPC clients must correlate responses by `id`: active prompt terminal events or the active prompt response may interleave with the cancel response because cancellation is observed by the prompt worker at cooperative runtime boundaries. Provider transport calls are not interrupted mid-request yet, so cancellation may complete after the in-flight provider call returns. If RPC stdin reaches EOF while a prompt worker exists, AVA marks input closed, requests cancellation, clears queued steering/follow-up messages, cancels pending resolvers, and prevents queued follow-ups from starting after client disconnect.
 
 State:
 
@@ -111,7 +160,25 @@ State:
 {"id":"3","type":"get_state"}
 ```
 
-Returns the active session id/path, mode, provider/model, workspace/current directory, cancel flag, and loaded context source summary.
+Returns the active protocol version, session id/path, mode, provider/model, workspace/current directory, cancel flag, and loaded context source summary.
+
+`get_state` and `list_sessions` remain available while a prompt is active. `get_messages` and `get_session_stats` materialize session history and are rejected while a prompt is active.
+
+Messages:
+
+```json
+{"id":"3a","type":"get_messages"}
+```
+
+Returns durable message-like session entries for the active session in append order. The current response is `{session_id,messages,truncated,message_count}` where each message includes `id`, `parent_id`, `type`, `timestamp`, and raw object-shaped `data` unless the individual entry is too large, in which case the entry is marked `truncated`. Responses are capped to protect headless clients and the AVA process. This intentionally excludes non-message bookkeeping entries such as `session_start`, `compaction`, and permission audit rows.
+
+Session stats:
+
+```json
+{"id":"3b","type":"get_session_stats"}
+```
+
+Returns `session_id`, `session_path`, `entry_count`, first/last timestamps, and small counts for user/assistant/tool/permission/error entries.
 
 List sessions:
 
@@ -125,9 +192,18 @@ Open a session by id or unambiguous prefix:
 
 ```json
 {"id":"5","type":"open_session","session_id":"session-prefix"}
+{"id":"5b","type":"switch_session","session_id":"session-prefix"}
 ```
 
-Switches the active runtime session and returns the same state shape as `get_state`.
+Switches the active runtime session and returns the same state shape as `get_state`. `switch_session` is the preferred Phase 2 name; `open_session` remains supported for compatibility. Session-switching commands are rejected while a prompt is active.
+
+New session:
+
+```json
+{"id":"5c","type":"new_session"}
+```
+
+Creates a new session for the current workspace/current directory, makes it active, clears the cancel flag, and returns the same state shape as `get_state`. `new_session` is rejected while a prompt is active.
 
 Backend slash-command equivalents:
 
@@ -140,6 +216,38 @@ Backend slash-command equivalents:
 These dispatch `/compact`, `/export`, and `/context` through the shared backend command dispatcher. Responses include `handled`, `quit`, `output` (array of strings), and `text` (joined output).
 
 Unknown command types return an error response and do not terminate the RPC loop.
+
+### Resolver Requests And Replies
+
+When an active prompt reaches a backend permission prompt, RPC emits a resolver event:
+
+```json
+{"schema_version":1,"name":"permission_requested","type":"permission_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","operation":"read_file","mode":"build","target_path":"/workspace/file","command":"","tool_name":"read_file","reason":"..."}}
+```
+
+The event top-level `request_id` remains the prompt command id. The client must answer with `payload.resolver_request_id` and the prompt `correlation_id`:
+
+```json
+{"id":"perm_reply_1","type":"permission_reply","request_id":"permission_...","correlation_id":"prompt_req","decision":"allow"}
+{"id":"perm_reply_2","type":"permission_reply","request_id":"permission_...","correlation_id":"prompt_req","decision":"deny"}
+```
+
+`decision` must be exactly `allow` or `deny`. Missing, unknown, or wrong-correlation resolver ids return in-band errors. Cancellation unblocks pending permission requests fail-closed.
+
+When an active prompt reaches the `question` tool, RPC emits:
+
+```json
+{"schema_version":1,"name":"question_requested","type":"question_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"question_...","header":"Choose","question":"Continue?","options":[{"value":"yes","label":"Yes"}],"multiple":false,"allow_custom":true}}
+```
+
+The client may answer with custom text when `allow_custom` is true, or one valid selected option value. Multi-select question prompts are not supported by RPC protocol version 1; AVA emits no resolver request for them and returns a failed `question` tool result to the active prompt.
+
+```json
+{"id":"question_reply_1","type":"question_reply","request_id":"question_...","correlation_id":"prompt_req","answer":"text"}
+{"id":"question_reply_2","type":"question_reply","request_id":"question_...","correlation_id":"prompt_req","selected":"yes"}
+```
+
+Missing, unknown, or wrong-correlation resolver ids; replies without exactly one of `answer` or `selected`; custom answers when `allow_custom` is false; and unknown `selected` values return in-band errors. Cancellation unblocks pending question requests with a canceled error.
 
 ## Future RPC Envelope (Deferred)
 
@@ -161,14 +269,14 @@ Error responses:
 {"id":"req_1","ok":false,"error":{"code":"permission_denied","message":"tool requires permission"}}
 ```
 
-RPC notifications may reuse the event objects above with no `id`. Request ids are client-owned strings and are echoed verbatim after validation.
+RPC notifications may reuse the event envelopes above. Request ids are client-owned strings and are echoed verbatim after validation.
 
 ## Permission And Question Behavior
 
 Headless operation is fail-closed by default:
 
-- Permission decisions that require user approval fail unless print mode supplies `--allow read-only` or `--allow-tool` for a supported read/search tool.
-- The `question` tool fails with an unavailable interaction error unless a future RPC client supplies a resolver.
+- Permission decisions that require user approval fail unless headless policy supplies `--allow read-only`/`--allow-tool` for a supported read/search tool or RPC mode receives an explicit `permission_reply` for the active resolver request.
+- The `question` tool fails with an unavailable interaction error unless RPC mode receives an explicit `question_reply` for the active resolver request.
 - Destructive operations remain behind existing backend permission policy checks.
 
 ## Server Mode Deferral

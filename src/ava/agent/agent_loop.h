@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -47,9 +48,12 @@ struct AgentLoopOptions {
   std::size_t max_tool_result_context_bytes = 8 * 1024;
   bool stream = true;
   std::function<void(const ToolTimelineEntry&)> on_tool_event = nullptr;
+  std::function<ava::core::VoidResult(const ava::provider::StreamEvent&)> on_stream_event = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;
+  std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
+  std::mutex* session_mutex = nullptr;
 };
 
 struct AgentLoopResult {
@@ -68,8 +72,7 @@ struct MessageBuildOptions {
 };
 
 [[nodiscard]] ava::core::Result<std::vector<ava::provider::ChatMessage>> build_provider_messages_from_entries(
-    const std::vector<ava::session::SessionEntry>& entries,
-    MessageBuildOptions options = MessageBuildOptions{});
+    const std::vector<ava::session::SessionEntry>& entries, MessageBuildOptions options = MessageBuildOptions{});
 
 class AgentLoop {
  public:

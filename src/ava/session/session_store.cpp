@@ -1,24 +1,27 @@
 #include "ava/session/session_store.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 #include <string_view>
 #include <utility>
 
+#include "ava/config/xdg_paths.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
-#include "ava/config/xdg_paths.h"
 
 namespace ava::session {
 
 namespace {
 
 constexpr std::size_t max_session_line_bytes = 1024 * 1024;
+constexpr long long current_session_entry_version = 1;
 
 int hex_value(char ch) {
   if (ch >= '0' && ch <= '9') return ch - '0';
@@ -63,7 +66,7 @@ ava::core::Result<bool> read_limited_line(std::ifstream& file, std::string& line
       }
       return true;
     }
-    if (line.size() >= max_session_line_bytes) {
+    if (line.size() + 1 >= max_session_line_bytes) {
       auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session entry line is too large");
       error.with_context("max_bytes", std::to_string(max_session_line_bytes));
       return std::unexpected(std::move(error));
@@ -109,6 +112,77 @@ ava::core::VoidResult validate_session_id(std::string_view session_id) {
   }
 
   return {};
+}
+
+ava::core::VoidResult validate_parent_id(std::string_view parent_id, std::string_view entry_id) {
+  if (parent_id.empty()) return {};
+  if (parent_id == "." || parent_id == "..") {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid session parent_id");
+    error.with_context("entry_id", std::string(entry_id));
+    error.with_context("reason", "reserved path segment");
+    return std::unexpected(std::move(error));
+  }
+
+  for (const char ch : parent_id) {
+    const auto byte = static_cast<unsigned char>(ch);
+    if (ch == '/' || ch == '\\' || byte < 0x20 || byte == 0x7F) {
+      auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid session parent_id");
+      error.with_context("entry_id", std::string(entry_id));
+      error.with_context("reason", "contains a path separator or control character");
+      return std::unexpected(std::move(error));
+    }
+  }
+
+  return {};
+}
+
+bool is_json_value_delimiter(char ch) {
+  return ch == ',' || ch == '}' || std::isspace(static_cast<unsigned char>(ch)) != 0;
+}
+
+ava::core::Result<std::optional<long long>> extract_entry_version(std::string_view line) {
+  const auto start = ava::core::json::field_value_start(line, "version");
+  if (!start) return std::optional<long long>{};
+  if (*start >= line.size()) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "invalid session entry version");
+    error.with_context("reason", "missing version value");
+    return std::unexpected(std::move(error));
+  }
+
+  std::size_t index = *start;
+  if (line[index] == '-') ++index;
+  const auto digits_start = index;
+  while (index < line.size() && std::isdigit(static_cast<unsigned char>(line[index])) != 0) ++index;
+  if (index == digits_start || (index < line.size() && !is_json_value_delimiter(line[index]))) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "invalid session entry version");
+    error.with_context("reason", "version must be an integer");
+    return std::unexpected(std::move(error));
+  }
+
+  try {
+    return std::stoll(std::string(line.substr(*start, index - *start)));
+  } catch (...) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "invalid session entry version");
+    error.with_context("reason", "version is outside supported integer range");
+    return std::unexpected(std::move(error));
+  }
+}
+
+ava::core::VoidResult validate_entry_version(std::string_view line, const std::filesystem::path& path) {
+  auto version = extract_entry_version(line);
+  if (!version) {
+    auto error = std::move(version.error());
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
+  }
+  if (!*version) return {};
+  if (**version == current_session_entry_version) return {};
+
+  auto error = ava::core::Error(ava::core::ErrorCategory::Session, "unsupported session entry version");
+  error.with_context("path", path.string());
+  error.with_context("version", std::to_string(**version));
+  error.with_context("supported_version", std::to_string(current_session_entry_version));
+  return std::unexpected(std::move(error));
 }
 
 std::string extract_json_string(std::string_view line, std::string_view key) {
@@ -269,15 +343,19 @@ ava::core::VoidResult SessionStore::append(const SessionEntry& entry) {
   }
 
   if (entry.data_json.empty() || entry.data_json.front() != '{' || entry.data_json.back() != '}') {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session entry data must be a JSON object");
+    auto error =
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session entry data must be a JSON object");
     error.with_context("entry_id", entry.id);
     return std::unexpected(std::move(error));
   }
   if (entry.data_json.find('\n') != std::string::npos || entry.data_json.find('\r') != std::string::npos) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                  "session entry data must not contain raw newlines");
+    auto error =
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session entry data must not contain raw newlines");
     error.with_context("entry_id", entry.id);
     return std::unexpected(std::move(error));
+  }
+  if (auto valid_parent_id = validate_parent_id(entry.parent_id, entry.id); !valid_parent_id) {
+    return valid_parent_id;
   }
 
   const auto path = session_path();
@@ -292,8 +370,8 @@ ava::core::VoidResult SessionStore::append(const SessionEntry& entry) {
 
   for (const auto& directory : {options_.root_dir, path.parent_path()}) {
     std::error_code permissions_error;
-    std::filesystem::permissions(directory, std::filesystem::perms::owner_all,
-                                 std::filesystem::perm_options::replace, permissions_error);
+    std::filesystem::permissions(directory, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace,
+                                 permissions_error);
     if (permissions_error) {
       auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to set session directory permissions");
       error.with_context("path", directory.string());
@@ -306,8 +384,7 @@ ava::core::VoidResult SessionStore::append(const SessionEntry& entry) {
   const auto status = std::filesystem::symlink_status(path, status_error);
   if (!status_error && std::filesystem::exists(status)) {
     if (std::filesystem::is_symlink(status)) {
-      auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
-                                    "session path must not be a symlink");
+      auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "session path must not be a symlink");
       error.with_context("session_id", session_id());
       error.with_context("path", path.string());
       return std::unexpected(std::move(error));
@@ -342,12 +419,20 @@ ava::core::VoidResult SessionStore::append(const SessionEntry& entry) {
     return std::unexpected(std::move(error));
   }
 
-  file << "{\"version\":1,";
-  file << "\"id\":\"" << json_escape(entry.id) << "\",";
-  file << "\"parent_id\":\"" << json_escape(entry.parent_id) << "\",";
-  file << "\"type\":\"" << to_string(entry.type) << "\",";
-  file << "\"timestamp\":\"" << json_escape(entry.timestamp) << "\",";
-  file << "\"data\":" << entry.data_json << "}\n";
+  std::string line = "{\"version\":1,";
+  line += "\"id\":\"" + json_escape(entry.id) + "\",";
+  line += "\"parent_id\":\"" + json_escape(entry.parent_id) + "\",";
+  line += "\"type\":\"" + std::string(to_string(entry.type)) + "\",";
+  line += "\"timestamp\":\"" + json_escape(entry.timestamp) + "\",";
+  line += "\"data\":" + entry.data_json + "}";
+  if (line.size() >= max_session_line_bytes) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session entry line is too large");
+    error.with_context("max_bytes", std::to_string(max_session_line_bytes));
+    error.with_context("entry_type", std::string(to_string(entry.type)));
+    return std::unexpected(std::move(error));
+  }
+
+  file << line << '\n';
   file.flush();
 
   if (!file) {
@@ -400,6 +485,9 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const {
     if (!*line_read) {
       break;
     }
+    if (auto valid_version = validate_entry_version(line, session_path()); !valid_version) {
+      return std::unexpected(std::move(valid_version.error()));
+    }
     const auto id = extract_json_string(line, "id");
     const auto type_text = extract_json_string(line, "type");
     const auto timestamp = extract_json_string(line, "timestamp");
@@ -418,9 +506,15 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const {
     if (!type) {
       return std::unexpected(type.error());
     }
+    const auto parent_id = extract_json_string(line, "parent_id");
+    if (auto valid_parent_id = validate_parent_id(parent_id, id); !valid_parent_id) {
+      auto error = std::move(valid_parent_id.error());
+      error.with_context("path", session_path().string());
+      return std::unexpected(std::move(error));
+    }
     entries.push_back(SessionEntry{
         .id = id,
-        .parent_id = extract_json_string(line, "parent_id"),
+        .parent_id = parent_id,
         .type = *type,
         .timestamp = timestamp,
         .data_json = extract_json_object(line, "data"),
@@ -430,7 +524,7 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const {
 }
 
 ava::core::Result<SessionStore> SessionStore::create(const std::filesystem::path& workspace_dir,
-                                                      const std::filesystem::path& root_dir) {
+                                                     const std::filesystem::path& root_dir) {
   return SessionStore(SessionStoreOptions{
       .root_dir = root_dir,
       .workspace_dir = workspace_dir,
@@ -439,7 +533,7 @@ ava::core::Result<SessionStore> SessionStore::create(const std::filesystem::path
 }
 
 ava::core::Result<SessionStore> SessionStore::open(const std::filesystem::path& workspace_dir, std::string session_id,
-                                                    const std::filesystem::path& root_dir) {
+                                                   const std::filesystem::path& root_dir) {
   if (auto valid_session_id = validate_session_id(session_id); !valid_session_id) {
     return std::unexpected(std::move(valid_session_id.error()));
   }
@@ -474,7 +568,7 @@ ava::core::Result<SessionStore> SessionStore::open(const std::filesystem::path& 
 }
 
 ava::core::Result<std::vector<SessionSummary>> SessionStore::list_sessions(const std::filesystem::path& workspace_dir,
-                                                                            const std::filesystem::path& root_dir) {
+                                                                           const std::filesystem::path& root_dir) {
   const auto directory = root_dir / project_key(workspace_dir);
   std::error_code exists_error;
   const bool directory_exists = std::filesystem::exists(directory, exists_error);
@@ -537,9 +631,7 @@ ava::core::Result<std::vector<SessionSummary>> SessionStore::list_sessions(const
   return summaries;
 }
 
-std::filesystem::path SessionStore::default_root_dir() {
-  return ava::config::xdg_paths().sessions_dir;
-}
+std::filesystem::path SessionStore::default_root_dir() { return ava::config::xdg_paths().sessions_dir; }
 
 std::string to_string(EntryType type) {
   switch (type) {

@@ -7,6 +7,17 @@
 
 namespace ava::provider {
 
+class OpenAIStreamParser {
+ public:
+  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> append(std::string_view chunk);
+  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> finish();
+
+  private:
+   std::string pending_line_;
+   std::string data_;
+   std::size_t scan_offset_ = 0;
+};
+
 class OpenAIProvider final : public Provider {
  public:
   explicit OpenAIProvider(std::string base_url = "https://api.openai.com");

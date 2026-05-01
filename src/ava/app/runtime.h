@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -62,6 +63,8 @@ struct RuntimeRunOptions {
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;
+  std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
+  std::mutex* session_mutex = nullptr;
 };
 
 [[nodiscard]] ava::core::Result<RuntimeSession> open_runtime_session(const RuntimeOpenOptions& options);

@@ -88,16 +88,18 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& 
                                                                 std::ostream& err) {
   bool emitted_error = false;
   auto runtime_options = print_runtime_options(options.runtime_options);
+  EventBus event_bus;
   if (options.output_format == PrintOutputFormat::Json) {
-    runtime_options.event_sink = [&out, &emitted_error](const RuntimeEvent& event) {
-      if (event.type == RuntimeEventType::Error) emitted_error = true;
-      out << serialize_event_jsonl(event);
+    event_bus.subscribe([&out, &emitted_error](const EventEnvelope& envelope) {
+      if (envelope.name == to_string(RuntimeEventType::Error)) emitted_error = true;
+      out << serialize_event_envelope_jsonl(envelope);
       if (!out) {
         return ava::core::VoidResult{
             std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write print JSON event"))};
       }
       return ava::core::VoidResult{};
-    };
+    });
+    runtime_options.event_sink = make_runtime_event_bus_adapter(event_bus);
   } else {
     runtime_options.event_sink = [&err, &emitted_error](const RuntimeEvent& event) {
       if (event.type == RuntimeEventType::Error) emitted_error = true;
@@ -114,7 +116,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& 
   if (!result) {
     if (!emitted_error) {
       if (options.output_format == PrintOutputFormat::Json) {
-        out << serialize_event_jsonl(runtime_error_event(session, result.error()));
+        // Best-effort fallback: preserve the runtime/provider error that caused the failed turn.
+        static_cast<void>(event_bus.publish(to_event_envelope(runtime_error_event(session, result.error()))));
       } else {
         err << result.error().format() << '\n';
       }

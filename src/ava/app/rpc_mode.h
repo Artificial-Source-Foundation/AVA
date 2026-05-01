@@ -14,9 +14,15 @@ namespace ava::app {
 struct RpcCommand {
   std::string id;
   std::string type;
+  std::optional<long long> protocol_version;
   std::optional<std::string> message;
   std::optional<std::string> session_id;
   std::optional<std::string> instructions;
+  std::optional<std::string> request_id;
+  std::optional<std::string> correlation_id;
+  std::optional<std::string> decision;
+  std::optional<std::string> answer;
+  std::optional<std::string> selected;
 };
 
 struct RpcModeOptions {

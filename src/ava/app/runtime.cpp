@@ -4,6 +4,7 @@
 
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/provider/provider.h"
 
 namespace ava::app {
 namespace {
@@ -43,19 +44,15 @@ ava::core::Result<std::string> resolve_session_id(const std::filesystem::path& w
   return matches.front();
 }
 
-std::string session_start_data_json(ava::agent::Mode mode,
-                                    const ava::config::ModelInfo& model,
-                                    const ava::config::PromptSelection& prompt,
-                                    std::size_t context_source_count) {
+std::string session_start_data_json(ava::agent::Mode mode, const ava::config::ModelInfo& model,
+                                    const ava::config::PromptSelection& prompt, std::size_t context_source_count) {
   return "{\"mode\":\"" + ava::agent::to_string(mode) + "\",\"provider\":\"" +
-         ava::core::json::escape(model.provider_id) + "\",\"model\":\"" +
-         ava::core::json::escape(model.model_id) + "\",\"prompt_override\":" +
-         (prompt.from_override ? std::string("true") : std::string("false")) + ",\"context_sources\":" +
-         std::to_string(context_source_count) + '}';
+         ava::core::json::escape(model.provider_id) + "\",\"model\":\"" + ava::core::json::escape(model.model_id) +
+         "\",\"prompt_override\":" + (prompt.from_override ? std::string("true") : std::string("false")) +
+         ",\"context_sources\":" + std::to_string(context_source_count) + '}';
 }
 
-ava::core::VoidResult append_session_start(ava::session::SessionStore& store,
-                                           ava::agent::Mode mode,
+ava::core::VoidResult append_session_start(ava::session::SessionStore& store, ava::agent::Mode mode,
                                            const ava::config::ModelInfo& model,
                                            const ava::config::PromptSelection& prompt,
                                            std::size_t context_source_count) {
@@ -79,6 +76,12 @@ RuntimeEvent base_event(const RuntimeSession& session, RuntimeEventType type) {
   return event;
 }
 
+RuntimeEvent base_event_locked(const RuntimeSession& session, RuntimeEventType type, std::mutex* mutex) {
+  if (!mutex) return base_event(session, type);
+  std::lock_guard lock(*mutex);
+  return base_event(session, type);
+}
+
 ava::core::Result<RuntimePromptState> load_runtime_prompt_state(const ava::config::XdgPaths& paths,
                                                                 const ava::config::ModelInfo& model,
                                                                 ava::agent::Mode mode,
@@ -97,9 +100,8 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(const ava::confi
   std::vector<ContextSourceMetadata> context_sources;
   context_sources.reserve(loaded_context->size());
   for (const auto& file : *loaded_context) {
-    context_sources.push_back(ContextSourceMetadata{.path = file.path,
-                                                    .source_type = file.source_type,
-                                                    .byte_count = file.byte_count});
+    context_sources.push_back(
+        ContextSourceMetadata{.path = file.path, .source_type = file.source_type, .byte_count = file.byte_count});
   }
 
   auto system_prompt = prompt->text + ava::context::format_context_for_prompt(*loaded_context);
@@ -114,7 +116,7 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(const ava::confi
 ava::core::Result<RuntimeSession> open_runtime_session(const RuntimeOpenOptions& options) {
   if (options.requested_session_id && options.continue_last_session) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                           "use either requested session id or continue, not both"));
+                                            "use either requested session id or continue, not both"));
   }
 
   auto cwd = current_path_result();
@@ -130,8 +132,8 @@ ava::core::Result<RuntimeSession> open_runtime_session(const RuntimeOpenOptions&
   if (!prompt_state) return std::unexpected(prompt_state.error());
 
   bool created = true;
-  ava::core::Result<ava::session::SessionStore> store = std::unexpected(
-      ava::core::Error(ava::core::ErrorCategory::Unknown, "session was not initialized"));
+  ava::core::Result<ava::session::SessionStore> store =
+      std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session was not initialized"));
   if (options.requested_session_id) {
     auto resolved = resolve_session_id(workspace_dir, options.paths.sessions_dir, *options.requested_session_id);
     if (!resolved) return std::unexpected(resolved.error());
@@ -152,8 +154,8 @@ ava::core::Result<RuntimeSession> open_runtime_session(const RuntimeOpenOptions&
   if (!store) return std::unexpected(store.error());
 
   if (created) {
-    auto appended = append_session_start(*store, options.mode, model, prompt_state->prompt,
-                                         prompt_state->context_sources.size());
+    auto appended =
+        append_session_start(*store, options.mode, model, prompt_state->prompt, prompt_state->context_sources.size());
     if (!appended) return std::unexpected(appended.error());
   }
 
@@ -181,17 +183,16 @@ void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prom
   session.system_prompt = std::move(prompt_state.system_prompt);
 }
 
-ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& session,
-                                                          const std::string& user_message,
+ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& session, const std::string& user_message,
                                                           const ava::provider::Provider& provider,
                                                           ava::provider::Transport& transport,
                                                           const RuntimeRunOptions& options) {
-  auto session_event = base_event(session, RuntimeEventType::SessionStart);
+  auto session_event = base_event_locked(session, RuntimeEventType::SessionStart, options.session_mutex);
   if (auto emitted = emit_event(options.event_sink, session_event); !emitted) {
     return std::unexpected(std::move(emitted.error()));
   }
 
-  auto user_event = base_event(session, RuntimeEventType::UserMessage);
+  auto user_event = base_event_locked(session, RuntimeEventType::UserMessage, options.session_mutex);
   user_event.text = user_message;
   if (auto emitted = emit_event(options.event_sink, user_event); !emitted) {
     return std::unexpected(std::move(emitted.error()));
@@ -208,30 +209,56 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
       .openai_oauth = options.openai_oauth,
       .openai_account_id = options.openai_account_id,
       .stream = options.stream,
-      .on_tool_event = [&session, &options, &sink_error](const ava::agent::ToolTimelineEntry& entry) {
-        if (sink_error) return;
-        auto event = base_event(session, entry.status == ava::agent::ToolTimelineStatus::Running
-                                            ? RuntimeEventType::ToolStart
-                                            : RuntimeEventType::ToolResult);
-        event.call_id = entry.call_id;
-        event.tool_name = entry.name;
-        event.text = entry.status == ava::agent::ToolTimelineStatus::Running ? entry.argument_summary
-                                                                             : entry.result_summary;
-        event.status = ava::agent::to_string(entry.status);
+      .on_tool_event =
+          [&session, &options, &sink_error](const ava::agent::ToolTimelineEntry& entry) {
+            if (sink_error) return;
+            auto event = base_event_locked(session,
+                                           entry.status == ava::agent::ToolTimelineStatus::Running
+                                               ? RuntimeEventType::ToolStart
+                                               : RuntimeEventType::ToolResult,
+                                           options.session_mutex);
+            event.call_id = entry.call_id;
+            event.tool_name = entry.name;
+            event.text =
+                entry.status == ava::agent::ToolTimelineStatus::Running ? entry.argument_summary : entry.result_summary;
+            event.status = ava::agent::to_string(entry.status);
+            if (auto emitted = emit_event(options.event_sink, event); !emitted) {
+              sink_error = std::move(emitted.error());
+            }
+          },
+      .on_stream_event = [&session, &options,
+                          &sink_error](const ava::provider::StreamEvent& stream_event) -> ava::core::VoidResult {
+        if (sink_error) return std::unexpected(*sink_error);
+        auto event = base_event_locked(
+            session,
+            stream_event.type == ava::provider::StreamEventType::TextDelta ? RuntimeEventType::MessageUpdate
+            : stream_event.type == ava::provider::StreamEventType::Done    ? RuntimeEventType::MessageEnd
+                                                                           : RuntimeEventType::ProviderEvent,
+            options.session_mutex);
+        event.text = stream_event.text;
+        event.call_id = stream_event.tool_call_id;
+        event.tool_name = stream_event.tool_name;
+        event.status = ava::provider::to_string(stream_event.type);
+        event.error_message = stream_event.error_message;
         if (auto emitted = emit_event(options.event_sink, event); !emitted) {
           sink_error = std::move(emitted.error());
+          return std::unexpected(*sink_error);
         }
+        return {};
       },
       .permission_resolver = options.permission_resolver,
       .question_resolver = options.question_resolver,
-      .cancel_requested = [&options, &sink_error] {
-        return sink_error.has_value() || (options.cancel_requested && options.cancel_requested());
-      }});
+      .cancel_requested =
+          [&options, &sink_error] {
+            return sink_error.has_value() || (options.cancel_requested && options.cancel_requested());
+          },
+      .take_steering_messages = options.take_steering_messages,
+      .session_mutex = options.session_mutex});
 
   auto result = loop.run_turn(user_message, session.store, provider, transport);
   if (sink_error) return std::unexpected(std::move(*sink_error));
   if (!result) {
-    auto event = base_event(session, RuntimeEventType::Error);
+    auto event = base_event_locked(session, RuntimeEventType::Error, options.session_mutex);
     event.error_category = ava::core::to_string(result.error().category());
     event.error_message = result.error().message();
     event.error_details = result.error().format();
@@ -239,13 +266,13 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
     return std::unexpected(result.error());
   }
 
-  auto assistant_event = base_event(session, RuntimeEventType::AssistantMessage);
+  auto assistant_event = base_event_locked(session, RuntimeEventType::AssistantMessage, options.session_mutex);
   assistant_event.text = result->final_text;
   if (auto emitted = emit_event(options.event_sink, assistant_event); !emitted) {
     return std::unexpected(std::move(emitted.error()));
   }
 
-  auto done_event = base_event(session, RuntimeEventType::Done);
+  auto done_event = base_event_locked(session, RuntimeEventType::Done, options.session_mutex);
   done_event.stop_reason = result->stop_reason;
   done_event.provider_iterations = result->provider_iterations;
   done_event.tool_calls = result->tool_calls;

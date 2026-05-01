@@ -52,6 +52,7 @@ add_library(ava_core
   src/ava/session/compaction.cpp
   src/ava/session/export.cpp
   src/ava/session/session_store.cpp
+  src/ava/session/stats.cpp
   src/ava/tools/bash_tool.cpp
   src/ava/tools/file_tools.cpp
   src/ava/tools/search_tools.cpp
@@ -103,6 +104,7 @@ if(AVA_BUILD_TESTS)
   enable_testing()
   add_library(ava_test_support
     tests/support/fake_transport.cpp
+    tests/support/test_harness.cpp
   )
   target_link_libraries(ava_test_support PUBLIC ava_core)
   target_include_directories(ava_test_support PUBLIC .)
@@ -110,7 +112,16 @@ if(AVA_BUILD_TESTS)
   ava_apply_sanitizers(ava_test_support)
 
   add_executable(ava_tests
+    tests/agent_tool_dispatcher_tests.cpp
+    tests/app_runtime_tests.cpp
+    tests/config_context_auth_oauth_tests.cpp
     tests/core_tests.cpp
+    tests/core_mode_json_permissions_tests.cpp
+    tests/events_tests.cpp
+    tests/provider_openai_tests.cpp
+    tests/session_tests.cpp
+    tests/tools_tests.cpp
+    tests/tui_composer_tests.cpp
   )
   target_link_libraries(ava_tests PRIVATE ava_core ava_tui ava_app ava_test_support)
   ava_apply_warnings(ava_tests)

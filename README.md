@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Artificial-Source/AVA/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Artificial-Source/AVA/actions/workflows/ci.yml)
 
-AVA is a native C++23 agentic coding tool. The active default branch is `develop`; historical branches are kept under `archive/*`. The current 0.32 line ships a focused terminal binary with OpenAI-first auth, safe built-in tools, build/plan modes, permission prompts, tool visibility, append-only JSONL sessions, and an interactive TUI backed by wide-character ncurses (`ncursesw`).
+AVA is a native C++23 agentic coding tool. The active default branch is `develop`; historical branches are kept under `archive/*`. The current 0.32 line ships a focused terminal binary with OpenAI-first auth, safe built-in tools, build/plan modes, permission prompts, tool visibility, append-only JSONL sessions, headless print/RPC modes, and an interactive TUI backed by wide-character ncurses (`ncursesw`).
 
 ## Build
 
@@ -37,9 +37,13 @@ GitHub Actions runs both the normal and sanitizer test jobs on pushes and pull r
 ./build/ava --mode plan
 ./build/ava --continue
 ./build/ava --session <id-or-prefix>
+./build/ava --print "summarize this repo"
+./build/ava --rpc
 ```
 
-When stdin/stdout are not a terminal, AVA falls back to a line-oriented shell for scripting:
+`--print` runs one prompt and exits. Add `--json` or `--output json` to emit runtime events instead of final text only. `--rpc` starts the JSONL stdio RPC MVP for automation clients; see `docs/headless-protocol.md` for request and event shapes.
+
+When stdin/stdout are not a terminal and no headless mode is selected, AVA falls back to a line-oriented shell for scripting:
 
 ```sh
 printf '/glob **/*.cpp\n/quit\n' | ./build/ava --continue

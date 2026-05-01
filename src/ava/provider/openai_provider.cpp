@@ -97,15 +97,6 @@ void apply_codex_oauth_request_options(HttpRequest& request) {
   }
 }
 
-void append_unknown_event(std::vector<StreamEvent>& events, std::string_view type) {
-  events.push_back(StreamEvent{
-      .type = StreamEventType::Error,
-      .text = "",
-      .tool_call_id = "",
-      .tool_name = "",
-      .error_message = "unknown OpenAI SSE event" + (type.empty() ? std::string{} : ": " + std::string(type))});
-}
-
 bool is_ignored_lifecycle_event(std::string_view type) {
   return type == "response.created" || type == "response.in_progress" || type == "response.output_item.added" ||
          type == "response.output_item.done" || type == "response.content_part.added" ||
@@ -175,6 +166,14 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
         .type = StreamEventType::Done, .text = "", .tool_call_id = "", .tool_name = "", .error_message = ""});
     return;
   }
+  if (!is_json_object_shape(data)) {
+    events.push_back(StreamEvent{.type = StreamEventType::Error,
+                                 .text = "",
+                                 .tool_call_id = "",
+                                 .tool_name = "",
+                                 .error_message = "malformed OpenAI SSE event"});
+    return;
+  }
   const auto type = ava::core::json::string_field(data, "type").value_or("");
   if (is_ignored_lifecycle_event(type)) return;
   if (type == "response.output_text.delta" || type == "response.text.delta") {
@@ -236,7 +235,25 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
                                                   : ava::core::json::string_field(data, "message").value_or("")});
     return;
   }
-  append_unknown_event(events, type);
+  // OpenAI may add non-content lifecycle events without changing the assistant turn.
+  // Ignore unknown event types unless the provider explicitly reports an error.
+}
+
+void append_events_for_sse_line(std::vector<StreamEvent>& events, std::string& data, std::string line) {
+  if (!line.empty() && line.back() == '\r') line.pop_back();
+  if (line.empty()) {
+    if (!data.empty()) {
+      append_event_for_data(events, data);
+      data.clear();
+    }
+    return;
+  }
+  if (line.starts_with("data:")) {
+    if (!data.empty()) data.push_back('\n');
+    auto value = std::string_view(line).substr(5);
+    if (!value.empty() && value.front() == ' ') value.remove_prefix(1);
+    data.append(value);
+  }
 }
 
 }  // namespace
@@ -268,8 +285,8 @@ ava::core::Result<HttpRequest> OpenAIProvider::build_request(const ProviderReque
 }
 
 ava::core::Result<HttpRequest> OpenAIProvider::build_request(const ProviderRequest& request,
-                                                              const ava::config::OpenAICredential& credential,
-                                                              long long now_seconds) const {
+                                                             const ava::config::OpenAICredential& credential,
+                                                             long long now_seconds) const {
   auto access_token = ava::config::openai_access_token_for_request(credential, now_seconds);
   if (!access_token) return std::unexpected(std::move(access_token.error()));
   auto http_request = build_request(request, *access_token);
@@ -290,28 +307,44 @@ ava::core::Result<HttpRequest> OpenAIProvider::build_request(const ProviderReque
   return build_request(request, *access_token);
 }
 
-ava::core::Result<std::vector<StreamEvent>> parse_openai_sse(std::string_view sse) {
+ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::append(std::string_view chunk) {
   std::vector<StreamEvent> events;
-  std::string data;
-  std::istringstream in{std::string(sse)};
-  std::string line;
-  while (std::getline(in, line)) {
-    if (!line.empty() && line.back() == '\r') line.pop_back();
-    if (line.empty()) {
-      if (!data.empty()) {
-        append_event_for_data(events, data);
-        data.clear();
-      }
-      continue;
-    }
-    if (line.starts_with("data:")) {
-      if (!data.empty()) data.push_back('\n');
-      auto value = std::string_view(line).substr(5);
-      if (!value.empty() && value.front() == ' ') value.remove_prefix(1);
-      data.append(value);
-    }
+  pending_line_.append(chunk);
+  std::size_t line_start = 0;
+  std::size_t search_from = scan_offset_;
+  while (true) {
+    const auto newline = pending_line_.find('\n', search_from);
+    if (newline == std::string::npos) break;
+    append_events_for_sse_line(events, data_, pending_line_.substr(line_start, newline - line_start));
+    line_start = newline + 1;
+    search_from = line_start;
   }
-  if (!data.empty()) append_event_for_data(events, data);
+  if (line_start > 0) pending_line_.erase(0, line_start);
+  scan_offset_ = pending_line_.size();
+  return events;
+}
+
+ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::finish() {
+  std::vector<StreamEvent> events;
+  if (!pending_line_.empty()) {
+    append_events_for_sse_line(events, data_, std::move(pending_line_));
+    pending_line_.clear();
+  }
+  scan_offset_ = 0;
+  if (!data_.empty()) {
+    append_event_for_data(events, data_);
+    data_.clear();
+  }
+  return events;
+}
+
+ava::core::Result<std::vector<StreamEvent>> parse_openai_sse(std::string_view sse) {
+  OpenAIStreamParser parser;
+  auto events = parser.append(sse);
+  if (!events) return std::unexpected(std::move(events.error()));
+  auto final_events = parser.finish();
+  if (!final_events) return std::unexpected(std::move(final_events.error()));
+  events->insert(events->end(), final_events->begin(), final_events->end());
   return events;
 }
 

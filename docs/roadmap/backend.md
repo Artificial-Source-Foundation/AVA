@@ -50,11 +50,11 @@ The gap is not that AVA lacks a backend. The gap is that AVA's backend is still 
 
 ## Milestone Audit Summary
 
-Explorer agents checked each roadmap phase against the current AVA code and PI reference lessons on 2026-04-30.
+Explorer agents checked each roadmap phase against the current AVA code and PI reference lessons on 2026-04-30. A Phase 1 closure audit on the same date verified the normal build, sanitizer build, whitespace check, and headless CLI basics.
 
-- Phase 0 is still needed because product/version docs under-report implemented backend features such as print/RPC mode, `AGENTS.md` loading, manual compaction entries, export, OAuth refresh, permission audit persistence, and atomic writes.
-- Phase 1 is mostly implemented in code. Its remaining work is closure work: docs reconciliation, release verification docs, and any missing edge-case coverage discovered during Phase 2.
-- Phase 2 is the next major engineering step. AVA has a basic runtime event sink, but not the rich turn/message/provider/tool event taxonomy, true incremental provider streaming, protocol versioning, async cancellation, or full RPC command set needed for editor integrations.
+- Phase 0 documentation reconciliation is closed for the known under-reported backend features: current docs now surface print/RPC mode, `AGENTS.md` loading, manual compaction entries, export, OAuth refresh, permission audit persistence, and atomic writes, while older version plans with superseded deferrals are marked historical.
+- Phase 1 is implemented and verified for the current single-provider backend. Keep edge-case coverage aligned as Phase 2 exposes new event/protocol boundaries.
+- Phase 2 is implemented and verified for the approved evented-runtime scope: versioned event envelopes, shared event bus routing for headless modes, incremental provider streaming, RPC protocol versioning/session commands, active-run cancellation, permission/question resolver replies, and bounded `steer`/`follow_up` queues. Provider/model registry commands and richer reasoning-specific events remain aligned with Phase 5 provider capability work.
 - Phase 3 has append-only sessions and compaction entry foundations, but still needs provider-generated summaries, automatic compaction integration, context-overflow retry, usage/cost records, stats, migrations, and optional tree/fork operations.
 - Phase 4 has safe built-in tools, but still needs PI-level edit/search ergonomics: `.gitignore` semantics, diff previews, CRLF/BOM/fuzzy edit handling, mutation queues, spill files, streaming progress, web fetch, and LSP.
 - Phase 5 has a provider interface but not a provider registry or model capability catalog. OpenAI remains hard-coded in several paths and the second production provider path is not started.
@@ -64,16 +64,13 @@ Explorer agents checked each roadmap phase against the current AVA code and PI r
 
 ### Runtime And Events
 
-AVA needs a more complete backend event model.
+AVA now has the Phase 2 backend event model needed for headless clients and future UI integration.
 
 Missing or incomplete:
 
-- True provider streaming to runtime consumers instead of parse-after-complete curl responses.
-- A subscription-style event bus for TUI, RPC, tests, and future extensions.
-- Steering and follow-up queues so users or clients can interrupt or queue work during a run.
-- Clear turn/message/tool lifecycle events, not only final assistant/tool summaries.
+- Full live TUI consumption of the shared event stream; the TUI still uses blocking runtime glue and can replay buffered events.
 - Thinking/reasoning lifecycle events for models that expose reasoning blocks or deltas.
-- Consistent cancellation propagation through provider requests, tools, bash children, and event listeners.
+- Deeper cancellation interruption inside buffered/non-streaming provider calls and individual long-running tools beyond the current cooperative boundaries.
 - Parallel tool execution controls, if the tool and permission model can safely support it.
 
 1.0 target:
@@ -283,6 +280,8 @@ Acceptance criteria:
 
 ### Phase 2: Evented Runtime And Protocol
 
+Status: implemented and verified for the approved Phase 2 scope on 2026-05-01. Deferred items that depend on a broader provider registry or richer model capability metadata are tracked under Phase 5.
+
 Purpose: turn the backend into a shared runtime for TUI and automation clients.
 
 Scope:
@@ -466,4 +465,4 @@ Defer unless earlier phases finish cleanly:
 
 ## Immediate Next Work
 
-Finish Phase 1 by keeping regression tests and docs aligned with the backend hardening that has landed, then plan the Phase 2 evented-runtime and protocol work.
+Start Phase 3 by planning context, usage, and session-depth work: provider-generated compaction summaries, automatic compaction triggers, context-overflow retry, usage/cost records, and bounded session stats APIs that build on the completed Phase 2 event/RPC foundation.

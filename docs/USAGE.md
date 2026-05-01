@@ -8,6 +8,8 @@ ava connect openai
 ava --mode plan
 ava --continue
 ava --session <id-or-prefix>
+ava --print "summarize this repo"
+ava --rpc
 ```
 
 `--continue` resumes the newest session for the current workspace. `--session` resumes an exact ID or a unique prefix. On exit, AVA prints the command needed to resume the current session.
@@ -57,16 +59,44 @@ Interactive permission requests replace the composer with an approval dock. The 
 
 ## Non-TTY Mode
 
-When stdin/stdout are not both terminals, AVA uses a line shell instead of the TUI. This keeps tests and scripts non-interactive.
+When stdin/stdout are not both terminals and no headless mode is selected, AVA uses a line shell instead of the TUI. This keeps tests and scripts non-interactive.
 
 ```sh
 printf '/sessions\n/quit\n' | ava --continue
 ```
+
+## Headless Modes
+
+Use print mode for one-shot automation:
+
+```sh
+ava --print "summarize this repo"
+printf 'summarize this repo\n' | ava --print
+ava --print "summarize this repo" --json
+```
+
+Text print mode writes final assistant text to stdout and diagnostics to stderr. JSON print mode writes newline-delimited runtime events to stdout. Prompt turns require configured OpenAI auth.
+
+Headless modes are fail-closed for permission prompts unless an explicit supported read/search policy is supplied. In RPC mode, matching prompts are auto-allowed before `permission_requested`; non-matching asks still require `permission_reply`:
+
+```sh
+ava --print "inspect this project" --allow read-only
+ava --print "read the README" --allow-tool read_file
+ava --rpc --allow read-only
+```
+
+Use RPC mode for a long-lived JSONL stdio automation client:
+
+```sh
+printf '%s\n' '{"id":"state","type":"get_state"}' | ava --rpc
+```
+
+See `docs/headless-protocol.md` for the complete stdout/stderr contract, event types, RPC commands, and exit-code behavior.
 
 ## Current Limits
 
 - OpenAI is the only provider.
 - The HTTP transport uses the local `curl` executable.
 - Tool results are returned after the provider turn completes; there is no async streaming UI yet.
-- Permission `ask` decisions open a TUI prompt in interactive mode and fail closed in non-TTY mode.
-- `question` does not open a modal yet; the assistant should ask the user directly.
+- Permission `ask` decisions open a TUI prompt in interactive mode and fail closed in non-TTY/headless mode unless a supported read/search allow policy is supplied or an RPC client answers `permission_requested` with `permission_reply`.
+- In interactive/TUI mode, `question` does not open a modal yet; the assistant should ask the user directly. In RPC mode, clients can answer `question_requested` with `question_reply` using either `answer` or `selected`.

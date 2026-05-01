@@ -91,7 +91,8 @@ MVP means a usable coding agent, not a demo.
 
 - `ava`: interactive terminal session.
 - `ava "prompt"`: one-shot prompt in current directory. Deferred after 0.1.
-- `ava --print "prompt"`: non-interactive output for scripts. Deferred after 0.1.
+- `ava --print "prompt"`: one-shot non-interactive output for scripts.
+- `ava --rpc`: JSONL stdio RPC MVP for automation clients.
 - `ava --continue`: resume latest session for current project.
 - `ava --session <id-or-path>`: open a specific session.
 - `ava --no-session`: ephemeral mode. Deferred after 0.1.
@@ -275,13 +276,13 @@ Deferred:
 - Add OpenCode-like slash command palette discovery and readable thinking/progress visibility.
 - Add interactive permission prompts for `ask` decisions while keeping non-interactive mode fail-closed.
 - Verify the existing 0.1 tools through real agent workflows before adding more providers or automation modes.
-- Keep additional providers, MCP/plugins, subagents, LSP, web fetch, and automation CLI modes deferred to later versions.
+- Keep additional providers, MCP/plugins, subagents, LSP, web fetch, and automation beyond the current print/RPC MVP deferred to later versions.
 
 ### Deferred Beyond 0.2 / 0.3+ Backlog
 
 These items were deferred from 0.1 and remain post-0.2 unless the 0.2 scope explicitly reclassifies them. See `docs/versions/0.2.md` for the 0.2 backlog boundary and hard deferrals.
 
-- Print mode and the JSONL RPC MVP are implemented; richer protocol controls remain on the backend roadmap.
+- Richer print/RPC protocol controls landed in the Phase 2 backend event/RPC work; future provider/model controls remain on the provider roadmap.
 - Persistent allow/deny rule management.
 - Diff previews and richer patch UI.
 - Structured skills and prompt templates beyond `AGENTS.md`.

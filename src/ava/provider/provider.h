@@ -1,7 +1,9 @@
 #pragma once
 
+#include <functional>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "ava/core/result.h"
@@ -63,8 +65,15 @@ class Provider {
 
 class Transport {
  public:
+  using BodyChunkSink = std::function<ava::core::VoidResult(std::string_view)>;
+  using CancelCallback = std::function<bool()>;
+
   virtual ~Transport() = default;
   [[nodiscard]] virtual ava::core::Result<HttpResponse> send(const HttpRequest& request) = 0;
+  [[nodiscard]] virtual bool supports_streaming() const noexcept;
+  [[nodiscard]] virtual ava::core::Result<HttpResponse> send_streaming(const HttpRequest& request,
+                                                                       BodyChunkSink on_body_chunk,
+                                                                       CancelCallback cancel_requested = nullptr);
 };
 
 [[nodiscard]] std::string to_string(StreamEventType type);

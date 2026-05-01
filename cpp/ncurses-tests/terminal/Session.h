@@ -1,6 +1,6 @@
 #pragma once
 
-#include <curses.h>     // chtype, A_NORMAL
+#include "ComplexChar.h"
 
 namespace terminal {
 
@@ -12,18 +12,20 @@ namespace terminal {
 class Session final
 {
  private:
-  cchar_t background_cchar;
+  ComplexChar background_cchar_;
 
  public:
   Session();
   ~Session();
 
-  cchar_t const* get_background_cchar() const
+  ComplexChar const& get_background_cchar() const
   {
-    return &background_cchar;
+    return background_cchar_;
   }
 
   int rows() const;
+  void refresh();
+  int get_wch();
 };
 
 } // namespace terminal

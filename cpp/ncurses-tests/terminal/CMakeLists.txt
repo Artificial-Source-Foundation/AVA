@@ -5,6 +5,9 @@ add_library(terminal_ObjLib OBJECT)
 target_sources(terminal_ObjLib
   PRIVATE
     "Session.cxx"
+    "ComplexChar.cxx"
+    "Window.cxx"
+    "private_convert.cxx"
 )
 
 # Set required include directories.

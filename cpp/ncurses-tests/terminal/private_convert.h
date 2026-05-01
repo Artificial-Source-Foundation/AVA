@@ -1,0 +1,20 @@
+// private_convert.h
+//
+// This header may *only* be included from terminal/*.cxx files.
+
+#include "ComplexChar.h"
+
+#define NCURSES_NOMACROS
+#include <curses.h>
+
+// Sanity check.
+#if NCURSES_WIDECHAR != 1
+#error "NCURSES_WIDECHAR is expected to be defined to 1."
+#endif
+
+using Attributes = terminal::Attributes;
+using Attribute = terminal::Attribute;
+using ComplexChar = terminal::ComplexChar;
+
+attr_t convert_to_attr(Attributes attributes);
+cchar_t convert_to_cchar(ComplexChar const& complex_char);

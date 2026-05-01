@@ -1,10 +1,10 @@
 #include "terminal/Session.h"
+#include "terminal/Window.h"
 #include <iostream>
-#include <curses.h>
 
 int main()
 {
-  wint_t wch;
+  int wch;
   {
     terminal::Session terminal_session;
 
@@ -13,20 +13,15 @@ int main()
     int y = terminal_session.rows() - height;
     int x = 10;
 
-    WINDOW* win = newwin(height, width, y, x);
-
-    // Set the background character/attribute for the whole window.
-    wbkgrnd(win, terminal_session.get_background_cchar());
-    werase(win);
-    wrefresh(win);
-
-    box(win, 0, 0);
-    mvwaddstr(win, 1, 2, "Dark red window");
-
-    refresh();
-    wrefresh(win);
-    get_wch(&wch);
-    delwin(win);
+    terminal::Window window(height, width, y, x);
+    window.set_background(terminal_session.get_background_cchar());
+    window.erase();
+    window.refresh();
+    window.box(0, 0);
+    window.addstr(1, 2, "Dark red window");
+    terminal_session.refresh();
+    window.refresh();
+    wch = terminal_session.get_wch();
   }
   std::cout << "Program terminated with " << wch << std::endl;
 }

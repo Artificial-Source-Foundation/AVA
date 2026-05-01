@@ -1,12 +1,9 @@
 #include "Session.h"
 #include <cstdlib>
 #include <locale.h>
-#include <curses.h>
 
-// Sanity check.
-#if NCURSES_WIDECHAR != 1
-#error "NCURSES_WIDECHAR is expected to be defined to 1."
-#endif
+// This header must be included last.
+#include "private_convert.h"
 
 namespace terminal {
 
@@ -18,7 +15,6 @@ Session::Session()
   initscr();
 
   wchar_t fill[] = L" ";
-  setcchar(&background_cchar, fill, A_NORMAL, 0, nullptr);
 
   if (has_colors())
   {
@@ -35,7 +31,7 @@ Session::Session()
     else
       init_pair(1, COLOR_WHITE, COLOR_BLACK);
 
-    setcchar(&background_cchar, fill, A_NORMAL, 1, nullptr);
+    background_cchar_.set_color_pair(1);
   }
 
   cbreak();
@@ -50,6 +46,18 @@ Session::~Session()
 int Session::rows() const
 {
   return LINES;
+}
+
+void Session::refresh()
+{
+  ::refresh();
+}
+
+int Session::get_wch()
+{
+  wint_t wch;
+  ::get_wch(&wch);
+  return wch;
 }
 
 } // namespace terminal

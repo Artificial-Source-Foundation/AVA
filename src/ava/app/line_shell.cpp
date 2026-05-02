@@ -6,12 +6,14 @@
 #include <utility>
 #include <vector>
 
+#include "ava/app/command_catalog.h"
 #include "ava/app/commands.h"
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/provider/curl_transport.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/tui/composer.h"
+#include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
 #include "ava/tui/terminal.h"
 
@@ -19,41 +21,13 @@ namespace {
 
 void print_shell_help() { std::cout << ava::app::command_help_text() << '\n'; }
 
-std::vector<ava::tui::SlashCommandItem> slash_command_palette_items() {
-  return {
-      ava::tui::SlashCommandItem{.command = "/help", .description = "Show this help", .category = "General"},
-      ava::tui::SlashCommandItem{.command = "/mode", .description = "Toggle build/plan mode", .category = "General"},
-      ava::tui::SlashCommandItem{.command = "/quit", .description = "Exit", .category = "General"},
-      ava::tui::SlashCommandItem{
-          .command = "/sessions", .description = "List sessions for this workspace", .category = "Sessions"},
-      ava::tui::SlashCommandItem{
-          .command = "/context", .description = "List loaded context sources", .category = "Sessions"},
-      ava::tui::SlashCommandItem{.command = "/compact",
-                                 .description = "Generate and record a provider summary",
-                                 .hint = "[instructions]",
-                                 .category = "Sessions"},
-      ava::tui::SlashCommandItem{
-          .command = "/export", .description = "Export this session as markdown", .category = "Sessions"},
-      ava::tui::SlashCommandItem{.command = "/glob",
-                                 .description = "List files matching a glob pattern",
-                                 .hint = "<pattern>",
-                                 .category = "Files"},
-      ava::tui::SlashCommandItem{.command = "/grep",
-                                 .description = "Search matching files for literal text",
-                                 .hint = "<text> [glob]",
-                                 .category = "Files"},
-      ava::tui::SlashCommandItem{.command = "/read",
-                                 .description = "Read a file through the permissioned read tool",
-                                 .hint = "<path>",
-                                 .category = "Files"},
-      ava::tui::SlashCommandItem{.command = "/write",
-                                 .description = "Write text through the permissioned write tool",
-                                 .hint = "<path> <txt>",
-                                 .category = "Files"},
-      ava::tui::SlashCommandItem{.command = "/bash",
-                                 .description = "Run a permissioned shell command",
-                                 .hint = "<command>",
-                                 .category = "Shell"}};
+std::vector<ava::app::CommandHotkey> command_hotkeys_from_key_bindings(const ava::tui::TuiKeyBindings& key_bindings) {
+  std::vector<ava::app::CommandHotkey> hotkeys;
+  for (const auto& item : ava::tui::key_binding_help_items(key_bindings)) {
+    hotkeys.push_back(
+        ava::app::CommandHotkey{.action = item.action, .description = item.description, .keys = item.keys});
+  }
+  return hotkeys;
 }
 
 ava::tui::ToolTimelineStatus tui_tool_status(ava::agent::ToolTimelineStatus status) {
@@ -138,7 +112,9 @@ LineResult with_openai_runtime(ShellState& state, std::string_view offline_suffi
 }
 
 LineResult handle_line(ShellState& state, const std::string& line,
-                       ava::permissions::PermissionResolver permission_resolver = nullptr) {
+                       ava::permissions::PermissionResolver permission_resolver = nullptr,
+                       ava::agent::QuestionResolver question_resolver = nullptr,
+                       const std::vector<ava::app::CommandHotkey>& hotkeys = {}) {
   LineResult line_result;
   if (line.empty()) return line_result;
   if (ava::app::is_backend_command(line)) {
@@ -149,15 +125,17 @@ LineResult handle_line(ShellState& state, const std::string& line,
               ava::app::RuntimeRunOptions run_options) {
             auto command_result = ava::app::run_command(
                 state.session,
-                ava::app::CommandRequest{
-                    .command = line,
-                    .permission_resolver = permission_resolver,
-                    .compaction_summary_generator = [&](const std::vector<ava::session::SessionEntry>& entries,
-                                                        const ava::session::CompactionConfig& config,
-                                                        std::string_view instructions, std::size_t estimated_tokens) {
-                      return ava::app::generate_compaction_summary(state.session, entries, config, instructions,
-                                                                   estimated_tokens, provider, transport, run_options);
-                    }});
+                ava::app::CommandRequest{.command = line,
+                                         .permission_resolver = permission_resolver,
+                                         .compaction_summary_generator =
+                                             [&](const std::vector<ava::session::SessionEntry>& entries,
+                                                 const ava::session::CompactionConfig& config,
+                                                 std::string_view instructions, std::size_t estimated_tokens) {
+                                               return ava::app::generate_compaction_summary(
+                                                   state.session, entries, config, instructions, estimated_tokens,
+                                                   provider, transport, run_options);
+                                             },
+                                         .hotkeys = hotkeys});
             if (!command_result) {
               LineResult compact_result;
               add_output(compact_result, command_result.error().format());
@@ -169,7 +147,8 @@ LineResult handle_line(ShellState& state, const std::string& line,
           });
     }
     auto command_result = ava::app::run_command(
-        state.session, ava::app::CommandRequest{.command = line, .permission_resolver = permission_resolver});
+        state.session,
+        ava::app::CommandRequest{.command = line, .permission_resolver = permission_resolver, .hotkeys = hotkeys});
     if (!command_result) {
       add_output(line_result, command_result.error().format());
       return line_result;
@@ -184,6 +163,7 @@ LineResult handle_line(ShellState& state, const std::string& line,
                              [&](const ava::provider::Provider& provider, ava::provider::Transport& transport,
                                  ava::app::RuntimeRunOptions run_options) {
                                run_options.permission_resolver = permission_resolver;
+                               run_options.question_resolver = question_resolver;
                                auto result =
                                    ava::app::run_prompt(state.session, line, provider, transport, run_options);
                                LineResult prompt_result;
@@ -231,15 +211,27 @@ int run_line_shell(ShellState state) {
 }
 
 int run_tui(ShellState state) {
+  auto key_bindings = ava::tui::default_key_bindings();
+  std::string keybind_status;
+  if (auto loaded = ava::tui::load_key_bindings(state.session.paths.ava_config_dir / "keybinds.json"); loaded) {
+    key_bindings = std::move(*loaded);
+  } else {
+    keybind_status = loaded.error().format();
+  }
+  auto hotkeys = command_hotkeys_from_key_bindings(key_bindings);
   auto result = ava::tui::run_interactive_composer(ava::tui::TuiRuntimeOptions{
       .mode = ava::agent::to_string(state.session.mode),
       .provider = state.session.model.provider_id,
       .model = state.session.model.model_id,
       .session_id = state.session.store.session_id(),
-      .slash_commands = slash_command_palette_items(),
+      .initial_status = keybind_status,
+      .slash_commands = ava::app::command_catalog_slash_items(hotkeys),
+      .key_bindings = key_bindings,
       .on_submit =
-          [&state](const std::string& submitted, const ava::permissions::PermissionResolver& permission_resolver) {
-            const auto line_result = handle_line(state, submitted, permission_resolver);
+          [&state, hotkeys](const std::string& submitted,
+                            const ava::permissions::PermissionResolver& permission_resolver,
+                            const ava::agent::QuestionResolver& question_resolver) {
+            const auto line_result = handle_line(state, submitted, permission_resolver, question_resolver, hotkeys);
             return ava::tui::TuiSubmitResult{.quit = line_result.quit,
                                              .output = line_result.output,
                                              .tool_timeline = tui_tool_timeline(line_result.tool_timeline)};

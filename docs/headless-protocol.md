@@ -29,8 +29,8 @@ Headless modes are fail-closed by default for backend permission decisions whose
 
 Supported policy flags:
 
-- `--allow read-only`: allows read/search-style permission prompts (`read_file`, `glob`, and `grep` shapes) when the backend asks. Write, edit, patch, bash, and question prompts remain denied.
-- `--allow-tool glob,grep,read_file`: allows only the listed exact tool names when those tools produce compatible ask prompts. Supported values are `glob`, `grep`, and `read_file`; unsupported values such as `bash`, `write_file`, `edit_file`, `apply_patch`, `question`, or arbitrary strings are rejected as usage errors.
+- `--allow read-only`: allows read/search-style permission prompts (`read_file`, `glob`, and `grep` shapes) when the backend asks. Network, write, edit, patch, bash, and question prompts remain denied.
+- `--allow-tool glob,grep,read_file,webfetch`: allows only the listed exact tool names when those tools produce compatible ask prompts. Supported values are `glob`, `grep`, `read_file`, and `webfetch`; unsupported values such as `bash`, `write_file`, `edit_file`, `apply_patch`, `question`, or arbitrary strings are rejected as usage errors. `webfetch` only auto-allows exact `network.fetch` prompts produced by the `webfetch` tool; `--allow read-only` never allows network prompts.
 
 Examples:
 
@@ -38,10 +38,11 @@ Examples:
 ava --print "summarize the repo" --allow read-only
 ava --print "inspect this file" --allow-tool read_file
 ava --print "find symbols" --allow-tool glob,grep
+ava --print "fetch release notes" --allow-tool webfetch
 ava --rpc --allow read-only
 ```
 
-Invalid permission flag values exit with code `2` and write a usage error to stderr before provider/auth startup. AVA does not persist headless permission rules; every headless invocation must provide the desired policy explicitly. In RPC mode, matching read/search prompts are auto-allowed before `permission_requested`; non-matching ask prompts still require an explicit `permission_reply`.
+Invalid permission flag values exit with code `2` and write a usage error to stderr before provider/auth startup. AVA does not persist headless permission rules; every headless invocation must provide the desired policy explicitly. In RPC mode, matching read/search or exact `webfetch` network prompts are auto-allowed before `permission_requested`; non-matching ask prompts still require an explicit `permission_reply`.
 
 ## Stdout / Stderr Contract
 
@@ -281,7 +282,7 @@ RPC notifications may reuse the event envelopes above. Request ids are client-ow
 
 Headless operation is fail-closed by default:
 
-- Permission decisions that require user approval fail unless headless policy supplies `--allow read-only`/`--allow-tool` for a supported read/search tool or RPC mode receives an explicit `permission_reply` for the active resolver request.
+- Permission decisions that require user approval fail unless headless policy supplies `--allow read-only`/`--allow-tool` for a supported read/search tool, `--allow-tool webfetch` for exact `network.fetch` webfetch prompts, or RPC mode receives an explicit `permission_reply` for the active resolver request.
 - The `question` tool fails with an unavailable interaction error unless RPC mode receives an explicit `question_reply` for the active resolver request.
 - Destructive operations remain behind existing backend permission policy checks.
 

@@ -256,30 +256,34 @@ std::vector<std::string> render_composer(const ComposerSnapshot& snapshot) {
   lines.reserve(height);
 
   const auto normal_composer_lines = detail::composer_block_line_count(snapshot, height);
-  const auto fixed_lines = snapshot.permission_prompt ? std::size_t{0} : normal_composer_lines;
+  const auto prompt_active = snapshot.permission_prompt.has_value() || snapshot.question_prompt.has_value();
+  const auto fixed_lines = prompt_active ? std::size_t{0} : normal_composer_lines;
   const auto max_prompt_lines = height > fixed_lines ? height - fixed_lines : 0;
-  const auto prompt_line_budget = snapshot.permission_prompt ? std::min<std::size_t>({5, max_prompt_lines}) : 0;
+  const auto prompt_line_budget = prompt_active ? std::min<std::size_t>({7, max_prompt_lines}) : 0;
   auto permission_lines = snapshot.permission_prompt
                               ? detail::render_permission_prompt(*snapshot.permission_prompt, width, prompt_line_budget)
                               : std::vector<std::string>{};
-  const auto fixed_and_prompt_lines = fixed_lines + permission_lines.size();
-  const auto palette_line_budget = (height > fixed_and_prompt_lines && !snapshot.permission_prompt)
-                                       ? std::min(detail::kMaxPaletteLines, height - fixed_and_prompt_lines)
-                                       : 0;
+  auto question_lines = snapshot.question_prompt
+                            ? detail::render_question_prompt(*snapshot.question_prompt, width, prompt_line_budget)
+                            : std::vector<std::string>{};
+  const auto fixed_and_prompt_lines = fixed_lines + permission_lines.size() + question_lines.size();
+  const auto palette_line_budget =
+      (height > fixed_and_prompt_lines && !prompt_active && !snapshot.slash_palette_suppressed)
+          ? std::min(detail::kMaxPaletteLines, height - fixed_and_prompt_lines)
+          : 0;
   auto palette_lines = detail::render_slash_palette(snapshot, width, palette_line_budget);
 
-  const auto non_transcript_lines = fixed_lines + palette_lines.size() + permission_lines.size();
+  const auto non_transcript_lines =
+      fixed_lines + palette_lines.size() + permission_lines.size() + question_lines.size();
   const auto transcript_height = height > non_transcript_lines ? height - non_transcript_lines : 0;
   const auto rendered_transcript = detail::render_transcript_lines(snapshot.transcript, width);
   const auto visible_transcript = detail::visible_transcript_lines(rendered_transcript, width, transcript_height,
                                                                    snapshot.transcript_scroll_offset);
 
-  const auto transcript_padding =
-      transcript_height > visible_transcript.size() ? transcript_height - visible_transcript.size() : std::size_t{0};
-  for (std::size_t index = 0; index < transcript_padding; ++index) {
+  lines.insert(lines.end(), visible_transcript.begin(), visible_transcript.end());
+  while (lines.size() < transcript_height) {
     lines.push_back("");
   }
-  lines.insert(lines.end(), visible_transcript.begin(), visible_transcript.end());
 
   for (const auto& line : palette_lines) {
     lines.push_back(line);
@@ -287,7 +291,10 @@ std::vector<std::string> render_composer(const ComposerSnapshot& snapshot) {
   for (const auto& line : permission_lines) {
     lines.push_back(line);
   }
-  if (!snapshot.permission_prompt) {
+  for (const auto& line : question_lines) {
+    lines.push_back(line);
+  }
+  if (!prompt_active) {
     const auto composer_lines = detail::render_composer_block(snapshot, width, normal_composer_lines);
     lines.insert(lines.end(), composer_lines.begin(), composer_lines.end());
   }
@@ -305,7 +312,7 @@ bool draw_screen(const ComposerSnapshot& snapshot) {
   const auto width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
   const auto lines = render_composer(snapshot);
 
-  if (snapshot.permission_prompt) {
+  if (snapshot.permission_prompt || snapshot.question_prompt) {
     static_cast<void>(curs_set(0));
   } else {
     static_cast<void>(curs_set(1));
@@ -318,7 +325,7 @@ bool draw_screen(const ComposerSnapshot& snapshot) {
     draw_styled_line(detail::screen_surface_line(lines[index], width));
   }
 
-  if (!snapshot.permission_prompt) {
+  if (!snapshot.permission_prompt && !snapshot.question_prompt) {
     const auto cursor = input_cursor_placement(snapshot, lines.size(), width);
     move(static_cast<int>(std::min<std::size_t>(cursor.row, LINES > 0 ? LINES - 1 : 0)),
          static_cast<int>(std::min<std::size_t>(cursor.column, COLS > 0 ? COLS - 1 : 0)));

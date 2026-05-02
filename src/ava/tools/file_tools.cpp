@@ -3,12 +3,16 @@
 #include <array>
 #include <cerrno>
 #include <fstream>
+#include <memory>
 #include <string_view>
 #include <system_error>
 #include <utility>
 
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/tools/diff_utils.h"
+#include "ava/tools/edit_match.h"
+#include "ava/tools/mutation_queue.h"
 
 namespace ava::tools {
 
@@ -161,6 +165,79 @@ std::string errno_cause(int value) {
   return std::generic_category().message(value);
 }
 
+std::shared_ptr<MutationQueue> effective_mutation_queue(const ToolContext& context) {
+  if (context.mutation_queue) return context.mutation_queue;
+  return default_mutation_queue();
+}
+
+ava::core::Result<FileMutationResult> write_file_unlocked(const std::filesystem::path& path, std::string_view content) {
+  const auto parent_path = path.parent_path();
+  if (!parent_path.empty()) {
+    std::error_code mkdir_error;
+    std::filesystem::create_directories(parent_path, mkdir_error);
+    if (mkdir_error) {
+      return std::unexpected(io_error("failed to create parent directory", parent_path, mkdir_error.message()));
+    }
+  }
+
+  std::error_code status_error;
+  const auto existing_status = std::filesystem::status(path, status_error);
+  const bool preserve_permissions = !status_error && std::filesystem::exists(existing_status);
+  const auto existing_permissions = existing_status.permissions();
+
+  const auto temp_path = unique_write_temp_path(path);
+  errno = 0;
+  std::ofstream file(temp_path, std::ios::binary | std::ios::trunc);
+  if (!file) {
+    return std::unexpected(
+        staged_io_error("failed to open temporary file for writing", path, temp_path, errno_cause(errno)));
+  }
+  errno = 0;
+  file << content;
+  if (!file) {
+    file.close();
+    remove_staged_file_best_effort(temp_path);
+    return std::unexpected(staged_io_error("failed to write temporary file", path, temp_path, errno_cause(errno)));
+  }
+  errno = 0;
+  file.close();
+  if (!file) {
+    remove_staged_file_best_effort(temp_path);
+    return std::unexpected(
+        staged_io_error("failed to close temporary file after writing", path, temp_path, errno_cause(errno)));
+  }
+
+  if (preserve_permissions) {
+    std::error_code permissions_error;
+    std::filesystem::permissions(temp_path, existing_permissions, std::filesystem::perm_options::replace,
+                                 permissions_error);
+    if (permissions_error) {
+      remove_staged_file_best_effort(temp_path);
+      return std::unexpected(staged_io_error("failed to apply target permissions to temporary file", path, temp_path,
+                                             permissions_error.message()));
+    }
+  } else {
+    std::error_code permissions_error;
+    std::filesystem::permissions(temp_path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::replace, permissions_error);
+    if (permissions_error) {
+      remove_staged_file_best_effort(temp_path);
+      return std::unexpected(staged_io_error("failed to apply new file permissions to temporary file", path, temp_path,
+                                             permissions_error.message()));
+    }
+  }
+
+  if (auto committed = replace_file_with_staged_file(temp_path, path); !committed) {
+    remove_staged_file_best_effort(temp_path);
+    return std::unexpected(std::move(committed.error()));
+  }
+
+  FileMutationResult result;
+  result.path = path;
+  result.bytes_written = content.size();
+  return result;
+}
+
 }  // namespace
 
 ava::core::VoidResult ensure_permission(const ToolContext& context, ava::permissions::Operation operation,
@@ -220,17 +297,19 @@ ava::core::VoidResult ensure_permission(const ToolContext& context, ava::permiss
     return {};
   }
 
-  const auto resolution_context = resolution ? ava::permissions::to_string(*resolution) : std::string("resolver_failed");
+  const auto resolution_context =
+      resolution ? ava::permissions::to_string(*resolution) : std::string("resolver_failed");
   return std::unexpected(permission_denied_error(error_message, decision, target_path, command, resolution_context));
 }
 
 std::string permission_audit_data_json(const PermissionAuditEvent& event) {
   std::string data = "{\"operation\":\"" + ava::core::json::escape(ava::permissions::to_string(event.operation)) +
                      "\",\"mode\":\"" + ava::core::json::escape(ava::agent::to_string(event.mode)) +
-                     "\",\"tool_name\":\"" + ava::core::json::escape(event.tool_name) +
-                     "\",\"action\":\"" + ava::core::json::escape(ava::permissions::to_string(event.action)) +
-                     "\",\"reason\":\"" + ava::core::json::escape(event.reason) + "\"";
-  if (event.operation != ava::permissions::Operation::RunCommand && !event.target_path.empty()) {
+                     "\",\"tool_name\":\"" + ava::core::json::escape(event.tool_name) + "\",\"action\":\"" +
+                     ava::core::json::escape(ava::permissions::to_string(event.action)) + "\",\"reason\":\"" +
+                     ava::core::json::escape(event.reason) + "\"";
+  if (event.operation != ava::permissions::Operation::RunCommand &&
+      event.operation != ava::permissions::Operation::NetworkFetch && !event.target_path.empty()) {
     data += ",\"target_path\":\"" + ava::core::json::escape(event.target_path.string()) + "\"";
   }
   if (!event.command.empty()) {
@@ -249,8 +328,8 @@ std::string permission_audit_data_json(const PermissionAuditEvent& event) {
 ava::core::Result<TextOutput> read_file(const ToolContext& context, const std::filesystem::path& path,
                                         ReadOptions options) {
   if (!options.permission_already_checked) {
-    if (auto permission = ensure_permission(context, ava::permissions::Operation::ReadFile, path, "", "",
-                                            "tool requires permission");
+    if (auto permission =
+            ensure_permission(context, ava::permissions::Operation::ReadFile, path, "", "", "tool requires permission");
         !permission) {
       return std::unexpected(permission.error());
     }
@@ -262,86 +341,27 @@ ava::core::Result<TextOutput> read_file(const ToolContext& context, const std::f
 ava::core::Result<FileMutationResult> write_file(const ToolContext& context, const std::filesystem::path& path,
                                                  std::string_view content, WriteOptions options) {
   if (!options.permission_already_checked) {
-    if (auto permission = ensure_permission(context, ava::permissions::Operation::EditFile, path, "", "",
-                                            "tool requires permission");
+    if (auto permission =
+            ensure_permission(context, ava::permissions::Operation::EditFile, path, "", "", "tool requires permission");
         !permission) {
       return std::unexpected(permission.error());
     }
   }
 
-  const auto parent_path = path.parent_path();
-  if (!parent_path.empty()) {
-    std::error_code mkdir_error;
-    std::filesystem::create_directories(parent_path, mkdir_error);
-    if (mkdir_error) {
-      return std::unexpected(io_error("failed to create parent directory", parent_path, mkdir_error.message()));
-    }
-  }
-
-  std::error_code status_error;
-  const auto existing_status = std::filesystem::status(path, status_error);
-  const bool preserve_permissions = !status_error && std::filesystem::exists(existing_status);
-  const auto existing_permissions = existing_status.permissions();
-
-  const auto temp_path = unique_write_temp_path(path);
-  errno = 0;
-  std::ofstream file(temp_path, std::ios::binary | std::ios::trunc);
-  if (!file) {
-    return std::unexpected(staged_io_error("failed to open temporary file for writing", path, temp_path,
-                                           errno_cause(errno)));
-  }
-  errno = 0;
-  file << content;
-  if (!file) {
-    file.close();
-    remove_staged_file_best_effort(temp_path);
-    return std::unexpected(staged_io_error("failed to write temporary file", path, temp_path, errno_cause(errno)));
-  }
-  errno = 0;
-  file.close();
-  if (!file) {
-    remove_staged_file_best_effort(temp_path);
-    return std::unexpected(
-        staged_io_error("failed to close temporary file after writing", path, temp_path, errno_cause(errno)));
-  }
-
-  if (preserve_permissions) {
-    std::error_code permissions_error;
-    std::filesystem::permissions(temp_path, existing_permissions, std::filesystem::perm_options::replace,
-                                 permissions_error);
-    if (permissions_error) {
-      remove_staged_file_best_effort(temp_path);
-      return std::unexpected(staged_io_error("failed to apply target permissions to temporary file", path, temp_path,
-                                              permissions_error.message()));
-    }
-  } else {
-    std::error_code permissions_error;
-    std::filesystem::permissions(temp_path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-                                 std::filesystem::perm_options::replace, permissions_error);
-    if (permissions_error) {
-      remove_staged_file_best_effort(temp_path);
-      return std::unexpected(staged_io_error("failed to apply new file permissions to temporary file", path, temp_path,
-                                             permissions_error.message()));
-    }
-  }
-
-  if (auto committed = replace_file_with_staged_file(temp_path, path); !committed) {
-    remove_staged_file_best_effort(temp_path);
-    return std::unexpected(std::move(committed.error()));
-  }
-
-  return FileMutationResult{.path = path, .bytes_written = content.size()};
+  if (options.mutation_already_locked) return write_file_unlocked(path, content);
+  [[maybe_unused]] auto mutation_lock = effective_mutation_queue(context)->lock_path(path);
+  return write_file_unlocked(path, content);
 }
 
 ava::core::Result<FileMutationResult> edit_file(const ToolContext& context, const std::filesystem::path& path,
                                                 std::string_view old_text, std::string_view new_text) {
-  if (auto permission = ensure_permission(context, ava::permissions::Operation::ReadFile, path, "", "",
-                                          "tool requires permission");
+  if (auto permission =
+          ensure_permission(context, ava::permissions::Operation::ReadFile, path, "", "", "tool requires permission");
       !permission) {
     return std::unexpected(permission.error());
   }
-  if (auto permission = ensure_permission(context, ava::permissions::Operation::EditFile, path, "", "",
-                                          "tool requires permission");
+  if (auto permission =
+          ensure_permission(context, ava::permissions::Operation::EditFile, path, "", "", "tool requires permission");
       !permission) {
     return std::unexpected(permission.error());
   }
@@ -351,26 +371,27 @@ ava::core::Result<FileMutationResult> edit_file(const ToolContext& context, cons
     return std::unexpected(std::move(error));
   }
 
+  [[maybe_unused]] auto mutation_lock = effective_mutation_queue(context)->lock_path(path);
   auto content = read_all_text(path);
   if (!content) {
     return std::unexpected(content.error());
   }
 
-  const auto first = content->find(old_text);
-  if (first == std::string::npos) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::NotFound, "old_text was not found");
-    error.with_context("path", path.string());
-    return std::unexpected(std::move(error));
-  }
+  auto match = find_unique_text_match(*content, old_text, path, "old_text was not found", "old_text is not unique");
+  if (!match) return std::unexpected(match.error());
 
-  if (content->find(old_text, first + old_text.size()) != std::string::npos) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "old_text is not unique");
-    error.with_context("path", path.string());
-    return std::unexpected(std::move(error));
-  }
+  const auto original = *content;
+  content->replace(match->position, match->size, new_text);
+  auto written = write_file(context, path, *content,
+                            WriteOptions{.permission_already_checked = true, .mutation_already_locked = true});
+  if (!written) return std::unexpected(written.error());
 
-  content->replace(first, old_text.size(), new_text);
-  return write_file(context, path, *content, WriteOptions{.permission_already_checked = true});
+  auto diff = unified_diff(original, *content, path, path);
+  written->diff = std::move(diff.text);
+  written->diff_truncated = diff.truncated;
+  written->line_endings = to_string(match->content_analysis.line_endings);
+  written->had_utf8_bom = match->content_analysis.has_utf8_bom;
+  return written;
 }
 
 ava::core::VoidResult replace_file_with_staged_file(const std::filesystem::path& staged_path,

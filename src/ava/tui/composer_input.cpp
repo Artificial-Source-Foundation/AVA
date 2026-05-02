@@ -1,9 +1,13 @@
 #include <algorithm>
+#include <array>
+#include <string>
 
 #include "ava/tui/composer_internal.h"
 
 namespace ava::tui::detail {
 namespace {
+
+constexpr std::size_t kMaxStatusColumns = 36;
 
 std::string composer_bar() {
   return std::string(kSgrAccent) + std::string(kComposerBar) + std::string(kSgrReset) + std::string(kSgrComposerBg) +
@@ -16,9 +20,11 @@ std::string composer_mode_badge(std::string_view mode) {
   return std::string(color) + "[" + mode_text + "]" + std::string(kSgrReset) + std::string(kSgrComposerBg);
 }
 
-std::string render_status_line(const ComposerSnapshot& snapshot, std::size_t width) {
+std::string render_status_line(const ComposerSnapshot& snapshot, std::size_t width,
+                               std::size_t hidden_draft_lines = 0) {
   const auto provider = sanitize_terminal_text(snapshot.provider);
   const auto model = sanitize_terminal_text(snapshot.model);
+  const auto status = fit_line(sanitize_terminal_text(snapshot.status), kMaxStatusColumns);
 
   std::string line = composer_bar() + composer_mode_badge(snapshot.mode);
   if (!provider.empty()) {
@@ -28,7 +34,37 @@ std::string render_status_line(const ComposerSnapshot& snapshot, std::size_t wid
   if (!model.empty()) {
     line += "  " + std::string(kSgrMuted) + model + std::string(kSgrReset) + std::string(kSgrComposerBg);
   }
-  static_cast<void>(snapshot.status);
+  if (!status.empty()) {
+    line += "  " + std::string(kSgrTextDimmed) + status + std::string(kSgrReset) + std::string(kSgrComposerBg);
+  }
+
+  std::string right;
+  if (hidden_draft_lines > 0) {
+    right += std::string(kSgrMuted) + "draft +" + std::to_string(hidden_draft_lines) + " above" +
+             std::string(kSgrReset) + std::string(kSgrComposerBg);
+  }
+  if (snapshot.token_status && !snapshot.token_status->empty()) {
+    if (!right.empty()) right += "  ";
+    right += std::string(kSgrMuted) + sanitize_terminal_text(*snapshot.token_status) + std::string(kSgrReset) +
+             std::string(kSgrComposerBg);
+  }
+  if (snapshot.processing) {
+    static constexpr std::array<std::string_view, 4> kSpinner = {"|", "/", "-", "\\"};
+    if (!right.empty()) right += "  ";
+    right += std::string(kSgrWarning) + std::string(kSpinner[snapshot.spinner_frame % kSpinner.size()]) +
+             std::string(kSgrReset) + std::string(kSgrComposerBg) + " working";
+  }
+
+  if (!right.empty()) {
+    const auto left_columns = terminal_text_columns(line);
+    const auto right_columns = terminal_text_columns(right);
+    if (left_columns + right_columns + 2 < width) {
+      line += std::string(width - left_columns - right_columns, ' ');
+      line += right;
+    } else {
+      line += "  " + right;
+    }
+  }
 
   return composer_surface_line(std::move(line), width);
 }
@@ -117,7 +153,7 @@ std::vector<std::string> render_composer_block(const ComposerSnapshot& snapshot,
   for (std::size_t index = layout.first_visible; index < last_visible; ++index) {
     lines.push_back(render_input_fragment_line(input_lines[index], index == 0, width));
   }
-  if (max_lines > 1) lines.push_back(render_status_line(snapshot, width));
+  if (max_lines > 1) lines.push_back(render_status_line(snapshot, width, layout.first_visible));
   while (lines.size() < max_lines) {
     lines.push_back(composer_surface_line("", width));
   }

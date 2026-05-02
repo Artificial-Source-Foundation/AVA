@@ -21,6 +21,7 @@ enum class Operation {
   SearchFiles,
   EditFile,
   RunCommand,
+  NetworkFetch,
 };
 
 struct PermissionRequest {

@@ -45,6 +45,9 @@ struct HttpRequest {
   std::string body;
   // Provider transports should honor this deadline and tests should preserve it verbatim.
   int timeout_ms = 60000;
+  bool follow_redirects = true;
+  bool include_response_headers = false;
+  std::vector<std::string> resolve_hosts;
 };
 
 struct HttpResponse {

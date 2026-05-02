@@ -288,10 +288,13 @@ ava::core::Result<ava::provider::HttpResponse> post_openai_oauth_token_form(std:
                                                                             std::string_view failure_message) {
   auto response = transport.send(ava::provider::HttpRequest{.method = "POST",
                                                             .url = std::string(kTokenUrl),
-                                                            .headers = {{"Content-Type",
-                                                                         "application/x-www-form-urlencoded"}},
-                                                            .body = std::move(body),
-                                                            .timeout_ms = 60000});
+                                                             .headers = {{"Content-Type",
+                                                                          "application/x-www-form-urlencoded"}},
+                                                             .body = std::move(body),
+                                                             .timeout_ms = 60000,
+                                                             .follow_redirects = true,
+                                                             .include_response_headers = false,
+                                                             .resolve_hosts = {}});
   if (!response) return std::unexpected(response.error());
   if (response->status_code < 200 || response->status_code >= 300) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, std::string(failure_message));

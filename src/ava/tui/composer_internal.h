@@ -60,6 +60,8 @@ struct ComposerInputLayout {
 
 [[nodiscard]] std::vector<std::string> render_permission_prompt(const PermissionPromptView& prompt, std::size_t width,
                                                                 std::size_t max_lines);
+[[nodiscard]] std::vector<std::string> render_question_prompt(const QuestionPromptView& prompt, std::size_t width,
+                                                              std::size_t max_lines);
 
 [[nodiscard]] std::string render_generic_line(const std::string& text, std::size_t width);
 [[nodiscard]] std::vector<std::string> render_transcript_lines(const std::vector<TranscriptItem>& transcript,

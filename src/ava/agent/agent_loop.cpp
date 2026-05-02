@@ -69,8 +69,7 @@ std::string tool_call_context_text(const ava::session::SessionEntry& entry) {
   const auto call_id = ava::core::json::string_field(entry.data_json, "call_id").value_or("");
   const auto name = ava::core::json::string_field(entry.data_json, "name").value_or("");
   const auto arguments = ava::core::json::string_field(entry.data_json, "arguments").value_or("");
-  return "Tool call requested by assistant. call_id=" + call_id + " name=" + name +
-         " arguments_json=" + arguments;
+  return "Tool call requested by assistant. call_id=" + call_id + " name=" + name + " arguments_json=" + arguments;
 }
 
 std::string truncate_tool_context(std::string text, std::size_t max_bytes) {
@@ -236,6 +235,11 @@ void publish_tool_event(const AgentLoopOptions& options, const ToolTimelineEntry
   if (options.on_tool_event) options.on_tool_event(event);
 }
 
+ava::core::VoidResult publish_tool_progress(const AgentLoopOptions& options, const ToolProgressEntry& event) {
+  if (!options.on_tool_progress) return {};
+  return options.on_tool_progress(event);
+}
+
 ava::core::VoidResult publish_stream_event(const AgentLoopOptions& options, const ava::provider::StreamEvent& event) {
   if (!options.on_stream_event) return {};
   return options.on_stream_event(event);
@@ -272,7 +276,7 @@ ava::core::VoidResult append_entry(ava::session::SessionStore& store, ava::sessi
 ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, const std::string& text) {
   auto id = ava::core::make_id("entry");
   auto appended = append_entry_with_id(store, ava::session::EntryType::UserMessage, id,
-                                      "{\"text\":\"" + ava::core::json::escape(text) + "\"}");
+                                       "{\"text\":\"" + ava::core::json::escape(text) + "\"}");
   if (!appended) return std::unexpected(std::move(appended.error()));
   return id;
 }
@@ -280,8 +284,7 @@ ava::core::Result<std::string> append_user_message(ava::session::SessionStore& s
 ava::core::VoidResult append_replay_user_message(ava::session::SessionStore& store, const std::string& text,
                                                  const std::string& replay_of) {
   return append_entry(store, ava::session::EntryType::UserMessage,
-                      "{\"text\":\"" + ava::core::json::escape(text) +
-                          "\",\"internal_replay\":true,\"replay_of\":\"" +
+                      "{\"text\":\"" + ava::core::json::escape(text) + "\",\"internal_replay\":true,\"replay_of\":\"" +
                           ava::core::json::escape(replay_of) +
                           "\",\"reason\":\"context_compaction_active_prompt_replay\"}");
 }
@@ -752,6 +755,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
   AgentLoopResult result;
   const ToolDispatcher dispatcher(ava::tools::ToolContext{
       .workspace_dir = options_.workspace_dir,
+      .spill_dir = store.session_path().parent_path() / "spill",
       .mode = options_.mode,
       .permission_resolver = options_.permission_resolver,
       .permission_audit_sink = [&store, session_mutex = options_.session_mutex](
@@ -761,6 +765,12 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
           return append_permission_decision(store, event);
         }
         return append_permission_decision(store, event);
+      },
+      .progress_sink = [this](const ava::tools::ToolProgressEvent& event) -> ava::core::VoidResult {
+        return publish_tool_progress(
+            options_,
+            ToolProgressEntry{
+                .call_id = event.call_id, .name = event.tool_name, .text = event.text, .status = event.status});
       },
       .question_resolver = options_.question_resolver});
 

@@ -2,23 +2,35 @@
 
 #include <algorithm>
 #include <fstream>
+#include <optional>
 #include <regex>
 #include <string>
 #include <system_error>
 #include <utility>
 
+#include "ava/tools/ignore_rules.h"
+#include "ava/tools/spill_files.h"
+
 namespace ava::tools {
 
 namespace {
 
-bool is_hidden_or_generated(const std::filesystem::path& path) {
+constexpr std::size_t kSearchVisitedProgressInterval = 10000;
+constexpr std::size_t kSearchMatchProgressInterval = 500;
+
+bool is_git_dir(const std::filesystem::path& path) {
   for (const auto& part : path) {
     const auto name = part.string();
-    if (name == ".git" || name == "build" || name == "node_modules" || name == "target" || name == "dist") {
+    if (name == ".git") {
       return true;
     }
   }
   return false;
+}
+
+bool is_generated_dir(const std::filesystem::path& path) {
+  const auto name = path.filename().string();
+  return name == "build" || name == "node_modules" || name == "target" || name == "dist";
 }
 
 std::string regex_escape(char ch) {
@@ -151,9 +163,18 @@ ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string
   if (!matcher) {
     return std::unexpected(matcher.error());
   }
+  std::optional<IgnoreMatcher> ignore_matcher;
+  if (!options.no_ignore) {
+    auto loaded_ignore_matcher = IgnoreMatcher::load(context.workspace_dir);
+    if (!loaded_ignore_matcher) return std::unexpected(loaded_ignore_matcher.error());
+    ignore_matcher = std::move(*loaded_ignore_matcher);
+  }
 
   GlobResult result;
+  SpillBuffer spill_buffer;
   std::size_t visited = 0;
+  std::size_t next_visited_progress = kSearchVisitedProgressInterval;
+  std::size_t next_match_progress = kSearchMatchProgressInterval;
   std::error_code iter_error;
   for (std::filesystem::recursive_directory_iterator it(context.workspace_dir, iter_error), end; it != end;
        it.increment(iter_error)) {
@@ -163,8 +184,20 @@ ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string
     }
     const auto& entry = *it;
     ++visited;
+    if (visited >= next_visited_progress) {
+      if (auto progress = emit_tool_progress(context, "glob visited " + std::to_string(visited) + " paths", "running");
+          !progress) {
+        return std::unexpected(std::move(progress.error()));
+      }
+      next_visited_progress += kSearchVisitedProgressInterval;
+    }
     if (visited > options.max_visited) {
       result.truncated = true;
+      if (auto progress = emit_tool_progress(
+              context, "glob truncated after visiting " + std::to_string(visited) + " paths", "running");
+          !progress) {
+        return std::unexpected(std::move(progress.error()));
+      }
       break;
     }
     if (static_cast<std::size_t>(it.depth()) > options.max_depth) {
@@ -173,11 +206,22 @@ ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string
       }
       continue;
     }
-    if (entry.is_directory(iter_error) && is_hidden_or_generated(entry.path())) {
-      it.disable_recursion_pending();
+    if (entry.is_directory(iter_error)) {
+      if (is_git_dir(entry.path()) || (!options.no_ignore && is_generated_dir(entry.path()))) {
+        it.disable_recursion_pending();
+        continue;
+      }
+      if (ignore_matcher && ignore_matcher->ignored(entry.path(), true)) {
+        it.disable_recursion_pending();
+        continue;
+      }
       continue;
     }
     if (!entry.is_regular_file(iter_error)) {
+      continue;
+    }
+
+    if (ignore_matcher && ignore_matcher->ignored(entry.path(), false)) {
       continue;
     }
 
@@ -201,6 +245,16 @@ ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string
       continue;
     }
     ++result.total_matches;
+    spill_buffer.append(entry.path().generic_string());
+    spill_buffer.append("\n");
+    if (result.total_matches >= next_match_progress) {
+      if (auto progress =
+              emit_tool_progress(context, "glob matched " + std::to_string(result.total_matches) + " paths", "running");
+          !progress) {
+        return std::unexpected(std::move(progress.error()));
+      }
+      next_match_progress += kSearchMatchProgressInterval;
+    }
     if (result.paths.size() < options.max_results) {
       result.paths.push_back(entry.path());
     } else {
@@ -208,6 +262,24 @@ ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string
     }
   }
   std::ranges::sort(result.paths, {}, [](const std::filesystem::path& path) { return path.generic_string(); });
+  if (result.truncated && !context.spill_dir.empty()) {
+    auto spill = write_spill_file(context, "glob", "txt", spill_buffer);
+    if (!spill) return std::unexpected(std::move(spill.error()));
+    result.spill_path = spill->path;
+    result.spill_truncated = spill->truncated;
+    if (auto progress = emit_tool_progress(
+            context, "glob results spilled " + std::to_string(spill->bytes_written) + " bytes", "running");
+        !progress) {
+      return std::unexpected(std::move(progress.error()));
+    }
+  }
+  if (result.truncated || result.total_matches > 0 || visited > 0) {
+    if (auto progress = emit_tool_progress(
+            context, "glob completed with " + std::to_string(result.total_matches) + " matches", "completed");
+        !progress) {
+      return std::unexpected(std::move(progress.error()));
+    }
+  }
   return result;
 }
 
@@ -218,13 +290,15 @@ ava::core::Result<GrepResult> grep_files(const ToolContext& context, std::string
     return std::unexpected(std::move(error));
   }
 
-  auto files = glob_files(context, include_glob, GlobOptions{.max_results = 100000});
+  auto files = glob_files(context, include_glob, GlobOptions{.max_results = 100000, .no_ignore = options.no_ignore});
   if (!files) {
     return std::unexpected(files.error());
   }
 
   GrepResult result;
   result.truncated = files->truncated;
+  SpillBuffer spill_buffer;
+  std::size_t next_match_progress = kSearchMatchProgressInterval;
   for (const auto& path : files->paths) {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
@@ -236,6 +310,7 @@ ava::core::Result<GrepResult> grep_files(const ToolContext& context, std::string
     std::size_t file_total_matches = 0;
     std::vector<GrepMatch> file_matches;
     file_matches.reserve(std::min<std::size_t>(options.max_matches, 64));
+    SpillBuffer file_spill_buffer;
     bool file_is_binary = false;
     while (true) {
       bool line_truncated = false;
@@ -258,6 +333,21 @@ ava::core::Result<GrepResult> grep_files(const ToolContext& context, std::string
       }
 
       ++file_total_matches;
+      file_spill_buffer.append(path.generic_string());
+      file_spill_buffer.append(":");
+      file_spill_buffer.append(std::to_string(line_number));
+      file_spill_buffer.append(":");
+      file_spill_buffer.append(line);
+      file_spill_buffer.append("\n");
+      if (result.total_matches + file_total_matches >= next_match_progress) {
+        if (auto progress = emit_tool_progress(
+                context, "grep matched " + std::to_string(result.total_matches + file_total_matches) + " lines",
+                "running");
+            !progress) {
+          return std::unexpected(std::move(progress.error()));
+        }
+        next_match_progress += kSearchMatchProgressInterval;
+      }
       if (file_matches.size() >= options.max_matches) continue;
 
       file_matches.push_back(GrepMatch{
@@ -272,6 +362,8 @@ ava::core::Result<GrepResult> grep_files(const ToolContext& context, std::string
       continue;
     }
 
+    spill_buffer.append(file_spill_buffer.content());
+
     if (result.total_matches + file_total_matches > options.max_matches) {
       result.truncated = true;
     }
@@ -282,6 +374,25 @@ ava::core::Result<GrepResult> grep_files(const ToolContext& context, std::string
         break;
       }
       result.matches.push_back(std::move(match));
+    }
+  }
+
+  if (result.truncated && !context.spill_dir.empty()) {
+    auto spill = write_spill_file(context, "grep", "txt", spill_buffer);
+    if (!spill) return std::unexpected(std::move(spill.error()));
+    result.spill_path = spill->path;
+    result.spill_truncated = spill->truncated;
+    if (auto progress = emit_tool_progress(
+            context, "grep results spilled " + std::to_string(spill->bytes_written) + " bytes", "running");
+        !progress) {
+      return std::unexpected(std::move(progress.error()));
+    }
+  }
+  if (result.truncated || result.total_matches > 0 || !files->paths.empty()) {
+    if (auto progress = emit_tool_progress(
+            context, "grep completed with " + std::to_string(result.total_matches) + " matches", "completed");
+        !progress) {
+      return std::unexpected(std::move(progress.error()));
     }
   }
 

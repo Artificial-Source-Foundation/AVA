@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <filesystem>
 #include <string>
 
 #include "ava/core/result.h"
@@ -18,12 +19,13 @@ struct BashResult {
   int exit_code = -1;
   bool timed_out = false;
   bool truncated = false;
+  bool spill_truncated = false;
   std::size_t total_bytes = 0;
   std::string output;
+  std::filesystem::path spill_path;
 };
 
-[[nodiscard]] ava::core::Result<BashResult> run_bash(const ToolContext& context,
-                                                     std::string_view command,
+[[nodiscard]] ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_view command,
                                                      BashOptions options = {});
 
 }  // namespace ava::tools

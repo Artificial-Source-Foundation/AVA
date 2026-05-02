@@ -42,9 +42,11 @@
 #include "ava/tools/file_tools.h"
 #include "ava/tools/search_tools.h"
 #include "ava/tui/composer.h"
+#include "ava/tui/composer_editor.h"
+#include "ava/tui/keybindings.h"
+#include "ava/tui/runtime.h"
 #include "ava/tui/terminal.h"
 #include "tests/support/fake_transport.h"
-
 #include "tests/support/test_harness.h"
 
 namespace {
@@ -103,6 +105,80 @@ void test_tui_composer_rendering_and_input() {
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::None &&
              prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
          "permission prompt ignores unmapped character keys without changing focus");
+
+  auto single_question =
+      ava::tui::QuestionPromptView{.header = "Choose",
+                                   .question = "Pick one",
+                                   .options = {ava::tui::QuestionPromptOptionView{.value = "alpha", .label = "Alpha"},
+                                               ava::tui::QuestionPromptOptionView{.value = "beta", .label = "Beta"}},
+                                   .multiple = false,
+                                   .allow_custom = true,
+                                   .selected_option_index = 0,
+                                   .custom_text = ""};
+  auto question_input = ava::tui::handle_question_prompt_input(
+      single_question, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = '2'});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Resolve &&
+             question_input.selected_option_index == 1 && question_input.options[1].selected,
+         "question prompt numeric shortcut selects and resolves a single-select option");
+  question_input = ava::tui::handle_question_prompt_input(
+      single_question, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'x'});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && question_input.custom_text == "x" &&
+             std::ranges::none_of(question_input.options,
+                                  [](const ava::tui::QuestionPromptOptionView& option) { return option.selected; }),
+         "question prompt custom text edits clear single-select option state");
+  single_question.custom_text = question_input.custom_text;
+  question_input = ava::tui::handle_question_prompt_input(
+      single_question, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = ' '});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && question_input.custom_text == "x ",
+         "question prompt custom text can include spaces after typing starts");
+  single_question.custom_text = question_input.custom_text;
+  question_input = ava::tui::handle_question_prompt_input(
+      single_question,
+      ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = static_cast<char>(0xC3), .text = "\xC3\xA9"});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw &&
+             question_input.custom_text == std::string("x ") + "\xC3\xA9",
+         "question prompt custom text preserves utf-8 input");
+  single_question.custom_text = "x";
+  question_input =
+      ava::tui::handle_question_prompt_input(single_question, ava::tui::InputEvent{.key = ava::tui::Key::Backspace});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && question_input.custom_text.empty(),
+         "question prompt backspace edits custom text");
+
+  auto multi_question =
+      ava::tui::QuestionPromptView{.header = "Choose",
+                                   .question = "Pick many",
+                                   .options = {ava::tui::QuestionPromptOptionView{.value = "read", .label = "Read"},
+                                               ava::tui::QuestionPromptOptionView{.value = "grep", .label = "Grep"}},
+                                   .multiple = true,
+                                   .allow_custom = true,
+                                   .selected_option_index = 0,
+                                   .custom_text = ""};
+  question_input = ava::tui::handle_question_prompt_input(
+      multi_question, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = ' '});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && question_input.options[0].selected,
+         "question prompt space toggles selected multi-select option");
+  multi_question.options = question_input.options;
+  question_input = ava::tui::handle_question_prompt_input(
+      multi_question, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = '2'});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && question_input.options[0].selected &&
+             question_input.options[1].selected,
+         "question prompt numeric shortcut toggles multi-select options without resolving");
+  multi_question.options = question_input.options;
+  question_input =
+      ava::tui::handle_question_prompt_input(multi_question, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Resolve && question_input.options[0].selected &&
+             question_input.options[1].selected,
+         "question prompt enter resolves current multi-select choices");
+  question_input =
+      ava::tui::handle_question_prompt_input(multi_question, ava::tui::InputEvent{.key = ava::tui::Key::Escape});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Cancel, "question prompt escape cancels safely");
+  auto empty_multi_question = multi_question;
+  for (auto& option : empty_multi_question.options) option.selected = false;
+  empty_multi_question.custom_text.clear();
+  auto empty_multi_answer = ava::tui::question_answer_from_prompt_view(empty_multi_question);
+  expect(empty_multi_answer && empty_multi_answer->selected_options.empty() && empty_multi_answer->custom_text.empty(),
+         "question prompt accepts an empty multi-select answer");
+
   std::string utf8_input = std::string("ab") + "\xC3\xA9";
   ava::tui::erase_last_utf8_codepoint(utf8_input);
   expect(utf8_input == "ab", "tui backspace erases a complete utf-8 codepoint");
@@ -120,6 +196,49 @@ void test_tui_composer_rendering_and_input() {
   ava::tui::erase_last_utf8_codepoint(incomplete_starter_with_continuation);
   expect(incomplete_starter_with_continuation == std::string("a") + std::string("\xF0", 1),
          "tui backspace erases only one byte from an incomplete trailing utf-8 sequence");
+
+  ava::tui::ComposerDraftState draft;
+  expect(ava::tui::insert_composer_draft_text(draft, std::string("a") + "\xC3\xA9") &&
+             draft.text == std::string("a") + "\xC3\xA9" && draft.cursor == draft.text.size(),
+         "tui draft editor inserts utf-8 text at the cursor");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteBackward) && draft.text == "a",
+         "tui draft editor deletes a complete utf-8 codepoint before the cursor");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::Undo) &&
+             draft.text == std::string("a") + "\xC3\xA9",
+         "tui draft editor undo restores the previous edit");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorLeft) && draft.cursor == 1,
+         "tui draft editor moves left by full utf-8 codepoint boundaries");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteBackward) &&
+             draft.text == std::string("\xC3\xA9"),
+         "tui draft editor preserves the utf-8 codepoint after deleting preceding ascii text");
+  ava::tui::reset_composer_draft(draft, "one two three");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) && draft.cursor == 8,
+         "tui draft editor moves to the previous word start");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteWordBackward) &&
+             draft.text == "one three" && draft.kill_buffer == "two ",
+         "tui draft editor deletes the previous word into the kill buffer");
+  ava::tui::reset_composer_draft(draft, "first\nsecond line");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorLineStart) && draft.cursor == 6,
+         "tui draft editor moves to the start of the current line");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorLineEnd) &&
+             draft.cursor == draft.text.size(),
+         "tui draft editor moves to the end of the current line");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteToLineStart) &&
+             draft.text == "first\n" && draft.kill_buffer == "second line",
+         "tui draft editor deletes from cursor to line start into the kill buffer");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::Yank) && draft.text == "first\nsecond line",
+         "tui draft editor yanks the last killed line text");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::Undo) && draft.text == "first\n",
+         "tui draft editor undo removes the yanked text");
+  ava::tui::reset_composer_draft(draft, "first\nsecond line", 6);
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteToLineEnd) &&
+             draft.text == "first\n" && draft.kill_buffer == "second line",
+         "tui draft editor deletes from cursor to line end into the kill buffer");
+  expect(ava::tui::normalize_composer_paste_text("one\r\ntwo\rthree") == "one\ntwo\nthree",
+         "tui paste normalizes crlf and lone carriage returns into newlines");
+  expect(ava::tui::normalize_composer_paste_text(std::string("a\x01\tb\n", 5) + "\xC3\xA9") ==
+             std::string("a\tb\n", 4) + "\xC3\xA9",
+         "tui paste strips controls while preserving tabs, newlines, and utf-8 bytes");
 
   const auto split_empty = ava::tui::split_lines("");
   expect(split_empty.size() == 1 && split_empty.front().empty(), "tui split keeps empty input as one line");
@@ -141,7 +260,9 @@ void test_tui_composer_rendering_and_input() {
                                                 ava::tui::TranscriptItem{.label = "ava", .text = "world"}},
                                  .width = 80,
                                  .height = 14});
-  expect(lines.size() == 14, "tui pins compact content to the bottom of the viewport");
+  expect(lines.size() == 14, "tui fills the viewport with transcript, spacer, and composer lines");
+  expect(!lines.empty() && strip_sgr(lines.front()).find("╭─ You") != std::string::npos,
+         "tui starts short chats at the top of the transcript area");
   expect(!lines.empty() && lines.back().find("\x1b[48;2;26;31;46m") != std::string::npos &&
              std::ranges::none_of(lines,
                                   [](const std::string& line) { return line.find("/ commands") != std::string::npos; }),
@@ -149,6 +270,9 @@ void test_tui_composer_rendering_and_input() {
   expect(std::ranges::any_of(
              lines, [](const std::string& line) { return strip_sgr(line).find("▎  ❯ /help") != std::string::npos; }),
          "tui renders old AVA-style composer input");
+  expect(std::ranges::any_of(
+             lines, [](const std::string& line) { return strip_sgr(line).find("ready") != std::string::npos; }),
+         "tui renders the composer status in the footer");
   expect(std::ranges::any_of(lines,
                              [](const std::string& line) {
                                return line.find("\x1b[48;2;26;31;46m") != std::string::npos &&
@@ -165,6 +289,27 @@ void test_tui_composer_rendering_and_input() {
              std::ranges::any_of(
                  lines, [](const std::string& line) { return strip_sgr(line).find("│ world") != std::string::npos; }),
          "tui renders visually separated user and assistant message blocks");
+
+  const auto processing_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                     .provider = "openai",
+                                                                                     .model = "gpt-5.5",
+                                                                                     .session_id = "session_test",
+                                                                                     .input = "",
+                                                                                     .status = "thinking...",
+                                                                                     .processing = true,
+                                                                                     .spinner_frame = 1,
+                                                                                     .token_status = "tokens pending",
+                                                                                     .transcript = {},
+                                                                                     .width = 80,
+                                                                                     .height = 10});
+  expect(std::ranges::any_of(processing_lines,
+                             [](const std::string& line) {
+                               const auto visible = strip_sgr(line);
+                               return visible.find("thinking...") != std::string::npos &&
+                                      visible.find("/ working") != std::string::npos &&
+                                      visible.find("tokens pending") != std::string::npos;
+                             }),
+         "tui renders composer processing spinner and token-status slot");
 
   const auto markdown_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -451,6 +596,122 @@ void test_tui_composer_rendering_and_input() {
              ava::tui::next_slash_palette_selection("/g", slash_commands, 1) == 0,
          "tui slash palette arrow selection wraps through filtered commands");
 
+  const auto key_bindings = ava::tui::parse_key_bindings_json(
+      "{\"submit\":\"Ctrl+T, Enter\",\"new_line\":\"Shift+Enter\",\"delete_to_line_start\":\"Ctrl+U\","
+      "\"autocomplete_accept\":\"Tab\",\"variant_cycle\":\"Ctrl+D\"}");
+  expect(
+      key_bindings && ava::tui::action_for_key(*key_bindings, ava::tui::Key::CtrlT) == ava::tui::TuiAction::Submit &&
+          ava::tui::action_for_key(*key_bindings, ava::tui::Key::CtrlD) == ava::tui::TuiAction::VariantCycle &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::DeleteToLineStart, ava::tui::Key::CtrlU) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::AutocompleteAccept, ava::tui::Key::Tab) &&
+          ava::tui::keys_display(*key_bindings, ava::tui::TuiAction::Submit).find("Ctrl+T") != std::string::npos,
+      "tui keybind parser maps configured keys to semantic actions and display text");
+  const auto default_bindings = ava::tui::default_key_bindings();
+  expect(
+      ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::HistoryPrev, ava::tui::Key::ArrowUp) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::PalettePrev, ava::tui::Key::ArrowUp) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModeToggle, ava::tui::Key::Tab) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::AutocompleteAccept, ava::tui::Key::Tab) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Undo, ava::tui::Key::CtrlZ) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Yank, ava::tui::Key::CtrlY),
+      "tui default keybinds preserve context-specific semantic actions for shared keys");
+  const auto help_items = ava::tui::key_binding_help_items(default_bindings);
+  expect(std::ranges::any_of(help_items,
+                             [](const ava::tui::TuiKeyBindingHelpItem& item) {
+                               return item.action == "variant_cycle" && item.keys.find("Ctrl+T") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(help_items,
+                                 [](const ava::tui::TuiKeyBindingHelpItem& item) {
+                                   return item.action == "delete_to_line_start" &&
+                                          item.keys.find("Ctrl+U") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](const ava::tui::TuiKeyBindingHelpItem& item) {
+                                   return item.action == "undo" && item.keys.find("Ctrl+Z") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](const ava::tui::TuiKeyBindingHelpItem& item) {
+                                   return item.action == "yank" && item.keys.find("Ctrl+Y") != std::string::npos;
+                                 }),
+         "tui keybind help lists concrete semantic action names and effective keys");
+  expect(!ava::tui::parse_key_bindings_json("{\"submit\":\"Hyper+Enter\"}"),
+         "tui keybind parser rejects unknown key names");
+  expect(!ava::tui::parse_key_bindings_json("{\"submt\":\"Enter\"}"),
+         "tui keybind parser rejects unknown action names");
+  const auto escaped_action_keybinds =
+      ava::tui::parse_key_bindings_json("{\"\\u0073\\u0075\\u0062\\u006d\\u0069\\u0074\":\"Ctrl+T\"}");
+  expect(escaped_action_keybinds &&
+             ava::tui::key_matches_action(*escaped_action_keybinds, ava::tui::TuiAction::Submit, ava::tui::Key::CtrlT),
+         "tui keybind parser accepts JSON unicode escapes in action names");
+  expect(!ava::tui::parse_key_bindings_json("{\"submit\":123}"), "tui keybind parser rejects non-string action values");
+
+  const auto keybind_root = temp_root() / "tui-keybinds";
+  std::filesystem::remove_all(keybind_root);
+  std::filesystem::create_directories(keybind_root);
+  const auto keybinds_file = keybind_root / "keybinds.json";
+  const auto missing_keybinds = ava::tui::load_key_bindings(keybinds_file);
+  expect(missing_keybinds &&
+             ava::tui::key_matches_action(*missing_keybinds, ava::tui::TuiAction::Submit, ava::tui::Key::Enter),
+         "tui keybind file loader falls back to defaults when the file is missing");
+  {
+    std::ofstream output(keybinds_file);
+    output << "{\"submit\":\"Ctrl+T\",\"variant_cycle\":\"Ctrl+D\"}";
+  }
+  const auto loaded_keybinds = ava::tui::load_key_bindings(keybinds_file);
+  expect(loaded_keybinds &&
+             ava::tui::key_matches_action(*loaded_keybinds, ava::tui::TuiAction::Submit, ava::tui::Key::CtrlT) &&
+             ava::tui::key_matches_action(*loaded_keybinds, ava::tui::TuiAction::VariantCycle, ava::tui::Key::CtrlD),
+         "tui keybind file loader reads valid configured bindings");
+  {
+    std::ofstream output(keybinds_file);
+    output << "{\"submit\":\"Enter\"";
+  }
+  expect(!ava::tui::load_key_bindings(keybinds_file), "tui keybind file loader rejects malformed JSON");
+  {
+    std::ofstream output(keybinds_file);
+    output << "{\"submt\":\"Enter\"}";
+  }
+  expect(!ava::tui::load_key_bindings(keybinds_file), "tui keybind file loader rejects unknown actions");
+
+  const std::vector<ava::tui::SlashCommandItem> disabled_slash_commands = {
+      ava::tui::SlashCommandItem{.command = "/models",
+                                 .description = "Select model",
+                                 .category = "Planned",
+                                 .aliases = {"/model"},
+                                 .key_display = "Ctrl+M",
+                                 .enabled = false,
+                                 .disabled_reason = "model switching is not implemented"},
+      ava::tui::SlashCommandItem{.command = "/mode", .description = "Toggle mode", .category = "General"}};
+  const auto alias_matches = ava::tui::filter_slash_commands("/model", disabled_slash_commands);
+  expect(alias_matches.size() == 1 && alias_matches.front().command == "/models",
+         "tui slash palette filters aliases as well as primary command names");
+  expect(ava::tui::slash_palette_visible("/model", disabled_slash_commands),
+         "tui slash palette keeps disabled exact alias matches visible");
+  const auto disabled_reason = ava::tui::slash_command_selection_disabled_reason("/model", disabled_slash_commands, 0);
+  expect(disabled_reason && disabled_reason->find("not implemented") != std::string::npos,
+         "tui slash selection exposes disabled command explanations");
+
+  const auto disabled_palette =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "/model",
+                                                           .status = "ready",
+                                                           .transcript = {},
+                                                           .slash_commands = disabled_slash_commands,
+                                                           .selected_slash_command_index = 0,
+                                                           .width = 140,
+                                                           .height = 10});
+  expect(std::ranges::any_of(disabled_palette,
+                             [](const std::string& line) {
+                               const auto visible = strip_sgr(line);
+                               return visible.find("/models (/model)") != std::string::npos &&
+                                      visible.find("Ctrl+M") != std::string::npos &&
+                                      visible.find("disabled: model switching is not implemented") != std::string::npos;
+                             }),
+         "tui slash palette renders aliases, key displays, and disabled reasons");
+
   const auto palette = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                             .provider = "openai",
                                                                             .model = "gpt-5.5",
@@ -489,6 +750,25 @@ void test_tui_composer_rendering_and_input() {
              std::ranges::none_of(palette,
                                   [](const std::string& line) { return line.find("/help") != std::string::npos; }),
          "tui renders filtered slash-command palette with columns and selected item marker");
+  const auto suppressed_palette = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                       .provider = "openai",
+                                                                                       .model = "gpt-5.5",
+                                                                                       .session_id = "session_test",
+                                                                                       .input = "/g",
+                                                                                       .status = "ready",
+                                                                                       .transcript = {},
+                                                                                       .slash_commands = slash_commands,
+                                                                                       .slash_palette_suppressed = true,
+                                                                                       .width = 80,
+                                                                                       .height = 12});
+  expect(std::ranges::none_of(suppressed_palette,
+                              [](const std::string& line) {
+                                return strip_sgr(line).find("commands matching /g") != std::string::npos;
+                              }) &&
+             std::ranges::any_of(
+                 suppressed_palette,
+                 [](const std::string& line) { return strip_sgr(line).find("❯ /g") != std::string::npos; }),
+         "tui can dismiss slash autocomplete without clearing the draft input");
   const auto clicked_palette_index =
       ava::tui::slash_palette_selection_for_screen_row(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                   .provider = "openai",
@@ -504,6 +784,42 @@ void test_tui_composer_rendering_and_input() {
                                                        8);
   expect(clicked_palette_index && *clicked_palette_index == 1,
          "tui maps slash palette screen rows back to selectable commands for clicks");
+  const auto suppressed_clicked_palette_index =
+      ava::tui::slash_palette_selection_for_screen_row(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                  .provider = "openai",
+                                                                                  .model = "gpt-5.5",
+                                                                                  .session_id = "session_test",
+                                                                                  .input = "/g",
+                                                                                  .status = "ready",
+                                                                                  .transcript = {},
+                                                                                  .slash_commands = slash_commands,
+                                                                                  .selected_slash_command_index = 1,
+                                                                                  .slash_palette_suppressed = true,
+                                                                                  .width = 80,
+                                                                                  .height = 12},
+                                                       8);
+  expect(!suppressed_clicked_palette_index, "tui ignores slash palette click mapping after autocomplete is dismissed");
+  const auto blocked_question_palette_index = ava::tui::slash_palette_selection_for_screen_row(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "/g",
+                                 .status = "ready",
+                                 .transcript = {},
+                                 .slash_commands = slash_commands,
+                                 .question_prompt = ava::tui::QuestionPromptView{.header = "Question",
+                                                                                 .question = "Choose",
+                                                                                 .options = {},
+                                                                                 .multiple = false,
+                                                                                 .allow_custom = false,
+                                                                                 .selected_option_index = 0,
+                                                                                 .custom_text = ""},
+                                 .selected_slash_command_index = 1,
+                                 .width = 80,
+                                 .height = 12},
+      8);
+  expect(!blocked_question_palette_index, "tui ignores slash palette click mapping while a question prompt is active");
 
   std::vector<ava::tui::SlashCommandItem> many_slash_commands;
   for (int index = 0; index < 8; ++index) {
@@ -917,6 +1233,45 @@ void test_tui_composer_rendering_and_input() {
                                  }),
          "tui composer frame replaces composer input with permission dock while active");
 
+  const auto question_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "do not focus composer",
+      .status = "question required",
+      .transcript = {},
+      .question_prompt =
+          ava::tui::QuestionPromptView{
+              .header = "Choose tools",
+              .question = "Pick the tools to run",
+              .options = {ava::tui::QuestionPromptOptionView{.value = "read", .label = "Read files"},
+                          ava::tui::QuestionPromptOptionView{
+                              .value = "grep", .label = "Search text", .selected = true}},
+              .multiple = true,
+              .allow_custom = true,
+              .selected_option_index = 1,
+              .custom_text = "explain"},
+      .width = 64,
+      .height = 12});
+  expect(question_frame.size() == 12 &&
+             std::ranges::none_of(question_frame,
+                                  [](const std::string& line) {
+                                    return strip_sgr(line).find("❯ do not focus composer") != std::string::npos;
+                                  }) &&
+             std::ranges::any_of(question_frame,
+                                 [](const std::string& line) {
+                                   return strip_sgr(line).find("Choose tools (multi-select)") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(question_frame,
+                                 [](const std::string& line) {
+                                   return strip_sgr(line).find("2. [x] Search text") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(
+                 question_frame,
+                 [](const std::string& line) { return strip_sgr(line).find("Custom: explain") != std::string::npos; }),
+         "tui composer frame replaces composer input with a multi-select question dock while active");
+
   const auto multiline_input = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                     .provider = "openai",
                                                                                     .model = "gpt-5.5",
@@ -961,6 +1316,26 @@ void test_tui_composer_rendering_and_input() {
                  grown_composer_height,
                  [](const std::string& line) { return strip_sgr(line).find("▎    five") != std::string::npos; }),
          "tui composer grows with multiline input and keeps the latest line visible");
+  const auto tall_draft = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine",
+                                 .status = "ready",
+                                 .transcript = {},
+                                 .width = 70,
+                                 .height = 12});
+  expect(std::ranges::any_of(
+             tall_draft,
+             [](const std::string& line) { return strip_sgr(line).find("draft +2 above") != std::string::npos; }) &&
+             std::ranges::any_of(
+                 tall_draft,
+                 [](const std::string& line) { return strip_sgr(line).find("▎    nine") != std::string::npos; }) &&
+             std::ranges::none_of(
+                 tall_draft,
+                 [](const std::string& line) { return strip_sgr(line).find("▎  ❯ one") != std::string::npos; }),
+         "tui composer shows a hidden draft indicator when tall input scrolls");
 
   std::vector<ava::tui::TranscriptItem> many_items;
   for (int index = 0; index < 20; ++index) {
@@ -1236,6 +1611,4 @@ void test_tui_composer_rendering_and_input() {
 
 }  // namespace
 
-void run_tui_composer_tests() {
-  test_tui_composer_rendering_and_input();
-}
+void run_tui_composer_tests() { test_tui_composer_rendering_and_input(); }

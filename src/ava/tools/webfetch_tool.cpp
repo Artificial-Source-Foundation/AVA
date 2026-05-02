@@ -1,0 +1,313 @@
+#include "ava/tools/webfetch_tool.h"
+
+#include <algorithm>
+#include <arpa/inet.h>
+#include <cctype>
+#include <charconv>
+#include <cstring>
+#include <memory>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <span>
+#include <string_view>
+
+#include "ava/provider/curl_transport.h"
+
+namespace ava::tools {
+namespace {
+
+constexpr std::size_t kMaxWebFetchBytes = 5 * 1024 * 1024;
+constexpr int kMaxWebFetchTimeoutMs = 120000;
+
+struct ValidatedUrl {
+  std::string url;
+  std::string host;
+  std::string port;
+};
+
+std::string lowercase(std::string_view value) {
+  std::string result(value);
+  std::ranges::transform(result, result.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  return result;
+}
+
+bool starts_with_case_insensitive(std::string_view value, std::string_view prefix) {
+  if (value.size() < prefix.size()) return false;
+  for (std::size_t index = 0; index < prefix.size(); ++index) {
+    if (std::tolower(static_cast<unsigned char>(value[index])) !=
+        std::tolower(static_cast<unsigned char>(prefix[index]))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool all_decimal_digits(std::string_view value) {
+  return !value.empty() && std::ranges::all_of(value, [](unsigned char ch) { return std::isdigit(ch); });
+}
+
+bool hex_literal(std::string_view value) {
+  if (value.size() <= 2 || value[0] != '0' || (value[1] != 'x' && value[1] != 'X')) return false;
+  return std::ranges::all_of(value.substr(2), [](unsigned char ch) { return std::isxdigit(ch); });
+}
+
+bool numeric_ipv4_literal_or_alias(std::string_view host) {
+  if (host.empty() || !std::isdigit(static_cast<unsigned char>(host.front()))) return false;
+  if (all_decimal_digits(host) || hex_literal(host)) return true;
+  if (host.find('.') == std::string_view::npos) return false;
+  std::size_t part_start = 0;
+  while (part_start <= host.size()) {
+    const auto dot = host.find('.', part_start);
+    const auto part = host.substr(part_start, dot == std::string_view::npos ? std::string_view::npos : dot - part_start);
+    if (!all_decimal_digits(part) && !hex_literal(part)) return false;
+    if (dot == std::string_view::npos) break;
+    part_start = dot + 1;
+  }
+  return true;
+}
+
+bool private_or_non_global_ipv4(unsigned long address) {
+  const auto first = static_cast<unsigned char>((address >> 24) & 0xFF);
+  const auto second = static_cast<unsigned char>((address >> 16) & 0xFF);
+  const auto third = static_cast<unsigned char>((address >> 8) & 0xFF);
+  return first == 0 || first == 10 || first == 127 || first >= 224 || (first == 100 && second >= 64 && second <= 127) ||
+         (first == 169 && second == 254) || (first == 172 && second >= 16 && second <= 31) ||
+         (first == 192 && second == 168) || (first == 192 && second == 0 && third == 0) ||
+         (first == 192 && second == 0 && third == 2) || (first == 198 && second >= 18 && second <= 19) ||
+         (first == 198 && second == 51 && third == 100) || (first == 203 && second == 0 && third == 113);
+}
+
+bool private_or_non_global_ipv6(const in6_addr& address) {
+  const auto* bytes = address.s6_addr;
+  const bool ipv4_mapped = std::ranges::all_of(std::span(bytes, 10), [](unsigned char byte) { return byte == 0; }) &&
+                           bytes[10] == 0xFF && bytes[11] == 0xFF;
+  const bool unspecified = std::ranges::all_of(std::span(bytes, 16), [](unsigned char byte) { return byte == 0; });
+  const bool loopback = std::ranges::all_of(std::span(bytes, 15), [](unsigned char byte) { return byte == 0; }) &&
+                        bytes[15] == 1;
+  return ipv4_mapped || unspecified || loopback || bytes[0] == 0xFF || (bytes[0] & 0xFE) == 0xFC ||
+         (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0x80) ||
+         (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0D && bytes[3] == 0xB8);
+}
+
+ava::core::Result<std::string> validate_resolved_host(std::string_view host) {
+  addrinfo hints{};
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_family = AF_UNSPEC;
+  addrinfo* raw_results = nullptr;
+  const auto query_host = std::string(host);
+  const int rc = getaddrinfo(query_host.c_str(), nullptr, &hints, &raw_results);
+  if (rc != 0) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch failed to resolve URL host");
+    error.with_context("host", query_host);
+    error.with_context("cause", gai_strerror(rc));
+    return std::unexpected(std::move(error));
+  }
+  std::unique_ptr<addrinfo, decltype(&freeaddrinfo)> results(raw_results, freeaddrinfo);
+  std::string first_global_address;
+  for (const auto* item = results.get(); item != nullptr; item = item->ai_next) {
+    if (item->ai_family == AF_INET) {
+      auto address = reinterpret_cast<const sockaddr_in*>(item->ai_addr)->sin_addr;
+      const auto host_order = ntohl(address.s_addr);
+      if (private_or_non_global_ipv4(host_order)) {
+        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                      "webfetch blocks private or non-global resolved hosts");
+        error.with_context("host", query_host);
+        return std::unexpected(std::move(error));
+      }
+      if (first_global_address.empty()) {
+        std::array<char, INET_ADDRSTRLEN> text{};
+        if (inet_ntop(AF_INET, &address, text.data(), text.size()) != nullptr) first_global_address = text.data();
+      }
+    } else if (item->ai_family == AF_INET6) {
+      const auto& address = reinterpret_cast<const sockaddr_in6*>(item->ai_addr)->sin6_addr;
+      if (private_or_non_global_ipv6(address)) {
+        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                      "webfetch blocks private or non-global resolved hosts");
+        error.with_context("host", query_host);
+        return std::unexpected(std::move(error));
+      }
+      if (first_global_address.empty()) {
+        std::array<char, INET6_ADDRSTRLEN> text{};
+        if (inet_ntop(AF_INET6, &address, text.data(), text.size()) != nullptr) {
+          first_global_address = "[";
+          first_global_address += text.data();
+          first_global_address += "]";
+        }
+      }
+    }
+  }
+  if (first_global_address.empty()) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch host has no global address");
+    error.with_context("host", query_host);
+    return std::unexpected(std::move(error));
+  }
+  return first_global_address;
+}
+
+ava::core::Result<ValidatedUrl> validated_url(std::string_view url) {
+  if (url.empty() || url.size() > 4096) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch URL is empty or too long");
+    error.with_context("max_bytes", "4096");
+    return std::unexpected(std::move(error));
+  }
+  for (const char ch : url) {
+    const auto byte = static_cast<unsigned char>(ch);
+    if (byte < 0x20 || byte == 0x7F) {
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch URL contains a control byte"));
+    }
+  }
+
+  const bool https = starts_with_case_insensitive(url, "https://");
+  const bool http = starts_with_case_insensitive(url, "http://");
+  if (!https && !http) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch only supports http and https URLs"));
+  }
+  const auto authority_start = https ? std::string_view("https://").size() : std::string_view("http://").size();
+  const auto path_start = url.find_first_of("/?#", authority_start);
+  auto authority = url.substr(authority_start, path_start == std::string_view::npos ? std::string_view::npos
+                                                                                     : path_start - authority_start);
+  if (authority.empty()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch URL host is empty"));
+  }
+  if (authority.find('@') != std::string_view::npos) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch URL must not include userinfo"));
+  }
+  if (!authority.empty() && authority.front() == '[') {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch does not allow IP literal hosts"));
+  }
+  std::string port = https ? "443" : "80";
+  if (const auto colon = authority.rfind(':'); colon != std::string_view::npos) {
+    port = std::string(authority.substr(colon + 1));
+    if (port.empty() || !std::ranges::all_of(port, [](unsigned char ch) { return std::isdigit(ch); })) {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch URL port is invalid"));
+    }
+    authority = authority.substr(0, colon);
+  }
+
+  const auto host = lowercase(authority);
+  if (host == "localhost" || host == "localhost." || host.ends_with(".localhost") || host.ends_with(".local")) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch blocks local hostnames"));
+  }
+  if (numeric_ipv4_literal_or_alias(host)) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch does not allow IP literal hosts"));
+  }
+
+  int octets[4] = {0, 0, 0, 0};
+  std::size_t part_start = 0;
+  bool ipv4 = true;
+  for (int part = 0; part < 4; ++part) {
+    const auto dot = part == 3 ? host.size() : host.find('.', part_start);
+    if (dot == std::string::npos || dot == part_start) {
+      ipv4 = false;
+      break;
+    }
+    const auto text = std::string_view(host).substr(part_start, dot - part_start);
+    int value = 0;
+    const auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (ec != std::errc{} || ptr != text.data() + text.size() || value < 0 || value > 255) {
+      ipv4 = false;
+      break;
+    }
+    octets[part] = value;
+    part_start = dot + 1;
+  }
+  if (ipv4 && part_start == host.size() + 1) {
+    const bool private_or_local = octets[0] == 10 || octets[0] == 127 || octets[0] == 0 ||
+                                  (octets[0] == 169 && octets[1] == 254) ||
+                                  (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31) ||
+                                  (octets[0] == 192 && octets[1] == 168);
+    if (private_or_local) {
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch blocks private IP hosts"));
+    }
+  }
+
+  return ValidatedUrl{.url = std::string(url), .host = host, .port = std::move(port)};
+}
+
+std::string header_value(const std::map<std::string, std::string>& headers, std::string_view name) {
+  const auto wanted = lowercase(name);
+  for (const auto& [key, value] : headers) {
+    if (lowercase(key) == wanted) return value;
+  }
+  return {};
+}
+
+bool looks_binary(std::string_view body, std::string_view content_type) {
+  const auto type = lowercase(content_type);
+  if (!type.empty() && !(type.starts_with("text/") || type.find("json") != std::string::npos ||
+                         type.find("xml") != std::string::npos || type.find("html") != std::string::npos ||
+                         type.find("javascript") != std::string::npos || type.find("ecmascript") != std::string::npos)) {
+    return true;
+  }
+  return body.find('\0') != std::string_view::npos;
+}
+
+}  // namespace
+
+ava::core::Result<WebFetchResult> webfetch(const ToolContext& context, std::string_view url, WebFetchOptions options) {
+  auto safe_url = validated_url(url);
+  if (!safe_url) return std::unexpected(std::move(safe_url.error()));
+
+  if (auto permission = ensure_permission(context, ava::permissions::Operation::NetworkFetch, {}, safe_url->url, "webfetch",
+                                           "network fetch requires permission");
+      !permission) {
+    return std::unexpected(std::move(permission.error()));
+  }
+
+  const auto max_bytes = std::min(options.max_bytes == 0 ? std::size_t{1024 * 1024} : options.max_bytes,
+                                  kMaxWebFetchBytes);
+  const auto timeout_ms = std::clamp(options.timeout_ms <= 0 ? 30000 : options.timeout_ms, 1000, kMaxWebFetchTimeoutMs);
+
+  std::vector<std::string> resolve_hosts;
+  if (options.transport == nullptr) {
+    auto resolved = validate_resolved_host(safe_url->host);
+    if (!resolved) return std::unexpected(std::move(resolved.error()));
+    resolve_hosts.push_back(safe_url->host + ":" + safe_url->port + ":" + *resolved);
+  }
+
+  ava::provider::CurlCliTransport default_transport;
+  auto& transport = options.transport ? *options.transport : static_cast<ava::provider::Transport&>(default_transport);
+  auto response = transport.send(ava::provider::HttpRequest{.method = "GET",
+                                                            .url = safe_url->url,
+                                                            .headers = {{"Accept", "text/html,text/plain,application/json,application/xml;q=0.9,*/*;q=0.1"},
+                                                                        {"User-Agent", "AVA/1.0 webfetch"}},
+                                                            .body = "",
+                                                            .timeout_ms = timeout_ms,
+                                                            .follow_redirects = false,
+                                                            .include_response_headers = true,
+                                                            .resolve_hosts = std::move(resolve_hosts)});
+  if (!response) return std::unexpected(std::move(response.error()));
+  if (response->status_code < 200 || response->status_code >= 300) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "webfetch HTTP request failed");
+    error.with_context("status_code", std::to_string(response->status_code));
+    error.with_context("url", safe_url->url);
+    return std::unexpected(std::move(error));
+  }
+
+  const auto content_type = header_value(response->headers, "content-type");
+  if (looks_binary(response->body, content_type)) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch response appears to be binary");
+    if (!content_type.empty()) error.with_context("content_type", content_type);
+    return std::unexpected(std::move(error));
+  }
+
+  WebFetchResult result;
+  result.url = safe_url->url;
+  result.status_code = response->status_code;
+  result.content_type = content_type;
+  result.total_bytes = response->body.size();
+  result.output_bytes = std::min(max_bytes, response->body.size());
+  result.truncated = result.output_bytes < result.total_bytes;
+  result.content = response->body.substr(0, result.output_bytes);
+  return result;
+}
+
+}  // namespace ava::tools

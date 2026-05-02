@@ -546,6 +546,20 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
               sink_error = std::move(emitted.error());
             }
           },
+      .on_tool_progress = [&session, &options,
+                           &sink_error](const ava::agent::ToolProgressEntry& entry) -> ava::core::VoidResult {
+        if (sink_error) return std::unexpected(*sink_error);
+        auto event = base_event_locked(session, RuntimeEventType::ToolProgress, options.session_mutex);
+        event.call_id = entry.call_id;
+        event.tool_name = entry.name;
+        event.text = entry.text;
+        event.status = entry.status;
+        if (auto emitted = emit_event(options.event_sink, event); !emitted) {
+          sink_error = std::move(emitted.error());
+          return std::unexpected(*sink_error);
+        }
+        return {};
+      },
       .on_stream_event = [&session, &options,
                           &sink_error](const ava::provider::StreamEvent& stream_event) -> ava::core::VoidResult {
         if (sink_error) return std::unexpected(*sink_error);

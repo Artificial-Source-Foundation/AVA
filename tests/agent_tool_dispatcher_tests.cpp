@@ -10,6 +10,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -40,6 +41,7 @@
 #include "ava/session/session_store.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/file_tools.h"
+#include "ava/tools/mutation_queue.h"
 #include "ava/tools/search_tools.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/terminal.h"
@@ -156,6 +158,59 @@ void test_tool_dispatcher() {
   expect(nul_include && !nul_include->success && nul_include->result_text.find("control byte") != std::string::npos,
          "tool dispatcher rejects NUL bytes decoded into grep include globs");
 
+  {
+    std::ofstream ignore_file(workspace / ".gitignore", std::ios::binary | std::ios::trunc);
+    ignore_file << "ignored.txt\n";
+  }
+  {
+    std::ofstream ignored_file(workspace / "ignored.txt", std::ios::binary | std::ios::trunc);
+    ignored_file << "hello ignored dispatcher";
+  }
+  auto ignored_glob = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_ignored_glob", .name = "glob", .arguments_json = "{\"pattern\":\"ignored.txt\"}"});
+  expect(ignored_glob && ignored_glob->success && ignored_glob->result_text.find("\"paths\":[]") != std::string::npos &&
+             ignored_glob->result_text.find("no_ignore") == std::string::npos,
+         "tool dispatcher keeps glob .gitignore filtering enabled by default");
+
+  auto no_ignore_glob = dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_no_ignore_glob",
+                                   .name = "glob",
+                                   .arguments_json = "{\"pattern\":\"ignored.txt\",\"no_ignore\":true}"});
+  expect(no_ignore_glob && !no_ignore_glob->success &&
+             no_ignore_glob->result_text.find("explicit local control") != std::string::npos,
+         "tool dispatcher rejects provider-controlled glob no_ignore");
+
+  auto no_ignore_grep = dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_no_ignore_grep",
+                                   .name = "grep",
+                                   .arguments_json = "{\"pattern\":\"ignored dispatcher\",\"no_ignore\":true}"});
+  expect(no_ignore_grep && !no_ignore_grep->success &&
+             no_ignore_grep->result_text.find("explicit local control") != std::string::npos,
+         "tool dispatcher rejects provider-controlled grep no_ignore");
+
+  const auto dispatcher_spill_dir = root / "session" / "spill";
+  const ava::agent::ToolDispatcher spilling_dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace, .spill_dir = dispatcher_spill_dir, .mode = ava::agent::Mode::Build});
+  auto dispatcher_spill = spilling_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call/dispatcher-spill", .name = "glob", .arguments_json = "{\"pattern\":\"**/*\",\"max_results\":1}"});
+  const auto dispatcher_spill_file = dispatcher_spill
+                                         ? ava::core::json::string_field(dispatcher_spill->result_text, "spill_file")
+                                         : std::optional<std::string>{};
+  expect(dispatcher_spill && dispatcher_spill->success && dispatcher_spill_file &&
+             dispatcher_spill->result_text.find("\"spill_truncated\":false") != std::string::npos &&
+             std::filesystem::path(*dispatcher_spill_file).parent_path().empty(),
+         "tool dispatcher includes local-only spill metadata without exposing absolute spill paths");
+
+  auto bad_no_ignore = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_bad_no_ignore", .name = "glob", .arguments_json = "{\"pattern\":\"**/*\",\"no_ignore\":\"yes\"}"});
+  expect(bad_no_ignore && !bad_no_ignore->success && bad_no_ignore->result_text.find("boolean") != std::string::npos,
+         "tool dispatcher rejects non-boolean no_ignore arguments");
+
+  auto bad_webfetch = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_bad_webfetch", .name = "webfetch", .arguments_json = "{\"url\":\"file:///etc/passwd\"}"});
+  expect(bad_webfetch && !bad_webfetch->success && bad_webfetch->result_text.find("http") != std::string::npos,
+         "tool dispatcher rejects unsupported webfetch URL schemes before network access");
+
   auto malformed_args = dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "call_bad_args", .name = "read_file", .arguments_json = "{not-json}"});
   expect(
@@ -166,12 +221,34 @@ void test_tool_dispatcher() {
       .id = "call_patch",
       .name = "apply_patch",
       .arguments_json = "{\"edits\":[{\"path\":\"note.txt\",\"old_text\":\"dispatcher\",\"new_text\":\"patch\"}]}"});
-  expect(patch && patch->success && patch->result_text.find("apply_patch") != std::string::npos,
-         "tool dispatcher applies exact patch edits");
+  const auto patch_diff =
+      patch ? ava::core::json::string_field(patch->result_text, "diff") : std::optional<std::string>{};
+  expect(patch && patch->success && patch->result_text.find("apply_patch") != std::string::npos && patch_diff &&
+             patch_diff->find("--- ") != std::string::npos &&
+             patch_diff->find("-hello dispatcher") != std::string::npos &&
+             patch_diff->find("+hello patch") != std::string::npos && patch_diff->size() <= 32 * 1024 &&
+             patch->result_text.find("\"diff_truncated\":false") != std::string::npos,
+         "tool dispatcher applies exact patch edits and returns a bounded unified diff");
   auto patched_read = dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "call_patched_read", .name = "read_file", .arguments_json = "{\"path\":\"note.txt\"}"});
   expect(patched_read && patched_read->result_text.find("hello patch") != std::string::npos,
          "apply_patch updates file content through file tools");
+
+  {
+    std::ofstream file(workspace / "edit-diff.txt", std::ios::binary | std::ios::trunc);
+    file << "red green blue\n";
+  }
+  auto edit_diff_result = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_edit_diff",
+      .name = "edit_file",
+      .arguments_json = "{\"path\":\"edit-diff.txt\",\"old_text\":\"green\",\"new_text\":\"gold\"}"});
+  const auto edit_diff = edit_diff_result ? ava::core::json::string_field(edit_diff_result->result_text, "diff")
+                                          : std::optional<std::string>{};
+  expect(edit_diff_result && edit_diff_result->success && edit_diff &&
+             edit_diff->find("-red green blue") != std::string::npos &&
+             edit_diff->find("+red gold blue") != std::string::npos && edit_diff->size() <= 32 * 1024 &&
+             edit_diff_result->result_text.find("\"diff_truncated\":false") != std::string::npos,
+         "edit_file provider result includes a bounded unified diff preview");
 
   const auto private_patch_path = workspace / "private-patch.txt";
   {
@@ -233,6 +310,62 @@ void test_tool_dispatcher() {
                             workspace / "sequential.txt");
   expect(sequential_patch && sequential_patch->success && sequential_read && sequential_read->content == "two three",
          "apply_patch validates same-file edits against original content before applying replacements");
+
+  {
+    std::ofstream file(workspace / "alias.txt", std::ios::binary | std::ios::trunc);
+    file << "alpha gamma";
+  }
+  auto alias_patch = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_alias_patch",
+      .name = "apply_patch",
+      .arguments_json = "{\"edits\":[{\"path\":\"./alias.txt\",\"old_text\":\"alpha\",\"new_text\":\"beta\"},"
+                        "{\"path\":\"alias.txt\",\"old_text\":\"gamma\",\"new_text\":\"delta\"}]}"});
+  auto alias_read = ava::tools::read_file(
+      ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build}, workspace / "alias.txt");
+  expect(alias_patch && alias_patch->success && alias_read && alias_read->content == "beta delta",
+         "apply_patch canonicalizes aliased same-file paths before staging writes");
+
+  {
+    std::ofstream file(workspace / "multi-diff.txt", std::ios::binary | std::ios::trunc);
+    file << "A\nB\nC\nD\nE\n";
+  }
+  auto multi_diff_patch = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_multi_diff_patch",
+      .name = "apply_patch",
+      .arguments_json = "{\"edits\":[{\"path\":\"multi-diff.txt\",\"old_text\":\"B\",\"new_text\":\"X\"},"
+                        "{\"path\":\"multi-diff.txt\",\"old_text\":\"E\",\"new_text\":\"Y\"}]}"});
+  const auto multi_diff =
+      multi_diff_patch ? ava::core::json::string_field(multi_diff_patch->result_text, "diff") : std::optional<std::string>{};
+  expect(multi_diff_patch && multi_diff_patch->success && multi_diff &&
+             multi_diff->find("-B") != std::string::npos && multi_diff->find("+X") != std::string::npos &&
+             multi_diff->find(" C\n") != std::string::npos && multi_diff->find("-C") == std::string::npos &&
+             multi_diff->find("+C") == std::string::npos && multi_diff->find(" D\n") != std::string::npos &&
+             multi_diff->find("-D") == std::string::npos && multi_diff->find("+D") == std::string::npos &&
+             multi_diff->find("-E") != std::string::npos && multi_diff->find("+Y") != std::string::npos,
+         "apply_patch diff keeps unchanged middle lines as context for separated edits");
+
+  {
+    std::ofstream a(workspace / "queued-a.txt", std::ios::binary | std::ios::trunc);
+    a << "a old";
+    std::ofstream b(workspace / "queued-b.txt", std::ios::binary | std::ios::trunc);
+    b << "b old";
+  }
+  auto dispatcher_queue = std::make_shared<ava::tools::MutationQueue>();
+  const ava::agent::ToolDispatcher queued_patch_dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace, .mode = ava::agent::Mode::Build, .mutation_queue = dispatcher_queue});
+  auto queued_patch = queued_patch_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_queued_patch",
+      .name = "apply_patch",
+      .arguments_json = "{\"edits\":[{\"path\":\"queued-b.txt\",\"old_text\":\"old\",\"new_text\":\"new\"},"
+                        "{\"path\":\"queued-a.txt\",\"old_text\":\"old\",\"new_text\":\"new\"}]}"});
+  auto queued_a_read = ava::tools::read_file(
+      ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build}, workspace / "queued-a.txt");
+  auto queued_b_read = ava::tools::read_file(
+      ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build}, workspace / "queued-b.txt");
+  expect(queued_patch && queued_patch->success && queued_a_read && queued_b_read && queued_a_read->content == "a new" &&
+             queued_b_read->content == "b new" &&
+             queued_patch->result_text.find("\"changed_files\"") != std::string::npos,
+         "apply_patch can acquire multiple shared mutation-queue locks and commit both paths");
 
   {
     std::ofstream file(workspace / "overlap.txt", std::ios::binary | std::ios::trunc);
@@ -611,18 +744,39 @@ void test_tool_dispatcher() {
          "tool dispatcher returns structured unknown tool errors");
 
   const auto schemas = ava::agent::ToolDispatcher::tool_schemas_json();
+  const auto metadata = ava::agent::ToolDispatcher::tool_metadata();
   bool has_apply_patch = false;
   bool has_question = false;
+  bool has_webfetch = false;
+  bool glob_has_no_ignore = false;
+  bool grep_has_no_ignore = false;
   bool question_has_allow_multiple = false;
-  for (const auto& schema : schemas) {
+  expect(metadata.size() == schemas.size(), "tool metadata and schema exports cover the same built-in tools");
+  for (std::size_t index = 0; index < metadata.size(); ++index) {
+    const auto& tool = metadata[index];
+    expect(!tool.name.empty() && !tool.description.empty() && !tool.schema_json.empty() &&
+               !tool.permission_category.empty() && !tool.output_bound_summary.empty() &&
+               !tool.execution_mode.empty() && !tool.event_rendering_hint.empty() &&
+               tool.description_family.has_value(),
+           "built-in tool metadata includes required generic fields");
+    expect(index < schemas.size() && schemas[index] == tool.schema_json,
+           "tool schema export is derived from built-in metadata registry");
+    const auto schema = std::string(tool.schema_json);
     has_apply_patch = has_apply_patch || schema.find("apply_patch") != std::string::npos;
+    has_webfetch = has_webfetch || schema.find("webfetch") != std::string::npos;
+    glob_has_no_ignore = glob_has_no_ignore || (schema.find("\"name\":\"glob\"") != std::string::npos &&
+                                                schema.find("no_ignore") != std::string::npos);
+    grep_has_no_ignore = grep_has_no_ignore || (schema.find("\"name\":\"grep\"") != std::string::npos &&
+                                                schema.find("no_ignore") != std::string::npos);
     const bool is_question_schema = schema.find("\"name\":\"question\"") != std::string::npos;
     has_question = has_question || is_question_schema;
     question_has_allow_multiple =
         question_has_allow_multiple || (is_question_schema && schema.find("allow_multiple") != std::string::npos);
   }
-  expect(!schemas.empty() && schemas[0].find("read_file") != std::string::npos && has_apply_patch && has_question,
+  expect(!schemas.empty() && schemas[0].find("read_file") != std::string::npos && has_apply_patch && has_question &&
+             has_webfetch,
          "tool dispatcher exposes provider tool schemas");
+  expect(!glob_has_no_ignore && !grep_has_no_ignore, "search tool schemas keep no_ignore out of provider control");
   expect(question_has_allow_multiple, "question tool schema exposes the allow_multiple alias");
 }
 

@@ -20,11 +20,13 @@ ava::core::Error unsupported_allow_error(std::string_view value) {
 ava::core::Error unsupported_allow_tool_error(std::string_view value) {
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "unsupported --allow-tool value");
   error.with_context("value", std::string(value));
-  error.with_context("supported", "glob, grep, read_file");
+  error.with_context("supported", "glob, grep, read_file, webfetch");
   return error;
 }
 
-bool is_supported_tool(std::string_view value) { return value == "glob" || value == "grep" || value == "read_file"; }
+bool is_supported_tool(std::string_view value) {
+  return value == "glob" || value == "grep" || value == "read_file" || value == "webfetch";
+}
 
 bool contains_tool(const std::vector<std::string>& tools, std::string_view value) {
   return std::ranges::any_of(tools, [value](const std::string& tool) { return tool == value; });
@@ -41,6 +43,9 @@ bool prompt_matches_allowed_tool(const ava::permissions::PermissionPrompt& promp
   }
   if (prompt.tool_name == "glob" || prompt.tool_name == "grep") {
     return prompt.operation == ava::permissions::Operation::SearchFiles && tools.contains(prompt.tool_name);
+  }
+  if (prompt.tool_name == "webfetch") {
+    return prompt.operation == ava::permissions::Operation::NetworkFetch && tools.contains("webfetch");
   }
   return false;
 }

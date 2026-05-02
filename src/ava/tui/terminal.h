@@ -24,14 +24,25 @@ enum class Key {
   MouseWheelDown,
   MouseLeftClick,
   ShiftEnter,
+  CtrlA,
+  CtrlB,
   CtrlC,
   CtrlD,
+  CtrlE,
+  CtrlF,
+  CtrlK,
+  CtrlT,
+  CtrlU,
+  CtrlW,
+  CtrlY,
+  CtrlZ,
   Unknown
 };
 
 struct InputEvent {
   Key key = Key::Unknown;
   char character = '\0';
+  std::string text = {};
   std::size_t mouse_column = 0;
   std::size_t mouse_row = 0;
 };

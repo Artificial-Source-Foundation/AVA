@@ -114,6 +114,7 @@ Missing or incomplete:
 - Mid-session model and thinking-level changes with session entries.
 - Session tree structure, branching, fork, clone, and branch summaries.
 - Full rewrite-style migrations for future schema changes beyond the current additive version checks and actionable future-version rejection.
+- A backend-provided live token/context usage summary for the TUI composer status slot. The frontend can reserve space for it in Phase 1, but accurate counts need backend session/provider usage data and context-window metadata.
 
 1.0 target:
 

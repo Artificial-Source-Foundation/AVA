@@ -53,6 +53,11 @@ void configure_curses_mouse() {
 #endif
 }
 
+void set_bracketed_paste(bool enabled) {
+  static_cast<void>(std::fputs(enabled ? "\x1b[?2004h" : "\x1b[?2004l", stdout));
+  static_cast<void>(std::fflush(stdout));
+}
+
 bool is_utf8_continuation(unsigned char byte) { return (byte & 0xC0U) == 0x80U; }
 
 std::size_t utf8_sequence_length(unsigned char byte) {
@@ -125,6 +130,7 @@ ava::core::Result<CursesSession> CursesSession::enter() {
 #endif
   configure_curses_colors();
   configure_curses_mouse();
+  set_bracketed_paste(true);
   restore_signal_mask();
   return session;
 }
@@ -132,6 +138,7 @@ ava::core::Result<CursesSession> CursesSession::enter() {
 void CursesSession::restore() noexcept {
   if (!active_) return;
   static_cast<void>(set_term(static_cast<SCREEN*>(screen_.get())));
+  set_bracketed_paste(false);
   static_cast<void>(curs_set(1));
   static_cast<void>(endwin());
   uninstall_curses_signal_flags();

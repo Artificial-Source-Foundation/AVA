@@ -152,15 +152,19 @@ Status: this phase is complete when this roadmap is accepted.
 
 ### Phase 1: Interaction Contract Foundation
 
-Purpose: close the current prompt and command UX gaps without requiring the full event-stream migration.
+Purpose: make the terminal chat feel like a normal chat app while closing the current prompt and command UX gaps without requiring the full event-stream migration.
 
 Backend dependency: current permission resolver and backend/RPC question resolver contracts. This phase is specifically about the interactive TUI prompt UX, not inventing the resolver contract.
 
 Scope:
 
-- Add an interactive question prompt that supports header text, question text, options, single-select, optional custom text, cancel/reject, and safe keyboard defaults. Multi-select should remain disabled or hidden until the backend/protocol contract supports it.
+- Start short conversations at the top of the transcript area instead of pinning them above the composer. Scrolling should feel natural: new output stays visible by default, but existing scrollback remains reachable and visibly indicated.
+- Add a small processing animation in or near the composer so users can see that AVA is working during the current blocking TUI runtime. Include a reserved composer/status slot for future token or context usage text, even if the backend cannot fill it yet.
+- Design tool usage as readable compact cards with clear running/success/error states, argument summaries, and result summaries. Keep richer live updates, diff expansion, and full tool-detail panes for the evented TUI phase unless a small static card improvement is enough.
+- Add an interactive question prompt that supports header text, question text, options, single-select, multi-select, optional custom text, cancel/reject, and safe keyboard defaults. Multi-select should follow the existing backend `QuestionPrompt::multiple` contract and serialize selected values through the current answer path.
 - Keep the permission prompt dock, but make its request summary, default deny state, allow-once wording, denial path, and long command/path wrapping consistent with question prompts.
 - Introduce semantic TUI action names internally, such as `submit`, `new_line`, `cancel`, `clear_input`, `history_prev`, `history_next`, `cursor_word_left`, `cursor_word_right`, `delete_word_backward`, `delete_to_line_start`, `delete_to_line_end`, `undo`, `yank`, `autocomplete_accept`, `palette_next`, `palette_prev`, `prompt_allow`, `prompt_deny`, `details_toggle`, `variant_cycle`, and `interrupt`. Editor-only actions such as `undo`/`yank` stay TUI-local; `variant_cycle` is inert until backend provider/model capability data exists.
+- Add a user-configurable keybind file for these semantic actions. Defaults should preserve current behavior where possible, and `/help` or `/hotkeys` should show the effective bindings rather than hardcoded prose.
 - Prefer fast prompt shortcuts where unambiguous: number keys for visible question options, consistent Tab/arrow navigation, and explicit rejection feedback for permission/question denial when backend contracts support it.
 - Polish slash command metadata: category, short description, hint/key display, aliases where supported, and disabled-state text for commands whose backend capability is not ready. Slash command metadata is TUI-owned presentation state until a backend command registry exposes structured metadata.
 - Add `/help` or `/hotkeys` output that reflects semantic key behavior and current mode. It should render into the transcript/chat area, not open an unrelated settings surface.
@@ -193,7 +197,7 @@ Acceptance criteria:
 - Commands with missing backend support are not executable without a clear disabled-state explanation.
 - Composer editing tests cover word movement/deletion, line start/end, undo/yank if implemented, bracketed paste, tall draft scrolling, and autocomplete cancellation.
 - Argument/file autocomplete breadth may remain disabled in Phase 1 if backend metadata or ignored-path-aware search semantics are not available.
-- Static render/input tests cover question prompt selection, custom answer entry, cancel, disabled/unsupported multi-select state, narrow widths, and UTF-8 labels.
+- Static render/input tests cover top-start transcript layout, scroll indicators, composer processing status, tool cards, question prompt selection, multi-select toggling, custom answer entry, cancel, narrow widths, and UTF-8 labels.
 
 ### Phase 2: Evented TUI Runtime
 
@@ -409,6 +413,10 @@ Acceptance criteria:
 - Fake-provider tests cover streamed text, thinking blocks, tool calls, tool partial/final results, retry/backoff, cancellation, and usage reporting without live provider calls.
 - Manual smoke verifies interactive chat, slash commands, permission ask/deny, question prompt, long output, resize, export, compact, session resume, and cancellation.
 - `docs/USAGE.md` accurately reflects shipped keybindings, commands, and current limits.
+
+Milestone 2 implementation note (2026-05-01): AVA now has a shared v1 command catalog, semantic configurable TUI keybinds loaded from `keybinds.json`, disabled planned slash commands with backend handling, alias-aware slash filtering, and `/help`/`/hotkeys` output generated from effective command/keybind metadata. The semantic action set includes the Phase 1 names for submission, cancellation, history, palette navigation, composer editing, prompt placeholders, `details_toggle`, `mode_toggle`, `variant_cycle`, `interrupt`, and `exit`; unimplemented editor-history/details behaviors stay unbound or report that they are unavailable. Bracketed paste, persistent history, and richer editor polish remain deferred.
+
+Milestone 3 implementation note (2026-05-01): AVA now has a TUI-local composer draft editor for UTF-8-safe insertion/deletion, word movement/deletion, current-line start/end movement and deletion, undo (`Ctrl+Z`), and yank (`Ctrl+Y`). The TUI enables bracketed paste while active, normalizes pasted newlines into the draft, shows a hidden-line indicator for tall drafts, and lets users dismiss slash autocomplete without clearing the typed input. Persistent history, escape-sequence buffering beyond bracketed paste, IME-specific cursor hardening, and broader file/path autocomplete remain deferred.
 
 ## Explicit Non-Goals For V1
 

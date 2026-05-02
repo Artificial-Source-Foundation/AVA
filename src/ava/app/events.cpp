@@ -116,6 +116,8 @@ std::string to_string(RuntimeEventType type) {
       return "provider_event";
     case RuntimeEventType::ToolStart:
       return "tool_start";
+    case RuntimeEventType::ToolProgress:
+      return "tool_progress";
     case RuntimeEventType::ToolResult:
       return "tool_result";
     case RuntimeEventType::Error:

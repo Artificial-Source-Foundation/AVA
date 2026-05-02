@@ -112,6 +112,40 @@ void test_runtime_event_bus_adapter_allows_default_legacy_sink() {
          "runtime event bus adapter supports a null legacy sink");
 }
 
+void test_tool_progress_runtime_event_serialization_and_bus_adapter() {
+  ava::app::RuntimeEvent event;
+  event.type = ava::app::RuntimeEventType::ToolProgress;
+  event.timestamp = "2026-04-30T00:00:04Z";
+  event.session_id = "session_1";
+  event.text = "reading";
+  event.call_id = "call_2";
+  event.tool_name = "read_file";
+  event.status = "running";
+
+  const auto json = ava::app::serialize_event_json(event);
+  expect(json ==
+             "{\"type\":\"tool_progress\",\"timestamp\":\"2026-04-30T00:00:04Z\","
+             "\"session_id\":\"session_1\",\"text\":\"reading\",\"call_id\":\"call_2\","
+             "\"tool\":\"read_file\",\"status\":\"running\"}",
+         "tool progress serializes with existing runtime event payload fields");
+
+  ava::app::EventBus bus;
+  std::vector<ava::app::EventEnvelope> published;
+  bus.subscribe([&published](const ava::app::EventEnvelope& envelope) {
+    published.push_back(envelope);
+    return ava::core::VoidResult{};
+  });
+  ava::app::EventEnvelopeContext context;
+  context.event_id = "event_progress";
+  auto sink = ava::app::make_runtime_event_bus_adapter(bus, context);
+  const auto emitted = sink(event);
+  expect(emitted.has_value() && published.size() == 1 && published.front().name == "tool_progress",
+         "event bus adapter publishes tool progress envelopes");
+  expect(published.front().payload_json ==
+             "{\"text\":\"reading\",\"call_id\":\"call_2\",\"tool\":\"read_file\",\"status\":\"running\"}",
+         "tool progress envelope payload keeps existing tool event fields");
+}
+
 }  // namespace
 
 void run_app_event_bus_tests() {
@@ -119,4 +153,5 @@ void run_app_event_bus_tests() {
   test_runtime_event_conversion_preserves_legacy_payload_shape();
   test_runtime_event_bus_adapter_publishes_and_forwards();
   test_runtime_event_bus_adapter_allows_default_legacy_sink();
+  test_tool_progress_runtime_event_serialization_and_bus_adapter();
 }

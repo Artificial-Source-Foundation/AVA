@@ -19,6 +19,7 @@ enum class RuntimeEventType {
   MessageEnd,
   ProviderEvent,
   ToolStart,
+  ToolProgress,
   ToolResult,
   Error,
   Done,

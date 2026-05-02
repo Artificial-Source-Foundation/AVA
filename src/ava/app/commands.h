@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "ava/agent/agent_loop.h"
+#include "ava/app/command_catalog.h"
 #include "ava/app/events.h"
 #include "ava/app/runtime.h"
 #include "ava/core/result.h"
@@ -20,6 +21,7 @@ struct CommandRequest {
   CompactionSummaryGenerator compaction_summary_generator = nullptr;
   std::mutex* session_mutex = nullptr;
   bool propagate_compaction_errors = false;
+  std::vector<CommandHotkey> hotkeys = {};
 };
 
 struct CommandResult {
@@ -30,7 +32,8 @@ struct CommandResult {
 };
 
 [[nodiscard]] bool is_backend_command(std::string_view line) noexcept;
-[[nodiscard]] std::string command_help_text();
+[[nodiscard]] std::string command_help_text(const std::vector<CommandHotkey>& hotkeys = {});
+[[nodiscard]] std::string command_hotkeys_text(const std::vector<CommandHotkey>& hotkeys = {});
 [[nodiscard]] ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandRequest request);
 
 }  // namespace ava::app

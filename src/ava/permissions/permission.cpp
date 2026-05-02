@@ -275,6 +275,10 @@ PermissionDecision decide(const PermissionRequest& request) {
     return classify_command(request.command);
   }
 
+  if (request.operation == Operation::NetworkFetch) {
+    return {.action = PermissionAction::Ask, .reason = "network fetch requires explicit approval"};
+  }
+
   return {.action = PermissionAction::Allow, .reason = "allowed by default workspace policy"};
 }
 
@@ -375,6 +379,8 @@ std::string to_string(Operation operation) {
       return "edit";
     case Operation::RunCommand:
       return "bash";
+    case Operation::NetworkFetch:
+      return "network.fetch";
   }
   return "unknown";
 }

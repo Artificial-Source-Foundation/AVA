@@ -531,6 +531,70 @@ void test_app_run_prompt_emits_events() {
          "runtime run_prompt persists user and assistant entries in the runtime session");
 }
 
+void test_app_run_prompt_emits_tool_progress_and_session_spill() {
+  const auto root = temp_root() / "app-runtime-tool-progress";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  const auto paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime tool progress test opens session");
+  if (!session) return;
+
+  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+                                           .status_code = 200,
+                                           .headers = {},
+                                           .body = "data: {\"type\":\"response.function_call.added\",\"item_id\":"
+                                                   "\"call_bash\",\"name\":\"bash\"}\n\n"
+                                                   "data: {\"type\":\"response.function_call_arguments.delta\","
+                                                   "\"item_id\":\"call_bash\",\"delta\":\"{\\\"command\\\":"
+                                                   "\\\"pwd\\\",\\\"max_bytes\\\":4}\"}\n\n"
+                                                   "data: [DONE]\n\n",
+                                       },
+                                       ava::provider::HttpResponse{
+                                           .status_code = 200,
+                                           .headers = {},
+                                           .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":"
+                                                   "\"tool done\"}\n\n"
+                                                   "data: [DONE]\n\n",
+                                       }});
+  std::vector<ava::app::RuntimeEvent> events;
+  ava::app::RuntimeRunOptions run_options;
+  run_options.access_token = "token";
+  run_options.event_sink = [&events](const ava::app::RuntimeEvent& event) {
+    events.push_back(event);
+    return ava::core::VoidResult{};
+  };
+
+  auto result = ava::app::run_prompt(*session, "run pwd", provider, transport, run_options);
+  const auto spill_dir = session->store.session_path().parent_path() / "spill";
+  bool has_spill_file = false;
+  std::error_code iter_error;
+  for (std::filesystem::directory_iterator it(spill_dir, iter_error), end; !iter_error && it != end;
+       it.increment(iter_error)) {
+    has_spill_file = true;
+    expect(it->path().parent_path() == spill_dir, "runtime spill file stays under the session-local spill directory");
+    break;
+  }
+  expect(result && result->final_text == "tool done" &&
+             std::ranges::any_of(events,
+                                 [](const ava::app::RuntimeEvent& event) {
+                                   return event.type == ava::app::RuntimeEventType::ToolProgress &&
+                                          event.call_id == "call_bash" && event.tool_name == "bash" &&
+                                          !event.text.empty();
+                                 }),
+         "runtime run_prompt emits additive tool_progress events from tool callbacks");
+  expect(has_spill_file, "runtime run_prompt configures session-local spill files for truncated tool output");
+}
+
 void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call() {
   const auto root = temp_root() / "app-runtime-event-sink-cancel";
   std::error_code remove_error;
@@ -639,6 +703,13 @@ void test_headless_permission_policy() {
                                                        .command = "true",
                                                        .tool_name = "bash",
                                                        .reason = "command risk is unknown"};
+  const ava::permissions::PermissionPrompt webfetch_prompt{.operation = ava::permissions::Operation::NetworkFetch,
+                                                           .mode = ava::agent::Mode::Build,
+                                                           .workspace_dir = workspace,
+                                                           .target_path = {},
+                                                           .command = "https://example.com",
+                                                           .tool_name = "webfetch",
+                                                           .reason = "network fetch requires explicit approval"};
 
   auto default_resolver = ava::app::build_headless_permission_resolver(ava::app::HeadlessPermissionPolicyOptions{});
   auto default_read = default_resolver(read_prompt);
@@ -653,6 +724,7 @@ void test_headless_permission_policy() {
   auto read_only_search = read_only_resolver(search_prompt);
   auto read_only_write = read_only_resolver(write_prompt);
   auto read_only_bash = read_only_resolver(bash_prompt);
+  auto read_only_webfetch = read_only_resolver(webfetch_prompt);
   expect(read_only_read && *read_only_read == ava::permissions::PermissionResolution::Allow,
          "headless read-only policy allows read prompts");
   expect(read_only_search && *read_only_search == ava::permissions::PermissionResolution::Allow,
@@ -660,15 +732,18 @@ void test_headless_permission_policy() {
   expect(read_only_write && *read_only_write == ava::permissions::PermissionResolution::Deny,
          "headless read-only policy denies write prompts");
   expect(read_only_bash && *read_only_bash == ava::permissions::PermissionResolution::Deny,
-         "headless read-only policy denies bash prompts");
+          "headless read-only policy denies bash prompts");
+  expect(read_only_webfetch && *read_only_webfetch == ava::permissions::PermissionResolution::Deny,
+         "headless read-only policy denies network prompts");
 
   ava::app::HeadlessPermissionPolicyOptions tool_options;
-  auto tools_added = ava::app::add_headless_allowed_tools(tool_options, "glob,grep,read_file");
-  expect(tools_added.has_value() && tool_options.allowed_tools.size() == 3,
+  auto tools_added = ava::app::add_headless_allowed_tools(tool_options, "glob,grep,read_file,webfetch");
+  expect(tools_added.has_value() && tool_options.allowed_tools.size() == 4,
          "headless allow-tool parses supported comma-separated tool names");
   auto tool_resolver = ava::app::build_headless_permission_resolver(tool_options);
   const auto tool_read = tool_resolver(read_prompt);
   const auto tool_search = tool_resolver(search_prompt);
+  const auto tool_webfetch = tool_resolver(webfetch_prompt);
   const ava::permissions::PermissionPrompt lower_layer_read_prompt{.operation = ava::permissions::Operation::ReadFile,
                                                                    .mode = ava::agent::Mode::Build,
                                                                    .workspace_dir = workspace,
@@ -689,6 +764,8 @@ void test_headless_permission_policy() {
          "headless allow-tool allows exact read_file prompts");
   expect(tool_search && *tool_search == ava::permissions::PermissionResolution::Allow,
          "headless allow-tool allows exact glob search prompts");
+  expect(tool_webfetch && *tool_webfetch == ava::permissions::PermissionResolution::Allow,
+         "headless allow-tool allows exact webfetch network prompts");
   expect(lower_layer_read && *lower_layer_read == ava::permissions::PermissionResolution::Deny,
          "headless allow-tool requires exact tool names");
   expect(mismatched_tool && *mismatched_tool == ava::permissions::PermissionResolution::Deny,
@@ -1062,6 +1139,30 @@ void test_app_command_dispatcher() {
   expect(session.has_value(), "command dispatcher test opens runtime session");
   if (!session) return;
   const auto plan_system_prompt = session->system_prompt;
+
+  expect(ava::app::is_backend_command("/model") && ava::app::is_backend_command("/models") &&
+             ava::app::is_backend_command("/hotkeys"),
+         "command catalog classifies disabled aliases and hotkeys as backend commands");
+
+  const std::vector<ava::app::CommandHotkey> custom_hotkeys = {
+      ava::app::CommandHotkey{.action = "submit", .description = "Submit custom", .keys = "Ctrl+M"},
+      ava::app::CommandHotkey{.action = "variant_cycle", .description = "Cycle variants", .keys = "Ctrl+T"}};
+  auto hotkeys =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/hotkeys", .hotkeys = custom_hotkeys});
+  expect(hotkeys && hotkeys->handled && !hotkeys->output.empty() &&
+             hotkeys->output[0].find("Ctrl+M") != std::string::npos &&
+             hotkeys->output[0].find("variant_cycle") != std::string::npos,
+         "command dispatcher /hotkeys reports effective keybind metadata");
+  auto help = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/help", .hotkeys = custom_hotkeys});
+  expect(help && help->handled && !help->output.empty() && help->output[0].find("/hotkeys") != std::string::npos &&
+             help->output[0].find("Unavailable commands") != std::string::npos &&
+             help->output[0].find("Ctrl+M") != std::string::npos,
+         "command dispatcher /help includes catalog commands and effective hotkeys");
+  auto disabled = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/model"});
+  expect(disabled && disabled->handled && !disabled->output.empty() &&
+             disabled->output[0].find("disabled") != std::string::npos &&
+             disabled->output[0].find("model switching") != std::string::npos,
+         "command dispatcher handles disabled command aliases instead of sending prompts");
 
   auto context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context"});
   expect(context && context->handled && !context->output.empty() &&
@@ -3159,6 +3260,7 @@ void run_app_event_serialization_tests() { test_app_event_serialization(); }
 void run_app_runtime_tests() {
   test_app_runtime_open_session_and_context_prompt();
   test_app_run_prompt_emits_events();
+  test_app_run_prompt_emits_tool_progress_and_session_spill();
   test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call();
   test_app_print_prompt_merging();
   test_headless_permission_policy();

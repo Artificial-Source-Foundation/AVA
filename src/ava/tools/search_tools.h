@@ -14,17 +14,21 @@ struct GlobOptions {
   std::size_t max_results = 2000;
   std::size_t max_visited = 100000;
   std::size_t max_depth = 32;
+  bool no_ignore = false;
 };
 
 struct GrepOptions {
   std::size_t max_matches = 2000;
   std::size_t max_line_length = 500;
+  bool no_ignore = false;
 };
 
 struct GlobResult {
   std::vector<std::filesystem::path> paths;
   bool truncated = false;
+  bool spill_truncated = false;
   std::size_t total_matches = 0;
+  std::filesystem::path spill_path;
 };
 
 struct GrepMatch {
@@ -37,14 +41,14 @@ struct GrepMatch {
 struct GrepResult {
   std::vector<GrepMatch> matches;
   bool truncated = false;
+  bool spill_truncated = false;
   std::size_t total_matches = 0;
+  std::filesystem::path spill_path;
 };
 
-[[nodiscard]] ava::core::Result<GlobResult> glob_files(const ToolContext& context,
-                                                       std::string_view pattern,
+[[nodiscard]] ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string_view pattern,
                                                        GlobOptions options = {});
-[[nodiscard]] ava::core::Result<GrepResult> grep_files(const ToolContext& context,
-                                                       std::string_view literal_pattern,
+[[nodiscard]] ava::core::Result<GrepResult> grep_files(const ToolContext& context, std::string_view literal_pattern,
                                                        std::string_view include_glob = "**/*",
                                                        GrepOptions options = {});
 

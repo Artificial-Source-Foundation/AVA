@@ -34,6 +34,10 @@ struct SlashCommandItem {
   std::string description;
   std::string hint = "";
   std::string category = "";
+  std::vector<std::string> aliases = {};
+  std::string key_display = "";
+  bool enabled = true;
+  std::string disabled_reason = "";
 };
 
 enum class PermissionPromptChoice {
@@ -62,6 +66,36 @@ struct PermissionPromptView {
   PermissionPromptChoice selected_choice = PermissionPromptChoice::Deny;
 };
 
+struct QuestionPromptOptionView {
+  std::string value;
+  std::string label;
+  bool selected = false;
+};
+
+enum class QuestionPromptInputAction {
+  None,
+  Redraw,
+  Resolve,
+  Cancel,
+};
+
+struct QuestionPromptInputResult {
+  std::size_t selected_option_index = 0;
+  std::vector<QuestionPromptOptionView> options;
+  std::string custom_text;
+  QuestionPromptInputAction action = QuestionPromptInputAction::None;
+};
+
+struct QuestionPromptView {
+  std::string header;
+  std::string question;
+  std::vector<QuestionPromptOptionView> options;
+  bool multiple = false;
+  bool allow_custom = false;
+  std::size_t selected_option_index = 0;
+  std::string custom_text;
+};
+
 struct ComposerSnapshot {
   std::string mode;
   std::string provider;
@@ -69,10 +103,15 @@ struct ComposerSnapshot {
   std::string session_id;
   std::string input;
   std::string status;
+  bool processing = false;
+  std::size_t spinner_frame = 0;
+  std::optional<std::string> token_status = std::nullopt;
   std::vector<TranscriptItem> transcript;
   std::vector<SlashCommandItem> slash_commands = {};
   std::optional<PermissionPromptView> permission_prompt = std::nullopt;
+  std::optional<QuestionPromptView> question_prompt = std::nullopt;
   std::size_t selected_slash_command_index = 0;
+  bool slash_palette_suppressed = false;
   std::size_t transcript_scroll_offset = 0;
   std::size_t width = 80;
   std::size_t height = 24;
@@ -94,14 +133,18 @@ struct ComposerSnapshot {
 [[nodiscard]] std::string slash_command_selection_text(std::string_view input,
                                                        const std::vector<SlashCommandItem>& commands,
                                                        std::size_t selected_index);
+[[nodiscard]] std::optional<std::string> slash_command_selection_disabled_reason(
+    std::string_view input, const std::vector<SlashCommandItem>& commands, std::size_t selected_index);
 [[nodiscard]] std::optional<std::size_t> slash_palette_selection_for_screen_row(const ComposerSnapshot& snapshot,
-                                                                                 std::size_t row);
+                                                                                std::size_t row);
 [[nodiscard]] std::vector<std::string> render_composer(const ComposerSnapshot& snapshot);
 [[nodiscard]] bool draw_screen(const ComposerSnapshot& snapshot);
 [[nodiscard]] std::string sanitize_terminal_text(std::string_view text);
 [[nodiscard]] std::vector<std::string> split_lines(std::string_view text);
 [[nodiscard]] PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice,
                                                                          InputEvent event);
+[[nodiscard]] QuestionPromptInputResult handle_question_prompt_input(const QuestionPromptView& prompt,
+                                                                     InputEvent event);
 [[nodiscard]] std::string to_string(ToolTimelineStatus status);
 
 }  // namespace ava::tui

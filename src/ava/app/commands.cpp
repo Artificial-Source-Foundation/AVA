@@ -1,7 +1,9 @@
 #include "ava/app/commands.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <mutex>
+#include <sstream>
 #include <utility>
 
 #include "ava/core/ids.h"
@@ -10,11 +12,62 @@
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/search_tools.h"
+#include "ava/tui/keybindings.h"
 
 namespace ava::app {
 namespace {
 
 void add_output(CommandResult& result, std::string text) { result.output.push_back(std::move(text)); }
+
+std::vector<CommandHotkey> default_command_hotkeys() {
+  std::vector<CommandHotkey> hotkeys;
+  for (const auto& item : ava::tui::key_binding_help_items(ava::tui::default_key_bindings())) {
+    hotkeys.push_back(CommandHotkey{.action = item.action, .description = item.description, .keys = item.keys});
+  }
+  return hotkeys;
+}
+
+std::vector<CommandHotkey> effective_hotkeys(const std::vector<CommandHotkey>& hotkeys) {
+  return hotkeys.empty() ? default_command_hotkeys() : hotkeys;
+}
+
+std::string aliases_text(const CommandCatalogEntry& entry) {
+  std::string text;
+  for (const auto& alias : entry.aliases) {
+    if (!text.empty()) text += ", ";
+    text += alias;
+  }
+  return text;
+}
+
+std::string command_display(const CommandCatalogEntry& entry) {
+  auto text = entry.command;
+  if (!entry.hint.empty()) text += " " + entry.hint;
+  const auto aliases = aliases_text(entry);
+  if (!aliases.empty()) text += " (alias: " + aliases + ")";
+  return text;
+}
+
+std::string command_rows(bool enabled) {
+  std::size_t width = 0;
+  std::vector<const CommandCatalogEntry*> entries;
+  for (const auto& entry : command_catalog()) {
+    if (entry.enabled != enabled) continue;
+    entries.push_back(&entry);
+    width = std::max(width, command_display(entry).size());
+  }
+
+  std::string output;
+  for (const auto* entry : entries) {
+    auto display = command_display(*entry);
+    output += "  " + display;
+    if (display.size() < width) output += std::string(width - display.size(), ' ');
+    output += "  " + entry->description;
+    if (!entry->enabled && !entry->disabled_reason.empty()) output += " — disabled: " + entry->disabled_reason;
+    output += '\n';
+  }
+  return output;
+}
 
 std::string display_path(const std::filesystem::path& path, const std::filesystem::path& base) {
   std::error_code error;
@@ -27,6 +80,7 @@ ava::tools::ToolContext make_tool_context(RuntimeSession& session,
                                           ava::permissions::PermissionResolver permission_resolver) {
   return ava::tools::ToolContext{
       .workspace_dir = session.workspace_dir,
+      .spill_dir = session.store.session_path().parent_path() / "spill",
       .mode = session.mode,
       .permission_resolver = std::move(permission_resolver),
       .permission_audit_sink =
@@ -300,28 +354,52 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
 
 }  // namespace
 
-bool is_backend_command(std::string_view line) noexcept {
-  return line == "/quit" || line == "/exit" || line == "/help" || line == "/sessions" || line == "/mode" ||
-         line == "/context" || line == "/export" || starts_with_command(line, "/compact") ||
-         line.starts_with("/read ") || line.starts_with("/glob ") || line.starts_with("/grep ") ||
-         line.starts_with("/write ") || line.starts_with("/bash ");
+bool is_backend_command(std::string_view line) noexcept { return find_command_catalog_entry(line) != nullptr; }
+
+std::string command_hotkeys_text(const std::vector<CommandHotkey>& hotkeys) {
+  const auto items = effective_hotkeys(hotkeys);
+  std::size_t action_width = 0;
+  std::size_t keys_width = 0;
+  for (const auto& item : items) {
+    action_width = std::max(action_width, item.action.size());
+    keys_width = std::max(keys_width, item.keys.size());
+  }
+
+  std::string output = "Hotkeys:\n";
+  for (const auto& item : items) {
+    output += "  " + item.action;
+    if (item.action.size() < action_width) output += std::string(action_width - item.action.size(), ' ');
+    output += "  " + item.keys;
+    if (item.keys.size() < keys_width) output += std::string(keys_width - item.keys.size(), ' ');
+    output += "  " + item.description + '\n';
+  }
+  return output;
 }
 
-std::string command_help_text() {
-  return "Commands:\n  /help                 Show this help\n  /mode                 Toggle build/plan mode\n  "
-         "/sessions             List sessions for this workspace\n  /context              List loaded context "
-         "sources\n  "
-         "/compact [text]       Generate and record a provider summary\n  /export               Export this session as "
-         "markdown\n  "
-         "/glob <pattern>       List files matching a glob pattern\n  /grep <text> [glob]   Search matching files "
-         "for literal text\n  /read <path>          Read a file through the permissioned read tool\n  "
-         "/write <path> <txt>   Write text through the permissioned write tool\n  /bash <command>       Run a "
-         "permissioned shell command\n  /quit                 Exit";
+std::string command_help_text(const std::vector<CommandHotkey>& hotkeys) {
+  std::string output = "Commands:\n";
+  output += command_rows(true);
+  output += "\nUnavailable commands:\n";
+  output += command_rows(false);
+  output += '\n';
+  output += command_hotkeys_text(hotkeys);
+  if (!output.empty() && output.back() == '\n') output.pop_back();
+  return output;
 }
 
 ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandRequest request) {
   CommandResult result;
   if (request.command.empty()) return result;
+
+  const auto* entry = find_command_catalog_entry(request.command);
+  if (!entry) return result;
+  request.command = normalize_command_line(request.command, *entry);
+
+  if (!entry->enabled) {
+    result.handled = true;
+    add_output(result, entry->command + " is disabled: " + entry->disabled_reason);
+    return result;
+  }
 
   if (request.command == "/quit" || request.command == "/exit") {
     result.handled = true;
@@ -330,7 +408,12 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
   }
   if (request.command == "/help") {
     result.handled = true;
-    add_output(result, command_help_text());
+    add_output(result, command_help_text(request.hotkeys));
+    return result;
+  }
+  if (request.command == "/hotkeys") {
+    result.handled = true;
+    add_output(result, command_hotkeys_text(request.hotkeys));
     return result;
   }
   if (request.command == "/sessions") {
@@ -389,7 +472,7 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
     const auto instructions = command_argument(request.command, "/compact");
     if (!request.compaction_summary_generator) {
       return fail_compaction(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                             "/compact requires provider-backed summary generation"));
+                                              "/compact requires provider-backed summary generation"));
     }
     auto config = ava::session::load_compaction_config(session.paths);
     if (!config) {
@@ -418,7 +501,7 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
       }
       if (summary->empty()) {
         return fail_compaction(ava::core::Error(ava::core::ErrorCategory::Provider,
-                                               "compaction summary generation returned an empty summary"));
+                                                "compaction summary generation returned an empty summary"));
       }
       if (summary->size() > config->max_summary_bytes) {
         auto error =
@@ -472,6 +555,38 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
       return result;
     }
     add_output(result, ava::session::format_session_markdown(*entries));
+    return result;
+  }
+
+  if (entry->hint.empty() && starts_with_command(request.command, entry->command)) {
+    result.handled = true;
+    add_output(result, missing_argument(entry->command));
+    return result;
+  }
+
+  if (request.command == "/glob") {
+    result.handled = true;
+    add_output(result, missing_argument("/glob <pattern>"));
+    return result;
+  }
+  if (request.command == "/grep") {
+    result.handled = true;
+    add_output(result, missing_argument("/grep <text> [glob]"));
+    return result;
+  }
+  if (request.command == "/read") {
+    result.handled = true;
+    add_output(result, missing_argument("/read <path>"));
+    return result;
+  }
+  if (request.command == "/write") {
+    result.handled = true;
+    add_output(result, missing_argument("/write <path> <text>"));
+    return result;
+  }
+  if (request.command == "/bash") {
+    result.handled = true;
+    add_output(result, missing_argument("/bash <command>"));
     return result;
   }
 

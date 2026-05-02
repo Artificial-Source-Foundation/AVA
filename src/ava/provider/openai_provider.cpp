@@ -355,6 +355,9 @@ ava::core::Result<HttpRequest> OpenAIProvider::build_request(const ProviderReque
                   {"Accept", "text/event-stream"}},
       .body = request_body_json(request),
       .timeout_ms = 60000,
+      .follow_redirects = true,
+      .include_response_headers = false,
+      .resolve_hosts = {},
   };
 }
 

@@ -32,6 +32,13 @@ struct ToolTimelineEntry {
   std::string result_summary = {};
 };
 
+struct ToolProgressEntry {
+  std::string call_id = {};
+  std::string name = {};
+  std::string text = {};
+  std::string status = "running";
+};
+
 [[nodiscard]] std::string to_string(ToolTimelineStatus status);
 
 struct AgentLoopOptions {
@@ -50,6 +57,7 @@ struct AgentLoopOptions {
   std::size_t max_tool_result_context_bytes = 8 * 1024;
   bool stream = true;
   std::function<void(const ToolTimelineEntry&)> on_tool_event = nullptr;
+  std::function<ava::core::VoidResult(const ToolProgressEntry&)> on_tool_progress = nullptr;
   std::function<ava::core::VoidResult(const ava::provider::StreamEvent&)> on_stream_event = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   QuestionResolver question_resolver = nullptr;

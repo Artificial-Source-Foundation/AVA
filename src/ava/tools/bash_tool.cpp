@@ -16,11 +16,15 @@
 #include <thread>
 #include <vector>
 
+#include "ava/tools/spill_files.h"
+
 namespace ava::tools {
 
 namespace {
 
 constexpr char kTrustedExecPath[] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+constexpr std::size_t kBashProgressByteInterval = 128 * 1024;
+constexpr auto kBashProgressTimeInterval = std::chrono::seconds(2);
 
 class UniqueFd {
  public:
@@ -282,15 +286,34 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
   }
 
   BashResult result;
+  SpillBuffer spill_buffer;
   bool running = true;
   const auto deadline = std::chrono::steady_clock::now() + options.timeout;
+  auto last_progress = std::chrono::steady_clock::now();
+  std::size_t next_progress_bytes = kBashProgressByteInterval;
   std::array<char, 4096> buffer{};
+
+  const auto maybe_emit_progress = [&]() -> ava::core::VoidResult {
+    if (!context.progress_sink) return {};
+    const auto now = std::chrono::steady_clock::now();
+    if (result.total_bytes < next_progress_bytes && now - last_progress < kBashProgressTimeInterval) return {};
+    while (result.total_bytes >= next_progress_bytes) next_progress_bytes += kBashProgressByteInterval;
+    last_progress = now;
+    return emit_tool_progress(context, "bash output " + std::to_string(result.total_bytes) + " bytes", "running");
+  };
 
   while (running) {
     while (true) {
       const auto bytes = read_retry(read_fd.get(), buffer.data(), buffer.size());
       if (bytes > 0) {
-        append_tail(result, std::string_view(buffer.data(), static_cast<std::size_t>(bytes)), options.max_bytes);
+        const std::string_view chunk(buffer.data(), static_cast<std::size_t>(bytes));
+        spill_buffer.append(chunk);
+        append_tail(result, chunk, options.max_bytes);
+        if (auto progress = maybe_emit_progress(); !progress) {
+          kill(can_signal_group ? -pid : pid, SIGKILL);
+          waitpid_retry(pid, &status, 0);
+          return std::unexpected(std::move(progress.error()));
+        }
         continue;
       }
       if (bytes == 0 || errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -341,7 +364,10 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
       }
       break;
     }
-    append_tail(result, std::string_view(buffer.data(), static_cast<std::size_t>(bytes)), options.max_bytes);
+    const std::string_view chunk(buffer.data(), static_cast<std::size_t>(bytes));
+    spill_buffer.append(chunk);
+    append_tail(result, chunk, options.max_bytes);
+    if (auto progress = maybe_emit_progress(); !progress) return std::unexpected(std::move(progress.error()));
   }
   read_fd.reset();
 
@@ -351,6 +377,24 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
     result.exit_code = WEXITSTATUS(status);
   } else if (WIFSIGNALED(status)) {
     result.exit_code = 128 + WTERMSIG(status);
+  }
+  if (result.truncated && !context.spill_dir.empty()) {
+    auto spill = write_spill_file(context, "bash", "txt", spill_buffer);
+    if (!spill) return std::unexpected(std::move(spill.error()));
+    result.spill_path = spill->path;
+    result.spill_truncated = spill->truncated;
+    if (auto progress = emit_tool_progress(
+            context, "bash output spilled " + std::to_string(spill->bytes_written) + " bytes", "running");
+        !progress) {
+      return std::unexpected(std::move(progress.error()));
+    }
+  }
+  if (result.total_bytes > 0) {
+    if (auto progress = emit_tool_progress(
+            context, "bash completed with " + std::to_string(result.total_bytes) + " output bytes", "completed");
+        !progress) {
+      return std::unexpected(std::move(progress.error()));
+    }
   }
   return result;
 }

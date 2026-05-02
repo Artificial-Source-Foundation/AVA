@@ -54,8 +54,14 @@ add_library(ava_core
   src/ava/session/session_store.cpp
   src/ava/session/stats.cpp
   src/ava/tools/bash_tool.cpp
+  src/ava/tools/diff_utils.cpp
+  src/ava/tools/edit_match.cpp
   src/ava/tools/file_tools.cpp
+  src/ava/tools/ignore_rules.cpp
+  src/ava/tools/mutation_queue.cpp
   src/ava/tools/search_tools.cpp
+  src/ava/tools/spill_files.cpp
+  src/ava/tools/webfetch_tool.cpp
 )
 
 target_include_directories(ava_core PUBLIC src)
@@ -64,11 +70,13 @@ ava_apply_sanitizers(ava_core)
 
 add_library(ava_tui
   src/ava/tui/composer.cpp
+  src/ava/tui/composer_editor.cpp
   src/ava/tui/composer_input.cpp
   src/ava/tui/composer_palette.cpp
   src/ava/tui/composer_permission.cpp
   src/ava/tui/composer_text.cpp
   src/ava/tui/composer_transcript.cpp
+  src/ava/tui/keybindings.cpp
   src/ava/tui/runtime.cpp
   src/ava/tui/terminal.cpp
 )
@@ -80,6 +88,7 @@ ava_apply_sanitizers(ava_tui)
 
 add_library(ava_app
   src/ava/app/app.cpp
+  src/ava/app/command_catalog.cpp
   src/ava/app/commands.cpp
   src/ava/app/connect_openai.cpp
   src/ava/app/events.cpp

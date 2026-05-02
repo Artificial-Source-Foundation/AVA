@@ -1,5 +1,5 @@
 #include <iostream>
-#include <locale.h>
+#include <clocale>
 #include <curses.h>
 
 // Test getting the size of the screen / terminal.

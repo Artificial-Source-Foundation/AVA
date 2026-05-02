@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Attributes.h"
+#include "Rendition.h"
 #include <cstdint>
 
 namespace terminal {
@@ -11,39 +11,34 @@ namespace terminal {
 class ComplexChar
 {
  private:
-  static constexpr int CCHARW_MAX = 5;
-  static constexpr wchar_t const* empty_ = L" ";
+  static constexpr int CCHARW_MAX = 5;                  // The same value that ncursesw uses.
+  static constexpr wchar_t const* space_ = L" ";
 
-  wchar_t	variable_width_character_[CCHARW_MAX];          // Character to display.
-  Attributes    attributes_;                                    // Text attributes that apply.
-  int		color_pair_;                                    // Color pair index of the foreground/background colors to use.
+  wchar_t variable_width_character_[CCHARW_MAX];        // Character to display.
+  Rendition rendition_;                                 // Text fore- and background colors and attributes that apply.
 
  public:
-  // vwch = variable width character (UTF8 encoded).
-  ComplexChar(wchar_t const* vwch, Attributes attributes, int color_pair);
+  ComplexChar(wchar_t const* vwch, Rendition rendition);
+
+  // Specify ColorPair and (optionally) Attributes.
+  ComplexChar(wchar_t const* variable_width_character, ColorPair color_pair, Attributes attributes = {}) :
+    ComplexChar(variable_width_character, Rendition{color_pair, attributes}) { }
 
   // Use default colors.
-  ComplexChar(wchar_t const* vwch, Attributes attributes);
+  ComplexChar(wchar_t const* variable_width_character, Attributes attributes = {}) :
+    ComplexChar(variable_width_character, 0, attributes) { }
 
-  // No attributes.
-  ComplexChar(wchar_t const* vwch, int color_pair);
-
-  // Use default colors and no attributes.
-  ComplexChar(wchar_t const* vwch);
-
-  // No variable width character.
-  ComplexChar(Attributes attributes, int color_pair) : ComplexChar(empty_, attributes, color_pair) { }
-  ComplexChar(Attributes attributes) : ComplexChar(empty_, attributes) { }
-  ComplexChar(int color_pair) : ComplexChar(empty_, color_pair) { }
-  ComplexChar() : ComplexChar(empty_) { }
+  // Empty variable width character.
+  ComplexChar(Rendition rendition)                                      : ComplexChar(space_, rendition) { }
+  ComplexChar(ColorPair color_pair, Attributes attributes = {}) : ComplexChar(space_, color_pair, attributes) { }
+  ComplexChar(Attributes attributes = {})                       : ComplexChar(space_, attributes) { }
 
   // Accessors.
   wchar_t const* character() const { return variable_width_character_; }
-  Attributes attributes() const { return attributes_; }
-  int color_pair() const { return color_pair_; }
+  Rendition rendition() const { return rendition_; }
 
-  // Manipulators.
-  void set_color_pair(int color_pair) { color_pair_ = color_pair; }
+  // Manipulator.
+  void set_rendition(Rendition rendition) { rendition_ = rendition; }
 };
 
 } // namespace terminal

@@ -2,7 +2,7 @@
 #include <sstream>
 #include <cctype>
 #include <cstring>
-#include <locale.h>
+#include <clocale>
 #include <curses.h>
 
 // Test resizing of terminal windows and being notified.

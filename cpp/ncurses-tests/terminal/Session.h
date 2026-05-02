@@ -1,6 +1,9 @@
 #pragma once
 
 #include "ComplexChar.h"
+#include "ColorPair.h"
+#include "Color.h"
+#include <vector>
 
 namespace terminal {
 
@@ -12,16 +15,20 @@ namespace terminal {
 class Session final
 {
  private:
-  ComplexChar background_cchar_;
+  Rendition default_rendition_;
+  std::vector<ColorPair> color_pairs_;
 
  public:
   Session();
   ~Session();
 
-  ComplexChar const& get_background_cchar() const
+  Rendition const& default_rendition() const
   {
-    return background_cchar_;
+    return default_rendition_;
   }
+
+  // Return a suitable ColorPair for the given colors.
+  ColorPair create_color_pair(Color foreground, Color background);
 
   int rows() const;
   void refresh();

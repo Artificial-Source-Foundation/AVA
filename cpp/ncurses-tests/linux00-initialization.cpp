@@ -1,5 +1,5 @@
 #include <iostream>
-#include <locale.h>
+#include <clocale>
 #include <curses.h>
 
 // Test ncurses initialization and printing of UTF8 characters.

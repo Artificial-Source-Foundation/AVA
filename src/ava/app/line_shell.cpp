@@ -14,7 +14,7 @@
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/provider/curl_transport.h"
-#include "ava/provider/registry.h"
+#include "ava/provider/openai_provider.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
@@ -94,33 +94,38 @@ void add_output(LineResult& result, std::string text) { result.output.push_back(
 template <typename Callback>
 LineResult with_openai_runtime(ShellState& state, std::string_view offline_suffix, Callback callback) {
   LineResult line_result;
+  auto credential = ava::config::load_openai_credential(state.session.paths);
+  if (!credential) {
+    add_output(line_result, credential.error().format() + std::string(offline_suffix));
+    return line_result;
+  }
+  if (!*credential) {
+    add_output(line_result, "OpenAI auth is required. Configure an OpenAI credential in " +
+                                state.session.paths.auth_file.string() + std::string(offline_suffix));
+    return line_result;
+  }
   ava::provider::CurlCliTransport transport;
   ava::provider::RetryTransport retry_transport(transport);
-  auto request_credential =
-      ava::config::provider_credential_for_request(state.session.paths, state.session.model.provider_id, transport);
+  auto request_credential = ava::config::openai_credential_for_request(state.session.paths, **credential, transport);
   if (!request_credential) {
     add_output(line_result, request_credential.error().format() + std::string(offline_suffix));
     return line_result;
   }
-  if (!*request_credential) {
-    add_output(line_result, "Auth is required for provider `" + state.session.model.provider_id +
-                                "`. Configure a credential in " + state.session.paths.auth_file.string() +
-                                " or the provider API key environment variable" + std::string(offline_suffix));
+  auto token = ava::config::openai_access_token_for_request(*request_credential);
+  if (!token) {
+    add_output(line_result, token.error().format() + std::string(offline_suffix));
     return line_result;
   }
-  auto registry = ava::provider::builtin_provider_registry();
-  auto provider = registry.create(state.session.model.provider_id);
-  if (!provider) {
-    add_output(line_result, provider.error().format() + std::string(offline_suffix));
-    return line_result;
+  std::string openai_account_id = request_credential->account_id;
+  if (request_credential->type == ava::config::OpenAICredentialType::OAuth && openai_account_id.empty()) {
+    openai_account_id = ava::config::openai_oauth_account_id_from_token(request_credential->access_token).value_or("");
   }
+  ava::provider::OpenAIProvider provider;
   ava::app::RuntimeRunOptions run_options;
-  run_options.access_token = (*request_credential)->access_token;
-  run_options.credential_type = (*request_credential)->credential_type;
-  run_options.openai_oauth = (*request_credential)->provider_id == "openai" &&
-                             (*request_credential)->credential_type == "oauth";
-  run_options.openai_account_id = (*request_credential)->account_id;
-  return callback(**provider, retry_transport, run_options);
+  run_options.access_token = *token;
+  run_options.openai_oauth = request_credential->type == ava::config::OpenAICredentialType::OAuth;
+  run_options.openai_account_id = openai_account_id;
+  return callback(provider, retry_transport, run_options);
 }
 
 LineResult handle_line(ShellState& state, const std::string& line,

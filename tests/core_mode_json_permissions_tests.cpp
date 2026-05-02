@@ -44,7 +44,6 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/terminal.h"
 #include "tests/support/fake_transport.h"
-
 #include "tests/support/test_harness.h"
 
 namespace {
@@ -162,6 +161,35 @@ void test_permission_defaults() {
   });
   expect(external_read.action == ava::permissions::PermissionAction::Ask, "external paths ask");
 
+  const auto workspace_lsp = ava::permissions::decide(ava::permissions::PermissionRequest{
+      .operation = ava::permissions::Operation::LspQuery,
+      .mode = ava::agent::Mode::Build,
+      .workspace_dir = workspace,
+      .target_path = workspace / "src/main.cpp",
+      .command = "",
+  });
+  expect(workspace_lsp.action == ava::permissions::PermissionAction::Allow, "workspace LSP diagnostics are allowed");
+  expect(ava::permissions::to_string(ava::permissions::Operation::LspQuery) == "lsp.query",
+         "LSP query operation string is stable");
+
+  const auto secret_lsp = ava::permissions::decide(ava::permissions::PermissionRequest{
+      .operation = ava::permissions::Operation::LspQuery,
+      .mode = ava::agent::Mode::Build,
+      .workspace_dir = workspace,
+      .target_path = workspace / ".env",
+      .command = "",
+  });
+  expect(secret_lsp.action == ava::permissions::PermissionAction::Deny, "LSP diagnostics deny secret paths");
+
+  const auto external_lsp = ava::permissions::decide(ava::permissions::PermissionRequest{
+      .operation = ava::permissions::Operation::LspQuery,
+      .mode = ava::agent::Mode::Build,
+      .workspace_dir = workspace,
+      .target_path = workspace.parent_path() / "outside.cpp",
+      .command = "",
+  });
+  expect(external_lsp.action == ava::permissions::PermissionAction::Ask, "external LSP diagnostic paths ask");
+
   const auto symlink_workspace = temp_root() / "symlink-workspace";
   const auto outside = temp_root() / "outside";
   std::filesystem::create_directories(symlink_workspace);
@@ -184,9 +212,7 @@ void test_permission_defaults() {
 
 }  // namespace
 
-void run_core_mode_tests() {
-  test_mode_parsing();
-}
+void run_core_mode_tests() { test_mode_parsing(); }
 
 void run_core_json_permission_tests() {
   test_json_escape_control_characters();

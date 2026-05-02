@@ -45,10 +45,13 @@ add_library(ava_core
   src/ava/core/error.cpp
   src/ava/core/ids.cpp
   src/ava/core/json.cpp
+  src/ava/lsp/lsp_client.cpp
   src/ava/permissions/permission.cpp
   src/ava/provider/curl_transport.cpp
+  src/ava/provider/anthropic_provider.cpp
   src/ava/provider/openai_provider.cpp
   src/ava/provider/provider.cpp
+  src/ava/provider/registry.cpp
   src/ava/session/compaction.cpp
   src/ava/session/export.cpp
   src/ava/session/session_store.cpp
@@ -58,6 +61,7 @@ add_library(ava_core
   src/ava/tools/edit_match.cpp
   src/ava/tools/file_tools.cpp
   src/ava/tools/ignore_rules.cpp
+  src/ava/tools/lsp_tools.cpp
   src/ava/tools/mutation_queue.cpp
   src/ava/tools/search_tools.cpp
   src/ava/tools/spill_files.cpp
@@ -121,6 +125,11 @@ if(AVA_BUILD_TESTS)
   ava_apply_warnings(ava_test_support)
   ava_apply_sanitizers(ava_test_support)
 
+  add_executable(ava_fake_lsp_server tests/support/fake_lsp_server.cpp)
+  target_link_libraries(ava_fake_lsp_server PRIVATE ava_core)
+  ava_apply_warnings(ava_fake_lsp_server)
+  ava_apply_sanitizers(ava_fake_lsp_server)
+
   add_executable(ava_tests
     tests/agent_tool_dispatcher_tests.cpp
     tests/app_runtime_tests.cpp
@@ -128,12 +137,16 @@ if(AVA_BUILD_TESTS)
     tests/core_tests.cpp
     tests/core_mode_json_permissions_tests.cpp
     tests/events_tests.cpp
+    tests/lsp_tests.cpp
+    tests/provider_anthropic_tests.cpp
     tests/provider_openai_tests.cpp
     tests/session_tests.cpp
     tests/tools_tests.cpp
     tests/tui_composer_tests.cpp
   )
   target_link_libraries(ava_tests PRIVATE ava_core ava_tui ava_app ava_test_support)
+  add_dependencies(ava_tests ava_fake_lsp_server)
+  target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")
   ava_apply_warnings(ava_tests)
   ava_apply_sanitizers(ava_tests)
   add_test(NAME ava_tests COMMAND ava_tests)

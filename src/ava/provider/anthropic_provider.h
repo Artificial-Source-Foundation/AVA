@@ -1,0 +1,52 @@
+#pragma once
+
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+
+#include "ava/provider/provider.h"
+
+namespace ava::provider {
+
+class AnthropicStreamParser final : public StreamParser {
+ public:
+  struct ToolBlock {
+    std::string id;
+    std::string name;
+  };
+
+  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> append(std::string_view chunk) override;
+  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> finish() override;
+
+ private:
+  std::string pending_line_;
+  std::string data_;
+  std::size_t scan_offset_ = 0;
+  std::map<long long, ToolBlock> tool_blocks_;
+  std::optional<TokenUsage> usage_;
+};
+
+class AnthropicProvider final : public Provider {
+ public:
+  using Provider::build_request;
+
+  explicit AnthropicProvider(std::string base_url = "");
+  [[nodiscard]] ava::core::Result<HttpRequest> build_request(const ProviderRequest& request,
+                                                             std::string_view access_token) const override;
+  [[nodiscard]] ava::core::VoidResult apply_auth_options(HttpRequest& request,
+                                                         const ProviderAuthContext& auth) const override;
+  [[nodiscard]] std::unique_ptr<StreamParser> create_stream_parser() const override;
+  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_response(const HttpResponse& response,
+                                                                           bool stream) const override;
+
+ private:
+  std::string base_url_;
+};
+
+[[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse(std::string_view sse);
+[[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse_response(const HttpResponse& response);
+[[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(const HttpResponse& response);
+[[nodiscard]] std::optional<TokenUsage> parse_anthropic_usage(std::string_view body);
+
+}  // namespace ava::provider

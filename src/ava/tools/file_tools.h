@@ -11,6 +11,10 @@
 #include "ava/core/result.h"
 #include "ava/permissions/permission.h"
 
+namespace ava::lsp {
+class DiagnosticsProvider;
+}  // namespace ava::lsp
+
 namespace ava::tools {
 
 class MutationQueue;
@@ -50,6 +54,7 @@ struct ToolContext {
   std::string current_tool_name = {};
   std::string current_call_id = {};
   std::shared_ptr<MutationQueue> mutation_queue = nullptr;
+  std::shared_ptr<ava::lsp::DiagnosticsProvider> lsp_diagnostics_provider = nullptr;
 };
 
 struct TextOutput {

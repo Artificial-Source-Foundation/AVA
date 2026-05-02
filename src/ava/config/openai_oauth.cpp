@@ -299,7 +299,6 @@ ava::core::Result<ava::provider::HttpResponse> post_openai_oauth_token_form(std:
   if (response->status_code < 200 || response->status_code >= 300) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, std::string(failure_message));
     error.with_context("status", std::to_string(response->status_code));
-    error.with_context("body", response->body.substr(0, 512));
     return std::unexpected(std::move(error));
   }
   return response;

@@ -30,6 +30,7 @@ class ToolDispatcher {
   [[nodiscard]] ava::core::Result<ToolDispatchResult> dispatch(const ProviderToolCall& call) const;
   [[nodiscard]] static std::span<const ToolMetadata> tool_metadata();
   [[nodiscard]] static std::vector<std::string> tool_schemas_json();
+  [[nodiscard]] static std::vector<std::string> tool_schemas_json(const ava::tools::ToolContext& context);
 
  private:
   ava::tools::ToolContext context_;

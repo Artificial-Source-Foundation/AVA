@@ -192,6 +192,29 @@ Rules:
 - Only available in interactive mode.
 - In non-interactive mode, returns unavailable with guidance.
 
+### lsp_diagnostics
+
+Queries diagnostics for one file from a locally configured language server.
+
+Inputs:
+
+- `path`
+
+Rules:
+
+- Request `lsp.query` permission for the target path before any server query.
+- Treat permission as read-like: deny secret paths, ask outside the workspace, and allow workspace files by default.
+- Provider-visible input includes only the file path. Server command argv is local configuration/test harness state and is not model-controlled.
+- Advertise the provider schema only when a local diagnostics provider is configured; otherwise the tool is not available to model calls.
+- Start the configured server with an explicit argv vector and workspace root; do not use a shell.
+- Use JSON-RPC `Content-Length` framing, initialize the server, then request `textDocument/diagnostic` for the file URI.
+- Percent-encode file URI path bytes while preserving real path separators, so literal encoded separators in filenames cannot cross the permission boundary.
+- Bound request timeouts and kill the LSP child process group on timeout or client destruction.
+- Return bounded structured diagnostics: `severity`, `message`, `line`, `column`, and `code`, plus `truncated` and `total_diagnostics` when provider-facing output is capped.
+- Redact local server command and workspace details from provider-visible LSP failures; keep detailed process context for local diagnostics only.
+
+First-slice non-goals: language-server discovery/config catalogs, symbols, definitions, references, workspace-wide diagnostics, TUI rendering, plugin/MCP integration, provider registry changes, and new external dependencies.
+
 ## Permission Integration
 
 Tools must not decide safety internally in an ad hoc way. They should produce permission requests and rely on the permission service.
@@ -203,6 +226,7 @@ Examples:
 - File deletion requests `file.delete` and is not part of MVP write/edit behavior.
 - `bash` requests `shell.run` and may request `shell.destructive` based on command scan.
 - `webfetch` requests `network.fetch`.
+- `lsp_diagnostics` requests `lsp.query` for the target file path.
 
 ## Output Truncation
 
@@ -234,6 +258,11 @@ Required regression areas:
 - Patch validation before mutation.
 - Bash timeout and cancellation.
 - Bash output truncation.
+- Search `.gitignore` pruning, provider-inaccessible `no_ignore`, spill files, and `tool_progress` events.
+- Webfetch URL validation, DNS pinning, redirect-disabled behavior, content-type filtering, and headless `network.fetch` permission.
+- LSP diagnostics permission, file URI encoding, timeout/size caps, provider error redaction, and provider JSON bounds.
+- OpenAI Responses tool-call event parsing, including `response.output_item.added` function-call items.
+- Live headless smoke for every model-visible tool class: read/search/webfetch in print mode; write/edit/apply_patch/bash/question through RPC resolver replies; LSP through fake-server tests unless a local diagnostics provider is configured.
 - Permission allow/ask/deny behavior.
 - Nonexistent files and directories.
 - Unicode and long-line handling.

@@ -143,6 +143,16 @@ void append_mode_change(std::string& out, const SessionEntry& entry, const Expor
   append_fenced_block(out, "Mode", string_field(entry, "mode").value_or(""));
 }
 
+void append_model_change(std::string& out, const SessionEntry& entry, const ExportOptions& options) {
+  append_heading(out, "Model Change");
+  append_metadata(out, entry, options);
+  append_optional_fenced_block(out, "Previous provider", string_field(entry, "previous_provider"));
+  append_optional_fenced_block(out, "Previous model", string_field(entry, "previous_model"));
+  append_optional_fenced_block(out, "Provider", string_field(entry, "provider"));
+  append_optional_fenced_block(out, "Model", string_field(entry, "model"));
+  append_optional_fenced_block(out, "Display name", string_field(entry, "display_name"));
+}
+
 void append_session_start(std::string& out, const SessionEntry& entry, const ExportOptions& options) {
   append_heading(out, "Session Start");
   append_metadata(out, entry, options);
@@ -224,6 +234,9 @@ std::string format_session_markdown(const std::vector<SessionEntry>& entries, co
         break;
       case EntryType::ModeChange:
         append_mode_change(out, entry, options);
+        break;
+      case EntryType::ModelChange:
+        append_model_change(out, entry, options);
         break;
       case EntryType::Compaction:
         if (options.include_compactions) append_compaction(out, entry, options);

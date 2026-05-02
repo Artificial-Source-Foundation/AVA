@@ -12,7 +12,9 @@ void run_app_event_serialization_tests();
 void run_app_runtime_tests();
 void run_app_event_bus_tests();
 void run_provider_openai_tests();
+void run_provider_anthropic_tests();
 void run_agent_tool_dispatcher_tests();
+void run_lsp_tests();
 void run_tui_composer_tests();
 
 int main() {
@@ -26,7 +28,9 @@ int main() {
   run_app_event_bus_tests();
   run_app_runtime_tests();
   run_provider_openai_tests();
+  run_provider_anthropic_tests();
   run_agent_tool_dispatcher_tests();
+  run_lsp_tests();
   run_tui_composer_tests();
 
   const int failures = ava::test::failures();

@@ -8,6 +8,19 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+## Headless Tool Smoke
+
+After provider streaming, tool schema, permission, or dispatcher changes, run a live headless smoke with configured OpenAI auth. Keep the workspace isolated under `/tmp/opencode` so mutating tools do not touch the repository.
+
+Recommended coverage:
+
+- `ava --print ... --json --allow read-only` for `read_file`, `glob`, and `grep`. This verifies OpenAI tool-call streaming, read/search permission auto-allow, `.gitignore` behavior, and tool progress events.
+- `ava --print ... --json --allow-tool webfetch` for `webfetch`. This verifies the explicit `network.fetch` headless allow path and real bounded HTTP fetch behavior.
+- `ava --rpc` with a small JSONL harness that answers `permission_requested` with `permission_reply` for `write_file`, `edit_file`, `apply_patch`, and `bash`.
+- `ava --rpc` with `question_reply` for the `question` tool.
+
+`lsp_diagnostics` is capability-gated in normal headless runtime. Verify it through `ava_tests` and the fake LSP server unless a local diagnostics provider is configured for a live run.
+
 ## Sanitizers
 
 ```sh
@@ -47,8 +60,8 @@ The current single test binary covers:
 - XDG path handling
 - OpenAI auth loading/storage and OAuth refresh preflight
 - model and prompt configuration
-- provider request/SSE parsing
-- permission audit persistence, file/search/bash tools, and atomic file writes
+- provider request/SSE parsing, including OpenAI Responses function-call starts from `response.output_item.added`
+- permission audit persistence, file/search/bash/webfetch/LSP tools, spill files, and atomic file writes
 - tool dispatcher and agent loop
 - print mode and JSONL RPC success, denial/recovery, malformed input, cancellation, and refresh paths
 - minimal TUI rendering/input helpers

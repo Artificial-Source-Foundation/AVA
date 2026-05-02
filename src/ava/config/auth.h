@@ -28,6 +28,14 @@ struct OpenAICredential {
   std::filesystem::path source_path;
 };
 
+struct ProviderCredential {
+  std::string provider_id;
+  std::string access_token;
+  std::string credential_type;
+  std::string account_id;
+  std::string source;
+};
+
 [[nodiscard]] std::optional<OpenAICredential> parse_openai_credential(std::string_view content,
                                                                       const std::filesystem::path& source_path = {});
 [[nodiscard]] ava::core::Result<std::optional<OpenAICredential>> load_openai_credential(const XdgPaths& paths);
@@ -41,8 +49,10 @@ struct OpenAICredential {
                                                                                 ava::provider::Transport& transport,
                                                                                 long long now_seconds);
 [[nodiscard]] ava::core::Result<OpenAICredential> openai_credential_for_request(const XdgPaths& paths,
-                                                                                const OpenAICredential& credential,
-                                                                                ava::provider::Transport& transport);
+                                                                                 const OpenAICredential& credential,
+                                                                                 ava::provider::Transport& transport);
+[[nodiscard]] ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(
+    const XdgPaths& paths, std::string_view provider_id, ava::provider::Transport& transport);
 [[nodiscard]] std::string authorization_header_value(const OpenAICredential& credential);
 
 }  // namespace ava::config

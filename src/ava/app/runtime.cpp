@@ -7,13 +7,12 @@
 
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
-#include "ava/provider/openai_provider.h"
 #include "ava/provider/provider.h"
+#include "ava/provider/registry.h"
 
 namespace ava::app {
 namespace {
 
-constexpr std::string_view kCodexResponsesUrl = "https://chatgpt.com/backend-api/codex/responses";
 constexpr std::size_t kMaxCompactionPromptEntryBytes = 8192;
 
 std::string_view trim(std::string_view value) {
@@ -86,42 +85,18 @@ ava::core::Result<std::string> build_recent_context_tail(const std::vector<ava::
   return truncate_recent_context_to_token_budget(std::move(tail), keep_recent_tokens);
 }
 
-void apply_codex_oauth_request_options(ava::provider::HttpRequest& request, std::string_view account_id) {
-  request.url = std::string(kCodexResponsesUrl);
-  request.headers["OpenAI-Beta"] = "responses=experimental";
-  request.headers["originator"] = "ava";
-  if (!account_id.empty()) {
-    request.headers["ChatGPT-Account-Id"] = std::string(account_id);
-    request.headers["chatgpt-account-id"] = std::string(account_id);
-  }
-  if (!request.body.empty() && request.body.back() == '}') {
-    request.body.insert(request.body.size() - 1, ",\"store\":false");
-  }
-}
-
-ava::core::Result<std::string> parse_compaction_response_text(const ava::provider::HttpResponse& response) {
-  if (response.status_code < 200 || response.status_code >= 300) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "compaction summary request failed with status " +
-                                                                          std::to_string(response.status_code));
+ava::core::Result<std::string> parse_compaction_response_text(const ava::provider::Provider& provider,
+                                                              const ava::provider::HttpResponse& response,
+                                                              bool stream) {
+  auto events = provider.parse_response(response, stream);
+  if (!events) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Provider,
+                                  "compaction summary request failed with status " +
+                                      std::to_string(response.status_code));
     error.with_context("status", std::to_string(response.status_code));
-    if (const auto error_object = ava::core::json::object_field(response.body, "error")) {
-      if (const auto message = ava::core::json::string_field(*error_object, "message"); message && !message->empty()) {
-        error.with_context("provider_message", *message);
-      }
-    }
-    if (!response.body.empty()) {
-      constexpr std::size_t max_body_snippet_bytes = 512;
-      error.with_context("body_snippet",
-                         std::string(response.body.substr(0, std::min(response.body.size(), max_body_snippet_bytes))));
-    }
+    error.with_context("provider_error", events.error().format());
     return std::unexpected(std::move(error));
   }
-  auto text = ava::provider::parse_openai_response_text(response.body);
-  if (text) return *text;
-
-  auto events = ava::provider::parse_openai_sse_response(response);
-  if (!events) return std::unexpected(std::move(text.error()));
-
   std::string streamed_text;
   for (const auto& event : *events) {
     if (event.type == ava::provider::StreamEventType::TextDelta) {
@@ -133,7 +108,8 @@ ava::core::Result<std::string> parse_compaction_response_text(const ava::provide
     }
   }
   if (!streamed_text.empty()) return streamed_text;
-  return std::unexpected(std::move(text.error()));
+  return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider,
+                                          "compaction summary response text is missing"));
 }
 
 ava::core::Result<std::filesystem::path> current_path_result() {
@@ -172,7 +148,7 @@ ava::core::Result<std::string> resolve_session_id(const std::filesystem::path& w
 }
 
 std::string session_start_data_json(ava::agent::Mode mode, const ava::config::ModelInfo& model,
-                                    const ava::config::PromptSelection& prompt, std::size_t context_source_count) {
+                                     const ava::config::PromptSelection& prompt, std::size_t context_source_count) {
   return "{\"mode\":\"" + ava::agent::to_string(mode) + "\",\"provider\":\"" +
          ava::core::json::escape(model.provider_id) + "\",\"model\":\"" + ava::core::json::escape(model.model_id) +
          "\",\"prompt_override\":" + (prompt.from_override ? std::string("true") : std::string("false")) +
@@ -188,8 +164,96 @@ ava::core::VoidResult append_session_start(ava::session::SessionStore& store, av
       .parent_id = "",
       .type = ava::session::EntryType::SessionStart,
       .timestamp = ava::session::now_timestamp(),
-      .data_json = session_start_data_json(mode, model, prompt, context_source_count),
-  });
+       .data_json = session_start_data_json(mode, model, prompt, context_source_count),
+   });
+}
+
+std::string optional_bool_json(std::string_view key, const std::optional<bool>& value) {
+  if (!value) return {};
+  return ",\"" + std::string(key) + "\":" + (*value ? "true" : "false");
+}
+
+std::string model_change_data_json(const ava::config::ModelInfo& previous, const ava::config::ModelInfo& current) {
+  std::string json = "{";
+  json += "\"previous_provider\":\"" + ava::core::json::escape(previous.provider_id) + "\"";
+  json += ",\"previous_model\":\"" + ava::core::json::escape(previous.model_id) + "\"";
+  json += ",\"provider\":\"" + ava::core::json::escape(current.provider_id) + "\"";
+  json += ",\"model\":\"" + ava::core::json::escape(current.model_id) + "\"";
+  json += ",\"display_name\":\"" + ava::core::json::escape(current.display_name) + "\"";
+  json += ",\"family\":\"" + ava::core::json::escape(current.family) + "\"";
+  json += ",\"api_family\":\"" + ava::core::json::escape(current.api_family) + "\"";
+  json += optional_bool_json("supports_tools", current.supports_tools);
+  json += optional_bool_json("supports_streaming", current.supports_streaming);
+  json += optional_bool_json("supports_reasoning", current.supports_reasoning);
+  json += "}";
+  return json;
+}
+
+ava::core::VoidResult append_model_change(ava::session::SessionStore& store, const ava::config::ModelInfo& previous,
+                                          const ava::config::ModelInfo& current) {
+  return store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                 .parent_id = "",
+                                                 .type = ava::session::EntryType::ModelChange,
+                                                 .timestamp = ava::session::now_timestamp(),
+                                                 .data_json = model_change_data_json(previous, current)});
+}
+
+std::optional<bool> bool_json_field(std::string_view object, std::string_view key) {
+  auto start = ava::core::json::field_value_start(object, key);
+  if (!start) return std::nullopt;
+  auto value = trim(object.substr(*start));
+  if (value.starts_with("true") && (value.size() == 4 || value[4] == ',' || value[4] == '}')) return true;
+  if (value.starts_with("false") && (value.size() == 5 || value[5] == ',' || value[5] == '}')) return false;
+  return std::nullopt;
+}
+
+ava::config::ModelInfo fallback_persisted_model(std::string provider_id, std::string model_id,
+                                                std::optional<bool> supports_tools,
+                                                std::optional<bool> supports_streaming,
+                                                std::optional<bool> supports_reasoning) {
+  const auto display_name = model_id;
+  const auto family = model_id;
+  return ava::config::ModelInfo{.provider_id = std::move(provider_id),
+                                .model_id = std::move(model_id),
+                                .display_name = display_name,
+                                .family = family,
+                                .context_window_tokens = std::nullopt,
+                                .max_output_tokens = std::nullopt,
+                                .pricing = std::nullopt,
+                                .api_family = {},
+                                .input_modalities = {},
+                                .supports_tools = supports_tools.value_or(false),
+                                .supports_streaming = supports_streaming.value_or(false),
+                                .supports_reasoning = supports_reasoning.value_or(false),
+                                .reports_usage = std::nullopt,
+                                .reasoning_levels = {},
+                                .compatibility_quirks = {"persisted_unknown_model"}};
+}
+
+std::optional<ava::config::ModelInfo> latest_persisted_model(
+    const ava::config::ModelRegistry& registry, const std::vector<ava::session::SessionEntry>& entries) {
+  std::optional<std::string> provider_id;
+  std::optional<std::string> model_id;
+  std::optional<bool> supports_tools;
+  std::optional<bool> supports_streaming;
+  std::optional<bool> supports_reasoning;
+  for (const auto& entry : entries) {
+    if (entry.type != ava::session::EntryType::SessionStart && entry.type != ava::session::EntryType::ModelChange) {
+      continue;
+    }
+    auto provider = ava::core::json::string_field(entry.data_json, "provider");
+    auto model = ava::core::json::string_field(entry.data_json, "model");
+    if (!provider || !model || provider->empty() || model->empty()) continue;
+    provider_id = std::move(*provider);
+    model_id = std::move(*model);
+    supports_tools = bool_json_field(entry.data_json, "supports_tools");
+    supports_streaming = bool_json_field(entry.data_json, "supports_streaming");
+    supports_reasoning = bool_json_field(entry.data_json, "supports_reasoning");
+  }
+  if (!provider_id || !model_id) return std::nullopt;
+  if (auto model = ava::config::find_model(registry, *provider_id, *model_id)) return model;
+  return fallback_persisted_model(std::move(*provider_id), std::move(*model_id), supports_tools, supports_streaming,
+                                  supports_reasoning);
 }
 
 RuntimeEvent base_event(const RuntimeSession& session, RuntimeEventType type) {
@@ -278,9 +342,6 @@ ava::core::Result<RuntimeSession> open_runtime_session(const RuntimeOpenOptions&
   if (!registry) return std::unexpected(registry.error());
   auto model = ava::config::select_default_model(*registry);
 
-  auto prompt_state = load_runtime_prompt_state(options.paths, model, options.mode, workspace_dir, current_dir);
-  if (!prompt_state) return std::unexpected(prompt_state.error());
-
   bool created = true;
   ava::core::Result<ava::session::SessionStore> store =
       std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session was not initialized"));
@@ -303,6 +364,15 @@ ava::core::Result<RuntimeSession> open_runtime_session(const RuntimeOpenOptions&
   }
   if (!store) return std::unexpected(store.error());
 
+  if (!created) {
+    auto entries = store->load();
+    if (!entries) return std::unexpected(std::move(entries.error()));
+    if (auto persisted_model = latest_persisted_model(*registry, *entries)) model = std::move(*persisted_model);
+  }
+
+  auto prompt_state = load_runtime_prompt_state(options.paths, model, options.mode, workspace_dir, current_dir);
+  if (!prompt_state) return std::unexpected(prompt_state.error());
+
   if (created) {
     auto appended =
         append_session_start(*store, options.mode, model, prompt_state->prompt, prompt_state->context_sources.size());
@@ -318,7 +388,55 @@ ava::core::Result<RuntimeSession> open_runtime_session(const RuntimeOpenOptions&
                         .current_dir = current_dir,
                         .context_sources = std::move(prompt_state->context_sources),
                         .system_prompt = std::move(prompt_state->system_prompt),
-                        .created = created};
+                         .created = created};
+}
+
+ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(const ava::config::XdgPaths& paths,
+                                                                std::string_view provider_id,
+                                                                std::string_view model_id) {
+  provider_id = trim(provider_id);
+  model_id = trim(model_id);
+  if (provider_id.empty() || model_id.empty()) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider and model are required"));
+  }
+
+  const auto providers = ava::provider::builtin_provider_registry();
+  if (!providers.contains(provider_id)) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::NotFound, "provider is not registered");
+    error.with_context("provider", std::string(provider_id));
+    return std::unexpected(std::move(error));
+  }
+
+  auto registry = ava::config::load_model_registry(paths);
+  if (!registry) return std::unexpected(std::move(registry.error()));
+  auto model = ava::config::find_model(*registry, provider_id, model_id);
+  if (!model) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::NotFound, "model is not configured");
+    error.with_context("provider", std::string(provider_id));
+    error.with_context("model", std::string(model_id));
+    return std::unexpected(std::move(error));
+  }
+  return *model;
+}
+
+ava::core::Result<bool> switch_runtime_model(RuntimeSession& session, ava::config::ModelInfo model) {
+  if (session.model.provider_id == model.provider_id && session.model.model_id == model.model_id) return false;
+
+  auto prompt_state = load_runtime_prompt_state(session.paths, model, session.mode, session.workspace_dir,
+                                               session.current_dir);
+  if (!prompt_state) return std::unexpected(std::move(prompt_state.error()));
+
+  const auto previous = session.model;
+  auto appended = append_model_change(session.store, previous, model);
+  if (!appended) return std::unexpected(std::move(appended.error()));
+
+  session.model = std::move(model);
+  session.mode = prompt_state->mode;
+  session.prompt = std::move(prompt_state->prompt);
+  session.context_sources = std::move(prompt_state->context_sources);
+  session.system_prompt = std::move(prompt_state->system_prompt);
+  return true;
 }
 
 ava::core::Result<RuntimePromptState> select_runtime_prompt_state(const RuntimeSession& session,
@@ -391,16 +509,18 @@ ava::core::Result<std::string> generate_compaction_summary(
       .system_prompt = std::string(system_prompt),
       .messages = {ava::provider::ChatMessage{.role = "user", .content = prompt}},
       .tools_json = {},
-      .stream = options.openai_oauth && session.model.provider_id == "openai"};
-  auto request = provider.build_request(provider_request, options.access_token);
+      .stream = options.openai_oauth && session.model.supports_streaming.value_or(true),
+      .max_output_tokens = session.model.max_output_tokens};
+  const ava::provider::ProviderAuthContext auth_context{
+      .access_token = options.access_token,
+      .credential_type = options.openai_oauth && options.credential_type == "bearer" ? "oauth" : options.credential_type,
+      .account_id = options.openai_account_id};
+  auto request = provider.build_request(provider_request, auth_context);
   if (!request) return std::unexpected(std::move(request.error()));
-  if (options.openai_oauth && session.model.provider_id == "openai") {
-    apply_codex_oauth_request_options(*request, options.openai_account_id);
-  }
 
   auto response = transport.send(*request);
   if (!response) return std::unexpected(std::move(response.error()));
-  auto summary = parse_compaction_response_text(*response);
+  auto summary = parse_compaction_response_text(provider, *response, provider_request.stream);
   if (!summary) return std::unexpected(std::move(summary.error()));
   *summary = trimmed_copy(*summary);
   if (summary->empty()) {
@@ -526,9 +646,14 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
       .model_id = session.model.model_id,
       .system_prompt = session.system_prompt,
       .access_token = options.access_token,
+      .credential_type = options.openai_oauth && options.credential_type == "bearer" ? "oauth" : options.credential_type,
       .openai_oauth = options.openai_oauth,
       .openai_account_id = options.openai_account_id,
       .stream = options.stream,
+      .model_supports_tools = session.model.supports_tools.value_or(true),
+      .model_supports_streaming = session.model.supports_streaming.value_or(true),
+      .model_supports_reasoning = session.model.supports_reasoning.value_or(false),
+      .model_max_output_tokens = session.model.max_output_tokens,
       .on_tool_event =
           [&session, &options, &sink_error](const ava::agent::ToolTimelineEntry& entry) {
             if (sink_error) return;

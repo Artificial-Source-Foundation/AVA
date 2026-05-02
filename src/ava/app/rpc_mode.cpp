@@ -1,5 +1,6 @@
 #include "ava/app/rpc_mode.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <condition_variable>
@@ -22,7 +23,7 @@
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 #include "ava/provider/curl_transport.h"
-#include "ava/provider/openai_provider.h"
+#include "ava/provider/registry.h"
 #include "ava/session/session_store.h"
 #include "ava/session/stats.h"
 
@@ -115,6 +116,89 @@ std::string output_array_json(const std::vector<std::string>& output) {
   return json;
 }
 
+std::string string_array_json(const std::vector<std::string>& values) {
+  std::string json = "[";
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    if (index > 0) json += ',';
+    json += '"';
+    json += ava::core::json::escape(values[index]);
+    json += '"';
+  }
+  json += ']';
+  return json;
+}
+
+std::string model_key(std::string_view provider_id, std::string_view model_id) {
+  return std::string(provider_id) + "\n" + std::string(model_id);
+}
+
+bool has_model_key(const std::vector<std::string>& keys, std::string_view key) {
+  for (const auto& existing : keys) {
+    if (existing == key) return true;
+  }
+  return false;
+}
+
+std::vector<ava::config::ModelInfo> effective_models(const ava::config::ModelRegistry& registry) {
+  std::vector<ava::config::ModelInfo> models;
+  std::vector<std::string> seen;
+  for (auto model = registry.models.rbegin(); model != registry.models.rend(); ++model) {
+    const auto key = model_key(model->provider_id, model->model_id);
+    if (has_model_key(seen, key)) continue;
+    seen.push_back(key);
+    models.push_back(*model);
+  }
+  std::reverse(models.begin(), models.end());
+  return models;
+}
+
+void append_optional_bool(std::string& json, std::string_view key, const std::optional<bool>& value) {
+  if (!value) return;
+  json += ',';
+  json += bool_field_json(key, *value);
+}
+
+void append_optional_integer(std::string& json, std::string_view key, const std::optional<long long>& value) {
+  if (!value) return;
+  json += ',';
+  json += integer_field_json(key, *value);
+}
+
+std::string model_info_json(const ava::config::ModelInfo& model, const RuntimeSession& session, bool configured) {
+  const bool registered = ava::provider::builtin_provider_registry().contains(model.provider_id);
+  std::string json = "{";
+  json += string_field_json("provider", model.provider_id);
+  json += ',';
+  json += string_field_json("model", model.model_id);
+  json += ',';
+  json += string_field_json("display_name", model.display_name);
+  json += ',';
+  json += string_field_json("family", model.family);
+  json += ',';
+  json += string_field_json("api_family", model.api_family);
+  json += ',';
+  json += bool_field_json("registered", registered);
+  json += ',';
+  json += bool_field_json("selectable", registered && configured);
+  append_optional_integer(json, "context_window_tokens", model.context_window_tokens);
+  append_optional_integer(json, "max_output_tokens", model.max_output_tokens);
+  append_optional_bool(json, "supports_tools", model.supports_tools);
+  append_optional_bool(json, "supports_streaming", model.supports_streaming);
+  append_optional_bool(json, "supports_reasoning", model.supports_reasoning);
+  append_optional_bool(json, "reports_usage", model.reports_usage);
+  json += ",\"input_modalities\":";
+  json += string_array_json(model.input_modalities);
+  json += ",\"reasoning_levels\":";
+  json += string_array_json(model.reasoning_levels);
+  json += ",\"compatibility_quirks\":";
+  json += string_array_json(model.compatibility_quirks);
+  json += ',';
+  json += bool_field_json("selected", session.model.provider_id == model.provider_id &&
+                                          session.model.model_id == model.model_id);
+  json += '}';
+  return json;
+}
+
 ava::core::Error invalid_rpc(std::string message);
 
 std::string joined_output(const std::vector<std::string>& output) {
@@ -204,6 +288,37 @@ ava::core::Result<std::string> list_sessions_result_json(const RuntimeSession& s
     json += ',';
     json += number_field_json("entry_count", summary.entry_count);
     json += '}';
+  }
+  json += "]}";
+  return json;
+}
+
+ava::core::Result<std::string> list_models_result_json(const RuntimeSession& session) {
+  auto registry = ava::config::load_model_registry(session.paths);
+  if (!registry) return std::unexpected(std::move(registry.error()));
+
+  auto models = effective_models(*registry);
+  bool current_in_catalog = false;
+  for (const auto& model : models) {
+    current_in_catalog = current_in_catalog ||
+                         (model.provider_id == session.model.provider_id && model.model_id == session.model.model_id);
+  }
+  std::string json = "{";
+  json += string_field_json("default_provider", registry->default_provider_id);
+  json += ',';
+  json += string_field_json("default_model", registry->default_model_id);
+  json += ',';
+  json += string_field_json("current_provider", session.model.provider_id);
+  json += ',';
+  json += string_field_json("current_model", session.model.model_id);
+  json += ",\"models\":[";
+  for (std::size_t index = 0; index < models.size(); ++index) {
+    if (index > 0) json += ',';
+    json += model_info_json(models[index], session, true);
+  }
+  if (!current_in_catalog) {
+    if (!models.empty()) json += ',';
+    json += model_info_json(session.model, session, false);
   }
   json += "]}";
   return json;
@@ -376,6 +491,8 @@ ava::core::Result<std::string> session_stats_result_json(const RuntimeSession& s
   json += number_field_json("permission_decision", stats.counts.permission_decision);
   json += ',';
   json += number_field_json("mode_change", stats.counts.mode_change);
+  json += ',';
+  json += number_field_json("model_change", stats.counts.model_change);
   json += ',';
   json += number_field_json("compaction", stats.counts.compaction);
   json += ',';
@@ -884,30 +1001,27 @@ ava::core::VoidResult write_error(RpcOutput& output, std::string_view id, const 
 }
 
 ava::core::Result<RuntimeRunOptions> ensure_prompt_runtime_options(const ava::config::XdgPaths& paths,
-                                                                   RuntimeRunOptions options,
-                                                                   ava::provider::Transport& transport,
-                                                                   std::string_view purpose) {
+                                                                    std::string_view provider_id,
+                                                                    RuntimeRunOptions options,
+                                                                    ava::provider::Transport& auth_transport,
+                                                                    std::string_view purpose) {
   if (!options.access_token.empty()) return options;
 
-  auto credential = ava::config::load_openai_credential(paths);
+  auto credential = ava::config::provider_credential_for_request(paths, provider_id, auth_transport);
   if (!credential) return std::unexpected(credential.error());
   if (!*credential) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                  "RPC " + std::string(purpose) + " requires OpenAI auth");
+                                  "RPC " + std::string(purpose) + " requires auth for provider `" +
+                                      std::string(provider_id) + "`");
     error.with_context("auth_file", paths.auth_file.string());
     return std::unexpected(std::move(error));
   }
-  auto request_credential = ava::config::openai_credential_for_request(paths, **credential, transport);
-  if (!request_credential) return std::unexpected(request_credential.error());
-  auto token = ava::config::openai_access_token_for_request(*request_credential);
-  if (!token) return std::unexpected(token.error());
-
-  options.access_token = *token;
-  options.openai_oauth = request_credential->type == ava::config::OpenAICredentialType::OAuth;
-  options.openai_account_id = request_credential->account_id;
+  options.access_token = (*credential)->access_token;
+  options.credential_type = (*credential)->credential_type;
+  options.openai_oauth = (*credential)->provider_id == "openai" && (*credential)->credential_type == "oauth";
+  options.openai_account_id = (*credential)->account_id;
   if (options.openai_oauth && options.openai_account_id.empty()) {
-    options.openai_account_id =
-        ava::config::openai_oauth_account_id_from_token(request_credential->access_token).value_or("");
+    options.openai_account_id = ava::config::openai_oauth_account_id_from_token((*credential)->access_token).value_or("");
   }
   return options;
 }
@@ -923,6 +1037,80 @@ ava::core::Result<RuntimeSession> open_requested_session(const RuntimeSession& c
   options.requested_session_id = std::string(requested_session_id);
   options.continue_last_session = false;
   return open_runtime_session(options);
+}
+
+ava::core::Result<ava::config::ModelInfo> resolve_requested_model(const RuntimeSession& session,
+                                                                  const RpcCommand& command) {
+  if (!command.model || command.model->empty()) return std::unexpected(invalid_rpc("set_model requires model"));
+  if (command.provider && !command.provider->empty()) {
+    return resolve_runtime_model(session.paths, *command.provider, *command.model);
+  }
+
+  auto current_provider_match = resolve_runtime_model(session.paths, session.model.provider_id, *command.model);
+  if (current_provider_match) return current_provider_match;
+  if (current_provider_match.error().category() != ava::core::ErrorCategory::NotFound) {
+    return std::unexpected(std::move(current_provider_match.error()));
+  }
+
+  auto registry = ava::config::load_model_registry(session.paths);
+  if (!registry) return std::unexpected(std::move(registry.error()));
+  const auto providers = ava::provider::builtin_provider_registry();
+  std::vector<ava::config::ModelInfo> matches;
+  for (const auto& model : effective_models(*registry)) {
+    if (model.model_id == *command.model && providers.contains(model.provider_id)) matches.push_back(model);
+  }
+  if (matches.empty()) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::NotFound, "model is not configured");
+    error.with_context("model", *command.model);
+    return std::unexpected(std::move(error));
+  }
+  if (matches.size() > 1) {
+    auto error = invalid_rpc("model id is ambiguous; provider is required");
+    error.with_context("model", *command.model);
+    error.with_context("matches", std::to_string(matches.size()));
+    return std::unexpected(std::move(error));
+  }
+  return matches.front();
+}
+
+ava::core::Result<ava::config::ModelInfo> next_runtime_model(const RuntimeSession& session) {
+  auto registry = ava::config::load_model_registry(session.paths);
+  if (!registry) return std::unexpected(std::move(registry.error()));
+  const auto providers = ava::provider::builtin_provider_registry();
+  std::vector<ava::config::ModelInfo> models;
+  for (const auto& model : effective_models(*registry)) {
+    if (providers.contains(model.provider_id)) models.push_back(model);
+  }
+  if (models.empty()) return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound,
+                                                              "no registered provider models are configured"));
+
+  std::size_t next_index = 0;
+  for (std::size_t index = 0; index < models.size(); ++index) {
+    if (models[index].provider_id == session.model.provider_id && models[index].model_id == session.model.model_id) {
+      next_index = (index + 1) % models.size();
+      break;
+    }
+  }
+  return models[next_index];
+}
+
+struct ProviderHandle {
+  const ava::provider::Provider* provider = nullptr;
+  std::unique_ptr<ava::provider::Provider> owned;
+
+  const ava::provider::Provider& get() const { return owned ? *owned : *provider; }
+};
+
+ava::core::Result<ProviderHandle> provider_for_session_model(const RuntimeSession& session,
+                                                             std::string_view injected_provider_id,
+                                                             const ava::provider::Provider& injected_provider) {
+  if (session.model.provider_id == injected_provider_id) {
+    return ProviderHandle{.provider = &injected_provider, .owned = nullptr};
+  }
+  auto registry = ava::provider::builtin_provider_registry();
+  auto provider = registry.create(session.model.provider_id);
+  if (!provider) return std::unexpected(std::move(provider.error()));
+  return ProviderHandle{.provider = nullptr, .owned = std::move(*provider)};
 }
 
 ava::permissions::PermissionResolver make_rpc_permission_resolver(
@@ -1142,12 +1330,22 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line) {
   if (auto valid = validate_optional_rpc_identifier(correlation_id, "correlation_id"); !valid) {
     return std::unexpected(std::move(valid.error()));
   }
+  auto provider = ava::core::json::string_field(line, "provider");
+  if (auto valid = validate_optional_rpc_identifier(provider, "provider"); !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
+  auto model = ava::core::json::string_field(line, "model");
+  if (auto valid = validate_optional_rpc_identifier(model, "model"); !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
 
   return RpcCommand{.id = std::move(*id),
                     .type = std::move(*type),
                     .protocol_version = std::move(*protocol_version),
                     .message = ava::core::json::string_field(line, "message"),
                     .session_id = ava::core::json::string_field(line, "session_id"),
+                    .provider = std::move(provider),
+                    .model = std::move(model),
                     .instructions = ava::core::json::string_field(line, "instructions"),
                     .request_id = std::move(request_id),
                     .correlation_id = std::move(correlation_id),
@@ -1179,8 +1377,9 @@ std::string serialize_rpc_error_jsonl(std::string_view id, const ava::core::Erro
 }
 
 ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOptions& open_options,
-                                   const ava::provider::Provider& provider, ava::provider::Transport& transport,
-                                   RuntimeRunOptions runtime_options, std::istream& in, std::ostream& out) {
+                                    const ava::provider::Provider& provider, ava::provider::Transport& transport,
+                                    ava::provider::Transport& auth_transport, RuntimeRunOptions runtime_options,
+                                    std::istream& in, std::ostream& out) {
   RpcOutput output(out);
   RpcRunState run_state;
   PendingResolverState pending_state;
@@ -1189,6 +1388,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
   if (!runtime_options.permission_resolver) {
     runtime_options.permission_resolver = build_headless_permission_resolver(HeadlessPermissionPolicyOptions{});
   }
+  const std::string injected_provider_id = session.model.provider_id;
 
   auto reap_finished_prompt = [&] {
     if (prompt_worker && !active_run(run_state)) {
@@ -1278,6 +1478,17 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
       continue;
     }
 
+    if (command->type == "list_models") {
+      std::lock_guard lock(session_mutex);
+      auto models_json = list_models_result_json(session);
+      if (!models_json) {
+        if (auto written = write_error(output, command->id, models_json.error()); !written) return written;
+        continue;
+      }
+      if (auto written = write_success(output, command->id, *models_json); !written) return written;
+      continue;
+    }
+
     if (command->type == "get_messages") {
       if (active_run(run_state)) {
         if (auto written = write_error(output, command->id, active_run_reject_error(command->type)); !written) {
@@ -1309,6 +1520,32 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
         continue;
       }
       if (auto written = write_success(output, command->id, *stats_json); !written) return written;
+      continue;
+    }
+
+    if (command->type == "set_model" || command->type == "cycle_model") {
+      if (active_run(run_state)) {
+        if (auto written = write_error(output, command->id, active_run_reject_error(command->type)); !written) {
+          return written;
+        }
+        continue;
+      }
+      std::lock_guard lock(session_mutex);
+      ava::core::Result<ava::config::ModelInfo> selected =
+          command->type == "set_model" ? resolve_requested_model(session, *command) : next_runtime_model(session);
+      if (!selected) {
+        if (auto written = write_error(output, command->id, selected.error()); !written) return written;
+        continue;
+      }
+      auto switched = switch_runtime_model(session, std::move(*selected));
+      if (!switched) {
+        if (auto written = write_error(output, command->id, switched.error()); !written) return written;
+        continue;
+      }
+      if (auto written = write_success(output, command->id, state_result_json(session, cancel_requested(run_state)));
+          !written) {
+        return written;
+      }
       continue;
     }
 
@@ -1545,13 +1782,22 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
         if (command->instructions) slash_command += " " + *command->instructions;
       }
       std::optional<RuntimeRunOptions> compact_runtime_options;
+      std::optional<ProviderHandle> compact_provider;
       if (command->type == "compact") {
         ava::config::XdgPaths paths;
+        std::string provider_id;
         {
           std::lock_guard lock(session_mutex);
           paths = session.paths;
+          provider_id = session.model.provider_id;
+          auto selected_provider = provider_for_session_model(session, injected_provider_id, provider);
+          if (!selected_provider) {
+            if (auto written = write_command_error(selected_provider.error()); !written) return written;
+            continue;
+          }
+          compact_provider = std::move(*selected_provider);
         }
-        auto ensured = ensure_prompt_runtime_options(paths, runtime_options, transport, "compact");
+        auto ensured = ensure_prompt_runtime_options(paths, provider_id, runtime_options, auth_transport, "compact");
         if (!ensured) {
           if (auto written = write_command_error(ensured.error()); !written) return written;
           continue;
@@ -1567,8 +1813,8 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
               ? CompactionSummaryGenerator([&](const std::vector<ava::session::SessionEntry>& entries,
                                                const ava::session::CompactionConfig& config,
                                                std::string_view instructions, std::size_t estimated_tokens) {
-                  return generate_compaction_summary(session, entries, config, instructions, estimated_tokens, provider,
-                                                     transport, *compact_runtime_options);
+                  return generate_compaction_summary(session, entries, config, instructions, estimated_tokens,
+                                                     compact_provider->get(), transport, *compact_runtime_options);
                 })
               : CompactionSummaryGenerator{};
       auto result = run_command(session, CommandRequest{.command = std::move(slash_command),
@@ -1623,7 +1869,13 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
           }
         };
 
-        auto prompt_options = ensure_prompt_runtime_options(paths, std::move(prompt_base_options), transport, "prompt");
+        std::string prompt_provider_id;
+        {
+          std::lock_guard lock(session_mutex);
+          prompt_provider_id = session.model.provider_id;
+        }
+        auto prompt_options = ensure_prompt_runtime_options(paths, prompt_provider_id, std::move(prompt_base_options),
+                                                           auth_transport, "prompt");
         if (!prompt_options) {
           if (auto written = write_error(output, prompt_id, prompt_options.error()); !written) {
             record_async_error(run_state, std::move(written.error()));
@@ -1659,7 +1911,15 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
           subscribe_event_envelope_writer(event_bus, output);
           prompt_options->event_sink = make_runtime_event_bus_adapter(event_bus, rpc_event_context(request_id));
 
-          auto result = run_prompt(session, message, provider, transport, *prompt_options);
+          ProviderHandle prompt_provider;
+          {
+            std::lock_guard lock(session_mutex);
+            auto selected_provider = provider_for_session_model(session, injected_provider_id, provider);
+            if (!selected_provider) return std::unexpected(std::move(selected_provider.error()));
+            prompt_provider = std::move(*selected_provider);
+          }
+
+          auto result = run_prompt(session, message, prompt_provider.get(), transport, *prompt_options);
           ClearedRpcQueues skipped_steering;
           skipped_steering.steering_messages = clear_queued_steering_messages(run_state);
           if (auto written = write_skipped_queue_events(output, session, session_mutex, skipped_steering,
@@ -1742,6 +2002,12 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
   return {};
 }
 
+ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOptions& open_options,
+                                   const ava::provider::Provider& provider, ava::provider::Transport& transport,
+                                   RuntimeRunOptions runtime_options, std::istream& in, std::ostream& out) {
+  return run_rpc_loop(session, open_options, provider, transport, transport, std::move(runtime_options), in, out);
+}
+
 int run_rpc_mode(const RpcModeOptions& options, std::istream& in, std::ostream& out, std::ostream& err) {
   auto session = open_runtime_session(options.open_options);
   if (!session) {
@@ -1753,9 +2019,16 @@ int run_rpc_mode(const RpcModeOptions& options, std::istream& in, std::ostream& 
   runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);
   runtime_options.question_resolver = nullptr;
 
-  ava::provider::OpenAIProvider provider;
+  auto registry = ava::provider::builtin_provider_registry();
+  auto provider = registry.create(session->model.provider_id);
+  if (!provider) {
+    err << provider.error().format() << '\n';
+    return 1;
+  }
   ava::provider::CurlCliTransport transport;
-  auto result = run_rpc_loop(*session, options.open_options, provider, transport, std::move(runtime_options), in, out);
+  ava::provider::RetryTransport retry_transport(transport);
+  auto result = run_rpc_loop(*session, options.open_options, **provider, retry_transport, transport,
+                             std::move(runtime_options), in, out);
   if (!result) {
     err << result.error().format() << '\n';
     return 1;

@@ -42,7 +42,7 @@ AVA already has important backend pieces:
 - OpenAI auth, model config, prompt config, and curl transport.
 - OpenAI Responses/Codex provider path in `src/ava/provider/`.
 - Sequential agent loop in `src/ava/agent/`.
-- Built-in tools for read, write, edit, glob, grep, bash, apply_patch, and question.
+- Built-in tools for read, write, edit, glob, grep, bash, apply_patch, question, webfetch, and capability-gated LSP diagnostics.
 - Build/plan permission policy in `src/ava/permissions/`.
 - Append-only JSONL sessions, resume/list/export, and compaction entries in `src/ava/session/`.
 - Project/global `AGENTS.md` context loading in `src/ava/context/`.
@@ -58,7 +58,7 @@ Explorer agents checked each roadmap phase against the current AVA code and PI r
 - Phase 1 is implemented and verified for the current single-provider backend. Keep edge-case coverage aligned as Phase 2 exposes new event/protocol boundaries.
 - Phase 2 is implemented and verified for the approved evented-runtime scope: versioned event envelopes, shared event bus routing for headless modes, incremental provider streaming, RPC protocol versioning/session commands, active-run cancellation, permission/question resolver replies, and bounded `steer`/`follow_up` queues. Provider/model registry commands and richer reasoning-specific events remain aligned with Phase 5 provider capability work.
 - Phase 3 core context/session work is implemented for the approved scope: provider-generated `/compact`, automatic compaction, one bounded context-overflow retry, provider usage/cost records, RPC stats, additive session version checks, and branching-ready `id`/`parent_id` validation. Full fork/clone/tree UI, branch summaries, and mid-session model/thinking entries remain deferred to later phases.
-- Phase 4 has safe built-in tools, but still needs PI-level edit/search ergonomics: `.gitignore` semantics, diff previews, CRLF/BOM/fuzzy edit handling, mutation queues, spill files, streaming progress, web fetch, and LSP.
+- Phase 4's core tool-quality slice is implemented and verified: centralized built-in tool metadata, `.gitignore`-aware search with a documented native subset, bounded spill files, streaming tool progress, edit/apply_patch diff previews with CRLF/BOM diagnostics, per-path mutation serialization, `webfetch` behind `network.fetch`, and an LSP diagnostics first slice. Final validation included live headless smokes for read/search/webfetch plus RPC permission/question reply smokes for write/edit/apply_patch/bash/question; LSP diagnostics are covered by fake-server tests because the tool is capability-gated. Remaining tool-quality expansion includes broader fuzzy/Unicode matching, image/multimodal reads, LSP symbols/definitions/references, and Phase 6-grade registry/artifact ownership.
 - Phase 5 has a provider interface but not a provider registry or model capability catalog. OpenAI remains hard-coded in several paths and the second production provider path is not started.
 - Phase 6 is well-scoped as a safe local plugin/MCP foundation, but it depends on earlier tool registry, event bus, permission, session, provider, and RPC seams.
 
@@ -125,20 +125,17 @@ Missing or incomplete:
 
 ### Tools And Operations
 
-AVA has a strong small tool set with permissioned atomic file writes where practical, but PI has more mature tool internals.
+AVA has a strong small tool set with permissioned atomic file writes where practical, Phase 4 search/edit/web/LSP improvements, and remaining maturity work around deeper abstractions and expanded code intelligence.
 
 Missing or incomplete:
 
 - Dedicated filesystem and process operation interfaces beneath tools.
-- Per-path file mutation queue for concurrent edits.
-- Robust edit behavior around line endings, BOM, Unicode normalization, and fuzzy fallback.
-- Unified diff output and safer patch preview flow.
-- Search behavior closer to `rg`/`fd`, including `.gitignore` semantics and an explicit way to opt out.
-- Streaming tool updates for long shell/search operations.
-- Full-output spill files for truncated bash/search output.
+- Broader Unicode normalization awareness and fuzzy edit fallback beyond current exact matching with CRLF/BOM diagnostics.
+- UI-mediated patch preview/approval flow beyond provider-visible bounded unified diffs.
+- Search parity for unsupported `.gitignore` edge syntax such as bracket character classes; current native matcher documents its subset.
 - Process-tree cleanup on cancellation and timeout.
 - Image/file attachment reads if AVA wants multimodal model support.
-- Web fetch and LSP tools.
+- LSP symbols, definitions, references, document sync, and configured production server discovery beyond the current diagnostics first slice.
 - Delete/move tools, only after audit and permissions are stronger.
 
 1.0 target:
@@ -158,9 +155,9 @@ Missing or incomplete:
 - Persistent allow/deny rules.
 - Session-wide grants.
 - Deny reasons surfaced consistently to users and headless clients.
-- Permission prompts over RPC.
+- Richer permission-prompt UX beyond the current TUI and RPC resolver flows.
 - Richer audit views that connect request, decision, actor, and executed operation.
-- Policy categories for network fetch, delete/move, LSP, plugin tools, and external directories.
+- Policy categories for delete/move, plugin tools, and external directories. `network.fetch` and `lsp.query` now exist for the Phase 4 web/LSP tools.
 
 1.0 target:
 
@@ -171,20 +168,15 @@ Missing or incomplete:
 
 ### Headless And Automation
 
-AVA already has print mode and a JSONL RPC MVP. PI's protocol is broader and more interactive.
+AVA has print mode and JSONL RPC protocol version 1. Print/RPC now share the event envelope for provider streaming, tool lifecycle/progress, permission requests, question requests, cancellation, queue lifecycle, assistant messages, and terminal outcomes. Live headless smokes verified model-visible tool calls for read/search/webfetch in print mode and mutating/bash/question tools through RPC resolver replies.
 
 Missing or incomplete:
 
-- Protocol versioning.
-- Full event stream for message/tool deltas.
-- `steer` and `follow_up` requests.
-- Async cancellation tied to active runs.
-- RPC permission and question resolvers.
 - Extension UI bridge or an explicit narrower replacement for select/confirm/input/editor-style requests.
 - Model selection, model cycling, available-model listing, and thinking/reasoning controls.
-- Session lifecycle commands for new, switch, fork, clone, list, get messages, and get session stats.
-- Direct backend commands for bash, compact, export, context, and state with stable schemas.
-- Typed protocol tests that spawn AVA as a subprocess.
+- Fork/clone branch session commands beyond the current session lifecycle and stats APIs.
+- Direct backend command for bash and richer stable command schemas beyond the current compact/export/context/state commands.
+- Broader subprocess-level protocol tests and live smoke automation that can exercise all resolver paths without ad hoc harness code.
 
 1.0 target:
 
@@ -443,10 +435,9 @@ Required for 1.0:
 Strongly desired for 1.0:
 
 - Session tree storage and fork/clone.
-- LSP tools.
-- Web fetch.
-- Diff previews for edits and patches.
-- Search behavior matching `.gitignore` expectations.
+- LSP symbols, definitions, references, and richer code-intelligence UI beyond diagnostics.
+- Image/file attachment reads for multimodal providers.
+- Search parity for advanced `.gitignore` syntax beyond the documented native subset.
 - Prompt templates and structured skills.
 - Optional OS-level sandbox integration for plugin processes where it can be implemented without weakening portability.
 
@@ -463,4 +454,4 @@ Defer unless earlier phases finish cleanly:
 
 ## Immediate Next Work
 
-Start Phase 3 by planning context, usage, and session-depth work: provider-generated compaction summaries, automatic compaction triggers, context-overflow retry, usage/cost records, and bounded session stats APIs that build on the completed Phase 2 event/RPC foundation.
+Start Phase 5 by introducing the provider registry and model capability catalog. Preserve the Phase 4 tool metadata shape so provider/model-family-specific tool descriptions and availability can be added without duplicating built-in tool implementations.

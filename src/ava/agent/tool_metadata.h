@@ -19,7 +19,7 @@ struct ToolMetadata {
   std::optional<std::string_view> description_family;
 };
 
-inline constexpr std::array<ToolMetadata, 9> kBuiltinToolMetadata{{
+inline constexpr std::array<ToolMetadata, 10> kBuiltinToolMetadata{{
     ToolMetadata{
         .name = "read_file",
         .description = "Read a workspace file through AVA permission checks.",
@@ -44,7 +44,7 @@ inline constexpr std::array<ToolMetadata, 9> kBuiltinToolMetadata{{
         .name = "edit_file",
         .description = "Replace one unique text span in a workspace file through AVA permission checks.",
         .schema_json =
-            R"({"type":"function","name":"edit_file","description":"Replace one unique text span in a workspace file through AVA permission checks.","parameters":{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}})",
+            R"({"type":"function","name":"edit_file","description":"Replace one unique text span in a workspace file through AVA permission checks.","parameters":{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string","minLength":1},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}})",
         .permission_category = "edit",
         .output_bound_summary = "Returns edit status and byte count only.",
         .execution_mode = "synchronous",
@@ -84,18 +84,28 @@ inline constexpr std::array<ToolMetadata, 9> kBuiltinToolMetadata{{
         .name = "webfetch",
         .description = "Fetch bounded text content from an http or https URL after network permission approval.",
         .schema_json =
-            R"({"type":"function","name":"webfetch","description":"Fetch bounded text content from an http or https URL after network permission approval.","parameters":{"type":"object","properties":{"url":{"type":"string"},"max_bytes":{"type":"integer"},"timeout_ms":{"type":"integer"}},"required":["url"]}})",
+            R"({"type":"function","name":"webfetch","description":"Fetch bounded text content from an http or https URL after network permission approval.","parameters":{"type":"object","properties":{"url":{"type":"string"},"max_bytes":{"type":"integer","minimum":1,"maximum":5242880,"description":"Defaults to 1048576 and is capped at 5242880."},"timeout_ms":{"type":"integer","minimum":1000,"maximum":120000,"description":"Defaults to 30000 and is clamped to 1000-120000."}},"required":["url"]}})",
         .permission_category = "network.fetch",
         .output_bound_summary = "Response content is bounded by max_bytes and a fixed 5 MiB tool cap.",
         .execution_mode = "synchronous_network",
         .event_rendering_hint = "network_fetch",
         .description_family = std::string_view("network")},
     ToolMetadata{
+        .name = "lsp_diagnostics",
+        .description = "Query configured local language-server diagnostics for one workspace file.",
+        .schema_json =
+            R"({"type":"function","name":"lsp_diagnostics","description":"Query configured local language-server diagnostics for one workspace file.","parameters":{"type":"object","properties":{"path":{"type":"string","maxLength":4096}},"required":["path"]}})",
+        .permission_category = "lsp.query",
+        .output_bound_summary = "Returns structured diagnostics only; server command configuration is local-only.",
+        .execution_mode = "synchronous_process",
+        .event_rendering_hint = "lsp_diagnostics",
+        .description_family = std::string_view("lsp")},
+    ToolMetadata{
         .name = "apply_patch",
         .description =
             "Apply up to 32 exact text replacements across workspace files. Each old_text must exist exactly once.",
         .schema_json =
-            R"({"type":"function","name":"apply_patch","description":"Apply up to 32 exact text replacements across workspace files. Each old_text must exist exactly once.","parameters":{"type":"object","properties":{"edits":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}}},"required":["edits"]}})",
+            R"({"type":"function","name":"apply_patch","description":"Apply up to 32 exact text replacements across workspace files. Each old_text must exist exactly once.","parameters":{"type":"object","properties":{"edits":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string","minLength":1},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}}},"required":["edits"]}})",
         .permission_category = "edit",
         .output_bound_summary = "Applies at most 32 edits and returns per-file byte counts.",
         .execution_mode = "synchronous",

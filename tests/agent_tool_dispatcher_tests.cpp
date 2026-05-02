@@ -34,6 +34,7 @@
 #include "ava/context/context_loader.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/lsp/lsp_client.h"
 #include "ava/permissions/permission.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/session/compaction.h"
@@ -80,6 +81,14 @@ class CallbackTransport final : public ava::provider::Transport {
   std::vector<ava::provider::HttpRequest> requests_;
 };
 
+class EmptyDiagnosticsProvider final : public ava::lsp::DiagnosticsProvider {
+ public:
+  [[nodiscard]] ava::core::Result<std::vector<ava::lsp::Diagnostic>> diagnostics(
+      const std::filesystem::path&) override {
+    return std::vector<ava::lsp::Diagnostic>{};
+  }
+};
+
 class OverflowOnceProvider final : public ava::provider::Provider {
  public:
   explicit OverflowOnceProvider(std::string base_url) : delegate_(std::move(base_url)) {}
@@ -92,6 +101,15 @@ class OverflowOnceProvider final : public ava::provider::Provider {
           ava::core::Error(ava::core::ErrorCategory::Provider, "context window exceeds token limit"));
     }
     return delegate_.build_request(request, access_token);
+  }
+
+  [[nodiscard]] std::unique_ptr<ava::provider::StreamParser> create_stream_parser() const override {
+    return delegate_.create_stream_parser();
+  }
+
+  [[nodiscard]] ava::core::Result<std::vector<ava::provider::StreamEvent>> parse_response(
+      const ava::provider::HttpResponse& response, bool stream) const override {
+    return delegate_.parse_response(response, stream);
   }
 
  private:
@@ -334,14 +352,14 @@ void test_tool_dispatcher() {
       .name = "apply_patch",
       .arguments_json = "{\"edits\":[{\"path\":\"multi-diff.txt\",\"old_text\":\"B\",\"new_text\":\"X\"},"
                         "{\"path\":\"multi-diff.txt\",\"old_text\":\"E\",\"new_text\":\"Y\"}]}"});
-  const auto multi_diff =
-      multi_diff_patch ? ava::core::json::string_field(multi_diff_patch->result_text, "diff") : std::optional<std::string>{};
-  expect(multi_diff_patch && multi_diff_patch->success && multi_diff &&
-             multi_diff->find("-B") != std::string::npos && multi_diff->find("+X") != std::string::npos &&
-             multi_diff->find(" C\n") != std::string::npos && multi_diff->find("-C") == std::string::npos &&
-             multi_diff->find("+C") == std::string::npos && multi_diff->find(" D\n") != std::string::npos &&
-             multi_diff->find("-D") == std::string::npos && multi_diff->find("+D") == std::string::npos &&
-             multi_diff->find("-E") != std::string::npos && multi_diff->find("+Y") != std::string::npos,
+  const auto multi_diff = multi_diff_patch ? ava::core::json::string_field(multi_diff_patch->result_text, "diff")
+                                           : std::optional<std::string>{};
+  expect(multi_diff_patch && multi_diff_patch->success && multi_diff && multi_diff->find("-B") != std::string::npos &&
+             multi_diff->find("+X") != std::string::npos && multi_diff->find(" C\n") != std::string::npos &&
+             multi_diff->find("-C") == std::string::npos && multi_diff->find("+C") == std::string::npos &&
+             multi_diff->find(" D\n") != std::string::npos && multi_diff->find("-D") == std::string::npos &&
+             multi_diff->find("+D") == std::string::npos && multi_diff->find("-E") != std::string::npos &&
+             multi_diff->find("+Y") != std::string::npos,
          "apply_patch diff keeps unchanged middle lines as context for separated edits");
 
   {
@@ -743,15 +761,26 @@ void test_tool_dispatcher() {
   expect(unknown && !unknown->success && unknown->result_text.find("unknown tool") != std::string::npos,
          "tool dispatcher returns structured unknown tool errors");
 
-  const auto schemas = ava::agent::ToolDispatcher::tool_schemas_json();
+  const auto default_schemas = ava::agent::ToolDispatcher::tool_schemas_json();
+  ava::tools::ToolContext lsp_schema_context;
+  lsp_schema_context.lsp_diagnostics_provider = std::make_shared<EmptyDiagnosticsProvider>();
+  const auto configured_schemas = ava::agent::ToolDispatcher::tool_schemas_json(lsp_schema_context);
+  const auto& schemas = configured_schemas;
   const auto metadata = ava::agent::ToolDispatcher::tool_metadata();
   bool has_apply_patch = false;
   bool has_question = false;
   bool has_webfetch = false;
+  bool has_lsp_diagnostics = false;
+  bool lsp_schema_exposes_command = false;
   bool glob_has_no_ignore = false;
   bool grep_has_no_ignore = false;
   bool question_has_allow_multiple = false;
-  expect(metadata.size() == schemas.size(), "tool metadata and schema exports cover the same built-in tools");
+  const auto default_has_lsp_schema = std::ranges::any_of(default_schemas, [](const std::string& schema) {
+    return schema.find("\"name\":\"lsp_diagnostics\"") != std::string::npos;
+  });
+  expect(!default_has_lsp_schema && default_schemas.size() + 1 == configured_schemas.size(),
+         "lsp_diagnostics schema is gated until a local diagnostics provider is configured");
+  expect(metadata.size() == schemas.size(), "tool metadata and configured schema exports cover the same built-in tools");
   for (std::size_t index = 0; index < metadata.size(); ++index) {
     const auto& tool = metadata[index];
     expect(!tool.name.empty() && !tool.description.empty() && !tool.schema_json.empty() &&
@@ -764,6 +793,11 @@ void test_tool_dispatcher() {
     const auto schema = std::string(tool.schema_json);
     has_apply_patch = has_apply_patch || schema.find("apply_patch") != std::string::npos;
     has_webfetch = has_webfetch || schema.find("webfetch") != std::string::npos;
+    const bool is_lsp_schema = schema.find("\"name\":\"lsp_diagnostics\"") != std::string::npos;
+    has_lsp_diagnostics = has_lsp_diagnostics || is_lsp_schema;
+    lsp_schema_exposes_command =
+        lsp_schema_exposes_command ||
+        (is_lsp_schema && (schema.find("command") != std::string::npos || schema.find("argv") != std::string::npos));
     glob_has_no_ignore = glob_has_no_ignore || (schema.find("\"name\":\"glob\"") != std::string::npos &&
                                                 schema.find("no_ignore") != std::string::npos);
     grep_has_no_ignore = grep_has_no_ignore || (schema.find("\"name\":\"grep\"") != std::string::npos &&
@@ -774,8 +808,9 @@ void test_tool_dispatcher() {
         question_has_allow_multiple || (is_question_schema && schema.find("allow_multiple") != std::string::npos);
   }
   expect(!schemas.empty() && schemas[0].find("read_file") != std::string::npos && has_apply_patch && has_question &&
-             has_webfetch,
+             has_webfetch && has_lsp_diagnostics,
          "tool dispatcher exposes provider tool schemas");
+  expect(!lsp_schema_exposes_command, "lsp_diagnostics schema keeps server command out of provider control");
   expect(!glob_has_no_ignore && !grep_has_no_ignore, "search tool schemas keep no_ignore out of provider control");
   expect(question_has_allow_multiple, "question tool schema exposes the allow_multiple alias");
 }
@@ -831,8 +866,39 @@ void test_agent_loop_text_only_turn() {
          "agent loop disables Codex response storage for OpenAI OAuth turns");
   auto entries = store.load();
   expect(entries && entries->size() == 2 && (*entries)[0].type == ava::session::EntryType::UserMessage &&
-             (*entries)[1].type == ava::session::EntryType::AssistantMessage,
-         "agent loop persists user and assistant entries for text-only turn");
+              (*entries)[1].type == ava::session::EntryType::AssistantMessage,
+          "agent loop persists user and assistant entries for text-only turn");
+}
+
+void test_agent_loop_model_capability_gating() {
+  const auto root = temp_root() / "agent-capabilities";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{
+      .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "capabilities"});
+  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = "{\"output_text\":\"plain\"}"}});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                          .mode = ava::agent::Mode::Build,
+                                                          .provider_id = "openai",
+                                                          .model_id = "text-only-model",
+                                                          .system_prompt = "system prompt",
+                                                          .access_token = "token",
+                                                          .stream = true,
+                                                          .model_supports_tools = false,
+                                                          .model_supports_streaming = false});
+  auto result = loop.run_turn("hi", store, provider, transport);
+  expect(result && result->final_text == "plain", "agent loop accepts text-only model response");
+  expect(transport.requests().size() == 1 && transport.requests()[0].body.find("read_file") == std::string::npos &&
+             transport.requests()[0].body.find("write_file") == std::string::npos,
+         "agent loop omits tool definitions for models without tool support");
+  expect(transport.requests().size() == 1 && transport.requests()[0].body.find("\"stream\":false") != std::string::npos,
+         "agent loop disables streaming for models without streaming support");
 }
 
 void test_agent_loop_usage_and_cost_persistence() {
@@ -1936,6 +2002,7 @@ void run_agent_tool_dispatcher_tests() {
   test_tool_dispatcher();
   test_tool_dispatcher_plan_mode_denies_mutation();
   test_agent_loop_text_only_turn();
+  test_agent_loop_model_capability_gating();
   test_agent_loop_usage_and_cost_persistence();
   test_agent_loop_tool_turn_and_continuation();
   test_agent_loop_permission_resolver_threads_to_tools();

@@ -22,6 +22,7 @@ enum class Operation {
   EditFile,
   RunCommand,
   NetworkFetch,
+  LspQuery,
 };
 
 struct PermissionRequest {

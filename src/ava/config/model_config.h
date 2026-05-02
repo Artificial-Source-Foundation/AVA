@@ -26,6 +26,14 @@ struct ModelInfo {
   std::optional<long long> context_window_tokens = std::nullopt;
   std::optional<long long> max_output_tokens = std::nullopt;
   std::optional<ModelPricing> pricing = std::nullopt;
+  std::string api_family;
+  std::vector<std::string> input_modalities;
+  std::optional<bool> supports_tools = std::nullopt;
+  std::optional<bool> supports_streaming = std::nullopt;
+  std::optional<bool> supports_reasoning = std::nullopt;
+  std::optional<bool> reports_usage = std::nullopt;
+  std::vector<std::string> reasoning_levels;
+  std::vector<std::string> compatibility_quirks;
 };
 
 struct ModelRegistry {
@@ -37,6 +45,8 @@ struct ModelRegistry {
 [[nodiscard]] ModelRegistry builtin_model_registry();
 [[nodiscard]] ModelRegistry parse_model_registry(std::string_view content);
 [[nodiscard]] ava::core::Result<ModelRegistry> load_model_registry(const XdgPaths& paths);
+[[nodiscard]] std::optional<ModelInfo> find_model(const ModelRegistry& registry, std::string_view provider_id,
+                                                  std::string_view model_id);
 [[nodiscard]] ModelInfo select_default_model(const ModelRegistry& registry);
 [[nodiscard]] std::optional<long double> usage_cost_usd(const ModelPricing& pricing,
                                                         const ava::provider::TokenUsage& usage);

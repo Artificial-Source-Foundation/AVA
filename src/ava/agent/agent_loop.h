@@ -48,6 +48,7 @@ struct AgentLoopOptions {
   std::string model_id = "gpt-5.5";
   std::string system_prompt;
   std::string access_token;
+  std::string credential_type = "bearer";
   bool openai_oauth = false;
   std::string openai_account_id = "";
   std::size_t max_tool_iterations = 10;
@@ -56,6 +57,10 @@ struct AgentLoopOptions {
   std::size_t max_tool_argument_bytes = 256 * 1024;
   std::size_t max_tool_result_context_bytes = 8 * 1024;
   bool stream = true;
+  bool model_supports_tools = true;
+  bool model_supports_streaming = true;
+  bool model_supports_reasoning = false;
+  std::optional<long long> model_max_output_tokens = std::nullopt;
   std::function<void(const ToolTimelineEntry&)> on_tool_event = nullptr;
   std::function<ava::core::VoidResult(const ToolProgressEntry&)> on_tool_progress = nullptr;
   std::function<ava::core::VoidResult(const ava::provider::StreamEvent&)> on_stream_event = nullptr;

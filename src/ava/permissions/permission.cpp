@@ -257,7 +257,8 @@ bool is_simple_number(std::string_view value) {
 PermissionDecision decide(const PermissionRequest& request) {
   const auto checked_path = policy_path(request.target_path);
 
-  if ((request.operation == Operation::ReadFile || request.operation == Operation::EditFile) &&
+  if ((request.operation == Operation::ReadFile || request.operation == Operation::EditFile ||
+       request.operation == Operation::LspQuery) &&
       is_secret_path(checked_path)) {
     return {.action = PermissionAction::Deny, .reason = "target looks like a secret file"};
   }
@@ -381,6 +382,8 @@ std::string to_string(Operation operation) {
       return "bash";
     case Operation::NetworkFetch:
       return "network.fetch";
+    case Operation::LspQuery:
+      return "lsp.query";
   }
   return "unknown";
 }

@@ -82,11 +82,16 @@ bool private_or_non_global_ipv6(const in6_addr& address) {
   const auto* bytes = address.s6_addr;
   const bool ipv4_mapped = std::ranges::all_of(std::span(bytes, 10), [](unsigned char byte) { return byte == 0; }) &&
                            bytes[10] == 0xFF && bytes[11] == 0xFF;
+  const bool nat64_well_known = bytes[0] == 0x00 && bytes[1] == 0x64 && bytes[2] == 0xFF && bytes[3] == 0x9B &&
+                                std::ranges::all_of(std::span(bytes + 4, 8), [](unsigned char byte) { return byte == 0; });
+  const bool nat64_local_use = bytes[0] == 0x00 && bytes[1] == 0x64 && bytes[2] == 0xFF && bytes[3] == 0x9B &&
+                               bytes[4] == 0x00 && bytes[5] == 0x01;
   const bool unspecified = std::ranges::all_of(std::span(bytes, 16), [](unsigned char byte) { return byte == 0; });
   const bool loopback = std::ranges::all_of(std::span(bytes, 15), [](unsigned char byte) { return byte == 0; }) &&
                         bytes[15] == 1;
-  return ipv4_mapped || unspecified || loopback || bytes[0] == 0xFF || (bytes[0] & 0xFE) == 0xFC ||
-         (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0x80) ||
+  return ipv4_mapped || nat64_well_known || nat64_local_use || unspecified || loopback || bytes[0] == 0xFF ||
+         (bytes[0] & 0xFE) == 0xFC || (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0x80) ||
+         (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0xC0) ||
          (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0D && bytes[3] == 0xB8);
 }
 

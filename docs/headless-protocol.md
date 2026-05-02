@@ -57,6 +57,10 @@ Invalid permission flag values exit with code `2` and write a usage error to std
 - `1`: print-mode runtime/provider/tool/permission failure, unavailable headless interaction, RPC startup failure, or unrecoverable RPC stdio read/write failure.
 - `2`: command-line usage error. Recoverable malformed RPC request records produce `success:false` responses and do not change the process exit code by themselves.
 
+## Provider Credentials
+
+Runtime provider calls resolve credentials for the active session provider. OpenAI keeps its existing stored OAuth/API-key behavior and falls back to `OPENAI_API_KEY` when no stored OpenAI credential exists. Non-OpenAI providers currently support provider-scoped API keys in `auth.json`, for example `{"anthropic":{"type":"api_key","api_key":"..."}}`, and then provider environment variables such as `ANTHROPIC_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. AVA only reads credential files when they are owned by the current user and not readable by group/other users; manually-created files should use owner-only permissions such as `chmod 600 ~/.config/ava/auth.json`. Anthropic OAuth tokens are bearer tokens supplied by the environment or auth file; AVA does not refresh Anthropic OAuth tokens yet.
+
 ## Event Envelope
 
 Headless JSON event records are newline-delimited envelopes emitted by the shared runtime event bus:
@@ -127,7 +131,7 @@ Prompt turn:
 {"id":"1","type":"prompt","message":"hello"}
 ```
 
-AVA starts the prompt turn asynchronously inside the RPC session, keeps reading stdin while it runs, streams normal runtime event envelopes (`session_start`, `user_message`, streaming `message_update`/`message_end`/`provider_event`, final `assistant_message`, tool events, `done`/`error`) to stdout, then writes exactly one RPC response with `final_text`, `stop_reason`, `provider_iterations`, `tool_calls`, and `session_id` on success or `success:false` on failure. Failures before runtime startup, such as missing auth, may return only the `success:false` RPC response. Prompt event envelopes include the prompt command id as `request_id`. Only one prompt may be active per RPC session; a second `prompt` while one is active returns an in-band error. Prompt requests require configured OpenAI auth unless the embedding test harness supplies runtime credentials.
+AVA starts the prompt turn asynchronously inside the RPC session, keeps reading stdin while it runs, streams normal runtime event envelopes (`session_start`, `user_message`, streaming `message_update`/`message_end`/`provider_event`, final `assistant_message`, tool events, `done`/`error`) to stdout, then writes exactly one RPC response with `final_text`, `stop_reason`, `provider_iterations`, `tool_calls`, and `session_id` on success or `success:false` on failure. Failures before runtime startup, such as missing auth, may return only the `success:false` RPC response. Prompt event envelopes include the prompt command id as `request_id`. Only one prompt may be active per RPC session; a second `prompt` while one is active returns an in-band error. Prompt requests require credentials for the active session provider unless the embedding test harness supplies runtime credentials.
 
 Steer an active prompt:
 
@@ -163,7 +167,7 @@ State:
 
 Returns the active protocol version, session id/path, mode, provider/model, workspace/current directory, cancel flag, and loaded context source summary.
 
-`get_state` and `list_sessions` remain available while a prompt is active. `get_messages`, `get_session_stats`, `compact`, `export`, and `context` materialize or mutate session history and are rejected while a prompt is active. RPC `/compact` also marks the session busy while it generates and records the provider summary, so a prompt cannot start midway through compaction.
+`get_state`, `list_models`, and `list_sessions` remain available while a prompt is active. `get_messages`, `get_session_stats`, `set_model`, `cycle_model`, `compact`, `export`, and `context` materialize or mutate session history and are rejected while a prompt is active. RPC `/compact` also marks the session busy while it generates and records the provider summary, so a prompt cannot start midway through compaction.
 
 Messages:
 
@@ -171,7 +175,7 @@ Messages:
 {"id":"3a","type":"get_messages"}
 ```
 
-Returns durable message-like session entries for the active session in append order. The current response is `{session_id,messages,truncated,message_count}` where each message includes `id`, `parent_id`, `type`, `timestamp`, and raw object-shaped `data` unless the individual entry is too large, in which case the entry is marked `truncated`. Responses are capped to protect headless clients and the AVA process. This intentionally excludes non-message bookkeeping entries such as `session_start`, `compaction`, and permission audit rows. Internal replay user messages inserted after context compaction are also hidden because they are provider-context repair entries, not user-visible transcript turns.
+Returns durable message-like session entries for the active session in append order. The current response is `{session_id,messages,truncated,message_count}` where each message includes `id`, `parent_id`, `type`, `timestamp`, and raw object-shaped `data` unless the individual entry is too large, in which case the entry is marked `truncated`. Responses are capped to protect headless clients and the AVA process. This intentionally excludes non-message bookkeeping entries such as `session_start`, `model_change`, `compaction`, and permission audit rows. Internal replay user messages inserted after context compaction are also hidden because they are provider-context repair entries, not user-visible transcript turns.
 
 Session stats:
 
@@ -179,11 +183,21 @@ Session stats:
 {"id":"3b","type":"get_session_stats"}
 ```
 
-Returns `session_id`, `session_path`, `entry_count`, first/last timestamps, usage/cost totals when known, and counts for session entry types. User-message counts exclude internal replay entries.
+Returns `session_id`, `session_path`, `entry_count`, first/last timestamps, usage/cost totals when known, and counts for session entry types. User-message counts exclude internal replay entries. Session JSONL entry types are additive; clients that inspect session files directly should ignore unknown non-message bookkeeping entries and prefer RPC `get_messages`/`get_session_stats` for stable automation data.
 
 Usage fields are additive and appear only when present in saved assistant entries: `input_tokens`, `output_tokens`, `reasoning_tokens`, `cache_read_tokens`, `cache_write_tokens`, and `total_tokens`. Exact provider token totals are kept separate from byte-count fallback estimates: `estimated_input_bytes`, `estimated_output_bytes`, and `estimated_total_bytes` report fallback byte estimates when provider usage was unavailable. `exact_usage_entries` and `estimated_usage_entries` show how many assistant entries contributed to each category.
 
 Cost fields are conservative. `known_cost_usd` is the sum of assistant entries whose model pricing was known. `total_cost_usd` is emitted only when `cost_complete:true`, meaning every exact billable usage entry had known pricing. If any exact billable entry lacks pricing, `cost_complete:false`, `unknown_cost_entries` is greater than zero, and clients should treat `known_cost_usd` as a partial subtotal.
+
+Model catalog and switching:
+
+```json
+{"id":"3c","type":"list_models"}
+{"id":"3d","type":"set_model","provider":"anthropic","model":"claude-sonnet-4-5"}
+{"id":"3e","type":"cycle_model"}
+```
+
+`list_models` returns the configured effective model catalog with local `models.json` overrides taking precedence over built-ins. The response includes `default_provider`, `default_model`, `current_provider`, `current_model`, and `models`, where each model includes `provider`, `model`, `display_name`, `family`, `api_family`, `registered`, `selectable`, capability metadata, modality arrays, and `selected` for the active model. `current_provider`/`current_model` are authoritative; when a session restores a removed model, AVA includes a synthetic selected model entry with `selectable:false`. `set_model` switches to a configured selectable model, appends a durable `model_change` session entry only when the provider/model actually changes, reloads provider/model-specific prompt context, and returns the same state shape as `get_state`. If `provider` is omitted, AVA first tries the current provider and then accepts the model id only when it is unique across registered providers. `cycle_model` advances to the next configured selectable model, appends `model_change` when the selection changes, reloads prompt context, and returns the state shape. Model switching commands are rejected while a prompt or RPC compaction is active.
 
 List sessions:
 
@@ -220,7 +234,7 @@ Backend slash-command equivalents:
 
 These dispatch `/compact`, `/export`, and `/context` through the shared backend command dispatcher. Responses include `handled`, `quit`, `output` (array of strings), and `text` (joined output).
 
-`compact` requires OpenAI auth/runtime access and asks the provider to generate the compaction summary before appending a compaction boundary. It returns `success:false` for missing auth, provider summary failure, empty or oversized summaries, stale-session append failures, or active-run conflicts. On success, the recorded compaction entry contains summary metadata such as trigger, estimated tokens, threshold, retained recent context, and keep-recent settings.
+`compact` requires credentials for the active session provider and asks that provider to generate the compaction summary before appending a compaction boundary. It returns `success:false` for missing auth, provider summary failure, empty or oversized summaries, stale-session append failures, or active-run conflicts. On success, the recorded compaction entry contains summary metadata such as trigger, estimated tokens, threshold, retained recent context, and keep-recent settings.
 
 Unknown command types return an error response and do not terminate the RPC loop.
 
@@ -229,7 +243,13 @@ Unknown command types return an error response and do not terminate the RPC loop
 When an active prompt reaches a backend permission prompt, RPC emits a resolver event:
 
 ```json
-{"schema_version":1,"name":"permission_requested","type":"permission_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","operation":"read_file","mode":"build","target_path":"/workspace/file","command":"","tool_name":"read_file","reason":"..."}}
+{"schema_version":1,"name":"permission_requested","type":"permission_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","operation":"read","mode":"build","target_path":"/workspace/file","command":"","tool_name":"read_file","reason":"..."}}
+```
+
+Permission `operation` values are backend policy categories: `read`, `search`, `edit`, `bash`, `network.fetch`, and `lsp.query`. Network fetch prompts use an empty `target_path` and carry the URL in `command`:
+
+```json
+{"schema_version":1,"name":"permission_requested","type":"permission_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","operation":"network.fetch","mode":"build","target_path":"","command":"https://example.com/page","tool_name":"webfetch","reason":"network fetch requires explicit approval"}}
 ```
 
 The event top-level `request_id` remains the prompt command id. The client must answer with `payload.resolver_request_id` and the prompt `correlation_id`:

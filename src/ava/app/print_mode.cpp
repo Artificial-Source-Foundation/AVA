@@ -9,7 +9,7 @@
 #include "ava/config/openai_oauth.h"
 #include "ava/core/error.h"
 #include "ava/provider/curl_transport.h"
-#include "ava/provider/openai_provider.h"
+#include "ava/provider/registry.h"
 
 namespace ava::app {
 namespace {
@@ -151,44 +151,41 @@ int run_print_mode(const PrintModeOptions& options, std::istream& in, std::ostre
     return 1;
   }
 
-  auto credential = ava::config::load_openai_credential(session->paths);
-  if (!credential) {
-    err << credential.error().format() << '\n';
-    return 1;
-  }
-  if (!*credential) {
-    err << "print mode requires OpenAI auth. Configure an OpenAI credential in " << session->paths.auth_file.string()
-        << '\n';
-    return 1;
-  }
   ava::provider::CurlCliTransport default_transport;
+  ava::provider::RetryTransport retry_transport(default_transport);
   ava::provider::Transport& transport = options.transport_override
                                             ? options.transport_override->get()
-                                            : static_cast<ava::provider::Transport&>(default_transport);
-  auto request_credential = ava::config::openai_credential_for_request(session->paths, **credential, transport);
+                                            : static_cast<ava::provider::Transport&>(retry_transport);
+  ava::provider::Transport& auth_transport = options.transport_override ? options.transport_override->get()
+                                                                        : static_cast<ava::provider::Transport&>(
+                                                                              default_transport);
+  auto request_credential = ava::config::provider_credential_for_request(session->paths, session->model.provider_id,
+                                                                         auth_transport);
   if (!request_credential) {
     err << request_credential.error().format() << '\n';
     return 1;
   }
-  auto token = ava::config::openai_access_token_for_request(*request_credential);
-  if (!token) {
-    err << token.error().format() << '\n';
+  if (!*request_credential) {
+    err << "print mode requires auth for provider `" << session->model.provider_id << "`. Configure a credential in "
+        << session->paths.auth_file.string() << " or the provider API key environment variable\n";
     return 1;
   }
 
-  std::string openai_account_id = request_credential->account_id;
-  if (request_credential->type == ava::config::OpenAICredentialType::OAuth && openai_account_id.empty()) {
-    openai_account_id = ava::config::openai_oauth_account_id_from_token(request_credential->access_token).value_or("");
+  auto registry = ava::provider::builtin_provider_registry();
+  auto default_provider = registry.create(session->model.provider_id);
+  if (!default_provider) {
+    err << default_provider.error().format() << '\n';
+    return 1;
   }
-
-  const ava::provider::OpenAIProvider default_provider;
-  const ava::provider::Provider& provider = options.provider_override
-                                                ? options.provider_override->get()
-                                                : static_cast<const ava::provider::Provider&>(default_provider);
+  const ava::provider::Provider& provider = options.provider_override ? options.provider_override->get()
+                                                                      : static_cast<const ava::provider::Provider&>(
+                                                                           **default_provider);
   RuntimeRunOptions runtime_options;
-  runtime_options.access_token = *token;
-  runtime_options.openai_oauth = request_credential->type == ava::config::OpenAICredentialType::OAuth;
-  runtime_options.openai_account_id = openai_account_id;
+  runtime_options.access_token = (*request_credential)->access_token;
+  runtime_options.credential_type = (*request_credential)->credential_type;
+  runtime_options.openai_oauth = (*request_credential)->provider_id == "openai" &&
+                                 (*request_credential)->credential_type == "oauth";
+  runtime_options.openai_account_id = (*request_credential)->account_id;
   runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);
 
   const PrintModeRunOptions run_options{.output_format = options.output_format,

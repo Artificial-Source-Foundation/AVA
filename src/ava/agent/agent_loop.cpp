@@ -10,12 +10,10 @@
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
-#include "ava/provider/openai_provider.h"
 
 namespace ava::agent {
 namespace {
 
-constexpr std::string_view kCodexResponsesUrl = "https://chatgpt.com/backend-api/codex/responses";
 constexpr std::size_t kMaxSummaryValueBytes = 80;
 constexpr std::size_t kMaxToolSummaryBytes = 180;
 
@@ -441,32 +439,6 @@ ava::core::VoidResult check_canceled(const AgentLoopOptions& options, ava::sessi
   return std::unexpected(std::move(error));
 }
 
-ava::core::Result<std::vector<ava::provider::StreamEvent>> parse_response(const ava::provider::HttpResponse& response,
-                                                                          bool stream) {
-  if (stream) {
-    return ava::provider::parse_openai_sse_response(response);
-  }
-  if (response.status_code < 200 || response.status_code >= 300) {
-    return ava::provider::parse_openai_sse_response(response);
-  }
-  auto text = ava::provider::parse_openai_response_text(response.body);
-  if (!text) return std::unexpected(text.error());
-  auto usage = ava::provider::parse_openai_usage(response.body);
-  return std::vector<ava::provider::StreamEvent>{
-      ava::provider::StreamEvent{.type = ava::provider::StreamEventType::TextDelta,
-                                 .text = *text,
-                                 .tool_call_id = "",
-                                 .tool_name = "",
-                                 .error_message = "",
-                                 .usage = std::nullopt},
-      ava::provider::StreamEvent{.type = ava::provider::StreamEventType::Done,
-                                 .text = "",
-                                 .tool_call_id = "",
-                                 .tool_name = "",
-                                 .error_message = "",
-                                 .usage = std::move(usage)}};
-}
-
 ProviderToolCall& pending_call_for(std::vector<ProviderToolCall>& calls, std::string_view id) {
   for (auto& call : calls) {
     if (call.id == id) return call;
@@ -555,15 +527,6 @@ ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(const std::vector<av
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "provider response was empty"));
   }
   return turn;
-}
-
-void apply_codex_oauth_request_options(ava::provider::HttpRequest& request) {
-  request.url = std::string(kCodexResponsesUrl);
-  request.headers["OpenAI-Beta"] = "responses=experimental";
-  request.headers["originator"] = "ava";
-  if (!request.body.empty() && request.body.back() == '}') {
-    request.body.insert(request.body.size() - 1, ",\"store\":false");
-  }
 }
 
 }  // namespace
@@ -753,7 +716,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
     return std::unexpected(appended.error());
 
   AgentLoopResult result;
-  const ToolDispatcher dispatcher(ava::tools::ToolContext{
+  const ava::tools::ToolContext tool_context{
       .workspace_dir = options_.workspace_dir,
       .spill_dir = store.session_path().parent_path() / "spill",
       .mode = options_.mode,
@@ -772,7 +735,8 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
             ToolProgressEntry{
                 .call_id = event.call_id, .name = event.tool_name, .text = event.text, .status = event.status});
       },
-      .question_resolver = options_.question_resolver});
+      .question_resolver = options_.question_resolver};
+  const ToolDispatcher dispatcher(tool_context);
 
   std::size_t tool_iterations = 0;
   bool accumulated_cost_known = true;
@@ -808,13 +772,20 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
 
     auto messages = build_messages_locked();
     if (!messages) return std::unexpected(messages.error());
+    const auto tool_schemas = options_.model_supports_tools ? ToolDispatcher::tool_schemas_json(tool_context)
+                                                            : std::vector<std::string>{};
     const ava::provider::ProviderRequest provider_request{.provider_id = options_.provider_id,
                                                           .model_id = options_.model_id,
-                                                          .system_prompt = options_.system_prompt,
-                                                          .messages = messages->messages,
-                                                          .tools_json = ToolDispatcher::tool_schemas_json(),
-                                                          .stream = options_.stream};
-    auto request = provider.build_request(provider_request, options_.access_token);
+                                                           .system_prompt = options_.system_prompt,
+                                                           .messages = messages->messages,
+                                                           .tools_json = tool_schemas,
+                                                           .stream = options_.stream && options_.model_supports_streaming,
+                                                           .max_output_tokens = options_.model_max_output_tokens};
+    const ava::provider::ProviderAuthContext auth_context{
+        .access_token = options_.access_token,
+        .credential_type = options_.openai_oauth && options_.credential_type == "bearer" ? "oauth" : options_.credential_type,
+        .account_id = options_.openai_account_id};
+    auto request = provider.build_request(provider_request, auth_context);
     if (!request) {
       if (auto retry = prepare_context_overflow_retry(request.error()); !retry) {
         return std::unexpected(std::move(retry.error()));
@@ -824,14 +795,6 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
       static_cast<void>(append_error_locked(request.error()));
       return std::unexpected(request.error());
     }
-    if (options_.openai_oauth && options_.provider_id == "openai") {
-      apply_codex_oauth_request_options(*request);
-      if (!options_.openai_account_id.empty()) {
-        request->headers["ChatGPT-Account-Id"] = options_.openai_account_id;
-        request->headers["chatgpt-account-id"] = options_.openai_account_id;
-      }
-    }
-
     result.used_compacted_context = result.used_compacted_context || messages->used_compacted_context;
     if (result.provider_iterations == 0) {
       result.initial_context_messages = provider_request.messages.size();
@@ -876,7 +839,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
     };
 
     if (provider_request.stream && transport.supports_streaming()) {
-      ava::provider::OpenAIStreamParser stream_parser;
+      auto stream_parser = provider.create_stream_parser();
       auto response = transport.send_streaming(
           *request,
           [&](std::string_view chunk) -> ava::core::VoidResult {
@@ -884,7 +847,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
             if (is_canceled(options_)) {
               return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled"));
             }
-            auto parsed = stream_parser.append(chunk);
+            auto parsed = stream_parser->append(chunk);
             if (!parsed) return std::unexpected(std::move(parsed.error()));
             return append_stream_events(std::move(*parsed));
           },
@@ -907,7 +870,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
         return std::unexpected(std::move(not_canceled.error()));
       }
       if (response->status_code < 200 || response->status_code >= 300) {
-        auto events = ava::provider::parse_openai_sse_response(*response);
+        auto events = provider.parse_response(*response, provider_request.stream);
         if (!events) {
           if (auto retry = prepare_context_overflow_retry(events.error()); !retry) {
             return std::unexpected(std::move(retry.error()));
@@ -927,7 +890,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
           return std::unexpected(std::move(appended.error()));
         }
       } else if (!processed_stream_chunks && provider_events.empty() && !response->body.empty()) {
-        auto events = parse_response(*response, provider_request.stream);
+        auto events = provider.parse_response(*response, provider_request.stream);
         if (!events) {
           if (auto retry = prepare_context_overflow_retry(events.error()); !retry) {
             return std::unexpected(std::move(retry.error()));
@@ -952,7 +915,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
           return std::unexpected(std::move(appended.error()));
         }
       } else {
-        auto parsed = stream_parser.finish();
+        auto parsed = stream_parser->finish();
         if (!parsed) {
           if (auto retry = prepare_context_overflow_retry(parsed.error()); !retry) {
             return std::unexpected(std::move(retry.error()));
@@ -991,7 +954,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
       if (auto not_canceled = check_canceled_locked("after_provider_call"); !not_canceled) {
         return std::unexpected(std::move(not_canceled.error()));
       }
-      auto events = parse_response(*response, provider_request.stream);
+      auto events = provider.parse_response(*response, provider_request.stream);
       if (!events) {
         if (auto retry = prepare_context_overflow_retry(events.error()); !retry) {
           return std::unexpected(std::move(retry.error()));

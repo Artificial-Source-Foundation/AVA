@@ -6,7 +6,10 @@
 #include <fstream>
 #include <initializer_list>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 #include "ava/core/json.h"
 
@@ -115,6 +118,74 @@ std::optional<long long> positive_integer_field(std::string_view object, std::in
   return std::nullopt;
 }
 
+std::optional<bool> bool_field(std::string_view object, std::initializer_list<std::string_view> keys) {
+  for (const auto key : keys) {
+    const auto start = ava::core::json::field_value_start(object, key);
+    if (!start) continue;
+    const auto value = object.substr(*start);
+    if (value.starts_with("true") && (value.size() == 4 || is_number_delimiter(value[4]))) return true;
+    if (value.starts_with("false") && (value.size() == 5 || is_number_delimiter(value[5]))) return false;
+  }
+  return std::nullopt;
+}
+
+std::vector<std::string> string_array_field(std::string_view object, std::initializer_list<std::string_view> keys) {
+  for (const auto key : keys) {
+    const auto start = ava::core::json::field_value_start(object, key);
+    if (!start || *start >= object.size() || object[*start] != '[') continue;
+    std::vector<std::string> values;
+    bool in_string = false;
+    bool escaped = false;
+    bool collecting = false;
+    int array_depth = 1;
+    int object_depth = 0;
+    std::string current;
+    for (std::size_t index = *start + 1; index < object.size(); ++index) {
+      const char ch = object[index];
+      if (escaped) {
+        if (collecting) current.push_back(ch);
+        escaped = false;
+        continue;
+      }
+      if (ch == '\\' && in_string) {
+        escaped = true;
+        continue;
+      }
+      if (ch == '"') {
+        if (!in_string) {
+          in_string = true;
+          collecting = array_depth == 1 && object_depth == 0;
+          if (collecting) current.clear();
+        } else {
+          if (collecting) {
+          values.push_back(std::move(current));
+          current.clear();
+          }
+          in_string = false;
+          collecting = false;
+        }
+        continue;
+      }
+      if (in_string) {
+        if (collecting) current.push_back(ch);
+        continue;
+      }
+      if (ch == '[') {
+        ++array_depth;
+      } else if (ch == ']') {
+        --array_depth;
+        if (array_depth == 0) return values;
+        if (array_depth < 0) break;
+      } else if (ch == '{') {
+        ++object_depth;
+      } else if (ch == '}' && object_depth > 0) {
+        --object_depth;
+      }
+    }
+  }
+  return {};
+}
+
 std::optional<ModelPricing> pricing_from_object(std::string_view object) {
   ModelPricing pricing;
   pricing.input_per_million = first_number_field(object, {"input_per_million", "input_usd_per_1m"});
@@ -144,24 +215,55 @@ ModelRegistry builtin_model_registry() {
   return ModelRegistry{
       .default_provider_id = "openai",
       .default_model_id = "gpt-5.5",
-      .models = {ModelInfo{.provider_id = "openai",
-                           .model_id = "gpt-5.5",
-                           .display_name = "GPT-5.5",
-                           .family = "gpt-5",
-                           .context_window_tokens = std::nullopt,
-                           .max_output_tokens = std::nullopt,
-                           .pricing = std::nullopt},
-                 ModelInfo{.provider_id = "openai",
-                           .model_id = "gpt-4.1-mini",
-                           .display_name = "GPT-4.1 mini",
-                           .family = "gpt-4.1",
-                           .context_window_tokens = 1'048'576,
-                           .max_output_tokens = 32'768,
-                           .pricing = ModelPricing{.input_per_million = 0.40L,
-                                                   .output_per_million = 1.60L,
-                                                   .cache_read_per_million = 0.10L,
-                                                   .cache_write_per_million = std::nullopt,
-                                                   .reasoning_per_million = std::nullopt}}},
+       .models = {ModelInfo{.provider_id = "openai",
+                             .model_id = "gpt-5.5",
+                             .display_name = "GPT-5.5",
+                             .family = "gpt-5",
+                             .context_window_tokens = std::nullopt,
+                             .max_output_tokens = std::nullopt,
+                             .pricing = std::nullopt,
+                             .api_family = "openai_responses",
+                            .input_modalities = {"text"},
+                            .supports_tools = true,
+                            .supports_streaming = true,
+                            .supports_reasoning = true,
+                             .reports_usage = true,
+                             .reasoning_levels = {"low", "medium", "high"},
+                             .compatibility_quirks = {}},
+                  ModelInfo{.provider_id = "openai",
+                             .model_id = "gpt-4.1-mini",
+                             .display_name = "GPT-4.1 mini",
+                             .family = "gpt-4.1",
+                             .context_window_tokens = 1'048'576,
+                             .max_output_tokens = 32'768,
+                             .pricing = ModelPricing{.input_per_million = 0.40L,
+                                                     .output_per_million = 1.60L,
+                                                     .cache_read_per_million = 0.10L,
+                                                     .cache_write_per_million = std::nullopt,
+                                                     .reasoning_per_million = std::nullopt},
+                             .api_family = "openai_responses",
+                            .input_modalities = {"text"},
+                            .supports_tools = true,
+                            .supports_streaming = true,
+                            .supports_reasoning = false,
+                              .reports_usage = true,
+                              .reasoning_levels = {},
+                              .compatibility_quirks = {}},
+                  ModelInfo{.provider_id = "anthropic",
+                            .model_id = "claude-sonnet-4-5",
+                            .display_name = "Claude Sonnet 4.5",
+                            .family = "claude-sonnet",
+                            .context_window_tokens = 200'000,
+                            .max_output_tokens = 64'000,
+                            .pricing = std::nullopt,
+                            .api_family = "anthropic_messages",
+                            .input_modalities = {"text"},
+                            .supports_tools = true,
+                            .supports_streaming = true,
+                            .supports_reasoning = false,
+                            .reports_usage = true,
+                            .reasoning_levels = {},
+                            .compatibility_quirks = {"anthropic_messages"}}},
   };
 }
 
@@ -177,12 +279,20 @@ ModelRegistry parse_model_registry(std::string_view content) {
     if (!provider || !id) continue;
     registry.models.push_back(
         ModelInfo{.provider_id = *provider,
-                  .model_id = *id,
-                  .display_name = ava::core::json::string_field(item, "name").value_or(*id),
-                  .family = ava::core::json::string_field(item, "family").value_or(family_from_model_id(*id)),
-                  .context_window_tokens = positive_integer_field(item, {"context_window_tokens", "context_window"}),
-                  .max_output_tokens = positive_integer_field(item, {"max_output_tokens"}),
-                  .pricing = model_pricing_from_item(item)});
+                    .model_id = *id,
+                    .display_name = ava::core::json::string_field(item, "name").value_or(*id),
+                    .family = ava::core::json::string_field(item, "family").value_or(family_from_model_id(*id)),
+                    .context_window_tokens = positive_integer_field(item, {"context_window_tokens", "context_window"}),
+                    .max_output_tokens = positive_integer_field(item, {"max_output_tokens"}),
+                    .pricing = model_pricing_from_item(item),
+                    .api_family = ava::core::json::string_field(item, "api_family").value_or(""),
+                    .input_modalities = string_array_field(item, {"input_modalities", "input"}),
+                    .supports_tools = bool_field(item, {"supports_tools", "tool_support", "tools"}).value_or(true),
+                    .supports_streaming = bool_field(item, {"supports_streaming", "streaming"}).value_or(true),
+                   .supports_reasoning = bool_field(item, {"supports_reasoning", "reasoning"}),
+                   .reports_usage = bool_field(item, {"reports_usage", "usage_support", "usage"}),
+                    .reasoning_levels = string_array_field(item, {"reasoning_levels"}),
+                    .compatibility_quirks = string_array_field(item, {"compatibility_quirks", "quirks"})});
   }
   return registry;
 }
@@ -194,10 +304,17 @@ ava::core::Result<ModelRegistry> load_model_registry(const XdgPaths& paths) {
   return parse_model_registry(*content);
 }
 
-ModelInfo select_default_model(const ModelRegistry& registry) {
-  for (const auto& model : registry.models) {
-    if (model.provider_id == registry.default_provider_id && model.model_id == registry.default_model_id) return model;
+std::optional<ModelInfo> find_model(const ModelRegistry& registry, std::string_view provider_id,
+                                    std::string_view model_id) {
+  for (auto it = registry.models.rbegin(); it != registry.models.rend(); ++it) {
+    const auto& model = *it;
+    if (model.provider_id == provider_id && model.model_id == model_id) return model;
   }
+  return std::nullopt;
+}
+
+ModelInfo select_default_model(const ModelRegistry& registry) {
+  if (auto model = find_model(registry, registry.default_provider_id, registry.default_model_id)) return *model;
   return ModelInfo{
       .provider_id = registry.default_provider_id,
       .model_id = registry.default_model_id,
@@ -206,6 +323,14 @@ ModelInfo select_default_model(const ModelRegistry& registry) {
       .context_window_tokens = std::nullopt,
       .max_output_tokens = std::nullopt,
       .pricing = std::nullopt,
+      .api_family = "",
+      .input_modalities = {},
+      .supports_tools = true,
+      .supports_streaming = true,
+      .supports_reasoning = std::nullopt,
+      .reports_usage = std::nullopt,
+      .reasoning_levels = {},
+      .compatibility_quirks = {},
   };
 }
 

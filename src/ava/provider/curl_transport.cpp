@@ -209,7 +209,7 @@ std::string build_curl_config(const HttpRequest& request, const std::string& bod
   config += "silent\n";
   config += "show-error\n";
   config += "no-progress-meter\n";
-  config += "max-time = \"" + std::to_string(std::max(1, request.timeout_ms / 1000)) + "\"\n";
+  config += "max-time = \"" + std::to_string(static_cast<double>(std::max(1, request.timeout_ms)) / 1000.0) + "\"\n";
   for (const auto& [name, value] : request.headers) {
     config += "header = \"" + curl_config_escape(name + ": " + value) + "\"\n";
   }

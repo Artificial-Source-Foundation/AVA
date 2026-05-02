@@ -16,6 +16,7 @@
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/diff_utils.h"
 #include "ava/tools/edit_match.h"
+#include "ava/tools/lsp_tools.h"
 #include "ava/tools/mutation_queue.h"
 #include "ava/tools/search_tools.h"
 #include "ava/tools/webfetch_tool.h"
@@ -27,6 +28,9 @@ constexpr std::size_t kMaxProviderToolCallIdBytes = 256;
 constexpr std::size_t kMaxQuestionAnswerSelectedOptions = 64;
 constexpr std::size_t kMaxQuestionAnswerStringBytes = 8192;
 constexpr std::size_t kMaxMutationDiffBytes = 32 * 1024;
+constexpr std::size_t kMaxLspProviderDiagnostics = 200;
+constexpr std::size_t kMaxLspProviderJsonBytes = 64 * 1024;
+constexpr std::size_t kMaxLspProviderPathBytes = 4096;
 
 std::string json_bool(bool value) { return value ? "true" : "false"; }
 
@@ -52,9 +56,25 @@ std::string error_json(std::string_view tool, const ava::core::Error& error) {
          "\"}}";
 }
 
+bool lsp_diagnostics_available(const ava::tools::ToolContext& context) {
+  return context.lsp_diagnostics_provider != nullptr;
+}
+
+bool is_lsp_diagnostics_metadata(const ToolMetadata& tool) { return tool.name == std::string_view("lsp_diagnostics"); }
+
 ToolDispatchResult tool_error_result(const ProviderToolCall& call, const ava::core::Error& error) {
   return ToolDispatchResult{
       .call_id = call.id, .name = call.name, .success = false, .result_text = error_json(call.name, error)};
+}
+
+ToolDispatchResult lsp_error_result(const ProviderToolCall& call, const ava::core::Error& error) {
+  if (error.category() == ava::core::ErrorCategory::PermissionDenied ||
+      error.category() == ava::core::ErrorCategory::InvalidArgument) {
+    return tool_error_result(call, error);
+  }
+  auto redacted = ava::core::Error(error.category(), "LSP diagnostics failed");
+  redacted.with_context("tool", call.name);
+  return tool_error_result(call, redacted);
 }
 
 ToolDispatchResult simple_error_result(const ProviderToolCall& call, ava::core::ErrorCategory category,
@@ -488,6 +508,44 @@ ToolDispatchResult webfetch_result(const ava::tools::ToolContext& context, const
                                            std::to_string(result->output_bytes) + "}"};
 }
 
+ToolDispatchResult lsp_diagnostics_result(const ava::tools::ToolContext& context, const ProviderToolCall& call) {
+  auto path = required_safe_string_arg(call.arguments_json, "path", call.name);
+  if (!path) return tool_error_result(call, path.error());
+  if (path->size() > kMaxLspProviderPathBytes) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "lsp_diagnostics path is too long");
+    error.with_context("max_bytes", std::to_string(kMaxLspProviderPathBytes));
+    return tool_error_result(call, error);
+  }
+  const auto tool_context = context_for_provider_tool(context, call);
+  auto result = ava::tools::lsp_diagnostics(tool_context, workspace_path(context, *path));
+  if (!result) return lsp_error_result(call, result.error());
+
+  std::string text =
+      "{\"tool\":\"lsp_diagnostics\",\"ok\":true,\"path\":\"" + ava::core::json::escape(*path) + "\",\"diagnostics\":[";
+  const auto total_diagnostics = result->diagnostics.size();
+  bool truncated = false;
+  for (std::size_t index = 0; index < result->diagnostics.size(); ++index) {
+    if (index >= kMaxLspProviderDiagnostics) {
+      truncated = true;
+      break;
+    }
+    const auto& diagnostic = result->diagnostics[index];
+    auto entry = std::string{"{\"severity\":"} + std::to_string(diagnostic.severity) + ",\"message\":\"" +
+                 ava::core::json::escape(diagnostic.message) + "\",\"line\":" + std::to_string(diagnostic.line) +
+                 ",\"column\":" + std::to_string(diagnostic.column) + ",\"code\":\"" +
+                 ava::core::json::escape(diagnostic.code) + "\"}";
+    if (text.size() + entry.size() + 80 > kMaxLspProviderJsonBytes) {
+      truncated = true;
+      break;
+    }
+    if (index > 0) text += ',';
+    text += std::move(entry);
+  }
+  text += "],\"truncated\":" + json_bool(truncated) + ",\"total_diagnostics\":" +
+          std::to_string(total_diagnostics) + "}";
+  return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
+}
+
 ToolDispatchResult apply_patch_result(const ava::tools::ToolContext& context, const ProviderToolCall& call) {
   const auto edits = ava::core::json::objects_in_array_field(call.arguments_json, "edits");
   if (edits.empty()) {
@@ -657,7 +715,7 @@ ToolDispatchResult question_result(const ava::tools::ToolContext& context, const
 }  // namespace
 
 ToolDispatcher::ToolDispatcher(ava::tools::ToolContext context) {
-  if (!context.mutation_queue) context.mutation_queue = ava::tools::default_mutation_queue();
+  if (!context.mutation_queue) context.mutation_queue = std::make_shared<ava::tools::MutationQueue>();
   context_ = std::move(context);
 }
 
@@ -687,6 +745,7 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(const ProviderToo
   if (normalized.name == "grep") return grep_result(context_, normalized);
   if (normalized.name == "bash") return bash_result(context_, normalized);
   if (normalized.name == "webfetch") return webfetch_result(context_, normalized);
+  if (normalized.name == "lsp_diagnostics") return lsp_diagnostics_result(context_, normalized);
   if (normalized.name == "apply_patch") return apply_patch_result(context_, normalized);
   if (normalized.name == "question") return question_result(context_, normalized);
   return simple_error_result(normalized, ava::core::ErrorCategory::Tool, "unknown tool");
@@ -695,10 +754,17 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(const ProviderToo
 std::span<const ToolMetadata> ToolDispatcher::tool_metadata() { return builtin_tool_metadata(); }
 
 std::vector<std::string> ToolDispatcher::tool_schemas_json() {
+  return tool_schemas_json(ava::tools::ToolContext{});
+}
+
+std::vector<std::string> ToolDispatcher::tool_schemas_json(const ava::tools::ToolContext& context) {
   const auto metadata = tool_metadata();
   std::vector<std::string> schemas;
   schemas.reserve(metadata.size());
-  for (const auto& tool : metadata) schemas.emplace_back(tool.schema_json);
+  for (const auto& tool : metadata) {
+    if (is_lsp_diagnostics_metadata(tool) && !lsp_diagnostics_available(context)) continue;
+    schemas.emplace_back(tool.schema_json);
+  }
   return schemas;
 }
 

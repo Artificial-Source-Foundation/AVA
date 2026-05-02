@@ -138,6 +138,9 @@ SessionStats compute_session_stats(const std::vector<SessionEntry>& entries) {
       case EntryType::ModeChange:
         ++stats.counts.mode_change;
         break;
+      case EntryType::ModelChange:
+        ++stats.counts.model_change;
+        break;
       case EntryType::Compaction:
         ++stats.counts.compaction;
         break;

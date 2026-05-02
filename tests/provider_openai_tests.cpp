@@ -6,6 +6,7 @@
 #include <climits>
 #include <cstdlib>
 #include <cwchar>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -35,6 +36,7 @@
 #include "ava/core/json.h"
 #include "ava/permissions/permission.h"
 #include "ava/provider/openai_provider.h"
+#include "ava/provider/registry.h"
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
 #include "ava/session/session_store.h"
@@ -48,6 +50,60 @@
 
 namespace {
 
+class StreamingFakeTransport final : public ava::provider::Transport {
+ public:
+  explicit StreamingFakeTransport(std::vector<ava::provider::HttpResponse> responses)
+      : responses_(responses.begin(), responses.end()) {}
+
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
+      const ava::provider::HttpRequest& request) override {
+    return send_streaming(request, nullptr);
+  }
+
+  [[nodiscard]] bool supports_streaming() const noexcept override { return true; }
+
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send_streaming(
+      const ava::provider::HttpRequest& request, BodyChunkSink on_body_chunk,
+      CancelCallback cancel_requested = nullptr) override {
+    requests_.push_back(request);
+    if (responses_.empty()) {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "fake transport has no response"));
+    }
+    auto response = responses_.front();
+    responses_.pop_front();
+    if (cancel_requested && cancel_requested()) {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
+    }
+    if (on_body_chunk && !response.body.empty()) {
+      if (auto delivered = on_body_chunk(response.body); !delivered) return std::unexpected(std::move(delivered.error()));
+    }
+    return response;
+  }
+
+  [[nodiscard]] const std::vector<ava::provider::HttpRequest>& requests() const noexcept { return requests_; }
+
+ private:
+  std::deque<ava::provider::HttpResponse> responses_;
+  std::vector<ava::provider::HttpRequest> requests_;
+};
+
+class FailingOnceTransport final : public ava::provider::Transport {
+ public:
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
+      const ava::provider::HttpRequest& request) override {
+    requests_.push_back(request);
+    if (requests_.size() == 1) {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "temporary transport failure"));
+    }
+    return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"};
+  }
+
+  [[nodiscard]] const std::vector<ava::provider::HttpRequest>& requests() const noexcept { return requests_; }
+
+ private:
+  std::vector<ava::provider::HttpRequest> requests_;
+};
+
 void test_openai_provider_contract() {
   const ava::provider::OpenAIProvider provider("https://api.example.test");
   const auto request = provider.build_request(
@@ -56,7 +112,8 @@ void test_openai_provider_contract() {
           .model_id = "gpt-5.5",
           .system_prompt = "system",
           .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello \"ava\""}},
-          .tools_json = {"{\"type\":\"function\",\"name\":\"read_file\"}"}},
+          .tools_json = {"{\"type\":\"function\",\"name\":\"read_file\"}"},
+          .max_output_tokens = 1234},
       "oauth-token");
   expect(request.has_value(), "OpenAI request builds with OAuth token");
   if (request) {
@@ -65,6 +122,8 @@ void test_openai_provider_contract() {
     expect(request->headers.at("Authorization") == "Bearer oauth-token", "OpenAI request uses OAuth bearer header");
     expect(request->body.find("\"model\":\"gpt-5.5\"") != std::string::npos, "OpenAI request includes model id");
     expect(request->body.find("\"stream\":true") != std::string::npos, "OpenAI request defaults to streaming");
+    expect(request->body.find("\"max_output_tokens\":1234") != std::string::npos,
+           "OpenAI request includes configured max output tokens");
     expect(request->body.find("\"store\":false") == std::string::npos,
            "OpenAI API-key request does not force Codex store flag");
     expect(request->body.find("hello \\\"ava\\\"") != std::string::npos, "OpenAI request JSON escapes message content");
@@ -117,6 +176,24 @@ void test_openai_provider_contract() {
            "OpenAI OAuth request disables Codex response storage");
   }
 
+  const auto oauth_credential_request_without_now = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system", .messages = {}, .tools_json = {}},
+      ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
+                                    .access_token = "codex-token",
+                                    .refresh_token = "refresh",
+                                    .expires_at = 0,
+                                    .account_id = "acct_456",
+                                    .source_path = {}});
+  expect(oauth_credential_request_without_now &&
+             oauth_credential_request_without_now->url == "https://chatgpt.com/backend-api/codex/responses",
+         "OpenAI OAuth request without explicit clock still uses Codex endpoint");
+  if (oauth_credential_request_without_now) {
+    expect(oauth_credential_request_without_now->headers.at("ChatGPT-Account-Id") == "acct_456" &&
+               oauth_credential_request_without_now->body.find("\"store\":false") != std::string::npos,
+           "OpenAI OAuth request without explicit clock applies Codex auth options");
+  }
+
   const auto invalid_tool = provider.build_request(ava::provider::ProviderRequest{.provider_id = "openai",
                                                                                   .model_id = "gpt-5.5",
                                                                                   .system_prompt = "system",
@@ -155,22 +232,90 @@ void test_openai_provider_contract() {
            "OpenAI SSE tool start parses");
     expect((*events)[4].type == ava::provider::StreamEventType::Done, "OpenAI SSE done parses");
   }
+  auto output_item_tool = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"call_live\","
+      "\"type\":\"function_call\",\"name\":\"read_file\",\"call_id\":\"call_live_provider\"}}\n\n"
+      "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_live\","
+      "\"delta\":\"{\\\"path\\\":\\\"smoke.txt\\\"}\"}\n\n"
+      "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_live\"}\n\n"
+      "data: [DONE]\n\n");
+  expect(output_item_tool && output_item_tool->size() == 4 &&
+             (*output_item_tool)[0].type == ava::provider::StreamEventType::ToolCallStart &&
+             (*output_item_tool)[0].tool_call_id == "call_live" &&
+             (*output_item_tool)[0].tool_name == "read_file" &&
+             (*output_item_tool)[1].type == ava::provider::StreamEventType::ToolCallDelta &&
+             (*output_item_tool)[1].tool_call_id == "call_live" &&
+             (*output_item_tool)[1].text.find("smoke.txt") != std::string::npos,
+         "OpenAI output_item.added function calls preserve tool names for argument deltas");
   auto http_error = ava::provider::parse_openai_sse_response(ava::provider::HttpResponse{
       .status_code = 401, .headers = {}, .body = "{\"error\":\"bad auth\",\"Authorization\":\"Bearer secret\"}"});
-  expect(!http_error && http_error.error().message().find("401") != std::string::npos,
-         "OpenAI non-200 response error includes status context");
+  expect(!http_error && http_error.error().category() == ava::core::ErrorCategory::Provider &&
+              http_error.error().message().find("401") != std::string::npos,
+         "OpenAI auth response is normalized as a provider error with status context");
   if (!http_error) {
     const auto formatted = http_error.error().format();
-    expect(formatted.find("body_snippet") != std::string::npos && formatted.find("bad auth") != std::string::npos &&
+    expect(formatted.find("provider_error_kind: authentication") != std::string::npos &&
+                formatted.find("body_snippet") != std::string::npos && formatted.find("bad auth") != std::string::npos &&
                formatted.find("Bearer secret") == std::string::npos,
-           "OpenAI non-200 response includes sanitized body snippet context");
+           "OpenAI non-200 response includes normalized kind and sanitized body snippet context");
   }
+  auto rate_limit = ava::provider::parse_openai_sse_response(ava::provider::HttpResponse{
+      .status_code = 429, .headers = {{"Retry-After", "2"}}, .body = "{\"error\":\"rate limited\"}"});
+  expect(!rate_limit && rate_limit.error().format().find("provider_error_kind: rate_limited") != std::string::npos &&
+             rate_limit.error().format().find("retry_after: 2") != std::string::npos,
+         "OpenAI rate-limit errors carry normalized kind and Retry-After context");
   expect(
       ava::provider::is_auth_status(401) && ava::provider::is_auth_status(403) && !ava::provider::is_auth_status(429),
       "OpenAI auth status helper classifies auth failures");
   expect(ava::provider::is_retryable_status(429) && ava::provider::is_retryable_status(500) &&
-             !ava::provider::is_retryable_status(401),
+              !ava::provider::is_retryable_status(401),
          "OpenAI retryable status helper classifies transient failures");
+
+  ava::tests::FakeTransport retry_inner({ava::provider::HttpResponse{.status_code = 429,
+                                                                      .headers = {{"Retry-After", "0"}},
+                                                                      .body = "rate limited"},
+                                        ava::provider::HttpResponse{.status_code = 200,
+                                                                    .headers = {},
+                                                                    .body = "ok"}});
+  ava::provider::RetryTransport retry_transport(
+      retry_inner, ava::provider::RetryOptions{.max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0});
+  const auto retry_request = ava::provider::HttpRequest{.method = "POST",
+                                                        .url = "https://api.example.test",
+                                                        .headers = {},
+                                                        .body = {},
+                                                        .timeout_ms = 60000,
+                                                        .follow_redirects = true,
+                                                        .include_response_headers = false,
+                                                        .resolve_hosts = {}};
+  auto retried = retry_transport.send(retry_request);
+  expect(retried && retried->status_code == 200 && retry_inner.requests().size() == 2,
+         "retry transport retries rate-limited non-streaming responses");
+
+  FailingOnceTransport failing_once;
+  ava::provider::RetryTransport retry_transport_error(
+      failing_once, ava::provider::RetryOptions{.max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0});
+  auto retried_transport_error = retry_transport_error.send(retry_request);
+  expect(retried_transport_error && retried_transport_error->status_code == 200 && failing_once.requests().size() == 2,
+         "retry transport retries retryable transport errors");
+
+  StreamingFakeTransport streaming_inner({ava::provider::HttpResponse{.status_code = 429,
+                                                                       .headers = {{"Retry-After", "0"}},
+                                                                       .body = ""},
+                                         ava::provider::HttpResponse{.status_code = 200,
+                                                                     .headers = {},
+                                                                     .body = "data: [DONE]\n\n"}});
+  ava::provider::RetryTransport streaming_retry_transport(
+      streaming_inner, ava::provider::RetryOptions{.max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0});
+  std::string streamed_body;
+  auto streaming_retry = streaming_retry_transport.send_streaming(
+      retry_request,
+      [&streamed_body](std::string_view chunk) -> ava::core::VoidResult {
+        streamed_body.append(chunk);
+        return {};
+      });
+  expect(streaming_retry && streaming_retry->status_code == 200 && streaming_inner.requests().size() == 2 &&
+             streamed_body == "data: [DONE]\n\n",
+         "retry transport retries rate-limited streaming responses and only delivers final chunks");
 
   auto completed = ava::provider::parse_openai_sse("data: {\"type\":\"response.completed\"}\n\n");
   expect(completed && completed->size() == 1 && (*completed)[0].type == ava::provider::StreamEventType::Done,
@@ -288,9 +433,21 @@ void test_openai_incremental_sse_parser() {
   }
 }
 
+void test_builtin_provider_registry() {
+  auto registry = ava::provider::builtin_provider_registry();
+  expect(registry.contains("openai"), "builtin provider registry contains OpenAI");
+  auto provider = registry.create("openai");
+  expect(provider.has_value() && *provider, "builtin provider registry creates OpenAI provider");
+
+  auto missing = registry.create("missing-provider");
+  expect(!missing && missing.error().category() == ava::core::ErrorCategory::NotFound,
+         "provider registry rejects unknown providers");
+}
+
 }  // namespace
 
 void run_provider_openai_tests() {
   test_openai_provider_contract();
   test_openai_incremental_sse_parser();
+  test_builtin_provider_registry();
 }

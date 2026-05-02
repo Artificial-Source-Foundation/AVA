@@ -12,9 +12,8 @@
 #include "ava/app/command_catalog.h"
 #include "ava/app/commands.h"
 #include "ava/config/auth.h"
-#include "ava/config/openai_oauth.h"
 #include "ava/provider/curl_transport.h"
-#include "ava/provider/openai_provider.h"
+#include "ava/provider/registry.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
@@ -92,39 +91,34 @@ struct LineResult {
 void add_output(LineResult& result, std::string text) { result.output.push_back(std::move(text)); }
 
 template <typename Callback>
-LineResult with_openai_runtime(ShellState& state, std::string_view offline_suffix, Callback callback) {
+LineResult with_provider_runtime(ShellState& state, std::string_view offline_suffix, Callback callback) {
   LineResult line_result;
-  auto credential = ava::config::load_openai_credential(state.session.paths);
+  ava::provider::CurlCliTransport transport;
+  auto credential =
+      ava::config::provider_credential_for_request(state.session.paths, state.session.model.provider_id, transport);
   if (!credential) {
     add_output(line_result, credential.error().format() + std::string(offline_suffix));
     return line_result;
   }
   if (!*credential) {
-    add_output(line_result, "OpenAI auth is required. Configure an OpenAI credential in " +
-                                state.session.paths.auth_file.string() + std::string(offline_suffix));
+    add_output(line_result, "Auth is required for provider `" + state.session.model.provider_id +
+                                "`. Configure a credential in " + state.session.paths.auth_file.string() +
+                                std::string(offline_suffix));
     return line_result;
   }
-  ava::provider::CurlCliTransport transport;
-  auto request_credential = ava::config::openai_credential_for_request(state.session.paths, **credential, transport);
-  if (!request_credential) {
-    add_output(line_result, request_credential.error().format() + std::string(offline_suffix));
+  auto registry = ava::provider::builtin_provider_registry();
+  auto provider = registry.create(state.session.model.provider_id);
+  if (!provider) {
+    add_output(line_result, provider.error().format() + std::string(offline_suffix));
     return line_result;
   }
-  auto token = ava::config::openai_access_token_for_request(*request_credential);
-  if (!token) {
-    add_output(line_result, token.error().format() + std::string(offline_suffix));
-    return line_result;
-  }
-  std::string openai_account_id = request_credential->account_id;
-  if (request_credential->type == ava::config::OpenAICredentialType::OAuth && openai_account_id.empty()) {
-    openai_account_id = ava::config::openai_oauth_account_id_from_token(request_credential->access_token).value_or("");
-  }
-  ava::provider::OpenAIProvider provider;
+  ava::provider::RetryTransport retry_transport(transport);
   ava::app::RuntimeRunOptions run_options;
-  run_options.access_token = *token;
-  run_options.openai_oauth = request_credential->type == ava::config::OpenAICredentialType::OAuth;
-  run_options.openai_account_id = openai_account_id;
-  return callback(provider, transport, run_options);
+  run_options.access_token = (*credential)->access_token;
+  run_options.credential_type = (*credential)->credential_type;
+  run_options.openai_oauth = (*credential)->provider_id == "openai" && (*credential)->credential_type == "oauth";
+  run_options.openai_account_id = (*credential)->account_id;
+  return callback(**provider, retry_transport, run_options);
 }
 
 LineResult handle_line(ShellState& state, const std::string& line,
@@ -137,7 +131,7 @@ LineResult handle_line(ShellState& state, const std::string& line,
   if (line.empty()) return line_result;
   if (ava::app::is_backend_command(line)) {
     if (is_compact_command(line)) {
-      return with_openai_runtime(
+      return with_provider_runtime(
           state, "\nother slash tool commands still work offline.",
           [&](const ava::provider::Provider& provider, ava::provider::Transport& transport,
               ava::app::RuntimeRunOptions run_options) {
@@ -178,7 +172,7 @@ LineResult handle_line(ShellState& state, const std::string& line,
     return line_result;
   }
 
-  return with_openai_runtime(state, "\nslash tool commands still work offline.",
+  return with_provider_runtime(state, "\nslash tool commands still work offline.",
                              [&](const ava::provider::Provider& provider, ava::provider::Transport& transport,
                                  ava::app::RuntimeRunOptions run_options) {
                                run_options.permission_resolver = permission_resolver;

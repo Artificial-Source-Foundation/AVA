@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <initializer_list>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <utility>
@@ -81,7 +82,12 @@ std::string request_body_json(const ProviderRequest& request) {
     if (index > 0) body += ',';
     body += input_item_json(request.messages[index]);
   }
-  body += "],\"tools\":[";
+  body += ']';
+  if (request.max_output_tokens && *request.max_output_tokens > 0) {
+    body += ",\"max_output_tokens\":";
+    body += std::to_string(*request.max_output_tokens);
+  }
+  body += ",\"tools\":[";
   for (std::size_t index = 0; index < request.tools_json.size(); ++index) {
     if (index > 0) body += ',';
     body += request.tools_json[index];
@@ -115,6 +121,13 @@ std::optional<long long> non_negative_integer_field(std::string_view object, std
 std::optional<long long> first_integer_field(std::string_view object, std::initializer_list<std::string_view> keys) {
   for (const auto key : keys) {
     if (const auto value = non_negative_integer_field(object, key)) return value;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> first_string_field(std::string_view object, std::initializer_list<std::string_view> keys) {
+  for (const auto key : keys) {
+    if (auto value = ava::core::json::string_field(object, key)) return value;
   }
   return std::nullopt;
 }
@@ -199,13 +212,17 @@ void redact_json_string_value(std::string& snippet, std::string_view key) {
         break;
       }
     }
-    if (!redacted) position = value + 1;
+    if (!redacted) {
+      snippet.replace(value + 1, std::string::npos, "[redacted]");
+      position = snippet.size();
+    }
   }
 }
 
 std::string sanitized_body_snippet(std::string_view body) {
   constexpr std::size_t kMaxSnippet = 256;
-  std::string snippet(body.substr(0, std::min(body.size(), kMaxSnippet)));
+  constexpr std::size_t kMaxSanitizeBytes = 4096;
+  std::string snippet(body.substr(0, std::min(body.size(), kMaxSanitizeBytes)));
   for (const std::string_view secret_key : {"access_token", "refresh_token", "api_key", "Authorization"}) {
     redact_json_string_value(snippet, secret_key);
   }
@@ -217,6 +234,7 @@ std::string sanitized_body_snippet(std::string_view body) {
     snippet.replace(bearer, end - bearer, "Bearer [redacted]");
     bearer += std::string_view("Bearer [redacted]").size();
   }
+  if (snippet.size() > kMaxSnippet) snippet.resize(kMaxSnippet);
   return snippet;
 }
 
@@ -240,6 +258,23 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     return;
   }
   const auto type = ava::core::json::string_field(data, "type").value_or("");
+  if (type == "response.output_item.added") {
+    const auto item = ava::core::json::object_field(data, "item");
+    if (item && ava::core::json::string_field(*item, "type").value_or("") == "function_call") {
+      events.push_back(
+          StreamEvent{.type = StreamEventType::ToolCallStart,
+                      .text = "",
+                      .tool_call_id = first_string_field(*item, {"id", "item_id", "call_id"})
+                                          .or_else([&data]() { return first_string_field(data, {"item_id", "call_id"}); })
+                                          .value_or(""),
+                      .tool_name = ava::core::json::string_field(*item, "name")
+                                       .or_else([&data]() { return ava::core::json::string_field(data, "name"); })
+                                       .value_or(""),
+                      .error_message = "",
+                      .usage = std::nullopt});
+    }
+    return;
+  }
   if (is_ignored_lifecycle_event(type)) return;
   if (type == "response.output_text.delta" || type == "response.text.delta") {
     events.push_back(StreamEvent{.type = StreamEventType::TextDelta,
@@ -335,7 +370,7 @@ void append_events_for_sse_line(std::vector<StreamEvent>& events, std::string& d
 OpenAIProvider::OpenAIProvider(std::string base_url) : base_url_(std::move(base_url)) {}
 
 ava::core::Result<HttpRequest> OpenAIProvider::build_request(const ProviderRequest& request,
-                                                             std::string_view access_token) const {
+                                                              std::string_view access_token) const {
   if (request.model_id.empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model id is required"));
   }
@@ -361,18 +396,54 @@ ava::core::Result<HttpRequest> OpenAIProvider::build_request(const ProviderReque
   };
 }
 
+ava::core::VoidResult OpenAIProvider::apply_auth_options(HttpRequest& request, const ProviderAuthContext& auth) const {
+  if (auth.credential_type != "oauth") return {};
+  apply_codex_oauth_request_options(request);
+  if (!auth.account_id.empty()) {
+    request.headers["ChatGPT-Account-Id"] = auth.account_id;
+    request.headers["chatgpt-account-id"] = auth.account_id;
+  }
+  return {};
+}
+
+std::unique_ptr<StreamParser> OpenAIProvider::create_stream_parser() const {
+  return std::make_unique<OpenAIStreamParser>();
+}
+
+ava::core::Result<std::vector<StreamEvent>> OpenAIProvider::parse_response(const HttpResponse& response,
+                                                                           bool stream) const {
+  if (stream) return parse_openai_sse_response(response);
+  if (response.status_code < 200 || response.status_code >= 300) return parse_openai_sse_response(response);
+  auto text = parse_openai_response_text(response.body);
+  if (!text) return std::unexpected(std::move(text.error()));
+  auto usage = parse_openai_usage(response.body);
+  return std::vector<StreamEvent>{StreamEvent{.type = StreamEventType::TextDelta,
+                                              .text = *text,
+                                              .tool_call_id = "",
+                                              .tool_name = "",
+                                              .error_message = "",
+                                              .usage = std::nullopt},
+                                  StreamEvent{.type = StreamEventType::Done,
+                                              .text = "",
+                                              .tool_call_id = "",
+                                              .tool_name = "",
+                                              .error_message = "",
+                                              .usage = std::move(usage)}};
+}
+
 ava::core::Result<HttpRequest> OpenAIProvider::build_request(const ProviderRequest& request,
-                                                             const ava::config::OpenAICredential& credential,
+                                                              const ava::config::OpenAICredential& credential,
                                                              long long now_seconds) const {
   auto access_token = ava::config::openai_access_token_for_request(credential, now_seconds);
   if (!access_token) return std::unexpected(std::move(access_token.error()));
   auto http_request = build_request(request, *access_token);
   if (!http_request || credential.type != ava::config::OpenAICredentialType::OAuth) return http_request;
 
-  apply_codex_oauth_request_options(*http_request);
-  if (!credential.account_id.empty()) {
-    http_request->headers["ChatGPT-Account-Id"] = credential.account_id;
-    http_request->headers["chatgpt-account-id"] = credential.account_id;
+  if (auto applied = apply_auth_options(*http_request, ProviderAuthContext{.access_token = *access_token,
+                                                                           .credential_type = "oauth",
+                                                                           .account_id = credential.account_id});
+      !applied) {
+    return std::unexpected(std::move(applied.error()));
   }
   return http_request;
 }
@@ -381,7 +452,16 @@ ava::core::Result<HttpRequest> OpenAIProvider::build_request(const ProviderReque
                                                              const ava::config::OpenAICredential& credential) const {
   auto access_token = ava::config::openai_access_token_for_request(credential);
   if (!access_token) return std::unexpected(std::move(access_token.error()));
-  return build_request(request, *access_token);
+  auto http_request = build_request(request, *access_token);
+  if (!http_request || credential.type != ava::config::OpenAICredentialType::OAuth) return http_request;
+
+  if (auto applied = apply_auth_options(*http_request, ProviderAuthContext{.access_token = *access_token,
+                                                                           .credential_type = "oauth",
+                                                                           .account_id = credential.account_id});
+      !applied) {
+    return std::unexpected(std::move(applied.error()));
+  }
+  return http_request;
 }
 
 ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::append(std::string_view chunk) {
@@ -427,9 +507,12 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_sse(std::string_view ss
 
 ava::core::Result<std::vector<StreamEvent>> parse_openai_sse_response(const HttpResponse& response) {
   if (response.status_code < 200 || response.status_code >= 300) {
+    const auto kind = classify_provider_error(response);
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider,
-                                  "OpenAI HTTP request failed with status " + std::to_string(response.status_code));
+                                   "OpenAI HTTP request failed with status " + std::to_string(response.status_code));
     error.with_context("status", std::to_string(response.status_code));
+    error.with_context("provider_error_kind", to_string(kind));
+    if (const auto retry_after = retry_after_header(response)) error.with_context("retry_after", *retry_after);
     if (!response.body.empty()) error.with_context("body_snippet", sanitized_body_snippet(response.body));
     return std::unexpected(std::move(error));
   }

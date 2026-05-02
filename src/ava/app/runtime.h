@@ -58,6 +58,7 @@ struct RuntimePromptState {
 
 struct RuntimeRunOptions {
   std::string access_token;
+  std::string credential_type = "bearer";
   bool openai_oauth = false;
   std::string openai_account_id;
   bool stream = true;
@@ -76,9 +77,15 @@ using CompactionSummaryGenerator = std::function<ava::core::Result<std::string>(
 [[nodiscard]] ava::core::Result<RuntimeSession> open_runtime_session(const RuntimeOpenOptions& options);
 
 [[nodiscard]] ava::core::Result<RuntimePromptState> select_runtime_prompt_state(const RuntimeSession& session,
-                                                                                ava::agent::Mode mode);
+                                                                                 ava::agent::Mode mode);
 
 void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prompt_state);
+
+[[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(const ava::config::XdgPaths& paths,
+                                                                              std::string_view provider_id,
+                                                                              std::string_view model_id);
+
+[[nodiscard]] ava::core::Result<bool> switch_runtime_model(RuntimeSession& session, ava::config::ModelInfo model);
 
 [[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& session,
                                                                         const std::string& user_message,

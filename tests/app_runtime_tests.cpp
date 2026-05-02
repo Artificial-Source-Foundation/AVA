@@ -2250,6 +2250,137 @@ void test_app_rpc_state_list_sessions_and_open_session() {
   expect(second->store.session_id() == first_id, "RPC open_session switches the active runtime session");
 }
 
+void test_app_runtime_model_switch_persists_and_reopens() {
+  const auto root = temp_root() / "app-runtime-model-switch";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  const auto paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(paths.ava_config_dir);
+  {
+    std::ofstream file(paths.models_file, std::ios::binary | std::ios::trunc);
+    file << R"JSON({
+      "default_provider":"openai",
+      "default_model":"gpt-5.5",
+      "models":[{
+        "provider":"anthropic",
+        "id":"claude-test",
+        "name":"Claude Test",
+        "family":"claude-test",
+        "api_family":"anthropic_messages",
+        "supports_tools":false,
+        "supports_streaming":true,
+        "supports_reasoning":false
+      }]
+    })JSON";
+  }
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime model switch test opens runtime session");
+  if (!session) return;
+  const auto session_id = session->store.session_id();
+
+  auto model = ava::app::resolve_runtime_model(paths, "anthropic", "claude-test");
+  expect(model.has_value(), "runtime resolves configured Anthropic model");
+  if (!model) return;
+  auto switched = ava::app::switch_runtime_model(*session, *model);
+  expect(switched.has_value() && *switched, "runtime model switch reports a change");
+  expect(session->model.provider_id == "anthropic" && session->model.model_id == "claude-test",
+         "runtime model switch updates active session model");
+
+  auto entries = session->store.load();
+  expect(entries.has_value(), "runtime model switch loads session entries");
+  bool saw_model_change = false;
+  if (entries) {
+    for (const auto& entry : *entries) {
+      saw_model_change = saw_model_change || (entry.type == ava::session::EntryType::ModelChange &&
+                                              entry.data_json.find("\"previous_provider\":\"openai\"") !=
+                                                  std::string::npos &&
+                                              entry.data_json.find("\"provider\":\"anthropic\"") !=
+                                                  std::string::npos);
+    }
+  }
+  expect(saw_model_change, "runtime model switch appends model_change entry");
+
+  ava::app::RuntimeOpenOptions reopen_options = open_options;
+  reopen_options.requested_session_id = session_id;
+  std::filesystem::remove(paths.models_file, remove_error);
+  auto reopened = ava::app::open_runtime_session(reopen_options);
+  expect(reopened.has_value(), "runtime model switch reopens persisted session");
+  expect(reopened && reopened->model.provider_id == "anthropic" && reopened->model.model_id == "claude-test",
+          "runtime reopen restores latest persisted model_change");
+  if (reopened) {
+    const ava::provider::OpenAIProvider provider("https://api.example.test");
+    ava::tests::FakeTransport transport({});
+    std::istringstream in("{\"id\":\"list\",\"type\":\"list_models\"}\n");
+    std::ostringstream out;
+    auto result = ava::app::run_rpc_loop(*reopened, reopen_options, provider, transport, ava::app::RuntimeRunOptions{}, in,
+                                         out);
+    const auto jsonl = out.str();
+    const auto restored_position = jsonl.find("\"model\":\"claude-test\"");
+    expect(result.has_value() && restored_position != std::string::npos,
+           "RPC list_models includes restored removed current model");
+    expect(restored_position != std::string::npos &&
+               jsonl.find("\"selectable\":false", restored_position) != std::string::npos,
+           "RPC list_models marks restored removed current model as not selectable");
+  }
+}
+
+void test_app_rpc_model_commands() {
+  const auto root = temp_root() / "app-rpc-model-commands";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  const auto paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC model command test opens runtime session");
+  if (!session) return;
+
+  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  std::istringstream in(
+      "{\"id\":\"list\",\"type\":\"list_models\"}\n"
+      "{\"id\":\"set\",\"type\":\"set_model\",\"provider\":\"anthropic\","
+      "\"model\":\"claude-sonnet-4-5\"}\n"
+      "{\"id\":\"state\",\"type\":\"get_state\"}\n"
+      "{\"id\":\"stats\",\"type\":\"get_session_stats\"}\n"
+      "{\"id\":\"cycle\",\"type\":\"cycle_model\"}\n");
+  std::ostringstream out;
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in,
+                                       out);
+  const auto jsonl = out.str();
+  expect(result.has_value(), "RPC model command loop completes successfully");
+  expect(jsonl.find("\"id\":\"list\"") != std::string::npos &&
+             jsonl.find("\"models\"") != std::string::npos &&
+             jsonl.find("claude-sonnet-4-5") != std::string::npos,
+         "RPC list_models returns configured model catalog");
+  expect(jsonl.find("\"id\":\"set\"") != std::string::npos &&
+             jsonl.find("\"provider\":\"anthropic\"") != std::string::npos &&
+             jsonl.find("\"model\":\"claude-sonnet-4-5\"") != std::string::npos,
+         "RPC set_model returns updated Anthropic state");
+  expect(jsonl.find("\"id\":\"state\"") != std::string::npos &&
+             jsonl.find("\"model\":\"claude-sonnet-4-5\"") != std::string::npos,
+         "RPC get_state reflects selected model after set_model");
+  expect(jsonl.find("\"id\":\"stats\"") != std::string::npos &&
+             jsonl.find("\"model_change\":1") != std::string::npos,
+         "RPC get_session_stats reports model_change count");
+  expect(jsonl.find("\"id\":\"cycle\"") != std::string::npos &&
+             jsonl.find("\"provider\":\"openai\"") != std::string::npos,
+         "RPC cycle_model advances to the next configured provider model");
+  expect(session->model.provider_id == "openai", "RPC cycle_model updates active session model");
+}
+
 void test_app_rpc_protocol_version_and_session_commands() {
   const auto root = temp_root() / "app-rpc-protocol-session";
   std::error_code remove_error;
@@ -3294,6 +3425,8 @@ void run_app_runtime_tests() {
   test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request();
   test_app_rpc_malformed_line_recovery_and_unknown_command();
   test_app_rpc_state_list_sessions_and_open_session();
+  test_app_runtime_model_switch_persists_and_reopens();
+  test_app_rpc_model_commands();
   test_app_rpc_protocol_version_and_session_commands();
   test_app_rpc_protocol_version_and_resolver_reply_errors();
   test_app_rpc_command_responses_for_context_compact_export();

@@ -2,13 +2,31 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <initializer_list>
+#include <limits>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
+
+#include "ava/core/json.h"
 
 namespace ava::provider {
 namespace {
+
+class DefaultStreamParser final : public StreamParser {
+ public:
+  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> append(std::string_view chunk) override {
+    pending_.append(chunk);
+    return std::vector<StreamEvent>{};
+  }
+
+  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> finish() override;
+
+ private:
+  std::string pending_;
+};
 
 std::string lower_copy(std::string_view value) {
   std::string lowered(value);
@@ -31,12 +49,154 @@ bool looks_like_context_overflow(std::string_view text) {
   return mentions_context && mentions_overflow;
 }
 
+bool looks_like_quota(std::string_view text) {
+  return has_any(text, {"quota", "billing", "insufficient_quota", "credit balance"});
+}
+
+bool looks_like_content_filter(std::string_view text) {
+  return has_any(text, {"content filter", "content_filter", "safety", "policy violation", "blocked"});
+}
+
+bool looks_like_refusal(std::string_view text) {
+  return has_any(text, {"refusal", "refused", "cannot comply", "can't comply"});
+}
+
+bool is_retryable_kind(ProviderErrorKind kind) noexcept {
+  return kind == ProviderErrorKind::RateLimited || kind == ProviderErrorKind::Transient;
+}
+
+bool is_retryable_transport_error(const ava::core::Error& error) noexcept {
+  return error.category() == ava::core::ErrorCategory::Io;
+}
+
+int exponential_delay_ms(const RetryOptions& options, int attempt) noexcept {
+  if (options.base_delay_ms <= 0) return 0;
+  long long delay = options.base_delay_ms;
+  for (int index = 1; index < attempt; ++index) {
+    if (delay > std::numeric_limits<int>::max() / 2) return std::numeric_limits<int>::max();
+    delay *= 2;
+  }
+  return static_cast<int>(delay);
+}
+
+void sleep_before_retry(int delay_ms) {
+  if (delay_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+}
+
+std::optional<std::string> default_text_from_json(std::string_view body) {
+  if (auto output = ava::core::json::string_field(body, "output_text")) return output;
+  if (auto text = ava::core::json::string_field(body, "text")) return text;
+  if (auto delta = ava::core::json::string_field(body, "delta")) return delta;
+  return std::nullopt;
+}
+
+ava::core::Result<std::vector<StreamEvent>> default_parse_response(const HttpResponse& response, bool stream) {
+  if (response.status_code < 200 || response.status_code >= 300) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Provider,
+                                  "provider HTTP request failed with status " + std::to_string(response.status_code));
+    error.with_context("status", std::to_string(response.status_code));
+    error.with_context("provider_error_kind", to_string(classify_provider_error(response)));
+    if (const auto retry_after = retry_after_header(response)) error.with_context("retry_after", *retry_after);
+    return std::unexpected(std::move(error));
+  }
+  if (stream) {
+    std::vector<StreamEvent> events;
+    std::size_t line_start = 0;
+    while (line_start <= response.body.size()) {
+      const auto newline = response.body.find('\n', line_start);
+      auto line = newline == std::string::npos ? std::string_view(response.body).substr(line_start)
+                                               : std::string_view(response.body).substr(line_start, newline - line_start);
+      if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+      if (line.starts_with("data:")) {
+        line.remove_prefix(5);
+        if (!line.empty() && line.front() == ' ') line.remove_prefix(1);
+        if (line == "[DONE]") {
+          events.push_back(StreamEvent{.type = StreamEventType::Done,
+                                       .text = "",
+                                       .tool_call_id = "",
+                                       .tool_name = "",
+                                       .error_message = "",
+                                       .usage = std::nullopt});
+        } else if (auto text = default_text_from_json(line)) {
+          events.push_back(StreamEvent{.type = StreamEventType::TextDelta,
+                                       .text = *text,
+                                       .tool_call_id = "",
+                                       .tool_name = "",
+                                       .error_message = "",
+                                       .usage = std::nullopt});
+        }
+      }
+      if (newline == std::string::npos) break;
+      line_start = newline + 1;
+    }
+    return events;
+  }
+  auto text = default_text_from_json(response.body);
+  if (!text) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "provider response text is missing"));
+  }
+  return std::vector<StreamEvent>{StreamEvent{.type = StreamEventType::TextDelta,
+                                              .text = *text,
+                                              .tool_call_id = "",
+                                              .tool_name = "",
+                                              .error_message = "",
+                                              .usage = std::nullopt},
+                                  StreamEvent{.type = StreamEventType::Done,
+                                              .text = "",
+                                              .tool_call_id = "",
+                                              .tool_name = "",
+                                              .error_message = "",
+                                              .usage = std::nullopt}};
+}
+
+ava::core::Result<std::vector<StreamEvent>> DefaultStreamParser::finish() {
+  return default_parse_response(HttpResponse{.status_code = 200, .headers = {}, .body = std::move(pending_)}, true);
+}
+
+std::optional<int> retry_after_ms(const HttpResponse& response, int max_retry_after_ms) {
+  const auto value = retry_after_header(response);
+  if (!value) return std::nullopt;
+  std::size_t index = 0;
+  while (index < value->size() && std::isspace(static_cast<unsigned char>((*value)[index])) != 0) ++index;
+  const auto start = index;
+  while (index < value->size() && std::isdigit(static_cast<unsigned char>((*value)[index])) != 0) ++index;
+  if (index == start) return std::nullopt;
+  try {
+    const auto seconds = std::stoi(value->substr(start, index - start));
+    if (seconds < 0) return std::nullopt;
+    const long long delay_ms = static_cast<long long>(seconds) * 1000LL;
+    return static_cast<int>(std::min(delay_ms, static_cast<long long>(max_retry_after_ms)));
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
 }  // namespace
+
+ava::core::Result<HttpRequest> Provider::build_request(const ProviderRequest& request,
+                                                       const ProviderAuthContext& auth) const {
+  auto http_request = build_request(request, auth.access_token);
+  if (!http_request) return http_request;
+  if (auto applied = apply_auth_options(*http_request, auth); !applied) {
+    return std::unexpected(std::move(applied.error()));
+  }
+  return http_request;
+}
+
+ava::core::VoidResult Provider::apply_auth_options(HttpRequest&, const ProviderAuthContext&) const { return {}; }
+
+std::unique_ptr<StreamParser> Provider::create_stream_parser() const {
+  return std::make_unique<DefaultStreamParser>();
+}
+
+ava::core::Result<std::vector<StreamEvent>> Provider::parse_response(const HttpResponse& response, bool stream) const {
+  return default_parse_response(response, stream);
+}
 
 bool Transport::supports_streaming() const noexcept { return false; }
 
 ava::core::Result<HttpResponse> Transport::send_streaming(const HttpRequest& request, BodyChunkSink on_body_chunk,
-                                                          CancelCallback cancel_requested) {
+                                                           CancelCallback cancel_requested) {
   if (cancel_requested && cancel_requested()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
   }
@@ -51,6 +211,69 @@ ava::core::Result<HttpResponse> Transport::send_streaming(const HttpRequest& req
   }
   if (cancel_requested && cancel_requested()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
+  }
+  return response;
+}
+
+RetryTransport::RetryTransport(Transport& inner, RetryOptions options) : inner_(inner), options_(options) {}
+
+ava::core::Result<HttpResponse> RetryTransport::send(const HttpRequest& request) {
+  const int max_attempts = std::max(1, options_.max_attempts);
+  ava::core::Result<HttpResponse> response = inner_.send(request);
+  for (int attempt = 1; attempt < max_attempts; ++attempt) {
+    if (response) {
+      if (!is_retryable_kind(classify_provider_error(*response))) break;
+      const int delay_ms = retry_after_ms(*response, options_.max_retry_after_ms)
+                               .value_or(exponential_delay_ms(options_, attempt));
+      sleep_before_retry(delay_ms);
+    } else {
+      if (!is_retryable_transport_error(response.error())) break;
+      sleep_before_retry(exponential_delay_ms(options_, attempt));
+    }
+    response = inner_.send(request);
+  }
+  return response;
+}
+
+bool RetryTransport::supports_streaming() const noexcept { return inner_.supports_streaming(); }
+
+ava::core::Result<HttpResponse> RetryTransport::send_streaming(const HttpRequest& request, BodyChunkSink on_body_chunk,
+                                                               CancelCallback cancel_requested) {
+  const int max_attempts = std::max(1, options_.max_attempts);
+  ava::core::Result<HttpResponse> response = std::unexpected(
+      ava::core::Error(ava::core::ErrorCategory::Unknown, "streaming request was not attempted"));
+  std::string final_body;
+  for (int attempt = 1; attempt <= max_attempts; ++attempt) {
+    std::string attempt_body;
+    bool delivered_chunks = false;
+    response = inner_.send_streaming(
+        request,
+        [&](std::string_view chunk) -> ava::core::VoidResult {
+          attempt_body.append(chunk);
+          if (!on_body_chunk) return ava::core::VoidResult{};
+          delivered_chunks = true;
+          return on_body_chunk(chunk);
+        },
+        cancel_requested);
+
+    const bool last_attempt = attempt == max_attempts;
+    if (response) {
+      if (!last_attempt && !delivered_chunks && is_retryable_kind(classify_provider_error(*response))) {
+        const int delay_ms = retry_after_ms(*response, options_.max_retry_after_ms)
+                                 .value_or(exponential_delay_ms(options_, attempt));
+        sleep_before_retry(delay_ms);
+        continue;
+      }
+      if (!delivered_chunks) final_body = std::move(attempt_body);
+      break;
+    }
+
+    if (last_attempt || delivered_chunks || !is_retryable_transport_error(response.error())) break;
+    sleep_before_retry(exponential_delay_ms(options_, attempt));
+  }
+  if (!response) return std::unexpected(std::move(response.error()));
+  if (on_body_chunk && !final_body.empty()) {
+    if (auto delivered = on_body_chunk(final_body); !delivered) return std::unexpected(std::move(delivered.error()));
   }
   return response;
 }
@@ -71,6 +294,56 @@ std::string to_string(StreamEventType type) {
       return "error";
   }
   return "error";
+}
+
+std::string to_string(ProviderErrorKind kind) {
+  switch (kind) {
+    case ProviderErrorKind::Authentication:
+      return "authentication";
+    case ProviderErrorKind::RateLimited:
+      return "rate_limited";
+    case ProviderErrorKind::Quota:
+      return "quota";
+    case ProviderErrorKind::InvalidRequest:
+      return "invalid_request";
+    case ProviderErrorKind::ContextOverflow:
+      return "context_overflow";
+    case ProviderErrorKind::Refusal:
+      return "refusal";
+    case ProviderErrorKind::ContentFilter:
+      return "content_filter";
+    case ProviderErrorKind::Transient:
+      return "transient";
+    case ProviderErrorKind::Unknown:
+      return "unknown";
+  }
+  return "unknown";
+}
+
+ProviderErrorKind classify_provider_error(const HttpResponse& response) {
+  if (response.status_code >= 200 && response.status_code < 300) return ProviderErrorKind::Unknown;
+  const auto body = lower_copy(response.body);
+  if (response.status_code == 401 || response.status_code == 403) return ProviderErrorKind::Authentication;
+  if (looks_like_context_overflow(body)) return ProviderErrorKind::ContextOverflow;
+  if (looks_like_quota(body)) return ProviderErrorKind::Quota;
+  if (looks_like_content_filter(body)) return ProviderErrorKind::ContentFilter;
+  if (looks_like_refusal(body)) return ProviderErrorKind::Refusal;
+  if (response.status_code == 429) return ProviderErrorKind::RateLimited;
+  if (response.status_code == 400 || response.status_code == 404 || response.status_code == 422) {
+    return ProviderErrorKind::InvalidRequest;
+  }
+  if (response.status_code == 408 || response.status_code == 409 ||
+      (response.status_code >= 500 && response.status_code < 600)) {
+    return ProviderErrorKind::Transient;
+  }
+  return ProviderErrorKind::Unknown;
+}
+
+std::optional<std::string> retry_after_header(const HttpResponse& response) {
+  for (const auto& [key, value] : response.headers) {
+    if (lower_copy(key) == "retry-after") return value;
+  }
+  return std::nullopt;
 }
 
 bool is_context_overflow_error(const ava::core::Error& error) {

@@ -253,6 +253,7 @@ void test_auth_load_and_store() {
     file << "{\"openai\":{\"type\":\"oauth\",\"access_token\":\"secret-token\",\"refresh_token\":\"refresh\",\"expires_"
             "at\":42}}";
   }
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
   auto loaded = ava::config::load_openai_credential(paths);
   expect(loaded && loaded->has_value(), "OpenAI OAuth credential loads from AVA XDG auth file");
   if (loaded && *loaded) {
@@ -266,6 +267,11 @@ void test_auth_load_and_store() {
     std::ofstream file(root / "data" / "opencode" / "auth.json", std::ios::binary | std::ios::trunc);
     file << "{\"openai\":{\"type\":\"oauth\",\"access\":\"opencode-token\",\"refresh\":\"r\",\"expires\":7}}";
   }
+  ::chmod((root / "data" / "opencode" / "auth.json").c_str(), S_IRUSR | S_IWUSR | S_IRGRP);
+  auto insecure_import = ava::config::load_openai_credential(paths);
+  expect(insecure_import && !insecure_import->has_value(),
+         "OpenAI credential load skips group-readable fallback auth file");
+  ::chmod((root / "data" / "opencode" / "auth.json").c_str(), S_IRUSR | S_IWUSR);
   auto imported = ava::config::load_openai_credential(paths);
   expect(imported && imported->has_value() && (*imported)->access_token == "opencode-token",
          "OpenAI OAuth credential is recognized from opencode auth path");
@@ -274,6 +280,7 @@ void test_auth_load_and_store() {
     std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
     file << "{\"openai\":{\"type\":\"api\",\"key\":\"ava-api-key\"}}";
   }
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
   auto oauth_preferred = ava::config::load_openai_credential(paths);
   expect(oauth_preferred && oauth_preferred->has_value() && (*oauth_preferred)->access_token == "opencode-token" &&
              (*oauth_preferred)->type == ava::config::OpenAICredentialType::OAuth,
@@ -286,6 +293,7 @@ void test_auth_load_and_store() {
     std::ofstream file(root / "data" / "opencode" / "auth.json", std::ios::binary | std::ios::trunc);
     file << "{\"openai\":{\"type\":\"api\",\"key\":\"opencode-api-key\"}}";
   }
+  ::chmod((root / "data" / "opencode" / "auth.json").c_str(), S_IRUSR | S_IWUSR);
   auto api_key = ava::config::load_openai_credential(paths);
   expect(api_key && api_key->has_value() && (*api_key)->access_token == "opencode-api-key" &&
              (*api_key)->type == ava::config::OpenAICredentialType::ApiKey,
@@ -345,6 +353,50 @@ void test_auth_load_and_store() {
                                     .source_path = {}},
       11);
   expect(api_key_not_expired && *api_key_not_expired == "api-token", "OpenAI API key ignores OAuth expiry field");
+
+  setenv("OPENAI_API_KEY", "env-openai-key", 1);
+  ava::tests::FakeTransport env_transport({});
+  auto stored_provider_credential = ava::config::provider_credential_for_request(paths, "openai", env_transport);
+  expect(stored_provider_credential && stored_provider_credential->has_value() &&
+             (*stored_provider_credential)->access_token == "stored-api-key" &&
+             (*stored_provider_credential)->credential_type == "api_key",
+         "provider credential discovery prefers stored OpenAI auth before env fallback");
+  std::filesystem::remove(paths.auth_file, remove_error);
+  std::filesystem::remove(root / "data" / "opencode" / "auth.json", remove_error);
+  auto env_openai_credential = ava::config::provider_credential_for_request(paths, "openai", env_transport);
+  expect(env_openai_credential && env_openai_credential->has_value() &&
+             (*env_openai_credential)->access_token == "env-openai-key" &&
+             (*env_openai_credential)->source == "env:OPENAI_API_KEY",
+          "provider credential discovery falls back to OPENAI_API_KEY without storing it");
+  unsetenv("OPENAI_API_KEY");
+  {
+    std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
+    file << "{\"anthropic\":{\"type\":\"api_key\",\"api_key\":\"stored-anthropic-key\"}}";
+  }
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
+  auto stored_anthropic_credential = ava::config::provider_credential_for_request(paths, "anthropic", env_transport);
+  expect(stored_anthropic_credential && stored_anthropic_credential->has_value() &&
+             (*stored_anthropic_credential)->provider_id == "anthropic" &&
+             (*stored_anthropic_credential)->access_token == "stored-anthropic-key" &&
+             (*stored_anthropic_credential)->credential_type == "api_key" &&
+             (*stored_anthropic_credential)->source == paths.auth_file.string(),
+         "provider credential discovery loads non-OpenAI API keys from auth file");
+  std::filesystem::remove(paths.auth_file, remove_error);
+  setenv("ANTHROPIC_API_KEY", "env-anthropic-key", 1);
+  auto anthropic_credential = ava::config::provider_credential_for_request(paths, "anthropic", env_transport);
+  expect(anthropic_credential && anthropic_credential->has_value() &&
+             (*anthropic_credential)->provider_id == "anthropic" &&
+             (*anthropic_credential)->access_token == "env-anthropic-key",
+         "provider credential discovery supports non-OpenAI API key environment variables");
+  unsetenv("ANTHROPIC_API_KEY");
+  auto restored_api = ava::config::store_openai_credential(
+      paths, ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::ApiKey,
+                                           .access_token = "stored-api-key",
+                                           .refresh_token = "",
+                                           .expires_at = 0,
+                                           .account_id = "",
+                                           .source_path = {}});
+  expect(restored_api.has_value(), "OpenAI API key credential restores after env discovery checks");
   struct stat st {};
   if (::stat(paths.auth_file.c_str(), &st) == 0) {
     expect((st.st_mode & 0777) == 0600, "auth file is owner-only");
@@ -357,6 +409,16 @@ void test_auth_load_and_store() {
   } else {
     expect(false, "auth directory stat succeeds");
   }
+
+  std::filesystem::remove(paths.auth_file, remove_error);
+  {
+    std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
+    file << "{\"openai\":{\"type\":\"api_key\",\"api_key\":\"too-readable\"}}";
+  }
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR | S_IRGRP);
+  auto broad_auth_file = ava::config::load_openai_credential(paths);
+  expect(!broad_auth_file && broad_auth_file.error().category() == ava::core::ErrorCategory::PermissionDenied,
+         "OpenAI credential load rejects group-readable auth file");
 
   const auto symlink_target = root / "symlink-target.json";
   {
@@ -594,9 +656,12 @@ void test_model_and_prompt_config() {
   for (const auto& model : builtin.models) {
     saw_priced_builtin = saw_priced_builtin || (model.model_id == "gpt-4.1-mini" && model.context_window_tokens &&
                                                 model.pricing && *model.context_window_tokens == 1'048'576 &&
-                                                model.pricing->input_per_million && model.pricing->output_per_million);
+                                                model.pricing->input_per_million && model.pricing->output_per_million &&
+                                                model.api_family == "openai_responses" &&
+                                                model.supports_tools.value_or(false) &&
+                                                model.supports_streaming.value_or(false) && model.reports_usage.value_or(false));
   }
-  expect(saw_priced_builtin, "builtin model registry carries static pricing and context metadata where known");
+  expect(saw_priced_builtin, "builtin model registry carries static pricing, context, and capability metadata");
 
   std::filesystem::create_directories(paths.ava_config_dir);
   {
@@ -604,6 +669,10 @@ void test_model_and_prompt_config() {
     file << "{\"default_provider\":\"openai\",\"default_model\":\"gpt-5.5-mini\","
             "\"models\":[{\"provider\":\"openai\",\"id\":\"gpt-5.5-mini\",\"name\":\"Mini\","
             "\"family\":\"gpt-5\",\"context_window_tokens\":12345,\"max_output_tokens\":678,"
+            "\"api_family\":\"openai_responses\",\"input_modalities\":[\"text\",\"image\"],"
+            "\"supports_tools\":false,\"supports_streaming\":true,\"supports_reasoning\":true,"
+            "\"reports_usage\":true,\"reasoning_levels\":[\"low\",\"high\"],"
+            "\"compatibility_quirks\":[\"requires_strict_tools\"],"
             "\"pricing\":{\"input_per_million\":1.5,\"output_per_million\":2.5}}]}";
   }
   auto registry = ava::config::load_model_registry(paths);
@@ -623,9 +692,13 @@ void test_model_and_prompt_config() {
                                           .estimated_total_bytes = std::nullopt,
                                           .estimated = false};
     auto cost = selected.pricing ? ava::config::usage_cost_usd(*selected.pricing, usage) : std::nullopt;
-    expect(selected.context_window_tokens == 12345 && selected.max_output_tokens == 678 && cost && *cost > 0.0064L &&
-               *cost < 0.0066L,
-           "model registry parses local pricing metadata and calculates cost");
+    expect(selected.context_window_tokens == 12345 && selected.max_output_tokens == 678 &&
+               selected.api_family == "openai_responses" && selected.input_modalities.size() == 2 &&
+               selected.supports_tools == false && selected.supports_streaming == true &&
+               selected.supports_reasoning == true && selected.reports_usage == true &&
+               selected.reasoning_levels.size() == 2 && selected.compatibility_quirks.size() == 1 && cost &&
+               *cost > 0.0064L && *cost < 0.0066L,
+           "model registry parses local capability and pricing metadata and calculates cost");
     expect(!ava::config::usage_cost_usd(ava::config::ModelPricing{}, usage),
            "usage cost remains unknown when pricing rates are absent");
     const ava::provider::TokenUsage cached_usage{.input_tokens = 1000,

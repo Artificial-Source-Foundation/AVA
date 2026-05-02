@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -23,6 +24,13 @@ struct ProviderRequest {
   std::vector<ChatMessage> messages;
   std::vector<std::string> tools_json;
   bool stream = true;
+  std::optional<long long> max_output_tokens = std::nullopt;
+};
+
+struct ProviderAuthContext {
+  std::string access_token;
+  std::string credential_type;
+  std::string account_id;
 };
 
 struct TokenUsage {
@@ -65,6 +73,18 @@ enum class StreamEventType {
   Error,
 };
 
+enum class ProviderErrorKind {
+  Authentication,
+  RateLimited,
+  Quota,
+  InvalidRequest,
+  ContextOverflow,
+  Refusal,
+  ContentFilter,
+  Transient,
+  Unknown,
+};
+
 struct StreamEvent {
   StreamEventType type = StreamEventType::Done;
   std::string text;
@@ -74,11 +94,25 @@ struct StreamEvent {
   std::optional<TokenUsage> usage;
 };
 
+class StreamParser {
+ public:
+  virtual ~StreamParser() = default;
+  [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> append(std::string_view chunk) = 0;
+  [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> finish() = 0;
+};
+
 class Provider {
  public:
   virtual ~Provider() = default;
   [[nodiscard]] virtual ava::core::Result<HttpRequest> build_request(const ProviderRequest& request,
                                                                      std::string_view access_token) const = 0;
+  [[nodiscard]] virtual ava::core::Result<HttpRequest> build_request(const ProviderRequest& request,
+                                                                     const ProviderAuthContext& auth) const;
+  [[nodiscard]] virtual ava::core::VoidResult apply_auth_options(HttpRequest& request,
+                                                                 const ProviderAuthContext& auth) const;
+  [[nodiscard]] virtual std::unique_ptr<StreamParser> create_stream_parser() const;
+  [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> parse_response(const HttpResponse& response,
+                                                                                   bool stream) const;
 };
 
 class Transport {
@@ -90,11 +124,33 @@ class Transport {
   [[nodiscard]] virtual ava::core::Result<HttpResponse> send(const HttpRequest& request) = 0;
   [[nodiscard]] virtual bool supports_streaming() const noexcept;
   [[nodiscard]] virtual ava::core::Result<HttpResponse> send_streaming(const HttpRequest& request,
-                                                                       BodyChunkSink on_body_chunk,
-                                                                       CancelCallback cancel_requested = nullptr);
+                                                                        BodyChunkSink on_body_chunk,
+                                                                        CancelCallback cancel_requested = nullptr);
+};
+
+struct RetryOptions {
+  int max_attempts = 3;
+  int base_delay_ms = 250;
+  int max_retry_after_ms = 60'000;
+};
+
+class RetryTransport final : public Transport {
+ public:
+  RetryTransport(Transport& inner, RetryOptions options = {});
+  [[nodiscard]] ava::core::Result<HttpResponse> send(const HttpRequest& request) override;
+  [[nodiscard]] bool supports_streaming() const noexcept override;
+  [[nodiscard]] ava::core::Result<HttpResponse> send_streaming(const HttpRequest& request, BodyChunkSink on_body_chunk,
+                                                               CancelCallback cancel_requested = nullptr) override;
+
+ private:
+  Transport& inner_;
+  RetryOptions options_;
 };
 
 [[nodiscard]] std::string to_string(StreamEventType type);
+[[nodiscard]] std::string to_string(ProviderErrorKind kind);
+[[nodiscard]] ProviderErrorKind classify_provider_error(const HttpResponse& response);
+[[nodiscard]] std::optional<std::string> retry_after_header(const HttpResponse& response);
 [[nodiscard]] bool is_context_overflow_error(const ava::core::Error& error);
 
 }  // namespace ava::provider

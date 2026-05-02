@@ -18,7 +18,6 @@
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/config/xdg_paths.h"
-#include "ava/provider/registry.h"
 
 namespace {
 
@@ -107,13 +106,8 @@ int run(int argc, char** argv) {
         return 2;
       }
       const std::string_view provider(argv[++index]);
-      const auto registry = ava::provider::builtin_provider_registry();
-      if (!registry.contains(provider)) {
-        std::cerr << "unsupported connect provider: " << provider << '\n';
-        return 2;
-      }
       if (provider != "openai") {
-        std::cerr << "connect provider is not implemented yet: " << provider << '\n';
+        std::cerr << "unsupported connect provider: " << provider << '\n';
         return 2;
       }
       if (index + 1 != argc) {

@@ -9,7 +9,7 @@ int main()
     terminal::Session terminal_session;
 
     int height = 15;
-    int width = 80;
+    int width = 20;
     int y = terminal_session.rows() - height;
     int x = 10;
 
@@ -18,7 +18,8 @@ int main()
     window.erase();
     window.refresh();
     window.box(0, 0);
-    window.addstr(1, 2, "Dark red window");
+    terminal::ComplexString long_line(u8"Dark red window: this line is longer than the width of the window.");
+    window.addstr(1, 2, long_line);
     terminal_session.refresh();
     window.refresh();
     wch = terminal_session.get_wch();

@@ -105,7 +105,6 @@ LineResult with_openai_runtime(ShellState& state, std::string_view offline_suffi
     return line_result;
   }
   ava::provider::CurlCliTransport transport;
-  ava::provider::RetryTransport retry_transport(transport);
   auto request_credential = ava::config::openai_credential_for_request(state.session.paths, **credential, transport);
   if (!request_credential) {
     add_output(line_result, request_credential.error().format() + std::string(offline_suffix));
@@ -125,7 +124,7 @@ LineResult with_openai_runtime(ShellState& state, std::string_view offline_suffi
   run_options.access_token = *token;
   run_options.openai_oauth = request_credential->type == ava::config::OpenAICredentialType::OAuth;
   run_options.openai_account_id = openai_account_id;
-  return callback(provider, retry_transport, run_options);
+  return callback(provider, transport, run_options);
 }
 
 LineResult handle_line(ShellState& state, const std::string& line,

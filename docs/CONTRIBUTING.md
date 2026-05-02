@@ -16,6 +16,14 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+Preset equivalent:
+
+```sh
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+```
+
 Sanitizer pass:
 
 ```sh
@@ -23,6 +31,16 @@ cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
 cmake --build build-sanitize
 ctest --test-dir build-sanitize --output-on-failure
 ```
+
+Preset equivalent:
+
+```sh
+cmake --preset sanitize
+cmake --build --preset sanitize
+ctest --preset sanitize
+```
+
+Tests currently build into one `ava_tests` CTest target from focused test sources under `tests/`. LSP coverage uses the `ava_fake_lsp_server` support executable.
 
 ## Formatting And Static Checks
 

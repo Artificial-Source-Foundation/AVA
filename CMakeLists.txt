@@ -51,6 +51,7 @@ add_library(ava_core
   src/ava/provider/anthropic_provider.cpp
   src/ava/provider/openai_provider.cpp
   src/ava/provider/provider.cpp
+  src/ava/provider/provider_utils.cpp
   src/ava/provider/registry.cpp
   src/ava/session/compaction.cpp
   src/ava/session/export.cpp

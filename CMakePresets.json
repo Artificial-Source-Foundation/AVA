@@ -1,0 +1,70 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "Developer build",
+      "description": "Configure a local developer build with tests and compile commands enabled.",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "AVA_BUILD_TESTS": "ON",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "sanitize",
+      "displayName": "Sanitizer build",
+      "description": "Configure a test build with AddressSanitizer and UndefinedBehaviorSanitizer enabled.",
+      "inherits": "dev",
+      "binaryDir": "${sourceDir}/build-sanitize",
+      "cacheVariables": {
+        "AVA_ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release build",
+      "description": "Configure an optimized build without tests.",
+      "binaryDir": "${sourceDir}/build-release",
+      "cacheVariables": {
+        "AVA_BUILD_TESTS": "OFF",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "sanitize",
+      "configurePreset": "sanitize"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "sanitize",
+      "configurePreset": "sanitize",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

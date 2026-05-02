@@ -1,7 +1,5 @@
 #include "ava/provider/anthropic_provider.h"
 
-#include <algorithm>
-#include <cctype>
 #include <cstdlib>
 #include <optional>
 #include <string_view>
@@ -9,6 +7,7 @@
 #include <vector>
 
 #include "ava/core/json.h"
+#include "ava/provider/provider_utils.h"
 
 namespace ava::provider {
 namespace {
@@ -27,111 +26,7 @@ std::string trim_trailing_slashes(std::string value) {
   return value;
 }
 
-std::string_view trim(std::string_view value) {
-  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) value.remove_prefix(1);
-  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) value.remove_suffix(1);
-  return value;
-}
-
-bool is_json_object_shape(std::string_view value) {
-  value = trim(value);
-  if (value.size() < 2 || value.front() != '{') return false;
-  bool in_string = false;
-  bool escaped = false;
-  int depth = 0;
-  std::size_t end = std::string_view::npos;
-  for (std::size_t index = 0; index < value.size(); ++index) {
-    const char ch = value[index];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (ch == '\\' && in_string) {
-      escaped = true;
-      continue;
-    }
-    if (ch == '"') {
-      in_string = !in_string;
-      continue;
-    }
-    if (in_string) continue;
-    if (ch == '{') ++depth;
-    if (ch == '}') {
-      --depth;
-      if (depth == 0) {
-        end = index;
-        break;
-      }
-      if (depth < 0) return false;
-    }
-  }
-  if (in_string || depth != 0 || end == std::string_view::npos) return false;
-  if (!trim(value.substr(end + 1)).empty()) return false;
-  const auto first_member = trim(value.substr(1, end - 1));
-  return first_member.empty() || first_member.front() == '"';
-}
-
-void redact_json_string_value(std::string& snippet, std::string_view key) {
-  std::size_t position = 0;
-  const std::string quoted_key = "\"" + std::string(key) + "\"";
-  while ((position = snippet.find(quoted_key, position)) != std::string::npos) {
-    const auto colon = snippet.find(':', position + quoted_key.size());
-    if (colon == std::string::npos) return;
-    auto value = colon + 1;
-    while (value < snippet.size() && std::isspace(static_cast<unsigned char>(snippet[value])) != 0) ++value;
-    if (value >= snippet.size() || snippet[value] != '"') {
-      position = value;
-      continue;
-    }
-    bool escaped = false;
-    bool redacted = false;
-    for (std::size_t end = value + 1; end < snippet.size(); ++end) {
-      const char ch = snippet[end];
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch == '\\') {
-        escaped = true;
-        continue;
-      }
-      if (ch == '"') {
-        snippet.replace(value + 1, end - value - 1, "[redacted]");
-        position = value + std::string_view("[redacted]").size() + 2;
-        redacted = true;
-        break;
-      }
-    }
-    if (!redacted) {
-      snippet.replace(value + 1, std::string::npos, "[redacted]");
-      position = snippet.size();
-    }
-  }
-}
-
-std::string sanitized_body_snippet(std::string_view body) {
-  constexpr std::size_t kMaxSnippet = 256;
-  constexpr std::size_t kMaxSanitizeBytes = 4096;
-  std::string snippet(body.substr(0, std::min(body.size(), kMaxSanitizeBytes)));
-  for (const std::string_view secret_key : {"access_token", "refresh_token", "api_key", "x-api-key", "Authorization"}) {
-    redact_json_string_value(snippet, secret_key);
-  }
-  std::size_t bearer = 0;
-  while ((bearer = snippet.find("Bearer ", bearer)) != std::string::npos) {
-    auto end = bearer + std::string_view("Bearer ").size();
-    while (end < snippet.size() && std::isspace(static_cast<unsigned char>(snippet[end])) == 0 && snippet[end] != '"') {
-      ++end;
-    }
-    snippet.replace(bearer, end - bearer, "Bearer [redacted]");
-    bearer += std::string_view("Bearer [redacted]").size();
-  }
-  if (snippet.size() > kMaxSnippet) snippet.resize(kMaxSnippet);
-  return snippet;
-}
-
-std::string message_role(const ChatMessage& message) {
-  return message.role == "assistant" ? "assistant" : "user";
-}
+std::string message_role(const ChatMessage& message) { return message.role == "assistant" ? "assistant" : "user"; }
 
 std::string message_json(const ChatMessage& message) {
   const std::string role = message_role(message);
@@ -182,8 +77,8 @@ std::string request_body_json(const ProviderRequest& request) {
   const auto messages = collapse_consecutive_roles(request.messages);
   std::string body = "{\"model\":\"" + ava::core::json::escape(request.model_id) +
                      "\",\"max_tokens\":" + std::to_string(max_tokens_for_request(request)) +
-                     ",\"stream\":" + (request.stream ? "true" : "false") +
-                     ",\"system\":\"" + ava::core::json::escape(request.system_prompt) + "\",\"messages\":[";
+                     ",\"stream\":" + (request.stream ? "true" : "false") + ",\"system\":\"" +
+                     ava::core::json::escape(request.system_prompt) + "\",\"messages\":[";
   for (std::size_t index = 0; index < messages.size(); ++index) {
     if (index > 0) body += ',';
     body += message_json(messages[index]);
@@ -215,7 +110,8 @@ void merge_usage(TokenUsage& target, const TokenUsage& source) {
   if (source.total_tokens) target.total_tokens = source.total_tokens;
 }
 
-void append_event_for_data(std::vector<StreamEvent>& events, std::map<long long, AnthropicStreamParser::ToolBlock>& tools,
+void append_event_for_data(std::vector<StreamEvent>& events,
+                           std::map<long long, AnthropicStreamParser::ToolBlock>& tools,
                            std::optional<TokenUsage>& usage, std::string_view data) {
   if (!is_json_object_shape(data)) {
     append_stream_error(events, "malformed Anthropic stream event");
@@ -271,7 +167,7 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<long long,
                                    .tool_call_id = tool == tools.end() ? "" : tool->second.id,
                                    .tool_name = "",
                                    .error_message = "",
-                                    .usage = std::nullopt});
+                                   .usage = std::nullopt});
       return;
     }
     append_stream_error(events, "unrecognized Anthropic content_block_delta");
@@ -315,13 +211,14 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<long long,
                                  .tool_name = "",
                                  .error_message = error ? ava::core::json::string_field(*error, "message").value_or("")
                                                         : ava::core::json::string_field(data, "message").value_or(""),
-                                  .usage = std::nullopt});
+                                 .usage = std::nullopt});
     return;
   }
   append_stream_error(events, "unrecognized Anthropic stream event");
 }
 
-void append_events_for_sse_line(std::vector<StreamEvent>& events, std::map<long long, AnthropicStreamParser::ToolBlock>& tools,
+void append_events_for_sse_line(std::vector<StreamEvent>& events,
+                                std::map<long long, AnthropicStreamParser::ToolBlock>& tools,
                                 std::optional<TokenUsage>& usage, std::string& data, std::string line) {
   if (!line.empty() && line.back() == '\r') line.pop_back();
   if (line.empty()) {
@@ -355,14 +252,14 @@ ava::core::Result<HttpRequest> AnthropicProvider::build_request(const ProviderRe
   }
   return HttpRequest{.method = "POST",
                      .url = base_url_ + "/v1/messages",
-                      .headers = {{"x-api-key", std::string(access_token)},
-                                  {"anthropic-version", std::string(kAnthropicVersion)},
-                                  {"Content-Type", "application/json"},
-                                  {"Accept", request.stream ? "text/event-stream" : "application/json"}},
-                      .body = request_body_json(request),
-                      .timeout_ms = 60000,
-                      .follow_redirects = false,
-                      .include_response_headers = false,
+                     .headers = {{"x-api-key", std::string(access_token)},
+                                 {"anthropic-version", std::string(kAnthropicVersion)},
+                                 {"Content-Type", "application/json"},
+                                 {"Accept", request.stream ? "text/event-stream" : "application/json"}},
+                     .body = request_body_json(request),
+                     .timeout_ms = 60000,
+                     .follow_redirects = false,
+                     .include_response_headers = false,
                      .resolve_hosts = {}};
 }
 
@@ -393,7 +290,8 @@ ava::core::Result<std::vector<StreamEvent>> AnthropicStreamParser::append(std::s
   while (true) {
     const auto newline = pending_line_.find('\n', search_from);
     if (newline == std::string::npos) break;
-    append_events_for_sse_line(events, tool_blocks_, usage_, data_, pending_line_.substr(line_start, newline - line_start));
+    append_events_for_sse_line(events, tool_blocks_, usage_, data_,
+                               pending_line_.substr(line_start, newline - line_start));
     line_start = newline + 1;
     search_from = line_start;
   }
@@ -435,7 +333,11 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse_response(const H
     error.with_context("status", std::to_string(response.status_code));
     error.with_context("provider_error_kind", to_string(classify_provider_error(response)));
     if (const auto retry_after = retry_after_header(response)) error.with_context("retry_after", *retry_after);
-    if (!response.body.empty()) error.with_context("body_snippet", sanitized_body_snippet(response.body));
+    if (!response.body.empty()) {
+      error.with_context("body_snippet",
+                         sanitized_body_snippet(response.body, {"access_token", "refresh_token", "api_key", "x-api-key",
+                                                                "Authorization"}));
+    }
     return std::unexpected(std::move(error));
   }
   return parse_anthropic_sse(response.body);
@@ -482,7 +384,11 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(const HttpR
   }
   if (!parsed_content) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "Anthropic response content is missing");
-    if (!response.body.empty()) error.with_context("body_snippet", sanitized_body_snippet(response.body));
+    if (!response.body.empty()) {
+      error.with_context("body_snippet",
+                         sanitized_body_snippet(response.body, {"access_token", "refresh_token", "api_key", "x-api-key",
+                                                                "Authorization"}));
+    }
     return std::unexpected(std::move(error));
   }
   events.push_back(StreamEvent{.type = StreamEventType::Done,
@@ -502,8 +408,8 @@ std::optional<TokenUsage> parse_anthropic_usage(std::string_view body) {
   usage.output_tokens = non_negative_integer_field(usage_view, "output_tokens");
   usage.cache_read_tokens = non_negative_integer_field(usage_view, "cache_read_input_tokens");
   usage.cache_write_tokens = non_negative_integer_field(usage_view, "cache_creation_input_tokens");
-  const long long input_total = regular_input_tokens.value_or(0) + usage.cache_read_tokens.value_or(0) +
-                                usage.cache_write_tokens.value_or(0);
+  const long long input_total =
+      regular_input_tokens.value_or(0) + usage.cache_read_tokens.value_or(0) + usage.cache_write_tokens.value_or(0);
   if (input_total > 0) usage.input_tokens = input_total;
   const long long total = input_total + usage.output_tokens.value_or(0);
   if (total > 0) usage.total_tokens = total;

@@ -10,6 +10,9 @@
 
 namespace ava::tools {
 
+[[nodiscard]] bool is_git_dir(const std::filesystem::path& path);
+[[nodiscard]] bool is_generated_dir(const std::filesystem::path& path);
+
 class IgnoreMatcher {
  private:
   struct Rule {

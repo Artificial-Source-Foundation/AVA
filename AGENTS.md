@@ -14,7 +14,7 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 - `src/ava/session/`: append-only JSONL session storage and session-level formatting/lifecycle helpers.
 - `src/ava/context/`: project/global instruction loading for provider context.
 - `src/ava/tui/`: custom terminal UI rendering, input handling, runtime glue, and terminal abstraction.
-- `tests/core_tests.cpp`: current single test binary. Add focused regression coverage near the related subsystem section until tests are split by module.
+- `tests/`: focused test sources linked into the `ava_tests` CTest target, plus support fakes under `tests/support/`.
 
 ## Local Workflow
 
@@ -22,6 +22,14 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 cmake -S . -B build -DAVA_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
+```
+
+Preset equivalent:
+
+```sh
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
 ```
 
 Sanitizers:

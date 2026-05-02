@@ -19,12 +19,28 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+Equivalent CMake presets are available for local development:
+
+```sh
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+```
+
 Sanitizer build:
 
 ```sh
 cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
 cmake --build build-sanitize
 ctest --test-dir build-sanitize --output-on-failure
+```
+
+Or with presets:
+
+```sh
+cmake --preset sanitize
+cmake --build --preset sanitize
+ctest --preset sanitize
 ```
 
 GitHub Actions runs both the normal and sanitizer test jobs on pushes and pull requests targeting `develop`. Dependabot is enabled for GitHub Actions updates on `develop`.

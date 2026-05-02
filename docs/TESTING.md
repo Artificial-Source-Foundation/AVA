@@ -8,6 +8,16 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+Preset equivalent:
+
+```sh
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+```
+
+The test suite is built as one `ava_tests` CTest target from focused test sources under `tests/`. The LSP tests also build and use `ava_fake_lsp_server` from `tests/support/`.
+
 ## Headless Tool Smoke
 
 After provider streaming, tool schema, permission, or dispatcher changes, run a live headless smoke with configured OpenAI auth. Keep the workspace isolated under `/tmp/opencode` so mutating tools do not touch the repository.
@@ -27,6 +37,14 @@ Recommended coverage:
 cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
 cmake --build build-sanitize
 ctest --test-dir build-sanitize --output-on-failure
+```
+
+Preset equivalent:
+
+```sh
+cmake --preset sanitize
+cmake --build --preset sanitize
+ctest --preset sanitize
 ```
 
 The sanitizer preset enables AddressSanitizer and UndefinedBehaviorSanitizer for supported non-MSVC builds.
@@ -53,7 +71,7 @@ git --no-pager diff --check
 
 ## Coverage Areas
 
-The current single test binary covers:
+The `ava_tests` binary covers:
 
 - mode parsing
 - session JSONL storage, resume, listing, corruption handling, and permissions
@@ -64,6 +82,6 @@ The current single test binary covers:
 - permission audit persistence, file/search/bash/webfetch/LSP tools, spill files, and atomic file writes
 - tool dispatcher and agent loop
 - print mode and JSONL RPC success, denial/recovery, malformed input, cancellation, and refresh paths
-- minimal TUI rendering/input helpers
+- TUI rendering, input, keybindings, palette, permission prompt, markdown, UTF-8, and scroll helpers
 
 Add regression tests for every safety-sensitive bug fix.

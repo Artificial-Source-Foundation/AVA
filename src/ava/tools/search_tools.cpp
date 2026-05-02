@@ -18,21 +18,6 @@ namespace {
 constexpr std::size_t kSearchVisitedProgressInterval = 10000;
 constexpr std::size_t kSearchMatchProgressInterval = 500;
 
-bool is_git_dir(const std::filesystem::path& path) {
-  for (const auto& part : path) {
-    const auto name = part.string();
-    if (name == ".git") {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool is_generated_dir(const std::filesystem::path& path) {
-  const auto name = path.filename().string();
-  return name == "build" || name == "node_modules" || name == "target" || name == "dist";
-}
-
 std::string regex_escape(char ch) {
   static const std::string special = R"(\.^$|()[]{}+)";
   if (special.find(ch) != std::string::npos) {

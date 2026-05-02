@@ -13,18 +13,6 @@ namespace {
 
 constexpr std::size_t kMaxIgnoreRuleWalkEntries = 100000;
 
-bool is_git_dir(const std::filesystem::path& path) {
-  for (const auto& part : path) {
-    if (part == ".git") return true;
-  }
-  return false;
-}
-
-bool is_generated_dir(const std::filesystem::path& path) {
-  const auto name = path.filename().string();
-  return name == "build" || name == "node_modules" || name == "target" || name == "dist";
-}
-
 bool is_blank(std::string_view value) {
   return std::ranges::all_of(value, [](char ch) { return std::isspace(static_cast<unsigned char>(ch)) != 0; });
 }
@@ -110,6 +98,18 @@ bool starts_with_path_prefix(std::string_view value, std::string_view prefix) {
 }
 
 }  // namespace
+
+bool is_git_dir(const std::filesystem::path& path) {
+  for (const auto& part : path) {
+    if (part == ".git") return true;
+  }
+  return false;
+}
+
+bool is_generated_dir(const std::filesystem::path& path) {
+  const auto name = path.filename().string();
+  return name == "build" || name == "node_modules" || name == "target" || name == "dist";
+}
 
 IgnoreMatcher::IgnoreMatcher(std::filesystem::path workspace_dir) : workspace_dir_(std::move(workspace_dir)) {}
 

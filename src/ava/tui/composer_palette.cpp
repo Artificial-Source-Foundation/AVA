@@ -68,33 +68,30 @@ std::string slash_command_description_display(const SlashCommandItem& item) {
   return text;
 }
 
-std::string render_palette_top_border(std::string_view header, std::size_t width) {
-  if (width < 8) {
-    return std::string(kSgrDim) + detail::fit_line(std::string("  ") + std::string(header), width) +
-           std::string(kSgrReset);
-  }
-  std::string line = "  -- ";
-  line += header;
-  line += " ";
-  auto line_cols = detail::terminal_text_columns(line);
-  if (line_cols < width) {
-    line += std::string(width - line_cols, '-');
-  }
-  line = detail::fit_line(std::move(line), width);
-  return std::string(kSgrDim) + line + std::string(kSgrReset);
+std::string palette_prefix() {
+  return std::string(kSgrAccent) + std::string(kComposerBar) + std::string(kSgrReset) + std::string(kSgrComposerBg) +
+         "  ";
+}
+
+std::size_t palette_content_width(std::size_t width) {
+  const auto prefix_cols = detail::terminal_text_columns(palette_prefix());
+  return width > prefix_cols ? width - prefix_cols : width;
+}
+
+std::string palette_surface_line(std::string content, std::size_t width) {
+  return detail::composer_surface_line(palette_prefix() + std::move(content), width);
 }
 
 std::string render_palette_item_columns(const SlashCommandItem& item, bool selected, std::size_t selected_index,
                                         std::size_t match_count, std::size_t width, std::size_t cmd_col_width,
                                         std::size_t category_col_width, std::size_t hint_col_width) {
+  static_cast<void>(selected_index);
+  static_cast<void>(match_count);
   auto command_text = slash_command_display(item);
-  if (selected && match_count > 0) {
-    command_text += " (" + std::to_string(selected_index + 1) + '/' + std::to_string(match_count) + ')';
-  }
   const auto hint_text = slash_command_hint_display(item);
   const auto description_text = slash_command_description_display(item);
 
-  std::string line = selected ? "> " : "  ";
+  std::string line = selected ? "› " : "  ";
   line += command_text;
 
   auto cmd_cols = detail::terminal_text_columns(command_text);
@@ -123,24 +120,21 @@ std::string render_palette_item_columns(const SlashCommandItem& item, bool selec
     line += "  " + description_text;
   }
 
-  line = detail::fit_line(std::move(line), width);
-  if (selected && detail::terminal_text_columns(line + " selected") <= width) {
-    line += std::string(kSgrDim) + " selected" + std::string(kSgrReset);
-  }
+  line = detail::fit_line(std::move(line), palette_content_width(width));
   if (selected) {
-    line = std::string(kReverseVideo) + line + std::string(kSgrReset);
+    line = std::string(kReverseVideo) + line + std::string(kSgrReset) + std::string(kSgrComposerBg);
   }
-  if (!item.enabled && !selected) line = std::string(kSgrDim) + line + std::string(kSgrReset);
-  return line;
+  if (!item.enabled && !selected)
+    line = std::string(kSgrDim) + line + std::string(kSgrReset) + std::string(kSgrComposerBg);
+  return palette_surface_line(std::move(line), width);
 }
 
 std::string render_palette_item_compact(const SlashCommandItem& item, bool selected, std::size_t selected_index,
                                         std::size_t match_count, std::size_t width) {
-  std::string line = selected ? "> " : "  ";
+  static_cast<void>(selected_index);
+  static_cast<void>(match_count);
+  std::string line = selected ? "› " : "  ";
   line += slash_command_display(item);
-  if (selected && match_count > 0) {
-    line += " (" + std::to_string(selected_index + 1) + '/' + std::to_string(match_count) + ')';
-  }
   const auto hint_text = slash_command_hint_display(item);
   if (!hint_text.empty()) {
     line += " " + hint_text;
@@ -152,15 +146,13 @@ std::string render_palette_item_compact(const SlashCommandItem& item, bool selec
   if (!description_text.empty()) {
     line += "  " + description_text;
   }
-  line = detail::fit_line(std::move(line), width);
-  if (selected && detail::terminal_text_columns(line + " selected") <= width) {
-    line += std::string(kSgrDim) + " selected" + std::string(kSgrReset);
-  }
+  line = detail::fit_line(std::move(line), palette_content_width(width));
   if (selected) {
-    line = std::string(kReverseVideo) + line + std::string(kSgrReset);
+    line = std::string(kReverseVideo) + line + std::string(kSgrReset) + std::string(kSgrComposerBg);
   }
-  if (!item.enabled && !selected) line = std::string(kSgrDim) + line + std::string(kSgrReset);
-  return line;
+  if (!item.enabled && !selected)
+    line = std::string(kSgrDim) + line + std::string(kSgrReset) + std::string(kSgrComposerBg);
+  return palette_surface_line(std::move(line), width);
 }
 
 }  // namespace
@@ -176,18 +168,12 @@ std::vector<std::string> render_slash_palette(const ComposerSnapshot& snapshot, 
   const auto selected =
       clamp_slash_palette_selection(snapshot.input, snapshot.slash_commands, snapshot.selected_slash_command_index);
 
-  const bool can_show_border = max_lines > 1;
-  const auto item_budget = can_show_border ? max_lines - 1 : max_lines;
+  const auto item_budget = max_lines;
 
   if (matches.empty()) {
-    const auto header =
-        prefix.empty() ? std::string("commands · 0 matches") : "commands matching /" + prefix + " · 0 matches";
-    if (can_show_border) {
-      lines.push_back(render_palette_top_border(header, width));
-    }
     if (lines.size() < max_lines) {
       lines.push_back(
-          detail::fit_line(prefix.empty() ? "  no matching commands" : "  no commands match /" + prefix, width));
+          palette_surface_line(prefix.empty() ? "  no matching commands" : "  no commands match /" + prefix, width));
     }
     return lines;
   }
@@ -195,13 +181,6 @@ std::vector<std::string> render_slash_palette(const ComposerSnapshot& snapshot, 
   const auto visible_items = std::min(matches.size(), item_budget);
   auto start = selected >= visible_items ? selected - visible_items + 1 : 0;
   if (start + visible_items > matches.size()) start = matches.size() - visible_items;
-  auto header = prefix.empty() ? std::string("commands") : "commands matching /" + prefix;
-  header += " · " + std::to_string(matches.size()) + (matches.size() == 1 ? " match" : " matches");
-  header += " · ↑/↓ move · Enter select";
-  if (start > 0) header += " · " + std::to_string(start) + " above";
-  if (start + visible_items < matches.size()) {
-    header += " · " + std::to_string(matches.size() - start - visible_items) + " below";
-  }
 
   std::size_t max_cmd_cols = 0;
   std::size_t max_category_cols = 0;
@@ -211,9 +190,6 @@ std::vector<std::string> render_slash_palette(const ComposerSnapshot& snapshot, 
   for (std::size_t offset = 0; offset < visible_items; ++offset) {
     const auto& item = matches[start + offset];
     auto command_text = slash_command_display(item);
-    if (start + offset == selected && !matches.empty()) {
-      command_text += " (" + std::to_string(selected + 1) + '/' + std::to_string(matches.size()) + ')';
-    }
     max_cmd_cols = std::max(max_cmd_cols, detail::terminal_text_columns(command_text));
     if (!item.category.empty()) {
       has_any_category = true;
@@ -229,10 +205,6 @@ std::vector<std::string> render_slash_palette(const ComposerSnapshot& snapshot, 
   const bool use_columns = width >= 40 && (2 + max_cmd_cols + (has_any_category ? max_category_cols + 2 : 0) +
                                                (has_any_hint ? max_hint_cols + 2 : 0) + 4 <=
                                            width);
-
-  if (can_show_border) {
-    lines.push_back(render_palette_top_border(header, width));
-  }
 
   for (std::size_t offset = 0; offset < visible_items && lines.size() < max_lines; ++offset) {
     const auto index = start + offset;
@@ -331,8 +303,7 @@ std::optional<std::size_t> slash_palette_selection_for_screen_row(const Composer
   const auto palette_line_budget = height > fixed_lines ? std::min(detail::kMaxPaletteLines, height - fixed_lines) : 0;
   if (palette_line_budget == 0) return std::nullopt;
 
-  const bool can_show_border = palette_line_budget > 1;
-  const auto item_budget = can_show_border ? palette_line_budget - 1 : palette_line_budget;
+  const auto item_budget = palette_line_budget;
   const auto visible_items = std::min(matches.size(), item_budget);
   if (visible_items == 0) return std::nullopt;
 
@@ -341,10 +312,10 @@ std::optional<std::size_t> slash_palette_selection_for_screen_row(const Composer
   auto start = selected >= visible_items ? selected - visible_items + 1 : 0;
   if (start + visible_items > matches.size()) start = matches.size() - visible_items;
 
-  const auto palette_lines = visible_items + (can_show_border ? std::size_t{1} : std::size_t{0});
+  const auto palette_lines = visible_items;
   const auto non_transcript_lines = fixed_lines + palette_lines;
   const auto transcript_height = height > non_transcript_lines ? height - non_transcript_lines : 0;
-  const auto first_item_row = transcript_height + 1 + (can_show_border ? std::size_t{1} : std::size_t{0});
+  const auto first_item_row = transcript_height + 1;
   if (row < first_item_row) return std::nullopt;
   const auto item_offset = row - first_item_row;
   if (item_offset >= visible_items) return std::nullopt;

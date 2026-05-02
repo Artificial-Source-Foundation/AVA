@@ -2,9 +2,11 @@
 
 #include <unistd.h>
 
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -16,6 +18,7 @@
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/config/xdg_paths.h"
+#include "ava/provider/registry.h"
 
 namespace {
 
@@ -40,10 +43,42 @@ void print_help() {
 
 bool stdin_is_tty() { return isatty(STDIN_FILENO) == 1; }
 
+bool stdout_is_tty() { return isatty(STDOUT_FILENO) == 1; }
+
 bool is_cli_option(std::string_view arg) {
   return arg == "--help" || arg == "-h" || arg == "--version" || arg == "--mode" || arg == "--session" ||
          arg == "--continue" || arg == "-c" || arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--json" ||
          arg == "--output" || arg == "--allow" || arg == "--allow-tool";
+}
+
+std::string_view exit_status_text(int status) {
+  if (status == 0) return "session saved";
+  if (status == 130) return "interrupted, session saved";
+  return "session saved with warnings";
+}
+
+void print_exit_card(const ava::app::RuntimeSession& session, int status) {
+  const bool use_color = stdout_is_tty() && std::getenv("NO_COLOR") == nullptr;
+  const auto blue = use_color ? std::string_view("\x1b[38;2;77;158;246m") : std::string_view("");
+  const auto muted = use_color ? std::string_view("\x1b[38;2;148;163;184m") : std::string_view("");
+  const auto bold = use_color ? std::string_view("\x1b[1m") : std::string_view("");
+  const auto reset = use_color ? std::string_view("\x1b[0m") : std::string_view("");
+  auto art = [&](std::string_view text) { std::cout << blue << text << reset << '\n'; };
+
+  std::cout << '\n';
+  art("  █████████   █████   █████   █████████");
+  art("  ███░░░░░███ ░░███   ░░███   ███░░░░░███");
+  art(" ░███    ░███  ░███    ░███  ░███    ░███");
+  art(" ░███████████  ░███    ░███  ░███████████");
+  art(" ░███░░░░░███  ░░███   ███   ░███░░░░░███");
+  art(" ░███    ░███   ░░░█████░    ░███    ░███");
+  art(" █████   █████    ░░███      █████   █████");
+  art("░░░░░   ░░░░░      ░░░      ░░░░░   ░░░░░");
+  std::cout << '\n';
+  std::cout << bold << "AVA " << reset << exit_status_text(status) << ". " << muted << "Ready when you are." << reset
+            << '\n';
+  std::cout << muted << "Resume: " << reset << "ava --session " << session.store.session_id() << '\n';
+  std::cout << muted << "Saved:  " << reset << session.store.session_path().string() << '\n';
 }
 
 }  // namespace
@@ -72,8 +107,13 @@ int run(int argc, char** argv) {
         return 2;
       }
       const std::string_view provider(argv[++index]);
-      if (provider != "openai") {
+      const auto registry = ava::provider::builtin_provider_registry();
+      if (!registry.contains(provider)) {
         std::cerr << "unsupported connect provider: " << provider << '\n';
+        return 2;
+      }
+      if (provider != "openai") {
+        std::cerr << "connect provider is not implemented yet: " << provider << '\n';
         return 2;
       }
       if (index + 1 != argc) {
@@ -242,13 +282,10 @@ int run(int argc, char** argv) {
     return 1;
   }
 
-  std::cout << (session->created ? "AVA session started\n" : "AVA session resumed\n");
-  std::cout << "mode: " << ava::agent::to_string(session->mode) << '\n';
-  std::cout << "provider: " << session->model.provider_id << '\n';
-  std::cout << "model: " << session->model.model_id << '\n';
-  std::cout << "session: " << session->store.session_id() << '\n';
-  std::cout << "path: " << session->store.session_path().string() << '\n';
-  return run_interactive(*session);
+  const bool print_farewell = stdin_is_tty() && stdout_is_tty();
+  const int status = run_interactive(*session);
+  if (print_farewell) print_exit_card(*session, status);
+  return status;
 }
 
 }  // namespace ava::app

@@ -29,6 +29,31 @@ struct TranscriptItem {
   std::optional<ToolTimelineItem> tool = std::nullopt;
 };
 
+struct SidebarActivityItem {
+  std::string id = {};
+  std::string label = {};
+  std::string detail = {};
+  ToolTimelineStatus status = ToolTimelineStatus::Running;
+};
+
+struct SidebarModifiedFile {
+  std::string path = {};
+  std::optional<int> added = std::nullopt;
+  std::optional<int> removed = std::nullopt;
+};
+
+struct SidebarSnapshot {
+  std::vector<SidebarActivityItem> activity = {};
+  std::vector<SidebarModifiedFile> modified_files = {};
+  std::string session_id = {};
+  std::string mode = {};
+  std::string provider = {};
+  std::string model = {};
+  std::string workspace = {};
+  std::string git_branch = {};
+  std::string version = {};
+};
+
 struct SlashCommandItem {
   std::string command;
   std::string description;
@@ -116,6 +141,8 @@ struct ComposerSnapshot {
   std::size_t width = 80;
   std::size_t height = 24;
   std::size_t input_cursor = std::string::npos;
+  std::optional<SidebarSnapshot> sidebar = std::nullopt;
+  std::size_t draft_scroll_offset = 0;
 };
 
 [[nodiscard]] std::vector<SlashCommandItem> filter_slash_commands(std::string_view input,
@@ -138,6 +165,7 @@ struct ComposerSnapshot {
 [[nodiscard]] std::optional<std::size_t> slash_palette_selection_for_screen_row(const ComposerSnapshot& snapshot,
                                                                                 std::size_t row);
 [[nodiscard]] std::vector<std::string> render_composer(const ComposerSnapshot& snapshot);
+[[nodiscard]] std::size_t composer_main_width(const ComposerSnapshot& snapshot);
 [[nodiscard]] bool draw_screen(const ComposerSnapshot& snapshot);
 [[nodiscard]] std::string sanitize_terminal_text(std::string_view text);
 [[nodiscard]] std::vector<std::string> split_lines(std::string_view text);

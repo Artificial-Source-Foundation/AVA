@@ -13,6 +13,14 @@
 namespace ava::tui {
 namespace {
 
+using detail::kSgrAccent;
+using detail::kSgrBold;
+using detail::kSgrDim;
+using detail::kSgrError;
+using detail::kSgrReset;
+using detail::kSgrSuccess;
+using detail::kSgrWarning;
+
 constexpr short kPairText = 1;
 constexpr short kPairMuted = 2;
 constexpr short kPairSuccess = 3;
@@ -234,7 +242,7 @@ CursorPlacement input_cursor_placement(const ComposerSnapshot& snapshot, std::si
                                        std::size_t width) {
   const auto input_lines = detail::input_render_lines(snapshot.input);
   const auto composer_lines = detail::composer_block_line_count(snapshot, rendered_line_count);
-  const auto layout = detail::composer_input_layout(input_lines.size(), composer_lines);
+  const auto layout = detail::composer_input_layout(input_lines.size(), composer_lines, snapshot.draft_scroll_offset);
   const auto cursor_line = detail::input_cursor_line(snapshot);
   const auto visible_cursor_line =
       cursor_line < layout.first_visible ? std::size_t{0} : cursor_line - layout.first_visible;
@@ -247,11 +255,128 @@ CursorPlacement input_cursor_placement(const ComposerSnapshot& snapshot, std::si
           .column = column == 0 ? std::size_t{0} : column - 1};
 }
 
+constexpr auto kSidebarWidth = std::size_t{38};
+constexpr auto kSidebarMinTerminalWidth = std::size_t{112};
+
+bool sidebar_visible(const ComposerSnapshot& snapshot, std::size_t width) {
+  return snapshot.sidebar.has_value() && width >= kSidebarMinTerminalWidth;
+}
+
+std::size_t main_width_for(const ComposerSnapshot& snapshot, std::size_t width) {
+  if (!sidebar_visible(snapshot, width)) return width;
+  const auto sidebar_width = std::min<std::size_t>(kSidebarWidth, width / 3);
+  return width > sidebar_width + 1 ? width - sidebar_width - 1 : width;
+}
+
+std::string status_marker(ToolTimelineStatus status) {
+  switch (status) {
+    case ToolTimelineStatus::Running:
+      return std::string(kSgrWarning) + "[~]" + std::string(kSgrReset);
+    case ToolTimelineStatus::Success:
+      return std::string(kSgrSuccess) + "[+]" + std::string(kSgrReset);
+    case ToolTimelineStatus::Error:
+      return std::string(kSgrError) + "[x]" + std::string(kSgrReset);
+  }
+  return std::string(kSgrDim) + "[?]" + std::string(kSgrReset);
+}
+
+void push_sidebar_line(std::vector<std::string>& lines, std::string line, std::size_t width) {
+  lines.push_back(detail::fit_line_preserving_sgr(" " + std::move(line), width));
+}
+
+std::vector<std::string> render_sidebar(const SidebarSnapshot& sidebar, std::size_t width, std::size_t height) {
+  std::vector<std::string> lines;
+  lines.reserve(height);
+  push_sidebar_line(lines, std::string(kSgrBold) + std::string(kSgrAccent) + "AVA" + std::string(kSgrReset), width);
+  push_sidebar_line(lines, std::string(kSgrDim) + "live session" + std::string(kSgrReset), width);
+  push_sidebar_line(lines, "", width);
+
+  push_sidebar_line(lines, std::string(kSgrBold) + "Activity" + std::string(kSgrReset), width);
+  if (sidebar.activity.empty()) {
+    push_sidebar_line(lines, std::string(kSgrDim) + "idle" + std::string(kSgrReset), width);
+  } else {
+    for (const auto& activity : sidebar.activity) {
+      auto line = status_marker(activity.status) + " " + sanitize_terminal_text(activity.label);
+      if (!activity.detail.empty()) {
+        line += " " + std::string(kSgrDim) + sanitize_terminal_text(activity.detail) + std::string(kSgrReset);
+      }
+      push_sidebar_line(lines, std::move(line), width);
+      if (lines.size() >= height) return lines;
+    }
+  }
+  push_sidebar_line(lines, "", width);
+
+  push_sidebar_line(lines, std::string(kSgrBold) + "Modified Files" + std::string(kSgrReset), width);
+  if (sidebar.modified_files.empty()) {
+    push_sidebar_line(lines, std::string(kSgrDim) + "no file changes yet" + std::string(kSgrReset), width);
+  } else {
+    for (const auto& file : sidebar.modified_files) {
+      auto line = sanitize_terminal_text(file.path);
+      if (file.added || file.removed) {
+        line += " ";
+        if (file.added) line += std::string(kSgrSuccess) + "+" + std::to_string(*file.added) + std::string(kSgrReset);
+        if (file.removed)
+          line += " " + std::string(kSgrError) + "-" + std::to_string(*file.removed) + std::string(kSgrReset);
+      } else {
+        line += " " + std::string(kSgrDim) + "changed" + std::string(kSgrReset);
+      }
+      push_sidebar_line(lines, std::move(line), width);
+      if (lines.size() >= height) return lines;
+    }
+  }
+  push_sidebar_line(lines, "", width);
+
+  push_sidebar_line(lines, std::string(kSgrBold) + "Session" + std::string(kSgrReset), width);
+  push_sidebar_line(lines, "mode " + sanitize_terminal_text(sidebar.mode), width);
+  push_sidebar_line(
+      lines, "model " + sanitize_terminal_text(sidebar.provider) + "/" + sanitize_terminal_text(sidebar.model), width);
+  push_sidebar_line(lines, "session " + sanitize_terminal_text(sidebar.session_id), width);
+  if (!sidebar.workspace.empty()) push_sidebar_line(lines, "cwd " + sanitize_terminal_text(sidebar.workspace), width);
+  if (!sidebar.git_branch.empty())
+    push_sidebar_line(lines, "branch " + sanitize_terminal_text(sidebar.git_branch), width);
+
+  while (lines.size() + 1 < height) lines.emplace_back();
+  if (!sidebar.version.empty() && lines.size() < height) {
+    push_sidebar_line(lines, std::string(kSgrDim) + "AVA " + sidebar.version + std::string(kSgrReset), width);
+  }
+  while (lines.size() < height) lines.emplace_back();
+  return lines;
+}
+
+std::vector<std::string> render_composer_main(ComposerSnapshot snapshot, std::size_t width, std::size_t height) {
+  snapshot.width = width;
+  snapshot.height = height;
+  snapshot.sidebar = std::nullopt;
+  return render_composer(snapshot);
+}
+
+std::string pad_line_to_width(std::string line, std::size_t width) {
+  auto fitted = detail::fit_line_preserving_sgr(std::move(line), width);
+  const auto columns = detail::terminal_text_columns(fitted);
+  if (columns < width) fitted.append(width - columns, ' ');
+  return fitted;
+}
+
 }  // namespace
 
 std::vector<std::string> render_composer(const ComposerSnapshot& snapshot) {
   const auto width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
   const auto height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
+  if (sidebar_visible(snapshot, width)) {
+    const auto sidebar_width = std::min<std::size_t>(kSidebarWidth, width / 3);
+    const auto main_width = main_width_for(snapshot, width);
+    auto main_lines = render_composer_main(snapshot, main_width, height);
+    auto sidebar_lines = render_sidebar(*snapshot.sidebar, sidebar_width, height);
+    std::vector<std::string> combined;
+    combined.reserve(height);
+    for (std::size_t row = 0; row < height; ++row) {
+      const auto main_line = row < main_lines.size() ? main_lines[row] : std::string{};
+      const auto sidebar_line = row < sidebar_lines.size() ? sidebar_lines[row] : std::string{};
+      combined.push_back(pad_line_to_width(main_line, main_width) + std::string(kSgrDim) + "│" +
+                         std::string(kSgrReset) + pad_line_to_width(sidebar_line, sidebar_width));
+    }
+    return combined;
+  }
   std::vector<std::string> lines;
   lines.reserve(height);
 
@@ -301,6 +426,11 @@ std::vector<std::string> render_composer(const ComposerSnapshot& snapshot) {
   return lines;
 }
 
+std::size_t composer_main_width(const ComposerSnapshot& snapshot) {
+  const auto width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
+  return main_width_for(snapshot, width);
+}
+
 bool draw_screen(const ComposerSnapshot& snapshot) {
   initialize_color_pairs();
   if (has_colors()) {
@@ -310,6 +440,7 @@ bool draw_screen(const ComposerSnapshot& snapshot) {
              ' '));
   }
   const auto width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
+  const auto main_width = composer_main_width(snapshot);
   const auto lines = render_composer(snapshot);
 
   if (snapshot.permission_prompt || snapshot.question_prompt) {
@@ -326,7 +457,7 @@ bool draw_screen(const ComposerSnapshot& snapshot) {
   }
 
   if (!snapshot.permission_prompt && !snapshot.question_prompt) {
-    const auto cursor = input_cursor_placement(snapshot, lines.size(), width);
+    const auto cursor = input_cursor_placement(snapshot, lines.size(), main_width);
     move(static_cast<int>(std::min<std::size_t>(cursor.row, LINES > 0 ? LINES - 1 : 0)),
          static_cast<int>(std::min<std::size_t>(cursor.column, COLS > 0 ? COLS - 1 : 0)));
   }

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "ava/core/result.h"
 
@@ -72,8 +73,10 @@ class CursesSession {
 };
 
 void erase_last_utf8_codepoint(std::string& text);
+[[nodiscard]] Key terminal_escape_sequence_key(std::string_view sequence);
 [[nodiscard]] bool terminal_is_tty();
 [[nodiscard]] bool terminal_signal_received();
+[[nodiscard]] int terminal_signal_number();
 void clear_terminal_signal();
 
 }  // namespace ava::tui

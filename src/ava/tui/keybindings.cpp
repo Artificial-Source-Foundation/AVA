@@ -532,7 +532,7 @@ std::string action_description(TuiAction action) {
     case TuiAction::ModeToggle:
       return "Toggle build/plan mode when the slash palette is not active";
     case TuiAction::Interrupt:
-      return "Interrupt or exit the current TUI loop";
+      return "Clear a non-empty composer draft, otherwise exit the current TUI loop";
     case TuiAction::Exit:
       return "Exit the TUI";
     case TuiAction::VariantCycle:

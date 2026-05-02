@@ -452,31 +452,20 @@ std::vector<std::string> render_transcript_lines(const std::vector<TranscriptIte
 std::vector<std::string> visible_transcript_lines(const std::vector<std::string>& rendered_transcript,
                                                   std::size_t width, std::size_t transcript_height,
                                                   std::size_t transcript_scroll_offset) {
+  static_cast<void>(width);
   std::vector<std::string> visible_transcript;
   if (rendered_transcript.size() > transcript_height && transcript_height > 0) {
-    const auto visible_count = transcript_height - 1;
+    const auto visible_count = transcript_height;
     const auto max_offset = rendered_transcript.size() > visible_count ? rendered_transcript.size() - visible_count : 0;
     const auto scroll_offset = std::min(transcript_scroll_offset, max_offset);
     const auto end = rendered_transcript.size() - scroll_offset;
     const auto start = end > visible_count ? end - visible_count : 0;
-    const auto earlier_count = start;
-    const auto newer_count = rendered_transcript.size() - end;
-    auto marker = std::string("↑ ") + std::to_string(earlier_count) + " older lines hidden";
-    if (newer_count > 0) {
-      marker += " · ↓ " + std::to_string(newer_count) + " newer lines hidden";
-    } else {
-      marker += " · PageUp/wheel scrolls history";
-    }
-    visible_transcript.push_back(render_generic_line(marker, width));
     for (std::size_t index = start; index < end; ++index) {
       visible_transcript.push_back(rendered_transcript[index]);
     }
   } else if (transcript_height > 0) {
     for (std::size_t index = 0; index < rendered_transcript.size(); ++index) {
       visible_transcript.push_back(rendered_transcript[index]);
-    }
-    if (rendered_transcript.empty() && transcript_scroll_offset > 0) {
-      visible_transcript.push_back(render_generic_line("transcript: no messages to scroll yet", width));
     }
   }
   return visible_transcript;

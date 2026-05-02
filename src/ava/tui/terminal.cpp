@@ -10,6 +10,7 @@
 #include <clocale>
 #include <csignal>
 #include <cstdio>
+#include <string_view>
 #include <utility>
 
 #include "ava/core/error.h"
@@ -49,7 +50,20 @@ void configure_curses_mouse() {
 #ifdef NCURSES_MOUSE_VERSION
   if (!has_mouse()) return;
   mmask_t previous_mask = 0;
-  static_cast<void>(mousemask(BUTTON1_CLICKED | BUTTON4_PRESSED | BUTTON5_PRESSED, &previous_mask));
+  mmask_t mask = BUTTON1_CLICKED | BUTTON4_PRESSED | BUTTON5_PRESSED;
+#ifdef BUTTON4_CLICKED
+  mask |= BUTTON4_CLICKED;
+#endif
+#ifdef BUTTON4_RELEASED
+  mask |= BUTTON4_RELEASED;
+#endif
+#ifdef BUTTON5_CLICKED
+  mask |= BUTTON5_CLICKED;
+#endif
+#ifdef BUTTON5_RELEASED
+  mask |= BUTTON5_RELEASED;
+#endif
+  static_cast<void>(mousemask(mask, &previous_mask));
 #endif
 }
 
@@ -177,9 +191,16 @@ void erase_last_utf8_codepoint(std::string& text) {
   }
 }
 
+Key terminal_escape_sequence_key(std::string_view sequence) {
+  if (sequence == "[27;2;13~" || sequence == "[13;2u" || sequence == "[13;2~") return Key::ShiftEnter;
+  return Key::Unknown;
+}
+
 bool terminal_is_tty() { return isatty(STDIN_FILENO) != 0 && isatty(STDOUT_FILENO) != 0; }
 
 bool terminal_signal_received() { return g_terminal_signal != 0; }
+
+int terminal_signal_number() { return g_terminal_signal; }
 
 void clear_terminal_signal() { g_terminal_signal = 0; }
 

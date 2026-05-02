@@ -108,26 +108,26 @@ Lessons to adapt:
 
 Current TUI strengths:
 
-- `src/ava/tui/runtime.cpp` owns an extracted ncursesw interactive loop with input, scroll, history, mouse wheel/click support, permission prompt flow, and callback wiring.
-- `src/ava/tui/composer*.cpp` renders a composer-first interface with a fixed bottom input block, transcript, slash palette, compact tool cards, and a permission approval dock.
+- `src/ava/tui/runtime.cpp` owns an extracted ncursesw interactive loop with input, scroll, bounded history, mouse wheel/click support, permission/question prompt flow, spinner processing state, and callback wiring.
+- `src/ava/tui/composer*.cpp` renders a composer-first interface with top-start transcript layout, fixed bottom input block, integrated slash palette, compact tool cards, permission/question docks, draft indicators, and spinner-only processing feedback.
 - `src/ava/tui/terminal.cpp` wraps terminal setup with RAII and wide-character ncurses handling.
-- `docs/USAGE.md` documents current TUI layout, permission prompt keys, commands, and current limits.
-- The TUI already presents tool activity as compact timeline cards and keeps permission decisions backend-owned and auditable.
+- `docs/USAGE.md` documents current TUI layout, permission/question prompt behavior, semantic keybinds, commands, and current limits.
+- The TUI already presents tool activity as compact timeline cards and keeps permission/question decisions backend-owned and auditable.
+- Phase 1 shipped metadata-rich slash commands, disabled command explanations, `/help` and `/hotkeys`, user-configurable semantic keybinds, UTF-8-safe draft editing, undo/yank, bracketed paste, autocomplete dismissal without draft loss, and Ctrl-C clear-before-exit behavior.
 
 Current 1.0 gaps:
 
 - The TUI still uses blocking runtime glue and replayed callback results; it does not fully consume the shared backend event stream.
 - Assistant text and tool results are not live in the interactive TUI even though headless event foundations exist.
-- Backend/RPC `question` resolver support exists, but interactive `question` requests do not open a TUI prompt yet.
 - Session stats, usage/cost, context pressure, loaded context files, and compaction state are not visible enough for long sessions.
-- Slash commands are useful but not yet a full command surface for help/hotkeys, compact/export/session/model/status/new/resume/reload/login workflows.
-- Slash autocomplete is static compared with the target command surface; it does not yet complete command arguments, model names, file/path references, or context/prompt sources.
-- The composer lacks several expected coding-agent editor affordances: semantic editing actions, draft scroll indicators, bracketed paste handling, visible queued follow-up/steering state, and transcript-rendered command output for chat-local commands.
-- Terminal/input hardening is incomplete for v1-level daily use: escape sequence buffering, bracketed paste, word movement/deletion, undo/yank, IME-sensitive cursor placement, Unicode width edge cases, and resize stress need explicit coverage.
+- Slash commands are metadata-rich, but commands that need backend state such as model/session/import/reload/login flows remain disabled or shallow until backend APIs exist.
+- Slash autocomplete is still mostly command-name based; it does not yet complete command arguments, model names, file/path references, or context/prompt sources.
+- The composer has core editor affordances, but visible queued follow-up/steering state is still missing.
+- Mouse-wheel scrolling inside tall composer drafts is still pending. The render state can represent draft offsets, but runtime wheel behavior needs a follow-up fix before this is considered complete.
+- Terminal/input hardening is incomplete for v1-level daily use: broader escape-sequence buffering, IME-sensitive cursor placement, Unicode width edge cases, and resize stress need explicit coverage.
 - Tool cards are summaries only; there is no detail toggle, diff preview, spill-file affordance, or streaming progress view.
-- Thinking/reasoning UI is not specified enough yet: there is no provider-specific variant cycle, no `Ctrl+T` action, and thinking blocks must render in the transcript/pending assistant area rather than leaking into the bottom composer/status area.
-- Keyboard behavior exists as direct key handling, not semantic actions that can be documented, tested, and later customized.
-- Render tests cover static composer behavior, but live event consumption, resize stress, long transcripts, question prompts, and performance are under-covered.
+- Thinking/reasoning UI is not specified enough yet: `Ctrl+T` exists as an inert semantic action, but provider-specific variants and thinking blocks must come from backend capability/event data.
+- Render tests cover static composer behavior, prompts, keybinds, paste, and palette behavior, but live event consumption, resize stress, long transcripts, and performance remain under-covered.
 
 ## Roadmap Phases
 
@@ -148,7 +148,7 @@ Acceptance criteria:
 - TUI non-goals are explicit.
 - Future implementation plans can cite this roadmap instead of rediscovering scope.
 
-Status: this phase is complete when this roadmap is accepted.
+Status: complete. This roadmap was accepted as the frontend companion to the backend roadmap, with Phase 1 implemented and reviewed as the first interaction-contract batch.
 
 ### Phase 1: Interaction Contract Foundation
 
@@ -198,6 +198,10 @@ Acceptance criteria:
 - Composer editing tests cover word movement/deletion, line start/end, undo/yank if implemented, bracketed paste, tall draft scrolling, and autocomplete cancellation.
 - Argument/file autocomplete breadth may remain disabled in Phase 1 if backend metadata or ignored-path-aware search semantics are not available.
 - Static render/input tests cover top-start transcript layout, scroll indicators, composer processing status, tool cards, question prompt selection, multi-select toggling, custom answer entry, cancel, narrow widths, and UTF-8 labels.
+
+Status: complete. Phase 1 shipped the interaction-contract foundation in the TUI and was locally validated and reviewed. Follow-up polish also removed composer footer status chatter, made the processing indicator spinner-only, integrated and simplified the slash palette, fixed transcript scroll affordances, added Ctrl-C clear-before-exit behavior, and replaced plain TUI startup/exit text with a user-friendly exit card.
+
+Completed implementation notes (2026-05-01): AVA now has interactive permission and question prompts, including multi-select and custom answers; metadata-rich slash commands with aliases, disabled explanations, `/help`, and `/hotkeys`; semantic configurable keybinds loaded from `keybinds.json`; a TUI-local composer draft editor for UTF-8-safe insertion/deletion, word movement/deletion, current-line movement/deletion, undo (`Ctrl+Z`), and yank (`Ctrl+Y`); bracketed paste handling; autocomplete dismissal without clearing input; and a reserved token/status slot plus spinner-only processing indicator. Mouse-wheel scrolling for tall composer drafts remains pending. Persistent history, argument/file autocomplete, live event consumption, tool expansion/diffs, provider model controls, and broader terminal hardening remain later-phase work.
 
 ### Phase 2: Evented TUI Runtime
 
@@ -413,10 +417,6 @@ Acceptance criteria:
 - Fake-provider tests cover streamed text, thinking blocks, tool calls, tool partial/final results, retry/backoff, cancellation, and usage reporting without live provider calls.
 - Manual smoke verifies interactive chat, slash commands, permission ask/deny, question prompt, long output, resize, export, compact, session resume, and cancellation.
 - `docs/USAGE.md` accurately reflects shipped keybindings, commands, and current limits.
-
-Milestone 2 implementation note (2026-05-01): AVA now has a shared v1 command catalog, semantic configurable TUI keybinds loaded from `keybinds.json`, disabled planned slash commands with backend handling, alias-aware slash filtering, and `/help`/`/hotkeys` output generated from effective command/keybind metadata. The semantic action set includes the Phase 1 names for submission, cancellation, history, palette navigation, composer editing, prompt placeholders, `details_toggle`, `mode_toggle`, `variant_cycle`, `interrupt`, and `exit`; unimplemented editor-history/details behaviors stay unbound or report that they are unavailable. Bracketed paste, persistent history, and richer editor polish remain deferred.
-
-Milestone 3 implementation note (2026-05-01): AVA now has a TUI-local composer draft editor for UTF-8-safe insertion/deletion, word movement/deletion, current-line start/end movement and deletion, undo (`Ctrl+Z`), and yank (`Ctrl+Y`). The TUI enables bracketed paste while active, normalizes pasted newlines into the draft, shows a hidden-line indicator for tall drafts, and lets users dismiss slash autocomplete without clearing the typed input. Persistent history, escape-sequence buffering beyond bracketed paste, IME-specific cursor hardening, and broader file/path autocomplete remain deferred.
 
 ## Explicit Non-Goals For V1
 

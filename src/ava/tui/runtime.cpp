@@ -3,27 +3,38 @@
 #include <curses.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <climits>
+#include <condition_variable>
 #include <csignal>
 #include <cstddef>
 #include <cstdlib>
 #include <cwchar>
 #include <deque>
+#include <future>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_editor.h"
+#include "ava/tui/composer_internal.h"
+#include "ava/tui/event_state.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/terminal.h"
 
 namespace ava::tui {
 namespace {
 
-constexpr std::size_t kMaxTranscriptScrollOffsetRequest = 10'000;
 constexpr std::size_t kMaxBracketedPasteBytes = 1024 * 1024;
+constexpr std::size_t kMaxTranscriptItems = 1000;
+constexpr auto kSpinnerFrameDelay = std::chrono::milliseconds(80);
 
 class SignalBlockGuard {
  public:
@@ -62,6 +73,55 @@ struct CursesInput {
   bool resize = false;
 };
 
+struct PendingPermissionRequest {
+  explicit PendingPermissionRequest(ava::permissions::PermissionPrompt prompt_in) : prompt(std::move(prompt_in)) {}
+
+  ava::permissions::PermissionPrompt prompt;
+  std::mutex mutex;
+  std::condition_variable ready;
+  std::optional<ava::core::Result<ava::permissions::PermissionResolution>> result;
+};
+
+struct PendingQuestionRequest {
+  explicit PendingQuestionRequest(ava::agent::QuestionPrompt prompt_in) : prompt(std::move(prompt_in)) {}
+
+  ava::agent::QuestionPrompt prompt;
+  std::mutex mutex;
+  std::condition_variable ready;
+  std::optional<ava::core::Result<ava::agent::QuestionAnswer>> result;
+};
+
+struct RuntimeEventQueue {
+  std::mutex mutex;
+  std::vector<ava::app::RuntimeEvent> events;
+  bool received = false;
+
+  [[nodiscard]] ava::app::RuntimeEventSink sink() {
+    return [this](const ava::app::RuntimeEvent& event) -> ava::core::VoidResult {
+      std::lock_guard<std::mutex> lock(mutex);
+      events.push_back(event);
+      received = true;
+      return {};
+    };
+  }
+
+  [[nodiscard]] std::vector<ava::app::RuntimeEvent> drain() {
+    std::lock_guard<std::mutex> lock(mutex);
+    auto drained = std::move(events);
+    events.clear();
+    return drained;
+  }
+
+  [[nodiscard]] bool received_any() {
+    std::lock_guard<std::mutex> lock(mutex);
+    return received;
+  }
+};
+
+enum class RuntimeEventDrainResult { NoEvents, Rendered, RenderFailed };
+
+bool mouse_state_matches(mmask_t state, mmask_t mask) { return (state & mask) != 0; }
+
 CursesInput key_input(Key key) {
   return CursesInput{.event = InputEvent{.key = key, .character = '\0', .text = {}, .mouse_column = 0, .mouse_row = 0},
                      .text = {},
@@ -69,7 +129,49 @@ CursesInput key_input(Key key) {
                      .resize = false};
 }
 
+CursesInput mouse_key_input(Key key, const MEVENT& mouse) {
+  return CursesInput{.event = InputEvent{.key = key,
+                                         .character = '\0',
+                                         .text = {},
+                                         .mouse_column = static_cast<std::size_t>(mouse.x + 1),
+                                         .mouse_row = static_cast<std::size_t>(mouse.y + 1)},
+                     .text = {},
+                     .bracketed_paste = false,
+                     .resize = false};
+}
+
 CursesInput unknown_input() { return key_input(Key::Unknown); }
+
+std::size_t transcript_height_for_snapshot(const ComposerSnapshot& snapshot, std::size_t width, std::size_t height) {
+  const auto normal_composer_lines = detail::composer_block_line_count(snapshot, height);
+  const auto prompt_active = snapshot.permission_prompt.has_value() || snapshot.question_prompt.has_value();
+  const auto fixed_lines = prompt_active ? std::size_t{0} : normal_composer_lines;
+  const auto max_prompt_lines = height > fixed_lines ? height - fixed_lines : 0;
+  const auto prompt_line_budget = prompt_active ? std::min<std::size_t>({7, max_prompt_lines}) : 0;
+  const auto permission_lines = snapshot.permission_prompt ? detail::render_permission_prompt(
+                                                                 *snapshot.permission_prompt, width, prompt_line_budget)
+                                                           : std::vector<std::string>{};
+  const auto question_lines = snapshot.question_prompt
+                                  ? detail::render_question_prompt(*snapshot.question_prompt, width, prompt_line_budget)
+                                  : std::vector<std::string>{};
+  const auto fixed_and_prompt_lines = fixed_lines + permission_lines.size() + question_lines.size();
+  const auto palette_line_budget =
+      (height > fixed_and_prompt_lines && !prompt_active && !snapshot.slash_palette_suppressed)
+          ? std::min(detail::kMaxPaletteLines, height - fixed_and_prompt_lines)
+          : 0;
+  const auto palette_lines = detail::render_slash_palette(snapshot, width, palette_line_budget);
+  const auto non_transcript_lines =
+      fixed_lines + palette_lines.size() + permission_lines.size() + question_lines.size();
+  return height > non_transcript_lines ? height - non_transcript_lines : 0;
+}
+
+std::size_t max_transcript_scroll_offset_for_snapshot(const ComposerSnapshot& snapshot, std::size_t width,
+                                                      std::size_t height) {
+  const auto transcript_height = transcript_height_for_snapshot(snapshot, width, height);
+  if (transcript_height == 0) return 0;
+  const auto rendered_transcript = detail::render_transcript_lines(snapshot.transcript, width);
+  return rendered_transcript.size() > transcript_height ? rendered_transcript.size() - transcript_height : 0;
+}
 
 std::optional<std::string> encode_wide_character(wchar_t character) {
   std::mbstate_t state{};
@@ -151,12 +253,27 @@ CursesInput read_bracketed_paste() {
   return character_input(normalize_composer_paste_text(pasted), true);
 }
 
-bool try_read_bracketed_paste_start() {
+bool is_escape_sequence_final(std::string_view sequence) {
+  if (sequence.size() <= 1) return false;
+  const auto last = static_cast<unsigned char>(sequence.back());
+  return last >= 0x40 && last <= 0x7EU;
+}
+
+std::optional<CursesInput> read_escape_sequence_input() {
   static_cast<void>(wtimeout(stdscr, 50));
-  auto [matched, consumed] = read_ascii_sequence("[200~");
+  std::string consumed;
+  for (std::size_t count = 0; count < 32; ++count) {
+    const auto character = read_plain_wide_character();
+    if (!character) break;
+    if (auto encoded = encode_wide_character(*character)) consumed += *encoded;
+    if (is_escape_sequence_final(consumed)) break;
+  }
   static_cast<void>(wtimeout(stdscr, -1));
-  if (!matched) push_pending_character_inputs(consumed);
-  return matched;
+
+  if (consumed == "[200~") return read_bracketed_paste();
+  if (const auto key = terminal_escape_sequence_key(consumed); key != Key::Unknown) return key_input(key);
+  if (!consumed.empty()) push_pending_character_inputs(consumed);
+  return std::nullopt;
 }
 
 CursesInput read_curses_input() {
@@ -202,21 +319,28 @@ CursesInput read_curses_input() {
       case KEY_MOUSE: {
         MEVENT mouse{};
         if (getmouse(&mouse) != OK) return unknown_input();
-        if ((mouse.bstate & BUTTON4_PRESSED) != 0) {
-          return key_input(Key::MouseWheelUp);
+        if (mouse_state_matches(mouse.bstate, BUTTON4_PRESSED)
+#ifdef BUTTON4_CLICKED
+            || mouse_state_matches(mouse.bstate, BUTTON4_CLICKED)
+#endif
+#ifdef BUTTON4_RELEASED
+            || mouse_state_matches(mouse.bstate, BUTTON4_RELEASED)
+#endif
+        ) {
+          return mouse_key_input(Key::MouseWheelUp, mouse);
         }
-        if ((mouse.bstate & BUTTON5_PRESSED) != 0) {
-          return key_input(Key::MouseWheelDown);
+        if (mouse_state_matches(mouse.bstate, BUTTON5_PRESSED)
+#ifdef BUTTON5_CLICKED
+            || mouse_state_matches(mouse.bstate, BUTTON5_CLICKED)
+#endif
+#ifdef BUTTON5_RELEASED
+            || mouse_state_matches(mouse.bstate, BUTTON5_RELEASED)
+#endif
+        ) {
+          return mouse_key_input(Key::MouseWheelDown, mouse);
         }
         if ((mouse.bstate & BUTTON1_CLICKED) != 0) {
-          return CursesInput{.event = InputEvent{.key = Key::MouseLeftClick,
-                                                 .character = '\0',
-                                                 .text = {},
-                                                 .mouse_column = static_cast<std::size_t>(mouse.x + 1),
-                                                 .mouse_row = static_cast<std::size_t>(mouse.y + 1)},
-                             .text = {},
-                             .bracketed_paste = false,
-                             .resize = false};
+          return mouse_key_input(Key::MouseLeftClick, mouse);
         }
         return unknown_input();
       }
@@ -231,7 +355,7 @@ CursesInput read_curses_input() {
   if (character == L'\n') return key_input(Key::ShiftEnter);
   if (character == L'\t') return key_input(Key::Tab);
   if (character == 0x1B) {
-    if (try_read_bracketed_paste_start()) return read_bracketed_paste();
+    if (auto escape_input = read_escape_sequence_input()) return *escape_input;
     return key_input(Key::Escape);
   }
   if (character == 0x01) return key_input(Key::CtrlA);
@@ -255,14 +379,26 @@ CursesInput read_curses_input() {
   return unknown_input();
 }
 
-void push_transcript(ComposerSnapshot& snapshot, TranscriptItem item) {
-  constexpr std::size_t kMaxTranscriptItems = 1000;
-  snapshot.transcript.push_back(std::move(item));
-  if (snapshot.transcript.size() > kMaxTranscriptItems) {
-    snapshot.transcript.erase(
-        snapshot.transcript.begin(),
-        snapshot.transcript.begin() + static_cast<std::ptrdiff_t>(snapshot.transcript.size() - kMaxTranscriptItems));
+std::optional<CursesInput> poll_curses_input() {
+  static_cast<void>(wtimeout(stdscr, 0));
+  auto input = read_curses_input();
+  static_cast<void>(wtimeout(stdscr, -1));
+  if (!input.resize && input.event.key == Key::Unknown && input.text.empty() && !input.bracketed_paste) {
+    return std::nullopt;
   }
+  return input;
+}
+
+void truncate_transcript(std::vector<TranscriptItem>& transcript) {
+  if (transcript.size() > kMaxTranscriptItems) {
+    transcript.erase(transcript.begin(),
+                     transcript.begin() + static_cast<std::ptrdiff_t>(transcript.size() - kMaxTranscriptItems));
+  }
+}
+
+void push_transcript(ComposerSnapshot& snapshot, TranscriptItem item) {
+  snapshot.transcript.push_back(std::move(item));
+  truncate_transcript(snapshot.transcript);
 }
 
 void push_history(std::vector<std::string>& history, std::string input) {
@@ -343,6 +479,13 @@ int run_interactive_composer(TuiRuntimeOptions options) {
                             .status = options.initial_status,
                             .transcript = {},
                             .slash_commands = std::move(options.slash_commands)};
+  SidebarSnapshot sidebar{.session_id = options.session_id,
+                          .mode = options.mode,
+                          .provider = options.provider,
+                          .model = options.model,
+                          .workspace = options.workspace,
+                          .git_branch = options.git_branch,
+                          .version = options.app_version};
 
   bool terminal_write_failed = false;
   std::vector<std::string> input_history;
@@ -352,39 +495,75 @@ int run_interactive_composer(TuiRuntimeOptions options) {
   std::size_t selected_slash_command_index = 0;
   bool slash_palette_suppressed = false;
   std::size_t transcript_scroll_offset = 0;
+  std::size_t draft_scroll_offset = 0;
   bool pending_escape_clear = false;
+  std::recursive_mutex ui_mutex;
+  std::mutex prompt_request_mutex;
+  std::deque<std::shared_ptr<PendingPermissionRequest>> pending_permission_requests;
+  std::deque<std::shared_ptr<PendingQuestionRequest>> pending_question_requests;
+  std::atomic_bool accept_prompt_requests{true};
+
+  auto max_draft_scroll_offset = [&](std::size_t height) {
+    auto draft_snapshot = snapshot;
+    draft_snapshot.input = draft.text;
+    const auto composer_lines = detail::composer_block_line_count(draft_snapshot, height);
+    const auto input_lines = detail::input_render_lines(draft.text).size();
+    const auto layout = detail::composer_input_layout(input_lines, composer_lines, 0);
+    return input_lines > layout.visible_input_lines ? input_lines - layout.visible_input_lines : std::size_t{0};
+  };
 
   auto render = [&]() -> bool {
     if (terminal_signal_received()) return false;
     bool wrote = false;
     {
+      std::lock_guard<std::recursive_mutex> lock(ui_mutex);
       SignalBlockGuard block_signals;
       draft.cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
       snapshot.input = draft.text;
       snapshot.input_cursor = draft.cursor;
       snapshot.selected_slash_command_index = selected_slash_command_index;
       snapshot.slash_palette_suppressed = slash_palette_suppressed;
-      snapshot.transcript_scroll_offset = transcript_scroll_offset;
+      snapshot.sidebar = sidebar;
       const auto [width, height] = terminal_size();
       snapshot.width = width;
       snapshot.height = height;
+      draft_scroll_offset = std::min(draft_scroll_offset, max_draft_scroll_offset(height));
+      snapshot.draft_scroll_offset = draft_scroll_offset;
+      const auto main_width = composer_main_width(snapshot);
+      transcript_scroll_offset =
+          std::min(transcript_scroll_offset, max_transcript_scroll_offset_for_snapshot(snapshot, main_width, height));
+      snapshot.transcript_scroll_offset = transcript_scroll_offset;
       wrote = draw_screen(snapshot);
     }
     return wrote && !terminal_signal_received();
+  };
+
+  auto render_processing_frame = [&]() -> bool {
+    {
+      std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+      if (snapshot.permission_prompt || snapshot.question_prompt) return true;
+      ++snapshot.spinner_frame;
+    }
+    return render();
   };
   auto insert_newline = [&]() {
     pending_escape_clear = false;
     history_index.reset();
     draft_input.clear();
     selected_slash_command_index = 0;
+    draft_scroll_offset = 0;
     static_cast<void>(insert_composer_draft_text(draft, "\n"));
   };
 
-  ava::permissions::PermissionResolver permission_resolver = [&](const ava::permissions::PermissionPrompt& prompt)
-      -> ava::core::Result<ava::permissions::PermissionResolution> {
-    snapshot.permission_prompt = permission_prompt_view(prompt);
-    snapshot.permission_prompt->selected_choice = PermissionPromptChoice::Deny;
-    snapshot.status = "permission required: A=allow D=deny Tab/Left/Right choose Enter/Space confirm Esc deny";
+  auto resolve_permission_prompt =
+      [&](const ava::permissions::PermissionPrompt& prompt, const std::function<bool()>& stop_requested = {},
+          const std::function<bool()>& request_stop = {}) -> ava::core::Result<ava::permissions::PermissionResolution> {
+    {
+      std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+      snapshot.permission_prompt = permission_prompt_view(prompt);
+      snapshot.permission_prompt->selected_choice = PermissionPromptChoice::Deny;
+      snapshot.status = "permission required: A=allow D=deny Tab/Left/Right choose Enter/Space confirm Esc deny";
+    }
     static_cast<void>(beep());
     if (!render()) {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render permission prompt"));
@@ -392,15 +571,22 @@ int run_interactive_composer(TuiRuntimeOptions options) {
 
     auto resolve_choice =
         [&](PermissionPromptChoice selected) -> ava::core::Result<ava::permissions::PermissionResolution> {
-      snapshot.permission_prompt.reset();
       if (selected == PermissionPromptChoice::Allow) {
-        snapshot.status = "permission allowed once";
+        {
+          std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+          snapshot.permission_prompt.reset();
+          snapshot.status = "permission allowed once";
+        }
         if (!render()) {
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to clear permission prompt"));
         }
         return ava::permissions::PermissionResolution::Allow;
       }
-      snapshot.status = "permission denied";
+      {
+        std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+        snapshot.permission_prompt.reset();
+        snapshot.status = "permission denied";
+      }
       if (!render()) {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to clear permission prompt"));
       }
@@ -409,9 +595,15 @@ int run_interactive_composer(TuiRuntimeOptions options) {
 
     while (true) {
       const auto choice_input = read_curses_input();
+      if (stop_requested && stop_requested()) {
+        return resolve_choice(PermissionPromptChoice::Deny);
+      }
       if (terminal_signal_received()) {
-        snapshot.permission_prompt.reset();
-        snapshot.status = "interrupted";
+        {
+          std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+          snapshot.permission_prompt.reset();
+          snapshot.status = "interrupted";
+        }
         static_cast<void>(render());
         return ava::permissions::PermissionResolution::Deny;
       }
@@ -420,6 +612,11 @@ int run_interactive_composer(TuiRuntimeOptions options) {
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render permission prompt"));
         }
         continue;
+      }
+
+      if (choice_input.event.key == Key::Escape && request_stop) {
+        static_cast<void>(request_stop());
+        return resolve_choice(PermissionPromptChoice::Deny);
       }
 
       auto input_result =
@@ -433,40 +630,57 @@ int run_interactive_composer(TuiRuntimeOptions options) {
         return resolve_choice(PermissionPromptChoice::Deny);
       }
       if (input_result.action == PermissionPromptInputAction::Redraw && snapshot.permission_prompt) {
-        snapshot.permission_prompt->selected_choice = input_result.selected_choice;
+        {
+          std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+          if (snapshot.permission_prompt) snapshot.permission_prompt->selected_choice = input_result.selected_choice;
+        }
         static_cast<void>(render());
         continue;
       }
 
-      snapshot.status = "permission required: A=allow D=deny Tab/Left/Right choose Enter/Space confirm Esc deny";
+      {
+        std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+        snapshot.status = "permission required: A=allow D=deny Tab/Left/Right choose Enter/Space confirm Esc deny";
+      }
       if (!render()) {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render permission prompt"));
       }
     }
   };
 
-  ava::agent::QuestionResolver question_resolver =
-      [&](const ava::agent::QuestionPrompt& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
-    snapshot.question_prompt = question_prompt_view(prompt);
-    snapshot.status = prompt.multiple ? "question required: Space toggles, Enter sends, Esc cancels"
-                                      : "question required: Enter sends, numbers choose, Esc cancels";
+  auto resolve_question_prompt =
+      [&](const ava::agent::QuestionPrompt& prompt, const std::function<bool()>& stop_requested = {},
+          const std::function<bool()>& request_stop = {}) -> ava::core::Result<ava::agent::QuestionAnswer> {
+    {
+      std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+      snapshot.question_prompt = question_prompt_view(prompt);
+      snapshot.status = prompt.multiple ? "question required: Space toggles, Enter sends, Esc cancels"
+                                        : "question required: Enter sends, numbers choose, Esc cancels";
+    }
     static_cast<void>(beep());
     if (!render()) {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render question prompt"));
     }
 
     auto cancel_question = [&]() -> ava::core::Result<ava::agent::QuestionAnswer> {
-      snapshot.question_prompt.reset();
-      snapshot.status = "question canceled";
+      {
+        std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+        snapshot.question_prompt.reset();
+        snapshot.status = "question canceled";
+      }
       static_cast<void>(render());
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "question prompt canceled"));
     };
 
     while (true) {
       const auto question_input = read_curses_input();
+      if (stop_requested && stop_requested()) return cancel_question();
       if (terminal_signal_received()) {
-        snapshot.question_prompt.reset();
-        snapshot.status = "interrupted";
+        {
+          std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+          snapshot.question_prompt.reset();
+          snapshot.status = "interrupted";
+        }
         static_cast<void>(render());
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "question prompt interrupted"));
       }
@@ -477,6 +691,11 @@ int run_interactive_composer(TuiRuntimeOptions options) {
         continue;
       }
 
+      if (question_input.event.key == Key::Escape && request_stop) {
+        static_cast<void>(request_stop());
+        return cancel_question();
+      }
+
       auto input_result = snapshot.question_prompt
                               ? handle_question_prompt_input(*snapshot.question_prompt, question_input.event)
                               : QuestionPromptInputResult{};
@@ -484,17 +703,23 @@ int run_interactive_composer(TuiRuntimeOptions options) {
 
       if (snapshot.question_prompt && (input_result.action == QuestionPromptInputAction::Redraw ||
                                        input_result.action == QuestionPromptInputAction::Resolve)) {
-        snapshot.question_prompt->selected_option_index = input_result.selected_option_index;
-        snapshot.question_prompt->options = std::move(input_result.options);
-        snapshot.question_prompt->custom_text = std::move(input_result.custom_text);
+        std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+        if (snapshot.question_prompt) {
+          snapshot.question_prompt->selected_option_index = input_result.selected_option_index;
+          snapshot.question_prompt->options = std::move(input_result.options);
+          snapshot.question_prompt->custom_text = std::move(input_result.custom_text);
+        }
       }
 
       if (input_result.action == QuestionPromptInputAction::Resolve) {
         auto answer = ava::core::Result<ava::agent::QuestionAnswer>{
             std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "question prompt was dismissed"))};
-        if (snapshot.question_prompt) answer = question_answer_from_view(*snapshot.question_prompt);
-        snapshot.question_prompt.reset();
-        snapshot.status = answer ? "question answered" : "question canceled";
+        {
+          std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+          if (snapshot.question_prompt) answer = question_answer_from_view(*snapshot.question_prompt);
+          snapshot.question_prompt.reset();
+          snapshot.status = answer ? "question answered" : "question canceled";
+        }
         if (!render()) {
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to clear question prompt"));
         }
@@ -512,6 +737,166 @@ int run_interactive_composer(TuiRuntimeOptions options) {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render question prompt"));
       }
     }
+  };
+
+  auto complete_permission_request = [](const std::shared_ptr<PendingPermissionRequest>& request,
+                                        ava::core::Result<ava::permissions::PermissionResolution> result) {
+    {
+      std::lock_guard<std::mutex> lock(request->mutex);
+      request->result = std::move(result);
+    }
+    request->ready.notify_one();
+  };
+
+  auto complete_question_request = [](const std::shared_ptr<PendingQuestionRequest>& request,
+                                      ava::core::Result<ava::agent::QuestionAnswer> result) {
+    {
+      std::lock_guard<std::mutex> lock(request->mutex);
+      request->result = std::move(result);
+    }
+    request->ready.notify_one();
+  };
+
+  auto fail_pending_prompt_requests = [&]() {
+    accept_prompt_requests.store(false);
+    std::deque<std::shared_ptr<PendingPermissionRequest>> permission_requests;
+    std::deque<std::shared_ptr<PendingQuestionRequest>> question_requests;
+    {
+      std::lock_guard<std::mutex> lock(prompt_request_mutex);
+      permission_requests = std::move(pending_permission_requests);
+      question_requests = std::move(pending_question_requests);
+      pending_permission_requests.clear();
+      pending_question_requests.clear();
+    }
+    for (const auto& permission_request : permission_requests) {
+      complete_permission_request(permission_request, ava::permissions::PermissionResolution::Deny);
+    }
+    for (const auto& question_request : question_requests) {
+      complete_question_request(question_request, std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool,
+                                                                                   "question prompt interrupted")));
+    }
+  };
+
+  auto service_pending_prompt_request = [&](const std::function<bool()>& stop_requested = {},
+                                            const std::function<bool()>& request_stop = {}) -> bool {
+    std::shared_ptr<PendingPermissionRequest> permission_request;
+    std::shared_ptr<PendingQuestionRequest> question_request;
+    {
+      std::lock_guard<std::mutex> lock(prompt_request_mutex);
+      if (!pending_permission_requests.empty()) {
+        permission_request = std::move(pending_permission_requests.front());
+        pending_permission_requests.pop_front();
+      } else if (!pending_question_requests.empty()) {
+        question_request = std::move(pending_question_requests.front());
+        pending_question_requests.pop_front();
+      }
+    }
+    if (permission_request) {
+      complete_permission_request(permission_request,
+                                  resolve_permission_prompt(permission_request->prompt, stop_requested, request_stop));
+      return true;
+    }
+    if (question_request) {
+      complete_question_request(question_request,
+                                resolve_question_prompt(question_request->prompt, stop_requested, request_stop));
+      return true;
+    }
+    return false;
+  };
+
+  ava::permissions::PermissionResolver permission_resolver = [&](const ava::permissions::PermissionPrompt& prompt)
+      -> ava::core::Result<ava::permissions::PermissionResolution> {
+    if (!accept_prompt_requests.load()) return ava::permissions::PermissionResolution::Deny;
+    auto request = std::make_shared<PendingPermissionRequest>(prompt);
+    {
+      std::lock_guard<std::mutex> lock(prompt_request_mutex);
+      if (!accept_prompt_requests.load()) return ava::permissions::PermissionResolution::Deny;
+      pending_permission_requests.push_back(request);
+    }
+    std::unique_lock<std::mutex> lock(request->mutex);
+    request->ready.wait(lock, [&]() { return request->result.has_value() || !accept_prompt_requests.load(); });
+    if (!request->result) return ava::permissions::PermissionResolution::Deny;
+    return std::move(*request->result);
+  };
+
+  ava::agent::QuestionResolver question_resolver =
+      [&](const ava::agent::QuestionPrompt& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
+    if (!accept_prompt_requests.load()) {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "question prompt interrupted"));
+    }
+    auto request = std::make_shared<PendingQuestionRequest>(prompt);
+    {
+      std::lock_guard<std::mutex> lock(prompt_request_mutex);
+      if (!accept_prompt_requests.load()) {
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "question prompt interrupted"));
+      }
+      pending_question_requests.push_back(request);
+    }
+    std::unique_lock<std::mutex> lock(request->mutex);
+    request->ready.wait(lock, [&]() { return request->result.has_value() || !accept_prompt_requests.load(); });
+    if (!request->result) {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "question prompt interrupted"));
+    }
+    return std::move(*request->result);
+  };
+
+  auto clear_draft_for_interrupt = [&]() {
+    pending_escape_clear = false;
+    history_index.reset();
+    draft_input.clear();
+    selected_slash_command_index = 0;
+    slash_palette_suppressed = false;
+    draft_scroll_offset = 0;
+    snapshot.status.clear();
+    return apply_composer_draft_action(draft, TuiAction::ClearInput);
+  };
+
+  auto slash_palette_active = [&]() {
+    return !slash_palette_suppressed && slash_palette_visible(draft.text, snapshot.slash_commands);
+  };
+
+  auto scroll_up = [&](std::size_t amount) {
+    pending_escape_clear = false;
+    const auto [width, height] = terminal_size();
+    snapshot.width = width;
+    snapshot.height = height;
+    const auto max_scroll = max_transcript_scroll_offset_for_snapshot(snapshot, composer_main_width(snapshot), height);
+    const auto clamped_scroll = std::min(transcript_scroll_offset, max_scroll);
+    transcript_scroll_offset = std::min(max_scroll, clamped_scroll + amount);
+  };
+
+  auto scroll_down = [&](std::size_t amount) {
+    pending_escape_clear = false;
+    const auto [width, height] = terminal_size();
+    snapshot.width = width;
+    snapshot.height = height;
+    const auto max_scroll = max_transcript_scroll_offset_for_snapshot(snapshot, composer_main_width(snapshot), height);
+    const auto clamped_scroll = std::min(transcript_scroll_offset, max_scroll);
+    transcript_scroll_offset = amount >= clamped_scroll ? 0 : clamped_scroll - amount;
+  };
+
+  auto scroll_draft_up = [&](std::size_t amount) {
+    pending_escape_clear = false;
+    const auto [_, height] = terminal_size();
+    const auto max_scroll = max_draft_scroll_offset(height);
+    const auto clamped_scroll = std::min(draft_scroll_offset, max_scroll);
+    draft_scroll_offset = std::min(max_scroll, clamped_scroll + amount);
+  };
+
+  auto scroll_draft_down = [&](std::size_t amount) {
+    pending_escape_clear = false;
+    const auto [_, height] = terminal_size();
+    const auto max_scroll = max_draft_scroll_offset(height);
+    const auto clamped_scroll = std::min(draft_scroll_offset, max_scroll);
+    draft_scroll_offset = amount >= clamped_scroll ? 0 : clamped_scroll - amount;
+  };
+
+  auto mouse_is_over_composer = [&](const InputEvent& mouse_event) {
+    if (mouse_event.mouse_row == 0 || snapshot.permission_prompt || snapshot.question_prompt) return false;
+    const auto [_, height] = terminal_size();
+    const auto composer_lines = detail::composer_block_line_count(snapshot, height);
+    const auto composer_start_row = height > composer_lines ? height - composer_lines + 1 : std::size_t{1};
+    return mouse_event.mouse_row >= composer_start_row;
   };
 
   enum class InputLoopAction { None, ContinueLoop, BreakLoop };
@@ -535,6 +920,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
         static_cast<void>(replace_composer_draft(
             draft, slash_command_selection_text(draft.text, snapshot.slash_commands, selected_slash_command_index)));
         selected_slash_command_index = 0;
+        draft_scroll_offset = 0;
         history_index.reset();
         draft_input.clear();
         snapshot.status = "command selected - press Enter to run";
@@ -548,35 +934,284 @@ int run_interactive_composer(TuiRuntimeOptions options) {
     }
     const auto submitted = draft.text;
     reset_composer_draft(draft);
+    draft_scroll_offset = 0;
     history_index.reset();
     draft_input.clear();
     selected_slash_command_index = 0;
     if (!submitted.empty()) {
-      push_transcript(snapshot, TranscriptItem{.label = submitted.starts_with('/') ? "cmd" : "you", .text = submitted});
+      const auto is_slash_command = submitted.starts_with('/');
+      const auto transcript_before_submit = snapshot.transcript;
+      RuntimeEventQueue event_queue;
+      TuiEventState event_state;
+      std::atomic_bool run_cancel_requested{false};
+      bool close_after_submit = false;
+      auto cancel_requested = [&run_cancel_requested]() { return run_cancel_requested.load(); };
+      auto event_sink = is_slash_command ? ava::app::RuntimeEventSink{} : event_queue.sink();
+      auto upsert_stopping_activity = [&]() {
+        auto item = SidebarActivityItem{.id = "stopping",
+                                        .label = "stopping",
+                                        .detail = "waiting for active work to stop",
+                                        .status = ToolTimelineStatus::Running};
+        auto existing = std::ranges::find_if(
+            sidebar.activity, [&](const SidebarActivityItem& activity) { return activity.id == item.id; });
+        if (existing == sidebar.activity.end()) {
+          sidebar.activity.push_back(std::move(item));
+        } else {
+          *existing = std::move(item);
+        }
+      };
+      auto request_stop = [&]() -> bool {
+        const bool was_already_requested = run_cancel_requested.exchange(true);
+        fail_pending_prompt_requests();
+        if (!was_already_requested) static_cast<void>(beep());
+        {
+          std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+          snapshot.status = "stop requested";
+          upsert_stopping_activity();
+        }
+        return render();
+      };
+      auto request_close_after_submit = [&]() {
+        run_cancel_requested.store(true);
+        close_after_submit = true;
+        fail_pending_prompt_requests();
+      };
+      auto drain_runtime_events = [&]() -> RuntimeEventDrainResult {
+        auto events = event_queue.drain();
+        if (events.empty()) return RuntimeEventDrainResult::NoEvents;
+        for (const auto& event : events) {
+          apply_runtime_event(event_state, event);
+        }
+        const auto turn_transcript = event_state_transcript_snapshot(event_state);
+        {
+          std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+          snapshot.transcript = transcript_before_submit;
+          snapshot.transcript.insert(snapshot.transcript.end(), turn_transcript.begin(), turn_transcript.end());
+          truncate_transcript(snapshot.transcript);
+          sidebar.activity = event_state.activity;
+          if (run_cancel_requested.load() && event_state.run_status == TuiEventRunStatus::Running) {
+            upsert_stopping_activity();
+          }
+          for (const auto& file : event_state.modified_files) {
+            const auto exists = std::ranges::any_of(sidebar.modified_files, [&](const SidebarModifiedFile& existing) {
+              return existing.path == file.path;
+            });
+            if (!exists) sidebar.modified_files.push_back(file);
+          }
+          constexpr auto kMaxSidebarModifiedFiles = std::size_t{50};
+          if (sidebar.modified_files.size() > kMaxSidebarModifiedFiles) {
+            sidebar.modified_files.erase(
+                sidebar.modified_files.begin(),
+                sidebar.modified_files.begin() +
+                    static_cast<std::ptrdiff_t>(sidebar.modified_files.size() - kMaxSidebarModifiedFiles));
+          }
+          transcript_scroll_offset = 0;
+        }
+        return render() ? RuntimeEventDrainResult::Rendered : RuntimeEventDrainResult::RenderFailed;
+      };
+
+      if (is_slash_command) {
+        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
+      }
       push_history(input_history, submitted);
-      snapshot.status = submitted.starts_with('/') ? "running command..." : "thinking...";
+      snapshot.status = is_slash_command ? "running command..." : "thinking...";
       snapshot.processing = true;
-      ++snapshot.spinner_frame;
       if (!render()) {
         terminal_write_failed = true;
         return InputLoopAction::BreakLoop;
       }
-      const auto result =
-          options.on_submit ? options.on_submit(submitted, permission_resolver, question_resolver) : TuiSubmitResult{};
-      if (terminal_signal_received()) return InputLoopAction::BreakLoop;
-      for (const auto& tool : result.tool_timeline) {
-        push_transcript(snapshot, TranscriptItem{.tool = tool});
+      auto result = TuiSubmitResult{};
+      if (options.on_submit) {
+        accept_prompt_requests.store(true);
+        auto submit_future = std::async(std::launch::async, [&]() {
+          return options.on_submit(submitted, permission_resolver, question_resolver, event_sink, cancel_requested);
+        });
+        auto handle_active_input = [&](const CursesInput& active_input) -> bool {
+          if (active_input.resize) return render();
+
+          const auto active_event = active_input.event;
+          auto active_is_action = [&](TuiAction action) {
+            return key_matches_action(options.key_bindings, action, active_event.key);
+          };
+          if (active_event.key == Key::Escape || active_is_action(TuiAction::Cancel)) {
+            return request_stop();
+          }
+          if (active_is_action(TuiAction::Interrupt)) {
+            if (!draft.text.empty()) {
+              static_cast<void>(clear_draft_for_interrupt());
+              snapshot.selected_slash_command_index = selected_slash_command_index;
+              return render();
+            }
+            request_close_after_submit();
+            return true;
+          }
+          if (active_is_action(TuiAction::Exit)) {
+            request_close_after_submit();
+            return true;
+          }
+          if (active_event.key == Key::Character) {
+            pending_escape_clear = false;
+            history_index.reset();
+            draft_input.clear();
+            selected_slash_command_index = 0;
+            slash_palette_suppressed = false;
+            draft_scroll_offset = 0;
+            const auto text = active_input.text.empty() ? std::string(1, active_event.character) : active_input.text;
+            static_cast<void>(insert_composer_draft_text(draft, text));
+            return render();
+          }
+          if (active_is_action(TuiAction::NewLine)) {
+            insert_newline();
+            return render();
+          }
+          if (active_is_action(TuiAction::DeleteBackward) || active_is_action(TuiAction::DeleteWordBackward) ||
+              active_is_action(TuiAction::DeleteToLineStart) || active_is_action(TuiAction::DeleteToLineEnd) ||
+              active_is_action(TuiAction::ClearInput) || active_is_action(TuiAction::CursorLeft) ||
+              active_is_action(TuiAction::CursorRight) || active_is_action(TuiAction::CursorLineStart) ||
+              active_is_action(TuiAction::CursorLineEnd) || active_is_action(TuiAction::CursorWordLeft) ||
+              active_is_action(TuiAction::CursorWordRight) || active_is_action(TuiAction::Undo) ||
+              active_is_action(TuiAction::Yank)) {
+            pending_escape_clear = false;
+            history_index.reset();
+            draft_input.clear();
+            selected_slash_command_index = 0;
+            slash_palette_suppressed = false;
+            draft_scroll_offset = 0;
+            if (active_is_action(TuiAction::DeleteBackward)) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteBackward));
+            } else if (active_is_action(TuiAction::DeleteWordBackward)) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteWordBackward));
+            } else if (active_is_action(TuiAction::DeleteToLineStart)) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteToLineStart));
+            } else if (active_is_action(TuiAction::DeleteToLineEnd)) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteToLineEnd));
+            } else if (active_is_action(TuiAction::ClearInput)) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::ClearInput));
+            } else if (active_is_action(TuiAction::CursorLeft)) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorLeft));
+            } else if (active_is_action(TuiAction::CursorRight)) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorRight));
+            } else if (active_is_action(TuiAction::CursorLineStart)) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorLineStart));
+            } else if (active_is_action(TuiAction::CursorLineEnd)) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorLineEnd));
+            } else if (active_is_action(TuiAction::CursorWordLeft)) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorWordLeft));
+            } else if (active_is_action(TuiAction::CursorWordRight)) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::CursorWordRight));
+            } else if (active_is_action(TuiAction::Undo)) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::Undo));
+            } else if (active_is_action(TuiAction::Yank)) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::Yank));
+            }
+            return render();
+          }
+          if (active_is_action(TuiAction::PageUp)) {
+            const auto [_, height] = terminal_size();
+            scroll_up(std::max<std::size_t>(1, height / 2));
+            return render();
+          }
+          if (active_is_action(TuiAction::PageDown)) {
+            const auto [_, height] = terminal_size();
+            scroll_down(std::max<std::size_t>(1, height / 2));
+            return render();
+          }
+          if (active_event.key == Key::MouseWheelUp) {
+            if (mouse_is_over_composer(active_event)) {
+              scroll_draft_up(3);
+            } else {
+              scroll_up(3);
+            }
+            return render();
+          }
+          if (active_event.key == Key::MouseWheelDown) {
+            if (mouse_is_over_composer(active_event)) {
+              scroll_draft_down(3);
+            } else {
+              scroll_down(3);
+            }
+            return render();
+          }
+          return true;
+        };
+        bool render_failed = false;
+        while (submit_future.wait_for(kSpinnerFrameDelay) != std::future_status::ready) {
+          if (terminal_signal_received()) {
+            if (terminal_signal_number() == SIGINT && !draft.text.empty()) {
+              clear_terminal_signal();
+              static_cast<void>(clear_draft_for_interrupt());
+              snapshot.selected_slash_command_index = selected_slash_command_index;
+              if (!render()) {
+                terminal_write_failed = true;
+                render_failed = true;
+                fail_pending_prompt_requests();
+                break;
+              }
+              continue;
+            }
+            request_close_after_submit();
+            break;
+          }
+          if (auto active_input = poll_curses_input()) {
+            if (!handle_active_input(*active_input)) {
+              terminal_write_failed = true;
+              render_failed = true;
+              fail_pending_prompt_requests();
+              break;
+            }
+            if (close_after_submit) break;
+          }
+          static_cast<void>(service_pending_prompt_request(cancel_requested, request_stop));
+          const auto drain_result = drain_runtime_events();
+          if (drain_result == RuntimeEventDrainResult::RenderFailed) {
+            terminal_write_failed = true;
+            render_failed = true;
+            fail_pending_prompt_requests();
+            break;
+          }
+          if (drain_result == RuntimeEventDrainResult::Rendered) continue;
+          if (!render_processing_frame()) {
+            terminal_write_failed = true;
+            render_failed = true;
+            fail_pending_prompt_requests();
+            break;
+          }
+        }
+        result = submit_future.get();
+        if (drain_runtime_events() == RuntimeEventDrainResult::RenderFailed) {
+          terminal_write_failed = true;
+          render_failed = true;
+        }
+        if (render_failed) return InputLoopAction::BreakLoop;
       }
-      for (const auto& output : result.output) {
-        push_transcript(snapshot, TranscriptItem{.label = "ava", .text = output});
+      if (terminal_signal_received()) return InputLoopAction::BreakLoop;
+      const auto events_received = event_queue.received_any();
+      if (!events_received) {
+        if (!is_slash_command) {
+          push_transcript(snapshot, TranscriptItem{.label = "you", .text = submitted});
+        }
+        if (run_cancel_requested.load()) {
+          push_transcript(snapshot, TranscriptItem{.label = "ava", .text = "stopped by user"});
+        } else {
+          for (const auto& tool : result.tool_timeline) {
+            push_transcript(snapshot, TranscriptItem{.tool = tool});
+          }
+          for (const auto& output : result.output) {
+            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = output});
+          }
+        }
       }
       transcript_scroll_offset = 0;
-      snapshot.status = result.output.empty() ? "ok" : "done";
+      snapshot.status = events_received ? (event_state.run_status == TuiEventRunStatus::Error      ? "error"
+                                           : event_state.run_status == TuiEventRunStatus::Canceled ? "stopped"
+                                                                                                   : "done")
+                                        : (result.output.empty() ? "ok" : "done");
       snapshot.processing = false;
       if (!render()) {
         terminal_write_failed = true;
         return InputLoopAction::BreakLoop;
       }
+      if (close_after_submit) return InputLoopAction::BreakLoop;
       if (result.quit) return InputLoopAction::BreakLoop;
       return InputLoopAction::ContinueLoop;
     }
@@ -588,7 +1223,19 @@ int run_interactive_composer(TuiRuntimeOptions options) {
 
   while (true) {
     const auto input = read_curses_input();
-    if (terminal_signal_received()) break;
+    if (terminal_signal_received()) {
+      if (terminal_signal_number() == SIGINT && !draft.text.empty()) {
+        clear_terminal_signal();
+        static_cast<void>(clear_draft_for_interrupt());
+        snapshot.selected_slash_command_index = selected_slash_command_index;
+        if (!render()) {
+          terminal_write_failed = true;
+          break;
+        }
+        continue;
+      }
+      break;
+    }
     if (input.resize) {
       if (!render()) {
         terminal_write_failed = true;
@@ -598,21 +1245,6 @@ int run_interactive_composer(TuiRuntimeOptions options) {
     }
     const auto event = input.event;
     auto is_action = [&](TuiAction action) { return key_matches_action(options.key_bindings, action, event.key); };
-    auto slash_palette_active = [&]() {
-      return !slash_palette_suppressed && slash_palette_visible(draft.text, snapshot.slash_commands);
-    };
-    auto scroll_up = [&](std::size_t amount) {
-      pending_escape_clear = false;
-      const auto remaining_scroll = transcript_scroll_offset >= kMaxTranscriptScrollOffsetRequest
-                                        ? std::size_t{0}
-                                        : kMaxTranscriptScrollOffsetRequest - transcript_scroll_offset;
-      transcript_scroll_offset += std::min(amount, remaining_scroll);
-      static_cast<void>(remaining_scroll);
-    };
-    auto scroll_down = [&](std::size_t amount) {
-      pending_escape_clear = false;
-      transcript_scroll_offset = amount >= transcript_scroll_offset ? 0 : transcript_scroll_offset - amount;
-    };
     auto select_slash_command = [&]() {
       selected_slash_command_index =
           clamp_slash_palette_selection(draft.text, snapshot.slash_commands, selected_slash_command_index);
@@ -625,6 +1257,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       static_cast<void>(replace_composer_draft(
           draft, slash_command_selection_text(draft.text, snapshot.slash_commands, selected_slash_command_index)));
       selected_slash_command_index = 0;
+      draft_scroll_offset = 0;
       history_index.reset();
       draft_input.clear();
       snapshot.status = "command selected - press Enter to run";
@@ -635,6 +1268,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       draft_input.clear();
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
+      draft_scroll_offset = 0;
       const auto text = input.text.empty() ? std::string(1, event.character) : input.text;
       if (insert_composer_draft_text(draft, text) && input.bracketed_paste)
         snapshot.status = "pasted into draft safely";
@@ -646,6 +1280,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       draft_input.clear();
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
+      draft_scroll_offset = 0;
       static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteBackward));
     } else if (is_action(TuiAction::DeleteWordBackward)) {
       pending_escape_clear = false;
@@ -653,6 +1288,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       draft_input.clear();
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
+      draft_scroll_offset = 0;
       static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteWordBackward));
     } else if (is_action(TuiAction::DeleteToLineStart)) {
       pending_escape_clear = false;
@@ -660,6 +1296,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       draft_input.clear();
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
+      draft_scroll_offset = 0;
       static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteToLineStart));
     } else if (is_action(TuiAction::DeleteToLineEnd)) {
       pending_escape_clear = false;
@@ -667,6 +1304,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       draft_input.clear();
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
+      draft_scroll_offset = 0;
       static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteToLineEnd));
     } else if (is_action(TuiAction::ClearInput)) {
       pending_escape_clear = false;
@@ -674,6 +1312,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       draft_input.clear();
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
+      draft_scroll_offset = 0;
       snapshot.status =
           apply_composer_draft_action(draft, TuiAction::ClearInput) ? "input cleared" : "input already empty";
     } else if (is_action(TuiAction::AutocompleteAccept) && slash_palette_active()) {
@@ -690,6 +1329,15 @@ int run_interactive_composer(TuiRuntimeOptions options) {
         snapshot.status = "mode switched to " + snapshot.mode;
       }
     } else if (is_action(TuiAction::Interrupt)) {
+      if (!draft.text.empty()) {
+        static_cast<void>(clear_draft_for_interrupt());
+        snapshot.selected_slash_command_index = selected_slash_command_index;
+        if (!render()) {
+          terminal_write_failed = true;
+          break;
+        }
+        continue;
+      }
       break;
     } else if (is_action(TuiAction::Exit)) {
       break;
@@ -703,9 +1351,17 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       const auto [_, height] = terminal_size();
       scroll_down(std::max<std::size_t>(1, height / 2));
     } else if (event.key == Key::MouseWheelUp) {
-      scroll_up(3);
+      if (mouse_is_over_composer(event)) {
+        scroll_draft_up(3);
+      } else {
+        scroll_up(3);
+      }
     } else if (event.key == Key::MouseWheelDown) {
-      scroll_down(3);
+      if (mouse_is_over_composer(event)) {
+        scroll_draft_down(3);
+      } else {
+        scroll_down(3);
+      }
     } else if (event.key == Key::MouseLeftClick) {
       pending_escape_clear = false;
       if (const auto clicked = slash_palette_selection_for_screen_row(snapshot, event.mouse_row)) {
@@ -753,6 +1409,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
           --(*history_index);
         }
         reset_composer_draft(draft, input_history[*history_index]);
+        draft_scroll_offset = 0;
         snapshot.status = "history " + std::to_string(*history_index + 1) + "/" + std::to_string(input_history.size());
       }
     } else if (is_action(TuiAction::PaletteNext) && slash_palette_active()) {
@@ -773,18 +1430,22 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       } else if (*history_index + 1 < input_history.size()) {
         ++(*history_index);
         reset_composer_draft(draft, input_history[*history_index]);
+        draft_scroll_offset = 0;
         snapshot.status = "history " + std::to_string(*history_index + 1) + "/" + std::to_string(input_history.size());
       } else {
         history_index.reset();
         reset_composer_draft(draft, draft_input);
+        draft_scroll_offset = 0;
         draft_input.clear();
         snapshot.status = "restored current draft";
       }
     } else if (is_action(TuiAction::Undo)) {
       pending_escape_clear = false;
+      draft_scroll_offset = 0;
       snapshot.status = apply_composer_draft_action(draft, TuiAction::Undo) ? "undo" : "nothing to undo";
     } else if (is_action(TuiAction::Yank)) {
       pending_escape_clear = false;
+      draft_scroll_offset = 0;
       snapshot.status = apply_composer_draft_action(draft, TuiAction::Yank) ? "yanked text" : "nothing to yank";
     } else if (is_action(TuiAction::DetailsToggle)) {
       pending_escape_clear = false;
@@ -799,13 +1460,14 @@ int run_interactive_composer(TuiRuntimeOptions options) {
         selected_slash_command_index = 0;
         history_index.reset();
         draft_input.clear();
-        snapshot.status = "slash palette dismissed";
+        snapshot.status.clear();
       } else if (!draft.text.empty()) {
         if (pending_escape_clear) {
           static_cast<void>(apply_composer_draft_action(draft, TuiAction::ClearInput));
           selected_slash_command_index = 0;
           history_index.reset();
           draft_input.clear();
+          draft_scroll_offset = 0;
           pending_escape_clear = false;
           snapshot.status = "input cleared";
         } else {

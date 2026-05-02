@@ -76,6 +76,7 @@ add_library(ava_tui
   src/ava/tui/composer_permission.cpp
   src/ava/tui/composer_text.cpp
   src/ava/tui/composer_transcript.cpp
+  src/ava/tui/event_state.cpp
   src/ava/tui/keybindings.cpp
   src/ava/tui/runtime.cpp
   src/ava/tui/terminal.cpp

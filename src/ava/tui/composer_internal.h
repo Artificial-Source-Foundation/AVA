@@ -38,6 +38,8 @@ struct ComposerInputLayout {
   std::size_t top_padding = 0;
   std::size_t first_visible = 0;
   std::size_t visible_input_lines = 1;
+  std::size_t hidden_above = 0;
+  std::size_t hidden_below = 0;
 };
 
 [[nodiscard]] bool is_utf8_continuation(unsigned char byte);
@@ -72,7 +74,8 @@ struct ComposerInputLayout {
 
 [[nodiscard]] std::vector<std::string> input_render_lines(std::string_view input);
 [[nodiscard]] std::size_t composer_block_line_count(const ComposerSnapshot& snapshot, std::size_t height);
-[[nodiscard]] ComposerInputLayout composer_input_layout(std::size_t input_line_count, std::size_t max_lines);
+[[nodiscard]] ComposerInputLayout composer_input_layout(std::size_t input_line_count, std::size_t max_lines,
+                                                        std::size_t draft_scroll_offset);
 [[nodiscard]] std::vector<std::string> render_composer_block(const ComposerSnapshot& snapshot, std::size_t width,
                                                              std::size_t max_lines);
 [[nodiscard]] std::size_t input_cursor_column(const ComposerSnapshot& snapshot, std::size_t width);

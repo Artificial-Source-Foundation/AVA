@@ -7,8 +7,6 @@
 namespace ava::tui::detail {
 namespace {
 
-constexpr std::size_t kMaxStatusColumns = 36;
-
 std::string composer_bar() {
   return std::string(kSgrAccent) + std::string(kComposerBar) + std::string(kSgrReset) + std::string(kSgrComposerBg) +
          "  ";
@@ -20,11 +18,9 @@ std::string composer_mode_badge(std::string_view mode) {
   return std::string(color) + "[" + mode_text + "]" + std::string(kSgrReset) + std::string(kSgrComposerBg);
 }
 
-std::string render_status_line(const ComposerSnapshot& snapshot, std::size_t width,
-                               std::size_t hidden_draft_lines = 0) {
+std::string render_status_line(const ComposerSnapshot& snapshot, std::size_t width) {
   const auto provider = sanitize_terminal_text(snapshot.provider);
   const auto model = sanitize_terminal_text(snapshot.model);
-  const auto status = fit_line(sanitize_terminal_text(snapshot.status), kMaxStatusColumns);
 
   std::string line = composer_bar() + composer_mode_badge(snapshot.mode);
   if (!provider.empty()) {
@@ -34,25 +30,17 @@ std::string render_status_line(const ComposerSnapshot& snapshot, std::size_t wid
   if (!model.empty()) {
     line += "  " + std::string(kSgrMuted) + model + std::string(kSgrReset) + std::string(kSgrComposerBg);
   }
-  if (!status.empty()) {
-    line += "  " + std::string(kSgrTextDimmed) + status + std::string(kSgrReset) + std::string(kSgrComposerBg);
-  }
-
   std::string right;
-  if (hidden_draft_lines > 0) {
-    right += std::string(kSgrMuted) + "draft +" + std::to_string(hidden_draft_lines) + " above" +
-             std::string(kSgrReset) + std::string(kSgrComposerBg);
-  }
   if (snapshot.token_status && !snapshot.token_status->empty()) {
     if (!right.empty()) right += "  ";
     right += std::string(kSgrMuted) + sanitize_terminal_text(*snapshot.token_status) + std::string(kSgrReset) +
              std::string(kSgrComposerBg);
   }
   if (snapshot.processing) {
-    static constexpr std::array<std::string_view, 4> kSpinner = {"|", "/", "-", "\\"};
+    static constexpr std::array<std::string_view, 10> kSpinner = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
     if (!right.empty()) right += "  ";
     right += std::string(kSgrWarning) + std::string(kSpinner[snapshot.spinner_frame % kSpinner.size()]) +
-             std::string(kSgrReset) + std::string(kSgrComposerBg) + " working";
+             std::string(kSgrReset) + std::string(kSgrComposerBg);
   }
 
   if (!right.empty()) {
@@ -112,16 +100,35 @@ std::size_t composer_block_line_count(const ComposerSnapshot& snapshot, std::siz
   return std::min(height, desired);
 }
 
-ComposerInputLayout composer_input_layout(std::size_t input_line_count, std::size_t max_lines) {
-  if (max_lines <= 1)
-    return {
-        .top_padding = 0, .first_visible = input_line_count > 1 ? input_line_count - 1 : 0, .visible_input_lines = 1};
+ComposerInputLayout composer_input_layout(std::size_t input_line_count, std::size_t max_lines,
+                                          std::size_t draft_scroll_offset) {
+  const auto effective_input_lines = std::max<std::size_t>(input_line_count, 1);
+  if (max_lines <= 1) {
+    const auto visible_input_lines = std::size_t{1};
+    const auto max_scroll =
+        effective_input_lines > visible_input_lines ? effective_input_lines - visible_input_lines : 0;
+    const auto scroll = std::min(draft_scroll_offset, max_scroll);
+    const auto first_visible =
+        effective_input_lines > visible_input_lines ? effective_input_lines - visible_input_lines - scroll : 0;
+    return {.top_padding = 0,
+            .first_visible = first_visible,
+            .visible_input_lines = visible_input_lines,
+            .hidden_above = first_visible,
+            .hidden_below = effective_input_lines - first_visible - visible_input_lines};
+  }
   const auto input_budget = max_lines - 1;
-  const auto visible_input_lines = std::min(std::max<std::size_t>(input_line_count, 1), input_budget);
-  const auto first_visible = input_line_count > visible_input_lines ? input_line_count - visible_input_lines : 0;
+  const auto visible_input_lines = std::min(effective_input_lines, input_budget);
+  const auto max_scroll = effective_input_lines > visible_input_lines ? effective_input_lines - visible_input_lines : 0;
+  const auto scroll = std::min(draft_scroll_offset, max_scroll);
+  const auto first_visible =
+      effective_input_lines > visible_input_lines ? effective_input_lines - visible_input_lines - scroll : 0;
   const auto content_lines = visible_input_lines + 1;
   const auto padding = max_lines > content_lines ? max_lines - content_lines : 0;
-  return {.top_padding = padding / 2, .first_visible = first_visible, .visible_input_lines = visible_input_lines};
+  return {.top_padding = padding / 2,
+          .first_visible = first_visible,
+          .visible_input_lines = visible_input_lines,
+          .hidden_above = first_visible,
+          .hidden_below = effective_input_lines - first_visible - visible_input_lines};
 }
 
 std::vector<std::string> render_composer_block(const ComposerSnapshot& snapshot, std::size_t width,
@@ -131,7 +138,7 @@ std::vector<std::string> render_composer_block(const ComposerSnapshot& snapshot,
     if (max_lines == 1) return {render_input_line(snapshot, width)};
     if (max_lines == 2) return {render_input_line(snapshot, width), render_status_line(snapshot, width)};
     std::vector<std::string> lines;
-    const auto layout = composer_input_layout(1, max_lines);
+    const auto layout = composer_input_layout(1, max_lines, 0);
     while (lines.size() < layout.top_padding) {
       lines.push_back(composer_surface_line("", width));
     }
@@ -145,7 +152,7 @@ std::vector<std::string> render_composer_block(const ComposerSnapshot& snapshot,
 
   std::vector<std::string> lines;
   const auto input_lines = input_render_lines(snapshot.input);
-  const auto layout = composer_input_layout(input_lines.size(), max_lines);
+  const auto layout = composer_input_layout(input_lines.size(), max_lines, snapshot.draft_scroll_offset);
   while (lines.size() < layout.top_padding) {
     lines.push_back(composer_surface_line("", width));
   }
@@ -153,7 +160,7 @@ std::vector<std::string> render_composer_block(const ComposerSnapshot& snapshot,
   for (std::size_t index = layout.first_visible; index < last_visible; ++index) {
     lines.push_back(render_input_fragment_line(input_lines[index], index == 0, width));
   }
-  if (max_lines > 1) lines.push_back(render_status_line(snapshot, width, layout.first_visible));
+  if (max_lines > 1) lines.push_back(render_status_line(snapshot, width));
   while (lines.size() < max_lines) {
     lines.push_back(composer_surface_line("", width));
   }

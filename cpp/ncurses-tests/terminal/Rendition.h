@@ -23,7 +23,10 @@ class Rendition
   // Accessors
 
   ColorPair color_pair() const { return color_pair_; }
+  ColorPair& color_pair() { return color_pair_; }
+
   Attributes attributes() const { return attributes_; }
+  Attributes& attributes() { return attributes_; }
 };
 
 } // namespace terminal

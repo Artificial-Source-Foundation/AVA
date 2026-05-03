@@ -34,8 +34,11 @@ class ComplexChar
   ComplexChar(Attributes attributes = {})                       : ComplexChar(space_, attributes) { }
 
   // Accessors.
-  wchar_t const* character() const { return variable_width_character_; }
+  wchar_t const* characters() const { return variable_width_character_; }
+  wchar_t* characters() { return variable_width_character_; }
+
   Rendition rendition() const { return rendition_; }
+  Rendition& rendition() { return rendition_; }
 
   // Manipulator.
   void set_rendition(Rendition rendition) { rendition_ = rendition; }

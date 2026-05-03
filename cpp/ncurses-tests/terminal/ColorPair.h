@@ -12,6 +12,7 @@ class ColorPair
 
   // Accessor.
   int index() const { return index_; }
+  int& index() { return index_; }
 };
 
 } // namespace terminal

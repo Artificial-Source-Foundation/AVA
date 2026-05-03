@@ -46,6 +46,7 @@ class Attributes
 
   // Accessor.
   attr_t mask() const { return mask_; }
+  attr_t& mask() { return mask_; }
 };
 
 template<typename T>

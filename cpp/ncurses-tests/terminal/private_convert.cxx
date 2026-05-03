@@ -19,6 +19,6 @@ cchar_t convert_to_cchar(ComplexChar const& complex_char)
 {
   cchar_t result;
   int color_pair_index = complex_char.rendition().color_pair().index();
-  setcchar(&result, complex_char.character(), convert_to_attr(complex_char.rendition().attributes()), 0, &color_pair_index);
+  setcchar(&result, complex_char.characters(), convert_to_attr(complex_char.rendition().attributes()), 0, &color_pair_index);
   return result;
 }

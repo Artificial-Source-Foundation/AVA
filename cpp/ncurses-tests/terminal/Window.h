@@ -6,10 +6,22 @@
 
 namespace terminal {
 
+// Forward declaration.
+class Session;
+
 class Window
 {
+ private:
+  // These are called before ncurses is initialized by the constructor of Session.
+  friend class Session;
+  Window();                     // Construct an uninitialized Window.
+  void init_as_stdscr();        // Initialize a default constructed window with stdscr.
+
  public:
+  // Construct a new Window at y,x with `height` rows x `width` cols.
   Window(int height, int width, int y, int x);
+
+  // The destructor must be defined in the .cxx file because of the std::unique_ptr<Impl> with incomplete `Impl`.
   ~Window();
 
   void set_background(ComplexChar background, bool erase = true);

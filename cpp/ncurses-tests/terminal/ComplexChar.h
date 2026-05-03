@@ -25,7 +25,7 @@ class ComplexChar
 
   // Use default colors.
   ComplexChar(GraphemeCluster const& cell_character, Attributes attributes = {}) :
-    ComplexChar(cell_character, 0, attributes) { }
+    ComplexChar(cell_character, {}, attributes) { }
 
   // Empty variable width character.
   ComplexChar(Rendition rendition)                              : ComplexChar(GraphemeCluster{}, rendition) { }

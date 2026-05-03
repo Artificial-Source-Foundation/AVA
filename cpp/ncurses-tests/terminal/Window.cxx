@@ -1,4 +1,5 @@
 #include "Window.h"
+#include "debug.h"
 
 // This header must be included last.
 #include "private_convert.h"
@@ -8,6 +9,11 @@ namespace terminal {
 struct Window::Impl
 {
   WINDOW* ncurses_window_;
+
+  // Construct an Impl representing stdscr.
+  Impl() : ncurses_window_(stdscr)
+  {
+  }
 
   Impl(int nlines, int ncols, int begin_y, int begin_x)
   {
@@ -21,6 +27,8 @@ struct Window::Impl
 
   ~Impl()
   {
+    if (ncurses_window_ == stdscr)
+      return;
     // From https://docs.oracle.com/cd/E86824_01/html/E54767/delwin-3xcurses.html
     //
     // The delwin() function deletes the specified window, freeing up the memory associated with it.
@@ -145,6 +153,17 @@ struct Window::Impl
     ::wmove(ncurses_window_, y, x);
   }
 };
+
+Window::Window()
+{
+}
+
+void Window::init_as_stdscr()
+{
+  // Only call this function once and only on a default constructed Window. This should only be called from Session().
+  ASSERT(!impl_);
+  impl_ = std::make_unique<Impl>();
+}
 
 Window::Window(int height, int width, int y, int x) : impl_(std::make_unique<Impl>(height, width, y, x))
 {

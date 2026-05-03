@@ -52,6 +52,8 @@ int main()
     // where setcchar needs a temporary terminator and getcchar writes one extra
     // wchar_t beyond ncurses' fixed cchar_t payload.
     terminal::Session terminal_session;
+    terminal::Rendition const green_rendition(terminal_session.create_color_pair({0xffffff}, {0x008800}));
+    terminal_session.stdscr().set_background({green_rendition});
     terminal::Window window{terminal_session.rows() / 2, terminal_session.cols() / 2, terminal_session.rows() / 4, terminal_session.cols() / 4};
     window.set_background(source);
     window.set_border({});
@@ -64,7 +66,7 @@ int main()
             "Window background round-trip should preserve bold attribute");
 
     window.move(1, 1);
-    terminal_session.refresh();
+    terminal_session.stdscr().refresh();
     window.refresh();
     terminal_session.get_wch();
   }

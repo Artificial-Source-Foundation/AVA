@@ -12,6 +12,8 @@ Session::Session() : default_rendition_(ColorPair{0})
   setlocale(LC_ALL, "");
   initscr();
 
+  stdscr_.init_as_stdscr();
+
   wchar_t fill[] = L" ";
 
   if (has_colors())
@@ -39,11 +41,6 @@ int Session::rows() const
 int Session::cols() const
 {
   return COLS;
-}
-
-void Session::refresh()
-{
-  ::refresh();
 }
 
 int Session::get_wch()

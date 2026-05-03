@@ -23,6 +23,9 @@ class Color
   uint32_t rgb_;
 
  public:
+  // Construct a color meaning "the default terminal color" (for either foreground or background).
+  Color() : rgb_(0xffffffff) { }
+
   Color(uint32_t rgb) : rgb_(rgb)
   {
     if (rgb_ < 8)

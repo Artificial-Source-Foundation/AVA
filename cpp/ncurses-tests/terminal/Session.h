@@ -3,6 +3,7 @@
 #include "ComplexChar.h"
 #include "ColorPair.h"
 #include "Color.h"
+#include "Window.h"
 #include <vector>
 
 namespace terminal {
@@ -15,6 +16,7 @@ namespace terminal {
 class Session final
 {
  private:
+  Window stdscr_;
   Rendition default_rendition_;
   std::vector<ColorPair> color_pairs_;
 
@@ -30,9 +32,11 @@ class Session final
   // Return a suitable ColorPair for the given colors.
   ColorPair create_color_pair(Color foreground, Color background);
 
+  Window const& stdscr() const { return stdscr_; }
+  Window& stdscr() { return stdscr_; }
+
   int rows() const;
   int cols() const;
-  void refresh();
   int get_wch();
 };
 

@@ -87,6 +87,7 @@ Current event names:
 - `message_update`: live assistant text delta emitted while a streaming provider response is in progress; includes `text` and `status`.
 - `message_end`: live provider stream completion marker; includes `status`.
 - `provider_event`: live non-text provider stream event such as tool-call argument deltas or provider stream errors; includes `status`, and may include `call_id`, `tool`, `text`, or `message` depending on the provider event.
+- `reasoning_start`, `reasoning_delta`, `reasoning_end` (planned for the provider-native MVP): provider-neutral reasoning lifecycle events for models that expose visible thinking/reasoning. These events should let TUI, frontend, and RPC clients display reasoning without parsing provider-specific raw stream records. Payloads are additive and should include bounded text deltas, provider/model metadata when safe, and redaction/signature status without exposing hidden verification material.
 - `assistant_message`: final assistant text for a completed turn.
 - `tool_start`: tool call began; includes `call_id`, `tool`, and a safe argument summary when available.
 - `tool_result`: tool call completed; includes `call_id`, `tool`, `status`, and a safe result summary when available.
@@ -198,6 +199,8 @@ Model catalog and switching:
 ```
 
 `list_models` returns the configured effective model catalog with local `models.json` overrides taking precedence over built-ins. The response includes `default_provider`, `default_model`, `current_provider`, `current_model`, and `models`, where each model includes `provider`, `model`, `display_name`, `family`, `api_family`, `registered`, `selectable`, capability metadata, modality arrays, and `selected` for the active model. `current_provider`/`current_model` are authoritative; when a session restores a removed model, AVA includes a synthetic selected model entry with `selectable:false`. `set_model` switches to a configured selectable model, appends a durable `model_change` session entry only when the provider/model actually changes, reloads provider/model-specific prompt context, and returns the same state shape as `get_state`. If `provider` is omitted, AVA first tries the current provider and then accepts the model id only when it is unique across registered providers. `cycle_model` advances to the next configured selectable model, appends `model_change` when the selection changes, reloads prompt context, and returns the state shape. Model switching commands are rejected while a prompt or RPC compaction is active.
+
+The provider-native MVP adds two compatibility rules to model switching: clients should only offer reasoning controls for models that declare support, and AVA should reject provider switches that cannot safely replay the existing conversation history instead of silently dropping tool or reasoning context.
 
 List sessions:
 

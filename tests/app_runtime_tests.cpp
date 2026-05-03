@@ -1144,6 +1144,37 @@ void test_app_connect_provider_credentials_headlessly() {
   expect(cancelled_wizard_exit == 1 && cancelled_wizard_err.str().find("provider login cancelled") != std::string::npos,
          "interactive provider wizard cancels on standalone escape without waiting for more input");
 
+  std::istringstream arrow_wizard_input("\x1b[B\napi-key\narrow-api-key\n");
+  std::ostringstream arrow_wizard_out;
+  std::ostringstream arrow_wizard_err;
+  const auto arrow_wizard_exit = ava::app::run_connect_provider_wizard(
+      wizard_paths,
+      ava::app::ConnectProviderWizardOptions{
+          .provider_id = std::nullopt, .credential_type = std::nullopt, .stdin_is_tty = true},
+      arrow_wizard_input, arrow_wizard_out, arrow_wizard_err);
+  expect(arrow_wizard_exit == 0 && arrow_wizard_err.str().empty(),
+         "interactive provider wizard supports arrow-key provider selection");
+  wizard_anthropic = ava::config::provider_credential_for_request(wizard_paths, "anthropic", transport);
+  expect(wizard_anthropic && wizard_anthropic->has_value() && (*wizard_anthropic)->access_token == "arrow-api-key",
+         "interactive provider wizard arrow selection stores the selected provider credential");
+
+  std::istringstream ignored_escape_wizard_input("\x1b[Canthropic\napi-key\nright-arrow-api-key\n");
+  std::ostringstream ignored_escape_wizard_out;
+  std::ostringstream ignored_escape_wizard_err;
+  const auto ignored_escape_wizard_exit = ava::app::run_connect_provider_wizard(
+      wizard_paths,
+      ava::app::ConnectProviderWizardOptions{
+          .provider_id = std::nullopt, .credential_type = std::nullopt, .stdin_is_tty = true},
+      ignored_escape_wizard_input, ignored_escape_wizard_out, ignored_escape_wizard_err);
+  expect(ignored_escape_wizard_exit == 0 && ignored_escape_wizard_err.str().empty(),
+         "interactive provider wizard ignores unsupported escape sequences without polluting search text");
+  expect(ignored_escape_wizard_out.str().find("Search: anthropic") != std::string::npos,
+         "interactive provider wizard keeps typed search text after unsupported escape sequence");
+  wizard_anthropic = ava::config::provider_credential_for_request(wizard_paths, "anthropic", transport);
+  expect(wizard_anthropic && wizard_anthropic->has_value() &&
+             (*wizard_anthropic)->access_token == "right-arrow-api-key",
+         "interactive provider wizard stores typed provider after ignoring unsupported escape sequence");
+
   std::istringstream non_tty_wizard_input;
   std::ostringstream non_tty_wizard_out;
   std::ostringstream non_tty_wizard_err;

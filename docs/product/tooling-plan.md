@@ -18,6 +18,8 @@ Every tool has:
 
 Tool metadata should stay generic by default, matching PI's lean tool model. The metadata shape should still allow later provider/model-specific descriptions or availability choices, matching the useful OpenCode pattern, once AVA has the Phase 5 provider/model capability catalog.
 
+For the backend MVP, the tool contract also becomes the foundation for plugin and MCP tools. Built-in tools, plugin tools, and MCP tools must share one registry path for schema validation, permission checks, source identity, event emission, audit records, cancellation, and output bounds. This registry work must preserve current built-in tool behavior before external tools are allowed through it.
+
 Image reading is deferred from the core text `read` tool for now. Supporting images would require provider modality metadata, session attachment shape, and model-specific payload handling; revisit it when multimodal provider capabilities are part of the provider/model catalog.
 
 Every tool result should include:

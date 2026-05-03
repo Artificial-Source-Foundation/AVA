@@ -2,6 +2,8 @@
 
 This document defines the intended 1.0 plugin foundation for AVA. It is grounded in PI's extension model, but adapted for AVA's constraints: native C++23, one binary, explicit permission boundaries, inspectable local files, and a core that must keep working when plugins fail.
 
+Phase 6 plugin/MCP foundation is required for the 1.0 backend MVP. Advanced extension features remain 1.1+ roadmap work.
+
 ## PI Reference Lessons
 
 PI uses trusted TypeScript extensions loaded in-process. The relevant reference files are:
@@ -56,6 +58,8 @@ AVA should not load third-party native shared libraries in-process for 1.0. A na
 - Provider/message interception that can silently rewrite prompts or provider requests.
 - Hard cross-platform sandbox guarantees for arbitrary executables.
 - Trusting MCP servers as safe just because they speak MCP.
+
+These are non-goals for the 1.0 plugin/MCP foundation, not discarded product ideas. Marketplace/install flows, richer UI bridges, advanced remote MCP transports, and subagent orchestration should stay on the 1.1+ roadmap after the out-of-process safety model is proven.
 
 ## Plugin Discovery
 

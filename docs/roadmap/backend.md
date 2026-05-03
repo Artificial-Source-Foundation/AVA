@@ -19,6 +19,30 @@ AVA 1.0 should be a reliable local coding-agent backend that supports:
 - Context management that prevents long sessions from failing because the window filled up.
 - A stable local plugin foundation for tools, commands, prompt resources, event hooks, and MCP servers after core safety is stable.
 
+## Approved Backend MVP Cut
+
+The 1.0 backend MVP was approved on 2026-05-03 after comparing AVA against PI and OpenCode reference behavior. The MVP cut keeps AVA focused on a safe local coding-agent backend rather than full product parity with either reference.
+
+Required for the MVP, including both implemented foundations and remaining Phase 5.5/6 work:
+
+- Provider-native OpenAI, Anthropic, Kimi/Moonshot, and OpenAI-compatible provider paths with fake-provider contract tests and opt-in live smokes. OpenAI is implemented, Anthropic is partial, and Kimi/Moonshot plus generic OpenAI-compatible shims remain planned implementation work.
+- Reasoning/thinking storage, runtime events, RPC controls, and frontend-visible deltas for providers that expose reasoning.
+- Safe mid-session model switching that preserves compatible history and rejects incompatible switches before sending invalid provider requests.
+- Hardened built-in tools, tool cancellation where safe, and a registry foundation shared by built-in, plugin, and MCP tools.
+- Out-of-process plugins with manifest validation, explicit enablement, diagnostics, permission/audit identity, and fake plugin tests.
+- MCP stdio host support for tool discovery/calls, diagnostics, permission/audit identity, and fake MCP server tests.
+- Docs, samples, protocol notes, and verification commands that prove the backend is ready.
+
+Explicitly post-MVP but still on the product roadmap:
+
+- 1.1 candidates: HTTP/server daemon mode, persistent permission rules, session tree UI with fork/clone/branch summaries, full LSP symbols/definitions/references, multimodal/image support, richer MCP resources/prompts if they do not fit the 1.0 slice, and broader live-provider smoke automation.
+- 1.2+ candidates: plugin marketplace/package manager/remote install, extension UI bridge, advanced MCP HTTP/OAuth/subscriptions/sampling/elicitation/pagination, parallel tool execution, and OS-level plugin sandboxing.
+- Later research: in-process native plugin ABI only if AVA accepts the crash/memory/C++ ABI support burden, and multi-agent/subagent orchestration only after plugin/process/session boundaries are stable.
+
+Reference-code rule: PI and OpenCode under `docs/reference-code/` are behavior references only. Their source code and architecture must not be copied into AVA.
+
+Terminology note: this roadmap uses "1.0" and "backend MVP" for the same release cut. "Post-MVP" means 1.1 and later.
+
 ## Reference: PI Backend Capabilities
 
 The PI backend reference lives under `docs/reference-code/pi-mono`. The most relevant files are:
@@ -59,7 +83,7 @@ Explorer agents checked each roadmap phase against the current AVA code and PI r
 - Phase 2 is implemented and verified for the approved evented-runtime scope: versioned event envelopes, shared event bus routing for headless modes, incremental provider streaming, RPC protocol versioning/session commands, active-run cancellation, permission/question resolver replies, and bounded `steer`/`follow_up` queues. Provider/model registry commands and richer reasoning-specific events remain aligned with Phase 5 provider capability work.
 - Phase 3 core context/session work is implemented for the approved scope: provider-generated `/compact`, automatic compaction, one bounded context-overflow retry, provider usage/cost records, RPC stats, additive session version checks, and branching-ready `id`/`parent_id` validation. Full fork/clone/tree UI, branch summaries, and mid-session model/thinking entries remain deferred to later phases.
 - Phase 4's core tool-quality slice is implemented and verified: centralized built-in tool metadata, `.gitignore`-aware search with a documented native subset, bounded spill files, streaming tool progress, edit/apply_patch diff previews with CRLF/BOM diagnostics, per-path mutation serialization, `webfetch` behind `network.fetch`, and an LSP diagnostics first slice. Final validation included live headless smokes for read/search/webfetch plus RPC permission/question reply smokes for write/edit/apply_patch/bash/question; LSP diagnostics are covered by fake-server tests because the tool is capability-gated. Remaining tool-quality expansion includes broader fuzzy/Unicode matching, image/multimodal reads, LSP symbols/definitions/references, and Phase 6-grade registry/artifact ownership.
-- Phase 5 is implemented and verified for the approved provider-breadth scope: provider registry, model capability catalog, provider-neutral credential discovery, retry/error normalization, Anthropic Messages first slice, model-change session entries, and RPC model listing/switching. The Phase 5 Anthropic slice intentionally remained first-slice protocol support; provider-native hardening beyond that base is tracked under Phase 5.5.
+- Phase 5 is implemented and verified for its foundation scope: provider registry, model capability catalog, provider-neutral credential discovery, retry/error normalization, Anthropic Messages first slice, model-change session entries, and RPC model listing/switching. This does not mean Anthropic is production-quality for the 1.0 cut yet; production-quality non-OpenAI support depends on the remaining Phase 5.5 hardening.
 - Phase 5.5 has its first provider-native slice implemented and verified: provider-neutral text/tool-call/tool-result content parts, session replay into native `tool_use`/`tool_result` blocks, Anthropic request validation/serialization, and fake-transport native tool-loop regressions. Remaining Phase 5.5 work should finish thinking/cache-control, Kimi/Moonshot, provider shims, provider-switch pruning or translation, retry/idempotency, and real endpoint smoke coverage before plugin/MCP seams depend on provider-native contracts.
 - Phase 6 is well-scoped as a safe local plugin/MCP foundation, but it depends on earlier tool registry, event bus, permission, session, provider, RPC, and provider-native message seams.
 
@@ -80,18 +104,19 @@ Missing or incomplete:
 
 - Every run emits structured lifecycle events.
 - TUI and RPC consume the same event stream.
-- Cancellation is observed promptly at provider, tool, and shell boundaries.
+- Cancellation is observed promptly at tool and shell boundaries and at safe provider boundaries. Direct interruption of in-flight provider transport calls remains a hardening item unless the transport boundary can support it safely.
 - Tool execution remains sequential by default, with explicit parallel eligibility later.
 
 ### Providers And Auth
 
-AVA's provider layer now has a registry-backed OpenAI path plus an Anthropic Messages path with native `tool_use`/`tool_result` replay. OpenAI OAuth credentials refresh before use when a refresh token is available.
+AVA's provider layer now has a registry-backed OpenAI path plus an Anthropic Messages path with native `tool_use`/`tool_result` replay. OpenAI OAuth credentials refresh before use when a refresh token is available. PI and OpenCode remain references for provider breadth, model metadata, Kimi/Moonshot quirks, and reasoning behavior; AVA should match the relevant behavior without copying their implementation architecture.
 
 Missing or incomplete:
 
 - Provider-native message replay beyond the completed Anthropic `tool_use`/`tool_result` slice, including safe provider-switch pruning or translation.
 - Anthropic-native thinking blocks, thinking signatures, cache-control hints, and stop-reason normalization.
 - Broader provider families beyond OpenAI and Anthropic, especially providers that expose OpenAI-compatible and Anthropic-compatible endpoints.
+- Kimi/Moonshot coding behavior, including reference-informed aliases, credentials, default parameters, `reasoning_content`, and context-overflow classification.
 - Provider-specific auth discovery beyond simple API-key/OAuth-token sources, such as Google ADC, AWS Bedrock credentials, or provider-specific CLI tokens.
 - Idempotency-aware retry policy for provider POSTs where providers support request ids or idempotency keys.
 - Reasoning controls wired through request builders rather than only represented in capability metadata.
@@ -99,11 +124,12 @@ Missing or incomplete:
 1.0 target:
 
 - OpenAI remains excellent.
-- At least one additional provider path is production-quality.
+- At least one additional provider path reaches production-quality before 1.0 ships; Anthropic is the current partial candidate and depends on Phase 5.5 completion.
 - Provider/model definitions declare capabilities that the runtime can enforce.
 - OAuth credentials refresh before expiry.
 - Provider failures are categorized and actionable.
 - Provider-native protocols preserve tool/result/thinking semantics instead of relying on text-only transcript replay.
+- Reasoning deltas are emitted in a shape that a frontend can display without parsing provider-specific raw events.
 
 ### Sessions And Context
 
@@ -112,6 +138,7 @@ AVA has append-only session storage, persisted permission audit entries, provide
 Missing or incomplete:
 
 - Mid-session model and thinking-level changes with session entries.
+- Durable reasoning/thinking storage that follows the strongest useful lessons from PI and OpenCode while preserving AVA's inspectable JSONL sessions.
 - Session tree structure, branching, fork, clone, and branch summaries.
 - Full rewrite-style migrations for future schema changes beyond the current additive version checks and actionable future-version rejection.
 - A backend-provided live token/context usage summary for the TUI composer status slot. The frontend can reserve space for it in Phase 1, but accurate counts need backend session/provider usage data and context-window metadata.
@@ -395,6 +422,7 @@ Scope:
 - Keep Anthropic-compatible endpoint support explicit: configurable base URL, API-key and bearer-token auth, no credential leakage across redirects, tolerant but loud SSE parsing, and tests that cover common compatible-provider drift.
 - Add at least two more provider families or compatibility shims after Anthropic is native. Preferred order: OpenAI-compatible endpoints such as OpenRouter/DeepSeek/xAI/Groq/Mistral where the Responses or Chat Completions shape is close enough; Google Gemini next if its message/tool/thinking shape can be tested without SDK sprawl; Bedrock/Vertex only after credential-chain and event-stream risks are planned.
 - Add an explicit Kimi/Moonshot coding capability profile, using OpenCode as the baseline: Kimi-specific coding prompt selection, Kimi K2/K2.5/K2-thinking model aliases across Moonshot and compatible gateways, temperature/top-p defaults, `enable_thinking`/`chat_template_args`/Anthropic-style thinking-budget quirks by endpoint family, `reasoning_content` handling, and Moonshot/Kimi context-overflow patterns such as `exceeded model token limit`.
+- Before implementation, re-check current PI/OpenCode reference behavior and current public Kimi/Moonshot docs so AVA chooses the smallest correct provider path instead of guessing between OpenAI-compatible and Anthropic-compatible routes.
 - Add provider-specific request transforms behind provider implementations, not in the agent loop: schema sanitization, tool-name quirks, strict JSON schema variants, stop-sequence fields, reasoning/thinking controls, max-output fields, and modality limits.
 - Add provider-specific auth discovery only with safe documented precedence and tests. Environment variables are sufficient for first support, but stored auth files, OAuth refresh, ADC, AWS, and CLI-token discovery must be explicit per provider.
 - Add provider-native fake transports/harnesses that exercise a complete tool loop for each non-OpenAI provider: request with tools, provider tool call, AVA tool result, follow-up request with native result block, and final answer.
@@ -414,6 +442,8 @@ Acceptance criteria:
 - The headless RPC model catalog shows enough capability and compatibility metadata for clients to avoid offering unsupported tools, modalities, or reasoning controls.
 
 ### Phase 6: Stable Plugin Foundation
+
+Status: required for the 1.0 backend MVP, sequenced after provider-native and tool-registry foundations so external contributions cannot depend on unstable contracts.
 
 Purpose: open backend seams as a small, safe plugin system without turning AVA into a marketplace or letting plugins destabilize the core.
 
@@ -460,7 +490,7 @@ Required for 1.0:
 - Hardened file/search/bash tools with focused tests.
 - Stable RPC protocol version with prompt, cancel, state, sessions, messages, compact, export, permission, and question flows.
 - Provider registry with OpenAI plus one additional high-quality provider, backed by model capability and pricing metadata.
-- Provider-native Anthropic support and at least two additional provider families or compatibility shims hardened enough for real endpoint use, including a Kimi/Moonshot coding path.
+- Provider-native Anthropic support hardened enough for real endpoint use, plus Kimi/Moonshot and at least one OpenAI-compatible provider shim covered by fake-provider contract tests. These are remaining 1.0 requirements, not current completed capabilities. Kimi/Moonshot's exact implementation route must be confirmed against current PI/OpenCode behavior and public provider docs before coding.
 - Mid-session model switching, model-change session entries, and session stats exposed over RPC.
 - Thinking/reasoning controls for providers and models that support them.
 - Stable local plugin foundation with manifest schema, versioned out-of-process JSONL protocol, tool/command/prompt/event/MCP contributions, diagnostics, docs, and regression tests.
@@ -484,6 +514,8 @@ Defer unless earlier phases finish cleanly:
 - Cross-platform hard sandbox guarantees for arbitrary untrusted plugin executables.
 - Full theme/UI extension system.
 - Built-in multi-agent orchestration, including `task` workers and subagents.
+
+These deferred items remain product-roadmap items rather than discarded ideas. Track them as 1.1+ follow-up work after the backend MVP is stable and verified.
 
 ## Immediate Next Work
 

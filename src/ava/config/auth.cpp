@@ -147,6 +147,12 @@ ava::core::Error auth_file_error(ava::core::ErrorCategory category,
   return error;
 }
 
+bool has_error_context(const ava::core::Error& error, std::string_view key, std::string_view value) {
+  return std::ranges::any_of(error.context(), [&](const ava::core::ErrorContext& item) {
+    return item.key == key && item.value == value;
+  });
+}
+
 bool is_json_ws(char ch) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; }
 
 void skip_json_ws(std::string_view text, std::size_t& index) {
@@ -551,7 +557,7 @@ ava::core::VoidResult store_provider_object(const XdgPaths& paths,
 
   auto content = read_text_if_exists(paths.auth_file, true);
   if (!content && content.error().category() == ava::core::ErrorCategory::PermissionDenied &&
-      content.error().message().find("permissions are too broad") != std::string::npos) {
+      has_error_context(content.error(), "reason", "broad_permissions")) {
     content = CandidateRead{};
   }
   if (!content) return std::unexpected(std::move(content.error()));
@@ -644,6 +650,7 @@ ava::core::Result<CandidateRead> read_text_if_exists(const std::filesystem::path
     if (!explicit_ava_auth_file) return CandidateRead{};
     auto error = auth_file_error(ava::core::ErrorCategory::PermissionDenied,
                                  "auth file permissions are too broad; run `chmod 600` on the auth file", path);
+    error.with_context("reason", "broad_permissions");
     error.with_context("expected_permissions", "0600");
     return std::unexpected(std::move(error));
   }

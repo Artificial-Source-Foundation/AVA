@@ -2,6 +2,7 @@
 
 #include <netinet/in.h>
 #include <poll.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <termios.h>
 #include <unistd.h>
@@ -33,41 +34,43 @@ namespace {
 
 constexpr std::size_t max_connect_secret_bytes = 64 * 1024;
 
-volatile std::sig_atomic_t raw_mode_signal_installed = 0;
-termios raw_mode_signal_original{};
-using SignalHandler = void (*)(int);
-SignalHandler raw_mode_previous_sigint = SIG_DFL;
-SignalHandler raw_mode_previous_sigterm = SIG_DFL;
-SignalHandler raw_mode_previous_sighup = SIG_DFL;
+volatile sig_atomic_t terminal_mode_signal_number = 0;
+bool terminal_mode_signal_handlers_installed = false;
+struct sigaction previous_sigint_action {};
+struct sigaction previous_sigterm_action {};
+struct sigaction previous_sighup_action {};
 
-void restore_raw_mode_from_signal(int signal_number) {
-  if (raw_mode_signal_installed != 0) {
-    static_cast<void>(::tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_mode_signal_original));
+void terminal_mode_signal_handler(int signal_number) { terminal_mode_signal_number = signal_number; }
+
+bool install_terminal_mode_signal_handlers() {
+  terminal_mode_signal_number = 0;
+  struct sigaction action {};
+  action.sa_handler = terminal_mode_signal_handler;
+  sigemptyset(&action.sa_mask);
+  action.sa_flags = 0;
+  if (::sigaction(SIGINT, &action, &previous_sigint_action) != 0) return false;
+  if (::sigaction(SIGTERM, &action, &previous_sigterm_action) != 0) {
+    static_cast<void>(::sigaction(SIGINT, &previous_sigint_action, nullptr));
+    return false;
   }
-  SignalHandler previous = SIG_DFL;
-  if (signal_number == SIGINT) previous = raw_mode_previous_sigint;
-  if (signal_number == SIGTERM) previous = raw_mode_previous_sigterm;
-  if (signal_number == SIGHUP) previous = raw_mode_previous_sighup;
-  if (previous == SIG_ERR) previous = SIG_DFL;
-  static_cast<void>(std::signal(signal_number, previous));
-  if (previous != SIG_IGN) static_cast<void>(std::raise(signal_number));
+  if (::sigaction(SIGHUP, &action, &previous_sighup_action) != 0) {
+    static_cast<void>(::sigaction(SIGTERM, &previous_sigterm_action, nullptr));
+    static_cast<void>(::sigaction(SIGINT, &previous_sigint_action, nullptr));
+    return false;
+  }
+  terminal_mode_signal_handlers_installed = true;
+  return true;
 }
 
-void install_raw_mode_signal_handlers(const termios& original) {
-  raw_mode_signal_original = original;
-  raw_mode_previous_sigint = std::signal(SIGINT, restore_raw_mode_from_signal);
-  raw_mode_previous_sigterm = std::signal(SIGTERM, restore_raw_mode_from_signal);
-  raw_mode_previous_sighup = std::signal(SIGHUP, restore_raw_mode_from_signal);
-  raw_mode_signal_installed = 1;
+void restore_terminal_mode_signal_handlers() {
+  if (!terminal_mode_signal_handlers_installed) return;
+  terminal_mode_signal_handlers_installed = false;
+  static_cast<void>(::sigaction(SIGINT, &previous_sigint_action, nullptr));
+  static_cast<void>(::sigaction(SIGTERM, &previous_sigterm_action, nullptr));
+  static_cast<void>(::sigaction(SIGHUP, &previous_sighup_action, nullptr));
 }
 
-void restore_raw_mode_signal_handlers() {
-  if (raw_mode_signal_installed == 0) return;
-  raw_mode_signal_installed = 0;
-  static_cast<void>(std::signal(SIGINT, raw_mode_previous_sigint == SIG_ERR ? SIG_DFL : raw_mode_previous_sigint));
-  static_cast<void>(std::signal(SIGTERM, raw_mode_previous_sigterm == SIG_ERR ? SIG_DFL : raw_mode_previous_sigterm));
-  static_cast<void>(std::signal(SIGHUP, raw_mode_previous_sighup == SIG_ERR ? SIG_DFL : raw_mode_previous_sighup));
-}
+bool terminal_mode_cancelled_by_signal() { return terminal_mode_signal_number != 0; }
 
 long long unix_time_seconds() {
   return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -123,15 +126,17 @@ class ScopedTerminalRawMode {
  public:
   explicit ScopedTerminalRawMode(bool enabled) : active_(enabled && ::tcgetattr(STDIN_FILENO, &original_) == 0) {
     if (!active_) return;
+    const bool signal_handlers_installed = install_terminal_mode_signal_handlers();
     auto current = original_;
     current.c_lflag &= static_cast<tcflag_t>(~(ICANON | ECHO));
     current.c_cc[VMIN] = 1;
     current.c_cc[VTIME] = 0;
     if (::tcsetattr(STDIN_FILENO, TCSAFLUSH, &current) != 0) {
+      if (signal_handlers_installed) restore_terminal_mode_signal_handlers();
       active_ = false;
       return;
     }
-    install_raw_mode_signal_handlers(original_);
+    signal_handlers_installed_ = signal_handlers_installed;
   }
 
   ScopedTerminalRawMode(const ScopedTerminalRawMode&) = delete;
@@ -140,11 +145,12 @@ class ScopedTerminalRawMode {
   ~ScopedTerminalRawMode() {
     if (!active_) return;
     static_cast<void>(::tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_));
-    restore_raw_mode_signal_handlers();
+    if (signal_handlers_installed_) restore_terminal_mode_signal_handlers();
   }
 
  private:
   bool active_ = false;
+  bool signal_handlers_installed_ = false;
   termios original_{};
 };
 
@@ -458,7 +464,8 @@ void render_provider_menu(std::ostream& out, std::string_view query, std::size_t
 }
 
 bool menu_input_pending(std::istream& in, bool stdin_is_tty) {
-  if (!stdin_is_tty) return in.rdbuf() != nullptr && in.rdbuf()->in_avail() > 0;
+  if (in.rdbuf() != nullptr && in.rdbuf()->in_avail() > 0) return true;
+  if (!stdin_is_tty) return false;
   pollfd descriptor{.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
   int ready = 0;
   do {
@@ -467,9 +474,21 @@ bool menu_input_pending(std::istream& in, bool stdin_is_tty) {
   return ready > 0 && (descriptor.revents & POLLIN) != 0;
 }
 
+void consume_escape_sequence_tail(std::istream& in, bool stdin_is_tty) {
+  while (menu_input_pending(in, stdin_is_tty)) {
+    char ignored = 0;
+    if (!in.get(ignored)) return;
+    if (ignored >= '@' && ignored <= '~') return;
+  }
+}
+
 ava::core::Result<MenuInput> read_menu_input(std::istream& in, bool stdin_is_tty) {
+  if (terminal_mode_cancelled_by_signal()) return MenuInput{.kind = MenuInputKind::Escape, .text = {}};
   char ch = 0;
-  if (!in.get(ch)) return std::unexpected(connect_error(ava::core::ErrorCategory::Io, "failed to read provider menu input"));
+  if (!in.get(ch)) {
+    if (terminal_mode_cancelled_by_signal()) return MenuInput{.kind = MenuInputKind::Escape, .text = {}};
+    return std::unexpected(connect_error(ava::core::ErrorCategory::Io, "failed to read provider menu input"));
+  }
   if (ch == '\n' || ch == '\r') return MenuInput{.kind = MenuInputKind::Enter, .text = {}};
   if (ch == '\x03' || ch == '\x04') return MenuInput{.kind = MenuInputKind::Escape, .text = {}};
   if (ch == '\x7f' || ch == '\b') return MenuInput{.kind = MenuInputKind::Backspace, .text = {}};
@@ -482,14 +501,15 @@ ava::core::Result<MenuInput> read_menu_input(std::istream& in, bool stdin_is_tty
         return MenuInput{.kind = MenuInputKind::Escape, .text = {}};
       }
       if (!menu_input_pending(in, stdin_is_tty)) {
-        static_cast<void>(in.unget());
         return MenuInput{.kind = MenuInputKind::Escape, .text = {}};
       }
       char code = 0;
       if (in.get(code)) {
         if (code == 'A') return MenuInput{.kind = MenuInputKind::Up, .text = {}};
         if (code == 'B') return MenuInput{.kind = MenuInputKind::Down, .text = {}};
-        static_cast<void>(in.unget());
+        if (code >= '@' && code <= '~') return MenuInput{.kind = MenuInputKind::Other, .text = {}};
+        consume_escape_sequence_tail(in, stdin_is_tty);
+        return MenuInput{.kind = MenuInputKind::Other, .text = {}};
       }
     }
     return MenuInput{.kind = MenuInputKind::Escape, .text = {}};

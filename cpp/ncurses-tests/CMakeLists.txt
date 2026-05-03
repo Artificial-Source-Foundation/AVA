@@ -46,3 +46,6 @@ target_link_libraries(linux05 PRIVATE AVA::terminal)
 
 add_executable(linux06 linux06-wrapping.cpp)
 target_link_libraries(linux06 PRIVATE AVA::terminal)
+
+add_executable(linux07 linux07-full-grapheme-cluster.cpp)
+target_link_libraries(linux07 PRIVATE AVA::terminal)

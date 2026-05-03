@@ -1,5 +1,7 @@
 #include "private_convert.h"
 #include "debug.h"
+#include <array>
+#include <cwchar>
 
 attr_t convert_to_attr(Attributes attributes)
 {
@@ -45,7 +47,8 @@ cchar_t convert_to_cchar(ComplexChar const& complex_char)
   {
     // setcchar requires the grapheme to be zero terminated.
     std::array<wchar_t, CCHARW_MAX + 1> tmp;
-    std::wcsncpy(tmp.data(), grapheme_cluster.data(), tmp.size());
+    std::wmemcpy(tmp.data(), grapheme_cluster.data(), CCHARW_MAX);
+    tmp[CCHARW_MAX] = L'\0';
     ::setcchar(&result, tmp.data(), attributes, 0, &color_pair_index);
   }
   return result;
@@ -54,13 +57,17 @@ cchar_t convert_to_cchar(ComplexChar const& complex_char)
 ComplexChar convert_to_ComplexChar(cchar_t const& cchar)
 {
   ComplexChar result;
-  [[maybe_unused]] NCURSES_PAIRS_T color_pair = 0;
+  attr_t attributes = A_NORMAL;
+  NCURSES_PAIRS_T color_pair = 0;
+  int extended_color_pair = 0;
   // We can not write directly into the Storage of result.cell_character() because the grapheme_cluster
   // returned by getcchar is null-terminated, even if it contains CCHARW_MAX non-zero characters!
   std::array<wchar_t, CCHARW_MAX + 1> grapheme_cluster;
-  int const status = ::getcchar(&cchar, grapheme_cluster.data(), &result.rendition().attributes().mask(), &color_pair, &result.rendition().color_pair().index());
+  int const status = ::getcchar(&cchar, grapheme_cluster.data(), &attributes, &color_pair, &extended_color_pair);
   ASSERT(status == OK);
   // Copy at most CCHARW_MAX wide characters into the ComplexChar.
   std::wcsncpy(result.cell_character().data(), grapheme_cluster.data(), CCHARW_MAX);
+  result.rendition().color_pair().index() = extended_color_pair;
+  result.rendition().attributes() = convert_to_Attributes(attributes);
   return result;
 }

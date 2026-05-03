@@ -18,3 +18,4 @@ using ComplexChar = terminal::ComplexChar;
 
 attr_t convert_to_attr(Attributes attributes);
 cchar_t convert_to_cchar(ComplexChar const& complex_char);
+ComplexChar convert_to_ComplexChar(cchar_t const& cchar);

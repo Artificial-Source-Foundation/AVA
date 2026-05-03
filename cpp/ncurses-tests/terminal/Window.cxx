@@ -47,23 +47,9 @@ struct Window::Impl
     ::wrefresh(ncurses_window_);
   }
 
-  void wborder(chtype left_side, chtype right_side, chtype top_side, chtype bottom_side, chtype top_left, chtype top_right, chtype bottom_left, chtype bottom_right)
+  void wborder_set(std::array<cchar_t, 8> const& b)
   {
-    // See https://docs.oracle.com/cd/E88353_01/html/E37849/wborder-3xcurses.html
-    //
-    // With the wborder() routine, a border is drawn around the edges of the window.
-    // +------------------------------------------------------+
-    // | Parameter       Default constant    Default character|
-    // | left_side       ACS_VLINE           |                |
-    // | right_side      ACS_VLINE           |                |
-    // | top_side        ACS_HLINE           -                |
-    // | bottom_side     ACS_HLINE           -                |
-    // | bottom_left     ACS_BLCORNER        +                |
-    // | bottom_right    ACS_BRCORNER        +                |
-    // | top_left        ACS_ULCORNER        +                |
-    // | top_right       ACS_URCORNER        +                |
-    // +------------------------------------------------------+
-    ::wborder(ncurses_window_, left_side, right_side, top_side, bottom_side, top_left, top_right, bottom_left, bottom_right);
+    ::wborder_set(ncurses_window_, &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &b[6], &b[7]);
   }
 
   void addstr(int y, int x, char const* str)
@@ -113,7 +99,7 @@ void Window::set_background(ComplexChar background, bool erase)
     //
     // The wbkgrndset() function turns off the previous background attributes, logical OR the requested attributes into the window rendition,
     // and sets the background property of the current or specified window based on the information in cchar of the second parameter.
-    wbkgrndset(impl_->ncurses_window_, &wch);
+    ::wbkgrndset(impl_->ncurses_window_, &wch);
     impl_->erase();
   }
   else
@@ -125,7 +111,7 @@ void Window::set_background(ComplexChar background, bool erase)
     //
     // * The rendition of every character on the screen is changed to the new window rendition.
     // * Wherever the former background character appears, it is changed to the new background character.
-    wbkgrnd(impl_->ncurses_window_, &wch);
+    ::wbkgrnd(impl_->ncurses_window_, &wch);
   }
 }
 
@@ -146,12 +132,13 @@ void Window::refresh()
   impl_->refresh();
 }
 
-void Window::box(int verch, int horch)
+void Window::set_border(Border const& border)
 {
-  // From https://docs.oracle.com/cd/E88353_01/html/E37849/box-3curses.html
-  //
-  // box(win, verch, horch) is a shorthand for the following call:
-  impl_->wborder(verch, verch, horch, horch, 0, 0, 0, 0);
+  ComplexChar const background = get_background();
+  std::array<cchar_t, 8> complex_characters;
+  for (int i = 0; i < 8; ++i)
+    complex_characters[i] = convert_to_cchar(border.get_complex_character(i, background.rendition()));
+  impl_->wborder_set(complex_characters);
 }
 
 void Window::addstr(int y, int x, char const* str)

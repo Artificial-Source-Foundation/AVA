@@ -15,7 +15,7 @@ int main()
 
     terminal::Window window(height, width, y, x);
     window.set_background(terminal_session.default_rendition());
-    window.box(0, 0);
+    window.set_border({});
     auto long_line = u8"Dark red window: αβγ this line is longer than the width of the window.";
     window.addstr(1, 2, long_line);
     terminal_session.refresh();

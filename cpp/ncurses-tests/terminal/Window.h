@@ -12,6 +12,7 @@ class Window
   ~Window();
 
   void set_background(ComplexChar background, bool erase = true);
+  ComplexChar get_background() const;
 
   void erase();                                         // https://man.archlinux.org/man/curs_clear.3x.en
   void refresh();                                       // https://man.archlinux.org/man/curs_refresh.3x.en

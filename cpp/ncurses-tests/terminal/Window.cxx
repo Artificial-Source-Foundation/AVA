@@ -129,6 +129,13 @@ void Window::set_background(ComplexChar background, bool erase)
   }
 }
 
+ComplexChar Window::get_background() const
+{
+  cchar_t background;
+  ::wgetbkgrnd(impl_->ncurses_window_, &background);
+  return convert_to_ComplexChar(background);
+}
+
 void Window::erase()
 {
   impl_->erase();

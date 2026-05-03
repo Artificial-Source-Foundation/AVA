@@ -36,6 +36,11 @@ int Session::rows() const
   return LINES;
 }
 
+int Session::cols() const
+{
+  return COLS;
+}
+
 void Session::refresh()
 {
   ::refresh();

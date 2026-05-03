@@ -31,6 +31,7 @@ class Session final
   ColorPair create_color_pair(Color foreground, Color background);
 
   int rows() const;
+  int cols() const;
   void refresh();
   int get_wch();
 };

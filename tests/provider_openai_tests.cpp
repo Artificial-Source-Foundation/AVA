@@ -142,6 +142,28 @@ void test_openai_provider_contract() {
   expect(non_stream_request && non_stream_request->body.find("\"stream\":false") != std::string::npos,
          "OpenAI request preserves stream=false body field");
 
+  const auto native_parts_request = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "openai",
+          .model_id = "gpt-5.5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+              .role = "user",
+              .content = "fallback content",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolResult,
+                                                           .text = "native result",
+                                                           .tool_call_id = "call_ignored",
+                                                           .tool_name = "read_file",
+                                                           .input_json = "",
+                                                           .is_error = false}}}},
+          .tools_json = {}},
+      "oauth-token");
+  expect(native_parts_request && native_parts_request->body.find("fallback content") != std::string::npos &&
+             native_parts_request->body.find("content_parts") == std::string::npos &&
+             native_parts_request->body.find("tool_result") == std::string::npos &&
+             native_parts_request->body.find("call_ignored") == std::string::npos,
+         "OpenAI request ignores native content parts and serializes fallback content only");
+
   const auto expired_credential_request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system", .messages = {}, .tools_json = {}},

@@ -12,9 +12,33 @@
 
 namespace ava::provider {
 
+enum class ContentPartType {
+  Text,
+  ToolUse,
+  ToolResult,
+};
+
+struct ContentPart {
+  // Provider-neutral native content item. Providers that do not support native
+  // parts can ignore these fields and serialize ChatMessage::content instead.
+  ContentPartType type = ContentPartType::Text;
+  std::string text;
+  std::string tool_call_id;
+  std::string tool_name;
+  std::string input_json;
+  bool is_error = false;
+};
+
 struct ChatMessage {
-  std::string role;
-  std::string content;
+  std::string role = {};
+  // Readable legacy fallback content. This remains populated for providers that
+  // do not understand content_parts and for diagnostics/session reconstruction.
+  std::string content = {};
+  // Optional native structure for providers that support text/tool-use/tool-result
+  // content blocks. When non-empty, native-capable providers should serialize
+  // these parts as canonical and treat content only as fallback/diagnostic text.
+  // Text-only providers should ignore this field.
+  std::vector<ContentPart> content_parts = {};
 };
 
 struct ProviderRequest {

@@ -1,5 +1,6 @@
 #include "ava/provider/anthropic_provider.h"
 
+#include <cstddef>
 #include <cstdlib>
 #include <optional>
 #include <string_view>
@@ -16,6 +17,12 @@ constexpr std::string_view kDefaultAnthropicBaseUrl = "https://api.anthropic.com
 constexpr std::string_view kAnthropicVersion = "2023-06-01";
 constexpr int kDefaultMaxTokens = 4096;
 
+struct PendingToolUse {
+  std::string id;
+  std::size_t message_index = 0;
+  std::size_t part_index = 0;
+};
+
 std::string configured_base_url() {
   if (const char* value = std::getenv("ANTHROPIC_BASE_URL"); value && value[0] != '\0') return value;
   return std::string(kDefaultAnthropicBaseUrl);
@@ -28,9 +35,161 @@ std::string trim_trailing_slashes(std::string value) {
 
 std::string message_role(const ChatMessage& message) { return message.role == "assistant" ? "assistant" : "user"; }
 
+std::vector<ContentPart> message_content_parts(const ChatMessage& message) {
+  if (!message.content_parts.empty()) return message.content_parts;
+  if (message.content.empty()) return {};
+  return {ContentPart{.type = ContentPartType::Text,
+                      .text = message.content,
+                      .tool_call_id = "",
+                      .tool_name = "",
+                      .input_json = "",
+                      .is_error = false}};
+}
+
+void append_content_parts(std::vector<ContentPart>& target, const std::vector<ContentPart>& source,
+                           bool separate_text) {
+  for (const auto& part : source) {
+    if (part.type == ContentPartType::Text && part.text.empty()) continue;
+    if (separate_text && part.type == ContentPartType::Text && !target.empty() &&
+        target.back().type == ContentPartType::Text) {
+      target.back().text += "\n\n";
+      target.back().text += part.text;
+      separate_text = false;
+      continue;
+    }
+    target.push_back(part);
+    separate_text = false;
+  }
+}
+
+ava::core::Error invalid_content_part_error(std::string message, std::size_t message_index, std::size_t part_index) {
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
+  error.with_context("provider", "anthropic");
+  error.with_context("message_index", std::to_string(message_index));
+  error.with_context("content_part_index", std::to_string(part_index));
+  return error;
+}
+
+bool contains_tool_use_id(const std::vector<std::string>& ids, std::string_view id) {
+  for (const auto& seen : ids) {
+    if (seen == id) return true;
+  }
+  return false;
+}
+
+ava::core::VoidResult validate_anthropic_content_parts(const std::vector<ChatMessage>& messages) {
+  std::vector<PendingToolUse> pending_tool_uses;
+  std::vector<std::string> seen_tool_use_ids;
+  for (std::size_t message_index = 0; message_index < messages.size(); ++message_index) {
+    const auto& message = messages[message_index];
+    const auto role = message_role(message);
+    if (role == "assistant" && !pending_tool_uses.empty()) {
+      const auto& pending = pending_tool_uses.front();
+      return std::unexpected(invalid_content_part_error(
+          "Anthropic tool_use content requires matching tool_result before the next assistant message",
+          pending.message_index, pending.part_index));
+    }
+    for (std::size_t part_index = 0; part_index < message.content_parts.size(); ++part_index) {
+      const auto& part = message.content_parts[part_index];
+      if (part.type == ContentPartType::Text && part.text.empty()) continue;
+      if (role == "user" && !pending_tool_uses.empty() && part.type != ContentPartType::ToolResult) {
+        return std::unexpected(invalid_content_part_error(
+            "Anthropic tool_result content must precede ordinary user content after tool_use", message_index,
+            part_index));
+      }
+      switch (part.type) {
+        case ContentPartType::Text:
+          break;
+        case ContentPartType::ToolUse:
+          if (role != "assistant") {
+            return std::unexpected(invalid_content_part_error("Anthropic tool_use content requires assistant role",
+                                                             message_index, part_index));
+          }
+          if (part.tool_call_id.empty() || part.tool_name.empty()) {
+            return std::unexpected(invalid_content_part_error("Anthropic tool_use content requires id and name",
+                                                             message_index, part_index));
+          }
+          if (!is_valid_json_object(part.input_json)) {
+            return std::unexpected(invalid_content_part_error("Anthropic tool_use input must be a valid JSON object",
+                                                             message_index, part_index));
+          }
+          if (contains_tool_use_id(seen_tool_use_ids, part.tool_call_id)) {
+            return std::unexpected(invalid_content_part_error("Anthropic tool_use id must be unique", message_index,
+                                                             part_index));
+          }
+          pending_tool_uses.push_back(
+              PendingToolUse{.id = part.tool_call_id, .message_index = message_index, .part_index = part_index});
+          seen_tool_use_ids.push_back(part.tool_call_id);
+          break;
+        case ContentPartType::ToolResult:
+          if (role != "user") {
+            return std::unexpected(invalid_content_part_error("Anthropic tool_result content requires user role",
+                                                             message_index, part_index));
+          }
+          if (part.tool_call_id.empty()) {
+            return std::unexpected(invalid_content_part_error("Anthropic tool_result content requires tool_use_id",
+                                                             message_index, part_index));
+          }
+          if (pending_tool_uses.empty() || pending_tool_uses.front().id != part.tool_call_id) {
+            return std::unexpected(invalid_content_part_error(
+                "Anthropic tool_result content requires a preceding unmatched tool_use", message_index, part_index));
+          }
+          pending_tool_uses.erase(pending_tool_uses.begin());
+          break;
+      }
+    }
+    if (role == "user" && !pending_tool_uses.empty()) {
+      const auto& pending = pending_tool_uses.front();
+      return std::unexpected(invalid_content_part_error(
+          "Anthropic tool_use content requires matching tool_result in the next user message", pending.message_index,
+          pending.part_index));
+    }
+  }
+  if (!pending_tool_uses.empty()) {
+    const auto& pending = pending_tool_uses.front();
+    return std::unexpected(invalid_content_part_error("Anthropic tool_use content requires matching tool_result",
+                                                     pending.message_index, pending.part_index));
+  }
+  return {};
+}
+
+std::string anthropic_content_part_json(const ContentPart& part) {
+  switch (part.type) {
+    case ContentPartType::Text:
+      return "{\"type\":\"text\",\"text\":\"" + ava::core::json::escape(part.text) + "\"}";
+    case ContentPartType::ToolUse: {
+      const auto input = is_valid_json_object(part.input_json) ? part.input_json : std::string("{}");
+      return "{\"type\":\"tool_use\",\"id\":\"" + ava::core::json::escape(part.tool_call_id) +
+             "\",\"name\":\"" + ava::core::json::escape(part.tool_name) + "\",\"input\":" + input + "}";
+    }
+    case ContentPartType::ToolResult: {
+      std::string json = "{\"type\":\"tool_result\",\"tool_use_id\":\"" +
+                         ava::core::json::escape(part.tool_call_id) + "\",\"content\":\"" +
+                         ava::core::json::escape(part.text) + "\"";
+      if (part.is_error) json += ",\"is_error\":true";
+      json += '}';
+      return json;
+    }
+  }
+  return "{\"type\":\"text\",\"text\":\"\"}";
+}
+
 std::string message_json(const ChatMessage& message) {
   const std::string role = message_role(message);
-  return "{\"role\":\"" + role + "\",\"content\":\"" + ava::core::json::escape(message.content) + "\"}";
+  if (message.content_parts.empty()) {
+    return "{\"role\":\"" + role + "\",\"content\":\"" + ava::core::json::escape(message.content) + "\"}";
+  }
+  std::string json = "{\"role\":\"" + role + "\",\"content\":[";
+  bool first = true;
+  for (const auto& part : message.content_parts) {
+    if (part.type == ContentPartType::Text && part.text.empty()) continue;
+    if (!first) json += ',';
+    first = false;
+    json += anthropic_content_part_json(part);
+  }
+  if (first) json += "{\"type\":\"text\",\"text\":\"\"}";
+  json += "]}";
+  return json;
 }
 
 std::vector<ChatMessage> collapse_consecutive_roles(const std::vector<ChatMessage>& messages) {
@@ -38,11 +197,22 @@ std::vector<ChatMessage> collapse_consecutive_roles(const std::vector<ChatMessag
   for (const auto& message : messages) {
     const std::string role = message_role(message);
     if (!collapsed.empty() && collapsed.back().role == role) {
-      collapsed.back().content += "\n\n";
-      collapsed.back().content += message.content;
+      if (collapsed.back().content_parts.empty() && message.content_parts.empty()) {
+        collapsed.back().content += "\n\n";
+        collapsed.back().content += message.content;
+        continue;
+      }
+      if (collapsed.back().content_parts.empty()) {
+        collapsed.back().content_parts = message_content_parts(collapsed.back());
+      }
+      append_content_parts(collapsed.back().content_parts, message_content_parts(message), true);
+      if (!message.content.empty()) {
+        collapsed.back().content += "\n\n";
+        collapsed.back().content += message.content;
+      }
       continue;
     }
-    collapsed.push_back(ChatMessage{.role = role, .content = message.content});
+    collapsed.push_back(ChatMessage{.role = role, .content = message.content, .content_parts = message.content_parts});
   }
   return collapsed;
 }
@@ -73,8 +243,7 @@ std::string anthropic_tool_json(std::string_view tool_json) {
          ava::core::json::escape(description) + "\",\"input_schema\":" + parameters + "}";
 }
 
-std::string request_body_json(const ProviderRequest& request) {
-  const auto messages = collapse_consecutive_roles(request.messages);
+std::string request_body_json(const ProviderRequest& request, const std::vector<ChatMessage>& messages) {
   std::string body = "{\"model\":\"" + ava::core::json::escape(request.model_id) +
                      "\",\"max_tokens\":" + std::to_string(max_tokens_for_request(request)) +
                      ",\"stream\":" + (request.stream ? "true" : "false") + ",\"system\":\"" +
@@ -250,13 +419,15 @@ ava::core::Result<HttpRequest> AnthropicProvider::build_request(const ProviderRe
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Anthropic API key is required"));
   }
+  const auto messages = collapse_consecutive_roles(request.messages);
+  if (auto valid = validate_anthropic_content_parts(messages); !valid) return std::unexpected(std::move(valid.error()));
   return HttpRequest{.method = "POST",
-                     .url = base_url_ + "/v1/messages",
+                      .url = base_url_ + "/v1/messages",
                      .headers = {{"x-api-key", std::string(access_token)},
                                  {"anthropic-version", std::string(kAnthropicVersion)},
                                  {"Content-Type", "application/json"},
                                  {"Accept", request.stream ? "text/event-stream" : "application/json"}},
-                     .body = request_body_json(request),
+                      .body = request_body_json(request, messages),
                      .timeout_ms = 60000,
                      .follow_redirects = false,
                      .include_response_headers = false,

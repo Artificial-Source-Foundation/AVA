@@ -59,8 +59,9 @@ Explorer agents checked each roadmap phase against the current AVA code and PI r
 - Phase 2 is implemented and verified for the approved evented-runtime scope: versioned event envelopes, shared event bus routing for headless modes, incremental provider streaming, RPC protocol versioning/session commands, active-run cancellation, permission/question resolver replies, and bounded `steer`/`follow_up` queues. Provider/model registry commands and richer reasoning-specific events remain aligned with Phase 5 provider capability work.
 - Phase 3 core context/session work is implemented for the approved scope: provider-generated `/compact`, automatic compaction, one bounded context-overflow retry, provider usage/cost records, RPC stats, additive session version checks, and branching-ready `id`/`parent_id` validation. Full fork/clone/tree UI, branch summaries, and mid-session model/thinking entries remain deferred to later phases.
 - Phase 4's core tool-quality slice is implemented and verified: centralized built-in tool metadata, `.gitignore`-aware search with a documented native subset, bounded spill files, streaming tool progress, edit/apply_patch diff previews with CRLF/BOM diagnostics, per-path mutation serialization, `webfetch` behind `network.fetch`, and an LSP diagnostics first slice. Final validation included live headless smokes for read/search/webfetch plus RPC permission/question reply smokes for write/edit/apply_patch/bash/question; LSP diagnostics are covered by fake-server tests because the tool is capability-gated. Remaining tool-quality expansion includes broader fuzzy/Unicode matching, image/multimodal reads, LSP symbols/definitions/references, and Phase 6-grade registry/artifact ownership.
-- Phase 5 has a provider interface but not a provider registry or model capability catalog. OpenAI remains hard-coded in several paths and the second production provider path is not started.
-- Phase 6 is well-scoped as a safe local plugin/MCP foundation, but it depends on earlier tool registry, event bus, permission, session, provider, and RPC seams.
+- Phase 5 is implemented and verified for the approved provider-breadth scope: provider registry, model capability catalog, provider-neutral credential discovery, retry/error normalization, Anthropic Messages first slice, model-change session entries, and RPC model listing/switching. The Phase 5 Anthropic slice intentionally remained first-slice protocol support; provider-native hardening beyond that base is tracked under Phase 5.5.
+- Phase 5.5 has its first provider-native slice implemented and verified: provider-neutral text/tool-call/tool-result content parts, session replay into native `tool_use`/`tool_result` blocks, Anthropic request validation/serialization, and fake-transport native tool-loop regressions. Remaining Phase 5.5 work should finish thinking/cache-control, Kimi/Moonshot, provider shims, provider-switch pruning or translation, retry/idempotency, and real endpoint smoke coverage before plugin/MCP seams depend on provider-native contracts.
+- Phase 6 is well-scoped as a safe local plugin/MCP foundation, but it depends on earlier tool registry, event bus, permission, session, provider, RPC, and provider-native message seams.
 
 ## 1.0 Gap Inventory
 
@@ -84,18 +85,16 @@ Missing or incomplete:
 
 ### Providers And Auth
 
-AVA's provider layer is currently OpenAI-first and OpenAI-shaped. OpenAI OAuth credentials refresh before use when a refresh token is available.
+AVA's provider layer now has a registry-backed OpenAI path plus an Anthropic Messages path with native `tool_use`/`tool_result` replay. OpenAI OAuth credentials refresh before use when a refresh token is available.
 
 Missing or incomplete:
 
-- Multi-provider registry.
-- Provider capability metadata beyond the current OpenAI-focused model context/pricing fields, including reasoning controls, image input, and provider compatibility quirks.
-- A full model catalog for multiple providers. The current local model metadata can declare context windows, max output tokens, and pricing/cache pricing for configured models.
-- Environment credential discovery beyond the current OpenAI-focused path.
-- Retry, backoff, and rate-limit handling.
-- Retry-after header parsing where providers expose it.
-- Normalized provider errors for context overflow, auth failure, quota, invalid request, and transient transport failure.
-- Provider-neutral usage and cost extraction beyond the current OpenAI Responses API usage handling.
+- Provider-native message replay beyond the completed Anthropic `tool_use`/`tool_result` slice, including safe provider-switch pruning or translation.
+- Anthropic-native thinking blocks, thinking signatures, cache-control hints, and stop-reason normalization.
+- Broader provider families beyond OpenAI and Anthropic, especially providers that expose OpenAI-compatible and Anthropic-compatible endpoints.
+- Provider-specific auth discovery beyond simple API-key/OAuth-token sources, such as Google ADC, AWS Bedrock credentials, or provider-specific CLI tokens.
+- Idempotency-aware retry policy for provider POSTs where providers support request ids or idempotency keys.
+- Reasoning controls wired through request builders rather than only represented in capability metadata.
 
 1.0 target:
 
@@ -104,6 +103,7 @@ Missing or incomplete:
 - Provider/model definitions declare capabilities that the runtime can enforce.
 - OAuth credentials refresh before expiry.
 - Provider failures are categorized and actionable.
+- Provider-native protocols preserve tool/result/thinking semantics instead of relying on text-only transcript replay.
 
 ### Sessions And Context
 
@@ -381,6 +381,38 @@ Acceptance criteria:
 - A non-tool-capable model does not receive tool definitions.
 - Auth discovery and refresh failures preserve existing credentials and produce safe, actionable errors.
 
+### Phase 5.5: Provider-Native Hardening And Breadth
+
+Status: first provider-native slice implemented and verified on 2026-05-02: provider-neutral `ContentPart` replay for text/tool calls/tool results, Anthropic native `tool_use`/`tool_result` serialization and validation, and fake-transport tool-loop regressions. The remaining Phase 5.5 scope below is still open for thinking/cache-control, Kimi/Moonshot, additional provider families/shims, provider-switch pruning or translation, retry/idempotency, and real endpoint smoke coverage.
+
+Purpose: turn Phase 5's provider-flexible foundation into provider-native behavior that is reliable across real Anthropic/OpenAI-compatible providers before plugin and MCP seams depend on it.
+
+Scope:
+
+- Extend the provider-native message/content contract beyond the completed text/tool-call/tool-result slice to represent images/files when supported, provider reasoning/thinking blocks, provider-specific stop reasons, and cache-control hints without flattening everything into plain text.
+- Preserve existing session JSONL readability while adding enough structured replay metadata for providers that require native `tool_use`/`tool_result` or thinking-signature continuity. The native `tool_use`/`tool_result` replay slice is implemented for Anthropic; thinking-signature continuity remains open.
+- Complete the remaining Anthropic Messages native support after the landed `tool_use`/`tool_result` round trip: stop-reason mapping, cache read/write accounting, optional cache-control on stable prompt/tool blocks, thinking-budget request controls, thinking signature preservation where the API requires it, and real endpoint smokes for streaming and non-streaming paths.
+- Keep Anthropic-compatible endpoint support explicit: configurable base URL, API-key and bearer-token auth, no credential leakage across redirects, tolerant but loud SSE parsing, and tests that cover common compatible-provider drift.
+- Add at least two more provider families or compatibility shims after Anthropic is native. Preferred order: OpenAI-compatible endpoints such as OpenRouter/DeepSeek/xAI/Groq/Mistral where the Responses or Chat Completions shape is close enough; Google Gemini next if its message/tool/thinking shape can be tested without SDK sprawl; Bedrock/Vertex only after credential-chain and event-stream risks are planned.
+- Add an explicit Kimi/Moonshot coding capability profile, using OpenCode as the baseline: Kimi-specific coding prompt selection, Kimi K2/K2.5/K2-thinking model aliases across Moonshot and compatible gateways, temperature/top-p defaults, `enable_thinking`/`chat_template_args`/Anthropic-style thinking-budget quirks by endpoint family, `reasoning_content` handling, and Moonshot/Kimi context-overflow patterns such as `exceeded model token limit`.
+- Add provider-specific request transforms behind provider implementations, not in the agent loop: schema sanitization, tool-name quirks, strict JSON schema variants, stop-sequence fields, reasoning/thinking controls, max-output fields, and modality limits.
+- Add provider-specific auth discovery only with safe documented precedence and tests. Environment variables are sufficient for first support, but stored auth files, OAuth refresh, ADC, AWS, and CLI-token discovery must be explicit per provider.
+- Add provider-native fake transports/harnesses that exercise a complete tool loop for each non-OpenAI provider: request with tools, provider tool call, AVA tool result, follow-up request with native result block, and final answer.
+- Harden retry/idempotency policy for provider POSTs. Add idempotency keys where a provider supports them, and downgrade retries or document best-effort semantics where the provider cannot deduplicate.
+- Update model catalog metadata with provider-native compatibility flags such as `api_family`, strict schema requirements, tool-result support, reasoning parameter names, thinking signature requirements, cache-control support, max image/file constraints, and known endpoint quirks.
+
+Acceptance criteria:
+
+- Anthropic can complete a multi-turn tool workflow using native `tool_use`/`tool_result` blocks, not text-only summaries.
+- Anthropic-compatible endpoint smoke tests cover both streaming and non-streaming requests through the real CLI/transport path.
+- Switching from a tool-capable provider to a non-tool provider either prunes/translates tool history safely or produces a clear warning/error before an invalid request is sent.
+- Reasoning/thinking controls are only exposed when the selected model declares support and the provider request builder actually serializes the corresponding native fields.
+- Kimi/Moonshot coding models have cataloged capabilities and endpoint quirks for OpenAI-compatible and Anthropic-compatible routes, including tests for request parameters, reasoning/thinking output, overflow classification, and the Kimi-specific coding prompt/profile.
+- At least two additional provider families or shims are registered, documented, and covered by fake-provider contract tests for request shape, streaming parse, usage parse, auth discovery, and normalized errors.
+- Provider-specific compatibility code stays inside provider modules or narrow transform helpers; the agent loop remains provider-neutral.
+- Retry behavior is documented per provider as idempotent, best-effort, or disabled for unsafe request classes.
+- The headless RPC model catalog shows enough capability and compatibility metadata for clients to avoid offering unsupported tools, modalities, or reasoning controls.
+
 ### Phase 6: Stable Plugin Foundation
 
 Purpose: open backend seams as a small, safe plugin system without turning AVA into a marketplace or letting plugins destabilize the core.
@@ -428,6 +460,7 @@ Required for 1.0:
 - Hardened file/search/bash tools with focused tests.
 - Stable RPC protocol version with prompt, cancel, state, sessions, messages, compact, export, permission, and question flows.
 - Provider registry with OpenAI plus one additional high-quality provider, backed by model capability and pricing metadata.
+- Provider-native Anthropic support and at least two additional provider families or compatibility shims hardened enough for real endpoint use, including a Kimi/Moonshot coding path.
 - Mid-session model switching, model-change session entries, and session stats exposed over RPC.
 - Thinking/reasoning controls for providers and models that support them.
 - Stable local plugin foundation with manifest schema, versioned out-of-process JSONL protocol, tool/command/prompt/event/MCP contributions, diagnostics, docs, and regression tests.
@@ -454,4 +487,4 @@ Defer unless earlier phases finish cleanly:
 
 ## Immediate Next Work
 
-Start Phase 5 by introducing the provider registry and model capability catalog. Preserve the Phase 4 tool metadata shape so provider/model-family-specific tool descriptions and availability can be added without duplicating built-in tool implementations.
+Continue Phase 5.5 from the completed Anthropic native `tool_use`/`tool_result` replay slice: add thinking/cache-control support, provider-switch pruning or translation, real Anthropic-compatible streaming/non-streaming smokes, the Kimi/Moonshot coding capability profile, and additional OpenAI-compatible and Anthropic-compatible provider shims.

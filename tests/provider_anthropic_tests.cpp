@@ -1,14 +1,42 @@
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <vector>
 
+#include "ava/agent/agent_loop.h"
 #include "ava/config/auth.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/provider/anthropic_provider.h"
+#include "ava/provider/provider_utils.h"
 #include "ava/provider/registry.h"
+#include "ava/session/session_store.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 
 namespace {
+
+ava::provider::HttpResponse sse_response(std::string body) {
+  return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = std::move(body)};
+}
+
+void test_json_object_validator() {
+  expect(ava::provider::is_valid_json_object(R"({})"), "JSON validator accepts empty objects");
+  expect(ava::provider::is_valid_json_object(
+             R"({"path":"note.txt","nested":{"enabled":true},"list":[1,-2.5e+3,null,false]})"),
+         "JSON validator accepts nested object values");
+  expect(ava::provider::is_valid_json_object(R"({"escaped":"quote \" slash \\ unicode \u20ac"})"),
+         "JSON validator accepts escaped strings and unicode escapes");
+  expect(!ava::provider::is_valid_json_object(""), "JSON validator rejects empty input");
+  expect(!ava::provider::is_valid_json_object(R"([])"), "JSON validator rejects non-object roots");
+  expect(!ava::provider::is_valid_json_object(R"({"path":})"), "JSON validator rejects missing values");
+  expect(!ava::provider::is_valid_json_object(R"({"path":"note.txt",})"),
+         "JSON validator rejects trailing commas");
+  expect(!ava::provider::is_valid_json_object(R"({"n":01})"), "JSON validator rejects leading-zero numbers");
+  expect(!ava::provider::is_valid_json_object(R"({"bad":"\x"})"), "JSON validator rejects invalid escapes");
+  expect(!ava::provider::is_valid_json_object(std::string(R"({"path":"note.txt"})") + '\f'),
+         "JSON validator rejects non-JSON whitespace");
+}
 
 void test_anthropic_provider_contract() {
   const ava::provider::AnthropicProvider provider("https://anthropic.example.test/");
@@ -86,7 +114,233 @@ void test_anthropic_provider_contract() {
                                      .tools_json = {}},
       "");
   expect(!missing_token && missing_token.error().category() == ava::core::ErrorCategory::PermissionDenied,
-         "Anthropic request rejects empty token");
+          "Anthropic request rejects empty token");
+}
+
+void test_anthropic_native_content_parts_request() {
+  const ava::provider::AnthropicProvider provider("https://anthropic.example.test");
+  const auto request = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "anthropic",
+          .model_id = "claude-sonnet-4-5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello"},
+                       ava::provider::ChatMessage{
+                           .role = "assistant",
+                           .content = "fallback tool call text",
+                           .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
+                                                                         .text = "",
+                                                                         .tool_call_id = "toolu_1",
+                                                                         .tool_name = "read_file",
+                                                                         .input_json = R"({"path":"note.txt"})",
+                                                                         .is_error = false}}},
+                       ava::provider::ChatMessage{
+                           .role = "user",
+                           .content = "fallback tool result text",
+                           .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolResult,
+                                                                         .text = "tool content",
+                                                                         .tool_call_id = "toolu_1",
+                                                                         .tool_name = "read_file",
+                                                                         .input_json = "",
+                                                                         .is_error = true}}}},
+          .tools_json = {},
+          .stream = false},
+      "anthropic-key");
+  expect(request.has_value(), "Anthropic request builds with native content parts");
+  if (!request) return;
+  expect(request->body.find(R"({"type":"tool_use","id":"toolu_1","name":"read_file","input":{"path":"note.txt"}})") !=
+             std::string::npos,
+         "Anthropic request serializes native tool_use content blocks");
+  expect(request->body.find(R"({"type":"tool_result","tool_use_id":"toolu_1","content":"tool content","is_error":true})") !=
+             std::string::npos,
+         "Anthropic request serializes native tool_result content blocks with error metadata");
+  expect(request->body.find("fallback tool call text") == std::string::npos &&
+             request->body.find("fallback tool result text") == std::string::npos,
+         "Anthropic native content parts are canonical over fallback text");
+
+  const auto invalid_input = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "anthropic",
+          .model_id = "claude-sonnet-4-5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+              .role = "assistant",
+              .content = "fallback",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
+                                                            .text = "",
+                                                            .tool_call_id = "toolu_bad",
+                                                            .tool_name = "bash",
+                                                            .input_json = R"({"cmd":})",
+                                                            .is_error = false}}}},
+          .tools_json = {},
+          .stream = false},
+      "anthropic-key");
+  expect(!invalid_input && invalid_input.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "Anthropic request rejects invalid native tool_use input before serialization");
+
+  const auto wrong_role = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "anthropic",
+          .model_id = "claude-sonnet-4-5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+              .role = "user",
+              .content = "fallback",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
+                                                            .text = "",
+                                                            .tool_call_id = "toolu_wrong_role",
+                                                            .tool_name = "bash",
+                                                            .input_json = "{}",
+                                                            .is_error = false}}}},
+          .tools_json = {},
+          .stream = false},
+      "anthropic-key");
+  expect(!wrong_role && wrong_role.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "Anthropic request rejects role-incompatible native content parts");
+
+  const auto dangling_tool_use = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "anthropic",
+          .model_id = "claude-sonnet-4-5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+              .role = "assistant",
+              .content = "fallback",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
+                                                            .text = "",
+                                                            .tool_call_id = "toolu_dangling",
+                                                            .tool_name = "read_file",
+                                                            .input_json = "{}",
+                                                            .is_error = false}}}},
+          .tools_json = {},
+          .stream = false},
+      "anthropic-key");
+  expect(!dangling_tool_use && dangling_tool_use.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "Anthropic request rejects native tool_use blocks without matching tool_result");
+
+  const auto dangling_tool_result = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "anthropic",
+          .model_id = "claude-sonnet-4-5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+              .role = "user",
+              .content = "fallback",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolResult,
+                                                            .text = "tool content",
+                                                            .tool_call_id = "toolu_missing",
+                                                            .tool_name = "read_file",
+                                                            .input_json = "",
+                                                            .is_error = false}}}},
+          .tools_json = {},
+          .stream = false},
+      "anthropic-key");
+  expect(!dangling_tool_result && dangling_tool_result.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "Anthropic request rejects native tool_result blocks without a preceding tool_use");
+
+  const auto duplicate_tool_use = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "anthropic",
+          .model_id = "claude-sonnet-4-5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+              .role = "assistant",
+              .content = "fallback",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
+                                                            .text = "",
+                                                            .tool_call_id = "toolu_dup",
+                                                            .tool_name = "read_file",
+                                                            .input_json = "{}",
+                                                            .is_error = false},
+                                ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
+                                                           .text = "",
+                                                           .tool_call_id = "toolu_dup",
+                                                           .tool_name = "read_file",
+                                                           .input_json = "{}",
+                                                           .is_error = false}}}},
+          .tools_json = {},
+          .stream = false},
+      "anthropic-key");
+  expect(!duplicate_tool_use && duplicate_tool_use.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "Anthropic request rejects duplicate native tool_use ids");
+
+  const auto text_before_tool_result = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "anthropic",
+          .model_id = "claude-sonnet-4-5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+                           .role = "assistant",
+                           .content = "fallback tool call",
+                           .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
+                                                                         .text = "",
+                                                                         .tool_call_id = "toolu_text_first",
+                                                                         .tool_name = "read_file",
+                                                                         .input_json = "{}",
+                                                                         .is_error = false}}},
+                       ava::provider::ChatMessage{
+                           .role = "user",
+                           .content = "fallback result",
+                           .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text,
+                                                                         .text = "ordinary text before result",
+                                                                         .tool_call_id = "",
+                                                                         .tool_name = "",
+                                                                         .input_json = "",
+                                                                         .is_error = false},
+                                             ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolResult,
+                                                                        .text = "tool content",
+                                                                        .tool_call_id = "toolu_text_first",
+                                                                        .tool_name = "read_file",
+                                                                        .input_json = "",
+                                                                        .is_error = false}}}},
+          .tools_json = {},
+          .stream = false},
+      "anthropic-key");
+  expect(!text_before_tool_result &&
+             text_before_tool_result.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "Anthropic request rejects ordinary user text before matching native tool_result");
+
+  const auto reversed_tool_results = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "anthropic",
+          .model_id = "claude-sonnet-4-5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+                           .role = "assistant",
+                           .content = "fallback tool calls",
+                           .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
+                                                                         .text = "",
+                                                                         .tool_call_id = "toolu_a",
+                                                                         .tool_name = "read_file",
+                                                                         .input_json = "{}",
+                                                                         .is_error = false},
+                                             ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
+                                                                        .text = "",
+                                                                        .tool_call_id = "toolu_b",
+                                                                        .tool_name = "read_file",
+                                                                        .input_json = "{}",
+                                                                        .is_error = false}}},
+                       ava::provider::ChatMessage{
+                           .role = "user",
+                           .content = "fallback results",
+                           .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolResult,
+                                                                         .text = "b result",
+                                                                         .tool_call_id = "toolu_b",
+                                                                         .tool_name = "read_file",
+                                                                         .input_json = "",
+                                                                         .is_error = false},
+                                             ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolResult,
+                                                                        .text = "a result",
+                                                                        .tool_call_id = "toolu_a",
+                                                                        .tool_name = "read_file",
+                                                                        .input_json = "",
+                                                                        .is_error = false}}}},
+          .tools_json = {},
+          .stream = false},
+      "anthropic-key");
+  expect(!reversed_tool_results &&
+             reversed_tool_results.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "Anthropic request rejects native tool_results that do not follow tool_use order");
 }
 
 void test_anthropic_parsing() {
@@ -208,10 +462,192 @@ void test_anthropic_registry_and_env_auth() {
          "Anthropic OAuth token environment variable takes precedence over API key");
 }
 
+void test_anthropic_agent_tool_loop_native_replay() {
+  const auto root = temp_root() / "anthropic-tool-loop";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  {
+    std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
+    file << "tool content";
+  }
+
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{
+      .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "anthropic-tool"});
+  const ava::provider::AnthropicProvider provider("https://anthropic.example.test");
+  ava::tests::FakeTransport transport(
+      {sse_response("event: content_block_start\n"
+                    "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{"
+                    "\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"read_file\",\"input\":{}}}\n\n"
+                    "event: content_block_delta\n"
+                    "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{"
+                    "\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}}\n\n"
+                    "event: content_block_stop\n"
+                    "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+                    "event: message_stop\n"
+                    "data: {\"type\":\"message_stop\"}\n\n"),
+       sse_response("event: content_block_start\n"
+                    "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{"
+                    "\"type\":\"text\",\"text\":\"\"}}\n\n"
+                    "event: content_block_delta\n"
+                    "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{"
+                    "\"type\":\"text_delta\",\"text\":\"read it\"}}\n\n"
+                    "event: message_stop\n"
+                    "data: {\"type\":\"message_stop\"}\n\n")});
+
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                          .mode = ava::agent::Mode::Build,
+                                                          .provider_id = "anthropic",
+                                                          .model_id = "claude-sonnet-4-5",
+                                                          .system_prompt = "system prompt",
+                                                          .access_token = "anthropic-key"});
+  auto result = loop.run_turn("read note", store, provider, transport);
+  expect(result && result->final_text == "read it" && result->tool_calls == 1 && result->provider_iterations == 2,
+         "Anthropic agent loop runs one native tool call then continues to final answer");
+  expect(transport.requests().size() == 2, "Anthropic tool loop makes initial and continuation requests");
+  if (transport.requests().size() != 2) return;
+  const auto& continuation = transport.requests()[1].body;
+  expect(continuation.find(R"("type":"tool_use","id":"toolu_1","name":"read_file")") != std::string::npos &&
+             continuation.find(R"("input":{"path":"note.txt"})") != std::string::npos,
+         "Anthropic continuation replays native tool_use block");
+  expect(continuation.find(R"("type":"tool_result","tool_use_id":"toolu_1")") != std::string::npos &&
+             continuation.find("tool content") != std::string::npos,
+         "Anthropic continuation sends native tool_result block with tool output");
+  expect(continuation.find("Tool call requested by assistant") == std::string::npos &&
+              continuation.find("Tool result data only") == std::string::npos,
+         "Anthropic continuation omits fallback tool replay text when native content parts are available");
+}
+
+void test_anthropic_agent_multi_tool_native_replay() {
+  const auto root = temp_root() / "anthropic-multi-tool-loop";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  {
+    std::ofstream first(workspace / "one.txt", std::ios::binary | std::ios::trunc);
+    first << "first content";
+    std::ofstream second(workspace / "two.txt", std::ios::binary | std::ios::trunc);
+    second << "second content";
+  }
+
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{
+      .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "anthropic-multi-tool"});
+  const ava::provider::AnthropicProvider provider("https://anthropic.example.test");
+  ava::tests::FakeTransport transport(
+      {sse_response("event: content_block_start\n"
+                    "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{"
+                    "\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"read_file\",\"input\":{}}}\n\n"
+                    "event: content_block_delta\n"
+                    "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{"
+                    "\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"one.txt\\\"}\"}}\n\n"
+                    "event: content_block_stop\n"
+                    "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+                    "event: content_block_start\n"
+                    "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{"
+                    "\"type\":\"tool_use\",\"id\":\"toolu_2\",\"name\":\"read_file\",\"input\":{}}}\n\n"
+                    "event: content_block_delta\n"
+                    "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{"
+                    "\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"two.txt\\\"}\"}}\n\n"
+                    "event: content_block_stop\n"
+                    "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n"
+                    "event: message_stop\n"
+                    "data: {\"type\":\"message_stop\"}\n\n"),
+       sse_response("event: content_block_start\n"
+                    "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{"
+                    "\"type\":\"text\",\"text\":\"\"}}\n\n"
+                    "event: content_block_delta\n"
+                    "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{"
+                    "\"type\":\"text_delta\",\"text\":\"read both\"}}\n\n"
+                    "event: message_stop\n"
+                    "data: {\"type\":\"message_stop\"}\n\n")});
+
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                          .mode = ava::agent::Mode::Build,
+                                                          .provider_id = "anthropic",
+                                                          .model_id = "claude-sonnet-4-5",
+                                                          .system_prompt = "system prompt",
+                                                          .access_token = "anthropic-key"});
+  auto result = loop.run_turn("read both notes", store, provider, transport);
+  expect(result && result->final_text == "read both" && result->tool_calls == 2 && result->provider_iterations == 2,
+         "Anthropic agent loop runs multiple native tool calls then continues");
+  expect(transport.requests().size() == 2, "Anthropic multi-tool loop makes initial and continuation requests");
+  if (transport.requests().size() != 2) return;
+  const auto& continuation = transport.requests()[1].body;
+  expect(continuation.find(R"("type":"tool_use","id":"toolu_1","name":"read_file")") != std::string::npos &&
+             continuation.find(R"("input":{"path":"one.txt"})") != std::string::npos &&
+             continuation.find(R"("type":"tool_result","tool_use_id":"toolu_1")") != std::string::npos &&
+             continuation.find("first content") != std::string::npos,
+         "Anthropic continuation replays first native tool pair");
+  expect(continuation.find(R"("type":"tool_use","id":"toolu_2","name":"read_file")") != std::string::npos &&
+             continuation.find(R"("input":{"path":"two.txt"})") != std::string::npos &&
+             continuation.find(R"("type":"tool_result","tool_use_id":"toolu_2")") != std::string::npos &&
+             continuation.find("second content") != std::string::npos,
+         "Anthropic continuation replays second native tool pair");
+  const auto first_use = continuation.find(R"("type":"tool_use","id":"toolu_1")");
+  const auto second_use = continuation.find(R"("type":"tool_use","id":"toolu_2")");
+  const auto first_result = continuation.find(R"("type":"tool_result","tool_use_id":"toolu_1")");
+  const auto second_result = continuation.find(R"("type":"tool_result","tool_use_id":"toolu_2")");
+  expect(first_use != std::string::npos && second_use != std::string::npos && first_result != std::string::npos &&
+             second_result != std::string::npos && first_use < second_use && second_use < first_result &&
+             first_result < second_result,
+         "Anthropic continuation batches parallel tool_use blocks before matching tool_result blocks");
+}
+
+void test_anthropic_agent_non_stream_tool_loop_native_replay() {
+  const auto root = temp_root() / "anthropic-non-stream-tool-loop";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  {
+    std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
+    file << "non-stream content";
+  }
+
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{
+      .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "anthropic-non-stream-tool"});
+  const ava::provider::AnthropicProvider provider("https://anthropic.example.test");
+  ava::tests::FakeTransport transport(
+      {ava::provider::HttpResponse{.status_code = 200,
+                                   .headers = {},
+                                   .body = R"({"content":[{"type":"tool_use","id":"toolu_1","name":"read_file","input":{"path":"note.txt"}}]})"},
+       ava::provider::HttpResponse{.status_code = 200,
+                                   .headers = {},
+                                   .body = R"({"content":[{"type":"text","text":"read non-stream"}]})"}});
+
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                          .mode = ava::agent::Mode::Build,
+                                                          .provider_id = "anthropic",
+                                                          .model_id = "claude-sonnet-4-5",
+                                                          .system_prompt = "system prompt",
+                                                          .access_token = "anthropic-key",
+                                                          .stream = false});
+  auto result = loop.run_turn("read note", store, provider, transport);
+  expect(result && result->final_text == "read non-stream" && result->tool_calls == 1 &&
+             result->provider_iterations == 2,
+         "Anthropic non-stream agent loop runs native tool call then continues");
+  expect(transport.requests().size() == 2, "Anthropic non-stream tool loop makes initial and continuation requests");
+  if (transport.requests().size() != 2) return;
+  const auto& continuation = transport.requests()[1].body;
+  expect(continuation.find(R"("stream":false)") != std::string::npos,
+         "Anthropic non-stream continuation preserves stream=false");
+  expect(continuation.find(R"("type":"tool_use","id":"toolu_1","name":"read_file")") != std::string::npos &&
+             continuation.find(R"("type":"tool_result","tool_use_id":"toolu_1")") != std::string::npos &&
+             continuation.find("non-stream content") != std::string::npos,
+         "Anthropic non-stream continuation replays native tool result");
+}
+
 }  // namespace
 
 void run_provider_anthropic_tests() {
+  test_json_object_validator();
   test_anthropic_provider_contract();
+  test_anthropic_native_content_parts_request();
   test_anthropic_parsing();
   test_anthropic_registry_and_env_auth();
+  test_anthropic_agent_tool_loop_native_replay();
+  test_anthropic_agent_multi_tool_native_replay();
+  test_anthropic_agent_non_stream_tool_loop_native_replay();
 }

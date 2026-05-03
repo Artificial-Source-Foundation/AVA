@@ -928,9 +928,274 @@ void test_compaction_context_reconstruction() {
           "post-compaction entries include internal replays as normal provider messages");
   expect((*messages)[4].role == "assistant" && (*messages)[4].content.find("Tool call requested by assistant") !=
                                                   std::string::npos &&
-             (*messages)[4].content.find("read_file") != std::string::npos &&
-             (*messages)[5].role == "user" && (*messages)[5].content.find("note contents") != std::string::npos,
-         "post-compaction context includes tool-call metadata before tool result data");
+              (*messages)[4].content.find("read_file") != std::string::npos &&
+              (*messages)[5].role == "user" && (*messages)[5].content.find("note contents") != std::string::npos,
+          "post-compaction context includes tool-call metadata before tool result data");
+  expect((*messages)[4].content_parts.size() == 1 &&
+              (*messages)[4].content_parts[0].type == ava::provider::ContentPartType::ToolUse &&
+              (*messages)[4].content_parts[0].tool_call_id == "call_read" &&
+              (*messages)[4].content_parts[0].tool_name == "read_file" &&
+              (*messages)[4].content_parts[0].input_json.find("note.txt") != std::string::npos &&
+              (*messages)[5].content_parts.size() == 1 &&
+              (*messages)[5].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
+              (*messages)[5].content_parts[0].tool_call_id == "call_read" &&
+              (*messages)[5].content_parts[0].tool_name == "read_file" &&
+              (*messages)[5].content_parts[0].text == "note contents" && !(*messages)[5].content_parts[0].is_error,
+          "tool-call and tool-result entries carry native provider content parts");
+}
+
+void test_tool_content_parts_reconstruction() {
+  const std::string long_result(80, 'r');
+  const std::vector<ava::session::SessionEntry> entries = {
+      ava::session::SessionEntry{.id = "tool_call",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolCall,
+                                  .timestamp = "2026-04-27T00:00:00Z",
+                                  .data_json = "{\"call_id\":\"call_failed\",\"name\":\"bash\","
+                                               "\"arguments\":\"{\\\"cmd\\\":\\\"false\\\"}\"}"},
+      ava::session::SessionEntry{.id = "tool_result",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolResult,
+                                  .timestamp = "2026-04-27T00:00:01Z",
+                                  .data_json = "{\"call_id\":\"call_failed\",\"name\":\"bash\","
+                                               "\"success\":false,\"result\":\"" +
+                                               long_result + "\"}"}};
+
+  auto messages = ava::agent::build_provider_messages_from_entries(
+      entries, ava::agent::MessageBuildOptions{.max_tool_result_context_bytes = 48});
+  expect(messages && messages->size() == 2, "tool entries reconstruct as provider messages");
+  if (!messages || messages->size() != 2) return;
+
+  expect((*messages)[0].role == "assistant" &&
+             (*messages)[0].content.find("Tool call requested by assistant") != std::string::npos &&
+             (*messages)[0].content_parts.size() == 1 &&
+             (*messages)[0].content_parts[0].type == ava::provider::ContentPartType::ToolUse &&
+             (*messages)[0].content_parts[0].tool_call_id == "call_failed" &&
+             (*messages)[0].content_parts[0].tool_name == "bash" &&
+             (*messages)[0].content_parts[0].input_json.find("false") != std::string::npos,
+         "tool-call entry reconstructs an assistant tool-use content part with fallback text");
+  expect((*messages)[1].role == "user" && !(*messages)[1].content.empty() &&
+              (*messages)[1].content_parts.size() == 1 &&
+              (*messages)[1].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
+              (*messages)[1].content_parts[0].tool_call_id == "call_failed" &&
+              (*messages)[1].content_parts[0].tool_name == "bash" && (*messages)[1].content_parts[0].is_error &&
+              (*messages)[1].content_parts[0].text.size() == 48 &&
+              (*messages)[1].content_parts[0].text.find("[AVA: tool result content truncated]") != std::string::npos,
+          "failed tool-result entry reconstructs native error metadata and truncated result text");
+
+  const std::vector<ava::session::SessionEntry> permission_entries = {
+      ava::session::SessionEntry{.id = "permission_tool_call",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolCall,
+                                  .timestamp = "2026-04-27T00:00:00Z",
+                                  .data_json = "{\"call_id\":\"call_permission\",\"name\":\"read_file\","
+                                               "\"arguments\":\"{}\"}"},
+      ava::session::SessionEntry{.id = "permission_decision",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::PermissionDecision,
+                                  .timestamp = "2026-04-27T00:00:01Z",
+                                  .data_json = "{\"resolution\":\"allow\"}"},
+      ava::session::SessionEntry{.id = "permission_tool_result",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolResult,
+                                  .timestamp = "2026-04-27T00:00:02Z",
+                                  .data_json = "{\"call_id\":\"call_permission\",\"name\":\"read_file\","
+                                               "\"success\":true,\"result\":\"permission result\"}"}};
+  auto permission_messages = ava::agent::build_provider_messages_from_entries(permission_entries);
+  expect(permission_messages && permission_messages->size() == 2,
+         "permission decisions are internal metadata during provider replay");
+  if (!permission_messages || permission_messages->size() != 2) return;
+  expect((*permission_messages)[0].content_parts.size() == 1 && (*permission_messages)[1].content_parts.size() == 1,
+         "native tool replay allows internal permission metadata between tool call and result");
+
+  constexpr std::string_view truncation_marker = "\n[AVA: tool result content truncated]";
+  const std::string euro = std::string("\xE2") + "\x82" + "\xAC";
+  const std::string utf8_result = "abc" + euro + std::string(80, 'x');
+  const std::vector<ava::session::SessionEntry> utf8_entries = {
+      ava::session::SessionEntry{.id = "utf8_tool_call",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolCall,
+                                  .timestamp = "2026-04-27T00:00:00Z",
+                                  .data_json = "{\"call_id\":\"call_utf8\",\"name\":\"bash\","
+                                               "\"arguments\":\"{}\"}"},
+      ava::session::SessionEntry{.id = "utf8_tool_result",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolResult,
+                                  .timestamp = "2026-04-27T00:00:01Z",
+                                  .data_json = "{\"call_id\":\"call_utf8\",\"name\":\"bash\","
+                                               "\"success\":true,\"result\":\"" +
+                                               utf8_result + "\"}"}};
+  auto utf8_messages = ava::agent::build_provider_messages_from_entries(
+      utf8_entries, ava::agent::MessageBuildOptions{.max_tool_result_context_bytes = truncation_marker.size() + 4});
+  expect(utf8_messages && utf8_messages->size() == 2, "utf8 tool entries reconstruct as provider messages");
+  if (!utf8_messages || utf8_messages->size() != 2) return;
+  expect((*utf8_messages)[1].content_parts[0].text.rfind("abc\n[AVA: tool result content truncated]", 0) == 0 &&
+             (*utf8_messages)[1].content_parts[0].text.find(euro) == std::string::npos,
+         "native tool-result truncation avoids splitting utf8 code points");
+
+  const std::vector<ava::session::SessionEntry> malformed_success_entries = {
+      ava::session::SessionEntry{.id = "malformed_success_call",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolCall,
+                                  .timestamp = "2026-04-27T00:00:00Z",
+                                  .data_json = "{\"call_id\":\"call_success_prefix\",\"name\":\"bash\","
+                                               "\"arguments\":\"{}\"}"},
+      ava::session::SessionEntry{.id = "malformed_success_result",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolResult,
+                                  .timestamp = "2026-04-27T00:00:01Z",
+                                  .data_json = "{\"call_id\":\"call_success_prefix\",\"name\":\"bash\","
+                                               "\"success\":falsefoo,\"result\":\"bool result\"}"}};
+  auto malformed_success_messages = ava::agent::build_provider_messages_from_entries(malformed_success_entries);
+  expect(malformed_success_messages && malformed_success_messages->size() == 2,
+         "malformed bool tool entries reconstruct as provider messages");
+  if (!malformed_success_messages || malformed_success_messages->size() != 2) return;
+  expect((*malformed_success_messages)[1].content_parts.size() == 1 &&
+             !(*malformed_success_messages)[1].content_parts[0].is_error,
+         "malformed success bool prefixes do not parse as native error metadata");
+
+  const std::vector<ava::session::SessionEntry> malformed_entries = {
+      ava::session::SessionEntry{.id = "malformed_tool_call",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolCall,
+                                  .timestamp = "2026-04-27T00:00:00Z",
+                                  .data_json = "{\"call_id\":\"call_bad\",\"name\":\"bash\","
+                                               "\"arguments\":\"{\\\"cmd\\\":}\"}"},
+      ava::session::SessionEntry{.id = "malformed_tool_result",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolResult,
+                                  .timestamp = "2026-04-27T00:00:01Z",
+                                  .data_json = "{\"call_id\":\"call_bad\",\"name\":\"bash\","
+                                               "\"success\":true,\"result\":\"still visible\"}"}};
+  auto malformed_messages = ava::agent::build_provider_messages_from_entries(malformed_entries);
+  expect(malformed_messages && malformed_messages->size() == 2,
+         "malformed tool entries still reconstruct as fallback provider messages");
+  if (!malformed_messages || malformed_messages->size() != 2) return;
+  expect((*malformed_messages)[0].content.find("cmd") != std::string::npos &&
+              (*malformed_messages)[0].content_parts.empty() &&
+              (*malformed_messages)[1].content.find("still visible") != std::string::npos &&
+              (*malformed_messages)[1].content_parts.empty(),
+          "malformed native tool-use replay falls back to text-only without dangling native tool-result");
+
+  const std::vector<ava::session::SessionEntry> malformed_id_entries = {
+      ava::session::SessionEntry{.id = "malformed_id_tool_call",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolCall,
+                                  .timestamp = "2026-04-27T00:00:00Z",
+                                  .data_json = "{\"call_id\":\"call\\nbad\",\"name\":\"bash\","
+                                               "\"arguments\":\"{}\"}"},
+      ava::session::SessionEntry{.id = "malformed_id_tool_result",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolResult,
+                                  .timestamp = "2026-04-27T00:00:01Z",
+                                  .data_json = "{\"call_id\":\"call\\nbad\",\"name\":\"bash\","
+                                               "\"success\":true,\"result\":\"still visible\"}"}};
+  auto malformed_id_messages = ava::agent::build_provider_messages_from_entries(malformed_id_entries);
+  expect(malformed_id_messages && malformed_id_messages->size() == 2,
+         "malformed tool id entries still reconstruct as fallback provider messages");
+  if (!malformed_id_messages || malformed_id_messages->size() != 2) return;
+  expect((*malformed_id_messages)[0].content_parts.empty() && (*malformed_id_messages)[1].content_parts.empty(),
+         "malformed native tool ids fall back to text-only replay");
+
+  const std::vector<ava::session::SessionEntry> duplicate_batch_id_entries = {
+      ava::session::SessionEntry{.id = "duplicate_batch_assistant",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::AssistantMessage,
+                                  .timestamp = "2026-04-27T00:00:00Z",
+                                  .data_json = "{\"text\":\"\",\"tool_calls\":2}"},
+      ava::session::SessionEntry{.id = "duplicate_batch_tool_call_1",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolCall,
+                                  .timestamp = "2026-04-27T00:00:01Z",
+                                  .data_json = "{\"call_id\":\"call_duplicate_batch\",\"name\":\"bash\","
+                                               "\"arguments\":\"{}\"}"},
+      ava::session::SessionEntry{.id = "duplicate_batch_tool_result_1",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolResult,
+                                  .timestamp = "2026-04-27T00:00:02Z",
+                                  .data_json = "{\"call_id\":\"call_duplicate_batch\",\"name\":\"bash\","
+                                               "\"success\":true,\"result\":\"first result\"}"},
+      ava::session::SessionEntry{.id = "duplicate_batch_tool_call_2",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolCall,
+                                  .timestamp = "2026-04-27T00:00:03Z",
+                                  .data_json = "{\"call_id\":\"call_duplicate_batch\",\"name\":\"bash\","
+                                               "\"arguments\":\"{}\"}"},
+      ava::session::SessionEntry{.id = "duplicate_batch_tool_result_2",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolResult,
+                                  .timestamp = "2026-04-27T00:00:04Z",
+                                  .data_json = "{\"call_id\":\"call_duplicate_batch\",\"name\":\"bash\","
+                                               "\"success\":true,\"result\":\"second result\"}"}};
+  auto duplicate_batch_id_messages = ava::agent::build_provider_messages_from_entries(duplicate_batch_id_entries);
+  expect(duplicate_batch_id_messages && duplicate_batch_id_messages->size() == 5,
+         "duplicate same-turn tool ids reconstruct as fallback provider messages");
+  if (!duplicate_batch_id_messages || duplicate_batch_id_messages->size() != 5) return;
+  expect((*duplicate_batch_id_messages)[1].content_parts.empty() &&
+             (*duplicate_batch_id_messages)[2].content_parts.empty() &&
+             (*duplicate_batch_id_messages)[3].content_parts.empty() &&
+             (*duplicate_batch_id_messages)[4].content_parts.empty(),
+         "duplicate same-turn native tool ids fall back to text-only replay");
+
+  const std::vector<ava::session::SessionEntry> reused_id_entries = {
+      ava::session::SessionEntry{.id = "valid_tool_call",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolCall,
+                                  .timestamp = "2026-04-27T00:00:00Z",
+                                  .data_json = "{\"call_id\":\"call_reused\",\"name\":\"bash\","
+                                               "\"arguments\":\"{}\"}"},
+      ava::session::SessionEntry{.id = "valid_tool_result",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolResult,
+                                  .timestamp = "2026-04-27T00:00:01Z",
+                                  .data_json = "{\"call_id\":\"call_reused\",\"name\":\"bash\","
+                                               "\"success\":true,\"result\":\"first result\"}"},
+      ava::session::SessionEntry{.id = "valid_reused_tool_call",
+                                   .parent_id = "",
+                                   .type = ava::session::EntryType::ToolCall,
+                                   .timestamp = "2026-04-27T00:00:02Z",
+                                   .data_json = "{\"call_id\":\"call_reused\",\"name\":\"bash\","
+                                                "\"arguments\":\"{}\"}"},
+      ava::session::SessionEntry{.id = "valid_reused_tool_result",
+                                   .parent_id = "",
+                                   .type = ava::session::EntryType::ToolResult,
+                                  .timestamp = "2026-04-27T00:00:03Z",
+                                  .data_json = "{\"call_id\":\"call_reused\",\"name\":\"bash\","
+                                               "\"success\":true,\"result\":\"second result\"}"}};
+  auto reused_id_messages = ava::agent::build_provider_messages_from_entries(reused_id_entries);
+  expect(reused_id_messages && reused_id_messages->size() == 4,
+         "reused tool ids reconstruct as provider messages");
+  if (!reused_id_messages || reused_id_messages->size() != 4) return;
+  expect((*reused_id_messages)[1].content_parts.size() == 1 &&
+              (*reused_id_messages)[1].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
+              (*reused_id_messages)[2].content_parts.empty() &&
+              (*reused_id_messages)[3].content_parts.empty(),
+          "native tool-result matching is one-shot and reused native ids fall back to text-only");
+
+  const std::vector<ava::session::SessionEntry> interrupted_entries = {
+      ava::session::SessionEntry{.id = "interrupted_tool_call",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolCall,
+                                  .timestamp = "2026-04-27T00:00:00Z",
+                                  .data_json = "{\"call_id\":\"call_late\",\"name\":\"bash\","
+                                               "\"arguments\":\"{}\"}"},
+      ava::session::SessionEntry{.id = "intervening_user",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::UserMessage,
+                                  .timestamp = "2026-04-27T00:00:01Z",
+                                  .data_json = "{\"text\":\"intervening user\"}"},
+      ava::session::SessionEntry{.id = "late_tool_result",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolResult,
+                                  .timestamp = "2026-04-27T00:00:02Z",
+                                  .data_json = "{\"call_id\":\"call_late\",\"name\":\"bash\","
+                                               "\"success\":true,\"result\":\"late result\"}"}};
+  auto interrupted_messages = ava::agent::build_provider_messages_from_entries(interrupted_entries);
+  expect(interrupted_messages && interrupted_messages->size() == 3,
+         "interrupted tool entries still reconstruct as provider messages");
+  if (!interrupted_messages || interrupted_messages->size() != 3) return;
+  expect((*interrupted_messages)[0].content_parts.empty() && (*interrupted_messages)[2].content_parts.empty(),
+         "non-contiguous tool-use/result history falls back to text-only native replay");
 }
 
 }  // namespace
@@ -945,4 +1210,5 @@ void run_session_tests() {
   test_session_markdown_export();
   test_compaction_config_and_thresholds();
   test_compaction_context_reconstruction();
+  test_tool_content_parts_reconstruction();
 }

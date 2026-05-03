@@ -63,6 +63,7 @@ int main()
         require((round_trip.rendition().attributes().mask() & static_cast<terminal::Attributes::attr_t>(terminal::Attribute::bold)) != 0,
             "Window background round-trip should preserve bold attribute");
 
+    window.move(1, 1);
     terminal_session.refresh();
     window.refresh();
     terminal_session.get_wch();

@@ -52,26 +52,21 @@ struct Window::Impl
     ::wborder_set(ncurses_window_, &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &b[6], &b[7]);
   }
 
-  void addstr(int y, int x, char const* str)
+  void addstr(char const* str)
   {
-    // From https://docs.oracle.com/cd/E88353_01/html/E37849/mvwaddstr-3xcurses.html
-    //
-    // The addstr() function writes a null-terminated string of multibyte characters to the stdscr window at the current cursor position.
-    // The waddstr() function performs an identical action, but writes the character to the window specified by win.
-    // The mvaddstr() and mvwaddstr() functions write the string to the position indicated by the x (column) and y (row) parameters
-    // (the former to the stdscr window; the latter to window win).
-    ::mvwaddstr(ncurses_window_, y, x, str);
+    ::waddstr(ncurses_window_, str);
   }
 
-  void mvwadd_wchstr(int y, int x, cchar_t const* wchstr)
+  void addstr(char8_t const* utf8_str)
   {
-    // From https://docs.oracle.com/cd/E88353_01/html/E37849/mvwadd-wchstr-3xcurses.html
-    //
-    // The add_wchstr() function copies the string of cchar_t characters to the stdscr window at the current cursor position.
-    // The mvadd_wchstr() and mvwadd_wchstr() functions copy the string to the starting position indicated by the x (column)
-    // and y (row) parameters (the former to the stdscr window; the latter to window win). The wadd_wchstr() is identical to
-    // add_wchstr (), but writes to the window specified by win.
-    ::mvwadd_wchstr(ncurses_window_, y, x, wchstr);
+    // Instead of using waddwstr, which would require application-side conversion from char8_t (utf8) to wchar_t,
+    // it is better to just cast to `char const*` and let the terminal do that.
+    ::waddstr(ncurses_window_, reinterpret_cast<char const*>(utf8_str));
+  }
+
+  void addstr(int y, int x, char const* str)
+  {
+    ::mvwaddstr(ncurses_window_, y, x, str);
   }
 
   void addstr(int y, int x, char8_t const* utf8_str)
@@ -79,6 +74,75 @@ struct Window::Impl
     // Instead of using mvwaddwstr, which would require application-side conversion from char8_t (utf8) to wchar_t,
     // it is better to just cast to `char const*` and let the terminal do that.
     ::mvwaddstr(ncurses_window_, y, x, reinterpret_cast<char const*>(utf8_str));
+  }
+
+  void addstr(char const* str, int n)
+  {
+    ::waddnstr(ncurses_window_, str, n);
+  }
+
+  void addstr(char8_t const* utf8_str, int n)
+  {
+    ::waddnstr(ncurses_window_, reinterpret_cast<char const*>(utf8_str), n);
+  }
+
+  void addstr(int y, int x, char const* str, int n)
+  {
+    ::mvwaddnstr(ncurses_window_, y, x, str, n);
+  }
+
+  void addstr(int y, int x, char8_t const* utf8_str, int n)
+  {
+    ::mvwaddnstr(ncurses_window_, y, x, reinterpret_cast<char const*>(utf8_str), n);
+  }
+
+  void addstr(cchar_t const* wchstr)
+  {
+    ::wadd_wchstr(ncurses_window_, wchstr);
+  }
+
+  void addstr(cchar_t const* wchstr, int n)
+  {
+    ::wadd_wchnstr(ncurses_window_, wchstr, n);
+  }
+
+  void addstr(int y, int x, cchar_t const* wchstr)
+  {
+    ::mvwadd_wchstr(ncurses_window_, y, x, wchstr);
+  }
+
+  void addstr(int y, int x, cchar_t const* wchstr, int n)
+  {
+    ::mvwadd_wchnstr(ncurses_window_, y, x, wchstr, n);
+  }
+
+  void addch(ComplexChar const& complex_char)
+  {
+    cchar_t wch = convert_to_cchar(complex_char);
+    ::wadd_wch(ncurses_window_, &wch);
+  }
+
+  void addch(int y, int x, ComplexChar const& complex_char)
+  {
+    cchar_t wch = convert_to_cchar(complex_char);
+    ::mvwadd_wch(ncurses_window_, y, x, &wch);
+  }
+
+  void echochar(ComplexChar const& complex_char)
+  {
+    cchar_t wch = convert_to_cchar(complex_char);
+    ::wecho_wchar(ncurses_window_, &wch);
+  }
+
+  void move(int y, int x)
+  {
+    // https://invisible-island.net/ncurses/man/curs_move.3x.html
+    //
+    // wmove relocates the cursor associated with the curses window win to
+    // line y and column x. The terminal's cursor does not move until
+    // refresh(3x) is called. The position (y, x) is relative to the upper
+    // left-hand corner of the window, which has coordinates (0, 0).
+    ::wmove(ncurses_window_, y, x);
   }
 };
 
@@ -141,6 +205,16 @@ void Window::set_border(Border const& border)
   impl_->wborder_set(complex_characters);
 }
 
+void Window::addstr(char const* str)
+{
+  impl_->addstr(str);
+}
+
+void Window::addstr(char8_t const* wstr)
+{
+  impl_->addstr(wstr);
+}
+
 void Window::addstr(int y, int x, char const* str)
 {
   impl_->addstr(y, x, str);
@@ -149,6 +223,46 @@ void Window::addstr(int y, int x, char const* str)
 void Window::addstr(int y, int x, char8_t const* wstr)
 {
   impl_->addstr(y, x, wstr);
+}
+
+void Window::addstr(char const* str, int n)
+{
+  impl_->addstr(str, n);
+}
+
+void Window::addstr(char8_t const* wstr, int n)
+{
+  impl_->addstr(wstr, n);
+}
+
+void Window::addstr(int y, int x, char const* str, int n)
+{
+  impl_->addstr(y, x, str, n);
+}
+
+void Window::addstr(int y, int x, char8_t const* wstr, int n)
+{
+  impl_->addstr(y, x, wstr, n);
+}
+
+void Window::addch(ComplexChar const& complex_char)
+{
+  impl_->addch(complex_char);
+}
+
+void Window::addch(int y, int x, ComplexChar const& complex_char)
+{
+  impl_->addch(y, x, complex_char);
+}
+
+void Window::echochar(ComplexChar const& complex_char)
+{
+  impl_->echochar(complex_char);
+}
+
+void Window::move(int y, int x)
+{
+  impl_->move(y, x);
 }
 
 } // namespace terminal

@@ -189,6 +189,66 @@ std::string error_text_for_event(const ava::app::RuntimeEvent& event) {
   return event.text;
 }
 
+bool is_provider_tool_call_status(std::string_view status) {
+  return status == "tool_call_start" || status == "tool_call_delta" || status == "tool_call_end";
+}
+
+std::string provider_tool_call_detail(std::string_view status) {
+  if (status == "tool_call_start") return "provider is preparing tool call";
+  if (status == "tool_call_delta") return "streaming tool arguments";
+  if (status == "tool_call_end") return "tool call ready";
+  return {};
+}
+
+ToolTimelineStatus provider_tool_call_activity_status(std::string_view status) {
+  return status == "tool_call_end" ? ToolTimelineStatus::Success : ToolTimelineStatus::Running;
+}
+
+std::string provider_tool_call_activity_id(const ava::app::RuntimeEvent& event) {
+  if (!event.call_id.empty()) return event.call_id;
+  const auto tool_key = event.tool_name.empty() ? std::string("tool_call") : event.tool_name;
+  return "provider:tool_call:" + tool_key;
+}
+
+void upsert_provider_tool_call_activity(TuiEventState& state, const ava::app::RuntimeEvent& event) {
+  auto item = SidebarActivityItem{.id = provider_tool_call_activity_id(event),
+                                  .label = event.tool_name.empty() ? std::string("tool call") : event.tool_name,
+                                  .detail = provider_tool_call_detail(event.status),
+                                  .status = provider_tool_call_activity_status(event.status)};
+  auto existing =
+      std::ranges::find_if(state.activity, [&](const SidebarActivityItem& activity) { return activity.id == item.id; });
+  if (existing != state.activity.end()) {
+    if (event.tool_name.empty() && !existing->label.empty()) item.label = existing->label;
+    *existing = std::move(item);
+    return;
+  }
+  state.activity.push_back(std::move(item));
+  constexpr auto kMaxActivityItems = std::size_t{8};
+  if (state.activity.size() > kMaxActivityItems) {
+    state.activity.erase(
+        state.activity.begin(),
+        state.activity.begin() + static_cast<std::ptrdiff_t>(state.activity.size() - kMaxActivityItems));
+  }
+}
+
+void apply_provider_event(TuiEventState& state, const ava::app::RuntimeEvent& event) {
+  if (is_provider_tool_call_status(event.status)) {
+    upsert_provider_tool_call_activity(state, event);
+    return;
+  }
+
+  if (event.status == "error") {
+    auto detail = error_text_for_event(event);
+    if (detail.empty()) return;
+    auto id = event.call_id.empty() ? std::string("provider:error") : event.call_id;
+    auto label = event.tool_name.empty() ? std::string("provider/error") : event.tool_name;
+    upsert_sidebar_activity(state, SidebarActivityItem{.id = std::move(id),
+                                                       .label = std::move(label),
+                                                       .detail = std::move(detail),
+                                                       .status = ToolTimelineStatus::Error});
+  }
+}
+
 }  // namespace
 
 void apply_runtime_event(TuiEventState& state, const ava::app::RuntimeEvent& event) {
@@ -263,6 +323,7 @@ void apply_runtime_event(TuiEventState& state, const ava::app::RuntimeEvent& eve
       state.run_status = TuiEventRunStatus::Done;
       break;
     case RuntimeEventType::ProviderEvent:
+      apply_provider_event(state, event);
       break;
   }
 }

@@ -281,10 +281,11 @@ void test_auth_load_and_store() {
     file << "{\"openai\":{\"type\":\"api\",\"key\":\"ava-api-key\"}}";
   }
   ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
-  auto oauth_preferred = ava::config::load_openai_credential(paths);
-  expect(oauth_preferred && oauth_preferred->has_value() && (*oauth_preferred)->access_token == "opencode-token" &&
-             (*oauth_preferred)->type == ava::config::OpenAICredentialType::OAuth,
-         "OpenAI OAuth credential is preferred over API key fallback");
+  auto explicit_ava_preferred = ava::config::load_openai_credential(paths);
+  expect(explicit_ava_preferred && explicit_ava_preferred->has_value() &&
+             (*explicit_ava_preferred)->access_token == "ava-api-key" &&
+             (*explicit_ava_preferred)->type == ava::config::OpenAICredentialType::ApiKey,
+         "explicit AVA OpenAI auth is preferred over legacy fallback auth");
 
   std::filesystem::remove(paths.auth_file, remove_error);
   std::filesystem::remove_all(root / "home" / ".ava", remove_error);
@@ -328,6 +329,134 @@ void test_auth_load_and_store() {
              (*loaded_api)->expires_at == 0,
          "OpenAI API key credential store/load round trips without OAuth expiry");
 
+  auto stored_anthropic_api = ava::config::store_provider_credential(
+      paths, ava::config::ProviderCredential{.provider_id = "anthropic",
+                                             .access_token = "stored-anthropic-api-key",
+                                             .credential_type = "api_key",
+                                             .account_id = "",
+                                             .source = "test"});
+  expect(stored_anthropic_api.has_value(), "generic provider API key credential stores to auth file");
+  loaded_api = ava::config::load_openai_credential(paths);
+  expect(loaded_api && loaded_api->has_value() && (*loaded_api)->access_token == "stored-api-key",
+         "generic provider credential store preserves existing OpenAI credential");
+  ava::tests::FakeTransport generic_store_transport({});
+  auto stored_anthropic_api_credential =
+      ava::config::provider_credential_for_request(paths, "anthropic", generic_store_transport);
+  expect(stored_anthropic_api_credential && stored_anthropic_api_credential->has_value() &&
+             (*stored_anthropic_api_credential)->access_token == "stored-anthropic-api-key" &&
+             (*stored_anthropic_api_credential)->credential_type == "api_key",
+         "generic provider API key credential loads after storing");
+
+  auto stored_anthropic_oauth = ava::config::store_provider_credential(
+      paths, ava::config::ProviderCredential{.provider_id = "anthropic",
+                                             .access_token = "stored-anthropic-oauth-token",
+                                             .credential_type = "oauth",
+                                             .account_id = "",
+                                             .source = "test"});
+  expect(stored_anthropic_oauth.has_value(), "generic provider OAuth bearer credential stores to auth file");
+  auto stored_anthropic_oauth_credential =
+      ava::config::provider_credential_for_request(paths, "anthropic", generic_store_transport);
+  expect(stored_anthropic_oauth_credential && stored_anthropic_oauth_credential->has_value() &&
+             (*stored_anthropic_oauth_credential)->access_token == "stored-anthropic-oauth-token" &&
+             (*stored_anthropic_oauth_credential)->credential_type == "oauth",
+         "generic provider OAuth bearer credential replaces the prior provider API key");
+
+  auto stored_moonshot_api = ava::config::store_provider_credential(
+      paths, ava::config::ProviderCredential{.provider_id = "moonshot",
+                                             .access_token = "stored-moonshot-api-key",
+                                             .credential_type = "api_key",
+                                             .account_id = "",
+                                             .source = "test"});
+  expect(stored_moonshot_api.has_value(), "Moonshot API key credential stores through generic provider auth");
+  auto stored_moonshot_credential =
+      ava::config::provider_credential_for_request(paths, "moonshot", generic_store_transport);
+  expect(stored_moonshot_credential && stored_moonshot_credential->has_value() &&
+             (*stored_moonshot_credential)->access_token == "stored-moonshot-api-key" &&
+             (*stored_moonshot_credential)->credential_type == "api_key",
+         "Moonshot API key credential loads through generic provider auth");
+
+  auto rotated_openai_api = ava::config::store_openai_credential(
+      paths, ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::ApiKey,
+                                           .access_token = "rotated-openai-api-key",
+                                           .refresh_token = "",
+                                           .expires_at = 0,
+                                           .account_id = "",
+                                           .source_path = {}});
+  expect(rotated_openai_api.has_value(), "OpenAI credential update stores after generic provider credentials");
+  loaded_api = ava::config::load_openai_credential(paths);
+  expect(loaded_api && loaded_api->has_value() && (*loaded_api)->access_token == "rotated-openai-api-key",
+         "OpenAI credential update loads after provider credential merge");
+  stored_anthropic_oauth_credential =
+      ava::config::provider_credential_for_request(paths, "anthropic", generic_store_transport);
+  expect(stored_anthropic_oauth_credential && stored_anthropic_oauth_credential->has_value() &&
+             (*stored_anthropic_oauth_credential)->access_token == "stored-anthropic-oauth-token",
+         "OpenAI credential update preserves Anthropic provider credential");
+  stored_moonshot_credential = ava::config::provider_credential_for_request(paths, "moonshot", generic_store_transport);
+  expect(stored_moonshot_credential && stored_moonshot_credential->has_value() &&
+             (*stored_moonshot_credential)->access_token == "stored-moonshot-api-key",
+         "OpenAI credential update preserves Moonshot provider credential");
+
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR | S_IRGRP);
+  auto repaired_broad_permissions = ava::config::store_provider_credential(
+      paths, ava::config::ProviderCredential{.provider_id = "kimi",
+                                             .access_token = "stored-kimi-api-key",
+                                             .credential_type = "api_key",
+                                             .account_id = "",
+                                             .source = "test"});
+  expect(repaired_broad_permissions.has_value(), "provider credential store repairs user-owned broad auth permissions");
+  struct stat auth_stat {};
+  expect(::stat(paths.auth_file.c_str(), &auth_stat) == 0 && (auth_stat.st_mode & (S_IRWXG | S_IRWXO)) == 0,
+         "provider credential store rewrites auth file with owner-only permissions");
+  std::ifstream repaired_auth_file(paths.auth_file, std::ios::binary);
+  std::stringstream repaired_auth_stream;
+  repaired_auth_stream << repaired_auth_file.rdbuf();
+  const auto repaired_auth_json = repaired_auth_stream.str();
+  expect(repaired_auth_json.find("openai") == std::string::npos &&
+             repaired_auth_json.find("anthropic") == std::string::npos &&
+             repaired_auth_json.find("moonshot") == std::string::npos,
+         "provider credential store discards broad-permission auth contents instead of blessing them");
+  auto stored_kimi_credential = ava::config::provider_credential_for_request(paths, "kimi", generic_store_transport);
+  expect(stored_kimi_credential && stored_kimi_credential->has_value() &&
+             (*stored_kimi_credential)->access_token == "stored-kimi-api-key",
+         "provider credential store writes only the requested credential while repairing permissions");
+
+  {
+    std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
+    file << "{\"openai\":{\"type\":\"api_key\",\"api_key\":\"bad\"}}trailing";
+  }
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
+  auto malformed_auth_store = ava::config::store_provider_credential(
+      paths, ava::config::ProviderCredential{.provider_id = "anthropic",
+                                             .access_token = "should-not-overwrite",
+                                             .credential_type = "api_key",
+                                             .account_id = "",
+                                             .source = "test"});
+  expect(!malformed_auth_store && malformed_auth_store.error().format().find("trailing content") != std::string::npos,
+         "provider credential store rejects malformed auth JSON with actionable error");
+  {
+    std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
+    file << "{\"openai\": }";
+  }
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
+  auto missing_value_auth_store = ava::config::store_provider_credential(
+      paths, ava::config::ProviderCredential{.provider_id = "anthropic",
+                                             .access_token = "should-not-overwrite",
+                                             .credential_type = "api_key",
+                                             .account_id = "",
+                                             .source = "test"});
+  expect(
+      !missing_value_auth_store && missing_value_auth_store.error().format().find("invalid value") != std::string::npos,
+      "provider credential store rejects auth JSON members with missing values");
+  std::filesystem::remove(paths.auth_file, remove_error);
+  auto restored_after_malformed_auth = ava::config::store_openai_credential(
+      paths, ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::ApiKey,
+                                           .access_token = "rotated-openai-api-key",
+                                           .refresh_token = "",
+                                           .expires_at = 0,
+                                           .account_id = "",
+                                           .source_path = {}});
+  expect(restored_after_malformed_auth.has_value(), "OpenAI credential stores after removing malformed auth file");
+
   expect(!ava::config::parse_openai_credential("{\"openai\":{\"type\":\"oauth\",\"api_key\":\"wrong\"}}"),
          "OpenAI credential parser rejects typed OAuth without OAuth token");
   expect(!ava::config::parse_openai_credential("{\"openai\":{\"type\":\"api_key\",\"access_token\":\"wrong\"}}"),
@@ -358,7 +487,7 @@ void test_auth_load_and_store() {
   ava::tests::FakeTransport env_transport({});
   auto stored_provider_credential = ava::config::provider_credential_for_request(paths, "openai", env_transport);
   expect(stored_provider_credential && stored_provider_credential->has_value() &&
-             (*stored_provider_credential)->access_token == "stored-api-key" &&
+             (*stored_provider_credential)->access_token == "rotated-openai-api-key" &&
              (*stored_provider_credential)->credential_type == "api_key",
          "provider credential discovery prefers stored OpenAI auth before env fallback");
   std::filesystem::remove(paths.auth_file, remove_error);
@@ -367,7 +496,7 @@ void test_auth_load_and_store() {
   expect(env_openai_credential && env_openai_credential->has_value() &&
              (*env_openai_credential)->access_token == "env-openai-key" &&
              (*env_openai_credential)->source == "env:OPENAI_API_KEY",
-          "provider credential discovery falls back to OPENAI_API_KEY without storing it");
+         "provider credential discovery falls back to OPENAI_API_KEY without storing it");
   unsetenv("OPENAI_API_KEY");
   {
     std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
@@ -652,15 +781,20 @@ void test_model_and_prompt_config() {
   const auto builtin = ava::config::builtin_model_registry();
   auto selected = ava::config::select_default_model(builtin);
   expect(selected.provider_id == "openai" && selected.model_id == "gpt-5.5", "default model is OpenAI GPT-5.5");
+  expect(selected.context_window_tokens && *selected.context_window_tokens == 200'000,
+         "default model carries context window metadata");
   bool saw_priced_builtin = false;
+  bool all_builtins_have_context_windows = !builtin.models.empty();
   for (const auto& model : builtin.models) {
-    saw_priced_builtin = saw_priced_builtin || (model.model_id == "gpt-4.1-mini" && model.context_window_tokens &&
-                                                model.pricing && *model.context_window_tokens == 1'048'576 &&
-                                                model.pricing->input_per_million && model.pricing->output_per_million &&
-                                                model.api_family == "openai_responses" &&
-                                                model.supports_tools.value_or(false) &&
-                                                model.supports_streaming.value_or(false) && model.reports_usage.value_or(false));
+    all_builtins_have_context_windows = all_builtins_have_context_windows && model.context_window_tokens.has_value();
+    saw_priced_builtin =
+        saw_priced_builtin || (model.model_id == "gpt-4.1-mini" && model.context_window_tokens && model.pricing &&
+                               *model.context_window_tokens == 1'048'576 && model.pricing->input_per_million &&
+                               model.pricing->output_per_million && model.api_family == "openai_responses" &&
+                               model.supports_tools.value_or(false) && model.supports_streaming.value_or(false) &&
+                               model.reports_usage.value_or(false));
   }
+  expect(all_builtins_have_context_windows, "builtin model registry always provides context windows");
   expect(saw_priced_builtin, "builtin model registry carries static pricing, context, and capability metadata");
 
   std::filesystem::create_directories(paths.ava_config_dir);
@@ -713,6 +847,21 @@ void test_model_and_prompt_config() {
                                                  .estimated = false};
     expect(!ava::config::usage_cost_usd(*selected.pricing, cached_usage),
            "usage cost remains unknown when present cache usage has no cache pricing");
+  }
+
+  {
+    std::ofstream file(paths.models_file, std::ios::binary | std::ios::trunc);
+    file << "{\"default_provider\":\"openai\",\"default_model\":\"gpt-5.5\","
+            "\"models\":[{\"provider\":\"openai\",\"id\":\"gpt-5.5\",\"name\":\"Custom GPT\"}]}";
+  }
+  registry = ava::config::load_model_registry(paths);
+  expect(registry.has_value(), "model registry loads partial builtin override");
+  if (registry) {
+    selected = ava::config::select_default_model(*registry);
+    expect(selected.display_name == "Custom GPT" && selected.context_window_tokens == 200'000 &&
+               selected.supports_reasoning == true && selected.reports_usage == true &&
+               selected.reasoning_levels.size() == 3,
+           "builtin model overrides preserve missing capability metadata");
   }
 
   auto inferred_family = ava::config::select_default_model(

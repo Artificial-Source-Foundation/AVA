@@ -1,14 +1,20 @@
 #include "ava/app/commands.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
+#include <iomanip>
 #include <mutex>
+#include <optional>
 #include <sstream>
+#include <string_view>
 #include <utility>
 
+#include "ava/config/auth.h"
 #include "ava/core/ids.h"
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
+#include "ava/session/stats.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/search_tools.h"
@@ -164,6 +170,284 @@ std::string missing_argument(std::string_view usage) { return "usage: " + std::s
 std::string command_argument(std::string_view line, std::string_view command) {
   if (line.size() <= command.size() || line[command.size()] != ' ') return {};
   return std::string(line.substr(command.size() + 1));
+}
+
+std::vector<std::string> split_command_arguments(std::string_view text) {
+  std::vector<std::string> parts;
+  std::size_t index = 0;
+  while (index < text.size()) {
+    while (index < text.size() && std::isspace(static_cast<unsigned char>(text[index])) != 0) ++index;
+    const auto start = index;
+    while (index < text.size() && std::isspace(static_cast<unsigned char>(text[index])) == 0) ++index;
+    if (start < index) parts.emplace_back(text.substr(start, index - start));
+  }
+  return parts;
+}
+
+bool is_valid_connect_provider_id(std::string_view provider_id) {
+  if (provider_id.empty() || provider_id.size() > 128) return false;
+  return std::ranges::all_of(provider_id, [](char ch) {
+    const auto uch = static_cast<unsigned char>(ch);
+    return std::isalnum(uch) != 0 || ch == '-' || ch == '_';
+  });
+}
+
+std::string trim_secret_text(std::string secret) {
+  auto is_edge_space = [](char ch) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; };
+  auto first = std::find_if_not(secret.begin(), secret.end(), is_edge_space);
+  auto last = std::find_if_not(secret.rbegin(), secret.rend(), is_edge_space).base();
+  if (first >= last) return {};
+  return std::string(first, last);
+}
+
+std::string format_cost_usd(long double value) {
+  std::ostringstream output;
+  output << '$' << std::fixed << std::setprecision(6) << value;
+  return output.str();
+}
+
+template <typename Value>
+void append_known_value(std::ostringstream& output, bool& wrote_any, std::string_view label,
+                        const std::optional<Value>& value) {
+  if (!value) return;
+  if (wrote_any) output << ' ';
+  output << label << '=' << *value;
+  wrote_any = true;
+}
+
+std::string shorten_middle(std::string text, std::size_t max_columns) {
+  if (text.size() <= max_columns || max_columns < 8) return text;
+  const auto front = (max_columns - 3) / 2;
+  const auto back = max_columns - 3 - front;
+  return text.substr(0, front) + "..." + text.substr(text.size() - back);
+}
+
+std::string compact_workspace_label(const std::filesystem::path& workspace) {
+  const auto filename = workspace.filename().generic_string();
+  if (!filename.empty()) return shorten_middle(filename, 32);
+  return shorten_middle(workspace.generic_string(), 48);
+}
+
+std::string compact_cwd_label(const std::filesystem::path& cwd, const std::filesystem::path& workspace) {
+  auto text = display_path(cwd, workspace);
+  if (text.empty()) text = ".";
+  return shorten_middle(std::move(text), 48);
+}
+
+std::string known_values_text(const ava::session::SessionStats& stats) {
+  std::ostringstream output;
+  bool wrote_any = false;
+  append_known_value(output, wrote_any, "input", stats.input_tokens);
+  append_known_value(output, wrote_any, "output", stats.output_tokens);
+  append_known_value(output, wrote_any, "reasoning", stats.reasoning_tokens);
+  append_known_value(output, wrote_any, "cache_read", stats.cache_read_tokens);
+  append_known_value(output, wrote_any, "cache_write", stats.cache_write_tokens);
+  append_known_value(output, wrote_any, "total", stats.total_tokens);
+  return wrote_any ? output.str() : std::string("unavailable");
+}
+
+std::string estimated_bytes_text(const ava::session::SessionStats& stats) {
+  std::ostringstream output;
+  bool wrote_any = false;
+  append_known_value(output, wrote_any, "input", stats.estimated_input_bytes);
+  append_known_value(output, wrote_any, "output", stats.estimated_output_bytes);
+  append_known_value(output, wrote_any, "total", stats.estimated_total_bytes);
+  return wrote_any ? output.str() : std::string("unavailable");
+}
+
+std::string cost_text(const ava::session::SessionStats& stats) {
+  if (stats.cost_complete) return stats.total_cost_usd ? format_cost_usd(*stats.total_cost_usd) : "unavailable";
+  if (stats.known_cost_usd) {
+    return "at least " + format_cost_usd(*stats.known_cost_usd) + " (" + std::to_string(stats.unknown_cost_entries) +
+           " unknown)";
+  }
+  return "incomplete (" + std::to_string(stats.unknown_cost_entries) + " unknown)";
+}
+
+std::string format_session_stats_text(const RuntimeSession& session, const ava::session::SessionStats& stats) {
+  std::ostringstream output;
+  output << "Session stats\n";
+  output << "  session: " << shorten_middle(session.store.session_id(), 32) << "   entries: " << stats.entry_count
+         << '\n';
+  output << "  model: " << session.model.provider_id << '/' << session.model.model_id
+         << "   mode: " << ava::agent::to_string(session.mode) << '\n';
+  output << "  workspace: " << compact_workspace_label(session.workspace_dir)
+         << "   cwd: " << compact_cwd_label(session.current_dir, session.workspace_dir) << '\n';
+  if (!stats.first_timestamp.empty() || !stats.last_timestamp.empty()) {
+    output << "  time: " << (stats.first_timestamp.empty() ? "unknown" : stats.first_timestamp) << " -> "
+           << (stats.last_timestamp.empty() ? "unknown" : stats.last_timestamp) << '\n';
+  }
+
+  output << "\nMessages:\n";
+  output << "  user " << stats.counts.user_message << "   assistant " << stats.counts.assistant_message << "   tools "
+         << stats.counts.tool_call << '/' << stats.counts.tool_result << "   permissions "
+         << stats.counts.permission_decision << '\n';
+  output << "  compactions " << stats.counts.compaction << "   mode/model " << stats.counts.mode_change << '/'
+         << stats.counts.model_change << "   errors/cancels " << stats.counts.error << '/' << stats.counts.cancel
+         << '\n';
+
+  output << "\nUsage:\n";
+  output << "  tokens: " << known_values_text(stats) << '\n';
+  output << "  est bytes: " << estimated_bytes_text(stats) << '\n';
+  output << "  cost: " << cost_text(stats) << "   usage entries exact/estimated " << stats.exact_usage_entries << '/'
+         << stats.estimated_usage_entries << '\n';
+
+  output << "\nHints:\n";
+  output << "  export: /export   resume: ava --session " << session.store.session_id();
+  return output.str();
+}
+
+std::string credential_type_value(std::string_view method) {
+  if (method == "api" || method == "api-key" || method == "apikey" || method == "key" || method == "api_key") {
+    return "api_key";
+  }
+  if (method == "oauth" || method == "oauth-token" || method == "oauth_token" || method == "bearer" ||
+      method == "token") {
+    return "oauth";
+  }
+  return {};
+}
+
+std::string credential_type_label(std::string_view credential_type) {
+  return credential_type == "oauth" ? "OAuth bearer token" : "API key";
+}
+
+std::string selected_or_custom_answer(const ava::agent::QuestionAnswer& answer) {
+  if (!answer.custom_text.empty()) return answer.custom_text;
+  if (!answer.selected_options.empty()) return answer.selected_options.front();
+  return {};
+}
+
+ava::core::Result<ava::agent::QuestionAnswer> ask_connect_question(const CommandRequest& request,
+                                                                   ava::agent::QuestionPrompt prompt) {
+  if (!request.question_resolver) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                         "/connect requires the interactive TUI; use `ava connect <provider> --api-key-stdin`, "
+                         "`--api-key-env ENV`, `--oauth-token-stdin`, or `--oauth-token-env ENV` for headless setup"));
+  }
+  return request.question_resolver(prompt);
+}
+
+std::vector<ava::agent::QuestionOption> provider_options(const RuntimeSession& session) {
+  std::vector<ava::agent::QuestionOption> options;
+  auto add = [&](std::string value, std::string label) {
+    if (std::ranges::any_of(options, [&](const auto& option) { return option.value == value; })) return;
+    options.push_back(ava::agent::QuestionOption{.value = std::move(value), .label = std::move(label)});
+  };
+  if (!session.model.provider_id.empty()) add(session.model.provider_id, session.model.provider_id + " (current)");
+  add("openai", "OpenAI - API key or ChatGPT OAuth token");
+  add("anthropic", "Anthropic - Claude API key or OAuth token");
+  add("moonshot", "Moonshot - Kimi API key");
+  add("kimi", "Kimi - Moonshot compatible API key");
+  add("openrouter", "OpenRouter - API key");
+  add("vercel", "Vercel AI Gateway - API key");
+  return options;
+}
+
+ava::core::Result<std::string> resolve_connect_provider(RuntimeSession& session, const CommandRequest& request,
+                                                        const std::vector<std::string>& args) {
+  if (!args.empty()) return args[0];
+  auto answer = ask_connect_question(request, ava::agent::QuestionPrompt{.header = "Connect a provider",
+                                                                         .question = "Select provider",
+                                                                         .options = provider_options(session),
+                                                                         .multiple = false,
+                                                                         .allow_custom = true,
+                                                                         .secret = false,
+                                                                         .modal = true,
+                                                                         .searchable = true});
+  if (!answer) return std::unexpected(std::move(answer.error()));
+  return selected_or_custom_answer(*answer);
+}
+
+ava::core::Result<std::string> resolve_connect_credential_type(const CommandRequest& request,
+                                                               const std::vector<std::string>& args) {
+  if (args.size() >= 2) {
+    const auto credential_type = credential_type_value(args[1]);
+    if (!credential_type.empty()) return credential_type;
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                  "/connect credential type must be api-key or oauth");
+    error.with_context("usage", "/connect [provider] [api-key|oauth]");
+    return std::unexpected(std::move(error));
+  }
+
+  auto answer = ask_connect_question(
+      request, ava::agent::QuestionPrompt{
+                   .header = "Connect a provider",
+                   .question = "Choose credential type",
+                   .options = {ava::agent::QuestionOption{.value = "api_key", .label = "API key"},
+                               ava::agent::QuestionOption{.value = "oauth", .label = "OAuth bearer token"}},
+                   .multiple = false,
+                   .allow_custom = false,
+                   .secret = false,
+                   .modal = true});
+  if (!answer) return std::unexpected(std::move(answer.error()));
+  return selected_or_custom_answer(*answer);
+}
+
+ava::core::Result<std::string> prompt_connect_secret(const CommandRequest& request, std::string_view provider_id,
+                                                     std::string_view credential_type) {
+  auto answer = ask_connect_question(
+      request, ava::agent::QuestionPrompt{
+                   .header = "Connect a provider",
+                   .question = "Paste " + credential_type_label(credential_type) + " for " + std::string(provider_id),
+                   .options = {},
+                   .multiple = false,
+                   .allow_custom = true,
+                   .secret = true,
+                   .modal = true});
+  if (!answer) return std::unexpected(std::move(answer.error()));
+  auto secret = trim_secret_text(selected_or_custom_answer(*answer));
+  if (secret.empty()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "credential was empty"));
+  }
+  return secret;
+}
+
+ava::core::Result<CommandResult> run_connect_command(RuntimeSession& session, const CommandRequest& request) {
+  CommandResult result;
+  result.handled = true;
+  const auto args = split_command_arguments(command_argument(request.command, "/connect"));
+  if (args.size() > 2) {
+    add_output(result, missing_argument("/connect [provider] [api-key|oauth]"));
+    return result;
+  }
+
+  auto provider_id = resolve_connect_provider(session, request, args);
+  if (!provider_id) {
+    add_output(result, provider_id.error().format());
+    return result;
+  }
+  if (!is_valid_connect_provider_id(*provider_id)) {
+    add_output(result, "provider id must contain only letters, numbers, '-' or '_'");
+    return result;
+  }
+
+  auto credential_type = resolve_connect_credential_type(request, args);
+  if (!credential_type) {
+    add_output(result, credential_type.error().format());
+    return result;
+  }
+
+  auto secret = prompt_connect_secret(request, *provider_id, *credential_type);
+  if (!secret) {
+    add_output(result, secret.error().format());
+    return result;
+  }
+
+  auto stored = ava::config::store_provider_credential(
+      session.paths, ava::config::ProviderCredential{.provider_id = *provider_id,
+                                                     .access_token = *secret,
+                                                     .credential_type = *credential_type,
+                                                     .account_id = "",
+                                                     .source = "connect"});
+  if (!stored) {
+    add_output(result, stored.error().format());
+    return result;
+  }
+  add_output(result, "Stored " + *provider_id + " " + credential_type_label(*credential_type) + " credential at " +
+                         session.paths.auth_file.string());
+  return result;
 }
 
 ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, CommandRequest& request) {
@@ -416,6 +700,9 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
     add_output(result, command_hotkeys_text(request.hotkeys));
     return result;
   }
+  if (starts_with_command(request.command, "/connect")) {
+    return run_connect_command(session, request);
+  }
   if (request.command == "/sessions") {
     result.handled = true;
     auto sessions = ava::session::SessionStore::list_sessions(session.workspace_dir, session.paths.sessions_dir);
@@ -460,6 +747,16 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
                 "  bytes=" + std::to_string(source.byte_count) + '\n';
     }
     add_output(result, std::move(output));
+    return result;
+  }
+  if (request.command == "/stats") {
+    result.handled = true;
+    auto entries = session.store.load();
+    if (!entries) {
+      add_output(result, entries.error().format());
+      return result;
+    }
+    add_output(result, format_session_stats_text(session, ava::session::compute_session_stats(*entries)));
     return result;
   }
   if (starts_with_command(request.command, "/compact")) {

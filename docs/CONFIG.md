@@ -18,6 +18,33 @@ ava connect openai
 
 The command prints an OpenAI authorization URL, waits for the browser callback on `http://localhost:1455/auth/callback`, and stores the resulting credential owner-only at the AVA auth path.
 
+Interactive provider login is available for API keys and bearer tokens:
+
+```sh
+ava auth login
+ava login anthropic
+ava auth login moonshot --api-key
+ava connect kimi --oauth-token
+```
+
+When the provider is omitted, `ava auth login`, `ava login`, and interactive `ava connect` open a searchable terminal provider picker before asking for credential type and secret. Secrets are read without terminal echo when stdin is a TTY. In the TUI, use `/connect` or `/login` to open the same provider flow as a modal; pasted secrets are masked in the prompt.
+
+Headless API-key setup is available for OpenAI, Anthropic, Moonshot/Kimi, and other provider ids:
+
+```sh
+printf '%s\n' "$OPENAI_API_KEY" | ava connect openai --api-key-stdin
+printf '%s\n' "$ANTHROPIC_API_KEY" | ava connect anthropic --api-key-stdin
+ava connect moonshot --api-key-env MOONSHOT_API_KEY
+ava connect kimi --api-key-env KIMI_API_KEY
+```
+
+Bearer-token providers can use the OAuth-token variants:
+
+```sh
+printf '%s\n' "$ANTHROPIC_OAUTH_TOKEN" | ava connect anthropic --oauth-token-stdin
+ava connect anthropic --oauth-token-env ANTHROPIC_OAUTH_TOKEN
+```
+
 OAuth token format:
 
 ```json
@@ -27,10 +54,10 @@ OAuth token format:
 API key format:
 
 ```json
-{"openai":{"type":"api_key","api_key":"sk-..."}}
+{"openai":{"type":"api_key","api_key":"sk-..."},"anthropic":{"type":"api_key","api_key":"sk-ant-..."}}
 ```
 
-Auth files are written owner-only. AVA also attempts to read legacy `~/.ava/credentials.json` and opencode's XDG auth file for migration.
+Auth files are written owner-only. Provider credential setup preserves existing provider entries in the same auth file. Explicit AVA auth entries take precedence; AVA also attempts to read legacy `~/.ava/credentials.json` and opencode's XDG auth file for OpenAI migration when no AVA OpenAI credential is stored.
 
 OAuth credentials refresh automatically before use when a refresh token is present. If refresh fails or the credential has no refresh token, rerun `ava connect openai`.
 
@@ -63,7 +90,7 @@ Optional model override file: `$XDG_CONFIG_HOME/ava/models.json`.
 }
 ```
 
-Model entries are additive overrides. `provider` and `id` are required; `name`, `family`, `context_window_tokens`, `max_output_tokens`, and `pricing` are optional. Pricing values are USD per one million tokens and are local static metadata; AVA does not fetch live prices. Cost is reported only when the saved provider usage and configured pricing are complete for the billable token types in that assistant response.
+Model entries are additive overrides. `provider` and `id` are required; omitted fields on built-in model overrides inherit the built-in metadata, including `context_window_tokens`. For brand-new custom models, set `context_window_tokens` so token percentage and context-aware compaction can work. Pricing values are USD per one million tokens and are local static metadata; AVA does not fetch live prices. Cost is reported only when the saved provider usage and configured pricing are complete for the billable token types in that assistant response.
 
 Accepted pricing aliases include `input_usd_per_1m`, `output_usd_per_1m`, `cache_read_usd_per_1m`, `cache_write_usd_per_1m`, and `reasoning_usd_per_1m`.
 

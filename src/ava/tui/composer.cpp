@@ -357,11 +357,42 @@ std::string pad_line_to_width(std::string line, std::size_t width) {
   return fitted;
 }
 
+std::size_t modal_width_for(std::size_t width) {
+  if (width < 48) return width;
+  return std::min<std::size_t>(76, std::max<std::size_t>(44, (width * 4) / 5));
+}
+
+std::size_t modal_height_for(std::size_t height) {
+  if (height < 10) return height;
+  return std::min<std::size_t>(18, height > 4 ? height - 4 : height);
+}
+
+std::vector<std::string> overlay_question_modal(std::vector<std::string> lines, const QuestionPromptView& prompt,
+                                                std::size_t width, std::size_t height) {
+  while (lines.size() < height) lines.emplace_back();
+  const auto modal_width = std::min(modal_width_for(width), width);
+  const auto modal_height = std::min(modal_height_for(height), height);
+  const auto modal_lines = detail::render_question_modal(prompt, modal_width, modal_height);
+  const auto top = height > modal_lines.size() ? (height - modal_lines.size()) / 2 : std::size_t{0};
+  const auto left = width > modal_width ? (width - modal_width) / 2 : std::size_t{0};
+  const auto right = width > left + modal_width ? width - left - modal_width : std::size_t{0};
+  for (std::size_t index = 0; index < modal_lines.size() && top + index < lines.size(); ++index) {
+    lines[top + index] = std::string(left, ' ') + modal_lines[index] + std::string(right, ' ');
+  }
+  return lines;
+}
+
 }  // namespace
 
 std::vector<std::string> render_composer(const ComposerSnapshot& snapshot) {
   const auto width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
   const auto height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
+  if (snapshot.question_prompt && snapshot.question_prompt->modal) {
+    auto base = snapshot;
+    const auto prompt = *base.question_prompt;
+    base.question_prompt = std::nullopt;
+    return overlay_question_modal(render_composer(base), prompt, width, height);
+  }
   if (sidebar_visible(snapshot, width)) {
     const auto sidebar_width = std::min<std::size_t>(kSidebarWidth, width / 3);
     const auto main_width = main_width_for(snapshot, width);

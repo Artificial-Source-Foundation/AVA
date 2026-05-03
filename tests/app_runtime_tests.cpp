@@ -24,6 +24,7 @@
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/app/commands.h"
+#include "ava/app/connect_openai.h"
 #include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/print_mode.h"
@@ -732,7 +733,7 @@ void test_headless_permission_policy() {
   expect(read_only_write && *read_only_write == ava::permissions::PermissionResolution::Deny,
          "headless read-only policy denies write prompts");
   expect(read_only_bash && *read_only_bash == ava::permissions::PermissionResolution::Deny,
-          "headless read-only policy denies bash prompts");
+         "headless read-only policy denies bash prompts");
   expect(read_only_webfetch && *read_only_webfetch == ava::permissions::PermissionResolution::Deny,
          "headless read-only policy denies network prompts");
 
@@ -1010,6 +1011,153 @@ void test_app_print_mode_refreshes_expired_oauth_before_provider_request() {
          "print mode OAuth preflight persists refreshed credential before provider startup");
 }
 
+void test_app_connect_provider_credentials_headlessly() {
+  const auto root = temp_root() / "app-connect-provider-credentials";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto paths = app_test_paths(root);
+
+  std::istringstream anthropic_input("anthropic-api-key\n");
+  std::ostringstream anthropic_out;
+  std::ostringstream anthropic_err;
+  const auto anthropic_exit = ava::app::run_connect_provider_credential(
+      paths,
+      ava::app::ConnectProviderCredentialOptions{.provider_id = "anthropic",
+                                                 .credential_type = ava::app::ConnectCredentialType::ApiKey,
+                                                 .env_var = std::nullopt},
+      anthropic_input, anthropic_out, anthropic_err);
+  expect(anthropic_exit == 0 && anthropic_err.str().empty() &&
+             anthropic_out.str().find("Stored API key credential") != std::string::npos,
+         "headless provider connect stores Anthropic API key from stdin");
+  ava::tests::FakeTransport transport({});
+  auto anthropic = ava::config::provider_credential_for_request(paths, "anthropic", transport);
+  expect(anthropic && anthropic->has_value() && (*anthropic)->access_token == "anthropic-api-key" &&
+             (*anthropic)->credential_type == "api_key",
+         "headless provider connect writes loadable Anthropic API key auth");
+
+  std::istringstream anthropic_oauth_input("anthropic-oauth-token\r\n");
+  std::ostringstream anthropic_oauth_out;
+  std::ostringstream anthropic_oauth_err;
+  const auto anthropic_oauth_exit = ava::app::run_connect_provider_credential(
+      paths,
+      ava::app::ConnectProviderCredentialOptions{.provider_id = "anthropic",
+                                                 .credential_type = ava::app::ConnectCredentialType::OAuthToken,
+                                                 .env_var = std::nullopt},
+      anthropic_oauth_input, anthropic_oauth_out, anthropic_oauth_err);
+  expect(anthropic_oauth_exit == 0 && anthropic_oauth_err.str().empty() &&
+             anthropic_oauth_out.str().find("Stored OAuth bearer token credential") != std::string::npos,
+         "headless provider connect stores Anthropic OAuth bearer token from stdin");
+  anthropic = ava::config::provider_credential_for_request(paths, "anthropic", transport);
+  expect(anthropic && anthropic->has_value() && (*anthropic)->access_token == "anthropic-oauth-token" &&
+             (*anthropic)->credential_type == "oauth",
+         "headless provider connect replaces Anthropic API key with OAuth bearer token");
+
+  ScopedEnvVar moonshot_key("AVA_TEST_MOONSHOT_KEY", "moonshot-api-key");
+  std::istringstream moonshot_input;
+  std::ostringstream moonshot_out;
+  std::ostringstream moonshot_err;
+  const auto moonshot_exit = ava::app::run_connect_provider_credential(
+      paths,
+      ava::app::ConnectProviderCredentialOptions{.provider_id = "moonshot",
+                                                 .credential_type = ava::app::ConnectCredentialType::ApiKey,
+                                                 .env_var = "AVA_TEST_MOONSHOT_KEY"},
+      moonshot_input, moonshot_out, moonshot_err);
+  expect(moonshot_exit == 0 && moonshot_err.str().empty(),
+         "headless provider connect stores Moonshot API key from environment");
+  auto moonshot = ava::config::provider_credential_for_request(paths, "moonshot", transport);
+  expect(moonshot && moonshot->has_value() && (*moonshot)->access_token == "moonshot-api-key" &&
+             (*moonshot)->credential_type == "api_key",
+         "headless provider connect writes loadable Moonshot API key auth");
+  anthropic = ava::config::provider_credential_for_request(paths, "anthropic", transport);
+  expect(anthropic && anthropic->has_value() && (*anthropic)->access_token == "anthropic-oauth-token",
+         "headless provider connect preserves existing provider credentials when adding another provider");
+
+  std::istringstream invalid_env_input;
+  std::ostringstream invalid_env_out;
+  std::ostringstream invalid_env_err;
+  const auto invalid_env_exit = ava::app::run_connect_provider_credential(
+      paths,
+      ava::app::ConnectProviderCredentialOptions{.provider_id = "anthropic",
+                                                 .credential_type = ava::app::ConnectCredentialType::ApiKey,
+                                                 .env_var = "sk-should-not-be-echoed"},
+      invalid_env_input, invalid_env_out, invalid_env_err);
+  expect(invalid_env_exit == 1 && invalid_env_out.str().empty() &&
+             invalid_env_err.str().find("credential env var name is invalid") != std::string::npos &&
+             invalid_env_err.str().find("sk-should-not-be-echoed") == std::string::npos,
+         "headless provider connect rejects invalid env names without echoing secrets");
+
+  std::istringstream missing_env_input;
+  std::ostringstream missing_env_out;
+  std::ostringstream missing_env_err;
+  const auto missing_env_exit = ava::app::run_connect_provider_credential(
+      paths,
+      ava::app::ConnectProviderCredentialOptions{.provider_id = "anthropic",
+                                                 .credential_type = ava::app::ConnectCredentialType::ApiKey,
+                                                 .env_var = "SKSHOULDNOTBEECHOED"},
+      missing_env_input, missing_env_out, missing_env_err);
+  expect(missing_env_exit == 1 && missing_env_out.str().empty() &&
+             missing_env_err.str().find("credential env var is not set") != std::string::npos &&
+             missing_env_err.str().find("SKSHOULDNOTBEECHOED") == std::string::npos,
+         "headless provider connect omits env var names from missing-env errors");
+
+  std::istringstream empty_stdin_input("\r\n");
+  std::ostringstream empty_stdin_out;
+  std::ostringstream empty_stdin_err;
+  const auto empty_stdin_exit = ava::app::run_connect_provider_credential(
+      paths,
+      ava::app::ConnectProviderCredentialOptions{.provider_id = "anthropic",
+                                                 .credential_type = ava::app::ConnectCredentialType::ApiKey,
+                                                 .env_var = std::nullopt},
+      empty_stdin_input, empty_stdin_out, empty_stdin_err);
+  expect(empty_stdin_exit == 1 && empty_stdin_out.str().empty() &&
+             empty_stdin_err.str().find("credential stdin was empty") != std::string::npos,
+         "headless provider connect rejects empty stdin credentials");
+
+  const auto wizard_root = temp_root() / "app-connect-provider-wizard";
+  std::error_code wizard_remove_error;
+  std::filesystem::remove_all(wizard_root, wizard_remove_error);
+  const auto wizard_paths = app_test_paths(wizard_root);
+  std::istringstream wizard_input("anthropic\napi-key\nwizard-api-key\n");
+  std::ostringstream wizard_out;
+  std::ostringstream wizard_err;
+  const auto wizard_exit = ava::app::run_connect_provider_wizard(
+      wizard_paths,
+      ava::app::ConnectProviderWizardOptions{
+          .provider_id = std::nullopt, .credential_type = std::nullopt, .stdin_is_tty = true},
+      wizard_input, wizard_out, wizard_err);
+  expect(wizard_exit == 0 && wizard_err.str().empty() && wizard_out.str().find("Add credential") != std::string::npos &&
+             wizard_out.str().find("Select provider") != std::string::npos &&
+             wizard_out.str().find("Stored anthropic API key credential") != std::string::npos,
+         "interactive provider wizard opens a searchable provider menu before prompting for method and secret");
+  auto wizard_anthropic = ava::config::provider_credential_for_request(wizard_paths, "anthropic", transport);
+  expect(wizard_anthropic && wizard_anthropic->has_value() && (*wizard_anthropic)->access_token == "wizard-api-key",
+         "interactive provider wizard stores a loadable credential");
+
+  std::istringstream cancelled_wizard_input("\x1b");
+  std::ostringstream cancelled_wizard_out;
+  std::ostringstream cancelled_wizard_err;
+  const auto cancelled_wizard_exit = ava::app::run_connect_provider_wizard(
+      wizard_paths,
+      ava::app::ConnectProviderWizardOptions{
+          .provider_id = std::nullopt, .credential_type = std::nullopt, .stdin_is_tty = true},
+      cancelled_wizard_input, cancelled_wizard_out, cancelled_wizard_err);
+  expect(cancelled_wizard_exit == 1 && cancelled_wizard_err.str().find("provider login cancelled") != std::string::npos,
+         "interactive provider wizard cancels on standalone escape without waiting for more input");
+
+  std::istringstream non_tty_wizard_input;
+  std::ostringstream non_tty_wizard_out;
+  std::ostringstream non_tty_wizard_err;
+  const auto non_tty_wizard_exit = ava::app::run_connect_provider_wizard(
+      wizard_paths,
+      ava::app::ConnectProviderWizardOptions{.provider_id = "anthropic",
+                                             .credential_type = ava::app::ConnectCredentialType::ApiKey,
+                                             .stdin_is_tty = false},
+      non_tty_wizard_input, non_tty_wizard_out, non_tty_wizard_err);
+  expect(non_tty_wizard_exit == 2 && non_tty_wizard_out.str().empty() &&
+             non_tty_wizard_err.str().find("interactive provider login requires a terminal") != std::string::npos,
+         "interactive provider wizard refuses to prompt without a tty");
+}
+
 void test_app_print_json_mode_outputs_runtime_events() {
   const auto root = temp_root() / "app-print-json";
   std::error_code remove_error;
@@ -1155,6 +1303,7 @@ void test_app_command_dispatcher() {
          "command dispatcher /hotkeys reports effective keybind metadata");
   auto help = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/help", .hotkeys = custom_hotkeys});
   expect(help && help->handled && !help->output.empty() && help->output[0].find("/hotkeys") != std::string::npos &&
+             help->output[0].find("/connect") != std::string::npos &&
              help->output[0].find("Unavailable commands") != std::string::npos &&
              help->output[0].find("Ctrl+M") != std::string::npos,
          "command dispatcher /help includes catalog commands and effective hotkeys");
@@ -1178,6 +1327,62 @@ void test_app_command_dispatcher() {
              session->system_prompt.find("Implement changes directly") != std::string::npos &&
              session->system_prompt.find("dispatcher context") != std::string::npos,
          "command dispatcher /mode rebuilds the mode-specific system prompt with context");
+
+  bool saw_secret_prompt = false;
+  auto connect = ava::app::run_command(
+      *session, ava::app::CommandRequest{.command = "/login moonshot oauth",
+                                         .question_resolver = [&](const ava::agent::QuestionPrompt& prompt) {
+                                           saw_secret_prompt = prompt.modal && prompt.secret && prompt.allow_custom &&
+                                                               prompt.question.find("moonshot") != std::string::npos;
+                                           return ava::agent::QuestionAnswer{.selected_options = {},
+                                                                             .custom_text = "slash-oauth-token"};
+                                         }});
+  expect(connect && connect->handled && saw_secret_prompt && !connect->output.empty() &&
+             connect->output[0].find("Stored moonshot OAuth bearer token credential") != std::string::npos,
+         "command dispatcher /login alias stores provider OAuth bearer credentials via masked prompt");
+  ava::tests::FakeTransport credential_transport({});
+  auto slash_moonshot = ava::config::provider_credential_for_request(session->paths, "moonshot", credential_transport);
+  expect(slash_moonshot && slash_moonshot->has_value() && (*slash_moonshot)->access_token == "slash-oauth-token" &&
+             (*slash_moonshot)->credential_type == "oauth",
+         "slash provider connect writes loadable provider credential");
+
+  std::size_t connect_prompt_count = 0;
+  auto connect_modal = ava::app::run_command(
+      *session,
+      ava::app::CommandRequest{
+          .command = "/connect", .question_resolver = [&](const ava::agent::QuestionPrompt& prompt) {
+            if (connect_prompt_count == 0) {
+              expect(prompt.modal && prompt.searchable && prompt.allow_custom && prompt.question == "Select provider",
+                     "slash /connect opens provider selection as searchable modal");
+              ++connect_prompt_count;
+              return ava::agent::QuestionAnswer{.selected_options = {"anthropic"}, .custom_text = ""};
+            }
+            if (connect_prompt_count == 1) {
+              expect(prompt.modal && !prompt.searchable && !prompt.secret,
+                     "slash /connect opens credential type as modal");
+              ++connect_prompt_count;
+              return ava::agent::QuestionAnswer{.selected_options = {"api_key"}, .custom_text = ""};
+            }
+            expect(connect_prompt_count == 2 && prompt.modal && prompt.secret &&
+                       prompt.question.find("anthropic") != std::string::npos,
+                   "slash /connect opens secret prompt as masked modal");
+            ++connect_prompt_count;
+            return ava::agent::QuestionAnswer{.selected_options = {}, .custom_text = "slash-api-key"};
+          }});
+  expect(connect_modal && connect_modal->handled && connect_prompt_count == 3 && !connect_modal->output.empty() &&
+             connect_modal->output[0].find("Stored anthropic API key credential") != std::string::npos,
+         "command dispatcher /connect walks provider, method, and secret modals");
+  auto slash_anthropic =
+      ava::config::provider_credential_for_request(session->paths, "anthropic", credential_transport);
+  expect(slash_anthropic && slash_anthropic->has_value() && (*slash_anthropic)->access_token == "slash-api-key" &&
+             (*slash_anthropic)->credential_type == "api_key",
+         "slash provider connect modal writes loadable API key credential");
+
+  auto connect_without_tui = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/connect anthropic"});
+  expect(connect_without_tui && connect_without_tui->handled && !connect_without_tui->output.empty() &&
+             connect_without_tui->output[0].find("--oauth-token-stdin") != std::string::npos &&
+             connect_without_tui->output[0].find("--oauth-token-env") != std::string::npos,
+         "command dispatcher /connect no-TUI error lists OAuth headless setup flags");
 
   auto glob = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/glob **/*.cpp"});
   expect(glob && glob->handled && !glob->output.empty() && glob->output[0].find("src/main.cpp") != std::string::npos,
@@ -1271,6 +1476,24 @@ void test_app_command_dispatcher() {
              exported->output[0].find("# AVA Session Export") != std::string::npos &&
              exported->output[0].find("## Compaction") != std::string::npos,
          "command dispatcher /export returns markdown for loaded session entries");
+
+  auto seeded_stats_usage = session->store.append(
+      ava::session::SessionEntry{.id = "entry_slash_stats_usage",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-05-02T00:00:00Z",
+                                 .data_json = "{\"text\":\"usage\",\"usage\":{\"input_tokens\":12,\"output_tokens\":7,"
+                                              "\"total_tokens\":19,\"cost_usd\":0.0015}}"});
+  expect(seeded_stats_usage.has_value(), "command dispatcher /stats test seeds usage metadata");
+  auto stats = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/stats"});
+  expect(stats && stats->handled && !stats->output.empty() &&
+             stats->output[0].find("Session stats") != std::string::npos &&
+             stats->output[0].find("tokens: input=12 output=7 total=19") != std::string::npos &&
+             stats->output[0].find("cost: $0.001500") != std::string::npos &&
+             stats->output[0].find("compactions ") != std::string::npos &&
+             stats->output[0].find("path:") == std::string::npos &&
+             stats->output[0].find("export: /export   resume: ava --session ") != std::string::npos,
+         "command dispatcher /stats renders compact session counts, usage, cost, and hints");
 
   auto quit = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/quit"});
   expect(quit && quit->handled && quit->quit, "command dispatcher /quit requests shell exit");
@@ -2298,11 +2521,10 @@ void test_app_runtime_model_switch_persists_and_reopens() {
   bool saw_model_change = false;
   if (entries) {
     for (const auto& entry : *entries) {
-      saw_model_change = saw_model_change || (entry.type == ava::session::EntryType::ModelChange &&
-                                              entry.data_json.find("\"previous_provider\":\"openai\"") !=
-                                                  std::string::npos &&
-                                              entry.data_json.find("\"provider\":\"anthropic\"") !=
-                                                  std::string::npos);
+      saw_model_change =
+          saw_model_change || (entry.type == ava::session::EntryType::ModelChange &&
+                               entry.data_json.find("\"previous_provider\":\"openai\"") != std::string::npos &&
+                               entry.data_json.find("\"provider\":\"anthropic\"") != std::string::npos);
     }
   }
   expect(saw_model_change, "runtime model switch appends model_change entry");
@@ -2313,14 +2535,14 @@ void test_app_runtime_model_switch_persists_and_reopens() {
   auto reopened = ava::app::open_runtime_session(reopen_options);
   expect(reopened.has_value(), "runtime model switch reopens persisted session");
   expect(reopened && reopened->model.provider_id == "anthropic" && reopened->model.model_id == "claude-test",
-          "runtime reopen restores latest persisted model_change");
+         "runtime reopen restores latest persisted model_change");
   if (reopened) {
     const ava::provider::OpenAIProvider provider("https://api.example.test");
     ava::tests::FakeTransport transport({});
     std::istringstream in("{\"id\":\"list\",\"type\":\"list_models\"}\n");
     std::ostringstream out;
-    auto result = ava::app::run_rpc_loop(*reopened, reopen_options, provider, transport, ava::app::RuntimeRunOptions{}, in,
-                                         out);
+    auto result =
+        ava::app::run_rpc_loop(*reopened, reopen_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
     const auto jsonl = out.str();
     const auto restored_position = jsonl.find("\"model\":\"claude-test\"");
     expect(result.has_value() && restored_position != std::string::npos,
@@ -2357,12 +2579,11 @@ void test_app_rpc_model_commands() {
       "{\"id\":\"stats\",\"type\":\"get_session_stats\"}\n"
       "{\"id\":\"cycle\",\"type\":\"cycle_model\"}\n");
   std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in,
-                                       out);
+  auto result =
+      ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
   const auto jsonl = out.str();
   expect(result.has_value(), "RPC model command loop completes successfully");
-  expect(jsonl.find("\"id\":\"list\"") != std::string::npos &&
-             jsonl.find("\"models\"") != std::string::npos &&
+  expect(jsonl.find("\"id\":\"list\"") != std::string::npos && jsonl.find("\"models\"") != std::string::npos &&
              jsonl.find("claude-sonnet-4-5") != std::string::npos,
          "RPC list_models returns configured model catalog");
   expect(jsonl.find("\"id\":\"set\"") != std::string::npos &&
@@ -2372,12 +2593,11 @@ void test_app_rpc_model_commands() {
   expect(jsonl.find("\"id\":\"state\"") != std::string::npos &&
              jsonl.find("\"model\":\"claude-sonnet-4-5\"") != std::string::npos,
          "RPC get_state reflects selected model after set_model");
-  expect(jsonl.find("\"id\":\"stats\"") != std::string::npos &&
-             jsonl.find("\"model_change\":1") != std::string::npos,
+  expect(jsonl.find("\"id\":\"stats\"") != std::string::npos && jsonl.find("\"model_change\":1") != std::string::npos,
          "RPC get_session_stats reports model_change count");
-  expect(jsonl.find("\"id\":\"cycle\"") != std::string::npos &&
-             jsonl.find("\"provider\":\"openai\"") != std::string::npos,
-         "RPC cycle_model advances to the next configured provider model");
+  expect(
+      jsonl.find("\"id\":\"cycle\"") != std::string::npos && jsonl.find("\"provider\":\"openai\"") != std::string::npos,
+      "RPC cycle_model advances to the next configured provider model");
   expect(session->model.provider_id == "openai", "RPC cycle_model updates active session model");
 }
 
@@ -3400,6 +3620,7 @@ void run_app_runtime_tests() {
   test_app_print_text_mode_reports_stdout_write_failure();
   test_app_print_mode_uses_headless_permission_policy();
   test_app_print_mode_refreshes_expired_oauth_before_provider_request();
+  test_app_connect_provider_credentials_headlessly();
   test_app_print_json_mode_outputs_runtime_events();
   test_app_print_json_mode_streams_provider_deltas_before_final_message();
   test_app_command_dispatcher();

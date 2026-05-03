@@ -144,14 +144,15 @@ CursesInput unknown_input() { return key_input(Key::Unknown); }
 
 std::size_t transcript_height_for_snapshot(const ComposerSnapshot& snapshot, std::size_t width, std::size_t height) {
   const auto normal_composer_lines = detail::composer_block_line_count(snapshot, height);
-  const auto prompt_active = snapshot.permission_prompt.has_value() || snapshot.question_prompt.has_value();
+  const auto modal_question = snapshot.question_prompt && snapshot.question_prompt->modal;
+  const auto prompt_active = snapshot.permission_prompt.has_value() || (snapshot.question_prompt && !modal_question);
   const auto fixed_lines = prompt_active ? std::size_t{0} : normal_composer_lines;
   const auto max_prompt_lines = height > fixed_lines ? height - fixed_lines : 0;
   const auto prompt_line_budget = prompt_active ? std::min<std::size_t>({7, max_prompt_lines}) : 0;
   const auto permission_lines = snapshot.permission_prompt ? detail::render_permission_prompt(
                                                                  *snapshot.permission_prompt, width, prompt_line_budget)
                                                            : std::vector<std::string>{};
-  const auto question_lines = snapshot.question_prompt
+  const auto question_lines = snapshot.question_prompt && !modal_question
                                   ? detail::render_question_prompt(*snapshot.question_prompt, width, prompt_line_budget)
                                   : std::vector<std::string>{};
   const auto fixed_and_prompt_lines = fixed_lines + permission_lines.size() + question_lines.size();
@@ -427,6 +428,9 @@ QuestionPromptView question_prompt_view(const ava::agent::QuestionPrompt& prompt
   view.question = prompt.question;
   view.multiple = prompt.multiple;
   view.allow_custom = prompt.allow_custom;
+  view.secret = prompt.secret;
+  view.modal = prompt.modal;
+  view.searchable = prompt.searchable;
   view.options.reserve(prompt.options.size());
   for (const auto& option : prompt.options) {
     view.options.push_back(QuestionPromptOptionView{.value = option.value, .label = option.label, .selected = false});
@@ -440,7 +444,7 @@ ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_view(const Qu
     if (option.selected) answer.selected_options.push_back(option.value);
   }
 
-  if (prompt.allow_custom && !prompt.custom_text.empty()) {
+  if (prompt.allow_custom && !prompt.custom_text.empty() && (!prompt.searchable || answer.selected_options.empty())) {
     answer.custom_text = prompt.custom_text;
   }
 
@@ -486,6 +490,10 @@ int run_interactive_composer(TuiRuntimeOptions options) {
                           .workspace = options.workspace,
                           .git_branch = options.git_branch,
                           .version = options.app_version};
+  auto refresh_token_status = [&]() {
+    snapshot.token_status = options.token_status_provider ? options.token_status_provider() : std::nullopt;
+  };
+  refresh_token_status();
 
   bool terminal_write_failed = false;
   std::vector<std::string> input_history;
@@ -875,30 +883,6 @@ int run_interactive_composer(TuiRuntimeOptions options) {
     transcript_scroll_offset = amount >= clamped_scroll ? 0 : clamped_scroll - amount;
   };
 
-  auto scroll_draft_up = [&](std::size_t amount) {
-    pending_escape_clear = false;
-    const auto [_, height] = terminal_size();
-    const auto max_scroll = max_draft_scroll_offset(height);
-    const auto clamped_scroll = std::min(draft_scroll_offset, max_scroll);
-    draft_scroll_offset = std::min(max_scroll, clamped_scroll + amount);
-  };
-
-  auto scroll_draft_down = [&](std::size_t amount) {
-    pending_escape_clear = false;
-    const auto [_, height] = terminal_size();
-    const auto max_scroll = max_draft_scroll_offset(height);
-    const auto clamped_scroll = std::min(draft_scroll_offset, max_scroll);
-    draft_scroll_offset = amount >= clamped_scroll ? 0 : clamped_scroll - amount;
-  };
-
-  auto mouse_is_over_composer = [&](const InputEvent& mouse_event) {
-    if (mouse_event.mouse_row == 0 || snapshot.permission_prompt || snapshot.question_prompt) return false;
-    const auto [_, height] = terminal_size();
-    const auto composer_lines = detail::composer_block_line_count(snapshot, height);
-    const auto composer_start_row = height > composer_lines ? height - composer_lines + 1 : std::size_t{1};
-    return mouse_event.mouse_row >= composer_start_row;
-  };
-
   enum class InputLoopAction { None, ContinueLoop, BreakLoop };
   auto handle_submit = [&]() -> InputLoopAction {
     pending_escape_clear = false;
@@ -1117,19 +1101,11 @@ int run_interactive_composer(TuiRuntimeOptions options) {
             return render();
           }
           if (active_event.key == Key::MouseWheelUp) {
-            if (mouse_is_over_composer(active_event)) {
-              scroll_draft_up(3);
-            } else {
-              scroll_up(3);
-            }
+            scroll_up(3);
             return render();
           }
           if (active_event.key == Key::MouseWheelDown) {
-            if (mouse_is_over_composer(active_event)) {
-              scroll_draft_down(3);
-            } else {
-              scroll_down(3);
-            }
+            scroll_down(3);
             return render();
           }
           return true;
@@ -1207,6 +1183,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
                                                                                                    : "done")
                                         : (result.output.empty() ? "ok" : "done");
       snapshot.processing = false;
+      refresh_token_status();
       if (!render()) {
         terminal_write_failed = true;
         return InputLoopAction::BreakLoop;
@@ -1351,17 +1328,9 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       const auto [_, height] = terminal_size();
       scroll_down(std::max<std::size_t>(1, height / 2));
     } else if (event.key == Key::MouseWheelUp) {
-      if (mouse_is_over_composer(event)) {
-        scroll_draft_up(3);
-      } else {
-        scroll_up(3);
-      }
+      scroll_up(3);
     } else if (event.key == Key::MouseWheelDown) {
-      if (mouse_is_over_composer(event)) {
-        scroll_draft_down(3);
-      } else {
-        scroll_down(3);
-      }
+      scroll_down(3);
     } else if (event.key == Key::MouseLeftClick) {
       pending_escape_clear = false;
       if (const auto clicked = slash_palette_selection_for_screen_row(snapshot, event.mouse_row)) {

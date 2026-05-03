@@ -117,13 +117,12 @@ Current TUI strengths:
 
 Current 1.0 gaps:
 
-- The TUI still uses blocking runtime glue and replayed callback results; it does not fully consume the shared backend event stream.
-- Assistant text and tool results are not live in the interactive TUI even though headless event foundations exist.
-- Session stats, usage/cost, context pressure, loaded context files, and compaction state are not visible enough for long sessions.
-- Slash commands are metadata-rich, but commands that need backend state such as model/session/import/reload/login flows remain disabled or shallow until backend APIs exist.
+- The TUI now has a live `RuntimeEvent` queue/reducer path for assistant text, tool lifecycle updates, and the sidebar shell, but it does not yet fully consume the shared `EventEnvelope` stream used by headless/RPC clients.
+- Permission/question audit events, thinking/reasoning updates, compaction/retry markers, and richer terminal outcomes are not yet rendered through the event-state transcript model.
+- Session stats and compact token usage have initial visibility through `/stats` and the composer status slot, but context pressure and compaction state still need richer long-session UI.
+- Slash commands are metadata-rich, and provider login now routes through backend auth. Model/session/import/reload flows still remain disabled or shallow until the corresponding backend APIs exist.
 - Slash autocomplete is still mostly command-name based; it does not yet complete command arguments, model names, file/path references, or context/prompt sources.
-- The composer has core editor affordances, but visible queued follow-up/steering state is still missing.
-- Mouse-wheel scrolling inside tall composer drafts is still pending. The render state can represent draft offsets, but runtime wheel behavior needs a follow-up fix before this is considered complete.
+- The composer has core editor affordances and tall-draft visibility indicators; mouse wheel input is reserved for transcript scrolling so chat scrollback stays predictable.
 - Terminal/input hardening is incomplete for v1-level daily use: broader escape-sequence buffering, IME-sensitive cursor placement, Unicode width edge cases, and resize stress need explicit coverage.
 - Tool cards are summaries only; there is no detail toggle, diff preview, spill-file affordance, or streaming progress view.
 - Thinking/reasoning UI is not specified enough yet: `Ctrl+T` exists as an inert semantic action, but provider-specific variants and thinking blocks must come from backend capability/event data.
@@ -195,13 +194,13 @@ Acceptance criteria:
 - Slash palette entries are grouped or clearly labeled by category where useful.
 - The help/hotkeys command lists real semantic actions, including `Ctrl+T` thinking-mode rotation, rather than stale hardcoded prose.
 - Commands with missing backend support are not executable without a clear disabled-state explanation.
-- Composer editing tests cover word movement/deletion, line start/end, undo/yank if implemented, bracketed paste, tall draft scrolling, and autocomplete cancellation.
+- Composer editing tests cover word movement/deletion, line start/end, undo/yank if implemented, bracketed paste, tall draft visibility, and autocomplete cancellation.
 - Argument/file autocomplete breadth may remain disabled in Phase 1 if backend metadata or ignored-path-aware search semantics are not available.
 - Static render/input tests cover top-start transcript layout, scroll indicators, composer processing status, tool cards, question prompt selection, multi-select toggling, custom answer entry, cancel, narrow widths, and UTF-8 labels.
 
-Status: complete. Phase 1 shipped the interaction-contract foundation in the TUI and was locally validated and reviewed. Follow-up polish also removed composer footer status chatter, made the processing indicator spinner-only, integrated and simplified the slash palette, fixed transcript scroll affordances, added Ctrl-C clear-before-exit behavior, and replaced plain TUI startup/exit text with a user-friendly exit card.
+Status: complete. Phase 1 shipped the interaction-contract foundation in the TUI and was locally validated and reviewed. Follow-up polish also removed composer footer status chatter, made the processing indicator spinner-only, integrated and simplified the slash palette, kept mouse-wheel input focused on transcript scrollback, added Ctrl-C clear-before-exit behavior, and replaced plain TUI startup/exit text with a user-friendly exit card.
 
-Completed implementation notes (2026-05-01): AVA now has interactive permission and question prompts, including multi-select and custom answers; metadata-rich slash commands with aliases, disabled explanations, `/help`, and `/hotkeys`; semantic configurable keybinds loaded from `keybinds.json`; a TUI-local composer draft editor for UTF-8-safe insertion/deletion, word movement/deletion, current-line movement/deletion, undo (`Ctrl+Z`), and yank (`Ctrl+Y`); bracketed paste handling; autocomplete dismissal without clearing input; and a reserved token/status slot plus spinner-only processing indicator. Mouse-wheel scrolling for tall composer drafts remains pending. Persistent history, argument/file autocomplete, live event consumption, tool expansion/diffs, provider model controls, and broader terminal hardening remain later-phase work.
+Completed implementation notes (2026-05-01): AVA now has interactive permission and question prompts, including multi-select and custom answers; metadata-rich slash commands with aliases, disabled explanations, `/help`, and `/hotkeys`; semantic configurable keybinds loaded from `keybinds.json`; a TUI-local composer draft editor for UTF-8-safe insertion/deletion, word movement/deletion, current-line movement/deletion, undo (`Ctrl+Z`), and yank (`Ctrl+Y`); bracketed paste handling; autocomplete dismissal without clearing input; tall-draft visibility indicators; mouse-wheel transcript scrolling; and a reserved token/status slot plus spinner-only processing indicator. Persistent history, argument/file autocomplete, tool expansion/diffs, provider model controls, and broader terminal hardening remain later-phase work.
 
 ### Phase 2: Evented TUI Runtime
 
@@ -259,6 +258,8 @@ Thinking block invariants:
 - It may be collapsed or expanded when long, but it must never render as bottom composer text, generic status text, or a detached footer line.
 - `/thinking` or an equivalent command controls display visibility only. It does not enable provider reasoning; provider/model capability state owns that.
 - `Ctrl+T` cycling is a provider/model control and may be inert until backend-declared reasoning variants exist.
+
+Status: in progress. The TUI has a pure `RuntimeEvent` to TUI-state reducer and drains live assistant/tool updates from the worker thread into the ncurses main loop. Remaining Phase 2 work is shared `EventEnvelope` consumption/correlation, prompt audit events, thinking placement, compaction/retry/cancellation terminal events, and broader replay/parity tests.
 
 ### Phase 3: Long-Session Visibility
 
@@ -376,7 +377,7 @@ Scope:
 - Show capability-relevant metadata without clutter: context window, tool support, streaming support, reasoning support, cost when known, and provider auth state.
 - Support mid-session model switches through backend-owned commands and session entries.
 - Add thinking/reasoning visibility controls only after backend emits thinking/reasoning lifecycle events. Follow the Phase 2 thinking block invariants: display visibility is separate from provider reasoning capability, and thinking content belongs with the active assistant turn.
-- Keep provider login/setup UI minimal. TUI may route to existing backend auth flows but should not own provider credential semantics.
+- Keep provider login/setup UI minimal. The existing `/connect` modal routes to backend auth flows; the TUI must not own provider credential semantics.
 
 Acceptance criteria:
 

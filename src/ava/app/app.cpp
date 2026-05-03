@@ -18,6 +18,7 @@
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/config/xdg_paths.h"
+#include "ava/tui/composer.h"
 
 namespace {
 
@@ -28,7 +29,12 @@ void print_help() {
   std::cout << "AVA " << kAvaDisplayVersion << "\n\n";
   std::cout << "Usage:\n";
   std::cout << "  ava [--help]\n";
+  std::cout << "  ava login [provider] [--api-key|--oauth-token]\n";
+  std::cout << "  ava auth login [provider] [--api-key|--oauth-token]\n";
+  std::cout << "  ava connect [provider] [--api-key|--oauth-token]\n";
   std::cout << "  ava connect openai\n";
+  std::cout << "  ava connect <provider> --api-key-stdin|--api-key-env <env>\n";
+  std::cout << "  ava connect <provider> --oauth-token-stdin|--oauth-token-env <env>\n";
   std::cout << "  ava --version\n";
   std::cout << "  ava --mode build|plan\n";
   std::cout << "  ava --session <id>\n";
@@ -98,23 +104,113 @@ int run(int argc, char** argv) {
 
   const auto paths = ava::config::xdg_paths();
 
+  auto parse_connect_like_command = [&](int& index,
+                                        std::optional<std::string> provider,
+                                        bool preserve_openai_browser_default) -> int {
+    enum class CredentialSource {
+      None,
+      Stdin,
+      Env,
+      Prompt,
+    };
+    CredentialSource source = CredentialSource::None;
+    std::optional<ava::app::ConnectCredentialType> credential_type;
+    std::optional<std::string> env_var;
+
+    auto set_source = [&](CredentialSource next_source, ava::app::ConnectCredentialType next_type) -> bool {
+      if (source != CredentialSource::None) {
+        std::cerr << "connect accepts only one credential source\n";
+        return false;
+      }
+      source = next_source;
+      credential_type = next_type;
+      return true;
+    };
+
+    while (index + 1 < argc) {
+      const std::string_view option(argv[++index]);
+      if (option == "--api-key") {
+        if (!set_source(CredentialSource::Prompt, ava::app::ConnectCredentialType::ApiKey)) return 2;
+        continue;
+      }
+      if (option == "--oauth-token") {
+        if (!set_source(CredentialSource::Prompt, ava::app::ConnectCredentialType::OAuthToken)) return 2;
+        continue;
+      }
+      if (option == "--api-key-stdin") {
+        if (!set_source(CredentialSource::Stdin, ava::app::ConnectCredentialType::ApiKey)) return 2;
+        continue;
+      }
+      if (option == "--oauth-token-stdin") {
+        if (!set_source(CredentialSource::Stdin, ava::app::ConnectCredentialType::OAuthToken)) return 2;
+        continue;
+      }
+      if (option == "--api-key-env" || option == "--oauth-token-env") {
+        if (!set_source(option == "--oauth-token-env" ? CredentialSource::Env : CredentialSource::Env,
+                        option == "--oauth-token-env" ? ava::app::ConnectCredentialType::OAuthToken
+                                                       : ava::app::ConnectCredentialType::ApiKey)) {
+          return 2;
+        }
+        if (index + 1 >= argc) {
+          std::cerr << ava::tui::sanitize_terminal_text(std::string(option))
+                    << " requires an environment variable name\n";
+          return 2;
+        }
+        env_var = std::string(argv[++index]);
+        continue;
+      }
+      std::cerr << "unknown connect option\n";
+      return 2;
+    }
+
+    if (source == CredentialSource::Stdin || source == CredentialSource::Env) {
+      if (!provider) {
+        std::cerr << "connect requires a provider with headless credential sources\n";
+        return 2;
+      }
+      return run_connect_provider_credential(
+          paths,
+          ava::app::ConnectProviderCredentialOptions{.provider_id = *provider,
+                                                     .credential_type = credential_type.value(),
+                                                     .env_var = env_var},
+          std::cin, std::cout, std::cerr);
+    }
+
+    if (source == CredentialSource::Prompt) {
+      return run_connect_provider_wizard(
+          paths,
+          ava::app::ConnectProviderWizardOptions{.provider_id = provider,
+                                                 .credential_type = credential_type,
+                                                 .stdin_is_tty = stdin_is_tty()},
+          std::cin, std::cout, std::cerr);
+    }
+
+    if (preserve_openai_browser_default && provider && *provider == "openai") return run_connect_openai(paths);
+    return run_connect_provider_wizard(
+        paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .stdin_is_tty = stdin_is_tty()}, std::cin,
+        std::cout, std::cerr);
+  };
+
   for (int index = 1; index < argc; ++index) {
     const std::string_view arg(argv[index]);
     if (arg == "connect") {
-      if (index + 1 >= argc) {
-        std::cerr << "connect requires a provider: openai\n";
+      std::optional<std::string> provider;
+      if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--")) provider = argv[++index];
+      return parse_connect_like_command(index, provider, true);
+    }
+    if (arg == "login") {
+      std::optional<std::string> provider;
+      if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--")) provider = argv[++index];
+      return parse_connect_like_command(index, provider, false);
+    }
+    if (arg == "auth") {
+      if (index + 1 >= argc || std::string_view(argv[++index]) != "login") {
+        std::cerr << "auth requires login\n";
         return 2;
       }
-      const std::string_view provider(argv[++index]);
-      if (provider != "openai") {
-        std::cerr << "unsupported connect provider: " << provider << '\n';
-        return 2;
-      }
-      if (index + 1 != argc) {
-        std::cerr << "connect openai does not accept extra arguments\n";
-        return 2;
-      }
-      return run_connect_openai(paths);
+      std::optional<std::string> provider;
+      if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--")) provider = argv[++index];
+      return parse_connect_like_command(index, provider, false);
     }
     if (arg == "--help" || arg == "-h") {
       print_help();

@@ -129,6 +129,13 @@ std::optional<bool> bool_field(std::string_view object, std::initializer_list<st
   return std::nullopt;
 }
 
+bool has_any_field(std::string_view object, std::initializer_list<std::string_view> keys) {
+  for (const auto key : keys) {
+    if (ava::core::json::field_value_start(object, key)) return true;
+  }
+  return false;
+}
+
 std::vector<std::string> string_array_field(std::string_view object, std::initializer_list<std::string_view> keys) {
   for (const auto key : keys) {
     const auto start = ava::core::json::field_value_start(object, key);
@@ -158,8 +165,8 @@ std::vector<std::string> string_array_field(std::string_view object, std::initia
           if (collecting) current.clear();
         } else {
           if (collecting) {
-          values.push_back(std::move(current));
-          current.clear();
+            values.push_back(std::move(current));
+            current.clear();
           }
           in_string = false;
           collecting = false;
@@ -215,55 +222,55 @@ ModelRegistry builtin_model_registry() {
   return ModelRegistry{
       .default_provider_id = "openai",
       .default_model_id = "gpt-5.5",
-       .models = {ModelInfo{.provider_id = "openai",
-                             .model_id = "gpt-5.5",
-                             .display_name = "GPT-5.5",
-                             .family = "gpt-5",
-                             .context_window_tokens = std::nullopt,
-                             .max_output_tokens = std::nullopt,
-                             .pricing = std::nullopt,
-                             .api_family = "openai_responses",
-                            .input_modalities = {"text"},
-                            .supports_tools = true,
-                            .supports_streaming = true,
-                            .supports_reasoning = true,
-                             .reports_usage = true,
-                             .reasoning_levels = {"low", "medium", "high"},
-                             .compatibility_quirks = {}},
-                  ModelInfo{.provider_id = "openai",
-                             .model_id = "gpt-4.1-mini",
-                             .display_name = "GPT-4.1 mini",
-                             .family = "gpt-4.1",
-                             .context_window_tokens = 1'048'576,
-                             .max_output_tokens = 32'768,
-                             .pricing = ModelPricing{.input_per_million = 0.40L,
-                                                     .output_per_million = 1.60L,
-                                                     .cache_read_per_million = 0.10L,
-                                                     .cache_write_per_million = std::nullopt,
-                                                     .reasoning_per_million = std::nullopt},
-                             .api_family = "openai_responses",
-                            .input_modalities = {"text"},
-                            .supports_tools = true,
-                            .supports_streaming = true,
-                            .supports_reasoning = false,
-                              .reports_usage = true,
-                              .reasoning_levels = {},
-                              .compatibility_quirks = {}},
-                  ModelInfo{.provider_id = "anthropic",
-                            .model_id = "claude-sonnet-4-5",
-                            .display_name = "Claude Sonnet 4.5",
-                            .family = "claude-sonnet",
-                            .context_window_tokens = 200'000,
-                            .max_output_tokens = 64'000,
-                            .pricing = std::nullopt,
-                            .api_family = "anthropic_messages",
-                            .input_modalities = {"text"},
-                            .supports_tools = true,
-                            .supports_streaming = true,
-                            .supports_reasoning = false,
-                            .reports_usage = true,
-                            .reasoning_levels = {},
-                            .compatibility_quirks = {"anthropic_messages"}}},
+      .models = {ModelInfo{.provider_id = "openai",
+                           .model_id = "gpt-5.5",
+                           .display_name = "GPT-5.5",
+                           .family = "gpt-5",
+                           .context_window_tokens = 200'000,
+                           .max_output_tokens = std::nullopt,
+                           .pricing = std::nullopt,
+                           .api_family = "openai_responses",
+                           .input_modalities = {"text"},
+                           .supports_tools = true,
+                           .supports_streaming = true,
+                           .supports_reasoning = true,
+                           .reports_usage = true,
+                           .reasoning_levels = {"low", "medium", "high"},
+                           .compatibility_quirks = {}},
+                 ModelInfo{.provider_id = "openai",
+                           .model_id = "gpt-4.1-mini",
+                           .display_name = "GPT-4.1 mini",
+                           .family = "gpt-4.1",
+                           .context_window_tokens = 1'048'576,
+                           .max_output_tokens = 32'768,
+                           .pricing = ModelPricing{.input_per_million = 0.40L,
+                                                   .output_per_million = 1.60L,
+                                                   .cache_read_per_million = 0.10L,
+                                                   .cache_write_per_million = std::nullopt,
+                                                   .reasoning_per_million = std::nullopt},
+                           .api_family = "openai_responses",
+                           .input_modalities = {"text"},
+                           .supports_tools = true,
+                           .supports_streaming = true,
+                           .supports_reasoning = false,
+                           .reports_usage = true,
+                           .reasoning_levels = {},
+                           .compatibility_quirks = {}},
+                 ModelInfo{.provider_id = "anthropic",
+                           .model_id = "claude-sonnet-4-5",
+                           .display_name = "Claude Sonnet 4.5",
+                           .family = "claude-sonnet",
+                           .context_window_tokens = 200'000,
+                           .max_output_tokens = 64'000,
+                           .pricing = std::nullopt,
+                           .api_family = "anthropic_messages",
+                           .input_modalities = {"text"},
+                           .supports_tools = true,
+                           .supports_streaming = true,
+                           .supports_reasoning = false,
+                           .reports_usage = true,
+                           .reasoning_levels = {},
+                           .compatibility_quirks = {"anthropic_messages"}}},
   };
 }
 
@@ -277,22 +284,53 @@ ModelRegistry parse_model_registry(std::string_view content) {
     auto provider = ava::core::json::string_field(item, "provider");
     auto id = ava::core::json::string_field(item, "id");
     if (!provider || !id) continue;
-    registry.models.push_back(
-        ModelInfo{.provider_id = *provider,
-                    .model_id = *id,
-                    .display_name = ava::core::json::string_field(item, "name").value_or(*id),
-                    .family = ava::core::json::string_field(item, "family").value_or(family_from_model_id(*id)),
-                    .context_window_tokens = positive_integer_field(item, {"context_window_tokens", "context_window"}),
-                    .max_output_tokens = positive_integer_field(item, {"max_output_tokens"}),
-                    .pricing = model_pricing_from_item(item),
-                    .api_family = ava::core::json::string_field(item, "api_family").value_or(""),
-                    .input_modalities = string_array_field(item, {"input_modalities", "input"}),
-                    .supports_tools = bool_field(item, {"supports_tools", "tool_support", "tools"}).value_or(true),
-                    .supports_streaming = bool_field(item, {"supports_streaming", "streaming"}).value_or(true),
-                   .supports_reasoning = bool_field(item, {"supports_reasoning", "reasoning"}),
-                   .reports_usage = bool_field(item, {"reports_usage", "usage_support", "usage"}),
-                    .reasoning_levels = string_array_field(item, {"reasoning_levels"}),
-                    .compatibility_quirks = string_array_field(item, {"compatibility_quirks", "quirks"})});
+    auto model = find_model(registry, *provider, *id)
+                     .value_or(ModelInfo{.provider_id = *provider,
+                                         .model_id = *id,
+                                         .display_name = *id,
+                                         .family = family_from_model_id(*id),
+                                         .context_window_tokens = std::nullopt,
+                                         .max_output_tokens = std::nullopt,
+                                         .pricing = std::nullopt,
+                                         .api_family = "",
+                                         .input_modalities = {},
+                                         .supports_tools = true,
+                                         .supports_streaming = true,
+                                         .supports_reasoning = std::nullopt,
+                                         .reports_usage = std::nullopt,
+                                         .reasoning_levels = {},
+                                         .compatibility_quirks = {}});
+    model.provider_id = *provider;
+    model.model_id = *id;
+    if (auto name = ava::core::json::string_field(item, "name")) model.display_name = *name;
+    if (auto family = ava::core::json::string_field(item, "family")) model.family = *family;
+    if (auto context_window = positive_integer_field(item, {"context_window_tokens", "context_window"})) {
+      model.context_window_tokens = context_window;
+    }
+    if (auto max_output = positive_integer_field(item, {"max_output_tokens"})) model.max_output_tokens = max_output;
+    if (auto pricing = model_pricing_from_item(item)) model.pricing = pricing;
+    if (auto api_family = ava::core::json::string_field(item, "api_family")) model.api_family = *api_family;
+    if (has_any_field(item, {"input_modalities", "input"})) {
+      model.input_modalities = string_array_field(item, {"input_modalities", "input"});
+    }
+    if (auto supports_tools = bool_field(item, {"supports_tools", "tool_support", "tools"})) {
+      model.supports_tools = supports_tools;
+    }
+    if (auto supports_streaming = bool_field(item, {"supports_streaming", "streaming"})) {
+      model.supports_streaming = supports_streaming;
+    }
+    if (auto supports_reasoning = bool_field(item, {"supports_reasoning", "reasoning"})) {
+      model.supports_reasoning = supports_reasoning;
+    }
+    if (auto reports_usage = bool_field(item, {"reports_usage", "usage_support", "usage"})) {
+      model.reports_usage = reports_usage;
+    }
+    if (has_any_field(item, {"reasoning_levels"}))
+      model.reasoning_levels = string_array_field(item, {"reasoning_levels"});
+    if (has_any_field(item, {"compatibility_quirks", "quirks"})) {
+      model.compatibility_quirks = string_array_field(item, {"compatibility_quirks", "quirks"});
+    }
+    registry.models.push_back(std::move(model));
   }
   return registry;
 }

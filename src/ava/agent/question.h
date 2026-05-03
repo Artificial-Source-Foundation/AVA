@@ -20,6 +20,9 @@ struct QuestionPrompt {
   std::vector<QuestionOption> options;
   bool multiple = false;
   bool allow_custom = false;
+  bool secret = false;
+  bool modal = false;
+  bool searchable = false;
 };
 
 struct QuestionAnswer {

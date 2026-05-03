@@ -13,6 +13,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -304,27 +305,49 @@ void test_tui_composer_rendering_and_input() {
                  lines, [](const std::string& line) { return strip_sgr(line).find("│ world") != std::string::npos; }),
          "tui renders visually separated user and assistant message blocks");
 
-  const auto processing_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
-                                                                                     .provider = "openai",
-                                                                                     .model = "gpt-5.5",
-                                                                                     .session_id = "session_test",
-                                                                                     .input = "",
-                                                                                     .status = "thinking...",
-                                                                                     .processing = true,
-                                                                                     .spinner_frame = 1,
-                                                                                     .token_status = "tokens pending",
-                                                                                     .transcript = {},
-                                                                                     .width = 80,
-                                                                                     .height = 10});
+  const auto processing_lines =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "",
+                                                           .status = "thinking...",
+                                                           .processing = true,
+                                                           .spinner_frame = 1,
+                                                           .token_status = "tokens 1.3k (0.7%)",
+                                                           .transcript = {},
+                                                           .width = 80,
+                                                           .height = 10});
   expect(std::ranges::any_of(processing_lines,
                              [](const std::string& line) {
                                const auto visible = strip_sgr(line);
                                return visible.find("thinking...") == std::string::npos &&
                                       visible.find("working") == std::string::npos &&
                                       visible.find("⠙") != std::string::npos &&
-                                      visible.find("tokens pending") != std::string::npos;
+                                      visible.find("tokens 1.3k (0.7%)") != std::string::npos;
                              }),
          "tui renders a spinner-only processing indicator and token-status slot");
+
+  const auto token_margin_lines =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "",
+                                                           .status = "ready",
+                                                           .token_status = "tokens 1.3k (0.7%)",
+                                                           .transcript = {},
+                                                           .width = 80,
+                                                           .height = 10});
+  expect(std::ranges::any_of(token_margin_lines,
+                             [](const std::string& line) {
+                               const auto visible = strip_sgr(line);
+                               const auto token_text = std::string_view("tokens 1.3k (0.7%)");
+                               const auto token_pos = visible.find(token_text);
+                               return token_pos != std::string::npos &&
+                                      visible.substr(token_pos + token_text.size(), 2) == "  ";
+                             }),
+         "tui leaves right margin after token-status text");
 
   const auto markdown_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -1287,6 +1310,114 @@ void test_tui_composer_rendering_and_input() {
                  [](const std::string& line) { return strip_sgr(line).find("Custom: explain") != std::string::npos; }),
          "tui composer frame replaces composer input with a multi-select question dock while active");
 
+  const auto secret_question_frame = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "question required",
+                                 .transcript = {},
+                                 .question_prompt = ava::tui::QuestionPromptView{.header = "Connect",
+                                                                                 .question = "Paste API key",
+                                                                                 .options = {},
+                                                                                 .multiple = false,
+                                                                                 .allow_custom = true,
+                                                                                 .secret = true,
+                                                                                 .custom_text = "sk-visible-secret"},
+                                 .width = 64,
+                                 .height = 9});
+  expect(std::ranges::none_of(
+             secret_question_frame,
+             [](const std::string& line) { return strip_sgr(line).find("sk-visible-secret") != std::string::npos; }) &&
+             std::ranges::any_of(secret_question_frame,
+                                 [](const std::string& line) {
+                                   return strip_sgr(line).find("Custom: *****************") != std::string::npos;
+                                 }),
+         "tui question dock masks secret custom input");
+
+  const auto modal_question_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "composer stays behind modal",
+      .status = "question required",
+      .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "background transcript"}},
+      .question_prompt = ava::tui::QuestionPromptView{.header = "Connect a provider",
+                                                      .question = "Select provider",
+                                                      .options = {ava::tui::QuestionPromptOptionView{.value = "openai",
+                                                                                                     .label = "OpenAI"},
+                                                                  ava::tui::QuestionPromptOptionView{
+                                                                      .value = "anthropic", .label = "Anthropic"}},
+                                                      .multiple = false,
+                                                      .allow_custom = true,
+                                                      .secret = false,
+                                                      .modal = true,
+                                                      .searchable = true,
+                                                      .selected_option_index = 1,
+                                                      .custom_text = "anth"},
+      .width = 80,
+      .height = 16});
+  expect(modal_question_frame.size() == 16 &&
+             std::ranges::any_of(modal_question_frame,
+                                 [](const std::string& line) {
+                                   return strip_sgr(line).find("Connect a provider") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(
+                 modal_question_frame,
+                 [](const std::string& line) { return strip_sgr(line).find("Search: anth") != std::string::npos; }) &&
+             std::ranges::any_of(
+                 modal_question_frame,
+                 [](const std::string& line) { return strip_sgr(line).find("Anthropic") != std::string::npos; }) &&
+             std::ranges::none_of(
+                 modal_question_frame,
+                 [](const std::string& line) { return strip_sgr(line).find("OpenAI") != std::string::npos; }),
+         "tui renders searchable provider questions as centered filtered modals");
+
+  auto searchable_question = ava::tui::QuestionPromptView{
+      .header = "Connect a provider",
+      .question = "Select provider",
+      .options = {ava::tui::QuestionPromptOptionView{.value = "openai", .label = "OpenAI"},
+                  ava::tui::QuestionPromptOptionView{.value = "anthropic", .label = "Anthropic"}},
+      .multiple = false,
+      .allow_custom = true,
+      .secret = false,
+      .modal = true,
+      .searchable = true,
+      .selected_option_index = 0,
+      .custom_text = ""};
+  auto searchable_input = ava::tui::handle_question_prompt_input(
+      searchable_question, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'h'});
+  expect(searchable_input.action == ava::tui::QuestionPromptInputAction::Redraw &&
+             searchable_input.custom_text == "h" && searchable_input.selected_option_index == 1,
+         "searchable question typing filters and moves selection to the first match");
+  searchable_question.custom_text = "anth";
+  searchable_question.selected_option_index = 1;
+  searchable_input =
+      ava::tui::handle_question_prompt_input(searchable_question, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
+  expect(
+      searchable_input.action == ava::tui::QuestionPromptInputAction::Resolve && searchable_input.options[1].selected,
+      "searchable question enter selects the matched provider option");
+  searchable_question.custom_text = "custom-provider";
+  searchable_question.selected_option_index = 0;
+  searchable_input =
+      ava::tui::handle_question_prompt_input(searchable_question, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
+  const auto custom_search_answer = ava::tui::question_answer_from_prompt_view(
+      ava::tui::QuestionPromptView{.header = searchable_question.header,
+                                   .question = searchable_question.question,
+                                   .options = searchable_input.options,
+                                   .multiple = searchable_question.multiple,
+                                   .allow_custom = searchable_question.allow_custom,
+                                   .secret = searchable_question.secret,
+                                   .modal = searchable_question.modal,
+                                   .searchable = searchable_question.searchable,
+                                   .selected_option_index = searchable_input.selected_option_index,
+                                   .custom_text = searchable_input.custom_text});
+  expect(custom_search_answer && custom_search_answer->selected_options.empty() &&
+             custom_search_answer->custom_text == "custom-provider",
+         "searchable question enter resolves custom provider ids when no option matches");
+
   const auto multiline_input = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                     .provider = "openai",
                                                                                     .model = "gpt-5.5",
@@ -1805,6 +1936,67 @@ void test_tui_event_state_reduces_runtime_events() {
   expect(final_state.run_status == ava::tui::TuiEventRunStatus::Completed && final_state.transcript.size() == 1 &&
              final_state.transcript[0].label == "ava" && final_state.transcript[0].text == "direct final",
          "tui event state records assistant final events without streaming deltas");
+
+  ava::tui::TuiEventState provider_state;
+  ava::app::RuntimeEvent provider_start;
+  provider_start.type = ava::app::RuntimeEventType::ProviderEvent;
+  provider_start.status = "tool_call_start";
+  provider_start.call_id = "provider_call_1";
+  provider_start.tool_name = "read_file";
+  provider_start.text = R"({"path": "README.md"})";
+  ava::tui::apply_runtime_event(provider_state, provider_start);
+  auto provider_snapshot = ava::tui::event_state_transcript_snapshot(provider_state);
+  const auto provider_activity_id = provider_state.activity.empty() ? std::string{} : provider_state.activity[0].id;
+  expect(provider_state.activity.size() == 1 && !provider_activity_id.empty() &&
+             provider_state.activity[0].label == "read_file" &&
+             provider_state.activity[0].detail == "provider is preparing tool call" &&
+             provider_state.activity[0].status == ava::tui::ToolTimelineStatus::Running &&
+             provider_state.transcript.empty() && provider_snapshot.empty(),
+         "tui event state shows provider tool-call starts as sidebar-only activity");
+
+  ava::app::RuntimeEvent provider_delta = provider_start;
+  provider_delta.status = "tool_call_delta";
+  provider_delta.tool_name.clear();
+  provider_delta.text = R"({"path": "README.md", "partial": true})";
+  ava::tui::apply_runtime_event(provider_state, provider_delta);
+  provider_snapshot = ava::tui::event_state_transcript_snapshot(provider_state);
+  expect(provider_state.activity.size() == 1 && provider_state.activity[0].id == provider_activity_id &&
+             provider_state.activity[0].label == "read_file" &&
+             provider_state.activity[0].detail == "streaming tool arguments" &&
+             provider_state.activity[0].status == ava::tui::ToolTimelineStatus::Running &&
+             provider_state.transcript.empty() && provider_snapshot.empty(),
+         "tui event state keeps provider tool-call deltas in the sidebar and preserves labels by call id");
+
+  ava::app::RuntimeEvent provider_end = provider_delta;
+  provider_end.status = "tool_call_end";
+  provider_end.text = R"({"path": "README.md", "complete": true})";
+  ava::tui::apply_runtime_event(provider_state, provider_end);
+  provider_snapshot = ava::tui::event_state_transcript_snapshot(provider_state);
+  expect(provider_state.activity.size() == 1 && provider_state.activity[0].id == provider_activity_id &&
+             provider_state.activity[0].label == "read_file" &&
+             provider_state.activity[0].detail == "tool call ready" &&
+             provider_state.activity[0].status == ava::tui::ToolTimelineStatus::Success &&
+             provider_state.transcript.empty() && provider_state.pending_tools.empty() && provider_snapshot.empty(),
+         "tui event state completes provider tool-call sidebar activity without adding transcript items");
+
+  ava::tui::TuiEventState provider_without_id_state;
+  ava::app::RuntimeEvent provider_without_id;
+  provider_without_id.type = ava::app::RuntimeEventType::ProviderEvent;
+  provider_without_id.status = "tool_call_start";
+  provider_without_id.tool_name = "grep";
+  ava::tui::apply_runtime_event(provider_without_id_state, provider_without_id);
+  const auto provider_without_id_activity_id =
+      provider_without_id_state.activity.empty() ? std::string{} : provider_without_id_state.activity[0].id;
+  provider_without_id.status = "tool_call_delta";
+  ava::tui::apply_runtime_event(provider_without_id_state, provider_without_id);
+  provider_without_id.status = "tool_call_end";
+  ava::tui::apply_runtime_event(provider_without_id_state, provider_without_id);
+  expect(provider_without_id_state.activity.size() == 1 && !provider_without_id_activity_id.empty() &&
+             provider_without_id_state.activity[0].id == provider_without_id_activity_id &&
+             provider_without_id_state.activity[0].label == "grep" &&
+             provider_without_id_state.activity[0].detail == "tool call ready" &&
+             provider_without_id_state.activity[0].status == ava::tui::ToolTimelineStatus::Success,
+         "tui event state coalesces provider tool-call activity when provider events omit call ids");
 
   ava::app::RuntimeEvent tool_start;
   tool_start.type = ava::app::RuntimeEventType::ToolStart;

@@ -117,6 +117,9 @@ struct QuestionPromptView {
   std::vector<QuestionPromptOptionView> options;
   bool multiple = false;
   bool allow_custom = false;
+  bool secret = false;
+  bool modal = false;
+  bool searchable = false;
   std::size_t selected_option_index = 0;
   std::string custom_text;
 };

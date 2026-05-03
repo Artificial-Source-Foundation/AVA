@@ -4,7 +4,14 @@
 
 ```sh
 ava
+ava auth login
+ava login anthropic
+ava auth login moonshot --api-key
 ava connect openai
+ava connect kimi --oauth-token
+printf '%s\n' "$OPENAI_API_KEY" | ava connect openai --api-key-stdin
+printf '%s\n' "$ANTHROPIC_API_KEY" | ava connect anthropic --api-key-stdin
+ava connect moonshot --api-key-env MOONSHOT_API_KEY
 ava --mode plan
 ava --continue
 ava --session <id-or-prefix>
@@ -29,7 +36,7 @@ The interactive TUI runs on wide-character ncurses (`ncursesw`) for terminal mod
 - The transcript renders user, assistant, tool, and error entries with distinct text markers.
 - Tool activity appears as compact cards with running, success, and error status markers.
 - The bottom composer is fixed to the bottom rows and uses the old AVA visual language: elevated `#1A1F2E` surface, primary-blue left rail, `❯` prompt glyph, mode badge, provider/model metadata, token metadata slot, and a spinner-only working indicator.
-- Enter submits, Shift+Enter inserts a newline, Page Up/Page Down or mouse wheel scroll transcript history, Ctrl+Z undoes the last composer edit, Ctrl+Y yanks the last killed composer text, Ctrl+C clears a non-empty composer draft and exits only when the draft is empty, Ctrl+D exits the current TUI loop, Ctrl+T reports that variant cycling is not available yet, and Esc dismisses the active palette or starts the safe clear-input flow. While AVA is actively responding, Esc requests a cooperative stop and keeps the TUI open.
+- Enter submits, Shift+Enter inserts a newline, Page Up/Page Down or mouse wheel scroll transcript history even when the pointer is over the composer, Ctrl+Z undoes the last composer edit, Ctrl+Y yanks the last killed composer text, Ctrl+C clears a non-empty composer draft and exits only when the draft is empty, Ctrl+D exits the current TUI loop, Ctrl+T reports that variant cycling is not available yet, and Esc dismisses the active palette or starts the safe clear-input flow. While AVA is actively responding, Esc requests a cooperative stop and keeps the TUI open.
 - Bracketed paste is enabled while the TUI is active. Pasted multi-line text is normalized into the draft instead of being treated as submitted commands, and tall drafts show a `draft +N above` indicator when earlier draft lines are hidden.
 
 TUI keybindings are semantic and can be overridden with `$XDG_CONFIG_HOME/ava/keybinds.json`, for example:
@@ -50,6 +57,8 @@ Use comma-separated strings for multiple keys. Current named actions include com
 
 The slash palette opens above the composer while typing `/`. Use arrows to move focus, Tab or Enter to insert the selected command, and Esc to dismiss without clearing the draft. The selected item is visually highlighted with a `›` marker. Disabled planned commands remain visible with a reason and are not submitted as model prompts.
 
+`/connect` opens a centered provider-credential modal. Type to search providers, use arrows to move selection, press Enter to confirm, then choose API key or OAuth bearer token and paste the secret. `/login` is an alias.
+
 ## Permission Prompts
 
 Interactive permission requests replace the composer with an approval dock. The dock shows the tool, command or path summary, selected action, and key help.
@@ -67,10 +76,12 @@ Interactive permission requests replace the composer with an approval dock. The 
 - `/help`: show commands and hotkeys
 - `/hotkeys`: show effective TUI hotkeys
 - `/mode`: toggle build/plan mode
+- `/connect [provider] [api-key|oauth]`: open a provider login modal and store an API key or OAuth bearer token; `/login` is an alias
 - `/sessions`: list sessions for this workspace
 - `/context`: list loaded context sources
 - `/compact [instructions]`: generate and record a provider summary
 - `/export`: export this session as markdown
+- `/stats`: show session counts, usage, cost, and resume/export hints
 - `/read <path>`: read a file
 - `/write <path> <text>`: write a file through permission checks using atomic replacement where practical
 - `/glob <pattern>`: list readable matching files
@@ -78,7 +89,7 @@ Interactive permission requests replace the composer with an approval dock. The 
 - `/bash <command>`: run a conservative permissioned command
 - `/quit`: exit
 
-Planned but unavailable commands such as `/models` (`/model`), `/import`, `/new`, `/resume`, `/reload`, `/login`, `/logout`, and `/stats` are recognized and return a disabled explanation instead of being sent to the model.
+Planned but unavailable commands such as `/models` (`/model`), `/import`, `/new`, `/resume`, `/reload`, and `/logout` are recognized and return a disabled explanation instead of being sent to the model.
 
 ## Non-TTY Mode
 
@@ -119,8 +130,8 @@ See `docs/headless-protocol.md` for the complete stdout/stderr contract, event t
 
 ## Current Limits
 
-- OpenAI is the only provider.
+- Built-in providers are OpenAI and Anthropic. Additional provider ids can store credentials for configured/provider-compatible model entries, but broader provider shims are still in progress.
 - The HTTP transport uses the local `curl` executable.
 - The TUI now renders assistant text and tool lifecycle updates live; detailed tool expansion and diff previews are still limited.
 - Permission `ask` decisions open a TUI prompt in interactive mode and fail closed in non-TTY/headless mode unless a supported read/search allow policy is supplied or an RPC client answers `permission_requested` with `permission_reply`.
-- Interactive/TUI mode opens a modal for `question` prompts with single-select, multi-select, custom text, and cancel handling. RPC clients can answer `question_requested` with `question_reply` using either `answer` or `selected`.
+- Interactive/TUI mode supports local modals for provider login plus question prompts with single-select, multi-select, custom text, and cancel handling. RPC clients can answer `question_requested` with `question_reply` using either `answer` or `selected`.

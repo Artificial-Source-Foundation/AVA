@@ -87,9 +87,15 @@ The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME
 
 ## Interactive Commands
 
-- `/help`: show commands
+- `/help`: show commands and hotkeys
+- `/hotkeys`: show effective TUI hotkeys
 - `/mode`: toggle build/plan mode
+- `/connect [provider] [api-key|oauth]`: store a provider credential; `/login` is an alias
 - `/sessions`: list resumable sessions for the current workspace
+- `/context`: list loaded context sources
+- `/compact [instructions]`: generate and record a provider summary
+- `/export`: export this session as markdown
+- `/stats`: show session counts, usage, cost, and resume/export hints
 - `/read <path>`: read a file through permissions
 - `/write <path> <text>`: write a file through permissions using atomic replacement where practical
 - `/glob <pattern>`: list readable matching files
@@ -102,9 +108,9 @@ The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME
 - Real OpenAI requests use the local `curl` executable as the HTTP transport with a sanitized execution path.
 - Tool calling is implemented through the provider contract and the built-in dispatcher.
 - `apply_patch` currently supports up to 32 exact text replacements through an `edits` array.
-- `question` is exposed as a tool, but AVA does not yet have a modal user-question workflow; the assistant is instructed to ask directly.
-- Interactive TUI permission prompts exist for backend `ask` decisions; permission decisions are persisted in session audit entries, while non-TTY mode still fails closed unless an explicit headless allow policy is supplied.
-- Deferred: multiple providers, plugins, MCP, full session tree UI, automatic/provider-generated compaction, LSP, web fetch, persistent permission rules, and a modal user-question workflow.
+- `question` opens an interactive TUI modal with single-select, multi-select, custom-answer, secret-entry, and cancel handling. Headless RPC clients can answer question requests through the protocol.
+- Interactive TUI permission prompts exist for backend `ask` decisions; permission decisions are persisted in session audit entries, while non-TTY mode still fails closed unless an explicit headless allow policy is supplied or RPC replies are provided.
+- Deferred: multiple fully selectable providers, plugins, MCP, full session tree UI, LSP, persistent permission rules, and richer tool-detail/diff panes.
 
 ## 0.32 TUI Notes
 
@@ -114,7 +120,7 @@ The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME
 - The slash palette opens above the composer with command metadata, keyboard focus cues, and narrow-terminal fallback.
 - Permission requests replace the composer with an approval dock. `Deny` stays the default focus; `A` allows once and `D` denies.
 - Non-TTY stdin/stdout still use the line shell fallback for scripts and tests.
-- 0.32 does not add providers, persistent permission rules, session-wide allows, streaming, MCP, plugins, or a session tree UI.
+- Later frontend work added live assistant/tool lifecycle updates in the TUI. 0.32 did not add providers, persistent permission rules, session-wide allows, MCP, plugins, or a session tree UI.
 
 ## Planning Docs
 

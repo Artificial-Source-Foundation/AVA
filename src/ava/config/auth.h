@@ -53,6 +53,8 @@ struct ProviderCredential {
                                                                                  ava::provider::Transport& transport);
 [[nodiscard]] ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(
     const XdgPaths& paths, std::string_view provider_id, ava::provider::Transport& transport);
+[[nodiscard]] ava::core::VoidResult store_provider_credential(const XdgPaths& paths,
+                                                              const ProviderCredential& credential);
 [[nodiscard]] std::string authorization_header_value(const OpenAICredential& credential);
 
 }  // namespace ava::config

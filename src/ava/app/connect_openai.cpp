@@ -3,12 +3,16 @@
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <cctype>
+#include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <map>
@@ -16,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
@@ -25,6 +30,44 @@
 
 namespace ava::app {
 namespace {
+
+constexpr std::size_t max_connect_secret_bytes = 64 * 1024;
+
+volatile std::sig_atomic_t raw_mode_signal_installed = 0;
+termios raw_mode_signal_original{};
+using SignalHandler = void (*)(int);
+SignalHandler raw_mode_previous_sigint = SIG_DFL;
+SignalHandler raw_mode_previous_sigterm = SIG_DFL;
+SignalHandler raw_mode_previous_sighup = SIG_DFL;
+
+void restore_raw_mode_from_signal(int signal_number) {
+  if (raw_mode_signal_installed != 0) {
+    static_cast<void>(::tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_mode_signal_original));
+  }
+  SignalHandler previous = SIG_DFL;
+  if (signal_number == SIGINT) previous = raw_mode_previous_sigint;
+  if (signal_number == SIGTERM) previous = raw_mode_previous_sigterm;
+  if (signal_number == SIGHUP) previous = raw_mode_previous_sighup;
+  if (previous == SIG_ERR) previous = SIG_DFL;
+  static_cast<void>(std::signal(signal_number, previous));
+  if (previous != SIG_IGN) static_cast<void>(std::raise(signal_number));
+}
+
+void install_raw_mode_signal_handlers(const termios& original) {
+  raw_mode_signal_original = original;
+  raw_mode_previous_sigint = std::signal(SIGINT, restore_raw_mode_from_signal);
+  raw_mode_previous_sigterm = std::signal(SIGTERM, restore_raw_mode_from_signal);
+  raw_mode_previous_sighup = std::signal(SIGHUP, restore_raw_mode_from_signal);
+  raw_mode_signal_installed = 1;
+}
+
+void restore_raw_mode_signal_handlers() {
+  if (raw_mode_signal_installed == 0) return;
+  raw_mode_signal_installed = 0;
+  static_cast<void>(std::signal(SIGINT, raw_mode_previous_sigint == SIG_ERR ? SIG_DFL : raw_mode_previous_sigint));
+  static_cast<void>(std::signal(SIGTERM, raw_mode_previous_sigterm == SIG_ERR ? SIG_DFL : raw_mode_previous_sigterm));
+  static_cast<void>(std::signal(SIGHUP, raw_mode_previous_sighup == SIG_ERR ? SIG_DFL : raw_mode_previous_sighup));
+}
 
 long long unix_time_seconds() {
   return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -53,6 +96,69 @@ class ScopedSocket {
   }
 
   int fd_ = -1;
+};
+
+class ScopedTerminalEcho {
+ public:
+  explicit ScopedTerminalEcho(bool enabled) : active_(enabled && ::tcgetattr(STDIN_FILENO, &original_) == 0) {
+    if (!active_) return;
+    auto current = original_;
+    current.c_lflag &= ~ECHO;
+    if (::tcsetattr(STDIN_FILENO, TCSAFLUSH, &current) != 0) active_ = false;
+  }
+
+  ScopedTerminalEcho(const ScopedTerminalEcho&) = delete;
+  ScopedTerminalEcho& operator=(const ScopedTerminalEcho&) = delete;
+
+  ~ScopedTerminalEcho() {
+    if (active_) static_cast<void>(::tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_));
+  }
+
+ private:
+  bool active_ = false;
+  termios original_{};
+};
+
+class ScopedTerminalRawMode {
+ public:
+  explicit ScopedTerminalRawMode(bool enabled) : active_(enabled && ::tcgetattr(STDIN_FILENO, &original_) == 0) {
+    if (!active_) return;
+    auto current = original_;
+    current.c_lflag &= static_cast<tcflag_t>(~(ICANON | ECHO));
+    current.c_cc[VMIN] = 1;
+    current.c_cc[VTIME] = 0;
+    if (::tcsetattr(STDIN_FILENO, TCSAFLUSH, &current) != 0) {
+      active_ = false;
+      return;
+    }
+    install_raw_mode_signal_handlers(original_);
+  }
+
+  ScopedTerminalRawMode(const ScopedTerminalRawMode&) = delete;
+  ScopedTerminalRawMode& operator=(const ScopedTerminalRawMode&) = delete;
+
+  ~ScopedTerminalRawMode() {
+    if (!active_) return;
+    static_cast<void>(::tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_));
+    restore_raw_mode_signal_handlers();
+  }
+
+ private:
+  bool active_ = false;
+  termios original_{};
+};
+
+struct ConnectProviderMenuItem {
+  std::string id;
+  std::string label;
+  std::string detail;
+};
+
+enum class MenuInputKind { Character, Enter, Escape, Backspace, Up, Down, Other };
+
+struct MenuInput {
+  MenuInputKind kind = MenuInputKind::Other;
+  std::string text;
 };
 
 std::string errno_message() { return std::strerror(errno); }
@@ -293,6 +399,266 @@ ava::core::Result<OAuthCallback> wait_for_oauth_callback(std::string_view expect
   return std::unexpected(connect_error(ava::core::ErrorCategory::Io, "timed out waiting for OAuth callback"));
 }
 
+std::string credential_type_value(ConnectCredentialType type) {
+  return type == ConnectCredentialType::OAuthToken ? "oauth" : "api_key";
+}
+
+std::string credential_type_label(ConnectCredentialType type) {
+  return type == ConnectCredentialType::OAuthToken ? "OAuth bearer token" : "API key";
+}
+
+std::string lower_ascii(std::string_view text) {
+  std::string lowered;
+  lowered.reserve(text.size());
+  for (const char ch : text) lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  return lowered;
+}
+
+std::vector<ConnectProviderMenuItem> connect_provider_menu_items() {
+  return {ConnectProviderMenuItem{.id = "openai", .label = "OpenAI", .detail = "API key or ChatGPT OAuth token"},
+          ConnectProviderMenuItem{.id = "anthropic", .label = "Anthropic", .detail = "Claude API key or OAuth token"},
+          ConnectProviderMenuItem{.id = "moonshot", .label = "Moonshot", .detail = "Kimi API key"},
+          ConnectProviderMenuItem{.id = "kimi", .label = "Kimi", .detail = "Moonshot-compatible API key"},
+          ConnectProviderMenuItem{.id = "openrouter", .label = "OpenRouter", .detail = "API key"},
+          ConnectProviderMenuItem{.id = "vercel", .label = "Vercel AI Gateway", .detail = "API key"}};
+}
+
+bool provider_menu_item_matches(const ConnectProviderMenuItem& item, std::string_view query) {
+  if (query.empty()) return true;
+  const auto lowered_query = lower_ascii(query);
+  const auto haystack = lower_ascii(item.id + " " + item.label + " " + item.detail);
+  return haystack.find(lowered_query) != std::string::npos;
+}
+
+std::vector<ConnectProviderMenuItem> filtered_provider_menu_items(std::string_view query) {
+  std::vector<ConnectProviderMenuItem> filtered;
+  for (auto item : connect_provider_menu_items()) {
+    if (provider_menu_item_matches(item, query)) filtered.push_back(std::move(item));
+  }
+  return filtered;
+}
+
+void render_provider_menu(std::ostream& out, std::string_view query, std::size_t selected_index) {
+  const auto filtered = filtered_provider_menu_items(query);
+  out << "\x1b[2J\x1b[H";
+  out << "Add credential\n\n";
+  out << "Select provider\n\n";
+  out << "Search: " << ava::tui::sanitize_terminal_text(std::string(query)) << "\n\n";
+  out << "Popular\n";
+  if (filtered.empty()) {
+    out << "  No matches. Press Enter to use custom provider id.\n";
+  } else {
+    for (std::size_t index = 0; index < filtered.size(); ++index) {
+      const auto& item = filtered[index];
+      out << (index == selected_index ? "> " : "  ") << ava::tui::sanitize_terminal_text(item.label) << "  "
+          << ava::tui::sanitize_terminal_text(item.detail) << "\n";
+    }
+  }
+  out << "\n↑/↓ to select • Enter: confirm • Type: search • Esc: cancel\n" << std::flush;
+}
+
+bool menu_input_pending(std::istream& in, bool stdin_is_tty) {
+  if (!stdin_is_tty) return in.rdbuf() != nullptr && in.rdbuf()->in_avail() > 0;
+  pollfd descriptor{.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
+  int ready = 0;
+  do {
+    ready = ::poll(&descriptor, 1, 25);
+  } while (ready < 0 && errno == EINTR);
+  return ready > 0 && (descriptor.revents & POLLIN) != 0;
+}
+
+ava::core::Result<MenuInput> read_menu_input(std::istream& in, bool stdin_is_tty) {
+  char ch = 0;
+  if (!in.get(ch)) return std::unexpected(connect_error(ava::core::ErrorCategory::Io, "failed to read provider menu input"));
+  if (ch == '\n' || ch == '\r') return MenuInput{.kind = MenuInputKind::Enter, .text = {}};
+  if (ch == '\x03' || ch == '\x04') return MenuInput{.kind = MenuInputKind::Escape, .text = {}};
+  if (ch == '\x7f' || ch == '\b') return MenuInput{.kind = MenuInputKind::Backspace, .text = {}};
+  if (ch == '\x1b') {
+    if (menu_input_pending(in, stdin_is_tty)) {
+      char prefix = 0;
+      if (!in.get(prefix)) return MenuInput{.kind = MenuInputKind::Escape, .text = {}};
+      if (prefix != '[') {
+        static_cast<void>(in.unget());
+        return MenuInput{.kind = MenuInputKind::Escape, .text = {}};
+      }
+      if (!menu_input_pending(in, stdin_is_tty)) {
+        static_cast<void>(in.unget());
+        return MenuInput{.kind = MenuInputKind::Escape, .text = {}};
+      }
+      char code = 0;
+      if (in.get(code)) {
+        if (code == 'A') return MenuInput{.kind = MenuInputKind::Up, .text = {}};
+        if (code == 'B') return MenuInput{.kind = MenuInputKind::Down, .text = {}};
+        static_cast<void>(in.unget());
+      }
+    }
+    return MenuInput{.kind = MenuInputKind::Escape, .text = {}};
+  }
+  if (std::isprint(static_cast<unsigned char>(ch)) != 0) {
+    return MenuInput{.kind = MenuInputKind::Character, .text = std::string(1, ch)};
+  }
+  return MenuInput{.kind = MenuInputKind::Other, .text = {}};
+}
+
+ava::core::Result<std::string> select_provider_from_menu(std::istream& in, std::ostream& out, bool stdin_is_tty) {
+  std::string query;
+  std::size_t selected_index = 0;
+  const ScopedTerminalRawMode raw_mode(stdin_is_tty);
+  while (true) {
+    auto filtered = filtered_provider_menu_items(query);
+    if (!filtered.empty()) selected_index = std::min(selected_index, filtered.size() - 1);
+    render_provider_menu(out, query, selected_index);
+    auto input = read_menu_input(in, stdin_is_tty);
+    if (!input) return std::unexpected(std::move(input.error()));
+    switch (input->kind) {
+      case MenuInputKind::Character:
+        query += input->text;
+        selected_index = 0;
+        break;
+      case MenuInputKind::Backspace:
+        if (!query.empty()) query.pop_back();
+        selected_index = 0;
+        break;
+      case MenuInputKind::Up:
+        filtered = filtered_provider_menu_items(query);
+        if (!filtered.empty()) selected_index = selected_index == 0 ? filtered.size() - 1 : selected_index - 1;
+        break;
+      case MenuInputKind::Down:
+        filtered = filtered_provider_menu_items(query);
+        if (!filtered.empty()) selected_index = (selected_index + 1) % filtered.size();
+        break;
+      case MenuInputKind::Enter:
+        filtered = filtered_provider_menu_items(query);
+        if (!filtered.empty()) return filtered[std::min(selected_index, filtered.size() - 1)].id;
+        if (!query.empty()) return query;
+        break;
+      case MenuInputKind::Escape:
+        return std::unexpected(connect_error(ava::core::ErrorCategory::InvalidArgument, "provider login cancelled"));
+      case MenuInputKind::Other:
+        break;
+    }
+  }
+}
+
+std::optional<ConnectCredentialType> parse_connect_credential_type(std::string_view value) {
+  if (value == "api" || value == "api-key" || value == "apikey" || value == "key" || value == "api_key") {
+    return ConnectCredentialType::ApiKey;
+  }
+  if (value == "oauth" || value == "oauth-token" || value == "oauth_token" || value == "bearer" ||
+      value == "token") {
+    return ConnectCredentialType::OAuthToken;
+  }
+  return std::nullopt;
+}
+
+std::string trim_stdin_secret(std::string secret) {
+  auto is_edge_space = [](char ch) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; };
+  auto first = std::find_if_not(secret.begin(), secret.end(), is_edge_space);
+  auto last = std::find_if_not(secret.rbegin(), secret.rend(), is_edge_space).base();
+  if (first >= last) return {};
+  return std::string(first, last);
+}
+
+bool is_valid_env_var_name(std::string_view name) {
+  if (name.empty()) return false;
+  const auto first = static_cast<unsigned char>(name.front());
+  if (std::isalpha(first) == 0 && name.front() != '_') return false;
+  for (const char ch : name.substr(1)) {
+    const auto uch = static_cast<unsigned char>(ch);
+    if (std::isalnum(uch) != 0 || ch == '_') continue;
+    return false;
+  }
+  return true;
+}
+
+bool is_valid_connect_provider_id(std::string_view provider_id) {
+  if (provider_id.empty() || provider_id.size() > 128) return false;
+  return std::ranges::all_of(provider_id, [](char ch) {
+    const auto uch = static_cast<unsigned char>(ch);
+    return std::isalnum(uch) != 0 || ch == '-' || ch == '_';
+  });
+}
+
+ava::core::Result<std::string> read_prompt_line(std::istream& in,
+                                                std::ostream& out,
+                                                std::string_view prompt,
+                                                bool secret,
+                                                bool stdin_is_tty) {
+  out << prompt << std::flush;
+  std::string line;
+  {
+    const ScopedTerminalEcho echo_guard(secret && stdin_is_tty);
+    if (!std::getline(in, line)) {
+      return std::unexpected(connect_error(ava::core::ErrorCategory::Io, "failed to read connect prompt input"));
+    }
+  }
+  if (secret && stdin_is_tty) out << '\n';
+  line = trim_stdin_secret(std::move(line));
+  if (line.size() > max_connect_secret_bytes) {
+    auto error = connect_error(ava::core::ErrorCategory::InvalidArgument, "connect prompt input is too large");
+    error.with_context("max_bytes", std::to_string(max_connect_secret_bytes));
+    return std::unexpected(std::move(error));
+  }
+  return line;
+}
+
+ava::core::VoidResult store_connect_secret(const ava::config::XdgPaths& paths,
+                                           std::string_view provider_id,
+                                           ConnectCredentialType credential_type,
+                                           std::string secret) {
+  if (!is_valid_connect_provider_id(provider_id)) {
+    return std::unexpected(
+        connect_error(ava::core::ErrorCategory::InvalidArgument, "provider id must contain only letters, numbers, '-' or '_'"));
+  }
+  if (secret.empty()) {
+    return std::unexpected(connect_error(ava::core::ErrorCategory::InvalidArgument, "credential was empty"));
+  }
+  return ava::config::store_provider_credential(
+      paths, ava::config::ProviderCredential{.provider_id = std::string(provider_id),
+                                             .access_token = std::move(secret),
+                                             .credential_type = credential_type_value(credential_type),
+                                             .account_id = "",
+                                             .source = "connect"});
+}
+
+ava::core::Result<std::string> read_connect_secret(const ConnectProviderCredentialOptions& options, std::istream& in) {
+  if (options.env_var) {
+    if (!is_valid_env_var_name(*options.env_var)) {
+      return std::unexpected(
+          connect_error(ava::core::ErrorCategory::InvalidArgument, "credential env var name is invalid"));
+    }
+    const char* value = std::getenv(options.env_var->c_str());
+    if (value == nullptr || std::string_view(value).empty()) {
+      return std::unexpected(connect_error(ava::core::ErrorCategory::PermissionDenied, "credential env var is not set"));
+    }
+    if (std::string_view(value).size() > max_connect_secret_bytes) {
+      auto error = connect_error(ava::core::ErrorCategory::InvalidArgument, "credential env var value is too large");
+      error.with_context("max_bytes", std::to_string(max_connect_secret_bytes));
+      return std::unexpected(std::move(error));
+    }
+    return std::string(value);
+  }
+
+  std::string secret;
+  char ch = 0;
+  while (in.get(ch)) {
+    if (secret.size() >= max_connect_secret_bytes) {
+      auto error = connect_error(ava::core::ErrorCategory::InvalidArgument, "credential stdin is too large");
+      error.with_context("max_bytes", std::to_string(max_connect_secret_bytes));
+      return std::unexpected(std::move(error));
+    }
+    secret.push_back(ch);
+  }
+  if (in.bad()) {
+    return std::unexpected(connect_error(ava::core::ErrorCategory::Io, "failed to read credential from stdin"));
+  }
+  secret = trim_stdin_secret(std::move(secret));
+  if (secret.empty()) {
+    return std::unexpected(connect_error(ava::core::ErrorCategory::InvalidArgument, "credential stdin was empty"));
+  }
+  return secret;
+}
+
 }  // namespace
 
 int run_connect_openai(const ava::config::XdgPaths& paths) {
@@ -322,7 +688,91 @@ int run_connect_openai(const ava::config::XdgPaths& paths) {
     std::cerr << ava::tui::sanitize_terminal_text(stored.error().format()) << '\n';
     return 1;
   }
-  std::cout << "OpenAI OAuth credential stored at " << paths.auth_file.string() << '\n';
+  std::cout << "OpenAI OAuth credential stored at " << ava::tui::sanitize_terminal_text(paths.auth_file.string()) << '\n';
+  return 0;
+}
+
+int run_connect_provider_wizard(const ava::config::XdgPaths& paths,
+                                const ConnectProviderWizardOptions& options,
+                                std::istream& in,
+                                std::ostream& out,
+                                std::ostream& err) {
+  if (!options.stdin_is_tty) {
+    err << "interactive provider login requires a terminal; use --api-key-stdin, --api-key-env, --oauth-token-stdin, or --oauth-token-env\n";
+    return 2;
+  }
+
+  std::string provider_id;
+  if (options.provider_id) {
+    provider_id = *options.provider_id;
+  } else {
+    auto provider = select_provider_from_menu(in, out, options.stdin_is_tty);
+    if (!provider) {
+      err << ava::tui::sanitize_terminal_text(provider.error().format()) << '\n';
+      return 1;
+    }
+    provider_id = *provider;
+  }
+
+  if (!is_valid_connect_provider_id(provider_id)) {
+    err << "provider id must contain only letters, numbers, '-' or '_'\n";
+    return 2;
+  }
+
+  ConnectCredentialType credential_type = ConnectCredentialType::ApiKey;
+  if (options.credential_type) {
+    credential_type = *options.credential_type;
+  } else {
+    auto method = read_prompt_line(in, out, "Credential type [api-key/oauth-token]: ", false, options.stdin_is_tty);
+    if (!method) {
+      err << ava::tui::sanitize_terminal_text(method.error().format()) << '\n';
+      return 1;
+    }
+    auto parsed = parse_connect_credential_type(*method);
+    if (!parsed) {
+      err << "credential type must be api-key or oauth-token\n";
+      return 2;
+    }
+    credential_type = *parsed;
+  }
+
+  auto secret = read_prompt_line(in, out, credential_type_label(credential_type) + " for " + provider_id + ": ", true,
+                                 options.stdin_is_tty);
+  if (!secret) {
+    err << ava::tui::sanitize_terminal_text(secret.error().format()) << '\n';
+    return 1;
+  }
+  auto stored = store_connect_secret(paths, provider_id, credential_type, *secret);
+  if (!stored) {
+    err << ava::tui::sanitize_terminal_text(stored.error().format()) << '\n';
+    return 1;
+  }
+  out << "Stored " << ava::tui::sanitize_terminal_text(provider_id) << ' ' << credential_type_label(credential_type)
+      << " credential at " << ava::tui::sanitize_terminal_text(paths.auth_file.string()) << '\n';
+  if (provider_id == "openai") {
+    out << "Tip: `ava connect openai` still runs the browser OAuth flow.\n";
+  }
+  return 0;
+}
+
+int run_connect_provider_credential(const ava::config::XdgPaths& paths,
+                                    const ConnectProviderCredentialOptions& options,
+                                    std::istream& in,
+                                    std::ostream& out,
+                                    std::ostream& err) {
+  auto secret = read_connect_secret(options, in);
+  if (!secret) {
+    err << ava::tui::sanitize_terminal_text(secret.error().format()) << '\n';
+    return 1;
+  }
+
+  auto stored = store_connect_secret(paths, options.provider_id, options.credential_type, *secret);
+  if (!stored) {
+    err << ava::tui::sanitize_terminal_text(stored.error().format()) << '\n';
+    return 1;
+  }
+  out << "Stored " << credential_type_label(options.credential_type) << " credential at "
+      << ava::tui::sanitize_terminal_text(paths.auth_file.string()) << '\n';
   return 0;
 }
 

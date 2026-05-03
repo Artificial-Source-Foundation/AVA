@@ -44,11 +44,14 @@ std::string render_status_line(const ComposerSnapshot& snapshot, std::size_t wid
   }
 
   if (!right.empty()) {
+    constexpr auto kRightGap = std::size_t{2};
+    constexpr auto kRightMargin = std::size_t{2};
     const auto left_columns = terminal_text_columns(line);
     const auto right_columns = terminal_text_columns(right);
-    if (left_columns + right_columns + 2 < width) {
-      line += std::string(width - left_columns - right_columns, ' ');
+    if (left_columns + right_columns + kRightGap + kRightMargin <= width) {
+      line += std::string(width - left_columns - right_columns - kRightMargin, ' ');
       line += right;
+      line += std::string(kRightMargin, ' ');
     } else {
       line += "  " + right;
     }

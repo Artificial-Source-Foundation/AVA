@@ -296,12 +296,17 @@ ava::core::Result<QuestionPrompt> parse_question_prompt(std::string_view argumen
   if (!multiple) return std::unexpected(multiple.error());
   auto custom = read_bool_aliases(arguments_json, "custom", "allow_custom", tool_name);
   if (!custom) return std::unexpected(custom.error());
+  if (ava::core::json::field_value_start(arguments_json, "secret")) {
+    return std::unexpected(
+        argument_error(tool_name, "secret", "secret prompts are only available to trusted local commands"));
+  }
 
   return QuestionPrompt{.header = std::move(*header),
                         .question = std::move(*question),
                         .options = std::move(*options),
                         .multiple = *multiple,
-                        .allow_custom = *custom};
+                        .allow_custom = *custom,
+                        .secret = false};
 }
 
 std::string serialize_question_answer_result(const QuestionPrompt& prompt, const QuestionAnswer& answer) {

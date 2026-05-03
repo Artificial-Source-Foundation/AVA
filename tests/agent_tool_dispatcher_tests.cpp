@@ -659,6 +659,14 @@ void test_tool_dispatcher() {
              multi_question->result_text.find("\"custom_text\":\"Use both\"") != std::string::npos,
          "question tool serializes multi-select and custom resolver answers");
 
+  auto secret_question = question_dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_question_secret",
+                                   .name = "question",
+                                   .arguments_json = "{\"question\":\"Paste a secret\",\"secret\":true}"});
+  expect(secret_question && !secret_question->success &&
+             secret_question->result_text.find("trusted local commands") != std::string::npos,
+         "question tool rejects model-originated secret prompts");
+
   const ava::agent::ToolDispatcher too_many_answers_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,

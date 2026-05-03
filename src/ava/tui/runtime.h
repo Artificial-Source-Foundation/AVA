@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -30,6 +31,8 @@ struct TuiRuntimeOptions {
   std::string initial_status = "";
   std::vector<SlashCommandItem> slash_commands = {};
   TuiKeyBindings key_bindings = default_key_bindings();
+  // Called on the TUI main thread at startup and after a submit worker completes; never from render/spinner loops.
+  std::function<std::optional<std::string>()> token_status_provider;
   std::function<TuiSubmitResult(const std::string&, const ava::permissions::PermissionResolver&,
                                 const ava::agent::QuestionResolver&, ava::app::RuntimeEventSink, std::function<bool()>)>
       on_submit;

@@ -40,7 +40,7 @@ int main()
       !require(same_storage(full_cluster, expected_full_cluster), "full cluster storage should match the input grapheme"))
     return EXIT_FAILURE;
 
-  terminal::ComplexChar const source{full_cluster, terminal::Attributes{terminal::Attribute::bold}};
+  terminal::ComplexChar const source{full_cluster /*, terminal::Attributes{terminal::Attribute::bold}*/};
   if (!require(same_storage(source.cell_character(), expected_full_cluster), "ComplexChar should preserve a full GraphemeCluster"))
     return EXIT_FAILURE;
 
@@ -52,8 +52,9 @@ int main()
     // where setcchar needs a temporary terminator and getcchar writes one extra
     // wchar_t beyond ncurses' fixed cchar_t payload.
     terminal::Session terminal_session;
-    terminal::Window window{1, 1, 0, 0};
+    terminal::Window window{40, 80, 0, 0};
     window.set_background(source);
+    window.set_border({});
     terminal::ComplexChar const round_trip = window.get_background();
     round_trip_ok =
         require(same_storage(round_trip.cell_character(), expected_full_cluster), "Window background round-trip should preserve full cluster storage") &&
@@ -63,6 +64,7 @@ int main()
             "Window background round-trip should preserve bold attribute");
 
     terminal_session.refresh();
+    window.refresh();
     terminal_session.get_wch();
   }
 

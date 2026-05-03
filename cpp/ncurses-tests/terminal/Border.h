@@ -43,8 +43,8 @@ class Border
   // (the same order as the elements of index_to_pos).
   ComplexChar get_complex_character(int i, Rendition rendition) const
   {
-    std::array<wchar_t, 2> zero_terminated_character = { box_characters_[index_to_pos[i]], L'\0' };
-    return {zero_terminated_character.data(), rendition};
+    GraphemeCluster::Storage zero_terminated_character = { box_characters_[index_to_pos[i]], L'\0' };
+    return {GraphemeCluster{zero_terminated_character}, rendition};
   }
 };
 

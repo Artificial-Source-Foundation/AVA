@@ -1,18 +1,20 @@
 #pragma once
 
+#include <cstdint>
+
 namespace terminal {
 
 class ColorPair
 {
  private:
-  int index_;
+  uint32_t index_;
 
  public:
-  ColorPair(int index) : index_(index) { }
+  ColorPair(uint32_t index) : index_(index) { }
 
   // Accessor.
-  int index() const { return index_; }
-  int& index() { return index_; }
+  uint32_t index() const { return index_; }
+  uint32_t& index() { return index_; }
 };
 
 } // namespace terminal

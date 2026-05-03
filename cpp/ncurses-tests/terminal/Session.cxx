@@ -7,7 +7,7 @@
 
 namespace terminal {
 
-Session::Session() : default_rendition_(ColorPair{-1})
+Session::Session() : default_rendition_(ColorPair{0})
 {
   setlocale(LC_ALL, "");
   initscr();

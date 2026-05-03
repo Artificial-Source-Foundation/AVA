@@ -36,8 +36,18 @@ static Attributes convert_to_Attributes(attr_t attributes)
 cchar_t convert_to_cchar(ComplexChar const& complex_char)
 {
   cchar_t result;
+  terminal::GraphemeCluster const& grapheme_cluster = complex_char.cell_character();
   int color_pair_index = complex_char.rendition().color_pair().index();
-  setcchar(&result, complex_char.cell_character(), convert_to_attr(complex_char.rendition().attributes()), 0, &color_pair_index);
+  attr_t attributes = convert_to_attr(complex_char.rendition().attributes());
+  if (grapheme_cluster.is_zero_terminated())
+    ::setcchar(&result, complex_char.cell_character().data(), attributes, 0, &color_pair_index);
+  else
+  {
+    // setcchar requires the grapheme to be zero terminated.
+    std::array<wchar_t, CCHARW_MAX + 1> tmp;
+    std::wcsncpy(tmp.data(), grapheme_cluster.data(), tmp.size());
+    ::setcchar(&result, tmp.data(), attributes, 0, &color_pair_index);
+  }
   return result;
 }
 
@@ -45,12 +55,12 @@ ComplexChar convert_to_ComplexChar(cchar_t const& cchar)
 {
   ComplexChar result;
   [[maybe_unused]] NCURSES_PAIRS_T color_pair = 0;
-
-  // getcchar is the documented inverse of setcchar: it extracts the wide character string, attribute mask, and color-pair identifier from ncurses' opaque cchar_t.
-  // convert_to_cchar uses ncurses' extended-color-pair opts argument, so pass an int pointer here as well and prefer that value over the possibly narrowed NCURSES_PAIRS_T result.
-  // On success, characters is null-terminated and can be copied directly into ComplexChar.
-  int const status = getcchar(&cchar, result.cell_character(), &result.rendition().attributes().mask(), &color_pair, &result.rendition().color_pair().index());
+  // We can not write directly into the Storage of result.cell_character() because the grapheme_cluster
+  // returned by getcchar is null-terminated, even if it contains CCHARW_MAX non-zero characters!
+  std::array<wchar_t, CCHARW_MAX + 1> grapheme_cluster;
+  int const status = ::getcchar(&cchar, grapheme_cluster.data(), &result.rendition().attributes().mask(), &color_pair, &result.rendition().color_pair().index());
   ASSERT(status == OK);
-
+  // Copy at most CCHARW_MAX wide characters into the ComplexChar.
+  std::wcsncpy(result.cell_character().data(), grapheme_cluster.data(), CCHARW_MAX);
   return result;
 }

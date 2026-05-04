@@ -152,15 +152,14 @@ int run_print_mode(const PrintModeOptions& options, std::istream& in, std::ostre
   }
 
   ava::provider::CurlCliTransport default_transport;
-  ava::provider::RetryTransport retry_transport(default_transport);
   ava::provider::Transport& transport = options.transport_override
                                             ? options.transport_override->get()
-                                            : static_cast<ava::provider::Transport&>(retry_transport);
-  ava::provider::Transport& auth_transport = options.transport_override ? options.transport_override->get()
-                                                                        : static_cast<ava::provider::Transport&>(
-                                                                              default_transport);
-  auto request_credential = ava::config::provider_credential_for_request(session->paths, session->model.provider_id,
-                                                                         auth_transport);
+                                            : static_cast<ava::provider::Transport&>(default_transport);
+  ava::provider::Transport& auth_transport = options.transport_override
+                                                 ? options.transport_override->get()
+                                                 : static_cast<ava::provider::Transport&>(default_transport);
+  auto request_credential =
+      ava::config::provider_credential_for_request(session->paths, session->model.provider_id, auth_transport);
   if (!request_credential) {
     err << request_credential.error().format() << '\n';
     return 1;
@@ -177,15 +176,16 @@ int run_print_mode(const PrintModeOptions& options, std::istream& in, std::ostre
     err << default_provider.error().format() << '\n';
     return 1;
   }
-  const ava::provider::Provider& provider = options.provider_override ? options.provider_override->get()
-                                                                      : static_cast<const ava::provider::Provider&>(
-                                                                           **default_provider);
+  const ava::provider::Provider& provider = options.provider_override
+                                                ? options.provider_override->get()
+                                                : static_cast<const ava::provider::Provider&>(**default_provider);
   RuntimeRunOptions runtime_options;
   runtime_options.access_token = (*request_credential)->access_token;
   runtime_options.credential_type = (*request_credential)->credential_type;
-  runtime_options.openai_oauth = (*request_credential)->provider_id == "openai" &&
-                                 (*request_credential)->credential_type == "oauth";
+  runtime_options.openai_oauth =
+      (*request_credential)->provider_id == "openai" && (*request_credential)->credential_type == "oauth";
   runtime_options.openai_account_id = (*request_credential)->account_id;
+  runtime_options.enable_transport_retries = !options.transport_override.has_value();
   runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);
 
   const PrintModeRunOptions run_options{.output_format = options.output_format,

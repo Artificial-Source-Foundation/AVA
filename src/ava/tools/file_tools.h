@@ -99,7 +99,8 @@ struct WriteOptions {
 [[nodiscard]] ava::core::VoidResult ensure_permission(const ToolContext& context, ava::permissions::Operation operation,
                                                       const std::filesystem::path& target_path,
                                                       std::string_view command, std::string_view tool_name,
-                                                      std::string_view error_message);
+                                                      std::string_view error_message,
+                                                      std::string_view diff_preview = {}, bool diff_truncated = false);
 [[nodiscard]] std::string permission_audit_data_json(const PermissionAuditEvent& event);
 [[nodiscard]] ava::core::VoidResult replace_file_with_staged_file(const std::filesystem::path& staged_path,
                                                                   const std::filesystem::path& target_path);

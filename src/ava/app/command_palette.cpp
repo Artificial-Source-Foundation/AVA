@@ -1,0 +1,236 @@
+#include "ava/app/command_palette.h"
+
+#include <algorithm>
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "ava/app/runtime.h"
+#include "ava/config/model_config.h"
+#include "ava/config/provider_profiles.h"
+#include "ava/mcp/config.h"
+#include "ava/plugin/diagnostics.h"
+#include "ava/provider/registry.h"
+#include "ava/session/session_store.h"
+
+namespace ava::app {
+namespace {
+
+std::string hotkeys_for_action(const std::vector<CommandHotkey>& hotkeys, std::string_view action) {
+  for (const auto& hotkey : hotkeys) {
+    if (hotkey.action == action) return hotkey.keys;
+  }
+  return "";
+}
+
+bool completion_exists(const std::vector<tui::SlashCommandArgumentCompletion>& completions, std::size_t argument_index,
+                       const std::vector<std::string>& previous_args, std::string_view value) {
+  return std::ranges::any_of(completions, [&](const auto& completion) {
+    return completion.argument_index == argument_index && completion.required_previous_args == previous_args &&
+           completion.value == value;
+  });
+}
+
+void add_completion(tui::SlashCommandItem& item, std::size_t argument_index, std::string value,
+                    std::string description = {}, std::string category = {},
+                    std::vector<std::string> previous_args = {}, bool append_space = true, bool enabled = true,
+                    std::string disabled_reason = {}) {
+  if (value.empty() || completion_exists(item.argument_completions, argument_index, previous_args, value)) return;
+  item.argument_completions.push_back(tui::SlashCommandArgumentCompletion{
+      .value = std::move(value),
+      .description = std::move(description),
+      .category = std::move(category),
+      .required_previous_args = std::move(previous_args),
+      .argument_index = argument_index,
+      .append_space = append_space,
+      .enabled = enabled,
+      .disabled_reason = std::move(disabled_reason)});
+}
+
+std::optional<std::size_t> find_item_index(const std::vector<tui::SlashCommandItem>& items, std::string_view command) {
+  for (std::size_t index = 0; index < items.size(); ++index) {
+    if (items[index].command == command) return index;
+  }
+  return std::nullopt;
+}
+
+std::vector<ava::config::ModelInfo> effective_models(const ava::config::ModelRegistry& registry) {
+  std::vector<ava::config::ModelInfo> models;
+  std::vector<std::string> seen;
+  for (auto model = registry.models.rbegin(); model != registry.models.rend(); ++model) {
+    const auto key = model->provider_id + "\n" + model->model_id;
+    if (std::ranges::find(seen, key) != seen.end()) continue;
+    seen.push_back(key);
+    models.push_back(*model);
+  }
+  std::reverse(models.begin(), models.end());
+  return models;
+}
+
+std::string model_completion_description(const ava::config::ModelInfo& model, bool registered) {
+  auto description = model.display_name.empty() ? model.model_id : model.display_name;
+  if (!registered) {
+    if (!description.empty()) description += " - ";
+    description += "provider unavailable";
+  } else if (model.supports_reasoning.value_or(false) && !model.reasoning_levels.empty()) {
+    description += " - reasoning levels: ";
+    for (std::size_t index = 0; index < model.reasoning_levels.size(); ++index) {
+      if (index > 0) description += ", ";
+      description += model.reasoning_levels[index];
+    }
+  }
+  return description;
+}
+
+ava::mcp::McpConfigLoadOptions mcp_config_options(const RuntimeSession& session) {
+  auto options = ava::mcp::default_mcp_config_options(session.workspace_dir);
+  options.global_config_file = session.paths.ava_config_dir / "mcp.json";
+  options.project_config_file = session.workspace_dir / ".ava" / "mcp.json";
+  return options;
+}
+
+ava::plugin::PluginDiscoveryOptions plugin_discovery_options(const RuntimeSession& session) {
+  return ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = session.paths.ava_config_dir / "plugins",
+                                             .project_plugins_dir = session.workspace_dir / ".ava" / "plugins"};
+}
+
+std::filesystem::path plugin_enablement_file(const RuntimeSession& session) {
+  return session.paths.ava_state_dir / "plugin-enablement.json";
+}
+
+void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, const RuntimeSession& session) {
+  if (auto index = find_item_index(items, "/connect")) {
+    auto& item = items[*index];
+    if (!session.model.provider_id.empty()) {
+      add_completion(item, 0, session.model.provider_id,
+                     ava::config::provider_display_name(session.model.provider_id) + " (current)", "Providers");
+    }
+    for (const auto& profile : ava::config::builtin_provider_profiles()) {
+      auto description = profile.display_name;
+      if (!profile.connect_detail.empty()) description += " - " + profile.connect_detail;
+      add_completion(item, 0, profile.provider_id, std::move(description), "Providers");
+    }
+    add_completion(item, 1, "api-key", "Store an API key credential", "Credential");
+    add_completion(item, 1, "oauth", "Store an OAuth bearer token credential", "Credential");
+  }
+
+  if (auto index = find_item_index(items, "/models")) {
+    auto& item = items[*index];
+    const auto providers = ava::provider::builtin_provider_registry();
+    if (auto registry = ava::config::load_model_registry(session.paths)) {
+      for (const auto& model : effective_models(*registry)) {
+        const auto registered = providers.contains(model.provider_id);
+        add_completion(item, 0, model.provider_id + "/" + model.model_id,
+                       model_completion_description(model, registered), "Models", {}, false, registered,
+                       registered ? "" : "provider is not registered");
+        add_completion(item, 0, model.model_id, model.provider_id + "/" + model.display_name, "Models", {}, false,
+                       registered, registered ? "" : "provider is not registered");
+      }
+    }
+  }
+
+  if (auto index = find_item_index(items, "/sessions")) {
+    auto& item = items[*index];
+    if (auto sessions = ava::session::SessionStore::list_sessions(session.workspace_dir, session.paths.sessions_dir)) {
+      for (const auto& summary : *sessions) {
+        auto description = "entries=" + std::to_string(summary.entry_count);
+        if (!summary.last_updated.empty()) description += " updated=" + summary.last_updated;
+        add_completion(item, 0, summary.session_id, std::move(description), "Sessions", {}, false);
+      }
+    }
+  }
+
+  if (auto index = find_item_index(items, "/context")) {
+    auto& item = items[*index];
+    for (const auto& source : session.context_sources) {
+      add_completion(item, 0, source.path.generic_string(), std::to_string(source.byte_count) + " bytes", "Context",
+                     {}, false);
+    }
+  }
+
+  if (auto index = find_item_index(items, "/mcp")) {
+    auto& item = items[*index];
+    for (const auto& subcommand : {"list", "inspect", "tools", "restart"}) {
+      add_completion(item, 0, subcommand, "MCP command", "MCP");
+    }
+    if (auto config = ava::mcp::load_mcp_config(mcp_config_options(session))) {
+      for (const auto& server : config->servers) {
+        const auto description = server.name.empty() ? std::string("configured MCP server") : server.name;
+        for (const auto& subcommand : {"inspect", "tools", "restart"}) {
+          add_completion(item, 1, server.id, description, "MCP", {subcommand});
+        }
+      }
+    }
+  }
+
+  const auto diagnostics =
+      ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session),
+                                              session.workspace_dir);
+  if (auto index = find_item_index(items, "/plugins")) {
+    auto& item = items[*index];
+    for (const auto& subcommand :
+         {"list", "inspect", "enable", "disable", "validate", "failures", "prompts", "prompt", "skills", "skill"}) {
+      add_completion(item, 0, subcommand, "Plugin command", "Plugins");
+    }
+    for (const auto& status : diagnostics.plugins) {
+      const auto& manifest = status.plugin.manifest;
+      auto description = manifest.name;
+      if (!status.enabled) description += " (disabled)";
+      for (const auto& subcommand : {"inspect", "enable", "disable", "prompts", "prompt", "skills", "skill"}) {
+        add_completion(item, 1, manifest.id, description, "Plugins", {subcommand});
+      }
+      for (const auto& prompt : manifest.contributes.prompts) {
+        add_completion(item, 2, prompt.name, prompt.description, "Prompts", {"prompt", manifest.id});
+      }
+      for (const auto& skill : manifest.contributes.skills) {
+        add_completion(item, 2, skill.name, skill.description, "Skills", {"skill", manifest.id});
+      }
+    }
+  }
+
+  if (auto index = find_item_index(items, "/plugin")) {
+    auto& item = items[*index];
+    add_completion(item, 0, "run", "Run an enabled plugin command", "Plugins");
+    for (const auto& status : diagnostics.plugins) {
+      const auto& manifest = status.plugin.manifest;
+      add_completion(item, 1, manifest.id, status.enabled ? manifest.name : manifest.name + " (disabled)", "Plugins",
+                     {"run"}, true, status.enabled, status.enabled ? "" : "plugin is disabled");
+      for (const auto& command : manifest.contributes.commands) {
+        add_completion(item, 2, command.name, command.description, "Plugin commands", {"run", manifest.id});
+      }
+    }
+  }
+}
+
+}  // namespace
+
+std::vector<tui::SlashCommandItem> command_catalog_slash_items(const std::vector<CommandHotkey>& hotkeys) {
+  std::vector<tui::SlashCommandItem> items;
+  items.reserve(command_catalog().size());
+  for (const auto& entry : command_catalog()) {
+    std::string key_display;
+    if (entry.command == "/mode") key_display = hotkeys_for_action(hotkeys, "mode_toggle");
+    if (entry.command == "/details") key_display = hotkeys_for_action(hotkeys, "details_toggle");
+    if (entry.command == "/quit") key_display = hotkeys_for_action(hotkeys, "exit");
+    items.push_back(tui::SlashCommandItem{.command = entry.command,
+                                          .description = entry.description,
+                                          .hint = entry.hint,
+                                          .category = entry.category,
+                                          .aliases = entry.aliases,
+                                          .key_display = std::move(key_display),
+                                          .enabled = entry.enabled,
+                                          .disabled_reason = entry.disabled_reason});
+  }
+  return items;
+}
+
+std::vector<tui::SlashCommandItem> command_catalog_slash_items(const RuntimeSession& session,
+                                                               const std::vector<CommandHotkey>& hotkeys) {
+  auto items = command_catalog_slash_items(hotkeys);
+  add_backend_argument_completions(items, session);
+  return items;
+}
+
+}  // namespace ava::app

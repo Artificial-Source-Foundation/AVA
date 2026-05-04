@@ -69,6 +69,7 @@ struct RuntimeRunOptions {
   bool openai_oauth = false;
   std::string openai_account_id;
   bool stream = true;
+  bool enable_transport_retries = false;
   RuntimeEventSink event_sink = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;

@@ -19,7 +19,7 @@ Print mode accepts an optional prompt argument after `--print`/`-p`. If no promp
 <stdin content>
 ```
 
-Text output is the default. In text output, stdout contains the final assistant text only; diagnostics, tool progress, and errors go to stderr. JSONL output is selected with `--json` or `--output json`; stdout contains serialized event envelopes and ends with either a `done` or `error` event for turns that reach the runtime. Credentials and startup failures are reported on stderr.
+Text output is the default. In text output, stdout contains the final assistant text only; diagnostics, tool progress, and errors go to stderr. JSONL output is selected with `--json` or `--output json`; stdout contains serialized event envelopes and ends with `done`, `canceled`, or `error` for turns that reach the runtime. Credentials and startup failures are reported on stderr.
 
 `--no-session` is not implemented because the shared runtime currently opens a session for every turn. Sessionless print mode is deferred in the product plan until the runtime supports it directly.
 
@@ -78,7 +78,7 @@ Envelope fields:
 - `run_id`, `turn_id`, `message_id`, `request_id`, `correlation_id`: optional correlation metadata. RPC prompt and command events include `request_id` for the client request that caused the event.
 - `name`: event name.
 - `payload`: event-specific object. Payloads are intentionally minimal and must not require clients to parse session JSONL internals.
-- `type` and documented legacy runtime fields such as `text`, `tool`, `status`, `category`, `message`, and `stop_reason`: compatibility aliases for the pre-envelope flat event shape. New clients should prefer `name` and `payload`; new payload fields are not automatically promoted to the top level.
+- `type` and documented runtime fields such as `text`, `tool`, `status`, `category`, `message`, `stop_reason`, `trigger`, `reason`, and small counters: compatibility aliases for the pre-envelope flat event shape. New clients should prefer `name` and `payload`; unknown future payload fields are not automatically promoted to the top level.
 
 Current event names:
 
@@ -90,7 +90,13 @@ Current event names:
 - `reasoning_start`, `reasoning_delta`, `reasoning_end`: provider-neutral reasoning lifecycle events for models that expose visible thinking/reasoning. Payloads may include bounded `text` deltas, `reasoning_format`, `reasoning_redacted`, and `reasoning_signature_present`; they never expose raw provider verification signatures or opaque redacted-thinking payloads.
 - `assistant_message`: final assistant text for a completed turn.
 - `tool_start`: tool call began; includes `call_id`, `tool`, and a safe argument summary when available.
+- `tool_progress`: tool progress or partial result update; includes `call_id`, `tool`, `status`, and bounded `text` when available.
 - `tool_result`: tool call completed; includes `call_id`, `tool`, `status`, and a safe result summary when available.
+- `compaction_start`, `compaction_end`: provider-backed compaction lifecycle events. Payloads include `trigger`, `attempt`, `max_attempts`, and known token/summary byte counters when available.
+- `retry`: bounded backend retry lifecycle event. Payloads include `attempt`, `max_attempts`, and `delay_ms` when the backend retry path has those values. Provider transport retries use `trigger:"provider_transport"` with provider-neutral reasons such as `rate_limited`, `transient`, or `transport_io`; context-overflow retries use `reason:"context_overflow"`; stale compaction snapshot retries use `reason:"stale_compaction_snapshot"`.
+- `retry_tick`: backend retry countdown tick emitted while a bounded retry delay is sleeping. Payloads include `remaining_ms` plus the same retry correlation metadata where available. Clients should treat it as status/progress, not a final failure.
+- `cancel_requested`: RPC cancel request was accepted. Payload includes `active_run`, `cleared_steer`, `cleared_follow_up`, and the active prompt request id when one exists.
+- `canceled`: terminal event for a cooperatively canceled runtime turn.
 - `error`: runtime, provider, or tool boundary failure; includes `category`, `message`, and optional `details`.
 - `done`: terminal event for a successful turn; includes `stop_reason` and small counters when available.
 - `steer_queued`, `steer_applied`, `steer_skipped`: RPC steering queue lifecycle events. Payloads include `message` and skipped events include `reason`.
@@ -134,7 +140,7 @@ Prompt turn:
 {"id":"1","type":"prompt","message":"hello"}
 ```
 
-AVA starts the prompt turn asynchronously inside the RPC session, keeps reading stdin while it runs, streams normal runtime event envelopes (`session_start`, `user_message`, streaming `message_update`/`message_end`/`provider_event`, final `assistant_message`, tool events, `done`/`error`) to stdout, then writes exactly one RPC response with `final_text`, `stop_reason`, `provider_iterations`, `tool_calls`, and `session_id` on success or `success:false` on failure. Failures before runtime startup, such as missing auth, may return only the `success:false` RPC response. Prompt event envelopes include the prompt command id as `request_id`. Only one prompt may be active per RPC session; a second `prompt` while one is active returns an in-band error. Prompt requests require credentials for the active session provider unless the embedding test harness supplies runtime credentials.
+AVA starts the prompt turn asynchronously inside the RPC session, keeps reading stdin while it runs, streams normal runtime event envelopes (`session_start`, `user_message`, streaming `message_update`/`message_end`/`provider_event`, final `assistant_message`, tool events, compaction/retry events, retry countdown ticks, and `done`/`canceled`/`error`) to stdout, then writes exactly one RPC response with `final_text`, `stop_reason`, `provider_iterations`, `tool_calls`, and `session_id` on success or `success:false` on failure. Failures before runtime startup, such as missing auth, may return only the `success:false` RPC response. Prompt event envelopes include the prompt command id as `request_id`. Only one prompt may be active per RPC session; a second `prompt` while one is active returns an in-band error. Prompt requests require credentials for the active session provider unless the embedding test harness supplies runtime credentials.
 
 Steer an active prompt:
 
@@ -160,7 +166,7 @@ Cancel:
 {"id":"2","type":"cancel"}
 ```
 
-Sets the RPC session cancel flag and returns `{"cancel_requested":true,"active_run":true|false,"cleared_steer":N,"cleared_follow_up":N}`. When a prompt is active, pending permission/question resolver waits are unblocked fail-closed, queued steering/follow-up messages are cleared, skipped queue events are emitted, the cancel command response is written, and then queued follow-up commands receive `success:false` canceled responses. RPC clients must correlate responses by `id`: active prompt terminal events or the active prompt response may interleave with the cancel response because cancellation is observed by the prompt worker at cooperative runtime boundaries. Provider transport calls are not interrupted mid-request yet, so cancellation may complete after the in-flight provider call returns; this is the 1.0 cooperative provider boundary, while direct provider transport interruption remains hardening work. If RPC stdin reaches EOF while a prompt worker exists, AVA marks input closed, requests cancellation, clears queued steering/follow-up messages, cancels pending resolvers, and prevents queued follow-ups from starting after client disconnect.
+Sets the RPC session cancel flag, emits `cancel_requested`, and returns `{"cancel_requested":true,"active_run":true|false,"cleared_steer":N,"cleared_follow_up":N}`. When a prompt is active, pending permission/question resolver waits are unblocked fail-closed, queued steering/follow-up messages are cleared, skipped queue events are emitted, the cancel command response is written, and then queued follow-up commands receive `success:false` canceled responses. The active prompt emits terminal `canceled` when the runtime observes the cancellation. RPC clients must correlate responses by `id`: active prompt terminal events or the active prompt response may interleave with the cancel response because cancellation is observed by the prompt worker at cooperative runtime boundaries. Provider transport calls are not interrupted mid-request yet, so cancellation may complete after the in-flight provider call returns; this is the 1.0 cooperative provider boundary, while direct provider transport interruption remains hardening work. If RPC stdin reaches EOF while a prompt worker exists, AVA marks input closed, requests cancellation, clears queued steering/follow-up messages, cancels pending resolvers, and prevents queued follow-ups from starting after client disconnect.
 
 State:
 
@@ -258,7 +264,7 @@ Backend slash-command equivalents:
 
 These dispatch `/compact`, `/export`, `/context`, `/plugins`, `/plugin run`, and `/mcp` through the shared backend command dispatcher. Plugin commands require `plugin_id` for plugin-specific operations, `path` for validate, and `name` for prompt/skill retrieval or command execution. MCP server commands require `server_id` except `list_mcp_servers`. Responses include `handled`, `quit`, `output` (array of strings), and `text` (joined output).
 
-`compact` requires credentials for the active session provider and asks that provider to generate the compaction summary before appending a compaction boundary. It returns `success:false` for missing auth, provider summary failure, empty or oversized summaries, stale-session append failures, or active-run conflicts. On success, the recorded compaction entry contains summary metadata such as trigger, estimated tokens, threshold, retained recent context, and keep-recent settings.
+`compact` requires credentials for the active session provider and asks that provider to generate the compaction summary before appending a compaction boundary. RPC compact emits `compaction_start` and `compaction_end` events around successful provider-backed compaction; stale-session retries emit `retry` with `reason:"stale_compaction_snapshot"` and bounded `attempt`/`max_attempts` metadata. It returns `success:false` for missing auth, provider summary failure, empty or oversized summaries, stale-session append failures, or active-run conflicts. On success, the recorded compaction entry contains summary metadata such as trigger, estimated tokens, threshold, retained recent context, and keep-recent settings.
 
 Most plugin RPC commands only discover, inspect, validate, read static prompt/skill files, or record enablement state. `run_plugin_command` starts the enabled plugin entrypoint, emits command tool events, and requires `plugin.execute` plus `plugin.command.run` permission approval. `list_mcp_tools` starts a fresh stdio MCP process for discovery, emits `mcp_tools` tool events, and requires `mcp.server.launch` plus `mcp.server.connect` permission approval. `restart_mcp_server` is informational because current stdio MCP servers are launched per discovery or tool call, not kept resident.
 
@@ -270,6 +276,12 @@ When an active prompt reaches a backend permission prompt, RPC emits a resolver 
 
 ```json
 {"schema_version":1,"name":"permission_requested","type":"permission_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","operation":"read","mode":"build","target_path":"/workspace/file","command":"","tool_name":"read_file","reason":"..."}}
+```
+
+File mutation prompts may include a backend-provided unified diff preview. Clients must treat `diff_preview` as display data only and still reply through the resolver decision:
+
+```json
+{"schema_version":1,"name":"permission_requested","type":"permission_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","operation":"edit","mode":"build","target_path":"/workspace/file","command":"","tool_name":"edit_file","reason":"...","diff_preview":"--- /workspace/file\n+++ /workspace/file\n@@ -1,1 +1,1 @@\n-old\n+new\n","diff_truncated":false}}
 ```
 
 Permission `operation` values are backend policy categories such as `read`, `search`, `edit`, `bash`, `network.fetch`, `lsp.query`, `plugin.execute`, `plugin.tool.call`, `plugin.command.run`, `plugin.event.observe`, `mcp.server.launch`, `mcp.server.connect`, and `mcp.tool.call`. Network fetch prompts use an empty `target_path` and carry the URL in `command`:
@@ -285,7 +297,13 @@ The event top-level `request_id` remains the prompt command id. The client must 
 {"id":"perm_reply_2","type":"permission_reply","request_id":"permission_...","correlation_id":"prompt_req","decision":"deny"}
 ```
 
-`decision` must be exactly `allow` or `deny`. Missing, unknown, or wrong-correlation resolver ids return in-band errors. Cancellation unblocks pending permission requests fail-closed.
+`decision` must be exactly `allow` or `deny`. A successful reply emits `permission_replied` before the in-band response:
+
+```json
+{"schema_version":1,"name":"permission_replied","type":"permission_replied","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","decision":"allow"}}
+```
+
+Missing, unknown, or wrong-correlation resolver ids return in-band errors. Cancellation unblocks pending permission requests fail-closed.
 
 When an active prompt reaches the `question` tool, RPC emits:
 
@@ -298,6 +316,12 @@ The client may answer with custom text when `allow_custom` is true, or one valid
 ```json
 {"id":"question_reply_1","type":"question_reply","request_id":"question_...","correlation_id":"prompt_req","answer":"text"}
 {"id":"question_reply_2","type":"question_reply","request_id":"question_...","correlation_id":"prompt_req","selected":"yes"}
+```
+
+Successful replies emit `question_replied` with the submitted value before the in-band response:
+
+```json
+{"schema_version":1,"name":"question_replied","type":"question_replied","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"question_...","selected":"yes"}}
 ```
 
 Missing, unknown, or wrong-correlation resolver ids; replies without exactly one of `answer` or `selected`; custom answers when `allow_custom` is false; and unknown `selected` values return in-band errors. Cancellation unblocks pending question requests with a canceled error.

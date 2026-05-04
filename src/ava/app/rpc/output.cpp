@@ -1,0 +1,91 @@
+#include "ava/app/rpc/output.h"
+
+#include <utility>
+
+#include "ava/app/rpc/protocol.h"
+#include "ava/app/rpc/serialization.h"
+#include "ava/core/ids.h"
+
+namespace ava::app::rpc {
+
+ava::core::VoidResult write_record(RpcOutput& output, std::string_view record) {
+  std::unique_lock lock(output.mutex);
+  output.out << record;
+  output.out.flush();
+  if (!output.out) {
+    auto on_write_failure = output.on_write_failure;
+    lock.unlock();
+    if (on_write_failure) on_write_failure();
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write RPC JSONL record"));
+  }
+  return {};
+}
+
+ava::core::VoidResult write_success(RpcOutput& output, std::string_view id, std::string_view result_json) {
+  return write_record(output, ava::app::serialize_rpc_success_jsonl(id, result_json));
+}
+
+ava::core::VoidResult write_error(RpcOutput& output, std::string_view id, const ava::core::Error& error) {
+  return write_record(output, ava::app::serialize_rpc_error_jsonl(id, error));
+}
+
+void subscribe_event_envelope_writer(EventBus& bus, RpcOutput& output) {
+  bus.subscribe([&output](const EventEnvelope& envelope) {
+    return write_record(output, serialize_event_envelope_jsonl(envelope));
+  });
+}
+
+EventEnvelopeContext rpc_event_context(std::string_view request_id) {
+  const auto id = std::string(request_id);
+  EventEnvelopeContext context;
+  context.request_id = id;
+  context.correlation_id = id;
+  return context;
+}
+
+std::string session_id_snapshot(const RuntimeSession& session, std::mutex& session_mutex) {
+  std::lock_guard lock(session_mutex);
+  return session.store.session_id();
+}
+
+EventEnvelope resolver_event_envelope(std::string name, std::string request_id, std::string correlation_id,
+                                      std::string session_id, std::string payload_json) {
+  EventEnvelope envelope;
+  envelope.schema_version = 1;
+  envelope.event_id = ava::core::make_id("event");
+  envelope.timestamp = ava::session::now_timestamp();
+  envelope.session_id = std::move(session_id);
+  envelope.request_id = std::move(request_id);
+  envelope.correlation_id = std::move(correlation_id);
+  envelope.name = std::move(name);
+  envelope.payload_json = std::move(payload_json);
+  return envelope;
+}
+
+ava::core::VoidResult write_queue_event(RpcOutput& output, const RuntimeSession& session, std::mutex& session_mutex,
+                                        std::string_view name, const QueuedRpcMessage& queued,
+                                        std::string_view reason) {
+  auto envelope = resolver_event_envelope(std::string(name), queued.request_id, queued.correlation_id,
+                                          session_id_snapshot(session, session_mutex),
+                                          queued_message_payload_json(queued.message, reason));
+  return write_record(output, serialize_event_envelope_jsonl(envelope));
+}
+
+ava::core::VoidResult write_skipped_queue_events(RpcOutput& output, const RuntimeSession& session,
+                                                 std::mutex& session_mutex, const ClearedRpcQueues& cleared,
+                                                 std::string_view reason) {
+  for (const auto& queued : cleared.steering_messages) {
+    if (auto written = write_queue_event(output, session, session_mutex, "steer_skipped", queued, reason); !written) {
+      return written;
+    }
+  }
+  for (const auto& queued : cleared.follow_up_messages) {
+    if (auto written = write_queue_event(output, session, session_mutex, "follow_up_skipped", queued, reason);
+        !written) {
+      return written;
+    }
+  }
+  return {};
+}
+
+}  // namespace ava::app::rpc

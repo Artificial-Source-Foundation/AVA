@@ -23,6 +23,8 @@
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_dispatcher.h"
+#include "ava/app/command_catalog.h"
+#include "ava/app/command_palette.h"
 #include "ava/app/commands.h"
 #include "ava/app/connect_openai.h"
 #include "ava/app/events.h"
@@ -31,6 +33,7 @@
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime_retry.h"
 #include "ava/config/auth.h"
 #include "ava/config/model_config.h"
 #include "ava/config/openai_oauth.h"
@@ -279,6 +282,17 @@ std::string read_file_call_sse(std::string_view path = "note.txt") {
          "\\\"" +
          ava::core::json::escape(path) +
          "\\\"}\"}\n\n"
+         "data: [DONE]\n\n";
+}
+
+std::string write_file_call_sse(std::string_view path, std::string_view content) {
+  const auto args =
+      "{\"path\":\"" + ava::core::json::escape(path) + "\",\"content\":\"" + ava::core::json::escape(content) + "\"}";
+  return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_write\",\"name\":\"write_file\"}\n\n"
+         "data: "
+         "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_write\",\"delta\":\"" +
+         ava::core::json::escape(args) +
+         "\"}\n\n"
          "data: [DONE]\n\n";
 }
 
@@ -569,6 +583,67 @@ void test_app_run_prompt_emits_events() {
   expect(entries && entries->size() == 3 && (*entries)[1].type == ava::session::EntryType::UserMessage &&
              (*entries)[2].type == ava::session::EntryType::AssistantMessage,
          "runtime run_prompt persists user and assistant entries in the runtime session");
+}
+
+void test_app_run_prompt_emits_provider_retry_events_when_enabled() {
+  const auto root = temp_root() / "app-runtime-provider-retry";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  const auto paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime provider retry test opens session");
+  if (!session) return;
+
+  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {ava::provider::HttpResponse{
+           .status_code = 429, .headers = {{"Retry-After", "0"}}, .body = "{\"error\":{\"message\":\"rate limited\"}}"},
+       sse_response(final_text_sse("retried answer"))});
+  std::vector<ava::app::RuntimeEvent> events;
+  ava::app::RuntimeRunOptions run_options;
+  run_options.access_token = "token";
+  run_options.enable_transport_retries = true;
+  run_options.event_sink = [&events](const ava::app::RuntimeEvent& event) {
+    events.push_back(event);
+    return ava::core::VoidResult{};
+  };
+
+  auto result = ava::app::run_prompt(*session, "retry runtime", provider, transport, run_options);
+  expect(result && result->final_text == "retried answer" && transport.requests().size() == 2,
+         "runtime run_prompt retries transient provider transport failures when enabled");
+  expect(std::ranges::any_of(events,
+                             [](const ava::app::RuntimeEvent& event) {
+                               return event.type == ava::app::RuntimeEventType::Retry &&
+                                      event.trigger == "provider_transport" && event.reason == "rate_limited" &&
+                                      event.attempt == 2 && event.max_attempts == 3 && event.delay_ms == 0 &&
+                                      event.text == "HTTP status 429";
+                             }),
+         "runtime run_prompt emits provider retry metadata through the shared event sink");
+  events.clear();
+  auto retry_options = ava::app::runtime::runtime_retry_options(*session, run_options);
+  expect(retry_options.on_retry != nullptr, "runtime retry options expose provider retry event mapping");
+  if (retry_options.on_retry) {
+    auto emitted_tick = retry_options.on_retry(ava::provider::RetryOptions::Event{.attempt = 2,
+                                                                                  .max_attempts = 3,
+                                                                                  .delay_ms = 1000,
+                                                                                  .remaining_ms = 500,
+                                                                                  .reason = "rate_limited",
+                                                                                  .status_code = 429,
+                                                                                  .streaming = true,
+                                                                                  .countdown_tick = true});
+    expect(emitted_tick.has_value() && events.size() == 1 && events[0].type == ava::app::RuntimeEventType::RetryTick &&
+               events[0].trigger == "provider_transport" && events[0].remaining_ms == 500 &&
+               events[0].delay_ms == 1000 && events[0].status == "streaming",
+           "runtime retry options map provider countdown ticks to explicit backend retry_tick events");
+  }
 }
 
 void test_app_run_prompt_emits_tool_progress_and_session_spill() {
@@ -1352,6 +1427,8 @@ void test_app_command_dispatcher() {
   write_app_test_file(workspace / ".ava" / "plugins" / "com.example.project" / "plugin.json",
                       app_test_plugin_manifest_json("com.example.project", "Project Plugin"));
   write_app_test_file(workspace / ".ava" / "plugins" / "com.example.bad" / "plugin.json", "{not-json");
+  write_app_test_file(workspace / ".ava" / "mcp.json",
+                      app_test_mcp_config_json("fs", "Filesystem Server", AVA_FAKE_MCP_SERVER_PATH));
 
   ava::app::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
@@ -1363,10 +1440,12 @@ void test_app_command_dispatcher() {
   if (!session) return;
   const auto plan_system_prompt = session->system_prompt;
 
-  expect(ava::app::is_backend_command("/model") && ava::app::is_backend_command("/models") &&
-             ava::app::is_backend_command("/hotkeys") && ava::app::is_backend_command("/details") &&
-             ava::app::is_backend_command("/plugins"),
-         "command catalog classifies disabled aliases and hotkeys as backend commands");
+  expect(
+      ava::app::is_backend_command("/model") && ava::app::is_backend_command("/models") &&
+          ava::app::is_backend_command("/hotkeys") && ava::app::is_backend_command("/details") &&
+          ava::app::is_backend_command("/thinking") && ava::app::is_backend_command("/status") &&
+          ava::app::is_backend_command("/plugins"),
+      "command catalog classifies display toggles, status aliases, disabled aliases, and hotkeys as backend commands");
 
   const std::vector<ava::app::CommandHotkey> custom_hotkeys = {
       ava::app::CommandHotkey{.action = "submit", .description = "Submit custom", .keys = "Ctrl+M"},
@@ -1381,6 +1460,11 @@ void test_app_command_dispatcher() {
   expect(details && details->handled && !details->output.empty() &&
              details->output[0].find("TUI display toggle") != std::string::npos,
          "command dispatcher recognizes /details without inventing backend tool metadata");
+  auto thinking = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/thinking"});
+  expect(thinking && thinking->handled && !thinking->output.empty() &&
+             thinking->output[0].find("TUI display toggle") != std::string::npos &&
+             thinking->output[0].find("does not change provider reasoning mode") != std::string::npos,
+         "command dispatcher recognizes /thinking as display-only instead of changing backend reasoning mode");
   auto help = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/help", .hotkeys = custom_hotkeys});
   expect(help && help->handled && !help->output.empty() && help->output[0].find("/hotkeys") != std::string::npos &&
              help->output[0].find("/connect") != std::string::npos &&
@@ -1415,6 +1499,35 @@ void test_app_command_dispatcher() {
   expect(plugins_after_enable && plugins_after_enable->handled && !plugins_after_enable->output.empty() &&
              plugins_after_enable->output[0].find("com.example.project  enabled") != std::string::npos,
          "command dispatcher /plugins list reflects enablement state");
+  const auto slash_items = ava::app::command_catalog_slash_items(*session, custom_hotkeys);
+  auto find_slash_item = [&slash_items](std::string_view command) -> const ava::tui::SlashCommandItem* {
+    for (const auto& item : slash_items) {
+      if (item.command == command) return &item;
+    }
+    return nullptr;
+  };
+  auto has_completion = [](const ava::tui::SlashCommandItem* item, std::size_t argument_index, std::string_view value,
+                           std::vector<std::string> previous_args = {}) {
+    return item != nullptr && std::ranges::any_of(item->argument_completions, [&](const auto& completion) {
+             return completion.argument_index == argument_index && completion.value == value &&
+                    completion.required_previous_args == previous_args;
+           });
+  };
+  const auto* connect_item = find_slash_item("/connect");
+  const auto* models_item = find_slash_item("/models");
+  const auto* sessions_item = find_slash_item("/sessions");
+  const auto* context_item = find_slash_item("/context");
+  const auto* mcp_item = find_slash_item("/mcp");
+  const auto* plugin_item = find_slash_item("/plugin");
+  expect(has_completion(connect_item, 0, "openai") && has_completion(connect_item, 1, "api-key") &&
+             has_completion(models_item, 0, "openai/gpt-5.5") &&
+             has_completion(sessions_item, 0, session->store.session_id()) &&
+             has_completion(context_item, 0, (workspace / "AGENTS.md").generic_string()) &&
+             has_completion(mcp_item, 1, "fs", {"inspect"}) &&
+             has_completion(plugin_item, 1, "com.example.project", {"run"}) &&
+             has_completion(plugin_item, 2, "todo", {"run", "com.example.project"}),
+         "command catalog argument completions are populated from backend provider, model, session, context, MCP, and "
+         "plugin metadata");
   auto disable_plugin =
       ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins disable com.example.project"});
   expect(disable_plugin && disable_plugin->handled && !disable_plugin->output.empty() &&
@@ -1443,12 +1556,26 @@ void test_app_command_dispatcher() {
              models->output[0].find("reasoning format") != std::string::npos &&
              models->output[0].find("Ctrl+T cycles") != std::string::npos,
          "command dispatcher lists provider/model reasoning metadata and documents TUI reasoning cycling");
+  auto filtered_models = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/models gpt-5.5"});
+  expect(filtered_models && filtered_models->handled && !filtered_models->output.empty() &&
+             filtered_models->output[0].find("filter gpt-5.5") != std::string::npos &&
+             filtered_models->output[0].find("gpt-5.5") != std::string::npos,
+         "command dispatcher /models accepts backend-backed autocomplete query text without switching models");
 
   auto context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context"});
   expect(context && context->handled && !context->output.empty() &&
              context->output[0].find("workspace") != std::string::npos &&
              context->output[0].find("AGENTS.md") != std::string::npos,
          "command dispatcher /context reports loaded context metadata");
+  auto filtered_context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context AGENTS"});
+  expect(filtered_context && filtered_context->handled && !filtered_context->output.empty() &&
+             filtered_context->output[0].find("AGENTS.md") != std::string::npos,
+         "command dispatcher /context accepts backend context-source query text");
+  auto filtered_sessions =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions " + session->store.session_id()});
+  expect(filtered_sessions && filtered_sessions->handled && !filtered_sessions->output.empty() &&
+             filtered_sessions->output[0].find(session->store.session_id()) != std::string::npos,
+         "command dispatcher /sessions accepts backend session-id query text");
 
   auto mode = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/mode"});
   expect(mode && mode->handled && session->mode == ava::agent::Mode::Build && !mode->output.empty() &&
@@ -1625,6 +1752,9 @@ void test_app_command_dispatcher() {
              stats->output[0].find("path:") == std::string::npos &&
              stats->output[0].find("export: /export   resume: ava --session ") != std::string::npos,
          "command dispatcher /stats renders compact session counts, usage, cost, and hints");
+  auto status = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/status"});
+  expect(status && status->handled && !status->output.empty() && status->output[0] == stats->output[0],
+         "command dispatcher /status aliases the backend-backed session stats surface");
 
   auto quit = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/quit"});
   expect(quit && quit->handled && quit->quit, "command dispatcher /quit requests shell exit");
@@ -2228,6 +2358,11 @@ void test_app_context_overflow_compacts_and_retries_once_successfully() {
        sse_response(final_text_sse("retry answer"))});
   ava::app::RuntimeRunOptions run_options;
   run_options.access_token = "token";
+  std::vector<ava::app::RuntimeEvent> events;
+  run_options.event_sink = [&events](const ava::app::RuntimeEvent& event) {
+    events.push_back(event);
+    return ava::core::VoidResult{};
+  };
 
   auto result = ava::app::run_prompt(*session, "overflow prompt", provider, transport, run_options);
   auto entries = session->store.load();
@@ -2237,6 +2372,25 @@ void test_app_context_overflow_compacts_and_retries_once_successfully() {
   expect(compaction && compaction->data_json.find("\"trigger\":\"context_overflow\"") != std::string::npos &&
              compaction->data_json.find("OVERFLOW SUMMARY") != std::string::npos,
          "context overflow retry appends a context_overflow compaction summary");
+  expect(std::ranges::any_of(events,
+                             [](const ava::app::RuntimeEvent& event) {
+                               return event.type == ava::app::RuntimeEventType::Retry &&
+                                      event.reason == "context_overflow" && event.attempt == 1 &&
+                                      event.max_attempts == 1;
+                             }) &&
+             std::ranges::any_of(events,
+                                 [](const ava::app::RuntimeEvent& event) {
+                                   return event.type == ava::app::RuntimeEventType::CompactionStart &&
+                                          event.trigger == "context_overflow" && event.attempt == 1 &&
+                                          event.max_attempts == 2;
+                                 }) &&
+             std::ranges::any_of(events,
+                                 [](const ava::app::RuntimeEvent& event) {
+                                   return event.type == ava::app::RuntimeEventType::CompactionEnd &&
+                                          event.summary_bytes == std::string("OVERFLOW SUMMARY").size() &&
+                                          event.attempt == 1 && event.max_attempts == 2;
+                                 }),
+         "context overflow retry emits backend lifecycle events for replaying TUI compaction and retry state");
   expect(transport.requests().size() == 3 &&
              transport.requests()[2].body.find("OVERFLOW SUMMARY") != std::string::npos &&
              transport.requests()[2].body.find("\"content\":\"overflow prompt\"") != std::string::npos &&
@@ -3511,6 +3665,8 @@ void test_app_rpc_command_responses_for_context_compact_export() {
              jsonl.find("com.example.rpcbad") != std::string::npos &&
              jsonl.find("\"id\":\"ctx\"") != std::string::npos && jsonl.find("AGENTS.md") != std::string::npos &&
              jsonl.find("\"id\":\"cmp\"") != std::string::npos &&
+             jsonl.find("\"name\":\"compaction_start\"") != std::string::npos &&
+             jsonl.find("\"name\":\"compaction_end\"") != std::string::npos &&
              jsonl.find("compaction summary recorded") != std::string::npos &&
              jsonl.find("\"id\":\"exp\"") != std::string::npos &&
              jsonl.find("# AVA Session Export") != std::string::npos &&
@@ -3586,6 +3742,8 @@ void test_app_rpc_cancel_affects_subsequent_prompt() {
   expect(transport.requests().empty(), "RPC cancel flag prevents subsequent prompt provider request");
   expect(jsonl.find("\"id\":\"cancel\"") != std::string::npos &&
              jsonl.find("\"cancel_requested\":true") != std::string::npos &&
+             jsonl.find("\"name\":\"cancel_requested\"") != std::string::npos &&
+             jsonl.find("\"name\":\"canceled\"") != std::string::npos &&
              jsonl.find("\"id\":\"prompt\"") != std::string::npos &&
              jsonl.find("agent loop canceled") != std::string::npos &&
              jsonl.find("\"success\":false") != std::string::npos,
@@ -3640,6 +3798,8 @@ void test_app_rpc_active_prompt_cancel_unblocks_pending_permission() {
   expect(result.has_value(), "RPC active cancel loop exits successfully");
   expect(
       jsonl.find("\"id\":\"cancel\"") != std::string::npos && jsonl.find("\"active_run\":true") != std::string::npos &&
+          jsonl.find("\"name\":\"cancel_requested\"") != std::string::npos &&
+          jsonl.find("\"name\":\"canceled\"") != std::string::npos &&
           jsonl.find("\"id\":\"p1\"") != std::string::npos && jsonl.find("agent loop canceled") != std::string::npos &&
           jsonl.find("\"success\":false") != std::string::npos,
       "RPC cancel is processed while prompt waits and prompt receives one canceled response");
@@ -4214,9 +4374,62 @@ void test_app_rpc_permission_reply_allow_and_deny_flows() {
     const auto jsonl = output_buffer.str();
     expect(result.has_value() && completed, "RPC permission reply loop exits successfully");
     expect(jsonl.find("\"id\":\"reply\"") != std::string::npos && jsonl.find("\"success\":true") != std::string::npos &&
-               jsonl.find("after " + decision_text) != std::string::npos,
-           "RPC permission " + decision_text + " reply unblocks the run and returns final response");
+               jsonl.find("after " + decision_text) != std::string::npos &&
+               jsonl.find("\"name\":\"permission_replied\"") != std::string::npos &&
+               jsonl.find("\"decision\":\"" + decision_text + "\"") != std::string::npos,
+           "RPC permission " + decision_text + " reply emits a reply event and unblocks the run");
   }
+}
+
+void test_app_rpc_permission_request_includes_mutation_diff_preview() {
+  const auto root = temp_root() / "app-rpc-permission-diff";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  const auto paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  const auto outside_path = root / "outside-created.txt";
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC permission diff test opens runtime session");
+  if (!session) return;
+
+  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response(write_file_call_sse(outside_path.generic_string(), "rpc new\n")),
+                                       sse_response(final_text_sse("after diff deny"))});
+  ava::app::RuntimeRunOptions runtime_options;
+  runtime_options.access_token = "token";
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult result;
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+
+  input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"write outside\"}\n");
+  const bool requested = output_buffer.wait_contains("\"diff_preview\"", std::chrono::seconds(2));
+  const auto resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
+  expect(requested && !resolver_request_id.empty(), "RPC permission diff test observes mutation diff preview");
+  input_buffer.push("{\"id\":\"reply\",\"type\":\"permission_reply\",\"request_id\":\"" + resolver_request_id +
+                    "\",\"correlation_id\":\"p1\",\"decision\":\"deny\"}\n");
+  const bool completed = output_buffer.wait_contains("after diff deny", std::chrono::seconds(2));
+  input_buffer.close();
+  rpc_thread.join();
+
+  const auto jsonl = output_buffer.str();
+  expect(result.has_value() && completed && !std::filesystem::exists(outside_path),
+         "RPC permission diff test completes after denied mutation without writing");
+  expect(jsonl.find("\"name\":\"permission_requested\"") != std::string::npos &&
+             jsonl.find("\"diff_preview\"") != std::string::npos && jsonl.find("+rpc new") != std::string::npos &&
+             jsonl.find("\"diff_truncated\":false") != std::string::npos &&
+             jsonl.find("\"name\":\"permission_replied\"") != std::string::npos &&
+             jsonl.find("\"decision\":\"deny\"") != std::string::npos,
+         "RPC permission request payload includes backend-provided unified diff preview and reply event");
 }
 
 void test_app_rpc_question_reply_flow() {
@@ -4261,8 +4474,10 @@ void test_app_rpc_question_reply_flow() {
   const auto jsonl = output_buffer.str();
   expect(result.has_value() && completed, "RPC question reply loop exits successfully");
   expect(jsonl.find("\"id\":\"reply\"") != std::string::npos && jsonl.find("\"success\":true") != std::string::npos &&
-             jsonl.find("question done") != std::string::npos,
-         "RPC question reply unblocks question tool and prompt returns final response");
+             jsonl.find("question done") != std::string::npos &&
+             jsonl.find("\"name\":\"question_replied\"") != std::string::npos &&
+             jsonl.find("\"answer\":\"custom ok\"") != std::string::npos,
+         "RPC question reply emits a reply event and unblocks question tool");
 }
 
 void test_app_rpc_question_reply_selected_option_flow() {
@@ -4314,8 +4529,10 @@ void test_app_rpc_question_reply_selected_option_flow() {
              jsonl.find("question_reply selected option is not valid") != std::string::npos,
          "RPC selected question reply rejects invalid selected option without resolving request");
   expect(jsonl.find("\"id\":\"reply\"") != std::string::npos && jsonl.find("\"success\":true") != std::string::npos &&
-             jsonl.find("selected question done") != std::string::npos,
-         "RPC selected question reply unblocks question tool and prompt returns final response");
+             jsonl.find("selected question done") != std::string::npos &&
+             jsonl.find("\"name\":\"question_replied\"") != std::string::npos &&
+             jsonl.find("\"selected\":\"yes\"") != std::string::npos,
+         "RPC selected question reply emits a reply event and unblocks question tool");
 }
 
 }  // namespace
@@ -4327,6 +4544,7 @@ void run_app_event_serialization_tests() { test_app_event_serialization(); }
 void run_app_runtime_tests() {
   test_app_runtime_open_session_and_context_prompt();
   test_app_run_prompt_emits_events();
+  test_app_run_prompt_emits_provider_retry_events_when_enabled();
   test_app_run_prompt_emits_tool_progress_and_session_spill();
   test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call();
   test_app_print_prompt_merging();
@@ -4385,6 +4603,7 @@ void run_app_runtime_tests() {
   test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch();
   test_app_rpc_permission_policy_auto_allows_before_resolver_event();
   test_app_rpc_permission_reply_allow_and_deny_flows();
+  test_app_rpc_permission_request_includes_mutation_diff_preview();
   test_app_rpc_question_reply_flow();
   test_app_rpc_question_reply_selected_option_flow();
 }

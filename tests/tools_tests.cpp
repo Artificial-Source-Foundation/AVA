@@ -362,19 +362,48 @@ void test_file_tools() {
              outside_write_without_resolver.error().format().find("resolution: no_resolver") != std::string::npos,
          "write_file fails closed for external ask decisions without writing");
 
-  int write_denials = 0;
+  std::vector<ava::permissions::PermissionPrompt> write_denials;
   ava::tools::ToolContext write_deny_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&write_denials](const ava::permissions::PermissionPrompt&)
+      .permission_resolver = [&write_denials](const ava::permissions::PermissionPrompt& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
-        ++write_denials;
+        write_denials.push_back(prompt);
         return ava::permissions::PermissionResolution::Deny;
       }};
   auto outside_write_denied = ava::tools::write_file(write_deny_context, outside_write_path, "bad");
-  expect(!outside_write_denied && write_denials == 1 && !std::filesystem::exists(outside_write_path) &&
+  expect(!outside_write_denied && write_denials.size() == 1 && !std::filesystem::exists(outside_write_path) &&
              outside_write_denied.error().format().find("resolution: deny") != std::string::npos,
          "write_file fails closed when resolver denies external writes");
+  if (!write_denials.empty()) {
+    expect(write_denials[0].operation == ava::permissions::Operation::EditFile &&
+               write_denials[0].diff_preview.find("+bad") != std::string::npos && !write_denials[0].diff_truncated,
+           "write_file includes backend-generated diff preview for denied new-file mutation prompts");
+  }
+
+  const auto outside_existing_write_path = temp_root() / "outside-existing-write.txt";
+  {
+    std::ofstream file(outside_existing_write_path, std::ios::binary | std::ios::trunc);
+    file << "external secret";
+  }
+  std::vector<ava::permissions::PermissionPrompt> existing_write_denials;
+  ava::tools::ToolContext existing_write_deny_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&existing_write_denials](const ava::permissions::PermissionPrompt& prompt)
+          -> ava::core::Result<ava::permissions::PermissionResolution> {
+        existing_write_denials.push_back(prompt);
+        return ava::permissions::PermissionResolution::Deny;
+      }};
+  auto existing_write_denied =
+      ava::tools::write_file(existing_write_deny_context, outside_existing_write_path, "replacement");
+  expect(!existing_write_denied && existing_write_denials.size() == 1 &&
+             read_text_file_for_test(outside_existing_write_path) == "external secret",
+         "write_file fails closed when resolver denies existing external writes");
+  if (!existing_write_denials.empty()) {
+    expect(existing_write_denials[0].diff_preview.empty(),
+           "write_file does not leak existing external file content into a diff before read approval");
+  }
 
   int write_fail_prompts = 0;
   ava::tools::ToolContext write_fail_context{
@@ -432,6 +461,33 @@ void test_file_tools() {
              outside_after_failed_edit->content == "outside content" &&
              outside_edit_failed.error().format().find("resolution: resolver_failed") != std::string::npos,
          "edit_file fails closed when resolver fails and leaves content unchanged");
+
+  std::vector<ava::permissions::PermissionPrompt> edit_diff_denials;
+  ava::tools::ToolContext edit_diff_deny_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&edit_diff_denials](const ava::permissions::PermissionPrompt& prompt)
+          -> ava::core::Result<ava::permissions::PermissionResolution> {
+        edit_diff_denials.push_back(prompt);
+        if (prompt.operation == ava::permissions::Operation::ReadFile) {
+          return ava::permissions::PermissionResolution::Allow;
+        }
+        return ava::permissions::PermissionResolution::Deny;
+      }};
+  auto outside_edit_diff_denied = ava::tools::edit_file(edit_diff_deny_context, outside_path, "outside", "external");
+  auto outside_after_diff_denied_edit = ava::tools::read_file(allow_context, outside_path);
+  expect(!outside_edit_diff_denied && edit_diff_denials.size() == 2 && outside_after_diff_denied_edit &&
+             outside_after_diff_denied_edit->content == "outside content" &&
+             outside_edit_diff_denied.error().format().find("resolution: deny") != std::string::npos,
+         "edit_file leaves content unchanged when external edit permission is denied after read approval");
+  if (edit_diff_denials.size() >= 2) {
+    expect(edit_diff_denials[0].operation == ava::permissions::Operation::ReadFile &&
+               edit_diff_denials[1].operation == ava::permissions::Operation::EditFile &&
+               edit_diff_denials[1].diff_preview.find("-outside content") != std::string::npos &&
+               edit_diff_denials[1].diff_preview.find("+external content") != std::string::npos &&
+               !edit_diff_denials[1].diff_truncated,
+           "edit_file includes backend-generated diff preview before denied external edit approval");
+  }
 
   std::vector<ava::permissions::Operation> edit_allow_prompts;
   ava::tools::ToolContext edit_allow_context{
@@ -1110,35 +1166,35 @@ void test_webfetch_tool() {
         expect(prompt.command == "https://example.com/page", "webfetch resolver receives URL as command target");
         return ava::permissions::PermissionResolution::Allow;
       }};
-  auto fetched = ava::tools::webfetch(
-      context, "https://example.com/page",
-      ava::tools::WebFetchOptions{.max_bytes = 3, .timeout_ms = 5000, .transport = &transport});
+  auto fetched =
+      ava::tools::webfetch(context, "https://example.com/page",
+                           ava::tools::WebFetchOptions{.max_bytes = 3, .timeout_ms = 5000, .transport = &transport});
   expect(fetched && fetched->content == "abc" && fetched->truncated && fetched->total_bytes == 6 &&
-              fetched->output_bytes == 3 && fetched->content_type == "text/plain; charset=utf-8" && prompts == 1 &&
-              transport.requests.size() == 1 && transport.requests[0].method == "GET" &&
-              transport.requests[0].timeout_ms == 5000 && !transport.requests[0].follow_redirects &&
-              transport.requests[0].include_response_headers,
-          "webfetch requires permission and bounds fetched text content");
+             fetched->output_bytes == 3 && fetched->content_type == "text/plain; charset=utf-8" && prompts == 1 &&
+             transport.requests.size() == 1 && transport.requests[0].method == "GET" &&
+             transport.requests[0].timeout_ms == 5000 && !transport.requests[0].follow_redirects &&
+             transport.requests[0].include_response_headers,
+         "webfetch requires permission and bounds fetched text content");
 
   StaticTransport unused_transport(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "unused"});
-  auto invalid_scheme = ava::tools::webfetch(
-      context, "file:///etc/passwd", ava::tools::WebFetchOptions{.transport = &unused_transport});
+  auto invalid_scheme =
+      ava::tools::webfetch(context, "file:///etc/passwd", ava::tools::WebFetchOptions{.transport = &unused_transport});
   expect(!invalid_scheme && unused_transport.requests.empty(), "webfetch rejects non-http URLs before transport use");
 
-  auto private_ip = ava::tools::webfetch(
-      context, "http://127.0.0.1:8080", ava::tools::WebFetchOptions{.transport = &unused_transport});
+  auto private_ip = ava::tools::webfetch(context, "http://127.0.0.1:8080",
+                                         ava::tools::WebFetchOptions{.transport = &unused_transport});
   expect(!private_ip && unused_transport.requests.empty(), "webfetch rejects local IP hosts before transport use");
 
-  auto short_ipv4 = ava::tools::webfetch(
-      context, "http://127.1:8080", ava::tools::WebFetchOptions{.transport = &unused_transport});
+  auto short_ipv4 =
+      ava::tools::webfetch(context, "http://127.1:8080", ava::tools::WebFetchOptions{.transport = &unused_transport});
   expect(!short_ipv4 && unused_transport.requests.empty(), "webfetch rejects shortened IPv4 literal hosts");
 
-  auto decimal_ipv4 = ava::tools::webfetch(
-      context, "http://2130706433/", ava::tools::WebFetchOptions{.transport = &unused_transport});
+  auto decimal_ipv4 =
+      ava::tools::webfetch(context, "http://2130706433/", ava::tools::WebFetchOptions{.transport = &unused_transport});
   expect(!decimal_ipv4 && unused_transport.requests.empty(), "webfetch rejects decimal IPv4 literal hosts");
 
-  auto hex_ipv4 = ava::tools::webfetch(
-      context, "http://0x7f000001/", ava::tools::WebFetchOptions{.transport = &unused_transport});
+  auto hex_ipv4 =
+      ava::tools::webfetch(context, "http://0x7f000001/", ava::tools::WebFetchOptions{.transport = &unused_transport});
   expect(!hex_ipv4 && unused_transport.requests.empty(), "webfetch rejects hexadecimal IPv4 literal hosts");
 
   StaticTransport digit_domain_transport(
@@ -1153,7 +1209,7 @@ void test_webfetch_tool() {
         return ava::permissions::PermissionResolution::Allow;
       }};
   auto digit_domain = ava::tools::webfetch(permissive_network_context, "https://1.be/",
-                                          ava::tools::WebFetchOptions{.transport = &digit_domain_transport});
+                                           ava::tools::WebFetchOptions{.transport = &digit_domain_transport});
   expect(digit_domain && digit_domain->content == "domain ok",
          "webfetch allows digit-leading DNS names that are not IP aliases");
 
@@ -1164,8 +1220,8 @@ void test_webfetch_tool() {
              unused_transport.requests.empty(),
          "webfetch fails closed without network permission resolver");
 
-  StaticTransport binary_transport(
-      ava::provider::HttpResponse{.status_code = 200, .headers = {{"content-type", "application/octet-stream"}}, .body = "abc"});
+  StaticTransport binary_transport(ava::provider::HttpResponse{
+      .status_code = 200, .headers = {{"content-type", "application/octet-stream"}}, .body = "abc"});
   auto binary = ava::tools::webfetch(context, "https://example.com/page",
                                      ava::tools::WebFetchOptions{.transport = &binary_transport});
   expect(!binary && binary.error().message().find("binary") != std::string::npos,

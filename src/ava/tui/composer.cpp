@@ -338,6 +338,8 @@ std::vector<std::string> render_sidebar(const SidebarSnapshot& sidebar, std::siz
   if (!sidebar.workspace.empty()) push_sidebar_line(lines, "cwd " + sanitize_terminal_text(sidebar.workspace), width);
   if (!sidebar.git_branch.empty())
     push_sidebar_line(lines, "branch " + sanitize_terminal_text(sidebar.git_branch), width);
+  if (sidebar.reasoning_status.has_value())
+    push_sidebar_line(lines, "reasoning " + sanitize_terminal_text(*sidebar.reasoning_status), width);
   push_sidebar_line(lines, "usage " + sanitize_terminal_text(sidebar.token_status.value_or("tokens unknown")), width);
   if (sidebar.context_source_count.has_value()) {
     push_sidebar_line(lines, "context sources " + std::to_string(*sidebar.context_source_count), width);
@@ -393,6 +395,30 @@ std::vector<std::string> overlay_question_modal(std::vector<std::string> lines, 
   return lines;
 }
 
+std::vector<std::string> render_queued_message_lines(const ComposerSnapshot& snapshot, std::size_t width,
+                                                     std::size_t max_lines) {
+  std::vector<std::string> lines;
+  if (max_lines == 0 || snapshot.queued_messages.empty()) return lines;
+
+  const auto visible_count = std::min(snapshot.queued_messages.size(), max_lines);
+  lines.reserve(visible_count);
+  const auto start = snapshot.queued_messages.size() - visible_count;
+  for (std::size_t index = start; index < snapshot.queued_messages.size(); ++index) {
+    const auto& item = snapshot.queued_messages[index];
+    auto line = std::string(kSgrDim) + "queued " + sanitize_terminal_text(item.kind) + std::string(kSgrReset) + " " +
+                sanitize_terminal_text(item.text);
+    if (index == snapshot.queued_messages.size() - 1) {
+      line += " " + std::string(kSgrDim) + "(/restore latest)" + std::string(kSgrReset);
+    }
+    lines.push_back(detail::screen_surface_line(std::move(line), width));
+  }
+  if (start > 0 && !lines.empty()) {
+    lines.front() = detail::screen_surface_line(
+        std::string(kSgrDim) + "queued +" + std::to_string(start) + " more" + std::string(kSgrReset), width);
+  }
+  return lines;
+}
+
 }  // namespace
 
 std::vector<std::string> render_composer(const ComposerSnapshot& snapshot) {
@@ -426,7 +452,10 @@ std::vector<std::string> render_composer(const ComposerSnapshot& snapshot) {
   const auto normal_composer_lines = detail::composer_block_line_count(snapshot, height);
   const auto fixed_lines = normal_composer_lines;
   const auto max_prompt_lines = height > fixed_lines ? height - fixed_lines : 0;
-  const auto prompt_line_budget = prompt_active ? std::min<std::size_t>({7, max_prompt_lines}) : 0;
+  const auto prompt_line_limit = snapshot.permission_prompt && !snapshot.permission_prompt->diff_preview.empty()
+                                     ? std::size_t{12}
+                                     : std::size_t{7};
+  const auto prompt_line_budget = prompt_active ? std::min(prompt_line_limit, max_prompt_lines) : 0;
   auto permission_lines = snapshot.permission_prompt
                               ? detail::render_permission_prompt(*snapshot.permission_prompt, width, prompt_line_budget)
                               : std::vector<std::string>{};
@@ -439,12 +468,17 @@ std::vector<std::string> render_composer(const ComposerSnapshot& snapshot) {
           ? std::min(detail::kMaxPaletteLines, height - fixed_and_prompt_lines)
           : 0;
   auto palette_lines = detail::render_slash_palette(snapshot, width, palette_line_budget);
+  const auto fixed_prompt_palette_lines = fixed_and_prompt_lines + palette_lines.size();
+  const auto queued_line_budget = (height > fixed_prompt_palette_lines && !prompt_active)
+                                      ? std::min<std::size_t>(3, height - fixed_prompt_palette_lines)
+                                      : 0;
+  auto queued_lines = render_queued_message_lines(snapshot, width, queued_line_budget);
 
   const auto non_transcript_lines =
-      fixed_lines + palette_lines.size() + permission_lines.size() + question_lines.size();
+      fixed_lines + queued_lines.size() + palette_lines.size() + permission_lines.size() + question_lines.size();
   const auto transcript_height = height > non_transcript_lines ? height - non_transcript_lines : 0;
-  const auto rendered_transcript =
-      detail::render_transcript_lines(snapshot.transcript, width, snapshot.tool_details_visible);
+  const auto rendered_transcript = detail::render_transcript_lines(
+      snapshot.transcript, width, snapshot.tool_details_visible, snapshot.thinking_visible);
   const auto visible_transcript = detail::visible_transcript_lines(rendered_transcript, width, transcript_height,
                                                                    snapshot.transcript_scroll_offset);
 
@@ -454,6 +488,9 @@ std::vector<std::string> render_composer(const ComposerSnapshot& snapshot) {
   }
 
   for (const auto& line : palette_lines) {
+    lines.push_back(line);
+  }
+  for (const auto& line : queued_lines) {
     lines.push_back(line);
   }
   for (const auto& line : permission_lines) {

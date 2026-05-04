@@ -33,6 +33,7 @@ namespace ava::tui {
 namespace {
 
 constexpr std::size_t kMaxBracketedPasteBytes = 1024 * 1024;
+constexpr std::size_t kMaxEscapeSequenceBytes = 16 * 1024;
 constexpr std::size_t kMaxTranscriptItems = 1000;
 constexpr auto kSpinnerFrameDelay = std::chrono::milliseconds(80);
 
@@ -91,13 +92,13 @@ struct PendingQuestionRequest {
   std::optional<ava::core::Result<ava::agent::QuestionAnswer>> result;
 };
 
-struct RuntimeEventQueue {
+struct EventEnvelopeQueue {
   std::mutex mutex;
-  std::vector<ava::app::RuntimeEvent> events;
+  std::vector<ava::app::EventEnvelope> events;
   bool received = false;
 
-  [[nodiscard]] ava::app::RuntimeEventSink sink() {
-    return [this](const ava::app::RuntimeEvent& event) -> ava::core::VoidResult {
+  [[nodiscard]] ava::app::EventEnvelopeSink sink() {
+    return [this](const ava::app::EventEnvelope& event) -> ava::core::VoidResult {
       std::lock_guard<std::mutex> lock(mutex);
       events.push_back(event);
       received = true;
@@ -105,7 +106,7 @@ struct RuntimeEventQueue {
     };
   }
 
-  [[nodiscard]] std::vector<ava::app::RuntimeEvent> drain() {
+  [[nodiscard]] std::vector<ava::app::EventEnvelope> drain() {
     std::lock_guard<std::mutex> lock(mutex);
     auto drained = std::move(events);
     events.clear();
@@ -170,6 +171,10 @@ std::string assistant_meta_for_snapshot(const ComposerSnapshot& snapshot) {
   return mode + " - " + snapshot.model;
 }
 
+bool is_compact_command(std::string_view line) noexcept {
+  return line == "/compact" || (line.starts_with("/compact") && line.size() > 8 && line[8] == ' ');
+}
+
 std::size_t transcript_height_for_snapshot(const ComposerSnapshot& snapshot, std::size_t width, std::size_t height) {
   const auto normal_composer_lines = detail::composer_block_line_count(snapshot, height);
   const auto modal_question = snapshot.question_prompt && snapshot.question_prompt->modal;
@@ -198,8 +203,8 @@ std::size_t max_transcript_scroll_offset_for_snapshot(const ComposerSnapshot& sn
                                                       std::size_t height) {
   const auto transcript_height = transcript_height_for_snapshot(snapshot, width, height);
   if (transcript_height == 0) return 0;
-  const auto rendered_transcript =
-      detail::render_transcript_lines(snapshot.transcript, width, snapshot.tool_details_visible);
+  const auto rendered_transcript = detail::render_transcript_lines(
+      snapshot.transcript, width, snapshot.tool_details_visible, snapshot.thinking_visible);
   return rendered_transcript.size() > transcript_height ? rendered_transcript.size() - transcript_height : 0;
 }
 
@@ -222,18 +227,6 @@ CursesInput character_input(std::string text, bool bracketed_paste = false) {
                      .text = std::move(text),
                      .bracketed_paste = bracketed_paste,
                      .resize = false};
-}
-
-std::deque<std::string>& pending_character_inputs() {
-  static std::deque<std::string> pending;
-  return pending;
-}
-
-void push_pending_character_inputs(std::string_view text) {
-  auto& pending = pending_character_inputs();
-  for (const char byte : text) {
-    pending.push_back(std::string(1, byte));
-  }
 }
 
 std::optional<wchar_t> read_plain_wide_character() {
@@ -283,37 +276,28 @@ CursesInput read_bracketed_paste() {
   return character_input(normalize_composer_paste_text(pasted), true);
 }
 
-bool is_escape_sequence_final(std::string_view sequence) {
-  if (sequence.size() <= 1) return false;
-  const auto last = static_cast<unsigned char>(sequence.back());
-  return last >= 0x40 && last <= 0x7EU;
-}
-
 std::optional<CursesInput> read_escape_sequence_input() {
   static_cast<void>(wtimeout(stdscr, 50));
   std::string consumed;
-  for (std::size_t count = 0; count < 32; ++count) {
+  consumed.reserve(32);
+  while (consumed.size() < kMaxEscapeSequenceBytes) {
     const auto character = read_plain_wide_character();
     if (!character) break;
     if (auto encoded = encode_wide_character(*character)) consumed += *encoded;
-    if (is_escape_sequence_final(consumed)) break;
+    if (terminal_escape_sequence_complete(consumed)) break;
   }
   static_cast<void>(wtimeout(stdscr, -1));
 
+  if (consumed.empty()) return std::nullopt;
   if (consumed == "[200~") return read_bracketed_paste();
   if (const auto key = terminal_escape_sequence_key(consumed); key != Key::Unknown) return key_input(key);
-  if (!consumed.empty()) push_pending_character_inputs(consumed);
-  return std::nullopt;
+  if (terminal_escape_sequence_should_discard(consumed) || !terminal_escape_sequence_complete(consumed)) {
+    return unknown_input();
+  }
+  return unknown_input();
 }
 
 CursesInput read_curses_input() {
-  auto& pending = pending_character_inputs();
-  if (!pending.empty()) {
-    auto text = std::move(pending.front());
-    pending.pop_front();
-    return character_input(std::move(text));
-  }
-
   wint_t value = 0;
   const auto result = wget_wch(stdscr, &value);
   if (terminal_signal_received()) return key_input(Key::CtrlC);
@@ -448,6 +432,8 @@ PermissionPromptView permission_prompt_view(const ava::permissions::PermissionPr
   view.target = prompt.target_path.empty() ? std::string{} : prompt.target_path.generic_string();
   view.command = prompt.command;
   view.reason = prompt.reason;
+  view.diff_preview = prompt.diff_preview;
+  view.diff_truncated = prompt.diff_truncated;
   return view;
 }
 
@@ -526,6 +512,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
   };
   auto refresh_reasoning_status = [&]() {
     snapshot.reasoning_status = options.reasoning_status_provider ? options.reasoning_status_provider() : std::nullopt;
+    sidebar.reasoning_status = snapshot.reasoning_status;
   };
   refresh_token_status();
   refresh_reasoning_status();
@@ -1025,14 +1012,67 @@ int run_interactive_composer(TuiRuntimeOptions options) {
         }
         return InputLoopAction::ContinueLoop;
       }
+      if (submitted == "/thinking") {
+        push_history(input_history, submitted);
+        snapshot.thinking_visible = !snapshot.thinking_visible;
+        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
+        push_transcript(snapshot, TranscriptItem{.label = "ava",
+                                                 .text = snapshot.thinking_visible ? "thinking blocks are now visible"
+                                                                                   : "thinking blocks are now hidden",
+                                                 .meta = assistant_meta_for_snapshot(snapshot)});
+        snapshot.status = snapshot.thinking_visible ? "thinking visible" : "thinking hidden";
+        transcript_scroll_offset = 0;
+        if (!render()) {
+          terminal_write_failed = true;
+          return InputLoopAction::BreakLoop;
+        }
+        return InputLoopAction::ContinueLoop;
+      }
       const auto is_slash_command = submitted.starts_with('/');
+      const auto supports_active_queue = !is_slash_command || is_compact_command(submitted);
       const auto transcript_before_submit = snapshot.transcript;
-      RuntimeEventQueue event_queue;
+      auto submitted_transcript = transcript_before_submit;
+      ava::app::EventBus event_bus;
+      EventEnvelopeQueue event_queue;
       TuiEventState event_state;
       std::atomic_bool run_cancel_requested{false};
       bool close_after_submit = false;
       auto cancel_requested = [&run_cancel_requested]() { return run_cancel_requested.load(); };
-      auto event_sink = is_slash_command ? ava::app::RuntimeEventSink{} : event_queue.sink();
+      event_bus.subscribe(event_queue.sink());
+      std::optional<TuiActiveRunQueues> active_queues;
+      std::mutex event_context_mutex;
+      std::string current_request_id;
+      auto set_current_request_id = [&](std::string request_id) {
+        std::lock_guard lock(event_context_mutex);
+        current_request_id = std::move(request_id);
+      };
+      if (supports_active_queue && options.create_active_run_queues) {
+        active_queues = options.create_active_run_queues(
+            [&event_bus](const ava::app::EventEnvelope& event) { return event_bus.publish(event); });
+        if (!active_queues->active_request_id.empty()) {
+          set_current_request_id(active_queues->active_request_id);
+          auto mark_follow_up_started = active_queues->mark_follow_up_started;
+          active_queues->mark_follow_up_started = [&, mark_follow_up_started](const TuiQueuedFollowUp& follow_up) {
+            set_current_request_id(follow_up.request_id);
+            if (mark_follow_up_started) return mark_follow_up_started(follow_up);
+            return ava::core::VoidResult{};
+          };
+        }
+      }
+      auto runtime_event_to_bus_sink = [&]() -> ava::app::RuntimeEventSink {
+        return [&](const ava::app::RuntimeEvent& event) {
+          ava::app::EventEnvelopeContext event_context;
+          {
+            std::lock_guard lock(event_context_mutex);
+            if (!current_request_id.empty()) {
+              event_context.request_id = current_request_id;
+              event_context.correlation_id = current_request_id;
+            }
+          }
+          return event_bus.publish(ava::app::to_event_envelope(event, event_context));
+        };
+      };
+      auto event_sink = supports_active_queue ? runtime_event_to_bus_sink() : ava::app::RuntimeEventSink{};
       {
         std::lock_guard<std::mutex> lock(prompt_audit_mutex);
         prompt_audit_sink = event_sink;
@@ -1087,14 +1127,15 @@ int run_interactive_composer(TuiRuntimeOptions options) {
         auto events = event_queue.drain();
         if (events.empty()) return RuntimeEventDrainResult::NoEvents;
         for (const auto& event : events) {
-          apply_runtime_event(event_state, event);
+          apply_event_envelope(event_state, event);
         }
         const auto turn_transcript = event_state_transcript_snapshot(event_state);
         {
           std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-          snapshot.transcript = transcript_before_submit;
+          snapshot.transcript = submitted_transcript;
           snapshot.transcript.insert(snapshot.transcript.end(), turn_transcript.begin(), turn_transcript.end());
           truncate_transcript(snapshot.transcript);
+          snapshot.queued_messages = event_state.queued_messages;
           sidebar.activity = event_state.activity;
           if (run_cancel_requested.load() && event_state.run_status == TuiEventRunStatus::Running) {
             upsert_stopping_activity();
@@ -1118,7 +1159,9 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       };
 
       if (is_slash_command) {
-        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
+        auto command_item = TranscriptItem{.label = "cmd", .text = submitted};
+        submitted_transcript.push_back(command_item);
+        push_transcript(snapshot, std::move(command_item));
       }
       push_history(input_history, submitted);
       snapshot.status = is_slash_command ? "running command..." : "thinking...";
@@ -1131,7 +1174,23 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       if (options.on_submit) {
         accept_prompt_requests.store(true);
         auto submit_future = std::async(std::launch::async, [&]() {
-          return options.on_submit(submitted, permission_resolver, question_resolver, event_sink, cancel_requested);
+          auto take_steering_messages = active_queues ? active_queues->take_steering_messages
+                                                      : std::function<ava::core::Result<std::vector<std::string>>()>{};
+          auto skip_active_steering = active_queues ? active_queues->skip_active_steering
+                                                    : std::function<ava::core::VoidResult(std::string_view)>{};
+          auto take_next_follow_up =
+              active_queues ? active_queues->take_next_follow_up : std::function<std::optional<TuiQueuedFollowUp>()>{};
+          auto mark_follow_up_started = active_queues
+                                            ? active_queues->mark_follow_up_started
+                                            : std::function<ava::core::VoidResult(const TuiQueuedFollowUp&)>{};
+          return options.on_submit(submitted, TuiSubmitContext{.permission_resolver = permission_resolver,
+                                                               .question_resolver = question_resolver,
+                                                               .event_sink = event_sink,
+                                                               .cancel_requested = cancel_requested,
+                                                               .take_steering_messages = take_steering_messages,
+                                                               .skip_active_steering = skip_active_steering,
+                                                               .take_next_follow_up = take_next_follow_up,
+                                                               .mark_follow_up_started = mark_follow_up_started});
         });
         auto handle_active_input = [&](const CursesInput& active_input) -> bool {
           if (active_input.resize) return render();
@@ -1169,6 +1228,73 @@ int run_interactive_composer(TuiRuntimeOptions options) {
           }
           if (active_is_action(TuiAction::NewLine)) {
             insert_newline();
+            return render();
+          }
+          if (active_is_action(TuiAction::Submit)) {
+            if (draft.text.empty()) {
+              snapshot.status = "type a follow-up before queueing";
+              return render();
+            }
+            if (draft.text == "/restore") {
+              if (!active_queues || !active_queues->restore_latest) {
+                snapshot.status = "active-run restore unavailable";
+                return render();
+              }
+              auto restored = active_queues->restore_latest();
+              if (!restored) {
+                snapshot.status = restored.error().format();
+                static_cast<void>(beep());
+                return render();
+              }
+              const auto restored_text = restored->steering ? "/steer " + restored->message : restored->message;
+              static_cast<void>(replace_composer_draft(draft, restored_text));
+              draft_scroll_offset = 0;
+              history_index.reset();
+              draft_input.clear();
+              selected_slash_command_index = 0;
+              slash_palette_suppressed = false;
+              snapshot.status = restored->steering ? "steering restored" : "follow-up restored";
+              return render();
+            }
+            const auto steering_prefix = std::string_view("/steer ");
+            const bool steering_draft = draft.text.starts_with(steering_prefix);
+            if (draft.text.starts_with('/') && !steering_draft) {
+              snapshot.status = "slash commands run between turns";
+              return render();
+            }
+            if (run_cancel_requested.load()) {
+              snapshot.status = "stop requested; queueing disabled";
+              return render();
+            }
+            if (!active_queues) {
+              snapshot.status = "active-run queue unavailable";
+              return render();
+            }
+            if (steering_draft && !active_queues->queue_steering) {
+              snapshot.status = "active-run steering unavailable";
+              return render();
+            }
+            if (!steering_draft && !active_queues->queue_follow_up) {
+              snapshot.status = "active-run follow-up unavailable";
+              return render();
+            }
+
+            auto queued_text = draft.text;
+            auto queued = steering_draft ? active_queues->queue_steering(queued_text.substr(steering_prefix.size()))
+                                         : active_queues->queue_follow_up(queued_text);
+            if (!queued) {
+              snapshot.status = queued.error().format();
+              static_cast<void>(beep());
+              return render();
+            }
+            push_history(input_history, queued_text);
+            reset_composer_draft(draft);
+            draft_scroll_offset = 0;
+            history_index.reset();
+            draft_input.clear();
+            selected_slash_command_index = 0;
+            slash_palette_suppressed = false;
+            snapshot.status = steering_draft ? "steering queued" : "follow-up queued";
             return render();
           }
           if (active_is_action(TuiAction::DeleteBackward) || active_is_action(TuiAction::DeleteWordBackward) ||
@@ -1286,6 +1412,15 @@ int run_interactive_composer(TuiRuntimeOptions options) {
           }
         }
         result = submit_future.get();
+        if (active_queues && active_queues->finish) {
+          if (auto finished = active_queues->finish(run_cancel_requested.load()); !finished) {
+            {
+              std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+              snapshot.status = finished.error().format();
+            }
+            render_failed = true;
+          }
+        }
         if (drain_runtime_events() == RuntimeEventDrainResult::RenderFailed) {
           terminal_write_failed = true;
           render_failed = true;

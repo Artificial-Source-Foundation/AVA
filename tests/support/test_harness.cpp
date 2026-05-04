@@ -23,6 +23,31 @@ int& failure_count() { return failures_value; }
 int failures() { return failures_value; }
 }  // namespace ava::test
 
+namespace {
+
+bool is_zero_width_codepoint(char32_t codepoint) {
+  return (codepoint >= 0x0300 && codepoint <= 0x036F) || (codepoint >= 0x0483 && codepoint <= 0x0489) ||
+         (codepoint >= 0x0591 && codepoint <= 0x05BD) || codepoint == 0x05BF ||
+         (codepoint >= 0x05C1 && codepoint <= 0x05C2) || (codepoint >= 0x05C4 && codepoint <= 0x05C5) ||
+         codepoint == 0x05C7 || (codepoint >= 0x0610 && codepoint <= 0x061A) ||
+         (codepoint >= 0x064B && codepoint <= 0x065F) || codepoint == 0x0670 ||
+         (codepoint >= 0x06D6 && codepoint <= 0x06DC) || (codepoint >= 0x06DF && codepoint <= 0x06E4) ||
+         (codepoint >= 0x06E7 && codepoint <= 0x06E8) || (codepoint >= 0x06EA && codepoint <= 0x06ED) ||
+         codepoint == 0x0711 || (codepoint >= 0x0730 && codepoint <= 0x074A) ||
+         (codepoint >= 0x07A6 && codepoint <= 0x07B0) || (codepoint >= 0x07EB && codepoint <= 0x07F3) ||
+         (codepoint >= 0x0816 && codepoint <= 0x0819) || (codepoint >= 0x081B && codepoint <= 0x0823) ||
+         (codepoint >= 0x0825 && codepoint <= 0x0827) || (codepoint >= 0x0829 && codepoint <= 0x082D) ||
+         (codepoint >= 0x0859 && codepoint <= 0x085B) || (codepoint >= 0x08D3 && codepoint <= 0x08E1) ||
+         (codepoint >= 0x08E3 && codepoint <= 0x0903) || (codepoint >= 0x093A && codepoint <= 0x093C) ||
+         (codepoint >= 0x0941 && codepoint <= 0x0948) || codepoint == 0x094D ||
+         (codepoint >= 0x0951 && codepoint <= 0x0957) || (codepoint >= 0x0962 && codepoint <= 0x0963) ||
+         codepoint == 0x200C || codepoint == 0x200D || (codepoint >= 0x20D0 && codepoint <= 0x20FF) ||
+         (codepoint >= 0xFE00 && codepoint <= 0xFE0F) || (codepoint >= 0xFE20 && codepoint <= 0xFE2F) ||
+         (codepoint >= 0xE0100 && codepoint <= 0xE01EF);
+}
+
+}  // namespace
+
 void expect(bool condition, const std::string& message) {
   if (!condition) {
     std::cerr << "FAIL: " << message << '\n';
@@ -140,6 +165,10 @@ std::size_t visible_columns(std::string_view text) {
     if (!valid) {
       ++columns;
       ++index;
+      continue;
+    }
+    if (is_zero_width_codepoint(codepoint)) {
+      index += length;
       continue;
     }
     const auto width = codepoint <= static_cast<char32_t>(WCHAR_MAX) ? ::wcwidth(static_cast<wchar_t>(codepoint)) : 1;

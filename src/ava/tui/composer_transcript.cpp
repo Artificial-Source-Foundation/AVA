@@ -2,6 +2,7 @@
 #include <cctype>
 
 #include "ava/tui/composer_internal.h"
+#include "ava/tui/tool_cards.h"
 
 namespace ava::tui {
 namespace detail {
@@ -421,84 +422,6 @@ std::string render_error_line(const std::string& text, std::size_t width) {
   return prefix + content;
 }
 
-void append_tool_detail_lines(std::vector<std::string>& lines, std::string_view label, const std::string& text,
-                              std::size_t width) {
-  if (text.empty()) return;
-  const auto sanitized = sanitize_terminal_text(text);
-  const auto prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
-  const auto label_prefix = prefix + std::string(kSgrDim) + std::string(label) + ": " + std::string(kSgrReset);
-  const auto continuation = std::string(terminal_text_columns(label_prefix), ' ');
-  const auto wrapped = wrap_words_with_prefix(sanitized, width, label_prefix, continuation);
-  for (const auto& line : wrapped) {
-    lines.push_back(fit_line_preserving_sgr(line, width));
-  }
-}
-
-std::vector<std::string> render_tool_card(const ToolTimelineItem& item, std::size_t width, bool details_visible) {
-  std::vector<std::string> lines;
-
-  const char* status_marker = "[?]";
-  std::string_view status_sgr = kSgrDim;
-  switch (item.status) {
-    case ToolTimelineStatus::Running:
-      status_marker = "[~]";
-      status_sgr = kSgrWarning;
-      break;
-    case ToolTimelineStatus::Success:
-      status_marker = "[+]";
-      status_sgr = kSgrSuccess;
-      break;
-    case ToolTimelineStatus::Error:
-      status_marker = "[x]";
-      status_sgr = kSgrError;
-      break;
-    default:
-      status_marker = "[?]";
-      status_sgr = kSgrDim;
-      break;
-  }
-
-  auto name_raw = sanitize_terminal_text(item.name.empty() ? "unknown" : item.name);
-  auto args_raw = sanitize_terminal_text(item.argument_summary);
-
-  auto prefix_text = wide_blocks(width) ? std::string("  │ ") : std::string("  ");
-  auto prefix_cols = terminal_text_columns(prefix_text + status_marker + " ");
-  auto name_cols = terminal_text_columns(name_raw);
-  auto args_cols = args_raw.empty() ? 0 : terminal_text_columns(std::string("  ") + args_raw);
-
-  if (prefix_cols + name_cols + args_cols > width) {
-    if (!args_raw.empty() && width > prefix_cols + name_cols) {
-      auto budget = width - prefix_cols - name_cols;
-      args_raw = fit_line(std::move(args_raw), budget);
-      args_cols = terminal_text_columns(args_raw);
-    }
-    if (prefix_cols + name_cols + args_cols > width && width > prefix_cols) {
-      auto budget = width - prefix_cols;
-      name_raw = fit_line(std::move(name_raw), budget);
-      name_cols = terminal_text_columns(name_raw);
-    }
-  }
-
-  std::string line1 = prefix_text + std::string(status_sgr) + status_marker + std::string(kSgrReset) + " " +
-                      std::string(kSgrBold) + std::string(kSgrAccent) + name_raw + std::string(kSgrReset);
-  if (!args_raw.empty()) {
-    line1 += "  " + std::string(kSgrDim) + args_raw + std::string(kSgrReset);
-  }
-  lines.push_back(fit_line_preserving_sgr(line1, width));
-
-  if (details_visible) {
-    append_tool_detail_lines(lines, "args", item.argument_summary, width);
-    append_tool_detail_lines(lines, "result", item.result_summary, width);
-  } else if (!item.result_summary.empty()) {
-    auto result_raw = sanitize_terminal_text(item.result_summary);
-    std::string line2 = (wide_blocks(width) ? std::string("  │     ") : std::string("      ")) +
-                        std::string(kSgrMuted) + result_raw + std::string(kSgrReset);
-    lines.push_back(fit_line_preserving_sgr(line2, width));
-  }
-
-  return lines;
-}
-
 }  // namespace
 
 std::string render_generic_line(const std::string& text, std::size_t width) {
@@ -510,7 +433,7 @@ std::string render_generic_line(const std::string& text, std::size_t width) {
 }
 
 std::vector<std::string> render_transcript_lines(const std::vector<TranscriptItem>& transcript, std::size_t width,
-                                                 bool tool_details_visible) {
+                                                 bool tool_details_visible, bool thinking_visible) {
   std::vector<std::string> rendered_transcript;
   for (const auto& item : transcript) {
     const auto should_space = width >= kTurnSpacingMinWidth && !rendered_transcript.empty() &&
@@ -525,9 +448,10 @@ std::vector<std::string> render_transcript_lines(const std::vector<TranscriptIte
       auto block = render_user_block(item.text, width);
       rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
     } else if (item.label == "ava") {
-      auto block = render_assistant_block(item.text, item.meta, item.thinking, width);
+      auto block =
+          render_assistant_block(item.text, item.meta, thinking_visible ? item.thinking : std::string{}, width);
       rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
-    } else if (item.label == "thinking") {
+    } else if (item.label == "thinking" && thinking_visible) {
       auto block = render_thinking_block(item.text, width);
       rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
     } else {

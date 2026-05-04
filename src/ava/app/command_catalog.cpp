@@ -1,6 +1,8 @@
 #include "ava/app/command_catalog.h"
 
 #include <algorithm>
+#include <string>
+#include <vector>
 
 namespace ava::app {
 namespace {
@@ -15,13 +17,6 @@ std::string_view command_token(std::string_view line) noexcept {
   return line.substr(0, end == std::string_view::npos ? line.size() : end);
 }
 
-std::string hotkeys_for_action(const std::vector<CommandHotkey>& hotkeys, std::string_view action) {
-  for (const auto& hotkey : hotkeys) {
-    if (hotkey.action == action) return hotkey.keys;
-  }
-  return "";
-}
-
 }  // namespace
 
 const std::vector<CommandCatalogEntry>& command_catalog() {
@@ -31,17 +26,26 @@ const std::vector<CommandCatalogEntry>& command_catalog() {
       CommandCatalogEntry{.command = "/hotkeys", .description = "Show effective TUI hotkeys", .category = "General"},
       CommandCatalogEntry{.command = "/mode", .description = "Toggle build/plan mode", .category = "General"},
       CommandCatalogEntry{.command = "/details", .description = "Toggle tool detail view", .category = "General"},
+      CommandCatalogEntry{
+          .command = "/thinking", .description = "Toggle inline thinking block visibility", .category = "General"},
       CommandCatalogEntry{.command = "/connect",
                           .aliases = {"/login"},
                           .description = "Store provider API key or OAuth bearer token",
                           .hint = "[provider] [api-key|oauth]",
                           .category = "General"},
       CommandCatalogEntry{.command = "/quit", .aliases = {"/exit"}, .description = "Exit", .category = "General"},
-      CommandCatalogEntry{
-          .command = "/sessions", .description = "List sessions for this workspace", .category = "Sessions"},
-      CommandCatalogEntry{.command = "/context", .description = "List loaded context sources", .category = "Sessions"},
+      CommandCatalogEntry{.command = "/sessions",
+                          .description = "List sessions for this workspace",
+                          .hint = "[query|id]",
+                          .category = "Sessions"},
+      CommandCatalogEntry{.command = "/context",
+                          .description = "List loaded context sources",
+                          .hint = "[query|source]",
+                          .category = "Sessions"},
       CommandCatalogEntry{
           .command = "/stats", .description = "Show session counts, usage, and cost", .category = "Sessions"},
+      CommandCatalogEntry{
+          .command = "/status", .description = "Alias for /stats session status", .category = "Sessions"},
       CommandCatalogEntry{.command = "/compact",
                           .description = "Generate and record a provider summary",
                           .hint = "[instructions]",
@@ -71,11 +75,12 @@ const std::vector<CommandCatalogEntry>& command_catalog() {
       CommandCatalogEntry{.command = "/models",
                           .aliases = {"/model"},
                           .description = "List configured models and capabilities",
+                          .hint = "[query|provider/model]",
                           .category = "Models"},
       CommandCatalogEntry{.command = "/plugins",
-                            .description = "List, inspect, enable, disable, and validate plugins",
-                            .hint = "<list|inspect|enable|disable|validate|failures|prompts|prompt|skills|skill> ...",
-                            .category = "Plugins"},
+                          .description = "List, inspect, enable, disable, and validate plugins",
+                          .hint = "<list|inspect|enable|disable|validate|failures|prompts|prompt|skills|skill> ...",
+                          .category = "Plugins"},
       CommandCatalogEntry{.command = "/mcp",
                           .description = "List, inspect, discover, and restart MCP servers",
                           .hint = "<list|inspect|tools|restart> ...",
@@ -129,26 +134,6 @@ std::string normalize_command_line(std::string_view line, const CommandCatalogEn
   if (token == entry.command) return std::string(line);
   const auto rest = line.substr(token.size());
   return entry.command + std::string(rest);
-}
-
-std::vector<tui::SlashCommandItem> command_catalog_slash_items(const std::vector<CommandHotkey>& hotkeys) {
-  std::vector<tui::SlashCommandItem> items;
-  items.reserve(command_catalog().size());
-  for (const auto& entry : command_catalog()) {
-    std::string key_display;
-    if (entry.command == "/mode") key_display = hotkeys_for_action(hotkeys, "mode_toggle");
-    if (entry.command == "/details") key_display = hotkeys_for_action(hotkeys, "details_toggle");
-    if (entry.command == "/quit") key_display = hotkeys_for_action(hotkeys, "exit");
-    items.push_back(tui::SlashCommandItem{.command = entry.command,
-                                          .description = entry.description,
-                                          .hint = entry.hint,
-                                          .category = entry.category,
-                                          .aliases = entry.aliases,
-                                          .key_display = std::move(key_display),
-                                          .enabled = entry.enabled,
-                                          .disabled_reason = entry.disabled_reason});
-  }
-  return items;
 }
 
 }  // namespace ava::app

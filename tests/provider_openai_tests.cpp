@@ -394,8 +394,16 @@ void test_openai_provider_contract() {
   ava::tests::FakeTransport retry_inner(
       {ava::provider::HttpResponse{.status_code = 429, .headers = {{"Retry-After", "0"}}, .body = "rate limited"},
        ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  std::vector<ava::provider::RetryOptions::Event> retry_events;
   ava::provider::RetryTransport retry_transport(
-      retry_inner, ava::provider::RetryOptions{.max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0});
+      retry_inner,
+      ava::provider::RetryOptions{.max_attempts = 2,
+                                  .base_delay_ms = 0,
+                                  .max_retry_after_ms = 0,
+                                  .on_retry = [&retry_events](const ava::provider::RetryOptions::Event& event) {
+                                    retry_events.push_back(event);
+                                    return ava::core::VoidResult{};
+                                  }});
   const auto retry_request = ava::provider::HttpRequest{.method = "POST",
                                                         .url = "https://api.example.test",
                                                         .headers = {},
@@ -407,6 +415,32 @@ void test_openai_provider_contract() {
   auto retried = retry_transport.send(retry_request);
   expect(retried && retried->status_code == 200 && retry_inner.requests().size() == 2,
          "retry transport retries rate-limited non-streaming responses");
+  expect(retry_events.size() == 1 && retry_events[0].attempt == 2 && retry_events[0].max_attempts == 2 &&
+             retry_events[0].reason == "rate_limited" && retry_events[0].status_code == 429 &&
+             !retry_events[0].streaming && !retry_events[0].countdown_tick,
+         "retry transport reports backend-owned retry metadata before sleeping");
+
+  ava::tests::FakeTransport countdown_inner(
+      {ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = "try again"},
+       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  std::vector<ava::provider::RetryOptions::Event> countdown_events;
+  ava::provider::RetryTransport countdown_transport(
+      countdown_inner,
+      ava::provider::RetryOptions{.max_attempts = 2,
+                                  .base_delay_ms = 1,
+                                  .max_retry_after_ms = 1,
+                                  .countdown_tick_ms = 1,
+                                  .on_retry = [&countdown_events](const ava::provider::RetryOptions::Event& event) {
+                                    countdown_events.push_back(event);
+                                    return ava::core::VoidResult{};
+                                  }});
+  auto countdown_retry = countdown_transport.send(retry_request);
+  expect(countdown_retry && countdown_retry->status_code == 200 && countdown_inner.requests().size() == 2,
+         "retry transport completes after a countdown-backed retry");
+  expect(countdown_events.size() == 2 && !countdown_events[0].countdown_tick && countdown_events[0].delay_ms == 1 &&
+             countdown_events[0].remaining_ms == 1 && countdown_events[1].countdown_tick &&
+             countdown_events[1].remaining_ms == 0 && countdown_events[1].reason == "transient",
+         "retry transport emits explicit backend countdown ticks while waiting to retry");
 
   FailingOnceTransport failing_once;
   ava::provider::RetryTransport retry_transport_error(

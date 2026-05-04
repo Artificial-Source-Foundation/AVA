@@ -117,16 +117,17 @@ Current TUI strengths:
 
 Current 1.0 gaps:
 
-- The TUI now has a live `RuntimeEvent` queue/reducer path for assistant text, tool lifecycle updates, and the sidebar shell, but it does not yet fully consume the shared `EventEnvelope` stream used by headless/RPC clients.
-- Permission/question audit events, thinking/reasoning updates, compaction/retry markers, and richer terminal outcomes are not yet rendered through the event-state transcript model.
+- The TUI now has a live `RuntimeEvent` queue/reducer path and a shared `EventEnvelope` reducer path for assistant text, thinking, tool lifecycle updates, prompt audit markers, and the sidebar shell. Some backend producers still provide summary-only tool metadata on the live runtime path.
+- Permission/question request and reply audit events, thinking/reasoning updates, compaction markers, retry markers, retry countdown ticks, queue lifecycle markers, and cooperative cancellation events render through the event-state transcript model where backend events exist. Retry markers include backend-provided attempt totals, retry delays, remaining countdown time, token pressure, and stale snapshot counts when emitted. Richer terminal outcomes still need explicit backend stream fields before the TUI can render them as first-class state.
+- Native interactive runs now support backend-owned queue behavior for the shipped subset: submitting a draft during an active assistant or `/compact` run enqueues a follow-up turn, `/steer ...` enqueues steering for the next safe provider boundary, queued items render in a compact pending region above the composer, `/restore` restores the latest pending item to the draft before it starts, and `steer_queued`/`steer_applied`/`steer_skipped` plus `follow_up_queued`/`follow_up_started`/`follow_up_skipped` render from the shared event stream.
 - Session stats and compact token usage have initial visibility through `/stats` and the composer status slot, but context pressure and compaction state still need richer long-session UI.
-- Slash commands are metadata-rich, and provider login now routes through backend auth. Model/session/import/reload flows still remain disabled or shallow until the corresponding backend APIs exist.
-- Slash autocomplete is still mostly command-name based; it does not yet complete command arguments, model names, file/path references, or context/prompt sources.
+- Slash commands are metadata-rich, and provider login now routes through backend auth. `/models`, `/sessions`, and `/context` accept optional query text using backend/session data; import/reload/new/resume switching flows still remain disabled or shallow until the corresponding backend APIs exist.
+- Slash autocomplete now supports staged argument suggestions from backend-owned data sources: configured providers/models, resumable sessions, loaded context sources, configured MCP server ids, and discovered plugin metadata. File/path autocomplete remains deferred until the backend/tooling path can provide ignored-path-aware search semantics.
 - The composer has core editor affordances and tall-draft visibility indicators; mouse wheel input is reserved for transcript scrolling so chat scrollback stays predictable.
-- Terminal/input hardening is incomplete for v1-level daily use: broader escape-sequence buffering, IME-sensitive cursor placement, Unicode width edge cases, and resize stress need explicit coverage.
-- Tool cards are summaries only; there is no detail toggle, diff preview, spill-file affordance, or streaming progress view.
-- Thinking/reasoning UI is not specified enough yet: `Ctrl+T` exists as an inert semantic action, but provider-specific variants and thinking blocks must come from backend capability/event data.
-- Render tests cover static composer behavior, prompts, keybinds, paste, and palette behavior, but live event consumption, resize stress, long transcripts, and performance remain under-covered.
+- Terminal/input hardening is improved but not exhausted for v1-level daily use: current tests include IME-sensitive cursor-placement cases through a virtual `newterm` ncurses smoke path, but real-terminal IME automation and deeper performance profiling remain future work. Current render/input tests cover broader escape-sequence buffering and discard, invalid UTF-8, CJK width, combining marks, zero-width joiners, variation selectors, resize stress, bounded overflow, a large-render performance budget, and a `newterm` ncurses smoke path that runs without a real TTY.
+- Tool cards now cover provider announcements, argument streaming, execution, progress, completion, errors, details, backend-provided per-tool detail state, and backend-provided truncation/spill/diff metadata. Diff-before-approval is implemented for backend file mutation prompts where AVA can safely compute a unified diff before approval; richer full diff navigation remains deferred.
+- Thinking/reasoning UI now keeps thinking attached to the active assistant turn, exposes `/thinking` as a display-only toggle, and leaves `Ctrl+T` to cycle backend-declared reasoning levels only.
+- Render tests now cover static composer behavior, prompts, keybinds, paste, palette behavior, backend-fed argument completions, event replay, thinking visibility/redaction, retry countdown ticks, tool lifecycle/details, resize stress over long mixed transcripts, a large-render performance budget, and a focused ncurses smoke path. Deeper real-terminal interaction coverage remains under-covered.
 
 ## Roadmap Phases
 
@@ -200,7 +201,7 @@ Acceptance criteria:
 
 Status: complete. Phase 1 shipped the interaction-contract foundation in the TUI and was locally validated and reviewed. Follow-up polish also removed composer footer status chatter, made the processing indicator spinner-only, integrated and simplified the slash palette, kept mouse-wheel input focused on transcript scrollback, added Ctrl-C clear-before-exit behavior, and replaced plain TUI startup/exit text with a user-friendly exit card.
 
-Completed implementation notes (2026-05-01): AVA now has interactive permission and question prompts, including multi-select and custom answers; metadata-rich slash commands with aliases, disabled explanations, `/help`, and `/hotkeys`; semantic configurable keybinds loaded from `keybinds.json`; a TUI-local composer draft editor for UTF-8-safe insertion/deletion, word movement/deletion, current-line movement/deletion, undo (`Ctrl+Z`), and yank (`Ctrl+Y`); bracketed paste handling; autocomplete dismissal without clearing input; tall-draft visibility indicators; mouse-wheel transcript scrolling; and a reserved token/status slot plus spinner-only processing indicator. Persistent history, argument/file autocomplete, tool expansion/diffs, provider model controls, and broader terminal hardening remain later-phase work.
+Completed implementation notes (2026-05-01): AVA now has interactive permission and question prompts, including multi-select and custom answers; metadata-rich slash commands with aliases, disabled explanations, `/help`, and `/hotkeys`; semantic configurable keybinds loaded from `keybinds.json`; a TUI-local composer draft editor for UTF-8-safe insertion/deletion, word movement/deletion, current-line movement/deletion, undo (`Ctrl+Z`), and yank (`Ctrl+Y`); bracketed paste handling; autocomplete dismissal without clearing input; tall-draft visibility indicators; mouse-wheel transcript scrolling; and a reserved token/status slot plus spinner-only processing indicator. Later work added backend-fed argument autocomplete for configured providers/models, sessions, context sources, MCP servers, and plugin metadata. Persistent history, file/path autocomplete, provider model switching, and broader terminal hardening remain later-phase work.
 
 ### Phase 2: Evented TUI Runtime
 
@@ -250,7 +251,7 @@ Minimum backend event mapping for the TUI:
 | `tool_start`, `tool_update`, `tool_end` | Pending tool card lifecycle and completed tool transcript entries |
 | `permission_requested`, `permission_replied` | Permission dock state and audit transcript marker |
 | `question_requested`, `question_replied` | Question prompt state and answer transcript marker |
-| `compaction`, `retry`, `cancellation`, `error`, `done` | Status/footer changes and terminal transcript markers |
+| `compaction_start`, `compaction_end`, `retry`, `cancel_requested`, `canceled`, `error`, `done` | Status/footer changes and terminal transcript markers |
 
 Thinking block invariants:
 
@@ -259,7 +260,7 @@ Thinking block invariants:
 - `/thinking` or an equivalent command controls display visibility only. It does not enable provider reasoning; provider/model capability state owns that.
 - `Ctrl+T` cycling is a provider/model control and may be inert until backend-declared reasoning variants exist.
 
-Status: in progress. The TUI has a pure `RuntimeEvent` to TUI-state reducer and drains live assistant/tool updates from the worker thread into the ncurses main loop. Remaining Phase 2 work is shared `EventEnvelope` consumption/correlation, prompt audit events, thinking placement, compaction/retry/cancellation terminal events, and broader replay/parity tests.
+Status: in progress. The TUI has a pure `RuntimeEvent` to TUI-state reducer, consumes the shared `EventEnvelope` stream used by print/RPC, and drains live assistant/tool updates from the worker thread into the ncurses main loop. Prompt audit events, thinking placement, tool lifecycle metadata, compaction/retry markers, retry countdown ticks, and cooperative cancellation markers are covered by reducer/render tests. Remaining Phase 2 work is broader terminal hardening and richer backend-provided terminal outcomes.
 
 ### Phase 3: Long-Session Visibility
 
@@ -297,9 +298,9 @@ Import, export, retry, and queues:
 - Add `/new`, `/resume`, and `/reload` only through backend-owned session/context APIs. `/reload` should refresh loaded project/global instructions and report changed, skipped, or failed context sources.
 - Improve `/sessions` for recent sessions and switching without implementing full tree/fork/timeline UI.
 - `/resume` or `/sessions` should start as a flat recent-session selector with cwd/session-name/model/time metadata. Tree/fork navigation remains out of scope.
-- Show retry/backoff state when backend emits it: spinner/countdown, retry reason, and a clear escape/interrupt path.
+- Show retry/backoff state when backend emits it: spinner/countdown, retry reason, and a clear escape/interrupt path. The backend now emits `retry_tick` with `remaining_ms` for provider retry countdowns, and the TUI reducer treats those ticks as status progress instead of transcript failures.
 - Retry/backoff UI should show attempt count, max attempts, delay countdown, reason, and cancel key. Intermediate retry failures should not look like final turn failure unless the backend reports retry exhaustion.
-- During active streaming or compaction, show queued steering/follow-up messages in a small pending region with a deterministic action to restore them to the composer before they are sent.
+- During active streaming or compaction, show queued steering/follow-up messages in a small pending region with a deterministic action to restore them to the composer before they are sent. Native TUI steering/follow-up now reaches the backend queue and shared event stream for assistant and `/compact` runs, and `/restore` restores the latest pending native queue item.
 - During compaction, queue user input explicitly rather than dropping it or submitting against stale context. The pending region should distinguish steering vs follow-up where backend semantics do.
 
 Likely files:
@@ -362,6 +363,8 @@ Acceptance criteria:
 - Diff previews never parse or infer mutations independently of backend-provided diff/metadata.
 - Tests cover diff rendering at narrow/wide widths, expansion state, truncation display, and error cards.
 
+Status: partially implemented. The TUI renders backend-provided mutation diffs in permission prompts and tool cards, `write_file`/`edit_file`/`apply_patch` populate permission diff previews where safe, RPC exposes `diff_preview`/`diff_truncated`, and tests cover permission diff rendering, denied mutation safety, RPC payloads, tool lifecycle transitions, per-tool detail visibility, truncation/spill metadata, and output sanitization. Rich diff navigation and broader terminal hardening remain future work.
+
 ### Phase 5: Provider And Model Controls
 
 Purpose: expose provider/model capability once the backend supports more than the current OpenAI-first path.
@@ -388,6 +391,8 @@ Acceptance criteria:
 - Footer/provider display reflects the active model and reasoning state.
 - Thinking visibility does not imply reasoning is enabled unless backend capability state confirms it.
 - Thinking-block placement tests prove reasoning text appears in the transcript/pending assistant region, not at the bottom composer/status area.
+
+Status: partially implemented. `/models` lists configured provider/model catalog entries and accepts optional query text, `/model` aliases it, and the slash palette offers backend-fed model argument suggestions. `Ctrl+T` uses backend-declared reasoning levels for the active model and no-ops with an explanation when no variants exist. Mid-session model switching and modal model/variant selectors remain deferred until the backend command/session mutation APIs are ready.
 
 ### Phase 6: V1 Hardening And Terminal Quality
 

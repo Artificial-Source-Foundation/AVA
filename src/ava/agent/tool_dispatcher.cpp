@@ -597,11 +597,6 @@ ToolDispatchResult apply_patch_result(const ava::tools::ToolContext& context, co
         !permission) {
       return tool_error_result(call, permission.error());
     }
-    if (auto permission = ava::tools::ensure_permission(context, ava::permissions::Operation::EditFile, target, "",
-                                                        call.name, "patch edit requires permission");
-        !permission) {
-      return tool_error_result(call, permission.error());
-    }
   }
 
   std::vector<std::filesystem::path> lock_paths;
@@ -661,6 +656,11 @@ ToolDispatchResult apply_patch_result(const ava::tools::ToolContext& context, co
 
   std::string diff_text;
   bool diff_truncated = false;
+  std::map<std::filesystem::path, ava::tools::DiffPreview> permission_diffs;
+  for (const auto& target : applied_paths) {
+    permission_diffs.emplace(target, ava::tools::unified_diff(original_contents[target], final_contents[target], target,
+                                                              target, kMaxMutationDiffBytes));
+  }
   for (const auto& target : applied_paths) {
     if (diff_text.size() >= kMaxMutationDiffBytes) {
       diff_truncated = true;
@@ -670,6 +670,18 @@ ToolDispatchResult apply_patch_result(const ava::tools::ToolContext& context, co
                                          kMaxMutationDiffBytes - diff_text.size());
     diff_text += std::move(diff.text);
     diff_truncated = diff_truncated || diff.truncated;
+  }
+
+  for (const auto& target : applied_paths) {
+    const auto diff = permission_diffs.find(target);
+    const auto diff_preview = diff == permission_diffs.end() ? std::string_view{} : std::string_view(diff->second.text);
+    const auto permission_diff_truncated = diff != permission_diffs.end() && diff->second.truncated;
+    if (auto permission =
+            ava::tools::ensure_permission(context, ava::permissions::Operation::EditFile, target, "", call.name,
+                                          "patch edit requires permission", diff_preview, permission_diff_truncated);
+        !permission) {
+      return tool_error_result(call, permission.error());
+    }
   }
 
   auto staged = stage_patch_writes(context, applied_paths, final_contents);

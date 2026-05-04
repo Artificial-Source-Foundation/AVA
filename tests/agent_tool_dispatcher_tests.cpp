@@ -437,13 +437,13 @@ void test_tool_dispatcher() {
     std::ofstream outside_patch_file(outside_patch_path, std::ios::binary | std::ios::trunc);
     outside_patch_file << "outside old";
   }
-  std::vector<ava::permissions::Operation> apply_patch_prompts;
+  std::vector<ava::permissions::PermissionPrompt> apply_patch_prompts;
   const ava::agent::ToolDispatcher patch_resolving_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&apply_patch_prompts](const ava::permissions::PermissionPrompt& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
-        apply_patch_prompts.push_back(prompt.operation);
+        apply_patch_prompts.push_back(prompt);
         expect(prompt.tool_name == "apply_patch", "apply_patch resolver receives tool name");
         return ava::permissions::PermissionResolution::Allow;
       }});
@@ -457,8 +457,11 @@ void test_tool_dispatcher() {
   auto outside_patch_read = ava::tools::read_file(
       ava::tools::ToolContext{.workspace_dir = root, .mode = ava::agent::Mode::Build}, outside_patch_path);
   expect(outside_patch && outside_patch->success && outside_patch_read && outside_patch_read->content == "inside new" &&
-             apply_patch_prompts.size() == 2 && apply_patch_prompts[0] == ava::permissions::Operation::ReadFile &&
-             apply_patch_prompts[1] == ava::permissions::Operation::EditFile,
+             apply_patch_prompts.size() == 2 &&
+             apply_patch_prompts[0].operation == ava::permissions::Operation::ReadFile &&
+             apply_patch_prompts[1].operation == ava::permissions::Operation::EditFile &&
+             apply_patch_prompts[1].diff_preview.find("-outside old") != std::string::npos &&
+             apply_patch_prompts[1].diff_preview.find("+inside new") != std::string::npos,
          "apply_patch resolves external read permission before edit permission");
 
   const auto outside_no_resolver_path = root / "outside-patch-no-resolver.txt";
@@ -507,6 +510,43 @@ void test_tool_dispatcher() {
              outside_denied_patch_read && outside_denied_patch_read->content == "keep old" &&
              outside_patch_denied->result_text.find("resolution: deny") != std::string::npos,
          "apply_patch resolver read denial prevents all external writes");
+
+  const auto outside_edit_denied_patch_path = root / "outside-patch-edit-denied.txt";
+  {
+    std::ofstream file(outside_edit_denied_patch_path, std::ios::binary | std::ios::trunc);
+    file << "keep old";
+  }
+  std::vector<ava::permissions::PermissionPrompt> edit_denied_patch_prompts;
+  const ava::agent::ToolDispatcher patch_edit_denying_dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&edit_denied_patch_prompts](const ava::permissions::PermissionPrompt& prompt)
+          -> ava::core::Result<ava::permissions::PermissionResolution> {
+        edit_denied_patch_prompts.push_back(prompt);
+        if (prompt.operation == ava::permissions::Operation::ReadFile) {
+          return ava::permissions::PermissionResolution::Allow;
+        }
+        return ava::permissions::PermissionResolution::Deny;
+      }});
+  auto outside_patch_edit_denied = patch_edit_denying_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_outside_patch_edit_denied",
+      .name = "apply_patch",
+      .arguments_json = "{\"edits\":[{\"path\":\"" +
+                        ava::core::json::escape(outside_edit_denied_patch_path.generic_string()) +
+                        "\",\"old_text\":\"old\",\"new_text\":\"new\"}]}"});
+  auto outside_edit_denied_patch_read = ava::tools::read_file(
+      ava::tools::ToolContext{.workspace_dir = root, .mode = ava::agent::Mode::Build}, outside_edit_denied_patch_path);
+  expect(outside_patch_edit_denied && !outside_patch_edit_denied->success && edit_denied_patch_prompts.size() == 2 &&
+             outside_edit_denied_patch_read && outside_edit_denied_patch_read->content == "keep old" &&
+             outside_patch_edit_denied->result_text.find("resolution: deny") != std::string::npos,
+         "apply_patch edit denial prevents all external writes after read-approved diff computation");
+  if (edit_denied_patch_prompts.size() >= 2) {
+    expect(edit_denied_patch_prompts[0].operation == ava::permissions::Operation::ReadFile &&
+               edit_denied_patch_prompts[1].operation == ava::permissions::Operation::EditFile &&
+               edit_denied_patch_prompts[1].diff_preview.find("-keep old") != std::string::npos &&
+               edit_denied_patch_prompts[1].diff_preview.find("+keep new") != std::string::npos,
+           "apply_patch edit prompt carries backend-generated diff preview");
+  }
 
   const auto outside_failed_patch_path = root / "outside-patch-failed.txt";
   {

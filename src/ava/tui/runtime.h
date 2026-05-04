@@ -3,6 +3,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "ava/agent/question.h"
@@ -21,6 +22,39 @@ struct TuiSubmitResult {
   std::vector<ToolTimelineItem> tool_timeline;
 };
 
+struct TuiQueuedFollowUp {
+  std::string request_id;
+  std::string message;
+};
+
+struct TuiRestoredQueuedMessage {
+  std::string message;
+  bool steering = false;
+};
+
+struct TuiActiveRunQueues {
+  std::string active_request_id;
+  std::function<ava::core::VoidResult(std::string)> queue_steering;
+  std::function<ava::core::VoidResult(std::string)> queue_follow_up;
+  std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages;
+  std::function<ava::core::VoidResult(std::string_view)> skip_active_steering;
+  std::function<std::optional<TuiQueuedFollowUp>()> take_next_follow_up;
+  std::function<ava::core::VoidResult(const TuiQueuedFollowUp&)> mark_follow_up_started;
+  std::function<ava::core::Result<TuiRestoredQueuedMessage>()> restore_latest;
+  std::function<ava::core::VoidResult(bool)> finish;
+};
+
+struct TuiSubmitContext {
+  ava::permissions::PermissionResolver permission_resolver;
+  ava::agent::QuestionResolver question_resolver;
+  ava::app::RuntimeEventSink event_sink;
+  std::function<bool()> cancel_requested;
+  std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages;
+  std::function<ava::core::VoidResult(std::string_view)> skip_active_steering;
+  std::function<std::optional<TuiQueuedFollowUp>()> take_next_follow_up;
+  std::function<ava::core::VoidResult(const TuiQueuedFollowUp&)> mark_follow_up_started;
+};
+
 struct TuiRuntimeOptions {
   std::string mode;
   std::string provider;
@@ -36,9 +70,8 @@ struct TuiRuntimeOptions {
   // Called on the TUI main thread at startup and after a submit worker completes; never from render/spinner loops.
   std::function<std::optional<std::string>()> token_status_provider;
   std::function<std::optional<std::string>()> reasoning_status_provider;
-  std::function<TuiSubmitResult(const std::string&, const ava::permissions::PermissionResolver&,
-                                const ava::agent::QuestionResolver&, ava::app::RuntimeEventSink, std::function<bool()>)>
-      on_submit;
+  std::function<TuiActiveRunQueues(ava::app::EventEnvelopeSink)> create_active_run_queues;
+  std::function<TuiSubmitResult(const std::string&, TuiSubmitContext)> on_submit;
   std::function<ava::core::Result<std::string>()> on_toggle_mode;
   std::function<ava::core::Result<std::string>()> on_cycle_reasoning;
 };

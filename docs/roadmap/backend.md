@@ -195,7 +195,7 @@ Missing or incomplete:
 
 ### Headless And Automation
 
-AVA has print mode and JSONL RPC protocol version 1. Print/RPC now share the event envelope for provider streaming, tool lifecycle/progress, permission requests, question requests, cancellation, queue lifecycle, assistant messages, and terminal outcomes. Live headless smokes verified model-visible tool calls for read/search/webfetch in print mode and mutating/bash/question tools through RPC resolver replies.
+AVA has print mode and JSONL RPC protocol version 1. Print/RPC now share the event envelope for provider streaming, tool lifecycle/progress, permission requests, question requests, cancellation, queue lifecycle, retry countdown ticks, assistant messages, and terminal outcomes. Live headless smokes verified model-visible tool calls for read/search/webfetch in print mode and mutating/bash/question tools through RPC resolver replies.
 
 Missing or incomplete:
 
@@ -305,7 +305,7 @@ Scope:
 
 - Define a runtime event taxonomy for session, run, turn, message, provider, tool, permission, queue, compaction, retry, cancellation, and error events.
 - Define a stable event envelope with schema version, event type, event id, session id, run id, turn id where applicable, timestamp, correlation ids, payload, and error fields.
-- Include agent, turn, message start/update/end, thinking update, tool start/update/end, permission, queue, compaction, retry, cancellation, and error event types in that taxonomy.
+- Include agent, turn, message start/update/end, thinking update, tool start/update/end, permission, queue, compaction, retry, retry countdown, cancellation, and error event types in that taxonomy.
 - Add a subscription-style event bus that can feed TUI, print JSON, RPC, tests, and future plugins without each mode reading private loop state.
 - Redesign the transport/provider boundary to support incremental stream event delivery instead of only returning a complete HTTP response.
 - Route TUI, print JSON, and RPC through the same event stream.

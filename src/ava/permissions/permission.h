@@ -58,6 +58,8 @@ struct PermissionPrompt {
   std::string command;
   std::string tool_name;
   std::string reason;
+  std::string diff_preview = {};
+  bool diff_truncated = false;
 };
 
 using PermissionResolver = std::function<ava::core::Result<PermissionResolution>(const PermissionPrompt&)>;

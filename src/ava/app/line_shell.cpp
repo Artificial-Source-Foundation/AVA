@@ -6,6 +6,8 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -13,11 +15,13 @@
 #include <utility>
 #include <vector>
 
-#include "ava/app/command_catalog.h"
+#include "ava/app/command_palette.h"
 #include "ava/app/commands.h"
+#include "ava/app/interactive_run_queue.h"
 #include "ava/app/reasoning_controls.h"
 #include "ava/config/auth.h"
 #include "ava/config/model_profiles.h"
+#include "ava/core/ids.h"
 #include "ava/core/version.h"
 #include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
@@ -185,13 +189,13 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
     add_output(line_result, provider.error().format() + std::string(offline_suffix));
     return line_result;
   }
-  ava::provider::RetryTransport retry_transport(transport);
   ava::app::RuntimeRunOptions run_options;
   run_options.access_token = (*credential)->access_token;
   run_options.credential_type = (*credential)->credential_type;
   run_options.openai_oauth = (*credential)->provider_id == "openai" && (*credential)->credential_type == "oauth";
   run_options.openai_account_id = (*credential)->account_id;
-  return callback(**provider, retry_transport, run_options);
+  run_options.enable_transport_retries = true;
+  return callback(**provider, transport, run_options);
 }
 
 LineResult handle_line(ShellState& state, const std::string& line,
@@ -199,7 +203,8 @@ LineResult handle_line(ShellState& state, const std::string& line,
                        ava::agent::QuestionResolver question_resolver = nullptr,
                        const std::vector<ava::app::CommandHotkey>& hotkeys = {},
                        ava::app::RuntimeEventSink event_sink = nullptr,
-                       std::function<bool()> cancel_requested = nullptr) {
+                       std::function<bool()> cancel_requested = nullptr,
+                       std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr) {
   LineResult line_result;
   if (line.empty()) return line_result;
   if (ava::app::is_backend_command(line)) {
@@ -209,9 +214,11 @@ LineResult handle_line(ShellState& state, const std::string& line,
           [&](const ava::provider::Provider& provider, ava::provider::Transport& transport,
               ava::app::RuntimeRunOptions run_options) {
             run_options.cancel_requested = cancel_requested;
+            run_options.event_sink = event_sink;
             auto command_result = ava::app::run_command(
                 state.session,
                 ava::app::CommandRequest{.command = line,
+                                         .event_sink = event_sink,
                                          .permission_resolver = permission_resolver,
                                          .question_resolver = question_resolver,
                                          .compaction_summary_generator =
@@ -255,6 +262,7 @@ LineResult handle_line(ShellState& state, const std::string& line,
                                  run_options.question_resolver = question_resolver;
                                  run_options.event_sink = std::move(event_sink);
                                  run_options.cancel_requested = std::move(cancel_requested);
+                                 run_options.take_steering_messages = std::move(take_steering_messages);
                                  auto result =
                                      ava::app::run_prompt(state.session, line, provider, transport, run_options);
                                  LineResult prompt_result;
@@ -322,17 +330,74 @@ int run_tui(ShellState state) {
       .app_version = std::string(version::kDisplayVersion),
       .context_source_count = state.session.context_sources.size(),
       .initial_status = keybind_status,
-      .slash_commands = ava::app::command_catalog_slash_items(hotkeys),
+      .slash_commands = ava::app::command_catalog_slash_items(state.session, hotkeys),
       .key_bindings = key_bindings,
       .token_status_provider = [&state]() { return token_status_for_session(state.session); },
       .reasoning_status_provider = [&state]() { return ava::app::reasoning_status_for_session(state.session); },
+      .create_active_run_queues =
+          [&state](ava::app::EventEnvelopeSink event_sink) {
+            auto queue = std::make_shared<ava::app::InteractiveRunQueue>(
+                state.session.store.session_id(), ava::core::make_id("request"), std::move(event_sink));
+            return ava::tui::TuiActiveRunQueues{
+                .active_request_id = queue->active_request_id(),
+                .queue_steering = [queue](std::string message) { return queue->queue_steering(std::move(message)); },
+                .queue_follow_up = [queue](std::string message) { return queue->queue_follow_up(std::move(message)); },
+                .take_steering_messages = [queue]() { return queue->take_steering_messages(); },
+                .skip_active_steering =
+                    [queue](std::string_view reason) { return queue->skip_active_steering(reason); },
+                .take_next_follow_up = [queue]() -> std::optional<ava::tui::TuiQueuedFollowUp> {
+                  auto next = queue->take_next_follow_up();
+                  if (!next) return std::nullopt;
+                  return ava::tui::TuiQueuedFollowUp{.request_id = next->request_id, .message = next->message};
+                },
+                .mark_follow_up_started =
+                    [queue](const ava::tui::TuiQueuedFollowUp& follow_up) {
+                      return queue->mark_follow_up_started(
+                          ava::app::InteractiveQueuedMessage{.request_id = follow_up.request_id,
+                                                             .correlation_id = follow_up.request_id,
+                                                             .message = follow_up.message});
+                    },
+                .restore_latest = [queue]() -> ava::core::Result<ava::tui::TuiRestoredQueuedMessage> {
+                  auto restored = queue->restore_latest();
+                  if (!restored) return std::unexpected(std::move(restored.error()));
+                  return ava::tui::TuiRestoredQueuedMessage{.message = restored->message,
+                                                            .steering = restored->steering};
+                },
+                .finish = [queue](bool canceled) { return queue->finish(canceled); }};
+          },
       .on_submit =
-          [&state, hotkeys](const std::string& submitted,
-                            const ava::permissions::PermissionResolver& permission_resolver,
-                            const ava::agent::QuestionResolver& question_resolver,
-                            ava::app::RuntimeEventSink event_sink, std::function<bool()> cancel_requested) {
-            const auto line_result = handle_line(state, submitted, permission_resolver, question_resolver, hotkeys,
-                                                 std::move(event_sink), std::move(cancel_requested));
+          [&state, hotkeys](const std::string& submitted, ava::tui::TuiSubmitContext context) {
+            auto line_result =
+                handle_line(state, submitted, context.permission_resolver, context.question_resolver, hotkeys,
+                            context.event_sink, context.cancel_requested, context.take_steering_messages);
+            auto append_result = [](LineResult& target, LineResult next) {
+              target.quit = target.quit || next.quit;
+              target.output.insert(target.output.end(), std::make_move_iterator(next.output.begin()),
+                                   std::make_move_iterator(next.output.end()));
+              target.tool_timeline.insert(target.tool_timeline.end(),
+                                          std::make_move_iterator(next.tool_timeline.begin()),
+                                          std::make_move_iterator(next.tool_timeline.end()));
+            };
+            while (!line_result.quit && (!context.cancel_requested || !context.cancel_requested())) {
+              if (context.skip_active_steering) {
+                if (auto skipped = context.skip_active_steering("run_completed_before_safe_point"); !skipped) {
+                  add_output(line_result, skipped.error().format());
+                  break;
+                }
+              }
+              if (!context.take_next_follow_up) break;
+              auto follow_up = context.take_next_follow_up();
+              if (!follow_up) break;
+              if (context.mark_follow_up_started) {
+                if (auto started = context.mark_follow_up_started(*follow_up); !started) {
+                  add_output(line_result, started.error().format());
+                  break;
+                }
+              }
+              append_result(line_result, handle_line(state, follow_up->message, context.permission_resolver,
+                                                     context.question_resolver, hotkeys, context.event_sink,
+                                                     context.cancel_requested, context.take_steering_messages));
+            }
             return ava::tui::TuiSubmitResult{.quit = line_result.quit,
                                              .output = line_result.output,
                                              .tool_timeline = tui_tool_timeline(line_result.tool_timeline)};

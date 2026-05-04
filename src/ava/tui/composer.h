@@ -16,11 +16,37 @@ enum class ToolTimelineStatus {
   Error,
 };
 
+enum class ToolLifecycleState {
+  ProviderAnnounced,
+  ArgumentsStreaming,
+  ArgumentsComplete,
+  ExecutionStarted,
+  Progress,
+  Complete,
+  Error,
+};
+
 struct ToolTimelineItem {
   ToolTimelineStatus status = ToolTimelineStatus::Running;
   std::string name = {};
   std::string argument_summary = {};
   std::string result_summary = {};
+  std::string call_id = {};
+  std::string request_id = {};
+  std::string correlation_id = {};
+  ToolLifecycleState lifecycle = ToolLifecycleState::ExecutionStarted;
+  std::optional<bool> details_visible = std::nullopt;
+  std::string diff = {};
+  bool diff_truncated = false;
+  bool truncated = false;
+  std::optional<std::size_t> output_bytes = std::nullopt;
+  std::optional<std::size_t> total_bytes = std::nullopt;
+  std::optional<std::size_t> omitted_bytes = std::nullopt;
+  std::optional<std::size_t> omitted_lines = std::nullopt;
+  std::optional<std::size_t> visible_matches = std::nullopt;
+  std::optional<std::size_t> total_matches = std::nullopt;
+  std::string spill_path = {};
+  bool spill_truncated = false;
 };
 
 struct TranscriptItem {
@@ -44,6 +70,23 @@ struct SidebarModifiedFile {
   std::optional<int> removed = std::nullopt;
 };
 
+struct QueuedMessageItem {
+  std::string id = {};
+  std::string kind = {};
+  std::string text = {};
+};
+
+struct SlashCommandArgumentCompletion {
+  std::string value = {};
+  std::string description = {};
+  std::string category = {};
+  std::vector<std::string> required_previous_args = {};
+  std::size_t argument_index = 0;
+  bool append_space = true;
+  bool enabled = true;
+  std::string disabled_reason = "";
+};
+
 struct SidebarSnapshot {
   std::vector<SidebarActivityItem> activity = {};
   std::vector<SidebarModifiedFile> modified_files = {};
@@ -55,6 +98,7 @@ struct SidebarSnapshot {
   std::string git_branch = {};
   std::string version = {};
   std::optional<std::string> token_status = std::nullopt;
+  std::optional<std::string> reasoning_status = std::nullopt;
   std::optional<std::size_t> context_source_count = std::nullopt;
 };
 
@@ -67,6 +111,9 @@ struct SlashCommandItem {
   std::string key_display = "";
   bool enabled = true;
   std::string disabled_reason = "";
+  std::vector<SlashCommandArgumentCompletion> argument_completions = {};
+  bool argument_completion = false;
+  std::string completion_insert_text = "";
 };
 
 enum class PermissionPromptChoice {
@@ -92,6 +139,8 @@ struct PermissionPromptView {
   std::string target;
   std::string command;
   std::string reason;
+  std::string diff_preview = {};
+  bool diff_truncated = false;
   PermissionPromptChoice selected_choice = PermissionPromptChoice::Deny;
 };
 
@@ -150,8 +199,10 @@ struct ComposerSnapshot {
   std::size_t height = 24;
   std::size_t input_cursor = std::string::npos;
   std::optional<SidebarSnapshot> sidebar = std::nullopt;
+  std::vector<QueuedMessageItem> queued_messages = {};
   std::size_t draft_scroll_offset = 0;
   bool tool_details_visible = false;
+  bool thinking_visible = true;
 };
 
 [[nodiscard]] std::vector<SlashCommandItem> filter_slash_commands(std::string_view input,
@@ -183,5 +234,6 @@ struct ComposerSnapshot {
 [[nodiscard]] QuestionPromptInputResult handle_question_prompt_input(const QuestionPromptView& prompt,
                                                                      InputEvent event);
 [[nodiscard]] std::string to_string(ToolTimelineStatus status);
+[[nodiscard]] std::string to_string(ToolLifecycleState state);
 
 }  // namespace ava::tui

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <memory>
@@ -181,6 +182,18 @@ struct RetryOptions {
   int max_attempts = 3;
   int base_delay_ms = 250;
   int max_retry_after_ms = 60'000;
+  int countdown_tick_ms = 1000;
+  struct Event {
+    std::size_t attempt = 0;
+    std::size_t max_attempts = 0;
+    std::size_t delay_ms = 0;
+    std::size_t remaining_ms = 0;
+    std::string reason = {};
+    int status_code = 0;
+    bool streaming = false;
+    bool countdown_tick = false;
+  };
+  std::function<ava::core::VoidResult(const Event&)> on_retry = nullptr;
 };
 
 class RetryTransport final : public Transport {

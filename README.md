@@ -90,12 +90,15 @@ The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME
 - `/help`: show commands and hotkeys
 - `/hotkeys`: show effective TUI hotkeys
 - `/mode`: toggle build/plan mode
+- `/details`: toggle TUI tool detail expansion
+- `/thinking`: toggle inline thinking block visibility without changing provider reasoning mode
 - `/connect [provider] [api-key|oauth]`: store a provider credential; `/login` is an alias
-- `/sessions`: list resumable sessions for the current workspace
-- `/context`: list loaded context sources
+- `/models [query|provider/model]`: list configured models and capabilities; `/model` is an alias
+- `/sessions [query|id]`: list resumable sessions for the current workspace
+- `/context [query|source]`: list loaded context sources
 - `/compact [instructions]`: generate and record a provider summary
 - `/export`: export this session as markdown
-- `/stats`: show session counts, usage, cost, and resume/export hints
+- `/stats`: show session counts, usage, cost, and resume/export hints; `/status` is an alias
 - `/read <path>`: read a file through permissions
 - `/write <path> <text>`: write a file through permissions using atomic replacement where practical
 - `/glob <pattern>`: list readable matching files
@@ -109,8 +112,8 @@ The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME
 - Tool calling is implemented through the provider contract and the built-in dispatcher.
 - `apply_patch` currently supports up to 32 exact text replacements through an `edits` array.
 - `question` opens an interactive TUI modal with single-select, multi-select, custom-answer, secret-entry, and cancel handling. Headless RPC clients can answer question requests through the protocol.
-- Interactive TUI permission prompts exist for backend `ask` decisions; permission decisions are persisted in session audit entries, while non-TTY mode still fails closed unless an explicit headless allow policy is supplied or RPC replies are provided.
-- Deferred: multiple fully selectable providers, plugins, MCP, full session tree UI, LSP, persistent permission rules, and richer tool-detail/diff panes.
+- Interactive TUI permission prompts exist for backend `ask` decisions; file mutation asks show backend-provided unified diffs when available. Permission decisions are persisted in session audit entries, while non-TTY mode still fails closed unless an explicit headless allow policy is supplied or RPC replies are provided.
+- Deferred: multiple fully selectable providers, plugins, MCP, full session tree UI, LSP, persistent permission rules, and full diff navigation.
 
 ## 0.32 TUI Notes
 
@@ -118,9 +121,10 @@ The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME
 - The visible layout remains composer-first: compact identity strip, role-aware transcript lines, compact tool cards, and a bottom-pinned AVA-style composer with the elevated surface, blue rail, and `❯` prompt.
 - The composer is intentionally quiet: no persistent keybinding help or transcript status line is rendered in the input area.
 - The slash palette opens above the composer with command metadata, keyboard focus cues, and narrow-terminal fallback.
-- Permission requests replace the composer with an approval dock. `Deny` stays the default focus; `A` allows once and `D` denies.
+- During an active assistant or `/compact` run, Enter on a draft queues a backend-owned follow-up turn. `/steer ...` queues steering for the next safe provider boundary. Pending queued items render above the composer, and `/restore` restores the latest pending queued item to the draft before it starts. Queue lifecycle events render as transcript audit entries.
+- Permission requests replace the composer with an approval dock. `Deny` stays the default focus; `A` allows once and `D` denies. Mutation prompts render backend-provided diffs before approval when AVA can safely compute them.
 - Non-TTY stdin/stdout still use the line shell fallback for scripts and tests.
-- Later frontend work added live assistant/tool lifecycle updates in the TUI. 0.32 did not add providers, persistent permission rules, session-wide allows, MCP, plugins, or a session tree UI.
+- Later frontend work added live assistant/tool lifecycle updates, inline thinking visibility, and backend-provided tool detail/diff rendering in the TUI. 0.32 did not add providers, persistent permission rules, session-wide allows, MCP, plugins, or a session tree UI.
 
 ## Planning Docs
 

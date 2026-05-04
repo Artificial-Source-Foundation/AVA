@@ -74,6 +74,8 @@ class CursesSession {
 
 void erase_last_utf8_codepoint(std::string& text);
 [[nodiscard]] Key terminal_escape_sequence_key(std::string_view sequence);
+[[nodiscard]] bool terminal_escape_sequence_complete(std::string_view sequence);
+[[nodiscard]] bool terminal_escape_sequence_should_discard(std::string_view sequence);
 [[nodiscard]] bool terminal_is_tty();
 [[nodiscard]] bool terminal_signal_received();
 [[nodiscard]] int terminal_signal_number();

@@ -1,9 +1,12 @@
+#include <curses.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <chrono>
 #include <climits>
+#include <clocale>
+#include <cstdio>
 #include <cstdlib>
 #include <cwchar>
 #include <filesystem>
@@ -44,6 +47,7 @@
 #include "ava/tools/search_tools.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_editor.h"
+#include "ava/tui/composer_internal.h"
 #include "ava/tui/event_state.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
@@ -64,6 +68,24 @@ void test_tui_composer_rendering_and_input() {
              ava::tui::terminal_escape_sequence_key("[200~") == ava::tui::Key::Unknown,
          "terminal escape parser maps complete shift-enter CSI forms without treating partial keys or paste markers as "
          "text");
+  expect(ava::tui::terminal_escape_sequence_complete("[13;2u") &&
+             ava::tui::terminal_escape_sequence_complete("[?25l") &&
+             ava::tui::terminal_escape_sequence_complete(std::string("]0;AVA") + "\a") &&
+             ava::tui::terminal_escape_sequence_complete(std::string("]52;c;AAAA") + "\x1b\\") &&
+             ava::tui::terminal_escape_sequence_complete(std::string("P1;2|payload") + "\x1b\\") &&
+             !ava::tui::terminal_escape_sequence_complete("[13;2") &&
+             !ava::tui::terminal_escape_sequence_complete("]0;AVA") &&
+             !ava::tui::terminal_escape_sequence_complete(std::string("P1;2|payload")),
+         "terminal escape parser buffers CSI, OSC, and DCS sequences until a real terminator is present");
+  expect(
+      ava::tui::terminal_escape_sequence_should_discard("[?25l") &&
+          ava::tui::terminal_escape_sequence_should_discard(std::string("]0;AVA") + "\a") &&
+          ava::tui::terminal_escape_sequence_should_discard(std::string("]52;c;AAAA") + "\x1b\\") &&
+          ava::tui::terminal_escape_sequence_should_discard(std::string("P1;2|payload") + "\x1b\\") &&
+          !ava::tui::terminal_escape_sequence_should_discard("[13;2u") &&
+          !ava::tui::terminal_escape_sequence_should_discard("[200~") &&
+          !ava::tui::terminal_escape_sequence_should_discard("[13;2"),
+      "terminal escape parser discards completed terminal controls while preserving AVA-owned key and paste markers");
 
   auto prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Deny,
                                                                ava::tui::InputEvent{.key = ava::tui::Key::Tab});
@@ -335,6 +357,32 @@ void test_tui_composer_rendering_and_input() {
                                       visible.find("1.3k (0.7%)") != std::string::npos;
                              }),
          "tui renders a spinner-only processing indicator and token-status slot");
+
+  const auto queued_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "thinking...",
+      .processing = true,
+      .transcript = {ava::tui::TranscriptItem{.label = "you", .text = "work on queue UI"}},
+      .width = 80,
+      .height = 12,
+      .queued_messages = {ava::tui::QueuedMessageItem{.id = "q1", .kind = "follow-up", .text = "run tests next"},
+                          ava::tui::QueuedMessageItem{.id = "q2", .kind = "steer", .text = "keep patch small"}}});
+  expect(std::ranges::any_of(queued_lines,
+                             [](const std::string& line) {
+                               const auto visible = strip_sgr(line);
+                               return visible.find("queued follow-up run tests next") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(queued_lines,
+                                 [](const std::string& line) {
+                                   const auto visible = strip_sgr(line);
+                                   return visible.find("queued steer keep patch small") != std::string::npos &&
+                                          visible.find("/restore latest") != std::string::npos;
+                                 }),
+         "tui renders active-run queued steering/follow-up messages in a compact pending region");
 
   const auto reasoning_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                     .provider = "openai",
@@ -695,6 +743,68 @@ void test_tui_composer_rendering_and_input() {
   expect(ava::tui::previous_slash_palette_selection("/g", slash_commands, 0) == 1 &&
              ava::tui::next_slash_palette_selection("/g", slash_commands, 1) == 0,
          "tui slash palette arrow selection wraps through filtered commands");
+
+  const std::vector<ava::tui::SlashCommandItem> argument_slash_commands = {
+      ava::tui::SlashCommandItem{
+          .command = "/models",
+          .description = "List models",
+          .hint = "[query|provider/model]",
+          .category = "Models",
+          .aliases = {"/model"},
+          .argument_completions = {ava::tui::SlashCommandArgumentCompletion{.value = "openai/gpt-5.5",
+                                                                            .description = "GPT-5.5",
+                                                                            .category = "Models",
+                                                                            .argument_index = 0,
+                                                                            .append_space = false},
+                                   ava::tui::SlashCommandArgumentCompletion{.value = "anthropic/claude-sonnet-4-5",
+                                                                            .description = "Claude Sonnet 4.5",
+                                                                            .category = "Models",
+                                                                            .argument_index = 0,
+                                                                            .append_space = false}}},
+      ava::tui::SlashCommandItem{
+          .command = "/mcp",
+          .description = "MCP",
+          .hint = "<list|inspect|tools|restart> ...",
+          .category = "Plugins",
+          .argument_completions = {
+              ava::tui::SlashCommandArgumentCompletion{
+                  .value = "inspect", .description = "Inspect server", .category = "MCP", .argument_index = 0},
+              ava::tui::SlashCommandArgumentCompletion{.value = "fs",
+                                                       .description = "Filesystem server",
+                                                       .category = "MCP",
+                                                       .required_previous_args = {"inspect"},
+                                                       .argument_index = 1,
+                                                       .append_space = false}}}};
+  const auto model_argument_matches = ava::tui::filter_slash_commands("/model open", argument_slash_commands);
+  expect(model_argument_matches.size() == 1 && model_argument_matches.front().argument_completion &&
+             model_argument_matches.front().command == "openai/gpt-5.5",
+         "tui slash palette filters backend-provided argument completions after a command alias");
+  expect(ava::tui::slash_palette_visible("/models open", argument_slash_commands) &&
+             ava::tui::slash_command_selection_text("/models open", argument_slash_commands, 0) ==
+                 "/models openai/gpt-5.5",
+         "tui slash selection inserts explicit backend-provided argument completion text");
+  expect(ava::tui::slash_command_selection_text("/mcp inspect f", argument_slash_commands, 0) == "/mcp inspect fs",
+         "tui argument completion preserves required previous arguments for nested command forms");
+  const auto argument_palette =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "/model open",
+                                                           .status = "ready",
+                                                           .transcript = {},
+                                                           .slash_commands = argument_slash_commands,
+                                                           .selected_slash_command_index = 0,
+                                                           .width = 96,
+                                                           .height = 10});
+  expect(std::ranges::any_of(argument_palette,
+                             [](const std::string& line) {
+                               const auto visible = strip_sgr(line);
+                               return visible.find("openai/gpt-5.5") != std::string::npos &&
+                                      visible.find("GPT-5.5") != std::string::npos &&
+                                      visible.find("Models") != std::string::npos;
+                             }),
+         "tui slash palette renders argument completion value, category, and description");
 
   const auto key_bindings = ava::tui::parse_key_bindings_json(
       "{\"submit\":\"Ctrl+T, Enter\",\"new_line\":\"Shift+Enter\",\"delete_to_line_start\":\"Ctrl+U\","
@@ -1111,6 +1221,84 @@ void test_tui_composer_rendering_and_input() {
                              }),
          "tui permission dock highlights the selected allow choice");
 
+  const auto diff_permission_modal = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "permission required",
+      .transcript = {},
+      .permission_prompt =
+          ava::tui::PermissionPromptView{.tool_name = "write_file",
+                                         .operation = "write_file",
+                                         .target = "/tmp/outside.txt",
+                                         .command = "",
+                                         .reason = "external mutation",
+                                         .diff_preview = "--- /tmp/outside.txt\n+++ /tmp/outside.txt\n@@ -1,1 +1,1 "
+                                                         "@@\n-old line\n+new line\n",
+                                         .diff_truncated = true},
+      .width = 54,
+      .height = 15});
+  expect(std::ranges::all_of(diff_permission_modal,
+                             [](const std::string& line) {
+                               return line.find('\n') == std::string::npos && visible_columns(line) <= 54;
+                             }) &&
+             std::ranges::any_of(
+                 diff_permission_modal,
+                 [](const std::string& line) { return strip_sgr(line).find("diff:") != std::string::npos; }) &&
+             std::ranges::any_of(
+                 diff_permission_modal,
+                 [](const std::string& line) { return strip_sgr(line).find("-old line") != std::string::npos; }) &&
+             std::ranges::any_of(
+                 diff_permission_modal,
+                 [](const std::string& line) { return strip_sgr(line).find("+new line") != std::string::npos; }) &&
+             std::ranges::any_of(diff_permission_modal,
+                                 [](const std::string& line) {
+                                   return strip_sgr(line).find("[diff truncated]") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(diff_permission_modal,
+                                 [](const std::string& line) {
+                                   return strip_sgr(line).find("[Deny]") != std::string::npos &&
+                                          strip_sgr(line).find("[Allow once]") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(
+                 diff_permission_modal,
+                 [](const std::string& line) { return strip_sgr(line).find("Esc deny") != std::string::npos; }),
+         "tui permission dock renders backend-provided mutation diffs while preserving fail-closed controls");
+
+  const auto narrow_diff_permission_modal = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "permission required",
+      .transcript = {},
+      .permission_prompt =
+          ava::tui::PermissionPromptView{.tool_name = "edit",
+                                         .operation = "edit",
+                                         .target = "/tmp/outside.txt",
+                                         .command = "",
+                                         .reason = "external mutation",
+                                         .diff_preview = "--- old\n+++ new\n@@ -1,1 +1,1 @@\n-old\n+new\n"},
+      .width = 28,
+      .height = 10});
+  expect(std::ranges::all_of(narrow_diff_permission_modal,
+                             [](const std::string& line) {
+                               return line.find('\n') == std::string::npos && visible_columns(line) <= 28;
+                             }) &&
+             std::ranges::any_of(
+                 narrow_diff_permission_modal,
+                 [](const std::string& line) { return strip_sgr(line).find("diff:") != std::string::npos; }) &&
+             std::ranges::any_of(narrow_diff_permission_modal,
+                                 [](const std::string& line) {
+                                   const auto visible = strip_sgr(line);
+                                   return visible.find("[Deny]") != std::string::npos &&
+                                          visible.find("[Allow once]") != std::string::npos;
+                                 }),
+         "tui permission dock keeps diff previews bounded at narrow widths");
+
   const auto long_permission_modal = ava::tui::render_composer(
       ava::tui::ComposerSnapshot{.mode = "build",
                                  .provider = "openai",
@@ -1279,6 +1467,34 @@ void test_tui_composer_rendering_and_input() {
          "tui sanitizer rejects utf-8 surrogate codepoints");
   expect(ava::tui::sanitize_terminal_text(std::string("x") + std::string("\xF4\x90\x80\x80", 4) + "y") == "x????y",
          "tui sanitizer rejects utf-8 codepoints above the unicode maximum");
+  expect(ava::tui::sanitize_terminal_text(std::string("nul") + std::string(1, '\0') + "byte") == "nul?byte",
+         "tui sanitizer replaces binary-like NUL bytes with a visible marker");
+  expect(ava::tui::detail::terminal_text_columns("\xE7\x95\x8C") == 2 &&
+             ava::tui::detail::terminal_text_columns(std::string("e") + "\xCC\x81") == 1 &&
+             ava::tui::detail::terminal_text_columns(std::string("a") + "\xE2\x80\x8D" + "b") == 2 &&
+             ava::tui::detail::terminal_text_columns(std::string("\xE2\x98\xBA") + "\xEF\xB8\x8F") >= 1,
+         "tui width accounting handles CJK width and treats combining marks, zero-width joiners, and variation "
+         "selectors as non-advancing");
+  const auto cursor_prefix_columns = ava::tui::detail::terminal_text_columns(
+      std::string(ava::tui::detail::kComposerBar) + "  " + std::string(ava::tui::detail::kComposerPrompt) + " ");
+  const auto cursor_base = cursor_prefix_columns + 1;
+  const auto cursor_for = [](std::string input, std::size_t cursor) {
+    return ava::tui::detail::input_cursor_column(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                            .provider = "openai",
+                                                                            .model = "gpt-5.5",
+                                                                            .session_id = "session_test",
+                                                                            .input = std::move(input),
+                                                                            .status = "ready",
+                                                                            .transcript = {},
+                                                                            .input_cursor = cursor},
+                                                 120);
+  };
+  const auto cursor_text = std::string("a") + "\xE7\x95\x8C" + "e" + "\xCC\x81";
+  expect(cursor_for(cursor_text, 1) == cursor_base + 1 && cursor_for(cursor_text, 4) == cursor_base + 3 &&
+             cursor_for(cursor_text, 5) == cursor_base + 4 &&
+             cursor_for(cursor_text, cursor_text.size()) == cursor_base + 4 &&
+             cursor_for(std::string("x") + std::string("\xC0\x80", 2), 3) == cursor_base + 3,
+         "tui composer cursor placement uses sanitized display columns for CJK, combining marks, and invalid utf-8");
 
   const auto composer_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "plan",
                                                                                    .provider = "openai",
@@ -1832,6 +2048,110 @@ void test_tui_composer_rendering_and_input() {
           std::ranges::all_of(detailed_tool_card, [](const std::string& line) { return visible_columns(line) <= 48; }),
       "tui expands tool cards into sanitized argument and result detail rows when details are enabled");
 
+  const auto collapsed_override_card = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "ready",
+                                 .transcript = {ava::tui::TranscriptItem{
+                                     .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                        .name = "bash",
+                                                                        .argument_summary = "command=ctest",
+                                                                        .result_summary = "ok",
+                                                                        .details_visible = false}}},
+                                 .width = 48,
+                                 .height = 10,
+                                 .tool_details_visible = true});
+  expect(std::ranges::none_of(
+             collapsed_override_card,
+             [](const std::string& line) { return strip_sgr(line).find("args: command=ctest") != std::string::npos; }),
+         "tui supports per-tool detail collapse even when the global details toggle is enabled");
+
+  const auto expanded_override_card = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "ready",
+                                 .transcript = {ava::tui::TranscriptItem{
+                                     .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                        .name = "grep",
+                                                                        .argument_summary = "pattern=todo",
+                                                                        .result_summary = "2 matches",
+                                                                        .details_visible = true,
+                                                                        .truncated = true,
+                                                                        .visible_matches = 2,
+                                                                        .total_matches = 10,
+                                                                        .spill_path = "/tmp/ava-spill/grep.txt",
+                                                                        .spill_truncated = true}}},
+                                 .width = 72,
+                                 .height = 12});
+  expect(std::ranges::any_of(expanded_override_card,
+                             [](const std::string& line) {
+                               return strip_sgr(line).find("truncation: truncated 2/10 matches") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(expanded_override_card,
+                                 [](const std::string& line) {
+                                   return strip_sgr(line).find("spill: /tmp/ava-spill/grep.txt") != std::string::npos;
+                                 }),
+         "tui renders backend-provided truncation counts and spill paths only when present");
+
+  const auto wide_diff_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                             .name = "edit_file",
+                                             .argument_summary = "path=note.txt",
+                                             .result_summary = "wrote 9 bytes",
+                                             .details_visible = true,
+                                             .diff = "--- note.txt\n+++ note.txt\n-old\n+new",
+                                             .diff_truncated = true}}},
+      .width = 88,
+      .height = 14});
+  expect(
+      std::ranges::any_of(wide_diff_card,
+                          [](const std::string& line) { return strip_sgr(line).find("diff:") != std::string::npos; }) &&
+          std::ranges::any_of(wide_diff_card,
+                              [](const std::string& line) {
+                                return strip_sgr(line).find("+new") != std::string::npos &&
+                                       line.find("\x1b[38;2;52;211;153m") != std::string::npos;
+                              }) &&
+          std::ranges::any_of(
+              wide_diff_card,
+              [](const std::string& line) { return strip_sgr(line).find("[diff truncated]") != std::string::npos; }),
+      "tui renders backend-provided unified diff previews with mutation colors and truncation markers");
+
+  const auto narrow_diff_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                             .name = "edit_file",
+                                             .argument_summary = "path=very/long/path/to/note.txt",
+                                             .result_summary = "wrote 9 bytes",
+                                             .details_visible = true,
+                                             .diff = "--- very/long/path/to/note.txt\n+++ very/long/path/to/"
+                                                     "note.txt\n-old value\n+new value"}}},
+      .width = 36,
+      .height = 14});
+  expect(
+      std::ranges::any_of(narrow_diff_card,
+                          [](const std::string& line) { return strip_sgr(line).find("diff:") != std::string::npos; }) &&
+          std::ranges::all_of(narrow_diff_card, [](const std::string& line) { return visible_columns(line) <= 36; }),
+      "tui keeps backend-provided diff previews width-safe on narrow terminals");
+
   const auto sidebar_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
       .provider = "openai",
@@ -1857,6 +2177,7 @@ void test_tui_composer_rendering_and_input() {
           .git_branch = "develop\x1b[31m",
           .version = "0.32",
           .token_status = "1.2k (4.0%)",
+          .reasoning_status = "low\x1b[31m",
           .context_source_count = 2}});
   expect(std::ranges::any_of(sidebar_frame,
                              [](const std::string& line) {
@@ -1887,6 +2208,9 @@ void test_tui_composer_rendering_and_input() {
                                  [](const std::string& line) {
                                    return strip_sgr(line).find("usage 1.2k (4.0%)") != std::string::npos;
                                  }) &&
+             std::ranges::any_of(
+                 sidebar_frame,
+                 [](const std::string& line) { return strip_sgr(line).find("reasoning low") != std::string::npos; }) &&
              std::ranges::any_of(sidebar_frame,
                                  [](const std::string& line) {
                                    return strip_sgr(line).find("context sources 2") != std::string::npos;
@@ -2047,6 +2371,91 @@ void test_tui_composer_rendering_and_input() {
                                 return !line.empty() && (static_cast<unsigned char>(line.back()) & 0xC0U) == 0xC0U;
                               }),
          "tui truncation does not leave a trailing utf-8 starter byte");
+
+  std::vector<ava::tui::TranscriptItem> stress_transcript;
+  for (int index = 0; index < 36; ++index) {
+    stress_transcript.push_back(
+        ava::tui::TranscriptItem{.label = "you",
+                                 .text = "resize stress user line " + std::to_string(index) +
+                                         " with a very-long-token-that-must-not-overflow-or-resize-the-layout"});
+    stress_transcript.push_back(ava::tui::TranscriptItem{.label = "ava",
+                                                         .text = "assistant answer " + std::to_string(index) +
+                                                                 " keeps CJK \xE7\x95\x8C and emoji \xF0\x9F\x98\x80 "
+                                                                 "inside the measured viewport",
+                                                         .meta = "Build - GPT-5.5",
+                                                         .thinking = "checked resize path " + std::to_string(index)});
+    if (index % 5 == 0) {
+      stress_transcript.push_back(ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{
+              .status = index % 10 == 0 ? ava::tui::ToolTimelineStatus::Error : ava::tui::ToolTimelineStatus::Success,
+              .name = "grep",
+              .argument_summary = "pattern=needle path=src",
+              .result_summary = "returned " + std::to_string(index) + " matches",
+              .call_id = "call_resize_" + std::to_string(index),
+              .lifecycle =
+                  index % 10 == 0 ? ava::tui::ToolLifecycleState::Error : ava::tui::ToolLifecycleState::Complete,
+              .truncated = true,
+              .visible_matches = 2,
+              .total_matches = 12,
+              .spill_path = "/tmp/ava-spill/resize.txt"}});
+    }
+    if (index % 7 == 0) {
+      stress_transcript.push_back(ava::tui::TranscriptItem{
+          .label = "audit", .text = "permission replied after resize boundary " + std::to_string(index)});
+    }
+  }
+
+  const ava::tui::SidebarSnapshot stress_sidebar{
+      .activity = {ava::tui::SidebarActivityItem{.id = "running",
+                                                 .label = "compaction",
+                                                 .detail = "compaction started tokens~9000/8000",
+                                                 .status = ava::tui::ToolTimelineStatus::Running},
+                   ava::tui::SidebarActivityItem{.id = "done",
+                                                 .label = "read_file",
+                                                 .detail = "assistant responded",
+                                                 .status = ava::tui::ToolTimelineStatus::Success}},
+      .modified_files = {ava::tui::SidebarModifiedFile{.path = "src/ava/tui/composer.cpp", .added = 3, .removed = 1}},
+      .session_id = "session_resize_stress",
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .workspace = "/workspace",
+      .git_branch = "develop",
+      .version = "test",
+      .token_status = "tokens unknown",
+      .context_source_count = 2};
+  const std::vector<std::size_t> stress_widths = {1, 20, 28, 40, 72, 111, 112, 160};
+  const std::vector<std::size_t> stress_heights = {1, 8, 10, 18, 32};
+  for (const auto width : stress_widths) {
+    for (const auto height : stress_heights) {
+      auto frame = ava::tui::render_composer(
+          ava::tui::ComposerSnapshot{.mode = "build",
+                                     .provider = "openai",
+                                     .model = "gpt-5.5",
+                                     .session_id = "session_resize_stress",
+                                     .input = "draft line one\nsecond draft line with \xE7\x95\x8C",
+                                     .status = "ready",
+                                     .processing = true,
+                                     .token_status = "tokens unknown",
+                                     .reasoning_status = "thinking visible",
+                                     .transcript = stress_transcript,
+                                     .transcript_scroll_offset = 50,
+                                     .width = width,
+                                     .height = height,
+                                     .input_cursor = std::string::npos,
+                                     .sidebar = stress_sidebar,
+                                     .tool_details_visible = true,
+                                     .thinking_visible = true});
+      const auto effective_width = std::max<std::size_t>(ava::tui::detail::kMinWidth, width);
+      const auto effective_height = std::max<std::size_t>(ava::tui::detail::kMinHeight, height);
+      expect(frame.size() == effective_height && std::ranges::all_of(frame,
+                                                                     [&](const std::string& line) {
+                                                                       return line.find('\n') == std::string::npos &&
+                                                                              visible_columns(line) <= effective_width;
+                                                                     }),
+             "tui resize stress render keeps long mixed transcripts bounded at every tested viewport");
+    }
+  }
 }
 
 void test_tui_event_state_reduces_runtime_events() {
@@ -2180,6 +2589,48 @@ void test_tui_event_state_reduces_runtime_events() {
              thinking_render,
              [](const std::string& line) { return strip_sgr(line).find("╭─ Thinking") != std::string::npos; }),
          "tui thinking transcript block avoids the normal boxed message header");
+  const auto hidden_thinking_render =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "",
+                                                           .status = "ready",
+                                                           .transcript = reasoning_state.transcript,
+                                                           .width = 60,
+                                                           .height = 10,
+                                                           .thinking_visible = false});
+  expect(std::ranges::none_of(hidden_thinking_render,
+                              [](const std::string& line) {
+                                return strip_sgr(line).find("Thinking: checking options") != std::string::npos;
+                              }) &&
+             std::ranges::any_of(
+                 hidden_thinking_render,
+                 [](const std::string& line) { return strip_sgr(line).find("answer") != std::string::npos; }),
+         "tui thinking visibility hides inline thinking blocks without hiding assistant text");
+
+  ava::tui::TuiEventState redacted_reasoning_state;
+  ava::app::RuntimeEvent redacted_reasoning;
+  redacted_reasoning.type = ava::app::RuntimeEventType::ReasoningDelta;
+  redacted_reasoning.reasoning_redacted = true;
+  redacted_reasoning.text = "provider-private-secret";
+  ava::tui::apply_runtime_event(redacted_reasoning_state, redacted_reasoning);
+  auto redacted_snapshot = ava::tui::event_state_transcript_snapshot(redacted_reasoning_state);
+  const auto redacted_render = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                    .provider = "openai",
+                                                                                    .model = "gpt-5.5",
+                                                                                    .session_id = "session_test",
+                                                                                    .input = "",
+                                                                                    .status = "ready",
+                                                                                    .transcript = redacted_snapshot,
+                                                                                    .width = 60,
+                                                                                    .height = 10});
+  expect(redacted_snapshot.size() == 1 && redacted_snapshot[0].thinking == "[reasoning redacted]" &&
+             std::ranges::none_of(redacted_render,
+                                  [](const std::string& line) {
+                                    return strip_sgr(line).find("provider-private-secret") != std::string::npos;
+                                  }),
+         "tui event state never renders text from redacted reasoning deltas");
 
   ava::tui::TuiEventState audit_state;
   ava::app::RuntimeEvent permission_audit;
@@ -2233,8 +2684,10 @@ void test_tui_event_state_reduces_runtime_events() {
              provider_state.activity[0].label == "read_file" &&
              provider_state.activity[0].detail == "provider is preparing tool call" &&
              provider_state.activity[0].status == ava::tui::ToolTimelineStatus::Running &&
-             provider_state.transcript.empty() && provider_snapshot.empty(),
-         "tui event state shows provider tool-call starts as sidebar-only activity");
+             provider_state.transcript.empty() && provider_state.pending_tools.size() == 1 &&
+             provider_snapshot.size() == 1 && provider_snapshot.back().tool &&
+             provider_snapshot.back().tool->lifecycle == ava::tui::ToolLifecycleState::ProviderAnnounced,
+         "tui event state shows provider tool-call starts as pending announced tool cards");
 
   ava::app::RuntimeEvent provider_delta = provider_start;
   provider_delta.status = "tool_call_delta";
@@ -2246,8 +2699,11 @@ void test_tui_event_state_reduces_runtime_events() {
              provider_state.activity[0].label == "read_file" &&
              provider_state.activity[0].detail == "streaming tool arguments" &&
              provider_state.activity[0].status == ava::tui::ToolTimelineStatus::Running &&
-             provider_state.transcript.empty() && provider_snapshot.empty(),
-         "tui event state keeps provider tool-call deltas in the sidebar and preserves labels by call id");
+             provider_state.transcript.empty() && provider_state.pending_tools.size() == 1 &&
+             provider_state.pending_tools[0].item.lifecycle == ava::tui::ToolLifecycleState::ArgumentsStreaming &&
+             provider_state.pending_tools[0].item.argument_summary.find("\"partial\": true") != std::string::npos &&
+             provider_snapshot.size() == 1 && provider_snapshot.back().tool,
+         "tui event state keeps provider tool-call deltas on the pending tool card and preserves labels by call id");
 
   ava::app::RuntimeEvent provider_end = provider_delta;
   provider_end.status = "tool_call_end";
@@ -2258,8 +2714,45 @@ void test_tui_event_state_reduces_runtime_events() {
              provider_state.activity[0].label == "read_file" &&
              provider_state.activity[0].detail == "tool call ready" &&
              provider_state.activity[0].status == ava::tui::ToolTimelineStatus::Success &&
-             provider_state.transcript.empty() && provider_state.pending_tools.empty() && provider_snapshot.empty(),
-         "tui event state completes provider tool-call sidebar activity without adding transcript items");
+             provider_state.transcript.empty() && provider_state.pending_tools.size() == 1 &&
+             provider_state.pending_tools[0].item.lifecycle == ava::tui::ToolLifecycleState::ArgumentsComplete &&
+             provider_snapshot.size() == 1 && provider_snapshot.back().tool,
+         "tui event state marks provider tool-call arguments complete without settling completed transcript history");
+
+  ava::app::RuntimeEvent provider_execution_start;
+  provider_execution_start.type = ava::app::RuntimeEventType::ToolStart;
+  provider_execution_start.call_id = "provider_call_1";
+  provider_execution_start.tool_name = "read_file";
+  provider_execution_start.text = "path=README.md";
+  ava::tui::apply_runtime_event(provider_state, provider_execution_start);
+  expect(provider_state.pending_tools.size() == 1 &&
+             provider_state.pending_tools[0].item.lifecycle == ava::tui::ToolLifecycleState::ExecutionStarted &&
+             provider_state.pending_tools[0].item.argument_summary == "path=README.md",
+         "tui event state advances an announced provider tool card into execution by call id");
+
+  ava::app::RuntimeEvent provider_execution_progress;
+  provider_execution_progress.type = ava::app::RuntimeEventType::ToolProgress;
+  provider_execution_progress.call_id = "provider_call_1";
+  provider_execution_progress.tool_name = "read_file";
+  provider_execution_progress.text = "reading file";
+  ava::tui::apply_runtime_event(provider_state, provider_execution_progress);
+  expect(provider_state.pending_tools.size() == 1 &&
+             provider_state.pending_tools[0].item.lifecycle == ava::tui::ToolLifecycleState::Progress &&
+             provider_state.pending_tools[0].item.result_summary == "reading file",
+         "tui event state records partial tool progress on the pending card");
+
+  ava::app::RuntimeEvent provider_execution_result;
+  provider_execution_result.type = ava::app::RuntimeEventType::ToolResult;
+  provider_execution_result.call_id = "provider_call_1";
+  provider_execution_result.tool_name = "read_file";
+  provider_execution_result.status = "success";
+  provider_execution_result.text = "read 10/10 bytes";
+  ava::tui::apply_runtime_event(provider_state, provider_execution_result);
+  expect(provider_state.pending_tools.empty() && !provider_state.transcript.empty() &&
+             provider_state.transcript.back().tool &&
+             provider_state.transcript.back().tool->lifecycle == ava::tui::ToolLifecycleState::Complete &&
+             provider_state.transcript.back().tool->argument_summary == "path=README.md",
+         "tui event state settles completed tools into immutable transcript history");
 
   ava::tui::TuiEventState provider_without_id_state;
   ava::app::RuntimeEvent provider_without_id;
@@ -2273,12 +2766,15 @@ void test_tui_event_state_reduces_runtime_events() {
   ava::tui::apply_runtime_event(provider_without_id_state, provider_without_id);
   provider_without_id.status = "tool_call_end";
   ava::tui::apply_runtime_event(provider_without_id_state, provider_without_id);
-  expect(provider_without_id_state.activity.size() == 1 && !provider_without_id_activity_id.empty() &&
-             provider_without_id_state.activity[0].id == provider_without_id_activity_id &&
-             provider_without_id_state.activity[0].label == "grep" &&
-             provider_without_id_state.activity[0].detail == "tool call ready" &&
-             provider_without_id_state.activity[0].status == ava::tui::ToolTimelineStatus::Success,
-         "tui event state coalesces provider tool-call activity when provider events omit call ids");
+  expect(
+      provider_without_id_state.activity.size() == 1 && !provider_without_id_activity_id.empty() &&
+          provider_without_id_state.activity[0].id == provider_without_id_activity_id &&
+          provider_without_id_state.activity[0].label == "grep" &&
+          provider_without_id_state.activity[0].detail == "tool call ready" &&
+          provider_without_id_state.activity[0].status == ava::tui::ToolTimelineStatus::Success &&
+          provider_without_id_state.pending_tools.size() == 1 &&
+          provider_without_id_state.pending_tools[0].item.lifecycle == ava::tui::ToolLifecycleState::ArgumentsComplete,
+      "tui event state coalesces provider tool-call activity and pending cards when provider events omit call ids");
 
   ava::app::RuntimeEvent tool_start;
   tool_start.type = ava::app::RuntimeEventType::ToolStart;
@@ -2342,8 +2838,96 @@ void test_tui_event_state_reduces_runtime_events() {
   tool_error.text = "denied";
   ava::tui::apply_runtime_event(state, tool_error);
   expect(state.transcript.back().tool && state.transcript.back().tool->status == ava::tui::ToolTimelineStatus::Error &&
+             state.transcript.back().tool->lifecycle == ava::tui::ToolLifecycleState::Error &&
              state.transcript.back().tool->result_summary == "denied",
          "tui event state records errored tool results as error tool cards");
+
+  ava::tui::TuiEventState correlated_tool_state;
+  ava::app::EventEnvelope correlated_provider_delta{.schema_version = 1,
+                                                    .event_id = "event_tool_delta",
+                                                    .timestamp = "2026-04-30T00:00:00Z",
+                                                    .session_id = "session_test",
+                                                    .run_id = "run_tool",
+                                                    .turn_id = "turn_tool",
+                                                    .message_id = "message_tool",
+                                                    .request_id = "request_tool",
+                                                    .correlation_id = "corr_tool",
+                                                    .name = "provider_event",
+                                                    .payload_json =
+                                                        "{\"status\":\"tool_call_delta\",\"tool_name\":\"grep\","
+                                                        "\"text\":\"{\\\"pattern\\\":\"}"};
+  ava::tui::apply_event_envelope(correlated_tool_state, correlated_provider_delta);
+  ava::app::EventEnvelope correlated_progress{.schema_version = 1,
+                                              .event_id = "event_tool_progress",
+                                              .timestamp = "2026-04-30T00:00:01Z",
+                                              .session_id = "session_test",
+                                              .run_id = "run_tool",
+                                              .turn_id = "turn_tool",
+                                              .message_id = "message_tool",
+                                              .request_id = "request_tool",
+                                              .correlation_id = "corr_tool",
+                                              .name = "tool_progress",
+                                              .payload_json =
+                                                  "{\"tool_name\":\"grep\",\"text\":\"scanned 10 files\","
+                                                  "\"status\":\"running\"}"};
+  ava::tui::apply_event_envelope(correlated_tool_state, correlated_progress);
+  expect(correlated_tool_state.pending_tools.size() == 1 &&
+             correlated_tool_state.pending_tools[0].call_id == "corr_tool" &&
+             correlated_tool_state.pending_tools[0].request_id == "request_tool" &&
+             correlated_tool_state.pending_tools[0].correlation_id == "corr_tool" &&
+             correlated_tool_state.pending_tools[0].item.result_summary == "scanned 10 files",
+         "tui EventEnvelope reducer updates pending tools by backend request and correlation ids");
+
+  ava::app::EventEnvelope correlated_result{.schema_version = 1,
+                                            .event_id = "event_tool_result",
+                                            .timestamp = "2026-04-30T00:00:02Z",
+                                            .session_id = "session_test",
+                                            .run_id = "run_tool",
+                                            .turn_id = "turn_tool",
+                                            .message_id = "message_tool",
+                                            .request_id = "request_tool",
+                                            .correlation_id = "corr_tool",
+                                            .name = "tool_result",
+                                            .payload_json =
+                                                "{\"tool_name\":\"grep\",\"result_summary\":\"2 matches\","
+                                                "\"status\":\"success\",\"truncated\":true,"
+                                                "\"details_visible\":true,"
+                                                "\"output_bytes\":256,\"total_bytes\":1024,"
+                                                "\"omitted_bytes\":768,\"omitted_lines\":12,"
+                                                "\"visible_matches\":2,\"total_matches\":8,"
+                                                "\"spill_path\":\"/tmp/ava-spill/grep.txt\","
+                                                "\"diff\":\"--- note.txt\\n+++ note.txt\\n-old\\n+new\","
+                                                "\"diff_truncated\":true}"};
+  ava::tui::apply_event_envelope(correlated_tool_state, correlated_result);
+  const auto correlated_tool_render = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "ready",
+                                 .transcript = ava::tui::event_state_transcript_snapshot(correlated_tool_state),
+                                 .width = 80,
+                                 .height = 14,
+                                 .tool_details_visible = false});
+  expect(
+      correlated_tool_state.pending_tools.empty() && correlated_tool_state.transcript.size() == 1 &&
+          correlated_tool_state.transcript[0].tool &&
+          correlated_tool_state.transcript[0].tool->lifecycle == ava::tui::ToolLifecycleState::Complete &&
+          correlated_tool_state.transcript[0].tool->truncated &&
+          correlated_tool_state.transcript[0].tool->details_visible == true &&
+          correlated_tool_state.transcript[0].tool->spill_path == "/tmp/ava-spill/grep.txt" &&
+          std::ranges::any_of(correlated_tool_render,
+                              [](const std::string& line) {
+                                const auto visible = strip_sgr(line);
+                                return visible.find("truncation: truncated 256/1024 bytes") != std::string::npos &&
+                                       visible.find("omitted 768 bytes, 12 lines") != std::string::npos;
+                              }) &&
+          std::ranges::any_of(
+              correlated_tool_render,
+              [](const std::string& line) { return strip_sgr(line).find("[diff truncated]") != std::string::npos; }),
+      "tui EventEnvelope reducer settles completed tools with backend-provided truncation, spill, diff, and per-tool "
+      "detail metadata");
 
   ava::app::RuntimeEvent error;
   error.type = ava::app::RuntimeEventType::Error;
@@ -2367,6 +2951,73 @@ void test_tui_event_state_reduces_runtime_events() {
              !canceled_state.activity.empty() && canceled_state.activity.back().label == "stopped",
          "tui event state presents cooperative cancellation as a friendly stopped state");
 
+  ava::tui::TuiEventState explicit_canceled_state;
+  ava::app::RuntimeEvent explicit_canceled;
+  explicit_canceled.type = ava::app::RuntimeEventType::Canceled;
+  explicit_canceled.text = "stopped by user";
+  explicit_canceled.reason = "cancel_requested";
+  ava::tui::apply_runtime_event(explicit_canceled_state, explicit_canceled);
+  expect(explicit_canceled_state.run_status == ava::tui::TuiEventRunStatus::Canceled &&
+             explicit_canceled_state.transcript.size() == 1 &&
+             explicit_canceled_state.transcript[0].text == "stopped by user" &&
+             explicit_canceled_state.activity.back().detail == "cancel_requested",
+         "tui event state accepts explicit backend canceled lifecycle events");
+
+  ava::tui::TuiEventState lifecycle_state;
+  ava::app::RuntimeEvent compaction_start;
+  compaction_start.type = ava::app::RuntimeEventType::CompactionStart;
+  compaction_start.trigger = "auto";
+  compaction_start.estimated_tokens = 9000;
+  compaction_start.threshold_tokens = 8000;
+  ava::tui::apply_runtime_event(lifecycle_state, compaction_start);
+  expect(lifecycle_state.transcript.empty() && lifecycle_state.activity.size() == 1 &&
+             lifecycle_state.activity[0].label == "compaction" &&
+             lifecycle_state.activity[0].detail.find("tokens~9000/8000") != std::string::npos,
+         "tui event state keeps compaction starts in status activity without inventing transcript content");
+  ava::app::RuntimeEvent retry;
+  retry.type = ava::app::RuntimeEventType::Retry;
+  retry.reason = "context_overflow";
+  retry.trigger = "context_overflow";
+  retry.attempt = 1;
+  retry.max_attempts = 1;
+  retry.delay_ms = 250;
+  retry.estimated_tokens = 9000;
+  retry.threshold_tokens = 8000;
+  retry.snapshot_entries = 3;
+  retry.current_entries = 4;
+  ava::tui::apply_runtime_event(lifecycle_state, retry);
+  ava::app::RuntimeEvent retry_tick;
+  retry_tick.type = ava::app::RuntimeEventType::RetryTick;
+  retry_tick.reason = "context_overflow";
+  retry_tick.trigger = "context_overflow";
+  retry_tick.attempt = 1;
+  retry_tick.max_attempts = 1;
+  retry_tick.delay_ms = 250;
+  retry_tick.remaining_ms = 125;
+  ava::tui::apply_runtime_event(lifecycle_state, retry_tick);
+  ava::app::RuntimeEvent compaction_end;
+  compaction_end.type = ava::app::RuntimeEventType::CompactionEnd;
+  compaction_end.trigger = "context_overflow";
+  compaction_end.attempt = 1;
+  compaction_end.max_attempts = 2;
+  compaction_end.summary_bytes = 1234;
+  ava::tui::apply_runtime_event(lifecycle_state, compaction_end);
+  expect(lifecycle_state.transcript.size() == 2 && lifecycle_state.transcript[0].label == "audit" &&
+             lifecycle_state.transcript[0].text.find("retrying after context_overflow") != std::string::npos &&
+             lifecycle_state.transcript[0].text.find("attempt 1/1") != std::string::npos &&
+             lifecycle_state.transcript[0].text.find("delay=250ms") != std::string::npos &&
+             lifecycle_state.transcript[0].text.find("tokens~9000/8000") != std::string::npos &&
+             lifecycle_state.transcript[0].text.find("entries=3/4") != std::string::npos &&
+             lifecycle_state.transcript[1].text.find("compaction completed") != std::string::npos &&
+             lifecycle_state.transcript[1].text.find("attempt 1/2") != std::string::npos &&
+             lifecycle_state.transcript[1].text.find("summary=1234 bytes") != std::string::npos &&
+             std::ranges::any_of(lifecycle_state.activity,
+                                 [](const ava::tui::SidebarActivityItem& activity) {
+                                   return activity.label == "retry" &&
+                                          activity.detail.find("remaining=125ms") != std::string::npos;
+                                 }),
+         "tui event state renders backend retry, retry countdown, and compaction markers with backend-provided detail");
+
   ava::tui::TuiEventState done_state;
   delta.text = "done text";
   ava::tui::apply_runtime_event(done_state, delta);
@@ -2381,6 +3032,458 @@ void test_tui_event_state_reduces_runtime_events() {
              done_state.pending_assistant_text.empty() && done_state.transcript.size() == 1 &&
              done_state.transcript[0].text == "done text",
          "tui event state records done metadata and commits pending assistant text");
+
+  std::vector<ava::app::RuntimeEvent> live_events;
+  ava::app::RuntimeEvent parity_session;
+  parity_session.type = ava::app::RuntimeEventType::SessionStart;
+  parity_session.provider_id = "openai";
+  parity_session.model_id = "gpt-5.5";
+  live_events.push_back(parity_session);
+  ava::app::RuntimeEvent parity_user;
+  parity_user.type = ava::app::RuntimeEventType::UserMessage;
+  parity_user.text = "inspect";
+  live_events.push_back(parity_user);
+  ava::app::RuntimeEvent parity_retry;
+  parity_retry.type = ava::app::RuntimeEventType::Retry;
+  parity_retry.reason = "context_overflow";
+  parity_retry.trigger = "context_overflow";
+  parity_retry.attempt = 1;
+  parity_retry.max_attempts = 1;
+  live_events.push_back(parity_retry);
+  ava::app::RuntimeEvent parity_retry_tick;
+  parity_retry_tick.type = ava::app::RuntimeEventType::RetryTick;
+  parity_retry_tick.reason = "context_overflow";
+  parity_retry_tick.trigger = "context_overflow";
+  parity_retry_tick.attempt = 1;
+  parity_retry_tick.max_attempts = 1;
+  parity_retry_tick.delay_ms = 250;
+  parity_retry_tick.remaining_ms = 0;
+  live_events.push_back(parity_retry_tick);
+  ava::app::RuntimeEvent parity_compaction_start;
+  parity_compaction_start.type = ava::app::RuntimeEventType::CompactionStart;
+  parity_compaction_start.trigger = "context_overflow";
+  parity_compaction_start.attempt = 1;
+  parity_compaction_start.max_attempts = 2;
+  live_events.push_back(parity_compaction_start);
+  ava::app::RuntimeEvent parity_compaction_end;
+  parity_compaction_end.type = ava::app::RuntimeEventType::CompactionEnd;
+  parity_compaction_end.trigger = "context_overflow";
+  parity_compaction_end.attempt = 1;
+  parity_compaction_end.max_attempts = 2;
+  parity_compaction_end.summary_bytes = 512;
+  live_events.push_back(parity_compaction_end);
+  ava::app::RuntimeEvent parity_reasoning;
+  parity_reasoning.type = ava::app::RuntimeEventType::ReasoningDelta;
+  parity_reasoning.text = "checking";
+  live_events.push_back(parity_reasoning);
+  ava::app::RuntimeEvent parity_delta;
+  parity_delta.type = ava::app::RuntimeEventType::MessageUpdate;
+  parity_delta.model_id = "gpt-5.5";
+  parity_delta.text = "answer";
+  live_events.push_back(parity_delta);
+  ava::app::RuntimeEvent parity_end;
+  parity_end.type = ava::app::RuntimeEventType::MessageEnd;
+  parity_end.model_id = "gpt-5.5";
+  live_events.push_back(parity_end);
+  ava::app::RuntimeEvent parity_tool_start;
+  parity_tool_start.type = ava::app::RuntimeEventType::ToolStart;
+  parity_tool_start.call_id = "call_parity";
+  parity_tool_start.tool_name = "read_file";
+  parity_tool_start.text = "path=README.md";
+  live_events.push_back(parity_tool_start);
+  ava::app::RuntimeEvent parity_tool_progress;
+  parity_tool_progress.type = ava::app::RuntimeEventType::ToolProgress;
+  parity_tool_progress.call_id = "call_parity";
+  parity_tool_progress.tool_name = "read_file";
+  parity_tool_progress.text = "reading";
+  parity_tool_progress.status = "running";
+  live_events.push_back(parity_tool_progress);
+  ava::app::RuntimeEvent parity_tool_result;
+  parity_tool_result.type = ava::app::RuntimeEventType::ToolResult;
+  parity_tool_result.call_id = "call_parity";
+  parity_tool_result.tool_name = "read_file";
+  parity_tool_result.text = "12 bytes";
+  parity_tool_result.status = "success";
+  live_events.push_back(parity_tool_result);
+  ava::app::RuntimeEvent parity_audit;
+  parity_audit.type = ava::app::RuntimeEventType::ProviderEvent;
+  parity_audit.status = "tui:question_answer";
+  parity_audit.text = "question answered: yes";
+  live_events.push_back(parity_audit);
+  ava::app::RuntimeEvent parity_done;
+  parity_done.type = ava::app::RuntimeEventType::Done;
+  parity_done.stop_reason = "stop";
+  parity_done.provider_iterations = 1;
+  parity_done.tool_calls = 1;
+  live_events.push_back(parity_done);
+
+  ava::tui::TuiEventState live_state;
+  ava::tui::TuiEventState replayed_state;
+  ava::app::EventEnvelopeContext parity_context;
+  parity_context.run_id = "run_1";
+  parity_context.turn_id = "turn_1";
+  parity_context.message_id = "message_1";
+  parity_context.request_id = "request_1";
+  parity_context.correlation_id = "correlation_1";
+  for (const auto& event : live_events) {
+    ava::tui::apply_runtime_event(live_state, event);
+    ava::tui::apply_event_envelope(replayed_state, ava::app::to_event_envelope(event, parity_context));
+  }
+  auto visible_lines = [](const std::vector<std::string>& rendered) {
+    std::vector<std::string> visible;
+    visible.reserve(rendered.size());
+    for (const auto& line : rendered) visible.push_back(strip_sgr(line));
+    return visible;
+  };
+  const auto live_render = visible_lines(ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "ready",
+                                 .transcript = ava::tui::event_state_transcript_snapshot(live_state),
+                                 .width = 72,
+                                 .height = 20}));
+  const auto replayed_render = visible_lines(ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "ready",
+                                 .transcript = ava::tui::event_state_transcript_snapshot(replayed_state),
+                                 .width = 72,
+                                 .height = 20}));
+  expect(live_render == replayed_render && replayed_state.active_run_id == "run_1" &&
+             replayed_state.active_turn_id == "turn_1" && replayed_state.active_message_id == "message_1" &&
+             replayed_state.active_request_id == "request_1" && replayed_state.active_correlation_id == "correlation_1",
+         "tui EventEnvelope replay renders the same visible transcript story as live RuntimeEvent reduction and tracks "
+         "backend ids");
+
+  ava::tui::TuiEventState resolver_state;
+  ava::app::EventEnvelope permission_requested{.schema_version = 1,
+                                               .event_id = "event_permission",
+                                               .timestamp = "2026-04-30T00:00:00Z",
+                                               .session_id = "session_test",
+                                               .run_id = "run_prompt",
+                                               .turn_id = "turn_prompt",
+                                               .message_id = std::nullopt,
+                                               .request_id = "request_prompt",
+                                               .correlation_id = "request_prompt",
+                                               .name = "permission_requested",
+                                               .payload_json =
+                                                   "{\"resolver_request_id\":\"permission_1\","
+                                                   "\"operation\":\"shell.run\",\"mode\":\"build\","
+                                                   "\"target_path\":\"\",\"command\":\"pwd\","
+                                                   "\"tool_name\":\"bash\",\"reason\":\"needs approval\"}"};
+  ava::tui::apply_event_envelope(resolver_state, permission_requested);
+  expect(resolver_state.transcript.size() == 1 && resolver_state.transcript[0].label == "audit" &&
+             resolver_state.transcript[0].text.find("permission requested: bash pwd") != std::string::npos &&
+             !resolver_state.activity.empty() && resolver_state.activity[0].label == "permission" &&
+             resolver_state.active_run_id == "run_prompt",
+         "tui EventEnvelope reducer records shared permission request envelopes without inventing prompt decisions");
+
+  ava::app::EventEnvelope permission_replied{.schema_version = 1,
+                                             .event_id = "event_permission_reply",
+                                             .timestamp = "2026-04-30T00:00:00Z",
+                                             .session_id = "session_test",
+                                             .run_id = "run_prompt",
+                                             .turn_id = "turn_prompt",
+                                             .message_id = std::nullopt,
+                                             .request_id = "request_prompt",
+                                             .correlation_id = "request_prompt",
+                                             .name = "permission_replied",
+                                             .payload_json =
+                                                 "{\"resolver_request_id\":\"permission_1\","
+                                                 "\"decision\":\"deny\"}"};
+  ava::tui::apply_event_envelope(resolver_state, permission_replied);
+  expect(resolver_state.transcript.size() == 2 && resolver_state.transcript[1].label == "audit" &&
+             resolver_state.transcript[1].text == "permission replied" &&
+             std::ranges::any_of(resolver_state.activity,
+                                 [](const ava::tui::SidebarActivityItem& item) {
+                                   return item.label == "permission" && item.detail == "permission replied";
+                                 }),
+         "tui EventEnvelope reducer records shared permission reply envelopes");
+
+  ava::app::EventEnvelope question_requested{.schema_version = 1,
+                                             .event_id = "event_question",
+                                             .timestamp = "2026-04-30T00:00:01Z",
+                                             .session_id = "session_test",
+                                             .run_id = "run_prompt",
+                                             .turn_id = "turn_prompt",
+                                             .message_id = std::nullopt,
+                                             .request_id = "request_question",
+                                             .correlation_id = "request_question",
+                                             .name = "question_requested",
+                                             .payload_json = "{\"question\":\"Pick an option\"}"};
+  ava::tui::apply_event_envelope(resolver_state, question_requested);
+  expect(resolver_state.transcript.size() == 3 && resolver_state.transcript[2].label == "audit" &&
+             resolver_state.transcript[2].text == "question requested: Pick an option" &&
+             std::ranges::any_of(resolver_state.activity,
+                                 [](const ava::tui::SidebarActivityItem& item) {
+                                   return item.label == "question" &&
+                                          item.detail.find("Pick an option") != std::string::npos;
+                                 }),
+         "tui EventEnvelope reducer records shared question request envelopes without inventing prompt answers");
+
+  ava::app::EventEnvelope question_replied{.schema_version = 1,
+                                           .event_id = "event_question_reply",
+                                           .timestamp = "2026-04-30T00:00:01Z",
+                                           .session_id = "session_test",
+                                           .run_id = "run_prompt",
+                                           .turn_id = "turn_prompt",
+                                           .message_id = std::nullopt,
+                                           .request_id = "request_question",
+                                           .correlation_id = "request_question",
+                                           .name = "question_replied",
+                                           .payload_json =
+                                               "{\"resolver_request_id\":\"question_1\","
+                                               "\"answer\":\"custom ok\"}"};
+  ava::tui::apply_event_envelope(resolver_state, question_replied);
+  expect(resolver_state.transcript.size() == 4 && resolver_state.transcript[3].label == "audit" &&
+             resolver_state.transcript[3].text == "question replied" &&
+             std::ranges::any_of(resolver_state.activity,
+                                 [](const ava::tui::SidebarActivityItem& item) {
+                                   return item.label == "question" && item.detail == "question replied";
+                                 }),
+         "tui EventEnvelope reducer records shared question reply envelopes");
+
+  ava::app::EventEnvelope steer_queued{.schema_version = 1,
+                                       .event_id = "event_steer",
+                                       .timestamp = "2026-04-30T00:00:02Z",
+                                       .session_id = "session_test",
+                                       .run_id = "run_prompt",
+                                       .turn_id = "turn_prompt",
+                                       .message_id = std::nullopt,
+                                       .request_id = "request_steer",
+                                       .correlation_id = "request_steer",
+                                       .name = "steer_queued",
+                                       .payload_json = "{\"message\":\"Use smaller patch groups\"}"};
+  ava::tui::apply_event_envelope(resolver_state, steer_queued);
+  expect(resolver_state.transcript.size() == 5 && resolver_state.transcript.back().label == "audit" &&
+             resolver_state.transcript.back().text.find("steer queued") != std::string::npos &&
+             resolver_state.transcript.back().text.find("Use smaller patch groups") != std::string::npos &&
+             resolver_state.queued_messages.size() == 1 && resolver_state.queued_messages.back().kind == "steer" &&
+             std::ranges::any_of(resolver_state.activity,
+                                 [](const ava::tui::SidebarActivityItem& item) {
+                                   return item.label == "steer" &&
+                                          item.detail.find("Use smaller patch groups") != std::string::npos &&
+                                          item.status == ava::tui::ToolTimelineStatus::Running;
+                                 }),
+         "tui EventEnvelope reducer surfaces backend queued steer events in transcript and sidebar activity");
+
+  ava::app::EventEnvelope follow_up_queued{.schema_version = 1,
+                                           .event_id = "event_follow_queue",
+                                           .timestamp = "2026-04-30T00:00:02Z",
+                                           .session_id = "session_test",
+                                           .run_id = "run_prompt",
+                                           .turn_id = "turn_prompt",
+                                           .message_id = std::nullopt,
+                                           .request_id = "request_follow",
+                                           .correlation_id = "request_steer",
+                                           .name = "follow_up_queued",
+                                           .payload_json = "{\"message\":\"Continue after tests\"}"};
+  ava::tui::apply_event_envelope(resolver_state, follow_up_queued);
+  expect(resolver_state.transcript.size() == 6 &&
+             resolver_state.transcript.back().text.find("follow-up queued") != std::string::npos &&
+             resolver_state.queued_messages.size() == 2 && resolver_state.queued_messages.back().kind == "follow-up" &&
+             std::ranges::any_of(resolver_state.activity,
+                                 [](const ava::tui::SidebarActivityItem& item) {
+                                   return item.label == "follow-up" &&
+                                          item.status == ava::tui::ToolTimelineStatus::Running &&
+                                          item.detail.find("Continue after tests") != std::string::npos;
+                                 }),
+         "tui EventEnvelope reducer records backend queued follow-up events");
+
+  ava::app::EventEnvelope follow_up_started{.schema_version = 1,
+                                            .event_id = "event_follow_start",
+                                            .timestamp = "2026-04-30T00:00:02Z",
+                                            .session_id = "session_test",
+                                            .run_id = "run_prompt",
+                                            .turn_id = "turn_prompt",
+                                            .message_id = std::nullopt,
+                                            .request_id = "request_follow",
+                                            .correlation_id = "request_follow",
+                                            .name = "follow_up_started",
+                                            .payload_json = "{\"message\":\"Continue after tests\"}"};
+  ava::tui::apply_event_envelope(resolver_state, follow_up_started);
+  expect(resolver_state.transcript.size() == 7 &&
+             resolver_state.transcript.back().text.find("follow-up started") != std::string::npos &&
+             resolver_state.queued_messages.size() == 1 &&
+             std::ranges::any_of(resolver_state.activity,
+                                 [](const ava::tui::SidebarActivityItem& item) {
+                                   return item.label == "follow-up" &&
+                                          item.status == ava::tui::ToolTimelineStatus::Running &&
+                                          item.detail.find("follow-up started") != std::string::npos;
+                                 }),
+         "tui EventEnvelope reducer records backend follow-up start events");
+
+  ava::app::EventEnvelope follow_up_skipped{.schema_version = 1,
+                                            .event_id = "event_follow_skip",
+                                            .timestamp = "2026-04-30T00:00:02Z",
+                                            .session_id = "session_test",
+                                            .run_id = "run_prompt",
+                                            .turn_id = "turn_prompt",
+                                            .message_id = std::nullopt,
+                                            .request_id = "request_follow",
+                                            .correlation_id = "request_follow",
+                                            .name = "follow_up_skipped",
+                                            .payload_json =
+                                                "{\"message\":\"Continue after tests\","
+                                                "\"reason\":\"canceled\","
+                                                "\"message_truncated\":true,"
+                                                "\"message_bytes\":4096}"};
+  ava::tui::apply_event_envelope(resolver_state, follow_up_skipped);
+  expect(resolver_state.transcript.size() == 8 &&
+             resolver_state.transcript.back().text.find("follow-up skipped: canceled") != std::string::npos &&
+             resolver_state.transcript.back().text.find("message truncated from 4096 bytes") != std::string::npos &&
+             std::ranges::any_of(resolver_state.activity,
+                                 [](const ava::tui::SidebarActivityItem& item) {
+                                   return item.label == "follow-up" &&
+                                          item.status == ava::tui::ToolTimelineStatus::Error &&
+                                          item.detail.find("Continue after tests") != std::string::npos;
+                                 }),
+         "tui EventEnvelope reducer records backend skipped follow-up events with truncation metadata");
+
+  ava::app::EventEnvelope cancel_requested{.schema_version = 1,
+                                           .event_id = "event_cancel",
+                                           .timestamp = "2026-04-30T00:00:03Z",
+                                           .session_id = "session_test",
+                                           .run_id = "run_prompt",
+                                           .turn_id = "turn_prompt",
+                                           .message_id = std::nullopt,
+                                           .request_id = "cancel_request",
+                                           .correlation_id = "request_prompt",
+                                           .name = "cancel_requested",
+                                           .payload_json =
+                                               "{\"active_run\":true,\"cleared_steer\":1,"
+                                               "\"cleared_follow_up\":2,\"active_request_id\":\"request_prompt\"}"};
+  ava::tui::apply_event_envelope(resolver_state, cancel_requested);
+  expect(resolver_state.transcript.back().label == "audit" &&
+             resolver_state.transcript.back().text.find("cancel requested for active run") != std::string::npos &&
+             resolver_state.transcript.back().text.find("steer=1 follow-up=2") != std::string::npos &&
+             resolver_state.activity.back().label == "cancel",
+         "tui EventEnvelope reducer surfaces backend cancel requests without pretending the run has finished");
+}
+
+void test_ncurses_newterm_smoke_without_real_tty() {
+  static_cast<void>(setenv("TERM", "xterm-256color", 1));
+  const char* previous_locale_value = std::setlocale(LC_ALL, nullptr);
+  const std::string previous_locale = previous_locale_value == nullptr ? "C" : previous_locale_value;
+  static_cast<void>(std::setlocale(LC_ALL, ""));
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  expect(input != nullptr && output != nullptr, "ncurses smoke test can create temporary input/output streams");
+  if (!input || !output) {
+    if (input) static_cast<void>(std::fclose(input));
+    if (output) static_cast<void>(std::fclose(output));
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  expect(screen != nullptr, "ncurses smoke test creates a screen without a real terminal");
+  if (screen) {
+    SCREEN* previous = set_term(screen);
+    int rows = 0;
+    int columns = 0;
+    getmaxyx(stdscr, rows, columns);
+    expect(rows > 0 && columns > 0, "ncurses smoke test reports a usable virtual screen size");
+    static_cast<void>(resizeterm(12, 48));
+    const auto ime_sensitive_input = std::string("a") + "\xE7\x95\x8C" + "e" + "\xCC\x81";
+    const auto snapshot =
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_term",
+                                   .input = ime_sensitive_input,
+                                   .status = "ready",
+                                   .transcript = {ava::tui::TranscriptItem{
+                                       .label = "ava", .text = "virtual terminal draw keeps \xE7\x95\x8C bounded"}},
+                                   .width = 48,
+                                   .height = 12,
+                                   .input_cursor = ime_sensitive_input.size()};
+    const auto expected_column =
+        ava::tui::detail::input_cursor_column(snapshot, ava::tui::composer_main_width(snapshot));
+    expect(ava::tui::draw_screen(snapshot), "ncurses smoke test draws a unicode composer frame to a virtual screen");
+    int cursor_y = 0;
+    int cursor_x = 0;
+    getyx(stdscr, cursor_y, cursor_x);
+    expect(cursor_x == static_cast<int>(expected_column - 1) && cursor_y >= 0,
+           "ncurses smoke test places the hardware cursor using CJK and combining-mark display columns");
+    static_cast<void>(endwin());
+    if (previous) static_cast<void>(set_term(previous));
+    delscreen(screen);
+  }
+
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+}
+
+void test_tui_large_render_performance_budget() {
+  std::vector<ava::tui::TranscriptItem> transcript;
+  transcript.reserve(900);
+  for (int index = 0; index < 300; ++index) {
+    transcript.push_back(ava::tui::TranscriptItem{
+        .label = "you",
+        .text = "performance input " + std::to_string(index) +
+                " with CJK \xE7\x95\x8C combining e\xCC\x81 and a very-long-token-that-must-wrap-safely"});
+    transcript.push_back(ava::tui::TranscriptItem{.label = "ava",
+                                                  .text = "performance answer " + std::to_string(index) +
+                                                          " keeps rendered rows bounded while the transcript is large",
+                                                  .meta = "Build - GPT-5.5",
+                                                  .thinking = "reasoning summary " + std::to_string(index)});
+    transcript.push_back(ava::tui::TranscriptItem{
+        .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                           .name = "read_file",
+                                           .argument_summary = "path=src/ava/tui/composer.cpp",
+                                           .result_summary = "read 1024 bytes",
+                                           .call_id = "perf_" + std::to_string(index),
+                                           .lifecycle = ava::tui::ToolLifecycleState::Complete}});
+  }
+
+  const auto start = std::chrono::steady_clock::now();
+  std::vector<std::string> frame;
+  for (int pass = 0; pass < 4; ++pass) {
+    frame = ava::tui::render_composer(
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_perf",
+                                   .input = "draft \xE7\x95\x8C",
+                                   .status = "ready",
+                                   .processing = true,
+                                   .transcript = transcript,
+                                   .transcript_scroll_offset = static_cast<std::size_t>(pass * 20),
+                                   .width = 120,
+                                   .height = 36,
+                                   .input_cursor = std::string::npos,
+                                   .tool_details_visible = true,
+                                   .thinking_visible = true});
+  }
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+  std::size_t max_columns = 0;
+  std::string widest_line;
+  for (const auto& line : frame) {
+    const auto columns = visible_columns(line);
+    if (columns > max_columns) {
+      max_columns = columns;
+      widest_line = strip_sgr(line);
+    }
+  }
+  if (max_columns > 120) {
+    std::cerr << "tui large render widest line has " << max_columns << " columns: " << widest_line << '\n';
+  }
+  expect(frame.size() == 36, "tui large render performance frame keeps the requested height");
+  expect(std::ranges::all_of(frame,
+                             [](const std::string& line) {
+                               return line.find('\n') == std::string::npos && visible_columns(line) <= 120;
+                             }),
+         "tui large render performance frame keeps every rendered line inside the requested width");
+  expect(elapsed < std::chrono::seconds(5),
+         "tui large render performance budget catches pathological redraw slowdowns without a real terminal");
 }
 
 }  // namespace
@@ -2388,4 +3491,6 @@ void test_tui_event_state_reduces_runtime_events() {
 void run_tui_composer_tests() {
   test_tui_composer_rendering_and_input();
   test_tui_event_state_reduces_runtime_events();
+  test_ncurses_newterm_smoke_without_real_tty();
+  test_tui_large_render_performance_budget();
 }

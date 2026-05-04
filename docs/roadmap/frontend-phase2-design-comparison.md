@@ -63,11 +63,11 @@ Phase 2 should prioritize live event consumption before large visual expansion.
 
 Planned adaptation path:
 
-1. Add a pure event-to-TUI-state layer that can be tested by replaying backend `RuntimeEvent`s.
-2. Wire the current TUI submit flow so backend events are queued from the worker thread and drained/rendered on the main ncurses thread.
-3. Render pending assistant text and pending tool cards live.
-4. Add an OpenCode-inspired sidebar shell only after live state exists, using currently safe data first: mode, provider/model, session id, workspace, active run state, pending tool count, AVA version, cwd/branch, and a modified-files section fed by backend/tool metadata where available.
-5. Defer rich sidebar data such as token/cost/context pressure, model variants, LSP status, and full diff navigation until the backend exposes those as explicit data or events.
+1. Add a pure event-to-TUI-state layer that can be tested by replaying backend `RuntimeEvent`s. Status: implemented, with a shared `EventEnvelope` reducer path for the stream used by print/RPC.
+2. Wire the current TUI submit flow so backend events are queued from the worker thread and drained/rendered on the main ncurses thread. Status: implemented through the TUI event queue.
+3. Render pending assistant text and pending tool cards live. Status: implemented for assistant deltas, thinking deltas, provider tool-call phases, execution progress, completed tool settlement, backend-provided mutation diff previews, and backend-owned compaction/retry/cancellation markers including bounded attempt totals, retry delays, and retry countdown ticks where emitted.
+4. Add an OpenCode-inspired sidebar shell only after live state exists, using currently safe data first: mode, provider/model, session id, workspace, active run state, pending tool count, AVA version, cwd/branch, and a modified-files section fed by backend/tool metadata where available. Status: partially implemented with trusted known/unknown handling.
+5. Defer rich sidebar data such as token/cost/context pressure, model variants, LSP status, and full diff navigation until the backend exposes those as explicit data or events. Status: still deferred for fields the backend does not emit.
 
 ## Mapping To Milestones
 

@@ -126,6 +126,20 @@ bool is_legacy_shift_enter_sequence(std::string_view sequence) {
   return key_code && *key_code == 13 && index + 1 == sequence.size() && sequence[index] == '~';
 }
 
+bool is_csi_final_byte(unsigned char byte) { return byte >= 0x40U && byte <= 0x7EU; }
+
+bool is_control_string_intro(char ch) { return ch == ']' || ch == 'P' || ch == '^' || ch == '_' || ch == 'X'; }
+
+bool ends_with_string_terminator(std::string_view sequence) {
+  return sequence.size() >= 2 && sequence[sequence.size() - 2] == '\x1b' && sequence.back() == '\\';
+}
+
+bool is_control_string_complete(std::string_view sequence) {
+  if (sequence.empty() || !is_control_string_intro(sequence.front())) return false;
+  if (ends_with_string_terminator(sequence)) return true;
+  return sequence.front() == ']' && sequence.find('\a') != std::string_view::npos;
+}
+
 }  // namespace
 
 CursesSession::CursesSession(void* screen) : screen_(screen), active_(screen != nullptr) {}
@@ -238,6 +252,40 @@ void erase_last_utf8_codepoint(std::string& text) {
 Key terminal_escape_sequence_key(std::string_view sequence) {
   if (is_legacy_shift_enter_sequence(sequence) || is_shift_enter_csi_u(sequence)) return Key::ShiftEnter;
   return Key::Unknown;
+}
+
+bool terminal_escape_sequence_complete(std::string_view sequence) {
+  if (sequence.empty()) return false;
+  if (is_control_string_complete(sequence)) return true;
+  if (is_control_string_intro(sequence.front())) return false;
+
+  if (sequence.starts_with('[')) {
+    if (sequence.size() <= 1) return false;
+    return is_csi_final_byte(static_cast<unsigned char>(sequence.back()));
+  }
+
+  if (sequence.starts_with('O')) {
+    if (sequence.size() <= 1) return false;
+    return is_csi_final_byte(static_cast<unsigned char>(sequence.back()));
+  }
+
+  if (sequence.starts_with('#')) {
+    if (sequence.size() <= 1) return false;
+    return is_csi_final_byte(static_cast<unsigned char>(sequence.back()));
+  }
+
+  if (sequence.size() == 1) {
+    const auto byte = static_cast<unsigned char>(sequence.front());
+    return byte >= 0x30U && byte <= 0x7EU;
+  }
+
+  return is_csi_final_byte(static_cast<unsigned char>(sequence.back()));
+}
+
+bool terminal_escape_sequence_should_discard(std::string_view sequence) {
+  if (!terminal_escape_sequence_complete(sequence)) return false;
+  if (sequence == "[200~") return false;
+  return terminal_escape_sequence_key(sequence) == Key::Unknown;
 }
 
 bool terminal_is_tty() { return isatty(STDIN_FILENO) != 0 && isatty(STDOUT_FILENO) != 0; }

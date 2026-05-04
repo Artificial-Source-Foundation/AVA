@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/question.h"
 #include "ava/config/model_config.h"
@@ -87,13 +88,6 @@ struct AgentLoopResult {
   std::string stop_reason = "unknown";
   std::vector<ToolTimelineEntry> tool_timeline;
 };
-
-struct MessageBuildOptions {
-  std::size_t max_tool_result_context_bytes = 8 * 1024;
-};
-
-[[nodiscard]] ava::core::Result<std::vector<ava::provider::ChatMessage>> build_provider_messages_from_entries(
-    const std::vector<ava::session::SessionEntry>& entries, MessageBuildOptions options = MessageBuildOptions{});
 
 class AgentLoop {
  public:

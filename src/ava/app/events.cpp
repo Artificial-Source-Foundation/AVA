@@ -91,29 +91,42 @@ std::string payload_json_for_runtime_event(const RuntimeEvent& event) {
   append_payload_string_field(out, has_field, "message", event.error_message);
   append_payload_string_field(out, has_field, "details", event.error_details);
   append_payload_string_field(out, has_field, "stop_reason", event.stop_reason);
+  append_payload_string_field(out, has_field, "trigger", event.trigger);
+  append_payload_string_field(out, has_field, "reason", event.reason);
   append_payload_string_field(out, has_field, "reasoning_format", event.reasoning_format);
   append_payload_bool_field(out, has_field, "reasoning_redacted", event.reasoning_redacted);
   append_payload_bool_field(out, has_field, "reasoning_signature_present", event.reasoning_signature_present);
   append_payload_number_field(out, has_field, "provider_iterations", event.provider_iterations);
   append_payload_number_field(out, has_field, "tool_calls", event.tool_calls);
+  append_payload_number_field(out, has_field, "attempt", event.attempt);
+  append_payload_number_field(out, has_field, "max_attempts", event.max_attempts);
+  append_payload_number_field(out, has_field, "delay_ms", event.delay_ms);
+  append_payload_number_field(out, has_field, "remaining_ms", event.remaining_ms);
+  append_payload_number_field(out, has_field, "estimated_tokens", event.estimated_tokens);
+  append_payload_number_field(out, has_field, "threshold_tokens", event.threshold_tokens);
+  append_payload_number_field(out, has_field, "summary_bytes", event.summary_bytes);
+  append_payload_number_field(out, has_field, "snapshot_entries", event.snapshot_entries);
+  append_payload_number_field(out, has_field, "current_entries", event.current_entries);
   out += '}';
   return out;
 }
 
 void append_payload_aliases(std::string& out, std::string_view payload_json) {
   for (std::string_view key : {"mode", "provider", "model", "text", "call_id", "tool", "status", "category", "message",
-                               "details", "stop_reason", "reasoning_format"}) {
+                               "details", "stop_reason", "trigger", "reason", "reasoning_format"}) {
     if (auto value = ava::core::json::string_field(payload_json, key); value && !value->empty()) {
       append_required_string_field(out, key, *value);
     }
   }
-  if (auto value = ava::core::json::integer_field(payload_json, "provider_iterations"); value && *value > 0) {
-    out += ",\"provider_iterations\":";
-    out += std::to_string(*value);
-  }
-  if (auto value = ava::core::json::integer_field(payload_json, "tool_calls"); value && *value > 0) {
-    out += ",\"tool_calls\":";
-    out += std::to_string(*value);
+  for (std::string_view key :
+       {"provider_iterations", "tool_calls", "attempt", "max_attempts", "delay_ms", "remaining_ms", "estimated_tokens",
+        "threshold_tokens", "summary_bytes", "snapshot_entries", "current_entries"}) {
+    if (auto value = ava::core::json::integer_field(payload_json, key); value && *value > 0) {
+      out += ",\"";
+      out += key;
+      out += "\":";
+      out += std::to_string(*value);
+    }
   }
 }
 
@@ -145,6 +158,16 @@ std::string to_string(RuntimeEventType type) {
       return "tool_progress";
     case RuntimeEventType::ToolResult:
       return "tool_result";
+    case RuntimeEventType::CompactionStart:
+      return "compaction_start";
+    case RuntimeEventType::CompactionEnd:
+      return "compaction_end";
+    case RuntimeEventType::Retry:
+      return "retry";
+    case RuntimeEventType::RetryTick:
+      return "retry_tick";
+    case RuntimeEventType::Canceled:
+      return "canceled";
     case RuntimeEventType::Error:
       return "error";
     case RuntimeEventType::Done:
@@ -170,11 +193,22 @@ std::string serialize_event_json(const RuntimeEvent& event) {
   append_string_field(out, "message", event.error_message);
   append_string_field(out, "details", event.error_details);
   append_string_field(out, "stop_reason", event.stop_reason);
+  append_string_field(out, "trigger", event.trigger);
+  append_string_field(out, "reason", event.reason);
   append_string_field(out, "reasoning_format", event.reasoning_format);
   append_bool_field(out, "reasoning_redacted", event.reasoning_redacted);
   append_bool_field(out, "reasoning_signature_present", event.reasoning_signature_present);
   append_number_field(out, "provider_iterations", event.provider_iterations);
   append_number_field(out, "tool_calls", event.tool_calls);
+  append_number_field(out, "attempt", event.attempt);
+  append_number_field(out, "max_attempts", event.max_attempts);
+  append_number_field(out, "delay_ms", event.delay_ms);
+  append_number_field(out, "remaining_ms", event.remaining_ms);
+  append_number_field(out, "estimated_tokens", event.estimated_tokens);
+  append_number_field(out, "threshold_tokens", event.threshold_tokens);
+  append_number_field(out, "summary_bytes", event.summary_bytes);
+  append_number_field(out, "snapshot_entries", event.snapshot_entries);
+  append_number_field(out, "current_entries", event.current_entries);
   out += '}';
   return out;
 }

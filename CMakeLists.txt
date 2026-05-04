@@ -42,10 +42,16 @@ endfunction()
 
 add_library(ava_core
   src/ava/agent/agent_loop.cpp
+  src/ava/agent/assistant_turn.cpp
+  src/ava/agent/message_builder.cpp
   src/ava/agent/mode.cpp
+  src/ava/agent/provider_output_validation.cpp
   src/ava/agent/question.cpp
+  src/ava/agent/stream_bridge.cpp
   src/ava/agent/tool_dispatcher.cpp
   src/ava/agent/tool_registry.cpp
+  src/ava/agent/tool_summaries.cpp
+  src/ava/agent/usage_accounting.cpp
   src/ava/config/auth.cpp
   src/ava/config/model_config.cpp
   src/ava/config/model_profiles.cpp
@@ -73,6 +79,9 @@ add_library(ava_core
   src/ava/provider/anthropic_provider.cpp
   src/ava/provider/openai_compatible_provider.cpp
   src/ava/provider/openai_provider.cpp
+  src/ava/provider/openai_request.cpp
+  src/ava/provider/openai_response_parser.cpp
+  src/ava/provider/openai_stream_parser.cpp
   src/ava/provider/provider.cpp
   src/ava/provider/provider_utils.cpp
   src/ava/provider/registry.cpp
@@ -108,6 +117,7 @@ add_library(ava_tui
   src/ava/tui/keybindings.cpp
   src/ava/tui/runtime.cpp
   src/ava/tui/terminal.cpp
+  src/ava/tui/tool_cards.cpp
 )
 
 target_link_libraries(ava_tui PUBLIC ava_core PRIVATE ${CURSES_LIBRARIES})
@@ -118,16 +128,39 @@ ava_apply_sanitizers(ava_tui)
 add_library(ava_app
   src/ava/app/app.cpp
   src/ava/app/command_catalog.cpp
+  src/ava/app/command_connect.cpp
+  src/ava/app/command_format.cpp
+  src/ava/app/command_help.cpp
+  src/ava/app/command_mcp.cpp
+  src/ava/app/command_models.cpp
+  src/ava/app/command_palette.cpp
+  src/ava/app/command_plugins.cpp
+  src/ava/app/command_sessions.cpp
+  src/ava/app/command_tools.cpp
   src/ava/app/commands.cpp
   src/ava/app/connect_openai.cpp
   src/ava/app/events.cpp
   src/ava/app/headless_policy.cpp
+  src/ava/app/interactive_run_queue.cpp
   src/ava/app/line_shell.cpp
   src/ava/app/plugin_event_hooks.cpp
   src/ava/app/print_mode.cpp
   src/ava/app/reasoning_controls.cpp
+  src/ava/app/rpc/handlers.cpp
+  src/ava/app/rpc/output.cpp
+  src/ava/app/rpc/protocol.cpp
+  src/ava/app/rpc/resolvers.cpp
+  src/ava/app/rpc/run_state.cpp
+  src/ava/app/rpc/serialization.cpp
   src/ava/app/rpc_mode.cpp
   src/ava/app/runtime.cpp
+  src/ava/app/runtime_compaction.cpp
+  src/ava/app/runtime_json.cpp
+  src/ava/app/runtime_model.cpp
+  src/ava/app/runtime_prompt.cpp
+  src/ava/app/runtime_reasoning.cpp
+  src/ava/app/runtime_retry.cpp
+  src/ava/app/runtime_session.cpp
 )
 
 target_link_libraries(ava_app PUBLIC ava_core ava_tui)

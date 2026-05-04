@@ -116,6 +116,33 @@ std::string permission_dock_keys(std::size_t width) {
   return fit_line_preserving_sgr(std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=deny", width);
 }
 
+void append_permission_diff_lines(std::vector<std::string>& lines, const PermissionPromptView& prompt,
+                                  std::size_t width, std::size_t budget) {
+  if (prompt.diff_preview.empty() || budget == 0) return;
+  const auto prefix = std::string("  ");
+  lines.push_back(fit_line_preserving_sgr(prefix + std::string(kSgrDim) + "diff:" + std::string(kSgrReset), width));
+  if (lines.size() >= budget) return;
+
+  const auto line_prefix = std::string("    ");
+  const auto diff_line_budget = prompt.diff_truncated && budget > lines.size() ? budget - 1 : budget;
+  for (const auto& raw_line : split_lines(prompt.diff_preview)) {
+    if (lines.size() >= diff_line_budget) break;
+    auto sanitized = sanitize_terminal_text(raw_line);
+    std::string_view sgr = kSgrMuted;
+    if (!sanitized.empty() && sanitized.front() == '+') {
+      sgr = kSgrSuccess;
+    } else if (!sanitized.empty() && sanitized.front() == '-') {
+      sgr = kSgrError;
+    }
+    lines.push_back(
+        fit_line_preserving_sgr(line_prefix + std::string(sgr) + std::move(sanitized) + std::string(kSgrReset), width));
+  }
+  if (prompt.diff_truncated && lines.size() < budget) {
+    lines.push_back(fit_line_preserving_sgr(
+        line_prefix + std::string(kSgrWarning) + "[diff truncated]" + std::string(kSgrReset), width));
+  }
+}
+
 std::string question_dock_header(const QuestionPromptView& prompt, std::size_t width) {
   auto label = prompt.header.empty() ? std::string("QUESTION") : sanitize_terminal_text(prompt.header);
   label = prompt.multiple ? label + " (multi-select)" : label;
@@ -249,8 +276,16 @@ std::vector<std::string> render_permission_prompt(const PermissionPromptView& pr
     return lines;
   }
 
+  constexpr std::size_t kReservedActionLines = 2;
+  if (!prompt.diff_preview.empty() && max_lines > lines.size() + kReservedActionLines) {
+    const auto diff_budget = max_lines - lines.size() - kReservedActionLines;
+    std::vector<std::string> diff_lines;
+    append_permission_diff_lines(diff_lines, prompt, width, diff_budget);
+    lines.insert(lines.end(), diff_lines.begin(), diff_lines.end());
+  }
+
   lines.push_back(permission_dock_actions(prompt.selected_choice, width));
-  if (max_lines >= 4) {
+  if (lines.size() < max_lines) {
     lines.push_back(permission_dock_keys(width));
   }
   return lines;

@@ -24,6 +24,11 @@ enum class RuntimeEventType {
   ToolStart,
   ToolProgress,
   ToolResult,
+  CompactionStart,
+  CompactionEnd,
+  Retry,
+  RetryTick,
+  Canceled,
   Error,
   Done,
 };
@@ -43,11 +48,22 @@ struct RuntimeEvent {
   std::string error_message;
   std::string error_details;
   std::string stop_reason;
+  std::string trigger;
+  std::string reason;
   std::string reasoning_format;
   bool reasoning_redacted = false;
   bool reasoning_signature_present = false;
   std::size_t provider_iterations = 0;
   std::size_t tool_calls = 0;
+  std::size_t attempt = 0;
+  std::size_t max_attempts = 0;
+  std::size_t delay_ms = 0;
+  std::size_t remaining_ms = 0;
+  std::size_t estimated_tokens = 0;
+  std::size_t threshold_tokens = 0;
+  std::size_t summary_bytes = 0;
+  std::size_t snapshot_entries = 0;
+  std::size_t current_entries = 0;
 };
 
 using RuntimeEventSink = std::function<ava::core::VoidResult(const RuntimeEvent&)>;

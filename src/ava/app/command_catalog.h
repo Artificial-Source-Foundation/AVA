@@ -5,8 +5,6 @@
 #include <string_view>
 #include <vector>
 
-#include "ava/tui/composer.h"
-
 namespace ava::app {
 
 struct CommandCatalogEntry {
@@ -28,7 +26,5 @@ struct CommandHotkey {
 [[nodiscard]] const std::vector<CommandCatalogEntry>& command_catalog();
 [[nodiscard]] const CommandCatalogEntry* find_command_catalog_entry(std::string_view line) noexcept;
 [[nodiscard]] std::string normalize_command_line(std::string_view line, const CommandCatalogEntry& entry);
-[[nodiscard]] std::vector<tui::SlashCommandItem> command_catalog_slash_items(
-    const std::vector<CommandHotkey>& hotkeys = {});
 
 }  // namespace ava::app

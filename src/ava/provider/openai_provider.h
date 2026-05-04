@@ -1,33 +1,15 @@
 #pragma once
 
-#include <optional>
+#include <memory>
 #include <string>
-#include <vector>
+#include <string_view>
 
 #include "ava/config/auth.h"
+#include "ava/provider/openai_response_parser.h"
+#include "ava/provider/openai_stream_parser.h"
 #include "ava/provider/provider.h"
 
 namespace ava::provider {
-
-class OpenAIStreamParser final : public StreamParser {
- public:
-  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> append(std::string_view chunk) override;
-  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> finish() override;
-
- private:
-  std::string pending_line_;
-  std::string data_;
-  std::size_t scan_offset_ = 0;
-  bool saw_content_ = false;
-  bool reasoning_open_ = false;
-  bool reasoning_text_seen_ = false;
-  std::string active_reasoning_item_id_;
-  std::string active_reasoning_text_;
-  std::vector<std::string> completed_reasoning_item_ids_;
-  std::vector<std::string> completed_reasoning_texts_;
-  bool done_seen_ = false;
-  bool error_seen_ = false;
-};
 
 class OpenAIProvider final : public Provider {
  public:
@@ -50,12 +32,5 @@ class OpenAIProvider final : public Provider {
  private:
   std::string base_url_;
 };
-
-[[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_openai_sse(std::string_view sse);
-[[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_openai_sse_response(const HttpResponse& response);
-[[nodiscard]] ava::core::Result<std::string> parse_openai_response_text(std::string_view body);
-[[nodiscard]] std::optional<TokenUsage> parse_openai_usage(std::string_view body);
-[[nodiscard]] bool is_retryable_status(int status_code) noexcept;
-[[nodiscard]] bool is_auth_status(int status_code) noexcept;
 
 }  // namespace ava::provider

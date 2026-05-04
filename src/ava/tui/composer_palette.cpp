@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cctype>
 
 #include "ava/tui/composer_internal.h"
 
@@ -13,6 +14,46 @@ std::string slash_command_prefix(std::string_view input) {
 }
 
 namespace {
+
+std::string_view command_token(std::string_view input) {
+  const auto end = input.find_first_of(" \t\r\n");
+  return input.substr(0, end == std::string_view::npos ? input.size() : end);
+}
+
+std::string_view argument_text(std::string_view input) {
+  const auto start = input.find_first_of(" \t\r\n");
+  if (start == std::string_view::npos) return {};
+  return input.substr(start + 1);
+}
+
+bool has_argument_text(std::string_view input) { return input.find_first_of(" \t\r\n") != std::string_view::npos; }
+
+std::vector<std::string> split_argument_tokens(std::string_view text) {
+  std::vector<std::string> tokens;
+  std::size_t index = 0;
+  while (index < text.size()) {
+    while (index < text.size() && std::isspace(static_cast<unsigned char>(text[index])) != 0) ++index;
+    const auto start = index;
+    while (index < text.size() && std::isspace(static_cast<unsigned char>(text[index])) == 0) ++index;
+    if (start < index) tokens.emplace_back(text.substr(start, index - start));
+  }
+  return tokens;
+}
+
+bool ends_with_ascii_space(std::string_view text) {
+  if (text.empty()) return false;
+  const auto byte = static_cast<unsigned char>(text.back());
+  return byte == ' ' || byte == '\t' || byte == '\r' || byte == '\n';
+}
+
+std::size_t current_argument_index(std::string_view text, const std::vector<std::string>& tokens) {
+  return ends_with_ascii_space(text) ? tokens.size() : tokens.empty() ? std::size_t{0} : tokens.size() - 1;
+}
+
+std::string current_argument_prefix(std::string_view text, const std::vector<std::string>& tokens) {
+  if (ends_with_ascii_space(text) || tokens.empty()) return {};
+  return tokens.back();
+}
 
 bool slash_command_matches(std::string_view command, std::string_view prefix) {
   if (command.starts_with('/')) command.remove_prefix(1);
@@ -36,7 +77,53 @@ bool slash_command_exact_match(const SlashCommandItem& item, std::string_view pr
                              [&](std::string_view alias) { return slash_command_name_exact_match(alias, prefix); });
 }
 
+bool slash_command_token_exact_match(const SlashCommandItem& item, std::string_view token) {
+  return item.command == token || std::ranges::find(item.aliases, token) != item.aliases.end();
+}
+
+const SlashCommandItem* find_slash_command_for_arguments(std::string_view input,
+                                                         const std::vector<SlashCommandItem>& commands) {
+  const auto token = command_token(input);
+  if (token.empty()) return nullptr;
+  for (const auto& command : commands) {
+    if (slash_command_token_exact_match(command, token)) return &command;
+  }
+  return nullptr;
+}
+
+bool completion_previous_args_match(const SlashCommandArgumentCompletion& completion,
+                                    const std::vector<std::string>& tokens) {
+  if (completion.required_previous_args.empty()) return true;
+  if (tokens.size() < completion.required_previous_args.size()) return false;
+  for (std::size_t index = 0; index < completion.required_previous_args.size(); ++index) {
+    if (tokens[index] != completion.required_previous_args[index]) return false;
+  }
+  return true;
+}
+
+std::string completion_insert_text(const SlashCommandItem& command, const SlashCommandArgumentCompletion& completion,
+                                   const std::vector<std::string>& tokens, std::size_t argument_index) {
+  std::string text = command.command;
+  std::vector<std::string> next_tokens;
+  next_tokens.reserve(std::max(tokens.size(), argument_index + 1));
+  for (std::size_t index = 0; index < argument_index && index < tokens.size(); ++index) {
+    next_tokens.push_back(tokens[index]);
+  }
+  next_tokens.push_back(completion.value);
+  for (const auto& token : next_tokens) {
+    text += " " + token;
+  }
+  if (completion.append_space) text.push_back(' ');
+  return text;
+}
+
+bool slash_command_has_argument_completions(std::string_view input, const std::vector<SlashCommandItem>& commands) {
+  const auto* command = find_slash_command_for_arguments(input, commands);
+  return command != nullptr && !command->argument_completions.empty();
+}
+
 std::string slash_command_display(const SlashCommandItem& item) {
+  if (item.argument_completion) return item.command;
   auto text = item.command;
   if (!item.aliases.empty()) {
     text += " (";
@@ -50,6 +137,7 @@ std::string slash_command_display(const SlashCommandItem& item) {
 }
 
 std::string slash_command_hint_display(const SlashCommandItem& item) {
+  if (item.argument_completion) return item.hint;
   auto text = item.hint;
   if (!item.key_display.empty()) {
     if (!text.empty()) text += " · ";
@@ -66,6 +154,33 @@ std::string slash_command_description_display(const SlashCommandItem& item) {
     if (!item.disabled_reason.empty()) text += ": " + item.disabled_reason;
   }
   return text;
+}
+
+std::vector<SlashCommandItem> filter_slash_argument_completions(std::string_view input,
+                                                                const std::vector<SlashCommandItem>& commands) {
+  std::vector<SlashCommandItem> matches;
+  const auto* command = find_slash_command_for_arguments(input, commands);
+  if (!command || command->argument_completions.empty()) return matches;
+
+  const auto args_text = argument_text(input);
+  const auto tokens = split_argument_tokens(args_text);
+  const auto argument_index = current_argument_index(args_text, tokens);
+  const auto prefix = current_argument_prefix(args_text, tokens);
+  for (const auto& completion : command->argument_completions) {
+    if (completion.argument_index != argument_index) continue;
+    if (!completion_previous_args_match(completion, tokens)) continue;
+    if (!prefix.empty() && !completion.value.starts_with(prefix)) continue;
+    matches.push_back(SlashCommandItem{
+        .command = completion.value,
+        .description = completion.description,
+        .hint = completion.append_space ? "" : "[complete]",
+        .category = completion.category.empty() ? command->category : completion.category,
+        .enabled = command->enabled && completion.enabled,
+        .disabled_reason = command->enabled ? completion.disabled_reason : command->disabled_reason,
+        .argument_completion = true,
+        .completion_insert_text = completion_insert_text(*command, completion, tokens, argument_index)});
+  }
+  return matches;
 }
 
 std::string palette_prefix() {
@@ -172,8 +287,10 @@ std::vector<std::string> render_slash_palette(const ComposerSnapshot& snapshot, 
 
   if (matches.empty()) {
     if (lines.size() < max_lines) {
-      lines.push_back(
-          palette_surface_line(prefix.empty() ? "  no matching commands" : "  no commands match /" + prefix, width));
+      const auto text = has_argument_text(snapshot.input) ? std::string("  no matching arguments")
+                        : prefix.empty()                  ? std::string("  no matching commands")
+                                                          : "  no commands match /" + prefix;
+      lines.push_back(palette_surface_line(text, width));
     }
     return lines;
   }
@@ -225,6 +342,7 @@ std::vector<SlashCommandItem> filter_slash_commands(std::string_view input,
                                                     const std::vector<SlashCommandItem>& commands) {
   std::vector<SlashCommandItem> matches;
   if (!input.starts_with('/')) return matches;
+  if (detail::has_argument_text(input)) return detail::filter_slash_argument_completions(input, commands);
 
   const auto prefix = detail::slash_command_prefix(input);
   for (const auto& command : commands) {
@@ -237,7 +355,7 @@ std::vector<SlashCommandItem> filter_slash_commands(std::string_view input,
 
 bool slash_palette_visible(std::string_view input, const std::vector<SlashCommandItem>& commands) {
   if (!input.starts_with('/') || commands.empty()) return false;
-  if (input.find_first_of(" \t\r\n") != std::string_view::npos) return false;
+  if (detail::has_argument_text(input)) return detail::slash_command_has_argument_completions(input, commands);
 
   const auto prefix = detail::slash_command_prefix(input);
   for (const auto& command : commands) {
@@ -274,6 +392,7 @@ std::string slash_command_selection_text(std::string_view input, const std::vect
   const auto matches = filter_slash_commands(input, commands);
   if (matches.empty()) return std::string(input);
   const auto selected = std::min(selected_index, matches.size() - 1);
+  if (matches[selected].argument_completion) return matches[selected].completion_insert_text;
   auto text = matches[selected].command;
   if (!matches[selected].hint.empty()) text.push_back(' ');
   return text;

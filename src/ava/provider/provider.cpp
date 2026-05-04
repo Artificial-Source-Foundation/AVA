@@ -80,8 +80,39 @@ int exponential_delay_ms(const RetryOptions& options, int attempt) noexcept {
   return static_cast<int>(delay);
 }
 
-void sleep_before_retry(int delay_ms) {
-  if (delay_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+ava::core::VoidResult publish_retry_event(const RetryOptions& options, std::size_t attempt, std::size_t max_attempts,
+                                          int delay_ms, std::size_t remaining_ms, std::string_view reason,
+                                          int status_code, bool streaming, bool countdown_tick = false) {
+  if (!options.on_retry) return {};
+  return options.on_retry(RetryOptions::Event{.attempt = attempt,
+                                              .max_attempts = max_attempts,
+                                              .delay_ms = static_cast<std::size_t>(std::max(0, delay_ms)),
+                                              .remaining_ms = remaining_ms,
+                                              .reason = std::string(reason),
+                                              .status_code = status_code,
+                                              .streaming = streaming,
+                                              .countdown_tick = countdown_tick});
+}
+
+ava::core::VoidResult sleep_before_retry(const RetryOptions& options, std::size_t attempt, std::size_t max_attempts,
+                                         int delay_ms, std::string_view reason, int status_code, bool streaming) {
+  if (delay_ms <= 0) return {};
+  const auto tick_ms = std::max(0, options.countdown_tick_ms);
+  auto remaining_ms = delay_ms;
+  while (remaining_ms > 0) {
+    const auto chunk_ms = tick_ms > 0 ? std::min(tick_ms, remaining_ms) : remaining_ms;
+    std::this_thread::sleep_for(std::chrono::milliseconds(chunk_ms));
+    remaining_ms -= chunk_ms;
+    if (tick_ms > 0) {
+      if (auto published =
+              publish_retry_event(options, attempt, max_attempts, delay_ms, static_cast<std::size_t>(remaining_ms),
+                                  reason, status_code, streaming, true);
+          !published) {
+        return std::unexpected(std::move(published.error()));
+      }
+    }
+  }
+  return {};
 }
 
 std::optional<std::string> default_text_from_json(std::string_view body) {
@@ -223,12 +254,35 @@ ava::core::Result<HttpResponse> RetryTransport::send(const HttpRequest& request)
   for (int attempt = 1; attempt < max_attempts; ++attempt) {
     if (response) {
       if (!is_retryable_kind(classify_provider_error(*response))) break;
+      const auto reason = to_string(classify_provider_error(*response));
       const int delay_ms =
           retry_after_ms(*response, options_.max_retry_after_ms).value_or(exponential_delay_ms(options_, attempt));
-      sleep_before_retry(delay_ms);
+      if (auto published = publish_retry_event(
+              options_, static_cast<std::size_t>(attempt + 1), static_cast<std::size_t>(max_attempts), delay_ms,
+              static_cast<std::size_t>(delay_ms), reason, response->status_code, false);
+          !published) {
+        return std::unexpected(std::move(published.error()));
+      }
+      if (auto slept = sleep_before_retry(options_, static_cast<std::size_t>(attempt + 1),
+                                          static_cast<std::size_t>(max_attempts), delay_ms, reason,
+                                          response->status_code, false);
+          !slept) {
+        return std::unexpected(std::move(slept.error()));
+      }
     } else {
       if (!is_retryable_transport_error(response.error())) break;
-      sleep_before_retry(exponential_delay_ms(options_, attempt));
+      const int delay_ms = exponential_delay_ms(options_, attempt);
+      if (auto published = publish_retry_event(options_, static_cast<std::size_t>(attempt + 1),
+                                               static_cast<std::size_t>(max_attempts), delay_ms,
+                                               static_cast<std::size_t>(delay_ms), "transport_io", 0, false);
+          !published) {
+        return std::unexpected(std::move(published.error()));
+      }
+      if (auto slept = sleep_before_retry(options_, static_cast<std::size_t>(attempt + 1),
+                                          static_cast<std::size_t>(max_attempts), delay_ms, "transport_io", 0, false);
+          !slept) {
+        return std::unexpected(std::move(slept.error()));
+      }
     }
     response = inner_.send(request);
   }
@@ -259,9 +313,21 @@ ava::core::Result<HttpResponse> RetryTransport::send_streaming(const HttpRequest
     const bool last_attempt = attempt == max_attempts;
     if (response) {
       if (!last_attempt && !delivered_chunks && is_retryable_kind(classify_provider_error(*response))) {
+        const auto reason = to_string(classify_provider_error(*response));
         const int delay_ms =
             retry_after_ms(*response, options_.max_retry_after_ms).value_or(exponential_delay_ms(options_, attempt));
-        sleep_before_retry(delay_ms);
+        if (auto published = publish_retry_event(
+                options_, static_cast<std::size_t>(attempt + 1), static_cast<std::size_t>(max_attempts), delay_ms,
+                static_cast<std::size_t>(delay_ms), reason, response->status_code, true);
+            !published) {
+          return std::unexpected(std::move(published.error()));
+        }
+        if (auto slept = sleep_before_retry(options_, static_cast<std::size_t>(attempt + 1),
+                                            static_cast<std::size_t>(max_attempts), delay_ms, reason,
+                                            response->status_code, true);
+            !slept) {
+          return std::unexpected(std::move(slept.error()));
+        }
         continue;
       }
       if (!delivered_chunks) final_body = std::move(attempt_body);
@@ -269,7 +335,18 @@ ava::core::Result<HttpResponse> RetryTransport::send_streaming(const HttpRequest
     }
 
     if (last_attempt || delivered_chunks || !is_retryable_transport_error(response.error())) break;
-    sleep_before_retry(exponential_delay_ms(options_, attempt));
+    const int delay_ms = exponential_delay_ms(options_, attempt);
+    if (auto published =
+            publish_retry_event(options_, static_cast<std::size_t>(attempt + 1), static_cast<std::size_t>(max_attempts),
+                                delay_ms, static_cast<std::size_t>(delay_ms), "transport_io", 0, true);
+        !published) {
+      return std::unexpected(std::move(published.error()));
+    }
+    if (auto slept = sleep_before_retry(options_, static_cast<std::size_t>(attempt + 1),
+                                        static_cast<std::size_t>(max_attempts), delay_ms, "transport_io", 0, true);
+        !slept) {
+      return std::unexpected(std::move(slept.error()));
+    }
   }
   if (!response) return std::unexpected(std::move(response.error()));
   if (on_body_chunk && !final_body.empty()) {

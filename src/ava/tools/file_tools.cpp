@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -17,6 +18,13 @@
 namespace ava::tools {
 
 namespace {
+
+constexpr std::size_t kMaxPermissionDiffBytes = 32 * 1024;
+
+struct PermissionDiffPreview {
+  std::string text;
+  bool truncated = false;
+};
 
 std::string effective_tool_name(const ToolContext& context, ava::permissions::Operation operation,
                                 std::string_view tool_name) {
@@ -170,6 +178,32 @@ std::shared_ptr<MutationQueue> effective_mutation_queue(const ToolContext& conte
   return default_mutation_queue();
 }
 
+std::optional<PermissionDiffPreview> write_permission_diff_preview(const ToolContext& context,
+                                                                   const std::filesystem::path& path,
+                                                                   std::string_view content) {
+  std::error_code exists_error;
+  const bool exists = std::filesystem::exists(path, exists_error);
+  if (exists_error) return std::nullopt;
+
+  std::string original;
+  if (exists) {
+    const auto read_decision = ava::permissions::decide(ava::permissions::PermissionRequest{
+        .operation = ava::permissions::Operation::ReadFile,
+        .mode = context.mode,
+        .workspace_dir = context.workspace_dir,
+        .target_path = path,
+        .command = "",
+    });
+    if (read_decision.action != ava::permissions::PermissionAction::Allow) return std::nullopt;
+    auto current = read_all_text(path);
+    if (!current) return std::nullopt;
+    original = std::move(*current);
+  }
+
+  auto diff = unified_diff(original, content, path, path, kMaxPermissionDiffBytes);
+  return PermissionDiffPreview{.text = std::move(diff.text), .truncated = diff.truncated};
+}
+
 ava::core::Result<FileMutationResult> write_file_unlocked(const std::filesystem::path& path, std::string_view content) {
   const auto parent_path = path.parent_path();
   if (!parent_path.empty()) {
@@ -242,7 +276,8 @@ ava::core::Result<FileMutationResult> write_file_unlocked(const std::filesystem:
 
 ava::core::VoidResult ensure_permission(const ToolContext& context, ava::permissions::Operation operation,
                                         const std::filesystem::path& target_path, std::string_view command,
-                                        std::string_view tool_name, std::string_view error_message) {
+                                        std::string_view tool_name, std::string_view error_message,
+                                        std::string_view diff_preview, bool diff_truncated) {
   const auto request_tool_name = effective_tool_name(context, operation, tool_name);
   const auto decision = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = operation,
@@ -285,6 +320,8 @@ ava::core::VoidResult ensure_permission(const ToolContext& context, ava::permiss
       .command = std::string(command),
       .tool_name = request_tool_name,
       .reason = decision.reason,
+      .diff_preview = std::string(diff_preview),
+      .diff_truncated = diff_truncated,
   });
 
   auto outcome_event = policy_event;
@@ -341,8 +378,11 @@ ava::core::Result<TextOutput> read_file(const ToolContext& context, const std::f
 ava::core::Result<FileMutationResult> write_file(const ToolContext& context, const std::filesystem::path& path,
                                                  std::string_view content, WriteOptions options) {
   if (!options.permission_already_checked) {
+    const auto preview = write_permission_diff_preview(context, path, content);
+    const auto diff_preview = preview ? std::string_view(preview->text) : std::string_view{};
     if (auto permission =
-            ensure_permission(context, ava::permissions::Operation::EditFile, path, "", "", "tool requires permission");
+            ensure_permission(context, ava::permissions::Operation::EditFile, path, "", "", "tool requires permission",
+                              diff_preview, preview ? preview->truncated : false);
         !permission) {
       return std::unexpected(permission.error());
     }
@@ -355,20 +395,43 @@ ava::core::Result<FileMutationResult> write_file(const ToolContext& context, con
 
 ava::core::Result<FileMutationResult> edit_file(const ToolContext& context, const std::filesystem::path& path,
                                                 std::string_view old_text, std::string_view new_text) {
-  if (auto permission =
-          ensure_permission(context, ava::permissions::Operation::ReadFile, path, "", "", "tool requires permission");
-      !permission) {
-    return std::unexpected(permission.error());
-  }
-  if (auto permission =
-          ensure_permission(context, ava::permissions::Operation::EditFile, path, "", "", "tool requires permission");
-      !permission) {
-    return std::unexpected(permission.error());
-  }
   if (old_text.empty()) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "old_text must not be empty");
     error.with_context("path", path.string());
     return std::unexpected(std::move(error));
+  }
+  const auto read_decision = ava::permissions::decide(ava::permissions::PermissionRequest{
+      .operation = ava::permissions::Operation::ReadFile,
+      .mode = context.mode,
+      .workspace_dir = context.workspace_dir,
+      .target_path = path,
+      .command = "",
+  });
+  if (read_decision.action == ava::permissions::PermissionAction::Deny) {
+    if (auto permission =
+            ensure_permission(context, ava::permissions::Operation::ReadFile, path, "", "", "tool requires permission");
+        !permission) {
+      return std::unexpected(permission.error());
+    }
+  }
+  const auto edit_decision = ava::permissions::decide(ava::permissions::PermissionRequest{
+      .operation = ava::permissions::Operation::EditFile,
+      .mode = context.mode,
+      .workspace_dir = context.workspace_dir,
+      .target_path = path,
+      .command = "",
+  });
+  if (edit_decision.action == ava::permissions::PermissionAction::Deny) {
+    if (auto permission =
+            ensure_permission(context, ava::permissions::Operation::EditFile, path, "", "", "tool requires permission");
+        !permission) {
+      return std::unexpected(permission.error());
+    }
+  }
+  if (auto permission =
+          ensure_permission(context, ava::permissions::Operation::ReadFile, path, "", "", "tool requires permission");
+      !permission) {
+    return std::unexpected(permission.error());
   }
 
   [[maybe_unused]] auto mutation_lock = effective_mutation_queue(context)->lock_path(path);
@@ -382,11 +445,16 @@ ava::core::Result<FileMutationResult> edit_file(const ToolContext& context, cons
 
   const auto original = *content;
   content->replace(match->position, match->size, new_text);
+  auto diff = unified_diff(original, *content, path, path, kMaxPermissionDiffBytes);
+  if (auto permission = ensure_permission(context, ava::permissions::Operation::EditFile, path, "", "",
+                                          "tool requires permission", diff.text, diff.truncated);
+      !permission) {
+    return std::unexpected(permission.error());
+  }
   auto written = write_file(context, path, *content,
                             WriteOptions{.permission_already_checked = true, .mutation_already_locked = true});
   if (!written) return std::unexpected(written.error());
 
-  auto diff = unified_diff(original, *content, path, path);
   written->diff = std::move(diff.text);
   written->diff_truncated = diff.truncated;
   written->line_endings = to_string(match->content_analysis.line_endings);

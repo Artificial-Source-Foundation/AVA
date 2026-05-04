@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ava::permissions {
@@ -270,6 +271,33 @@ bool is_simple_number(std::string_view value)
   return saw_digit;
 }
 
+PermissionDecision decision(PermissionAction action, std::string reason, PermissionRisk risk)
+{
+  return PermissionDecision{.action = action, .reason = std::move(reason), .risk = risk};
+}
+
+PermissionRisk default_allow_risk(Operation operation)
+{
+  switch (operation) {
+    case Operation::EditFile:
+    case Operation::RunCommand:
+    case Operation::NetworkFetch:
+    case Operation::PluginExecute:
+    case Operation::PluginToolCall:
+    case Operation::PluginCommandRun:
+    case Operation::PluginEventObserve:
+    case Operation::McpServerLaunch:
+    case Operation::McpServerConnect:
+    case Operation::McpToolCall:
+      return PermissionRisk::Medium;
+    case Operation::ReadFile:
+    case Operation::SearchFiles:
+    case Operation::LspQuery:
+      return PermissionRisk::Low;
+  }
+  return PermissionRisk::Medium;
+}
+
 }  // namespace
 
 PermissionDecision decide(PermissionRequest const& request)
@@ -279,16 +307,16 @@ PermissionDecision decide(PermissionRequest const& request)
   if ((request.operation == Operation::ReadFile || request.operation == Operation::EditFile ||
        request.operation == Operation::LspQuery) &&
       is_secret_path(checked_path)) {
-    return {.action = PermissionAction::Deny, .reason = "target looks like a secret file"};
+    return decision(PermissionAction::Deny, "target looks like a secret file", PermissionRisk::Critical);
   }
 
   if (!is_within_workspace(request.workspace_dir, request.target_path)) {
-    return {.action = PermissionAction::Ask, .reason = "target is outside the workspace"};
+    return decision(PermissionAction::Ask, "target is outside the workspace", PermissionRisk::High);
   }
 
   if (request.operation == Operation::EditFile && request.mode == ava::agent::Mode::Plan &&
       !is_planning_markdown(checked_path)) {
-    return {.action = PermissionAction::Deny, .reason = "plan mode can only edit planning markdown"};
+    return decision(PermissionAction::Deny, "plan mode can only edit planning markdown", PermissionRisk::High);
   }
 
   if (request.operation == Operation::RunCommand) {
@@ -296,104 +324,109 @@ PermissionDecision decide(PermissionRequest const& request)
   }
 
   if (request.operation == Operation::NetworkFetch) {
-    return {.action = PermissionAction::Ask, .reason = "network fetch requires explicit approval"};
+    return decision(PermissionAction::Ask, "network fetch requires explicit approval", PermissionRisk::Medium);
   }
 
   if (request.operation == Operation::PluginExecute) {
-    return {.action = PermissionAction::Ask, .reason = "plugin subprocess execution requires explicit approval"};
+    return decision(PermissionAction::Ask, "plugin subprocess execution requires explicit approval",
+                    PermissionRisk::High);
   }
 
   if (request.operation == Operation::PluginToolCall) {
-    return {.action = PermissionAction::Ask, .reason = "plugin tool calls require explicit approval"};
+    return decision(PermissionAction::Ask, "plugin tool calls require explicit approval", PermissionRisk::High);
   }
 
   if (request.operation == Operation::PluginCommandRun) {
-    return {.action = PermissionAction::Ask, .reason = "plugin commands require explicit approval"};
+    return decision(PermissionAction::Ask, "plugin commands require explicit approval", PermissionRisk::High);
   }
 
   if (request.operation == Operation::PluginEventObserve) {
-    return {.action = PermissionAction::Ask, .reason = "plugin event observation requires explicit approval"};
+    return decision(PermissionAction::Ask, "plugin event observation requires explicit approval",
+                    PermissionRisk::Medium);
   }
 
   if (request.operation == Operation::McpServerLaunch) {
-    return {.action = PermissionAction::Ask, .reason = "MCP server launch requires explicit approval"};
+    return decision(PermissionAction::Ask, "MCP server launch requires explicit approval", PermissionRisk::High);
   }
 
   if (request.operation == Operation::McpServerConnect) {
-    return {.action = PermissionAction::Ask, .reason = "MCP server connection requires explicit approval"};
+    return decision(PermissionAction::Ask, "MCP server connection requires explicit approval", PermissionRisk::High);
   }
 
   if (request.operation == Operation::McpToolCall) {
-    return {.action = PermissionAction::Ask, .reason = "MCP tool calls require explicit approval"};
+    return decision(PermissionAction::Ask, "MCP tool calls require explicit approval", PermissionRisk::High);
   }
 
-  return {.action = PermissionAction::Allow, .reason = "allowed by default workspace policy"};
+  return decision(PermissionAction::Allow, "allowed by default workspace policy",
+                  default_allow_risk(request.operation));
 }
 
 PermissionDecision classify_command(std::string_view command)
 {
   auto const parsed = parse_command_argv(command);
   if (!parsed.ok) {
-    return {.action = PermissionAction::Deny, .reason = parsed.reason};
+    return decision(PermissionAction::Deny, parsed.reason, PermissionRisk::High);
   }
   auto const argv = lowercase_argv(parsed.argv);
   auto const& executable = argv[0];
   auto const value = lowercase(command);
 
   if (contains_any(value, {"rm -rf", "rm -fr", "mkfs", ":(){", "chmod -r 777 /", "chown -r ", "> /dev/"})) {
-    return {.action = PermissionAction::Deny, .reason = "command matches a destructive pattern"};
+    return decision(PermissionAction::Deny, "command matches a destructive pattern", PermissionRisk::Critical);
   }
 
   if (equals_any(executable, {"bash", "sh", "zsh", "fish", "python", "python3", "node", "perl", "ruby", "php", "lua",
                               "make", "ninja", "npm", "pnpm", "yarn", "bun", "cargo"})) {
-    return {.action = PermissionAction::Deny, .reason = "command can execute arbitrary scripts"};
+    return decision(PermissionAction::Deny, "command can execute arbitrary scripts", PermissionRisk::High);
   }
 
   if (contains_any(value, {"git push", "git reset --hard", "git clean", "npm publish", "pnpm publish", "yarn publish",
                            "deploy", "terraform apply", "kubectl delete", "sudo "})) {
-    return {.action = PermissionAction::Ask, .reason = "command can change external or destructive state"};
+    return decision(PermissionAction::Ask, "command can change external or destructive state", PermissionRisk::High);
   }
 
   if (executable == "git" && argv.size() >= 2 && (argv[1] == "status" || argv[1] == "diff" || argv[1] == "log")) {
     if (!has_unsafe_path_arg(parsed.argv, 2)) {
-      return {.action = PermissionAction::Allow, .reason = "command is read-only or local verification"};
+      return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
     }
-    return {.action = PermissionAction::Ask, .reason = "git command includes unsafe path or output options"};
+    return decision(PermissionAction::Ask, "git command includes unsafe path or output options",
+                    PermissionRisk::Medium);
   }
   if (executable == "cmake") {
     for (auto const& arg : argv) {
       if (is_dangerous_cmake_arg(arg)) {
-        return {.action = PermissionAction::Deny, .reason = "cmake script/file helpers are not allowed"};
+        return decision(PermissionAction::Deny, "cmake script/file helpers are not allowed", PermissionRisk::High);
       }
     }
     if (is_safe_cmake_build(parsed.argv, argv)) {
-      return {.action = PermissionAction::Allow, .reason = "command is read-only or local verification"};
+      return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
     }
   }
   if (executable == "ctest" && is_safe_ctest(parsed.argv, argv)) {
-    return {.action = PermissionAction::Allow, .reason = "command is read-only or local verification"};
+    return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
   }
   if (executable == "rg") {
     for (auto const& arg : argv) {
       if (arg == "--pre" || arg.starts_with("--pre=")) {
-        return {.action = PermissionAction::Deny, .reason = "rg preprocessors can execute arbitrary commands"};
+        return decision(PermissionAction::Deny, "rg preprocessors can execute arbitrary commands",
+                        PermissionRisk::High);
       }
     }
     if (!has_unsafe_path_arg(parsed.argv, 1)) {
-      return {.action = PermissionAction::Allow, .reason = "command is read-only or local verification"};
+      return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
     }
   }
   if (executable == "ls" && !has_unsafe_path_arg(parsed.argv, 1)) {
-    return {.action = PermissionAction::Allow, .reason = "command is read-only or local verification"};
+    return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
   }
   if (executable == "pwd" && (argv.size() == 1 || (argv.size() == 2 && (argv[1] == "-p" || argv[1] == "-l")))) {
-    return {.action = PermissionAction::Allow, .reason = "command is read-only or local verification"};
+    return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
   }
   if (executable == "sleep" && argv.size() == 2 && is_simple_number(argv[1])) {
-    return {.action = PermissionAction::Allow, .reason = "command is read-only or local verification"};
+    return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
   }
 
-  return {.action = PermissionAction::Ask, .reason = "command risk is unknown"};
+  return decision(PermissionAction::Ask, "command risk is unknown", PermissionRisk::Medium);
 }
 
 std::string to_string(PermissionAction action)
@@ -418,6 +451,21 @@ std::string to_string(PermissionResolution resolution)
       return "deny";
   }
   return "deny";
+}
+
+std::string to_string(PermissionRisk risk)
+{
+  switch (risk) {
+    case PermissionRisk::Low:
+      return "low";
+    case PermissionRisk::Medium:
+      return "medium";
+    case PermissionRisk::High:
+      return "high";
+    case PermissionRisk::Critical:
+      return "critical";
+  }
+  return "high";
 }
 
 std::string to_string(Operation operation)

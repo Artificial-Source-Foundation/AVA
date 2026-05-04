@@ -541,13 +541,15 @@ void test_app_rpc_prompt_payload_serialization()
                                                          .command = "",
                                                          .tool_name = "edit_file",
                                                          .reason = "needs approval",
+                                                         .risk = ava::permissions::PermissionRisk::High,
                                                          .diff_preview = "--- a\n+++ b\n-old\n+new",
                                                          .diff_truncated = true});
   expect(permission_json.find("\"operation\":\"edit\"") != std::string::npos &&
              permission_json.find("\"target_path\":\"/workspace/src/main.cpp\"") != std::string::npos &&
+             permission_json.find("\"risk\":\"high\"") != std::string::npos &&
              permission_json.find("\"diff_preview\":\"--- a\\n+++ b\\n-old\\n+new\"") != std::string::npos &&
              permission_json.find("\"diff_truncated\":true") != std::string::npos,
-         "RPC permission request payload preserves semantic operation, target, reason, and diff preview data");
+         "RPC permission request payload preserves semantic operation, target, risk, reason, and diff preview data");
 
   auto const question_json = ava::app::rpc::question_request_payload_json(
       "question_1",

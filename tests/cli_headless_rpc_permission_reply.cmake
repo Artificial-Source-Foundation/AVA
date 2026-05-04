@@ -166,6 +166,7 @@ foreach(NEEDLE
         "\"operation\":\"edit\""
         "\"target_path\":\"${TARGET_FILE}\""
         "\"tool_name\":\"write_file\""
+        "\"risk\":\"high\""
         "\"diff_preview\""
         "+rpc new"
         "\"id\":\"reply\""

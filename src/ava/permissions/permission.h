@@ -16,6 +16,13 @@ enum class PermissionAction {
   Deny,
 };
 
+enum class PermissionRisk {
+  Low,
+  Medium,
+  High,
+  Critical,
+};
+
 enum class Operation {
   ReadFile,
   SearchFiles,
@@ -43,6 +50,7 @@ struct PermissionRequest {
 struct PermissionDecision {
   PermissionAction action;
   std::string reason;
+  PermissionRisk risk = PermissionRisk::Low;
 };
 
 enum class PermissionResolution {
@@ -58,6 +66,7 @@ struct PermissionPrompt {
   std::string command;
   std::string tool_name;
   std::string reason;
+  PermissionRisk risk = PermissionRisk::Low;
   std::string diff_preview = {};
   bool diff_truncated = false;
 };
@@ -68,6 +77,7 @@ using PermissionResolver = std::function<ava::core::Result<PermissionResolution>
 [[nodiscard]] PermissionDecision classify_command(std::string_view command);
 [[nodiscard]] std::string to_string(PermissionAction action);
 [[nodiscard]] std::string to_string(PermissionResolution resolution);
+[[nodiscard]] std::string to_string(PermissionRisk risk);
 [[nodiscard]] std::string to_string(Operation operation);
 
 }  // namespace ava::permissions

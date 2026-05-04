@@ -644,6 +644,8 @@ std::string permission_request_payload_json(std::string_view resolver_request_id
   json += string_field_json("tool_name", prompt.tool_name);
   json += ',';
   json += string_field_json("reason", prompt.reason);
+  json += ',';
+  json += string_field_json("risk", ava::permissions::to_string(prompt.risk));
   if (!prompt.diff_preview.empty()) {
     json += ',';
     json += string_field_json("diff_preview", prompt.diff_preview);

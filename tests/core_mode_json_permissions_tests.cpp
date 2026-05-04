@@ -114,7 +114,9 @@ void test_permission_defaults()
       .target_path = workspace / "src/main.cpp",
       .command = "",
   });
-  expect(normal_edit.action == ava::permissions::PermissionAction::Allow, "build mode allows workspace edits");
+  expect(normal_edit.action == ava::permissions::PermissionAction::Allow &&
+             normal_edit.risk == ava::permissions::PermissionRisk::Medium,
+         "build mode allows workspace edits with medium mutation risk");
 
   auto const plan_source_edit = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::EditFile,
@@ -123,7 +125,9 @@ void test_permission_defaults()
       .target_path = workspace / "src/main.cpp",
       .command = "",
   });
-  expect(plan_source_edit.action == ava::permissions::PermissionAction::Deny, "plan mode denies source edits");
+  expect(plan_source_edit.action == ava::permissions::PermissionAction::Deny &&
+             plan_source_edit.risk == ava::permissions::PermissionRisk::High,
+         "plan mode denies source edits with high semantic risk");
 
   auto const plan_doc_edit = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::EditFile,
@@ -141,7 +145,9 @@ void test_permission_defaults()
       .target_path = workspace / ".env",
       .command = "",
   });
-  expect(secret_read.action == ava::permissions::PermissionAction::Deny, "secret files are denied");
+  expect(secret_read.action == ava::permissions::PermissionAction::Deny &&
+             secret_read.risk == ava::permissions::PermissionRisk::Critical,
+         "secret files are denied with critical semantic risk");
 
   auto const npmrc_read = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::ReadFile,
@@ -168,7 +174,9 @@ void test_permission_defaults()
       .target_path = workspace.parent_path() / "outside.txt",
       .command = "",
   });
-  expect(external_read.action == ava::permissions::PermissionAction::Ask, "external paths ask");
+  expect(external_read.action == ava::permissions::PermissionAction::Ask &&
+             external_read.risk == ava::permissions::PermissionRisk::High,
+         "external paths ask with high semantic risk");
 
   auto const workspace_lsp = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::LspQuery,
@@ -180,6 +188,8 @@ void test_permission_defaults()
   expect(workspace_lsp.action == ava::permissions::PermissionAction::Allow, "workspace LSP diagnostics are allowed");
   expect(ava::permissions::to_string(ava::permissions::Operation::LspQuery) == "lsp.query",
          "LSP query operation string is stable");
+  expect(ava::permissions::to_string(ava::permissions::PermissionRisk::Critical) == "critical",
+         "permission risk string is stable");
 
   auto const secret_lsp = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::LspQuery,

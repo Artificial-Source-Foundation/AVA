@@ -25,6 +25,7 @@ struct PermissionAuditEvent {
   std::string tool_name;
   ava::permissions::PermissionAction action = ava::permissions::PermissionAction::Deny;
   std::string reason;
+  ava::permissions::PermissionRisk risk = ava::permissions::PermissionRisk::Low;
   std::filesystem::path target_path;
   std::string command;
   std::string resolution;

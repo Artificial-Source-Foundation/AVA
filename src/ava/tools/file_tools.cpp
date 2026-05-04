@@ -49,6 +49,7 @@ PermissionAuditEvent audit_event(ToolContext const& context, ava::permissions::O
                               .tool_name = std::move(tool_name),
                               .action = decision.action,
                               .reason = decision.reason,
+                              .risk = decision.risk,
                               .target_path = target_path,
                               .command = std::string(command),
                               .resolution = "",
@@ -63,6 +64,7 @@ ava::core::Error permission_denied_error(std::string_view error_message,
   auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, std::string(error_message));
   error.with_context("action", ava::permissions::to_string(decision.action));
   error.with_context("reason", decision.reason);
+  error.with_context("risk", ava::permissions::to_string(decision.risk));
   if (!command.empty()) {
     error.with_context("command", std::string(command));
   } else {
@@ -423,6 +425,7 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
       .command = std::string(command),
       .tool_name = request_tool_name,
       .reason = decision.reason,
+      .risk = decision.risk,
       .diff_preview = std::string(diff_preview),
       .diff_truncated = diff_truncated,
   });
@@ -448,7 +451,8 @@ std::string permission_audit_data_json(PermissionAuditEvent const& event)
                      "\",\"mode\":\"" + ava::core::json::escape(ava::agent::to_string(event.mode)) +
                      "\",\"tool_name\":\"" + ava::core::json::escape(event.tool_name) + "\",\"action\":\"" +
                      ava::core::json::escape(ava::permissions::to_string(event.action)) + "\",\"reason\":\"" +
-                     ava::core::json::escape(event.reason) + "\"";
+                     ava::core::json::escape(event.reason) + "\",\"risk\":\"" +
+                     ava::core::json::escape(ava::permissions::to_string(event.risk)) + "\"";
   if (event.operation != ava::permissions::Operation::RunCommand &&
       event.operation != ava::permissions::Operation::NetworkFetch && !event.target_path.empty()) {
     data += ",\"target_path\":\"" + ava::core::json::escape(event.target_path.string()) + "\"";

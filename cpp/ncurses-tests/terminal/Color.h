@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include "debug.h"
 
 namespace terminal {
@@ -20,12 +21,15 @@ namespace terminal {
 class Color
 {
  private:
+  static constexpr uint32_t default_terminal_color = std::numeric_limits<std::uint32_t>::max();
+
   uint32_t rgb_;
 
  public:
   // Construct a color meaning "the default terminal color" (for either foreground or background).
-  Color() : rgb_(0xffffffff) { }
+  Color() : rgb_(default_terminal_color) { }
 
+  // Construct a Color by RGB value (0x000000 (black) till 0xffffff (white)).
   Color(uint32_t rgb) : rgb_(rgb)
   {
     if (rgb_ < 8)
@@ -37,7 +41,7 @@ class Color
 
   int as_int() const
   {
-    return static_cast<int>(rgb_);
+    return static_cast<int>(static_cast<int32_t>(rgb_));
   }
 };
 

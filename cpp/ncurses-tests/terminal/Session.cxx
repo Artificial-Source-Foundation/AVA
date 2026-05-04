@@ -19,6 +19,11 @@ Session::Session() : default_rendition_(ColorPair{0})
   if (has_colors())
   {
     start_color();
+    // Enable ncurses' default-color extension: after this succeeds, color
+    // number -1 in init_pair/init_extended_pair means the terminal's default
+    // foreground or background color instead of an RGB/direct-color index.
+    int const status = ::use_default_colors();
+    ASSERT(status == OK);
     Color foreground_color{0xffffff};
     Color background_color{0x2a2222};
     default_rendition_ = Rendition{create_color_pair(foreground_color, background_color)};
@@ -63,7 +68,8 @@ ColorPair Session::create_color_pair(Color foreground, Color background)
     // The next color pair index.
     int color_pair_index = color_pairs_.size() + 1;
     // Initialize the new color pair.
-    ::init_extended_pair(color_pair_index, foreground.as_int(), background.as_int());
+    int const status = ::init_extended_pair(color_pair_index, foreground.as_int(), background.as_int());
+    ASSERT(status == OK);
     // Create the new ColorPair from the new color pair index.
     color_pairs_.push_back(color_pair_index);
   }

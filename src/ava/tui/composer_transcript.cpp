@@ -87,6 +87,53 @@ std::vector<std::string> words_in(std::string_view text) {
   return words;
 }
 
+std::string text_span_sgr(const Rendition& rendition) {
+  std::string sgr;
+  if (rendition.bold) sgr += std::string(kSgrBold);
+  if (rendition.code) {
+    sgr += std::string(kSgrWarning);
+  } else if (rendition.color == TextColorRole::Thinking) {
+    sgr += std::string(kSgrThinking);
+  } else if (rendition.color == TextColorRole::Muted || rendition.dim) {
+    sgr += std::string(kSgrDim);
+  } else if (rendition.color == TextColorRole::Success || rendition.color == TextColorRole::Added) {
+    sgr += std::string(kSgrSuccess);
+  } else if (rendition.color == TextColorRole::Error || rendition.color == TextColorRole::Removed) {
+    sgr += std::string(kSgrError);
+  } else if (rendition.color == TextColorRole::Warning || rendition.color == TextColorRole::Code) {
+    sgr += std::string(kSgrWarning);
+  } else if (rendition.color == TextColorRole::Accent) {
+    sgr += std::string(kSgrAccent);
+  }
+  return sgr;
+}
+
+std::string render_inline_text(const Text& text) {
+  std::string rendered;
+  for (const auto& run : text.runs) {
+    if (std::holds_alternative<NewLine>(run)) {
+      rendered.push_back(' ');
+    } else if (const auto* string = std::get_if<String>(&run)) {
+      rendered += string->text;
+    } else if (const auto* span = std::get_if<TextSpan>(&run)) {
+      const auto sgr = text_span_sgr(span->rendition);
+      if (sgr.empty()) {
+        rendered += span->text;
+      } else {
+        rendered += sgr;
+        rendered += span->text;
+        rendered += std::string(kSgrReset);
+      }
+    }
+  }
+  return rendered;
+}
+
+std::string text_model_or(const Text& model, const std::string& fallback) {
+  if (text_empty(model)) return fallback;
+  return to_plain_text(model);
+}
+
 void push_wrapped_word(std::vector<std::string>& output, const std::string& word, const std::string& next_prefix,
                        std::string& current, std::size_t& current_cols, std::size_t width) {
   auto remaining = word;
@@ -151,33 +198,7 @@ std::vector<std::string> wrap_words_with_prefix(std::string_view text, std::size
 }
 
 std::string render_inline_markup(std::string_view sanitized_text) {
-  std::string rendered;
-  rendered.reserve(sanitized_text.size());
-  for (std::size_t index = 0; index < sanitized_text.size();) {
-    if (index + 1 < sanitized_text.size() && sanitized_text[index] == '*' && sanitized_text[index + 1] == '*') {
-      const auto end = sanitized_text.find("**", index + 2);
-      if (end != std::string_view::npos && end > index + 2) {
-        rendered += std::string(kSgrBold);
-        rendered.append(sanitized_text.substr(index + 2, end - index - 2));
-        rendered += std::string(kSgrReset);
-        index = end + 2;
-        continue;
-      }
-    }
-    if (sanitized_text[index] == '`') {
-      const auto end = sanitized_text.find('`', index + 1);
-      if (end != std::string_view::npos && end > index + 1) {
-        rendered += std::string(kSgrWarning);
-        rendered.append(sanitized_text.substr(index + 1, end - index - 1));
-        rendered += std::string(kSgrReset);
-        index = end + 1;
-        continue;
-      }
-    }
-    rendered.push_back(sanitized_text[index]);
-    ++index;
-  }
-  return rendered;
+  return render_inline_text(text_from_markdown(sanitized_text));
 }
 
 std::string render_wide_content(std::string_view border_sgr, std::string content, std::size_t width) {
@@ -445,17 +466,20 @@ std::vector<std::string> render_transcript_lines(const std::vector<TranscriptIte
       continue;
     }
     if (item.label == "you") {
-      auto block = render_user_block(item.text, width);
+      auto block = render_user_block(text_model_or(item.text_model, item.text), width);
       rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
     } else if (item.label == "ava") {
-      auto block =
-          render_assistant_block(item.text, item.meta, thinking_visible ? item.thinking : std::string{}, width);
+      auto assistant_text = item.text;
+      if (assistant_text.empty() && !text_empty(item.text_model)) assistant_text = to_plain_text(item.text_model);
+      auto thinking_text = thinking_visible ? text_model_or(item.thinking_model, item.thinking) : std::string{};
+      auto block = render_assistant_block(assistant_text, item.meta, thinking_text, width);
       rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
     } else if (item.label == "thinking" && thinking_visible) {
-      auto block = render_thinking_block(item.text, width);
+      auto block = render_thinking_block(text_model_or(item.text_model, item.text), width);
       rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
     } else {
-      const auto text_lines = split_lines(item.text);
+      const auto text = text_model_or(item.text_model, item.text);
+      const auto text_lines = split_lines(text);
       for (const auto& part : text_lines) {
         for (const auto& wrapped : wrap_transcript_text(part, width)) {
           if (item.label == "error") {

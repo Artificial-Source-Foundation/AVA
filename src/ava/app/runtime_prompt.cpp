@@ -136,6 +136,20 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
             event.tool_name = entry.name;
             event.text =
                 entry.status == ava::agent::ToolTimelineStatus::Running ? entry.argument_summary : entry.result_summary;
+            event.tool_arguments_json = entry.arguments_json;
+            event.tool_result_json = entry.result_json;
+            event.diff = entry.diff;
+            event.diff_truncated = entry.diff_truncated;
+            event.changed_paths = entry.changed_paths;
+            event.truncated = entry.truncated;
+            event.spill_path = entry.spill_path;
+            event.spill_truncated = entry.spill_truncated;
+            if (entry.output_bytes) event.output_bytes = *entry.output_bytes;
+            if (entry.total_bytes) event.total_bytes = *entry.total_bytes;
+            if (entry.omitted_bytes) event.omitted_bytes = *entry.omitted_bytes;
+            if (entry.omitted_lines) event.omitted_lines = *entry.omitted_lines;
+            if (entry.visible_matches) event.visible_matches = *entry.visible_matches;
+            if (entry.total_matches) event.total_matches = *entry.total_matches;
             event.status = ava::agent::to_string(entry.status);
             if (auto emitted = emit_event(event_sink, event); !emitted) {
               sink_error = std::move(emitted.error());

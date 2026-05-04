@@ -31,6 +31,7 @@
 #include "ava/app/headless_policy.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/reasoning_controls.h"
+#include "ava/app/rpc/serialization.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime_retry.h"
@@ -471,6 +472,42 @@ void test_app_event_serialization() {
          "runtime event JSONL contains one terminating newline only");
 }
 
+void test_app_rpc_prompt_payload_serialization() {
+  const auto permission_json = ava::app::rpc::permission_request_payload_json(
+      "permission_1", ava::permissions::PermissionPrompt{.operation = ava::permissions::Operation::EditFile,
+                                                         .mode = ava::agent::Mode::Build,
+                                                         .workspace_dir = "/workspace",
+                                                         .target_path = "/workspace/src/main.cpp",
+                                                         .command = "",
+                                                         .tool_name = "edit_file",
+                                                         .reason = "needs approval",
+                                                         .diff_preview = "--- a\n+++ b\n-old\n+new",
+                                                         .diff_truncated = true});
+  expect(permission_json.find("\"operation\":\"edit\"") != std::string::npos &&
+             permission_json.find("\"target_path\":\"/workspace/src/main.cpp\"") != std::string::npos &&
+             permission_json.find("\"diff_preview\":\"--- a\\n+++ b\\n-old\\n+new\"") != std::string::npos &&
+             permission_json.find("\"diff_truncated\":true") != std::string::npos,
+         "RPC permission request payload preserves semantic operation, target, reason, and diff preview data");
+
+  const auto question_json = ava::app::rpc::question_request_payload_json(
+      "question_1",
+      ava::agent::QuestionPrompt{.header = "Choose",
+                                 .question = "Pick providers",
+                                 .options = {ava::agent::QuestionOption{.value = "openai", .label = "OpenAI"}},
+                                 .multiple = true,
+                                 .allow_custom = true,
+                                 .secret = true,
+                                 .modal = true,
+                                 .searchable = true});
+  expect(question_json.find("\"options\":[{\"value\":\"openai\",\"label\":\"OpenAI\"}]") != std::string::npos &&
+             question_json.find("\"multiple\":true") != std::string::npos &&
+             question_json.find("\"allow_custom\":true") != std::string::npos &&
+             question_json.find("\"secret\":true") != std::string::npos &&
+             question_json.find("\"modal\":true") != std::string::npos &&
+             question_json.find("\"searchable\":true") != std::string::npos,
+         "RPC question request payload preserves options, selection metadata, and local prompt flags");
+}
+
 void test_app_runtime_open_session_and_context_prompt() {
   const auto root = temp_root() / "app-runtime-open";
   std::error_code remove_error;
@@ -707,6 +744,20 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill() {
                                           !event.text.empty();
                                  }),
          "runtime run_prompt emits additive tool_progress events from tool callbacks");
+  expect(std::ranges::any_of(events,
+                             [](const ava::app::RuntimeEvent& event) {
+                               return event.type == ava::app::RuntimeEventType::ToolStart &&
+                                      event.call_id == "call_bash" && event.tool_name == "bash" &&
+                                      event.tool_arguments_json.find("\"command\":\"pwd\"") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(events,
+                                 [](const ava::app::RuntimeEvent& event) {
+                                   return event.type == ava::app::RuntimeEventType::ToolResult &&
+                                          event.call_id == "call_bash" && event.tool_name == "bash" &&
+                                          event.truncated && event.total_bytes > 0 && !event.spill_path.empty() &&
+                                          event.tool_result_json.find("\"spill_file\"") != std::string::npos;
+                                 }),
+         "runtime run_prompt emits semantic tool args, result, and spill metadata for frontend adapters");
   expect(has_spill_file, "runtime run_prompt configures session-local spill files for truncated tool output");
 }
 
@@ -4539,7 +4590,10 @@ void test_app_rpc_question_reply_selected_option_flow() {
 
 void run_app_command_classification_tests() { test_command_classification(); }
 
-void run_app_event_serialization_tests() { test_app_event_serialization(); }
+void run_app_event_serialization_tests() {
+  test_app_event_serialization();
+  test_app_rpc_prompt_payload_serialization();
+}
 
 void run_app_runtime_tests() {
   test_app_runtime_open_session_and_context_prompt();

@@ -43,6 +43,8 @@ struct RuntimeEvent {
   std::string text;
   std::string call_id;
   std::string tool_name;
+  std::string tool_arguments_json;
+  std::string tool_result_json;
   std::string status;
   std::string error_category;
   std::string error_message;
@@ -51,8 +53,14 @@ struct RuntimeEvent {
   std::string trigger;
   std::string reason;
   std::string reasoning_format;
+  std::string diff;
+  std::vector<std::string> changed_paths;
+  std::string spill_path;
   bool reasoning_redacted = false;
   bool reasoning_signature_present = false;
+  bool diff_truncated = false;
+  bool truncated = false;
+  bool spill_truncated = false;
   std::size_t provider_iterations = 0;
   std::size_t tool_calls = 0;
   std::size_t attempt = 0;
@@ -64,6 +72,12 @@ struct RuntimeEvent {
   std::size_t summary_bytes = 0;
   std::size_t snapshot_entries = 0;
   std::size_t current_entries = 0;
+  std::size_t output_bytes = 0;
+  std::size_t total_bytes = 0;
+  std::size_t omitted_bytes = 0;
+  std::size_t omitted_lines = 0;
+  std::size_t visible_matches = 0;
+  std::size_t total_matches = 0;
 };
 
 using RuntimeEventSink = std::function<ava::core::VoidResult(const RuntimeEvent&)>;

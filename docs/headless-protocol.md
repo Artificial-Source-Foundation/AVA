@@ -69,6 +69,8 @@ Headless JSON event records are newline-delimited envelopes emitted by the share
 {"schema_version":1,"event_id":"event_...","timestamp":"2026-04-30T00:00:00Z","session_id":"session_...","name":"assistant_message","type":"assistant_message","payload":{"text":"hello"},"text":"hello"}
 ```
 
+AVA's backend/frontend content boundary is semantic. Backend producers emit event names, lifecycle/status metadata, tool/permission/question payload fields, and Markdown or plain text. They do not emit terminal layout instructions, cards, panels, borders, columns, ncurses attributes, or ANSI escape codes as the internal styling model. Frontend adapters convert Markdown/plain text into `ava::tui::Text`, a layout-free sequence of `TextRun` values with explicit `NewLine` runs and styled `TextSpan` runs. The TUI renderer owns wrapping, scrolling, layout, terminal sanitization, SGR conversion, and ncurses drawing.
+
 Envelope fields:
 
 - `schema_version`: integer schema version. The current value is `1`.
@@ -89,9 +91,9 @@ Current event names:
 - `provider_event`: live non-text provider stream event such as tool-call argument deltas or provider stream errors; includes `status`, and may include `call_id`, `tool`, `text`, or `message` depending on the provider event.
 - `reasoning_start`, `reasoning_delta`, `reasoning_end`: provider-neutral reasoning lifecycle events for models that expose visible thinking/reasoning. Payloads may include bounded `text` deltas, `reasoning_format`, `reasoning_redacted`, and `reasoning_signature_present`; they never expose raw provider verification signatures or opaque redacted-thinking payloads.
 - `assistant_message`: final assistant text for a completed turn.
-- `tool_start`: tool call began; includes `call_id`, `tool`, and a safe argument summary when available.
-- `tool_progress`: tool progress or partial result update; includes `call_id`, `tool`, `status`, and bounded `text` when available.
-- `tool_result`: tool call completed; includes `call_id`, `tool`, `status`, and a safe result summary when available.
+- `tool_start`: tool call began; includes `call_id`, `tool`, a safe argument summary when available, and may include structured `args` or fallback `args_json`.
+- `tool_progress`: tool progress or partial result update; includes `call_id`, `tool`, `status`, bounded `text` when available, and may include partial `result` or fallback `result_json`.
+- `tool_result`: tool call completed; includes `call_id`, `tool`, `status`, a safe result summary when available, and may include `args`, `result`, `diff`, `changed_paths`, `diff_truncated`, output truncation/spill fields, and match/byte/line counters.
 - `compaction_start`, `compaction_end`: provider-backed compaction lifecycle events. Payloads include `trigger`, `attempt`, `max_attempts`, and known token/summary byte counters when available.
 - `retry`: bounded backend retry lifecycle event. Payloads include `attempt`, `max_attempts`, and `delay_ms` when the backend retry path has those values. Provider transport retries use `trigger:"provider_transport"` with provider-neutral reasons such as `rate_limited`, `transient`, or `transport_io`; context-overflow retries use `reason:"context_overflow"`; stale compaction snapshot retries use `reason:"stale_compaction_snapshot"`.
 - `retry_tick`: backend retry countdown tick emitted while a bounded retry delay is sleeping. Payloads include `remaining_ms` plus the same retry correlation metadata where available. Clients should treat it as status/progress, not a final failure.
@@ -308,10 +310,10 @@ Missing, unknown, or wrong-correlation resolver ids return in-band errors. Cance
 When an active prompt reaches the `question` tool, RPC emits:
 
 ```json
-{"schema_version":1,"name":"question_requested","type":"question_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"question_...","header":"Choose","question":"Continue?","options":[{"value":"yes","label":"Yes"}],"multiple":false,"allow_custom":true}}
+{"schema_version":1,"name":"question_requested","type":"question_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"question_...","header":"Choose","question":"Continue?","options":[{"value":"yes","label":"Yes"}],"multiple":false,"allow_custom":true,"secret":false,"modal":false,"searchable":false}}
 ```
 
-The client may answer with custom text when `allow_custom` is true, or one valid selected option value. Multi-select question prompts are not supported by RPC protocol version 1; AVA emits no resolver request for them and returns a failed `question` tool result to the active prompt.
+Question payloads carry prompt text, option metadata, single/multiple-selection capability, custom-text allowance, and local prompt flags such as `secret`, `modal`, and `searchable`. The client may answer with custom text when `allow_custom` is true, or one valid selected option value. Multi-select question prompts are not supported by RPC protocol version 1; AVA emits no resolver request for them and returns a failed `question` tool result to the active prompt.
 
 ```json
 {"id":"question_reply_1","type":"question_reply","request_id":"question_...","correlation_id":"prompt_req","answer":"text"}

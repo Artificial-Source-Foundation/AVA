@@ -14,6 +14,7 @@ namespace ava::core::json {
 [[nodiscard]] std::optional<long long> integer_field(std::string_view object, std::string_view key);
 [[nodiscard]] std::optional<std::string> object_field(std::string_view object, std::string_view key);
 [[nodiscard]] std::vector<std::string> objects_in_array_field(std::string_view object, std::string_view key);
+[[nodiscard]] std::vector<std::string> strings_in_array_field(std::string_view object, std::string_view key);
 [[nodiscard]] bool is_valid_object(std::string_view value);
 
 }  // namespace ava::core::json

@@ -117,6 +117,7 @@ add_library(ava_tui
   src/ava/tui/keybindings.cpp
   src/ava/tui/runtime.cpp
   src/ava/tui/terminal.cpp
+  src/ava/tui/text.cpp
   src/ava/tui/tool_cards.cpp
 )
 

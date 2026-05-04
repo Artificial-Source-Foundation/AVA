@@ -2458,6 +2458,85 @@ void test_tui_composer_rendering_and_input() {
   }
 }
 
+void test_tui_text_model_conversions() {
+  const auto plain = ava::tui::text_from_plain("first\r\nsecond\nthird\rfour");
+  expect(ava::tui::to_plain_text(plain) == "first\nsecond\nthird\nfour" && ava::tui::validate_text(plain).has_value(),
+         "tui Text plain conversion normalizes CR/LF boundaries into explicit newline runs");
+
+  auto appended = ava::tui::Text{};
+  auto ok_string = ava::tui::append_string(appended, "plain");
+  ava::tui::append_newline(appended);
+  auto ok_span = ava::tui::append_span(appended, "code", ava::tui::Rendition{.code = true});
+  auto bad_string = ava::tui::append_string(appended, "bad\nrun");
+  auto bad_span = ava::tui::append_span(appended, "bad\rrun", ava::tui::Rendition{.bold = true});
+  expect(ok_string.has_value() && ok_span.has_value() && !bad_string.has_value() && !bad_span.has_value() &&
+             ava::tui::to_plain_text(appended) == "plain\ncode",
+         "tui Text builders reject embedded newlines inside string and span runs");
+
+  auto invalid = ava::tui::Text{};
+  invalid.runs.push_back(ava::tui::String{.text = "broken\nrun"});
+  expect(!ava::tui::validate_text(invalid).has_value(), "tui Text validation catches invalid hand-built string runs");
+
+  const auto markdown = ava::tui::text_from_markdown(
+      "# Title\nSee [docs](https://example.test) and *note*.\nUse `ava` and **bold**.\n```cpp\nint main() "
+      "{}\n```\n**open");
+  bool saw_code = false;
+  bool saw_bold = false;
+  bool saw_italic = false;
+  bool saw_link = false;
+  for (const auto& run : markdown.runs) {
+    if (const auto* span = std::get_if<ava::tui::TextSpan>(&run)) {
+      saw_code = saw_code || span->rendition.code;
+      saw_bold = saw_bold || span->rendition.bold;
+      saw_italic = saw_italic || span->rendition.italic;
+      saw_link = saw_link || (span->rendition.underline && span->rendition.color == ava::tui::TextColorRole::Accent);
+    }
+  }
+  expect(ava::tui::validate_text(markdown).has_value() && saw_code && saw_bold && saw_italic && saw_link &&
+             ava::tui::to_plain_text(markdown).find("Title") != std::string::npos &&
+             ava::tui::to_plain_text(markdown).find("docs (https://example.test)") != std::string::npos &&
+             ava::tui::to_plain_text(markdown).find("Use ava and bold.") != std::string::npos &&
+             ava::tui::to_plain_text(markdown).find("**open") != std::string::npos,
+         "tui Markdown conversion supports basic heading/link/emphasis/code/fences and leaves unsupported Markdown "
+         "readable");
+
+  const auto rendered_from_model = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_text_model",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{.label = "you",
+                                              .text = "raw-user-hidden",
+                                              .text_model = ava::tui::text_from_plain("model user visible")},
+                     ava::tui::TranscriptItem{.label = "ava",
+                                              .text = "",
+                                              .text_model = ava::tui::text_from_plain("model assistant visible")},
+                     ava::tui::TranscriptItem{.label = "ava",
+                                              .text = "answer",
+                                              .thinking = "raw-thinking-hidden",
+                                              .thinking_model = ava::tui::text_from_plain("model thinking visible")},
+                     ava::tui::TranscriptItem{.label = "error",
+                                              .text = "raw-error-hidden",
+                                              .text_model = ava::tui::text_from_plain("model error visible")}},
+      .width = 80,
+      .height = 22});
+  std::string visible_model_text;
+  for (const auto& line : rendered_from_model) {
+    visible_model_text += strip_sgr(line);
+    visible_model_text += '\n';
+  }
+  expect(visible_model_text.find("model user visible") != std::string::npos &&
+             visible_model_text.find("model assistant visible") != std::string::npos &&
+             visible_model_text.find("model thinking visible") != std::string::npos &&
+             visible_model_text.find("model error visible") != std::string::npos &&
+             visible_model_text.find("raw-user-hidden") == std::string::npos &&
+             visible_model_text.find("raw-thinking-hidden") == std::string::npos &&
+             visible_model_text.find("raw-error-hidden") == std::string::npos,
+         "tui transcript renderer consumes Text models for plain transcript, thinking, and fallback assistant paths");
+}
+
 void test_tui_event_state_reduces_runtime_events() {
   ava::tui::TuiEventState state;
 
@@ -2466,7 +2545,8 @@ void test_tui_event_state_reduces_runtime_events() {
   user.text = "hello";
   ava::tui::apply_runtime_event(state, user);
   expect(state.run_status == ava::tui::TuiEventRunStatus::Running && state.transcript.size() == 1 &&
-             state.transcript[0].label == "you" && state.transcript[0].text == "hello",
+             state.transcript[0].label == "you" && state.transcript[0].text == "hello" &&
+             ava::tui::to_plain_text(state.transcript[0].text_model) == "hello",
          "tui event state records user messages as completed transcript items");
 
   ava::app::RuntimeEvent delta;
@@ -2479,7 +2559,8 @@ void test_tui_event_state_reduces_runtime_events() {
   auto streaming_snapshot = ava::tui::event_state_transcript_snapshot(state);
   expect(state.pending_assistant_text == "hello" && streaming_snapshot.size() == 2 &&
              streaming_snapshot[1].label == "ava" && streaming_snapshot[1].text == "hello" &&
-             streaming_snapshot[1].meta == "Build - GPT-5.5",
+             streaming_snapshot[1].meta == "Build - GPT-5.5" &&
+             ava::tui::to_plain_text(streaming_snapshot[1].text_model) == "hello",
          "tui event state exposes pending assistant deltas and mode/model metadata in snapshots");
 
   ava::app::RuntimeEvent end;
@@ -2487,7 +2568,8 @@ void test_tui_event_state_reduces_runtime_events() {
   ava::tui::apply_runtime_event(state, end);
   expect(state.run_status == ava::tui::TuiEventRunStatus::Completed && state.pending_assistant_text.empty() &&
              state.transcript.size() == 2 && state.transcript[1].label == "ava" &&
-             state.transcript[1].text == "hello" && state.transcript[1].meta == "Build - GPT-5.5",
+             state.transcript[1].text == "hello" && state.transcript[1].meta == "Build - GPT-5.5" &&
+             ava::tui::to_plain_text(state.transcript[1].text_model) == "hello",
          "tui event state commits assistant deltas on message end");
   expect(!state.activity.empty() && state.activity.back().id == "responding" &&
              state.activity.back().status == ava::tui::ToolTimelineStatus::Success &&
@@ -2531,7 +2613,8 @@ void test_tui_event_state_reduces_runtime_events() {
   auto reasoning_snapshot = ava::tui::event_state_transcript_snapshot(reasoning_state);
   expect(reasoning_state.pending_reasoning_text == "checking options" && reasoning_snapshot.size() == 1 &&
              reasoning_snapshot[0].label == "ava" && reasoning_snapshot[0].thinking == "checking options" &&
-             reasoning_snapshot[0].text.empty(),
+             reasoning_snapshot[0].text.empty() &&
+             ava::tui::to_plain_text(reasoning_snapshot[0].thinking_model) == "checking options",
          "tui event state exposes pending reasoning as part of the assistant turn");
   ava::app::RuntimeEvent reasoning_end;
   reasoning_end.type = ava::app::RuntimeEventType::ReasoningEnd;
@@ -2552,7 +2635,9 @@ void test_tui_event_state_reduces_runtime_events() {
   ava::tui::apply_runtime_event(reasoning_state, reasoning_answer_end);
   expect(reasoning_state.pending_reasoning_text.empty() && reasoning_state.transcript.size() == 1 &&
              reasoning_state.transcript[0].label == "ava" && reasoning_state.transcript[0].text == "answer" &&
-             reasoning_state.transcript[0].thinking == "checking options",
+             reasoning_state.transcript[0].thinking == "checking options" &&
+             ava::tui::to_plain_text(reasoning_state.transcript[0].text_model) == "answer" &&
+             ava::tui::to_plain_text(reasoning_state.transcript[0].thinking_model) == "checking options",
          "tui event state commits reasoning and answer as one assistant transcript item");
 
   const auto thinking_render =
@@ -2669,6 +2754,11 @@ void test_tui_event_state_reduces_runtime_events() {
   expect(final_state.run_status == ava::tui::TuiEventRunStatus::Completed && final_state.transcript.size() == 1 &&
              final_state.transcript[0].label == "ava" && final_state.transcript[0].text == "direct final",
          "tui event state records assistant final events without streaming deltas");
+  assistant_final.text = "Use `ava` and **bold**";
+  ava::tui::apply_runtime_event(final_state, assistant_final);
+  expect(final_state.transcript.size() == 2 &&
+             ava::tui::to_plain_text(final_state.transcript.back().text_model) == "Use ava and bold",
+         "tui event state stores assistant Markdown as frontend-owned semantic Text");
 
   ava::tui::TuiEventState provider_state;
   ava::app::RuntimeEvent provider_start;
@@ -2781,10 +2871,12 @@ void test_tui_event_state_reduces_runtime_events() {
   tool_start.call_id = "call_1";
   tool_start.tool_name = "bash";
   tool_start.text = "pwd";
+  tool_start.tool_arguments_json = "{\"command\":\"pwd\"}";
   ava::tui::apply_runtime_event(state, tool_start);
   expect(state.pending_tools.size() == 1 && state.pending_tools[0].call_id == "call_1" &&
              state.pending_tools[0].item.status == ava::tui::ToolTimelineStatus::Running &&
-             state.pending_tools[0].item.name == "bash" && state.pending_tools[0].item.argument_summary == "pwd",
+             state.pending_tools[0].item.name == "bash" && state.pending_tools[0].item.argument_summary == "pwd" &&
+             state.pending_tools[0].item.arguments_json == "{\"command\":\"pwd\"}",
          "tui event state tracks started tools by call id");
 
   ava::app::RuntimeEvent tool_progress;
@@ -2792,11 +2884,12 @@ void test_tui_event_state_reduces_runtime_events() {
   tool_progress.call_id = "call_1";
   tool_progress.tool_name = "bash";
   tool_progress.text = "running pwd";
+  tool_progress.tool_result_json = "{\"partial\":true}";
   ava::tui::apply_runtime_event(state, tool_progress);
   auto tool_snapshot = ava::tui::event_state_transcript_snapshot(state);
   expect(state.pending_tools.size() == 1 && state.pending_tools[0].item.result_summary == "running pwd" &&
-             !tool_snapshot.empty() && tool_snapshot.back().tool &&
-             tool_snapshot.back().tool->status == ava::tui::ToolTimelineStatus::Running,
+             state.pending_tools[0].item.result_json == "{\"partial\":true}" && !tool_snapshot.empty() &&
+             tool_snapshot.back().tool && tool_snapshot.back().tool->status == ava::tui::ToolTimelineStatus::Running,
          "tui event state updates pending tool progress and includes it in snapshots");
 
   ava::app::RuntimeEvent tool_result;
@@ -2805,11 +2898,14 @@ void test_tui_event_state_reduces_runtime_events() {
   tool_result.tool_name = "bash";
   tool_result.status = "success";
   tool_result.text = "ok";
+  tool_result.tool_result_json = "{\"ok\":true}";
   ava::tui::apply_runtime_event(state, tool_result);
   expect(state.pending_tools.empty() && !state.transcript.empty() && state.transcript.back().tool &&
              state.transcript.back().tool->status == ava::tui::ToolTimelineStatus::Success &&
              state.transcript.back().tool->argument_summary == "pwd" &&
-             state.transcript.back().tool->result_summary == "ok",
+             state.transcript.back().tool->result_summary == "ok" &&
+             state.transcript.back().tool->arguments_json == "{\"command\":\"pwd\"}" &&
+             state.transcript.back().tool->result_json == "{\"ok\":true}",
          "tui event state moves successful tool results into completed transcript items");
 
   ava::app::RuntimeEvent write_start;
@@ -2829,6 +2925,18 @@ void test_tui_event_state_reduces_runtime_events() {
              state.activity.back().status == ava::tui::ToolTimelineStatus::Success &&
              state.modified_files.size() == 1 && state.modified_files[0].path == "src/main.cpp",
          "tui event state feeds sidebar activity and modified-file summaries from successful mutating tools");
+
+  ava::app::RuntimeEvent semantic_write;
+  semantic_write.type = ava::app::RuntimeEventType::ToolResult;
+  semantic_write.call_id = "call_semantic_write";
+  semantic_write.tool_name = "edit_file";
+  semantic_write.status = "success";
+  semantic_write.text = "edited file";
+  semantic_write.changed_paths = {"src/semantic.cpp"};
+  ava::tui::apply_runtime_event(state, semantic_write);
+  expect(std::ranges::any_of(state.modified_files,
+                             [](const ava::tui::SidebarModifiedFile& file) { return file.path == "src/semantic.cpp"; }),
+         "tui event state prefers semantic changed paths over parsing mutating tool summaries");
 
   ava::app::RuntimeEvent tool_error;
   tool_error.type = ava::app::RuntimeEventType::ToolResult;
@@ -2890,12 +2998,15 @@ void test_tui_event_state_reduces_runtime_events() {
                                             .name = "tool_result",
                                             .payload_json =
                                                 "{\"tool_name\":\"grep\",\"result_summary\":\"2 matches\","
+                                                "\"args\":{\"pattern\":\"needle\"},"
+                                                "\"result\":{\"ok\":true,\"matches\":2},"
                                                 "\"status\":\"success\",\"truncated\":true,"
                                                 "\"details_visible\":true,"
                                                 "\"output_bytes\":256,\"total_bytes\":1024,"
                                                 "\"omitted_bytes\":768,\"omitted_lines\":12,"
                                                 "\"visible_matches\":2,\"total_matches\":8,"
                                                 "\"spill_path\":\"/tmp/ava-spill/grep.txt\","
+                                                "\"changed_paths\":[\"logs/output.txt\"],"
                                                 "\"diff\":\"--- note.txt\\n+++ note.txt\\n-old\\n+new\","
                                                 "\"diff_truncated\":true}"};
   ava::tui::apply_event_envelope(correlated_tool_state, correlated_result);
@@ -2916,6 +3027,10 @@ void test_tui_event_state_reduces_runtime_events() {
           correlated_tool_state.transcript[0].tool->lifecycle == ava::tui::ToolLifecycleState::Complete &&
           correlated_tool_state.transcript[0].tool->truncated &&
           correlated_tool_state.transcript[0].tool->details_visible == true &&
+          correlated_tool_state.transcript[0].tool->arguments_json == "{\"pattern\":\"needle\"}" &&
+          correlated_tool_state.transcript[0].tool->result_json == "{\"ok\":true,\"matches\":2}" &&
+          correlated_tool_state.transcript[0].tool->changed_paths.size() == 1 &&
+          correlated_tool_state.transcript[0].tool->changed_paths[0] == "logs/output.txt" &&
           correlated_tool_state.transcript[0].tool->spill_path == "/tmp/ava-spill/grep.txt" &&
           std::ranges::any_of(correlated_tool_render,
                               [](const std::string& line) {
@@ -3490,6 +3605,7 @@ void test_tui_large_render_performance_budget() {
 
 void run_tui_composer_tests() {
   test_tui_composer_rendering_and_input();
+  test_tui_text_model_conversions();
   test_tui_event_state_reduces_runtime_events();
   test_ncurses_newterm_smoke_without_real_tty();
   test_tui_large_render_performance_budget();

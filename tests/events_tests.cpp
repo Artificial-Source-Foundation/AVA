@@ -5,6 +5,7 @@
 #include "ava/agent/mode.h"
 #include "ava/app/events.h"
 #include "ava/app/interactive_run_queue.h"
+#include "ava/core/json.h"
 #include "tests/support/test_harness.h"
 
 namespace {
@@ -145,6 +146,49 @@ void test_tool_progress_runtime_event_serialization_and_bus_adapter() {
   expect(published.front().payload_json ==
              "{\"text\":\"reading\",\"call_id\":\"call_2\",\"tool\":\"read_file\",\"status\":\"running\"}",
          "tool progress envelope payload keeps existing tool event fields");
+}
+
+void test_tool_runtime_event_serializes_semantic_frontend_payloads() {
+  ava::app::RuntimeEvent event;
+  event.type = ava::app::RuntimeEventType::ToolResult;
+  event.timestamp = "2026-04-30T00:00:04Z";
+  event.session_id = "session_1";
+  event.text = "edited src/main.cpp";
+  event.call_id = "call_edit";
+  event.tool_name = "edit_file";
+  event.tool_arguments_json = "{\"path\":\"src/main.cpp\"}";
+  event.tool_result_json = "{\"ok\":true,\"path\":\"src/main.cpp\"}";
+  event.status = "success";
+  event.diff = "--- src/main.cpp\n+++ src/main.cpp\n-old\n+new";
+  event.changed_paths = {"src/main.cpp", "include/ava/app/events.h"};
+  event.diff_truncated = true;
+  event.truncated = true;
+  event.spill_path = "/tmp/ava-spill/tool.txt";
+  event.spill_truncated = true;
+  event.output_bytes = 128;
+  event.total_bytes = 512;
+  event.omitted_bytes = 384;
+  event.omitted_lines = 7;
+
+  const auto json = ava::app::serialize_event_json(event);
+  expect(json.find("\"args\":{\"path\":\"src/main.cpp\"}") != std::string::npos &&
+             json.find("\"result\":{\"ok\":true,\"path\":\"src/main.cpp\"}") != std::string::npos &&
+             json.find("\"changed_paths\":[\"src/main.cpp\",\"include/ava/app/events.h\"]") != std::string::npos &&
+             json.find("\"diff_truncated\":true") != std::string::npos &&
+             json.find("\"omitted_lines\":7") != std::string::npos,
+         "tool runtime events serialize semantic args, result, changed paths, diffs, and truncation metadata");
+
+  ava::app::EventEnvelopeContext context;
+  context.event_id = "event_semantic_tool";
+  const auto envelope = ava::app::to_event_envelope(event, context);
+  const auto args = ava::core::json::object_field(envelope.payload_json, "args");
+  const auto result = ava::core::json::object_field(envelope.payload_json, "result");
+  const auto paths = ava::core::json::strings_in_array_field(envelope.payload_json, "changed_paths");
+  expect(envelope.name == "tool_result" && args && *args == "{\"path\":\"src/main.cpp\"}" && result &&
+             *result == "{\"ok\":true,\"path\":\"src/main.cpp\"}" && paths.size() == 2 &&
+             paths[1] == "include/ava/app/events.h" &&
+             envelope.payload_json.find("\"spill_path\":\"/tmp/ava-spill/tool.txt\"") != std::string::npos,
+         "tool event envelopes preserve semantic payloads for frontend replay");
 }
 
 void test_reasoning_runtime_event_serialization_hides_provider_private_state() {
@@ -363,6 +407,7 @@ void run_app_event_bus_tests() {
   test_runtime_event_bus_adapter_publishes_and_forwards();
   test_runtime_event_bus_adapter_allows_default_legacy_sink();
   test_tool_progress_runtime_event_serialization_and_bus_adapter();
+  test_tool_runtime_event_serializes_semantic_frontend_payloads();
   test_reasoning_runtime_event_serialization_hides_provider_private_state();
   test_lifecycle_runtime_event_serialization_and_aliases();
   test_interactive_run_queue_emits_steer_queued_and_applied_events();

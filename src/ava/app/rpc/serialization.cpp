@@ -588,6 +588,12 @@ std::string question_request_payload_json(std::string_view resolver_request_id,
   json += bool_field_json("multiple", prompt.multiple);
   json += ',';
   json += bool_field_json("allow_custom", prompt.allow_custom);
+  json += ',';
+  json += bool_field_json("secret", prompt.secret);
+  json += ',';
+  json += bool_field_json("modal", prompt.modal);
+  json += ',';
+  json += bool_field_json("searchable", prompt.searchable);
   json += '}';
   return json;
 }

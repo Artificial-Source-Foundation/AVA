@@ -1,0 +1,62 @@
+#pragma once
+
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
+
+#include "ava/core/result.h"
+
+namespace ava::tui {
+
+enum class TextColorRole {
+  Default,
+  Muted,
+  Accent,
+  Success,
+  Warning,
+  Error,
+  Thinking,
+  Code,
+  Added,
+  Removed,
+};
+
+struct Rendition {
+  bool bold = false;
+  bool dim = false;
+  bool underline = false;
+  bool italic = false;
+  bool code = false;
+  TextColorRole color = TextColorRole::Default;
+};
+
+struct NewLine {};
+
+struct String {
+  std::string text;
+};
+
+struct TextSpan {
+  std::string text;
+  Rendition rendition;
+};
+
+using TextRun = std::variant<NewLine, String, TextSpan>;
+
+struct Text {
+  std::vector<TextRun> runs;
+};
+
+[[nodiscard]] bool text_run_has_embedded_newline(std::string_view text);
+[[nodiscard]] bool text_empty(const Text& text);
+[[nodiscard]] ava::core::VoidResult append_string(Text& text, std::string value);
+[[nodiscard]] ava::core::VoidResult append_span(Text& text, std::string value, Rendition rendition);
+void append_newline(Text& text);
+void append_plain_text(Text& text, std::string_view value);
+[[nodiscard]] Text text_from_plain(std::string_view value);
+[[nodiscard]] Text text_from_markdown(std::string_view value);
+[[nodiscard]] std::string to_plain_text(const Text& text);
+[[nodiscard]] ava::core::VoidResult validate_text(const Text& text);
+
+}  // namespace ava::tui

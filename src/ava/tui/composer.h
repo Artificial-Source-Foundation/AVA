@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "ava/tui/terminal.h"
+#include "ava/tui/text.h"
 
 namespace ava::tui {
 
@@ -31,6 +32,8 @@ struct ToolTimelineItem {
   std::string name = {};
   std::string argument_summary = {};
   std::string result_summary = {};
+  std::string arguments_json = {};
+  std::string result_json = {};
   std::string call_id = {};
   std::string request_id = {};
   std::string correlation_id = {};
@@ -38,6 +41,7 @@ struct ToolTimelineItem {
   std::optional<bool> details_visible = std::nullopt;
   std::string diff = {};
   bool diff_truncated = false;
+  std::vector<std::string> changed_paths = {};
   bool truncated = false;
   std::optional<std::size_t> output_bytes = std::nullopt;
   std::optional<std::size_t> total_bytes = std::nullopt;
@@ -52,8 +56,10 @@ struct ToolTimelineItem {
 struct TranscriptItem {
   std::string label = {};
   std::string text = {};
+  Text text_model = {};
   std::string meta = {};
   std::string thinking = {};
+  Text thinking_model = {};
   std::optional<ToolTimelineItem> tool = std::nullopt;
 };
 

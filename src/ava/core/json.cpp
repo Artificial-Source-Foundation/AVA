@@ -242,6 +242,24 @@ std::optional<std::string> parse_string_at(std::string_view text, std::size_t st
   return std::nullopt;
 }
 
+std::optional<std::size_t> string_literal_end(std::string_view text, std::size_t start) {
+  if (start >= text.size() || text[start] != '"') return std::nullopt;
+  bool escaped = false;
+  for (std::size_t index = start + 1; index < text.size(); ++index) {
+    const char ch = text[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"') return index;
+  }
+  return std::nullopt;
+}
+
 std::optional<std::string> parse_balanced(std::string_view text, std::size_t start, char open, char close) {
   if (start >= text.size() || text[start] != open) return std::nullopt;
   bool in_string = false;
@@ -416,6 +434,46 @@ std::vector<std::string> objects_in_array_field(std::string_view object, std::st
         index += parsed->size() - 1;
       }
     }
+  }
+  return result;
+}
+
+std::vector<std::string> strings_in_array_field(std::string_view object, std::string_view key) {
+  std::vector<std::string> result;
+  const auto start = field_value_start(object, key);
+  if (!start || *start >= object.size() || object[*start] != '[') return result;
+  const auto array = parse_balanced(object, *start, '[', ']');
+  if (!array) return result;
+
+  for (std::size_t index = 1; index + 1 < array->size();) {
+    while (index + 1 < array->size() &&
+           (std::isspace(static_cast<unsigned char>((*array)[index])) != 0 || (*array)[index] == ',')) {
+      ++index;
+    }
+    if (index + 1 >= array->size()) break;
+
+    if ((*array)[index] == '"') {
+      if (auto parsed = parse_string_at(*array, index)) result.push_back(*parsed);
+      if (auto end = string_literal_end(*array, index)) {
+        index = *end + 1;
+      } else {
+        break;
+      }
+      continue;
+    }
+    if ((*array)[index] == '{') {
+      if (auto parsed = parse_balanced(*array, index, '{', '}')) {
+        index += parsed->size();
+        continue;
+      }
+    }
+    if ((*array)[index] == '[') {
+      if (auto parsed = parse_balanced(*array, index, '[', ']')) {
+        index += parsed->size();
+        continue;
+      }
+    }
+    ++index;
   }
   return result;
 }

@@ -110,6 +110,7 @@ Current TUI strengths:
 
 - `src/ava/tui/runtime.cpp` owns an extracted ncursesw interactive loop with input, scroll, bounded history, mouse wheel/click support, permission/question prompt flow, spinner processing state, and callback wiring.
 - `src/ava/tui/composer*.cpp` renders a composer-first interface with top-start transcript layout, fixed bottom input block, integrated slash palette, compact tool cards, permission/question docks, draft indicators, and spinner-only processing feedback.
+- Frontend content now has a small layout-free text boundary in `src/ava/tui/text.*`: backend events carry semantic payloads plus Markdown/plain text, TUI state adapts transcript/thinking content to `Text`/`TextRun`, and ncurses/SGR concerns stay inside the renderer.
 - `src/ava/tui/terminal.cpp` wraps terminal setup with RAII and wide-character ncurses handling.
 - `docs/USAGE.md` documents current TUI layout, permission/question prompt behavior, semantic keybinds, commands, and current limits.
 - The TUI already presents tool activity as compact timeline cards and keeps permission/question decisions backend-owned and auditable.
@@ -117,7 +118,7 @@ Current TUI strengths:
 
 Current 1.0 gaps:
 
-- The TUI now has a live `RuntimeEvent` queue/reducer path and a shared `EventEnvelope` reducer path for assistant text, thinking, tool lifecycle updates, prompt audit markers, and the sidebar shell. Some backend producers still provide summary-only tool metadata on the live runtime path.
+- The TUI now has a live `RuntimeEvent` queue/reducer path and a shared `EventEnvelope` reducer path for assistant text, thinking, tool lifecycle updates, prompt audit markers, and the sidebar shell. Tool events carry structured args/results, changed paths, diffs, truncation/spill metadata, and counters when the backend has them; some producers may still provide only summaries.
 - Permission/question request and reply audit events, thinking/reasoning updates, compaction markers, retry markers, retry countdown ticks, queue lifecycle markers, and cooperative cancellation events render through the event-state transcript model where backend events exist. Retry markers include backend-provided attempt totals, retry delays, remaining countdown time, token pressure, and stale snapshot counts when emitted. Richer terminal outcomes still need explicit backend stream fields before the TUI can render them as first-class state.
 - Native interactive runs now support backend-owned queue behavior for the shipped subset: submitting a draft during an active assistant or `/compact` run enqueues a follow-up turn, `/steer ...` enqueues steering for the next safe provider boundary, queued items render in a compact pending region above the composer, `/restore` restores the latest pending item to the draft before it starts, and `steer_queued`/`steer_applied`/`steer_skipped` plus `follow_up_queued`/`follow_up_started`/`follow_up_skipped` render from the shared event stream.
 - Session stats and compact token usage have initial visibility through `/stats` and the composer status slot, but context pressure and compaction state still need richer long-session UI.

@@ -40,6 +40,34 @@ void append_required_string_field(std::string& out, std::string_view key, std::s
   out += '"';
 }
 
+void append_string_array_field(std::string& out, std::string_view key, const std::vector<std::string>& values) {
+  if (values.empty()) return;
+  out += ",\"";
+  out += key;
+  out += "\":[";
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    if (index > 0) out += ',';
+    out += '"';
+    out += ava::core::json::escape(values[index]);
+    out += '"';
+  }
+  out += ']';
+}
+
+void append_json_object_field(std::string& out, std::string_view key, std::string_view value) {
+  if (value.empty()) return;
+  out += ",\"";
+  out += key;
+  if (ava::core::json::is_valid_object(value)) {
+    out += "\":";
+    out += value;
+    return;
+  }
+  out += "_json\":\"";
+  out += ava::core::json::escape(value);
+  out += '"';
+}
+
 void append_optional_string_field(std::string& out, std::string_view key, const std::optional<std::string>& value) {
   if (!value || value->empty()) return;
   append_required_string_field(out, key, *value);
@@ -75,6 +103,39 @@ void append_payload_bool_field(std::string& out, bool& has_field, std::string_vi
   has_field = true;
 }
 
+void append_payload_json_object_field(std::string& out, bool& has_field, std::string_view key, std::string_view value) {
+  if (value.empty()) return;
+  if (has_field) out += ',';
+  out += '"';
+  out += key;
+  if (ava::core::json::is_valid_object(value)) {
+    out += "\":";
+    out += value;
+  } else {
+    out += "_json\":\"";
+    out += ava::core::json::escape(value);
+    out += '"';
+  }
+  has_field = true;
+}
+
+void append_payload_string_array_field(std::string& out, bool& has_field, std::string_view key,
+                                       const std::vector<std::string>& values) {
+  if (values.empty()) return;
+  if (has_field) out += ',';
+  out += '"';
+  out += key;
+  out += "\":[";
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    if (index > 0) out += ',';
+    out += '"';
+    out += ava::core::json::escape(values[index]);
+    out += '"';
+  }
+  out += ']';
+  has_field = true;
+}
+
 std::string payload_json_for_runtime_event(const RuntimeEvent& event) {
   std::string out = "{";
   bool has_field = false;
@@ -86,6 +147,8 @@ std::string payload_json_for_runtime_event(const RuntimeEvent& event) {
   append_payload_string_field(out, has_field, "text", event.text);
   append_payload_string_field(out, has_field, "call_id", event.call_id);
   append_payload_string_field(out, has_field, "tool", event.tool_name);
+  append_payload_json_object_field(out, has_field, "args", event.tool_arguments_json);
+  append_payload_json_object_field(out, has_field, "result", event.tool_result_json);
   append_payload_string_field(out, has_field, "status", event.status);
   append_payload_string_field(out, has_field, "category", event.error_category);
   append_payload_string_field(out, has_field, "message", event.error_message);
@@ -94,8 +157,14 @@ std::string payload_json_for_runtime_event(const RuntimeEvent& event) {
   append_payload_string_field(out, has_field, "trigger", event.trigger);
   append_payload_string_field(out, has_field, "reason", event.reason);
   append_payload_string_field(out, has_field, "reasoning_format", event.reasoning_format);
+  append_payload_string_field(out, has_field, "diff", event.diff);
+  append_payload_string_array_field(out, has_field, "changed_paths", event.changed_paths);
+  append_payload_string_field(out, has_field, "spill_path", event.spill_path);
   append_payload_bool_field(out, has_field, "reasoning_redacted", event.reasoning_redacted);
   append_payload_bool_field(out, has_field, "reasoning_signature_present", event.reasoning_signature_present);
+  append_payload_bool_field(out, has_field, "diff_truncated", event.diff_truncated);
+  append_payload_bool_field(out, has_field, "truncated", event.truncated);
+  append_payload_bool_field(out, has_field, "spill_truncated", event.spill_truncated);
   append_payload_number_field(out, has_field, "provider_iterations", event.provider_iterations);
   append_payload_number_field(out, has_field, "tool_calls", event.tool_calls);
   append_payload_number_field(out, has_field, "attempt", event.attempt);
@@ -107,20 +176,28 @@ std::string payload_json_for_runtime_event(const RuntimeEvent& event) {
   append_payload_number_field(out, has_field, "summary_bytes", event.summary_bytes);
   append_payload_number_field(out, has_field, "snapshot_entries", event.snapshot_entries);
   append_payload_number_field(out, has_field, "current_entries", event.current_entries);
+  append_payload_number_field(out, has_field, "output_bytes", event.output_bytes);
+  append_payload_number_field(out, has_field, "total_bytes", event.total_bytes);
+  append_payload_number_field(out, has_field, "omitted_bytes", event.omitted_bytes);
+  append_payload_number_field(out, has_field, "omitted_lines", event.omitted_lines);
+  append_payload_number_field(out, has_field, "visible_matches", event.visible_matches);
+  append_payload_number_field(out, has_field, "total_matches", event.total_matches);
   out += '}';
   return out;
 }
 
 void append_payload_aliases(std::string& out, std::string_view payload_json) {
-  for (std::string_view key : {"mode", "provider", "model", "text", "call_id", "tool", "status", "category", "message",
-                               "details", "stop_reason", "trigger", "reason", "reasoning_format"}) {
+  for (std::string_view key :
+       {"mode", "provider", "model", "text", "call_id", "tool", "status", "category", "message", "details",
+        "stop_reason", "trigger", "reason", "reasoning_format", "diff", "spill_path"}) {
     if (auto value = ava::core::json::string_field(payload_json, key); value && !value->empty()) {
       append_required_string_field(out, key, *value);
     }
   }
   for (std::string_view key :
        {"provider_iterations", "tool_calls", "attempt", "max_attempts", "delay_ms", "remaining_ms", "estimated_tokens",
-        "threshold_tokens", "summary_bytes", "snapshot_entries", "current_entries"}) {
+        "threshold_tokens", "summary_bytes", "snapshot_entries", "current_entries", "output_bytes", "total_bytes",
+        "omitted_bytes", "omitted_lines", "visible_matches", "total_matches"}) {
     if (auto value = ava::core::json::integer_field(payload_json, key); value && *value > 0) {
       out += ",\"";
       out += key;
@@ -188,6 +265,8 @@ std::string serialize_event_json(const RuntimeEvent& event) {
   append_string_field(out, "text", event.text);
   append_string_field(out, "call_id", event.call_id);
   append_string_field(out, "tool", event.tool_name);
+  append_json_object_field(out, "args", event.tool_arguments_json);
+  append_json_object_field(out, "result", event.tool_result_json);
   append_string_field(out, "status", event.status);
   append_string_field(out, "category", event.error_category);
   append_string_field(out, "message", event.error_message);
@@ -196,8 +275,14 @@ std::string serialize_event_json(const RuntimeEvent& event) {
   append_string_field(out, "trigger", event.trigger);
   append_string_field(out, "reason", event.reason);
   append_string_field(out, "reasoning_format", event.reasoning_format);
+  append_string_field(out, "diff", event.diff);
+  append_string_array_field(out, "changed_paths", event.changed_paths);
+  append_string_field(out, "spill_path", event.spill_path);
   append_bool_field(out, "reasoning_redacted", event.reasoning_redacted);
   append_bool_field(out, "reasoning_signature_present", event.reasoning_signature_present);
+  append_bool_field(out, "diff_truncated", event.diff_truncated);
+  append_bool_field(out, "truncated", event.truncated);
+  append_bool_field(out, "spill_truncated", event.spill_truncated);
   append_number_field(out, "provider_iterations", event.provider_iterations);
   append_number_field(out, "tool_calls", event.tool_calls);
   append_number_field(out, "attempt", event.attempt);
@@ -209,6 +294,12 @@ std::string serialize_event_json(const RuntimeEvent& event) {
   append_number_field(out, "summary_bytes", event.summary_bytes);
   append_number_field(out, "snapshot_entries", event.snapshot_entries);
   append_number_field(out, "current_entries", event.current_entries);
+  append_number_field(out, "output_bytes", event.output_bytes);
+  append_number_field(out, "total_bytes", event.total_bytes);
+  append_number_field(out, "omitted_bytes", event.omitted_bytes);
+  append_number_field(out, "omitted_lines", event.omitted_lines);
+  append_number_field(out, "visible_matches", event.visible_matches);
+  append_number_field(out, "total_matches", event.total_matches);
   out += '}';
   return out;
 }

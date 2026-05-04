@@ -77,6 +77,11 @@ void test_core_json_top_level_lookup() {
   const auto model_id = models.empty() ? std::optional<std::string>{} : ava::core::json::string_field(models[0], "id");
   expect(models.size() == 1 && model_id && *model_id == "ok",
          "JSON array lookup ignores nested arrays before top-level field");
+  const auto paths = ava::core::json::strings_in_array_field(
+      "{\"items\":[\"bad\"],\"changed_paths\":[\"src/main.cpp\",\"a\\\\b\",{\"skip\":\"nested\"},[\"also skip\"]]}",
+      "changed_paths");
+  expect(paths.size() == 2 && paths[0] == "src/main.cpp" && paths[1] == "a\\b",
+         "JSON string array lookup reads only top-level string array elements");
 
   const auto surrogate_pair = ava::core::json::string_field("{\"text\":\"\\uD834\\uDD1E\"}", "text");
   expect(surrogate_pair && *surrogate_pair == std::string("\xF0\x9D\x84\x9E"),

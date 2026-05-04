@@ -1,6 +1,8 @@
 #include "ava/agent/agent_loop.h"
 
+#include <algorithm>
 #include <map>
+#include <optional>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -131,6 +133,60 @@ ava::core::VoidResult append_error(ava::session::SessionStore& store, const ava:
 ava::core::VoidResult append_cancel(ava::session::SessionStore& store, std::string_view boundary) {
   return append_entry(store, ava::session::EntryType::Cancel,
                       "{\"reason\":\"cancel_requested\",\"boundary\":\"" + ava::core::json::escape(boundary) + "\"}");
+}
+
+bool bool_field_is_true(std::string_view object, std::string_view key) {
+  const auto start = ava::core::json::field_value_start(object, key);
+  return start && object.substr(*start, 4) == "true";
+}
+
+std::optional<std::size_t> optional_size_field(std::string_view object, std::string_view key) {
+  const auto value = ava::core::json::integer_field(object, key);
+  if (!value || *value < 0) return std::nullopt;
+  return static_cast<std::size_t>(*value);
+}
+
+void add_changed_path(ToolTimelineEntry& entry, std::string path) {
+  if (path.empty()) return;
+  if (std::ranges::find(entry.changed_paths, path) == entry.changed_paths.end()) {
+    entry.changed_paths.push_back(std::move(path));
+  }
+}
+
+void assign_size_field(std::optional<std::size_t>& target, std::string_view object, std::string_view key) {
+  if (auto value = optional_size_field(object, key)) target = *value;
+}
+
+void populate_tool_timeline_metadata(ToolTimelineEntry& entry, const ToolDispatchResult& result) {
+  const auto payload = std::string_view(result.result_text);
+  entry.result_json = result.result_text;
+  entry.diff = ava::core::json::string_field(payload, "diff").value_or("");
+  entry.diff_truncated = bool_field_is_true(payload, "diff_truncated");
+  entry.truncated = bool_field_is_true(payload, "truncated");
+  entry.spill_truncated = bool_field_is_true(payload, "spill_truncated");
+  entry.spill_path = ava::core::json::string_field(payload, "spill_path")
+                         .value_or(ava::core::json::string_field(payload, "spill_file").value_or(""));
+  assign_size_field(entry.output_bytes, payload, "output_bytes");
+  assign_size_field(entry.total_bytes, payload, "total_bytes");
+  assign_size_field(entry.omitted_bytes, payload, "omitted_bytes");
+  assign_size_field(entry.omitted_bytes, payload, "omitted_output_bytes");
+  assign_size_field(entry.omitted_lines, payload, "omitted_lines");
+  assign_size_field(entry.omitted_lines, payload, "omitted_line_count");
+  assign_size_field(entry.visible_matches, payload, "visible_matches");
+  assign_size_field(entry.visible_matches, payload, "output_matches");
+  assign_size_field(entry.visible_matches, payload, "returned_matches");
+  assign_size_field(entry.total_matches, payload, "total_matches");
+
+  add_changed_path(entry, ava::core::json::string_field(payload, "path").value_or(""));
+  for (const auto& path : ava::core::json::strings_in_array_field(payload, "changed_paths")) {
+    add_changed_path(entry, path);
+  }
+  for (const auto& path : ava::core::json::strings_in_array_field(payload, "changed_files")) {
+    add_changed_path(entry, path);
+  }
+  for (const auto& edit : ava::core::json::objects_in_array_field(payload, "edits")) {
+    add_changed_path(entry, ava::core::json::string_field(edit, "path").value_or(""));
+  }
 }
 
 bool is_canceled(const AgentLoopOptions& options) { return options.cancel_requested && options.cancel_requested(); }
@@ -648,7 +704,8 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
                                        .call_id = call.id,
                                        .name = call.name,
                                        .argument_summary = summarize_tool_arguments(call),
-                                       .result_summary = ""};
+                                       .result_summary = "",
+                                       .arguments_json = call.arguments_json};
       publish_tool_event(options_, timeline_entry);
       if (auto not_canceled = check_canceled_locked("after_tool_start_event"); !not_canceled) {
         return std::unexpected(std::move(not_canceled.error()));
@@ -664,6 +721,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
         timeline_entry.status = dispatch_result.success ? ToolTimelineStatus::Success : ToolTimelineStatus::Error;
       }
       timeline_entry.result_summary = summarize_tool_result(dispatch_result);
+      populate_tool_timeline_metadata(timeline_entry, dispatch_result);
       result.tool_timeline.push_back(timeline_entry);
       publish_tool_event(options_, timeline_entry);
       ++result.tool_calls;

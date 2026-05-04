@@ -8,21 +8,24 @@ namespace ava::tui {
 namespace detail {
 namespace {
 
-std::string render_permission_choice(std::string_view label, bool selected) {
+std::string render_permission_choice(std::string_view label, bool selected)
+{
   std::string text = selected ? "> " : "  ";
   text += label;
   if (!selected) return text;
   return std::string(kReverseVideo) + text + std::string(kSgrReset);
 }
 
-std::string render_compact_permission_choice(std::string_view label, bool selected) {
+std::string render_compact_permission_choice(std::string_view label, bool selected)
+{
   std::string text = selected ? "> " : "  ";
   text += label;
   if (!selected) return text;
   return std::string(kReverseVideo) + text + std::string(kSgrReset);
 }
 
-std::string permission_dock_header(std::size_t width) {
+std::string permission_dock_header(std::size_t width)
+{
   if (width < 8) {
     return fit_line_preserving_sgr(std::string(kSgrBold) + std::string(kSgrError) + "PERM" + std::string(kSgrReset),
                                    width);
@@ -45,7 +48,8 @@ std::string permission_dock_header(std::size_t width) {
   return std::string(kSgrDim) + text + std::string(kSgrReset);
 }
 
-std::string permission_dock_summary(PermissionPromptView const& prompt, std::size_t width) {
+std::string permission_dock_summary(PermissionPromptView const& prompt, std::size_t width)
+{
   std::string summary = "  ";
   if (!prompt.tool_name.empty()) {
     summary += std::string(kSgrBold) + sanitize_terminal_text(prompt.tool_name) + std::string(kSgrReset);
@@ -78,9 +82,13 @@ std::string permission_dock_summary(PermissionPromptView const& prompt, std::siz
   return fit_line_preserving_sgr(summary, width);
 }
 
-std::string key_pill(std::string_view key) { return std::string(kSgrBold) + std::string(key) + std::string(kSgrReset); }
+std::string key_pill(std::string_view key)
+{
+  return std::string(kSgrBold) + std::string(key) + std::string(kSgrReset);
+}
 
-std::string permission_dock_actions(PermissionPromptChoice selected, std::size_t width) {
+std::string permission_dock_actions(PermissionPromptChoice selected, std::size_t width)
+{
   std::array const candidates = {
       std::string("  ") + render_permission_choice("[Deny]", selected == PermissionPromptChoice::Deny) + "  " +
           render_permission_choice("[Allow once]", selected == PermissionPromptChoice::Allow),
@@ -98,7 +106,8 @@ std::string permission_dock_actions(PermissionPromptChoice selected, std::size_t
   return fit_line_preserving_sgr(candidates.back(), width);
 }
 
-std::string permission_dock_keys(std::size_t width) {
+std::string permission_dock_keys(std::size_t width)
+{
   std::array const candidates = {
       std::string("  ") + key_pill("A") + " allow once  " + key_pill("D") + " deny  " + key_pill("Enter") +
           " confirm  " + key_pill("Esc") + " deny  " + key_pill("Tab/arrows") + " move",
@@ -117,7 +126,8 @@ std::string permission_dock_keys(std::size_t width) {
 }
 
 void append_permission_diff_lines(std::vector<std::string>& lines, PermissionPromptView const& prompt,
-                                  std::size_t width, std::size_t budget) {
+                                  std::size_t width, std::size_t budget)
+{
   if (prompt.diff_preview.empty() || budget == 0) return;
   auto const prefix = std::string("  ");
   lines.push_back(fit_line_preserving_sgr(prefix + std::string(kSgrDim) + "diff:" + std::string(kSgrReset), width));
@@ -143,7 +153,8 @@ void append_permission_diff_lines(std::vector<std::string>& lines, PermissionPro
   }
 }
 
-std::string question_dock_header(QuestionPromptView const& prompt, std::size_t width) {
+std::string question_dock_header(QuestionPromptView const& prompt, std::size_t width)
+{
   auto label = prompt.header.empty() ? std::string("QUESTION") : sanitize_terminal_text(prompt.header);
   label = prompt.multiple ? label + " (multi-select)" : label;
   std::string text = "  -- " + label;
@@ -153,7 +164,8 @@ std::string question_dock_header(QuestionPromptView const& prompt, std::size_t w
   return std::string(kSgrDim) + text + std::string(kSgrReset);
 }
 
-std::string question_option_line(QuestionPromptView const& prompt, std::size_t index, std::size_t width) {
+std::string question_option_line(QuestionPromptView const& prompt, std::size_t index, std::size_t width)
+{
   auto const& option = prompt.options[index];
   std::string text = "  ";
   text += index == prompt.selected_option_index ? "> " : "  ";
@@ -164,7 +176,8 @@ std::string question_option_line(QuestionPromptView const& prompt, std::size_t i
   return fit_line_preserving_sgr(text, width);
 }
 
-std::string question_custom_line(QuestionPromptView const& prompt, std::size_t width) {
+std::string question_custom_line(QuestionPromptView const& prompt, std::size_t width)
+{
   std::string text = "  Custom: ";
   if (prompt.custom_text.empty()) {
     text += prompt.secret ? std::string("paste secret") : std::string("type to answer");
@@ -176,14 +189,16 @@ std::string question_custom_line(QuestionPromptView const& prompt, std::size_t w
   return fit_line_preserving_sgr(std::string(kSgrTextDimmed) + text + std::string(kSgrReset), width);
 }
 
-std::string lower_ascii(std::string_view text) {
+std::string lower_ascii(std::string_view text)
+{
   std::string lowered;
   lowered.reserve(text.size());
   for (char const ch : text) lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
   return lowered;
 }
 
-bool prompt_option_matches(QuestionPromptView const& prompt, std::size_t index) {
+bool prompt_option_matches(QuestionPromptView const& prompt, std::size_t index)
+{
   if (!prompt.searchable || prompt.custom_text.empty()) return true;
   auto const query = lower_ascii(prompt.custom_text);
   auto const& option = prompt.options[index];
@@ -192,7 +207,8 @@ bool prompt_option_matches(QuestionPromptView const& prompt, std::size_t index) 
   return label.find(query) != std::string::npos || value.find(query) != std::string::npos;
 }
 
-std::vector<std::size_t> matching_option_indices(QuestionPromptView const& prompt) {
+std::vector<std::size_t> matching_option_indices(QuestionPromptView const& prompt)
+{
   std::vector<std::size_t> indices;
   for (std::size_t index = 0; index < prompt.options.size(); ++index) {
     if (prompt_option_matches(prompt, index)) indices.push_back(index);
@@ -200,11 +216,13 @@ std::vector<std::size_t> matching_option_indices(QuestionPromptView const& promp
   return indices;
 }
 
-std::string modal_line(std::string content, std::size_t width) {
+std::string modal_line(std::string content, std::size_t width)
+{
   return composer_surface_line("  " + std::move(content), width);
 }
 
-std::string modal_title_line(QuestionPromptView const& prompt, std::size_t width) {
+std::string modal_title_line(QuestionPromptView const& prompt, std::size_t width)
+{
   auto const title =
       prompt.header.empty() ? sanitize_terminal_text(prompt.question) : sanitize_terminal_text(prompt.header);
   std::string line = std::string(kSgrBold) + title + std::string(kSgrReset) + std::string(kSgrComposerBg);
@@ -215,14 +233,16 @@ std::string modal_title_line(QuestionPromptView const& prompt, std::size_t width
   return modal_line(std::move(line), width);
 }
 
-std::string modal_search_line(QuestionPromptView const& prompt, std::size_t width) {
+std::string modal_search_line(QuestionPromptView const& prompt, std::size_t width)
+{
   std::string query = sanitize_terminal_text(prompt.custom_text);
   if (query.empty()) query = std::string(kSgrMuted) + "Search" + std::string(kSgrReset) + std::string(kSgrComposerBg);
   query += std::string(kSgrAccent) + "█" + std::string(kSgrReset) + std::string(kSgrComposerBg);
   return modal_line("Search: " + std::move(query), width);
 }
 
-std::string modal_option_line(QuestionPromptView const& prompt, std::size_t index, std::size_t width) {
+std::string modal_option_line(QuestionPromptView const& prompt, std::size_t index, std::size_t width)
+{
   auto const& option = prompt.options[index];
   std::string text = index == prompt.selected_option_index ? "› " : "  ";
   text += option.selected ? "✓ " : "  ";
@@ -231,13 +251,15 @@ std::string modal_option_line(QuestionPromptView const& prompt, std::size_t inde
   return modal_line(std::move(text), width);
 }
 
-std::string modal_keys_line(QuestionPromptView const& prompt, std::size_t width) {
+std::string modal_keys_line(QuestionPromptView const& prompt, std::size_t width)
+{
   auto const search = prompt.searchable ? std::string("  Type to search  ") : std::string("  ");
   return modal_line(
       std::string(kSgrMuted) + "↑/↓ select  Enter confirm" + search + "Esc cancel" + std::string(kSgrReset), width);
 }
 
-std::string question_dock_keys(QuestionPromptView const& prompt, std::size_t width) {
+std::string question_dock_keys(QuestionPromptView const& prompt, std::size_t width)
+{
   auto const select = prompt.multiple ? std::string("Space toggle  Enter send") : std::string("Enter/1-9 select");
   std::array const candidates = {
       std::string("  ") + key_pill("Tab/arrows") + " move  " + key_pill(select) + "  " + key_pill("Esc") + " cancel",
@@ -253,7 +275,8 @@ std::string question_dock_keys(QuestionPromptView const& prompt, std::size_t wid
 }  // namespace
 
 std::vector<std::string> render_permission_prompt(PermissionPromptView const& prompt, std::size_t width,
-                                                  std::size_t max_lines) {
+                                                  std::size_t max_lines)
+{
   std::vector<std::string> lines;
   if (max_lines == 0) return lines;
 
@@ -292,7 +315,8 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
 }
 
 std::vector<std::string> render_question_prompt(QuestionPromptView const& prompt, std::size_t width,
-                                                std::size_t max_lines) {
+                                                std::size_t max_lines)
+{
   std::vector<std::string> lines;
   if (max_lines == 0) return lines;
   lines.push_back(question_dock_header(prompt, width));
@@ -319,7 +343,8 @@ std::vector<std::string> render_question_prompt(QuestionPromptView const& prompt
 }
 
 std::vector<std::string> render_question_modal(QuestionPromptView const& prompt, std::size_t width,
-                                               std::size_t max_lines) {
+                                               std::size_t max_lines)
+{
   std::vector<std::string> lines;
   if (max_lines == 0) return lines;
   lines.push_back(composer_surface_line("", width));
@@ -378,7 +403,8 @@ std::vector<std::string> render_question_modal(QuestionPromptView const& prompt,
 
 }  // namespace detail
 
-PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event) {
+PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event)
+{
   switch (event.key) {
     case Key::Character:
       if (event.character == 'a' || event.character == 'A') {
@@ -434,7 +460,8 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
   return {.selected_choice = selected_choice, .action = PermissionPromptInputAction::None};
 }
 
-QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const& prompt, InputEvent event) {
+QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const& prompt, InputEvent event)
+{
   auto result = QuestionPromptInputResult{.selected_option_index = prompt.selected_option_index,
                                           .options = prompt.options,
                                           .custom_text = prompt.custom_text,

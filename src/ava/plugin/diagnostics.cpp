@@ -9,16 +9,19 @@
 namespace ava::plugin {
 namespace {
 
-PluginFailure make_failure(PluginScope scope, std::filesystem::path const& path, ava::core::Error const& error) {
+PluginFailure make_failure(PluginScope scope, std::filesystem::path const& path, ava::core::Error const& error)
+{
   return PluginFailure{.scope = scope, .path = path, .message = error.message(), .details = error.format()};
 }
 
 PluginFailure make_failure(PluginScope scope, std::filesystem::path const& path, std::string message,
-                           std::string details = {}) {
+                           std::string details = {})
+{
   return PluginFailure{.scope = scope, .path = path, .message = std::move(message), .details = std::move(details)};
 }
 
-void collect_from_dir(std::filesystem::path const& root, PluginScope scope, PluginDiagnostics& diagnostics) {
+void collect_from_dir(std::filesystem::path const& root, PluginScope scope, PluginDiagnostics& diagnostics)
+{
   if (root.empty()) return;
   std::error_code exists_error;
   if (!std::filesystem::exists(root, exists_error)) return;
@@ -56,7 +59,8 @@ void collect_from_dir(std::filesystem::path const& root, PluginScope scope, Plug
   }
 }
 
-void disable_duplicate_ids(PluginDiagnostics& diagnostics) {
+void disable_duplicate_ids(PluginDiagnostics& diagnostics)
+{
   std::ranges::sort(diagnostics.plugins, [](PluginStatus const& left, PluginStatus const& right) {
     if (left.plugin.manifest.id != right.plugin.manifest.id) return left.plugin.manifest.id < right.plugin.manifest.id;
     return static_cast<int>(left.plugin.scope) < static_cast<int>(right.plugin.scope);
@@ -85,7 +89,8 @@ void disable_duplicate_ids(PluginDiagnostics& diagnostics) {
 }
 
 void apply_enablement(std::filesystem::path const& enablement_file, std::filesystem::path const& workspace_root,
-                      PluginDiagnostics& diagnostics) {
+                      PluginDiagnostics& diagnostics)
+{
   auto records = load_plugin_enablement(enablement_file);
   if (!records) {
     diagnostics.failures.push_back(PluginFailure{.scope = PluginScope::Project,
@@ -110,7 +115,8 @@ void apply_enablement(std::filesystem::path const& enablement_file, std::filesys
 
 PluginDiagnostics collect_plugin_diagnostics(PluginDiscoveryOptions const& options,
                                              std::filesystem::path const& enablement_file,
-                                             std::filesystem::path const& workspace_root) {
+                                             std::filesystem::path const& workspace_root)
+{
   PluginDiagnostics diagnostics{
       .discovery_options = options, .enablement_file = enablement_file, .plugins = {}, .failures = {}};
   collect_from_dir(options.global_plugins_dir, PluginScope::Global, diagnostics);

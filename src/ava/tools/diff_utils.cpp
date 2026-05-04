@@ -17,7 +17,8 @@ struct Alignment {
   bool found = false;
 };
 
-std::vector<LogicalLine> split_lines(std::string_view text) {
+std::vector<LogicalLine> split_lines(std::string_view text)
+{
   std::vector<LogicalLine> lines;
   std::size_t start = 0;
   for (std::size_t index = 0; index < text.size(); ++index) {
@@ -33,7 +34,8 @@ std::vector<LogicalLine> split_lines(std::string_view text) {
   return lines;
 }
 
-void append_bounded(DiffPreview& preview, std::string_view text, std::size_t max_bytes) {
+void append_bounded(DiffPreview& preview, std::string_view text, std::size_t max_bytes)
+{
   if (preview.text.size() >= max_bytes) {
     preview.truncated = true;
     return;
@@ -47,7 +49,8 @@ void append_bounded(DiffPreview& preview, std::string_view text, std::size_t max
   preview.truncated = true;
 }
 
-void append_diff_line(DiffPreview& preview, char prefix, std::string_view line, std::size_t max_bytes) {
+void append_diff_line(DiffPreview& preview, char prefix, std::string_view line, std::size_t max_bytes)
+{
   char prefix_text[] = {prefix, '\0'};
   append_bounded(preview, std::string_view(prefix_text, 1), max_bytes);
   append_bounded(preview, line, max_bytes);
@@ -55,7 +58,8 @@ void append_diff_line(DiffPreview& preview, char prefix, std::string_view line, 
 }
 
 Alignment next_alignment(std::vector<LogicalLine> const& old_lines, std::vector<LogicalLine> const& new_lines,
-                         std::size_t old_start, std::size_t old_end, std::size_t new_start, std::size_t new_end) {
+                         std::size_t old_start, std::size_t old_end, std::size_t new_start, std::size_t new_end)
+{
   constexpr std::size_t kAlignmentLookahead = 64;
   auto const old_limit = std::min(old_end, old_start + kAlignmentLookahead);
   auto const new_limit = std::min(new_end, new_start + kAlignmentLookahead);
@@ -71,7 +75,8 @@ Alignment next_alignment(std::vector<LogicalLine> const& old_lines, std::vector<
 
 void append_changed_region(DiffPreview& preview, std::vector<LogicalLine> const& old_lines,
                            std::vector<LogicalLine> const& new_lines, std::size_t old_start, std::size_t old_end,
-                           std::size_t new_start, std::size_t new_end, std::size_t max_bytes) {
+                           std::size_t new_start, std::size_t new_end, std::size_t max_bytes)
+{
   auto old_index = old_start;
   auto new_index = new_start;
   while (old_index < old_end || new_index < new_end) {
@@ -90,7 +95,8 @@ void append_changed_region(DiffPreview& preview, std::vector<LogicalLine> const&
   }
 }
 
-std::string hunk_header(std::size_t old_start, std::size_t old_count, std::size_t new_start, std::size_t new_count) {
+std::string hunk_header(std::size_t old_start, std::size_t old_count, std::size_t new_start, std::size_t new_count)
+{
   return "@@ -" + std::to_string(old_count == 0 ? old_start : old_start + 1) + "," + std::to_string(old_count) + " +" +
          std::to_string(new_count == 0 ? new_start : new_start + 1) + "," + std::to_string(new_count) + " @@\n";
 }
@@ -99,7 +105,8 @@ std::string hunk_header(std::size_t old_start, std::size_t old_count, std::size_
 
 DiffPreview unified_diff(std::string_view old_content, std::string_view new_content,
                          std::filesystem::path const& old_path, std::filesystem::path const& new_path,
-                         std::size_t max_bytes) {
+                         std::size_t max_bytes)
+{
   DiffPreview preview;
   if (old_content == new_content || max_bytes == 0) return preview;
 

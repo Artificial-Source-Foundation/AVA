@@ -27,13 +27,15 @@ struct ValidatedUrl {
   std::string port;
 };
 
-std::string lowercase(std::string_view value) {
+std::string lowercase(std::string_view value)
+{
   std::string result(value);
   std::ranges::transform(result, result.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   return result;
 }
 
-bool starts_with_case_insensitive(std::string_view value, std::string_view prefix) {
+bool starts_with_case_insensitive(std::string_view value, std::string_view prefix)
+{
   if (value.size() < prefix.size()) return false;
   for (std::size_t index = 0; index < prefix.size(); ++index) {
     if (std::tolower(static_cast<unsigned char>(value[index])) !=
@@ -44,16 +46,19 @@ bool starts_with_case_insensitive(std::string_view value, std::string_view prefi
   return true;
 }
 
-bool all_decimal_digits(std::string_view value) {
+bool all_decimal_digits(std::string_view value)
+{
   return !value.empty() && std::ranges::all_of(value, [](unsigned char ch) { return std::isdigit(ch); });
 }
 
-bool hex_literal(std::string_view value) {
+bool hex_literal(std::string_view value)
+{
   if (value.size() <= 2 || value[0] != '0' || (value[1] != 'x' && value[1] != 'X')) return false;
   return std::ranges::all_of(value.substr(2), [](unsigned char ch) { return std::isxdigit(ch); });
 }
 
-bool numeric_ipv4_literal_or_alias(std::string_view host) {
+bool numeric_ipv4_literal_or_alias(std::string_view host)
+{
   if (host.empty() || !std::isdigit(static_cast<unsigned char>(host.front()))) return false;
   if (all_decimal_digits(host) || hex_literal(host)) return true;
   if (host.find('.') == std::string_view::npos) return false;
@@ -69,7 +74,8 @@ bool numeric_ipv4_literal_or_alias(std::string_view host) {
   return true;
 }
 
-bool private_or_non_global_ipv4(unsigned long address) {
+bool private_or_non_global_ipv4(unsigned long address)
+{
   auto const first = static_cast<unsigned char>((address >> 24) & 0xFF);
   auto const second = static_cast<unsigned char>((address >> 16) & 0xFF);
   auto const third = static_cast<unsigned char>((address >> 8) & 0xFF);
@@ -80,7 +86,8 @@ bool private_or_non_global_ipv4(unsigned long address) {
          (first == 198 && second == 51 && third == 100) || (first == 203 && second == 0 && third == 113);
 }
 
-bool private_or_non_global_ipv6(in6_addr const& address) {
+bool private_or_non_global_ipv6(in6_addr const& address)
+{
   auto const* bytes = address.s6_addr;
   bool const ipv4_mapped = std::ranges::all_of(std::span(bytes, 10), [](unsigned char byte) { return byte == 0; }) &&
                            bytes[10] == 0xFF && bytes[11] == 0xFF;
@@ -98,7 +105,8 @@ bool private_or_non_global_ipv6(in6_addr const& address) {
          (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0D && bytes[3] == 0xB8);
 }
 
-ava::core::Result<std::string> validate_resolved_host(std::string_view host) {
+ava::core::Result<std::string> validate_resolved_host(std::string_view host)
+{
   addrinfo hints{};
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_family = AF_UNSPEC;
@@ -153,7 +161,8 @@ ava::core::Result<std::string> validate_resolved_host(std::string_view host) {
   return first_global_address;
 }
 
-ava::core::Result<ValidatedUrl> validated_url(std::string_view url) {
+ava::core::Result<ValidatedUrl> validated_url(std::string_view url)
+{
   if (url.empty() || url.size() > 4096) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch URL is empty or too long");
     error.with_context("max_bytes", "4096");
@@ -240,7 +249,8 @@ ava::core::Result<ValidatedUrl> validated_url(std::string_view url) {
   return ValidatedUrl{.url = std::string(url), .host = host, .port = std::move(port)};
 }
 
-std::string header_value(std::map<std::string, std::string> const& headers, std::string_view name) {
+std::string header_value(std::map<std::string, std::string> const& headers, std::string_view name)
+{
   auto const wanted = lowercase(name);
   for (auto const& [key, value] : headers) {
     if (lowercase(key) == wanted) return value;
@@ -248,7 +258,8 @@ std::string header_value(std::map<std::string, std::string> const& headers, std:
   return {};
 }
 
-bool looks_binary(std::string_view body, std::string_view content_type) {
+bool looks_binary(std::string_view body, std::string_view content_type)
+{
   auto const type = lowercase(content_type);
   if (!type.empty() &&
       !(type.starts_with("text/") || type.find("json") != std::string::npos || type.find("xml") != std::string::npos ||
@@ -261,7 +272,8 @@ bool looks_binary(std::string_view body, std::string_view content_type) {
 
 }  // namespace
 
-ava::core::Result<WebFetchResult> webfetch(ToolContext const& context, std::string_view url, WebFetchOptions options) {
+ava::core::Result<WebFetchResult> webfetch(ToolContext const& context, std::string_view url, WebFetchOptions options)
+{
   if (context.cancel_requested && context.cancel_requested()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled"));
   }

@@ -7,19 +7,22 @@
 namespace ava::app {
 namespace {
 
-bool token_matches(std::string_view token, CommandCatalogEntry const& entry) noexcept {
+bool token_matches(std::string_view token, CommandCatalogEntry const& entry) noexcept
+{
   if (token == entry.command) return true;
   return std::ranges::find(entry.aliases, token) != entry.aliases.end();
 }
 
-std::string_view command_token(std::string_view line) noexcept {
+std::string_view command_token(std::string_view line) noexcept
+{
   auto const end = line.find_first_of(" \t\r\n");
   return line.substr(0, end == std::string_view::npos ? line.size() : end);
 }
 
 }  // namespace
 
-std::vector<CommandCatalogEntry> const& command_catalog() {
+std::vector<CommandCatalogEntry> const& command_catalog()
+{
   static auto const catalog = std::vector<CommandCatalogEntry>{
       CommandCatalogEntry{
           .command = "/help", .description = "Show commands and effective hotkeys", .category = "General"},
@@ -120,7 +123,8 @@ std::vector<CommandCatalogEntry> const& command_catalog() {
   return catalog;
 }
 
-CommandCatalogEntry const* find_command_catalog_entry(std::string_view line) noexcept {
+CommandCatalogEntry const* find_command_catalog_entry(std::string_view line) noexcept
+{
   if (!line.starts_with('/')) return nullptr;
   auto const token = command_token(line);
   for (auto const& entry : command_catalog()) {
@@ -129,7 +133,8 @@ CommandCatalogEntry const* find_command_catalog_entry(std::string_view line) noe
   return nullptr;
 }
 
-std::string normalize_command_line(std::string_view line, CommandCatalogEntry const& entry) {
+std::string normalize_command_line(std::string_view line, CommandCatalogEntry const& entry)
+{
   auto const token = command_token(line);
   if (token == entry.command) return std::string(line);
   auto const rest = line.substr(token.size());

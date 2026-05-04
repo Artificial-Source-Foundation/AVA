@@ -13,11 +13,13 @@ namespace {
 
 constexpr std::size_t kMaxIgnoreRuleWalkEntries = 100000;
 
-bool is_blank(std::string_view value) {
+bool is_blank(std::string_view value)
+{
   return std::ranges::all_of(value, [](char ch) { return std::isspace(static_cast<unsigned char>(ch)) != 0; });
 }
 
-bool is_escaped_trailing_space(std::string_view value, std::size_t space_index) {
+bool is_escaped_trailing_space(std::string_view value, std::size_t space_index)
+{
   std::size_t backslash_count = 0;
   for (std::size_t index = space_index; index > 0 && value[index - 1] == '\\'; --index) {
     ++backslash_count;
@@ -25,19 +27,22 @@ bool is_escaped_trailing_space(std::string_view value, std::size_t space_index) 
   return backslash_count % 2 == 1;
 }
 
-void strip_unescaped_trailing_spaces(std::string& line) {
+void strip_unescaped_trailing_spaces(std::string& line)
+{
   while (!line.empty() && line.back() == ' ' && !is_escaped_trailing_space(line, line.size() - 1)) {
     line.pop_back();
   }
 }
 
-std::string regex_escape(char ch) {
+std::string regex_escape(char ch)
+{
   static std::string const special = R"(\.^$|()[]{}+*?)";
   if (special.find(ch) != std::string::npos) return std::string("\\") + ch;
   return std::string(1, ch);
 }
 
-std::string wildcard_to_regex(std::string_view pattern) {
+std::string wildcard_to_regex(std::string_view pattern)
+{
   std::string out = "^";
   for (std::size_t index = 0; index < pattern.size(); ++index) {
     char const ch = pattern[index];
@@ -66,7 +71,8 @@ std::string wildcard_to_regex(std::string_view pattern) {
   return out;
 }
 
-std::vector<std::string_view> slash_components(std::string_view path) {
+std::vector<std::string_view> slash_components(std::string_view path)
+{
   std::vector<std::string_view> components;
   std::size_t start = 0;
   while (start <= path.size()) {
@@ -79,7 +85,8 @@ std::vector<std::string_view> slash_components(std::string_view path) {
   return components;
 }
 
-std::vector<std::string> ancestor_dirs(std::string_view path, bool is_directory) {
+std::vector<std::string> ancestor_dirs(std::string_view path, bool is_directory)
+{
   std::vector<std::string> ancestors;
   auto const components = slash_components(path);
   auto const count = is_directory ? components.size() : (components.empty() ? 0 : components.size() - 1);
@@ -92,35 +99,42 @@ std::vector<std::string> ancestor_dirs(std::string_view path, bool is_directory)
   return ancestors;
 }
 
-bool starts_with_path_prefix(std::string_view value, std::string_view prefix) {
+bool starts_with_path_prefix(std::string_view value, std::string_view prefix)
+{
   if (prefix.empty()) return true;
   return value == prefix || (value.size() > prefix.size() && value.starts_with(prefix) && value[prefix.size()] == '/');
 }
 
 }  // namespace
 
-bool is_git_dir(std::filesystem::path const& path) {
+bool is_git_dir(std::filesystem::path const& path)
+{
   for (auto const& part : path) {
     if (part == ".git") return true;
   }
   return false;
 }
 
-bool is_generated_dir(std::filesystem::path const& path) {
+bool is_generated_dir(std::filesystem::path const& path)
+{
   auto const name = path.filename().string();
   return name == "build" || name == "node_modules" || name == "target" || name == "dist";
 }
 
-IgnoreMatcher::IgnoreMatcher(std::filesystem::path workspace_dir) : workspace_dir_(std::move(workspace_dir)) {}
+IgnoreMatcher::IgnoreMatcher(std::filesystem::path workspace_dir) : workspace_dir_(std::move(workspace_dir))
+{
+}
 
-ava::core::Result<IgnoreMatcher> IgnoreMatcher::load(std::filesystem::path const& workspace_dir) {
+ava::core::Result<IgnoreMatcher> IgnoreMatcher::load(std::filesystem::path const& workspace_dir)
+{
   IgnoreMatcher matcher(workspace_dir);
   auto loaded = matcher.load_rules();
   if (!loaded) return std::unexpected(loaded.error());
   return matcher;
 }
 
-bool IgnoreMatcher::ignored(std::filesystem::path const& path, bool is_directory) const {
+bool IgnoreMatcher::ignored(std::filesystem::path const& path, bool is_directory) const
+{
   auto const relative = relative_to_workspace(path);
   bool ignored = false;
   for (auto const& rule : rules_) {
@@ -136,7 +150,8 @@ bool IgnoreMatcher::ignored(std::filesystem::path const& path, bool is_directory
   return ignored;
 }
 
-bool IgnoreMatcher::rule_matches(Rule const& rule, std::string_view relative_to_base, bool is_directory) {
+bool IgnoreMatcher::rule_matches(Rule const& rule, std::string_view relative_to_base, bool is_directory)
+{
   if (rule.anchored || rule.contains_slash) {
     if (rule.directory_only) {
       for (auto const& ancestor : ancestor_dirs(relative_to_base, is_directory)) {
@@ -156,7 +171,8 @@ bool IgnoreMatcher::rule_matches(Rule const& rule, std::string_view relative_to_
   return false;
 }
 
-ava::core::Result<void> IgnoreMatcher::load_rules() {
+ava::core::Result<void> IgnoreMatcher::load_rules()
+{
   auto root_loaded = load_file(workspace_dir_ / ".gitignore");
   if (!root_loaded) return std::unexpected(root_loaded.error());
 
@@ -192,7 +208,8 @@ ava::core::Result<void> IgnoreMatcher::load_rules() {
   return {};
 }
 
-ava::core::Result<void> IgnoreMatcher::load_file(std::filesystem::path const& ignore_file) {
+ava::core::Result<void> IgnoreMatcher::load_file(std::filesystem::path const& ignore_file)
+{
   std::error_code status_error;
   auto const status = std::filesystem::symlink_status(ignore_file, status_error);
   if (status_error || std::filesystem::is_symlink(status)) return {};
@@ -248,7 +265,8 @@ ava::core::Result<void> IgnoreMatcher::load_file(std::filesystem::path const& ig
   return {};
 }
 
-std::string IgnoreMatcher::relative_to_workspace(std::filesystem::path const& path) const {
+std::string IgnoreMatcher::relative_to_workspace(std::filesystem::path const& path) const
+{
   std::error_code error;
   auto relative = std::filesystem::relative(path, workspace_dir_, error);
   if (error) return {};

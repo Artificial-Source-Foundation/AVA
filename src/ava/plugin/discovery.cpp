@@ -8,12 +8,14 @@
 namespace ava::plugin {
 namespace {
 
-ava::core::Error discovery_error(std::string message, std::filesystem::path const& path) {
+ava::core::Error discovery_error(std::string message, std::filesystem::path const& path)
+{
   return ava::core::Error(ava::core::ErrorCategory::Io, std::move(message)).with_context("path", path.string());
 }
 
 ava::core::VoidResult discover_from_dir(std::filesystem::path const& root, PluginScope scope,
-                                        std::vector<DiscoveredPlugin>& out) {
+                                        std::vector<DiscoveredPlugin>& out)
+{
   if (root.empty()) return {};
   std::error_code exists_error;
   if (!std::filesystem::exists(root, exists_error)) return {};
@@ -39,13 +41,15 @@ ava::core::VoidResult discover_from_dir(std::filesystem::path const& root, Plugi
 
 }  // namespace
 
-PluginDiscoveryOptions default_plugin_discovery_options(std::filesystem::path const& workspace_root) {
+PluginDiscoveryOptions default_plugin_discovery_options(std::filesystem::path const& workspace_root)
+{
   auto const xdg = ava::config::xdg_paths();
   return PluginDiscoveryOptions{.global_plugins_dir = xdg.ava_config_dir / "plugins",
                                 .project_plugins_dir = workspace_root / ".ava" / "plugins"};
 }
 
-ava::core::Result<std::vector<DiscoveredPlugin>> discover_plugins(PluginDiscoveryOptions const& options) {
+ava::core::Result<std::vector<DiscoveredPlugin>> discover_plugins(PluginDiscoveryOptions const& options)
+{
   std::vector<DiscoveredPlugin> plugins;
   if (auto result = discover_from_dir(options.global_plugins_dir, PluginScope::Global, plugins); !result) {
     return std::unexpected(result.error());

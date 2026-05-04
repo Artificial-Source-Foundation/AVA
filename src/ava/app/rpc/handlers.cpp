@@ -15,7 +15,8 @@ ava::core::Result<RuntimeRunOptions> ensure_prompt_runtime_options(ava::config::
                                                                    std::string_view provider_id,
                                                                    RuntimeRunOptions options,
                                                                    ava::provider::Transport& auth_transport,
-                                                                   std::string_view purpose) {
+                                                                   std::string_view purpose)
+{
   if (!options.access_token.empty()) return options;
 
   auto credential = ava::config::provider_credential_for_request(paths, provider_id, auth_transport);
@@ -39,7 +40,8 @@ ava::core::Result<RuntimeRunOptions> ensure_prompt_runtime_options(ava::config::
 }
 
 ava::core::Result<RuntimeSession> create_new_session(RuntimeSession const& current,
-                                                     RuntimeOpenOptions const& base_options) {
+                                                     RuntimeOpenOptions const& base_options)
+{
   RuntimeOpenOptions options = base_options;
   options.workspace_dir = current.workspace_dir;
   options.current_dir = current.current_dir;
@@ -52,7 +54,8 @@ ava::core::Result<RuntimeSession> create_new_session(RuntimeSession const& curre
 
 ava::core::Result<RuntimeSession> open_requested_session(RuntimeSession const& current,
                                                          RuntimeOpenOptions const& base_options,
-                                                         std::string_view requested_session_id) {
+                                                         std::string_view requested_session_id)
+{
   RuntimeOpenOptions options = base_options;
   options.workspace_dir = current.workspace_dir;
   options.current_dir = current.current_dir;
@@ -64,7 +67,8 @@ ava::core::Result<RuntimeSession> open_requested_session(RuntimeSession const& c
 }
 
 ava::core::Result<ava::config::ModelInfo> resolve_requested_model(RuntimeSession const& session,
-                                                                  RpcCommand const& command) {
+                                                                  RpcCommand const& command)
+{
   if (!command.model || command.model->empty()) return std::unexpected(invalid_rpc("set_model requires model"));
   if (command.provider && !command.provider->empty()) {
     return resolve_runtime_model(session.paths, *command.provider, *command.model);
@@ -97,7 +101,8 @@ ava::core::Result<ava::config::ModelInfo> resolve_requested_model(RuntimeSession
   return matches.front();
 }
 
-ava::core::Result<ava::config::ModelInfo> next_runtime_model(RuntimeSession const& session) {
+ava::core::Result<ava::config::ModelInfo> next_runtime_model(RuntimeSession const& session)
+{
   auto registry = ava::config::load_model_registry(session.paths);
   if (!registry) return std::unexpected(std::move(registry.error()));
   auto const providers = ava::provider::builtin_provider_registry();
@@ -121,7 +126,8 @@ ava::core::Result<ava::config::ModelInfo> next_runtime_model(RuntimeSession cons
 
 ava::core::Result<ProviderHandle> provider_for_session_model(RuntimeSession const& session,
                                                              std::string_view injected_provider_id,
-                                                             ava::provider::Provider const& injected_provider) {
+                                                             ava::provider::Provider const& injected_provider)
+{
   if (session.model.provider_id == injected_provider_id) {
     return ProviderHandle{.provider = &injected_provider, .owned = nullptr};
   }
@@ -131,19 +137,22 @@ ava::core::Result<ProviderHandle> provider_for_session_model(RuntimeSession cons
   return ProviderHandle{.provider = nullptr, .owned = std::move(*provider)};
 }
 
-bool is_plugin_rpc_command(std::string_view type) {
+bool is_plugin_rpc_command(std::string_view type)
+{
   return type == "list_plugins" || type == "plugin_failures" || type == "inspect_plugin" || type == "enable_plugin" ||
          type == "disable_plugin" || type == "validate_plugin" || type == "list_plugin_prompts" ||
          type == "get_plugin_prompt" || type == "list_plugin_skills" || type == "get_plugin_skill" ||
          type == "run_plugin_command";
 }
 
-bool is_mcp_rpc_command(std::string_view type) {
+bool is_mcp_rpc_command(std::string_view type)
+{
   return type == "list_mcp_servers" || type == "inspect_mcp_server" || type == "list_mcp_tools" ||
          type == "restart_mcp_server";
 }
 
-ava::core::Result<std::string> plugin_rpc_slash_command(RpcCommand const& command) {
+ava::core::Result<std::string> plugin_rpc_slash_command(RpcCommand const& command)
+{
   if (command.type == "list_plugins") return std::string("/plugins list");
   if (command.type == "plugin_failures") return std::string("/plugins failures");
   if (command.type == "validate_plugin") {
@@ -171,7 +180,8 @@ ava::core::Result<std::string> plugin_rpc_slash_command(RpcCommand const& comman
   return std::unexpected(invalid_rpc("unsupported plugin RPC command"));
 }
 
-ava::core::Result<std::string> mcp_rpc_slash_command(RpcCommand const& command) {
+ava::core::Result<std::string> mcp_rpc_slash_command(RpcCommand const& command)
+{
   if (command.type == "list_mcp_servers") return std::string("/mcp list");
   if (!command.server_id || command.server_id->empty()) {
     return std::unexpected(invalid_rpc(command.type + " requires server_id"));

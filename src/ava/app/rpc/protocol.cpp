@@ -11,13 +11,15 @@
 namespace ava::app::rpc {
 namespace {
 
-std::string_view trim(std::string_view value) {
+std::string_view trim(std::string_view value)
+{
   while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) value.remove_prefix(1);
   while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) value.remove_suffix(1);
   return value;
 }
 
-bool is_json_object_line(std::string_view line) {
+bool is_json_object_line(std::string_view line)
+{
   line = trim(line);
   if (line.size() < 2 || line.front() != '{') return false;
   bool in_string = false;
@@ -54,12 +56,13 @@ bool is_json_object_line(std::string_view line) {
   return trim(line.substr(object_end + 1)).empty();
 }
 
-std::string string_field_json(std::string_view key, std::string_view value) {
+std::string string_field_json(std::string_view key, std::string_view value)
+{
   return "\"" + std::string(key) + "\":\"" + ava::core::json::escape(value) + "\"";
 }
 
-ava::core::Result<std::optional<long long>> exact_optional_integer_field(std::string_view object,
-                                                                         std::string_view key) {
+ava::core::Result<std::optional<long long>> exact_optional_integer_field(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return std::optional<long long>{};
   auto const field_name = std::string(key);
@@ -84,7 +87,8 @@ ava::core::Result<std::optional<long long>> exact_optional_integer_field(std::st
   }
 }
 
-bool is_rpc_identifier_metacharacter(char ch) {
+bool is_rpc_identifier_metacharacter(char ch)
+{
   switch (ch) {
     case '"':
     case '\'':
@@ -108,7 +112,8 @@ bool is_rpc_identifier_metacharacter(char ch) {
   }
 }
 
-ava::core::VoidResult validate_rpc_identifier(std::string_view value, std::string_view field_name) {
+ava::core::VoidResult validate_rpc_identifier(std::string_view value, std::string_view field_name)
+{
   if (value.size() > kMaxRpcIdentifierBytes) {
     auto error = invalid_rpc("RPC identifier is too long");
     error.with_context("field", std::string(field_name));
@@ -129,18 +134,21 @@ ava::core::VoidResult validate_rpc_identifier(std::string_view value, std::strin
 }
 
 ava::core::VoidResult validate_optional_rpc_identifier(std::optional<std::string> const& value,
-                                                       std::string_view field_name) {
+                                                       std::string_view field_name)
+{
   if (!value) return {};
   return validate_rpc_identifier(*value, field_name);
 }
 
 }  // namespace
 
-ava::core::Error invalid_rpc(std::string message) {
+ava::core::Error invalid_rpc(std::string message)
+{
   return ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
 }
 
-ava::core::VoidResult validate_protocol_version(RpcCommand const& command) {
+ava::core::VoidResult validate_protocol_version(RpcCommand const& command)
+{
   if (!command.protocol_version) return {};
   if (*command.protocol_version == kRpcProtocolVersion) return {};
 
@@ -150,12 +158,14 @@ ava::core::VoidResult validate_protocol_version(RpcCommand const& command) {
   return std::unexpected(std::move(error));
 }
 
-std::string rpc_protocol_result_json() {
+std::string rpc_protocol_result_json()
+{
   return "{\"protocol_version\":" + std::to_string(kRpcProtocolVersion) + ",\"supported_protocol_versions\":[" +
          std::to_string(kRpcProtocolVersion) + "]}";
 }
 
-std::string parse_error_response_id(std::string_view line) {
+std::string parse_error_response_id(std::string_view line)
+{
   if (!is_json_object_line(line)) return "";
   auto id = ava::core::json::string_field(line, "id");
   if (!id || id->empty()) return "";
@@ -163,7 +173,8 @@ std::string parse_error_response_id(std::string_view line) {
   return *id;
 }
 
-ava::core::Result<bool> read_rpc_line_bounded(std::istream& in, std::string& line) {
+ava::core::Result<bool> read_rpc_line_bounded(std::istream& in, std::string& line)
+{
   line.clear();
   bool oversized = false;
   while (true) {
@@ -189,7 +200,8 @@ ava::core::Result<bool> read_rpc_line_bounded(std::istream& in, std::string& lin
 
 namespace ava::app {
 
-ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line) {
+ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
+{
   if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
   if (line.size() > rpc::kMaxRpcLineBytes) return std::unexpected(rpc::invalid_rpc("RPC request line is too large"));
   if (!rpc::is_json_object_line(line)) return std::unexpected(rpc::invalid_rpc("malformed RPC JSON object"));
@@ -255,7 +267,8 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line) {
                     .path = ava::core::json::string_field(line, "path")};
 }
 
-std::string serialize_rpc_success_jsonl(std::string_view id, std::string_view result_json) {
+std::string serialize_rpc_success_jsonl(std::string_view id, std::string_view result_json)
+{
   std::string json = "{\"id\":\"" + ava::core::json::escape(id) + "\",\"type\":\"response\",\"success\":true";
   if (!result_json.empty()) {
     json += ",\"result\":";
@@ -265,7 +278,8 @@ std::string serialize_rpc_success_jsonl(std::string_view id, std::string_view re
   return json;
 }
 
-std::string serialize_rpc_error_jsonl(std::string_view id, ava::core::Error const& error) {
+std::string serialize_rpc_error_jsonl(std::string_view id, ava::core::Error const& error)
+{
   std::string json =
       "{\"id\":\"" + ava::core::json::escape(id) + "\",\"type\":\"response\",\"success\":false,\"error\":{";
   json += rpc::string_field_json("category", ava::core::to_string(error.category()));

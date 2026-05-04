@@ -51,7 +51,8 @@
 
 namespace {
 
-void test_xdg_paths() {
+void test_xdg_paths()
+{
   auto const root = temp_root() / "xdg";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -99,7 +100,8 @@ void test_xdg_paths() {
   expect(empty_home.state_home.is_absolute(), "XDG state fallback remains absolute when HOME is empty");
 }
 
-void test_context_loader() {
+void test_context_loader()
+{
   auto const root = temp_root() / "context";
   auto const workspace = root / "workspace";
   auto const nested = workspace / "src" / "feature";
@@ -240,7 +242,8 @@ void test_context_loader() {
   }
 }
 
-void test_auth_load_and_store() {
+void test_auth_load_and_store()
+{
   auto const root = temp_root() / "auth";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -576,7 +579,8 @@ void test_auth_load_and_store() {
   }
 }
 
-void test_openai_oauth_helpers() {
+void test_openai_oauth_helpers()
+{
   std::string const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
   expect(ava::config::openai_oauth_code_challenge(verifier) == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
          "OpenAI OAuth PKCE challenge matches RFC 7636 test vector");
@@ -631,7 +635,8 @@ void test_openai_oauth_helpers() {
   }
 }
 
-void test_openai_oauth_refresh() {
+void test_openai_oauth_refresh()
+{
   ava::tests::FakeTransport refresh_transport({ava::provider::HttpResponse{
       .status_code = 200,
       .headers = {},
@@ -771,7 +776,8 @@ void test_openai_oauth_refresh() {
   }
 }
 
-void test_model_and_prompt_config() {
+void test_model_and_prompt_config()
+{
   auto const root = temp_root() / "model";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -948,7 +954,8 @@ void test_model_and_prompt_config() {
 
 }  // namespace
 
-void run_config_context_auth_oauth_tests() {
+void run_config_context_auth_oauth_tests()
+{
   test_xdg_paths();
   test_context_loader();
   test_auth_load_and_store();

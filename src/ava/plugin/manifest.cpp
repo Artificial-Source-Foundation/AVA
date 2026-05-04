@@ -14,11 +14,13 @@ namespace {
 
 constexpr std::size_t kMaxManifestBytes = 256 * 1024;
 
-ava::core::Error manifest_error(std::string message) {
+ava::core::Error manifest_error(std::string message)
+{
   return ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
 }
 
-bool is_valid_plugin_id(std::string_view id) {
+bool is_valid_plugin_id(std::string_view id)
+{
   if (id.empty() || id.size() > 128) return false;
   bool last_was_separator = false;
   for (char const ch : id) {
@@ -30,7 +32,8 @@ bool is_valid_plugin_id(std::string_view id) {
   return !last_was_separator;
 }
 
-bool is_valid_contribution_name(std::string_view name) {
+bool is_valid_contribution_name(std::string_view name)
+{
   if (name.empty() || name.size() > 96) return false;
   for (char const ch : name) {
     bool const allowed = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') ||
@@ -40,7 +43,8 @@ bool is_valid_contribution_name(std::string_view name) {
   return true;
 }
 
-bool is_valid_resource_path(std::string_view path) {
+bool is_valid_resource_path(std::string_view path)
+{
   if (path.empty() || path.size() > 512) return false;
   std::filesystem::path const parsed{std::string(path)};
   if (parsed.is_absolute()) return false;
@@ -54,7 +58,8 @@ bool is_valid_resource_path(std::string_view path) {
   return true;
 }
 
-std::optional<std::string> array_field(std::string_view object, std::string_view key) {
+std::optional<std::string> array_field(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start || *start >= object.size() || object[*start] != '[') return std::nullopt;
   bool in_string = false;
@@ -84,11 +89,13 @@ std::optional<std::string> array_field(std::string_view object, std::string_view
   return std::nullopt;
 }
 
-std::optional<std::string> parse_string_literal(std::string_view literal) {
+std::optional<std::string> parse_string_literal(std::string_view literal)
+{
   return ava::core::json::string_field(std::string("{\"value\":") + std::string(literal) + '}', "value");
 }
 
-ava::core::Result<std::vector<std::string>> string_array_field(std::string_view object, std::string_view key) {
+ava::core::Result<std::vector<std::string>> string_array_field(std::string_view object, std::string_view key)
+{
   std::vector<std::string> values;
   if (!ava::core::json::field_value_start(object, key)) return values;
   auto const array = array_field(object, key);
@@ -142,11 +149,13 @@ ava::core::Result<std::vector<std::string>> string_array_field(std::string_view 
   return values;
 }
 
-std::vector<std::string> object_array_field(std::string_view object, std::string_view key) {
+std::vector<std::string> object_array_field(std::string_view object, std::string_view key)
+{
   return ava::core::json::objects_in_array_field(object, key);
 }
 
-ava::core::Result<PluginEntrypoint> parse_entrypoint(std::string_view manifest_json) {
+ava::core::Result<PluginEntrypoint> parse_entrypoint(std::string_view manifest_json)
+{
   auto const entrypoint = ava::core::json::object_field(manifest_json, "entrypoint");
   if (!entrypoint) return std::unexpected(manifest_error("plugin manifest requires entrypoint object"));
   auto command = ava::core::json::string_field(*entrypoint, "command");
@@ -158,7 +167,8 @@ ava::core::Result<PluginEntrypoint> parse_entrypoint(std::string_view manifest_j
   return PluginEntrypoint{.command = std::move(*command), .args = std::move(*args)};
 }
 
-ava::core::Result<PluginContributions> parse_contributions(std::string_view manifest_json) {
+ava::core::Result<PluginContributions> parse_contributions(std::string_view manifest_json)
+{
   PluginContributions contributions;
   auto const contributes = ava::core::json::object_field(manifest_json, "contributes");
   if (!contributes) return contributions;
@@ -230,7 +240,8 @@ ava::core::Result<PluginContributions> parse_contributions(std::string_view mani
 
 }  // namespace
 
-std::string_view to_string(PluginScope scope) {
+std::string_view to_string(PluginScope scope)
+{
   switch (scope) {
     case PluginScope::Global:
       return "global";
@@ -240,7 +251,8 @@ std::string_view to_string(PluginScope scope) {
   return "unknown";
 }
 
-ava::core::Result<PluginManifest> parse_plugin_manifest(std::string_view json, std::filesystem::path manifest_path) {
+ava::core::Result<PluginManifest> parse_plugin_manifest(std::string_view json, std::filesystem::path manifest_path)
+{
   if (json.size() > kMaxManifestBytes) {
     return std::unexpected(manifest_error("plugin manifest exceeds maximum size")
                                .with_context("max_bytes", std::to_string(kMaxManifestBytes)));
@@ -287,7 +299,8 @@ ava::core::Result<PluginManifest> parse_plugin_manifest(std::string_view json, s
                         .directory = manifest_directory};
 }
 
-ava::core::Result<PluginManifest> load_plugin_manifest(std::filesystem::path const& manifest_path) {
+ava::core::Result<PluginManifest> load_plugin_manifest(std::filesystem::path const& manifest_path)
+{
   std::error_code type_error;
   if (!std::filesystem::is_regular_file(manifest_path, type_error)) {
     auto error = ava::core::Error(type_error ? ava::core::ErrorCategory::Io : ava::core::ErrorCategory::InvalidArgument,

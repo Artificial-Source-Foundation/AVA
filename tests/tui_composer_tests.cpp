@@ -57,7 +57,8 @@
 
 namespace {
 
-void test_tui_composer_rendering_and_input() {
+void test_tui_composer_rendering_and_input()
+{
   expect(ava::tui::terminal_escape_sequence_key("[27;2;13~") == ava::tui::Key::ShiftEnter &&
              ava::tui::terminal_escape_sequence_key("[13;2u") == ava::tui::Key::ShiftEnter &&
              ava::tui::terminal_escape_sequence_key("[13;2~") == ava::tui::Key::ShiftEnter &&
@@ -2458,7 +2459,8 @@ void test_tui_composer_rendering_and_input() {
   }
 }
 
-void test_tui_text_model_conversions() {
+void test_tui_text_model_conversions()
+{
   auto const plain = ava::tui::text_from_plain("first\r\nsecond\nthird\rfour");
   expect(ava::tui::to_plain_text(plain) == "first\nsecond\nthird\nfour" && ava::tui::validate_text(plain).has_value(),
          "tui Text plain conversion normalizes CR/LF boundaries into explicit newline runs");
@@ -2537,7 +2539,8 @@ void test_tui_text_model_conversions() {
          "tui transcript renderer consumes Text models for plain transcript, thinking, and fallback assistant paths");
 }
 
-void test_tui_event_state_reduces_runtime_events() {
+void test_tui_event_state_reduces_runtime_events()
+{
   ava::tui::TuiEventState state;
 
   ava::app::RuntimeEvent user;
@@ -3482,7 +3485,8 @@ void test_tui_event_state_reduces_runtime_events() {
          "tui EventEnvelope reducer surfaces backend cancel requests without pretending the run has finished");
 }
 
-void test_ncurses_newterm_smoke_without_real_tty() {
+void test_ncurses_newterm_smoke_without_real_tty()
+{
   static_cast<void>(setenv("TERM", "xterm-256color", 1));
   char const* previous_locale_value = std::setlocale(LC_ALL, nullptr);
   std::string const previous_locale = previous_locale_value == nullptr ? "C" : previous_locale_value;
@@ -3537,7 +3541,8 @@ void test_ncurses_newterm_smoke_without_real_tty() {
   static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
 }
 
-void test_tui_large_render_performance_budget() {
+void test_tui_large_render_performance_budget()
+{
   std::vector<ava::tui::TranscriptItem> transcript;
   transcript.reserve(900);
   for (int index = 0; index < 300; ++index) {
@@ -3603,7 +3608,8 @@ void test_tui_large_render_performance_budget() {
 
 }  // namespace
 
-void run_tui_composer_tests() {
+void run_tui_composer_tests()
+{
   test_tui_composer_rendering_and_input();
   test_tui_text_model_conversions();
   test_tui_event_state_reduces_runtime_events();

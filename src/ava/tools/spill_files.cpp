@@ -9,7 +9,8 @@
 namespace ava::tools {
 namespace {
 
-std::string safe_filename_component(std::string_view value, std::string_view fallback) {
+std::string safe_filename_component(std::string_view value, std::string_view fallback)
+{
   std::string out;
   out.reserve(value.size());
   for (char const ch : value) {
@@ -24,7 +25,8 @@ std::string safe_filename_component(std::string_view value, std::string_view fal
   return out;
 }
 
-std::string normalized_extension(std::string_view extension) {
+std::string normalized_extension(std::string_view extension)
+{
   std::string out;
   for (char const ch : extension) {
     auto const byte = static_cast<unsigned char>(ch);
@@ -38,11 +40,13 @@ std::string normalized_extension(std::string_view extension) {
 
 }  // namespace
 
-SpillBuffer::SpillBuffer(std::size_t max_bytes) : max_bytes_(max_bytes) {
+SpillBuffer::SpillBuffer(std::size_t max_bytes) : max_bytes_(max_bytes)
+{
   content_.reserve(std::min(max_bytes, 64UL * 1024UL));
 }
 
-void SpillBuffer::append(std::string_view text) {
+void SpillBuffer::append(std::string_view text)
+{
   total_bytes_ += text.size();
   if (text.empty()) return;
   if (content_.size() >= max_bytes_) {
@@ -58,14 +62,24 @@ void SpillBuffer::append(std::string_view text) {
   truncated_ = true;
 }
 
-std::string const& SpillBuffer::content() const noexcept { return content_; }
+std::string const& SpillBuffer::content() const noexcept
+{
+  return content_;
+}
 
-std::size_t SpillBuffer::total_bytes() const noexcept { return total_bytes_; }
+std::size_t SpillBuffer::total_bytes() const noexcept
+{
+  return total_bytes_;
+}
 
-bool SpillBuffer::truncated() const noexcept { return truncated_; }
+bool SpillBuffer::truncated() const noexcept
+{
+  return truncated_;
+}
 
 ava::core::Result<SpillFileResult> write_spill_file(ToolContext const& context, std::string_view tool_name,
-                                                    std::string_view extension, SpillBuffer const& buffer) {
+                                                    std::string_view extension, SpillBuffer const& buffer)
+{
   if (context.spill_dir.empty()) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "spill directory is not configured");
     return std::unexpected(std::move(error));
@@ -128,7 +142,8 @@ ava::core::Result<SpillFileResult> write_spill_file(ToolContext const& context, 
   return SpillFileResult{.path = path, .truncated = buffer.truncated(), .bytes_written = buffer.content().size()};
 }
 
-ava::core::VoidResult emit_tool_progress(ToolContext const& context, std::string text, std::string status) {
+ava::core::VoidResult emit_tool_progress(ToolContext const& context, std::string text, std::string status)
+{
   if (!context.progress_sink) return {};
   return context.progress_sink(ToolProgressEvent{.text = std::move(text),
                                                  .call_id = context.current_call_id,

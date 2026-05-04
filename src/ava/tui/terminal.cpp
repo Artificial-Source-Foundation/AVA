@@ -24,9 +24,13 @@ sig_atomic_t volatile g_terminal_signal = 0;
 struct sigaction g_curses_previous_sigint{};
 struct sigaction g_curses_previous_sigterm{};
 
-void mark_terminal_signal(int signal_number) { g_terminal_signal = signal_number; }
+void mark_terminal_signal(int signal_number)
+{
+  g_terminal_signal = signal_number;
+}
 
-void install_curses_signal_flags() {
+void install_curses_signal_flags()
+{
   struct sigaction action{};
   action.sa_handler = mark_terminal_signal;
   sigemptyset(&action.sa_mask);
@@ -37,18 +41,21 @@ void install_curses_signal_flags() {
   static_cast<void>(sigaction(SIGTERM, &action, &g_curses_previous_sigterm));
 }
 
-void uninstall_curses_signal_flags() {
+void uninstall_curses_signal_flags()
+{
   static_cast<void>(sigaction(SIGINT, &g_curses_previous_sigint, nullptr));
   static_cast<void>(sigaction(SIGTERM, &g_curses_previous_sigterm, nullptr));
 }
 
-void configure_curses_colors() {
+void configure_curses_colors()
+{
   if (!has_colors()) return;
   static_cast<void>(start_color());
   static_cast<void>(use_default_colors());
 }
 
-void configure_curses_mouse() {
+void configure_curses_mouse()
+{
 #ifdef NCURSES_MOUSE_VERSION
   if (!has_mouse()) return;
   mmask_t previous_mask = 0;
@@ -69,14 +76,19 @@ void configure_curses_mouse() {
 #endif
 }
 
-void set_bracketed_paste(bool enabled) {
+void set_bracketed_paste(bool enabled)
+{
   static_cast<void>(std::fputs(enabled ? "\x1b[?2004h" : "\x1b[?2004l", stdout));
   static_cast<void>(std::fflush(stdout));
 }
 
-bool is_utf8_continuation(unsigned char byte) { return (byte & 0xC0U) == 0x80U; }
+bool is_utf8_continuation(unsigned char byte)
+{
+  return (byte & 0xC0U) == 0x80U;
+}
 
-std::size_t utf8_sequence_length(unsigned char byte) {
+std::size_t utf8_sequence_length(unsigned char byte)
+{
   if ((byte & 0x80U) == 0) return 1;
   if (byte >= 0xC2U && byte <= 0xDFU) return 2;
   if ((byte & 0xF0U) == 0xE0U) return 3;
@@ -84,7 +96,8 @@ std::size_t utf8_sequence_length(unsigned char byte) {
   return 0;
 }
 
-std::optional<int> parse_unsigned_int(std::string_view text, std::size_t& index) {
+std::optional<int> parse_unsigned_int(std::string_view text, std::size_t& index)
+{
   if (index >= text.size() || text[index] < '0' || text[index] > '9') return std::nullopt;
   int value = 0;
   while (index < text.size() && text[index] >= '0' && text[index] <= '9') {
@@ -96,13 +109,15 @@ std::optional<int> parse_unsigned_int(std::string_view text, std::size_t& index)
   return value;
 }
 
-bool consume_char(std::string_view text, std::size_t& index, char expected) {
+bool consume_char(std::string_view text, std::size_t& index, char expected)
+{
   if (index >= text.size() || text[index] != expected) return false;
   ++index;
   return true;
 }
 
-bool is_shift_enter_csi_u(std::string_view sequence) {
+bool is_shift_enter_csi_u(std::string_view sequence)
+{
   if (!sequence.starts_with('[')) return false;
   auto index = std::size_t{1};
   auto const codepoint = parse_unsigned_int(sequence, index);
@@ -113,7 +128,8 @@ bool is_shift_enter_csi_u(std::string_view sequence) {
   return index + 1 == sequence.size() && (sequence[index] == 'u' || sequence[index] == '~');
 }
 
-bool is_legacy_shift_enter_sequence(std::string_view sequence) {
+bool is_legacy_shift_enter_sequence(std::string_view sequence)
+{
   if (!sequence.starts_with('[')) return false;
   auto index = std::size_t{1};
   auto const escape_code = parse_unsigned_int(sequence, index);
@@ -126,15 +142,23 @@ bool is_legacy_shift_enter_sequence(std::string_view sequence) {
   return key_code && *key_code == 13 && index + 1 == sequence.size() && sequence[index] == '~';
 }
 
-bool is_csi_final_byte(unsigned char byte) { return byte >= 0x40U && byte <= 0x7EU; }
+bool is_csi_final_byte(unsigned char byte)
+{
+  return byte >= 0x40U && byte <= 0x7EU;
+}
 
-bool is_control_string_intro(char ch) { return ch == ']' || ch == 'P' || ch == '^' || ch == '_' || ch == 'X'; }
+bool is_control_string_intro(char ch)
+{
+  return ch == ']' || ch == 'P' || ch == '^' || ch == '_' || ch == 'X';
+}
 
-bool ends_with_string_terminator(std::string_view sequence) {
+bool ends_with_string_terminator(std::string_view sequence)
+{
   return sequence.size() >= 2 && sequence[sequence.size() - 2] == '\x1b' && sequence.back() == '\\';
 }
 
-bool is_control_string_complete(std::string_view sequence) {
+bool is_control_string_complete(std::string_view sequence)
+{
   if (sequence.empty() || !is_control_string_intro(sequence.front())) return false;
   if (ends_with_string_terminator(sequence)) return true;
   return sequence.front() == ']' && sequence.find('\a') != std::string_view::npos;
@@ -142,14 +166,19 @@ bool is_control_string_complete(std::string_view sequence) {
 
 }  // namespace
 
-CursesSession::CursesSession(void* screen) : screen_(screen), active_(screen != nullptr) {}
+CursesSession::CursesSession(void* screen) : screen_(screen), active_(screen != nullptr)
+{
+}
 
 CursesSession::CursesSession(CursesSession&& other) noexcept
     : screen_(std::move(other.screen_)),
       previous_locale_(std::move(other.previous_locale_)),
-      active_(std::exchange(other.active_, false)) {}
+      active_(std::exchange(other.active_, false))
+{
+}
 
-CursesSession& CursesSession::operator=(CursesSession&& other) noexcept {
+CursesSession& CursesSession::operator=(CursesSession&& other) noexcept
+{
   if (this == &other) return *this;
   restore();
   screen_ = std::move(other.screen_);
@@ -158,9 +187,13 @@ CursesSession& CursesSession::operator=(CursesSession&& other) noexcept {
   return *this;
 }
 
-CursesSession::~CursesSession() { restore(); }
+CursesSession::~CursesSession()
+{
+  restore();
+}
 
-ava::core::Result<CursesSession> CursesSession::enter() {
+ava::core::Result<CursesSession> CursesSession::enter()
+{
   char const* current_locale = std::setlocale(LC_ALL, nullptr);
   std::string const previous_locale = current_locale == nullptr ? "C" : current_locale;
   if (std::setlocale(LC_ALL, "") == nullptr) {
@@ -207,7 +240,8 @@ ava::core::Result<CursesSession> CursesSession::enter() {
   return session;
 }
 
-void CursesSession::restore() noexcept {
+void CursesSession::restore() noexcept
+{
   if (!active_) return;
   static_cast<void>(set_term(static_cast<SCREEN*>(screen_.get())));
   set_bracketed_paste(false);
@@ -219,12 +253,14 @@ void CursesSession::restore() noexcept {
   if (!previous_locale_.empty()) static_cast<void>(std::setlocale(LC_ALL, previous_locale_.c_str()));
 }
 
-void CursesSession::ScreenDeleter::operator()(void* screen) const noexcept {
+void CursesSession::ScreenDeleter::operator()(void* screen) const noexcept
+{
   if (screen == nullptr) return;
   delscreen(static_cast<SCREEN*>(screen));
 }
 
-void erase_last_utf8_codepoint(std::string& text) {
+void erase_last_utf8_codepoint(std::string& text)
+{
   if (text.empty()) return;
   if (!is_utf8_continuation(static_cast<unsigned char>(text.back()))) {
     text.pop_back();
@@ -249,12 +285,14 @@ void erase_last_utf8_codepoint(std::string& text) {
   }
 }
 
-Key terminal_escape_sequence_key(std::string_view sequence) {
+Key terminal_escape_sequence_key(std::string_view sequence)
+{
   if (is_legacy_shift_enter_sequence(sequence) || is_shift_enter_csi_u(sequence)) return Key::ShiftEnter;
   return Key::Unknown;
 }
 
-bool terminal_escape_sequence_complete(std::string_view sequence) {
+bool terminal_escape_sequence_complete(std::string_view sequence)
+{
   if (sequence.empty()) return false;
   if (is_control_string_complete(sequence)) return true;
   if (is_control_string_intro(sequence.front())) return false;
@@ -282,18 +320,31 @@ bool terminal_escape_sequence_complete(std::string_view sequence) {
   return is_csi_final_byte(static_cast<unsigned char>(sequence.back()));
 }
 
-bool terminal_escape_sequence_should_discard(std::string_view sequence) {
+bool terminal_escape_sequence_should_discard(std::string_view sequence)
+{
   if (!terminal_escape_sequence_complete(sequence)) return false;
   if (sequence == "[200~") return false;
   return terminal_escape_sequence_key(sequence) == Key::Unknown;
 }
 
-bool terminal_is_tty() { return isatty(STDIN_FILENO) != 0 && isatty(STDOUT_FILENO) != 0; }
+bool terminal_is_tty()
+{
+  return isatty(STDIN_FILENO) != 0 && isatty(STDOUT_FILENO) != 0;
+}
 
-bool terminal_signal_received() { return g_terminal_signal != 0; }
+bool terminal_signal_received()
+{
+  return g_terminal_signal != 0;
+}
 
-int terminal_signal_number() { return g_terminal_signal; }
+int terminal_signal_number()
+{
+  return g_terminal_signal;
+}
 
-void clear_terminal_signal() { g_terminal_signal = 0; }
+void clear_terminal_signal()
+{
+  g_terminal_signal = 0;
+}
 
 }  // namespace ava::tui

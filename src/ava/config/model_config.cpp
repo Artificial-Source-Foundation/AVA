@@ -19,7 +19,8 @@ namespace {
 
 constexpr std::size_t max_model_config_bytes = 1024 * 1024;
 
-ava::core::Result<std::string> read_text(std::filesystem::path const& path) {
+ava::core::Result<std::string> read_text(std::filesystem::path const& path)
+{
   std::error_code status_error;
   if (!std::filesystem::is_regular_file(path, status_error)) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "model config is not a regular file");
@@ -62,18 +63,21 @@ ava::core::Result<std::string> read_text(std::filesystem::path const& path) {
   return content;
 }
 
-std::string family_from_model_id(std::string_view model_id) {
+std::string family_from_model_id(std::string_view model_id)
+{
   if (model_id == "gpt-5" || model_id.starts_with("gpt-5.") || model_id.starts_with("gpt-5-")) return "gpt-5";
   auto const dash = model_id.find_last_of('-');
   if (dash == std::string_view::npos) return std::string(model_id);
   return std::string(model_id.substr(0, dash));
 }
 
-bool is_number_delimiter(char ch) {
+bool is_number_delimiter(char ch)
+{
   return ch == ',' || ch == '}' || ch == ']' || std::isspace(static_cast<unsigned char>(ch)) != 0;
 }
 
-std::optional<long double> number_field(std::string_view object, std::string_view key) {
+std::optional<long double> number_field(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start || *start >= object.size()) return std::nullopt;
 
@@ -104,14 +108,16 @@ std::optional<long double> number_field(std::string_view object, std::string_vie
   }
 }
 
-std::optional<long double> first_number_field(std::string_view object, std::initializer_list<std::string_view> keys) {
+std::optional<long double> first_number_field(std::string_view object, std::initializer_list<std::string_view> keys)
+{
   for (auto const key : keys) {
     if (auto const value = number_field(object, key); value && *value >= 0.0L) return value;
   }
   return std::nullopt;
 }
 
-std::optional<long long> positive_integer_field(std::string_view object, std::initializer_list<std::string_view> keys) {
+std::optional<long long> positive_integer_field(std::string_view object, std::initializer_list<std::string_view> keys)
+{
   for (auto const key : keys) {
     auto const value = ava::core::json::integer_field(object, key);
     if (value && *value > 0) return value;
@@ -119,7 +125,8 @@ std::optional<long long> positive_integer_field(std::string_view object, std::in
   return std::nullopt;
 }
 
-std::optional<bool> bool_field(std::string_view object, std::initializer_list<std::string_view> keys) {
+std::optional<bool> bool_field(std::string_view object, std::initializer_list<std::string_view> keys)
+{
   for (auto const key : keys) {
     auto const start = ava::core::json::field_value_start(object, key);
     if (!start) continue;
@@ -130,14 +137,16 @@ std::optional<bool> bool_field(std::string_view object, std::initializer_list<st
   return std::nullopt;
 }
 
-bool has_any_field(std::string_view object, std::initializer_list<std::string_view> keys) {
+bool has_any_field(std::string_view object, std::initializer_list<std::string_view> keys)
+{
   for (auto const key : keys) {
     if (ava::core::json::field_value_start(object, key)) return true;
   }
   return false;
 }
 
-std::vector<std::string> string_array_field(std::string_view object, std::initializer_list<std::string_view> keys) {
+std::vector<std::string> string_array_field(std::string_view object, std::initializer_list<std::string_view> keys)
+{
   for (auto const key : keys) {
     auto const start = ava::core::json::field_value_start(object, key);
     if (!start || *start >= object.size() || object[*start] != '[') continue;
@@ -194,7 +203,8 @@ std::vector<std::string> string_array_field(std::string_view object, std::initia
   return {};
 }
 
-std::optional<ModelPricing> pricing_from_object(std::string_view object) {
+std::optional<ModelPricing> pricing_from_object(std::string_view object)
+{
   ModelPricing pricing;
   pricing.input_per_million = first_number_field(object, {"input_per_million", "input_usd_per_1m"});
   pricing.output_per_million = first_number_field(object, {"output_per_million", "output_usd_per_1m"});
@@ -208,20 +218,26 @@ std::optional<ModelPricing> pricing_from_object(std::string_view object) {
   return pricing;
 }
 
-std::optional<ModelPricing> model_pricing_from_item(std::string_view item) {
+std::optional<ModelPricing> model_pricing_from_item(std::string_view item)
+{
   if (auto const object = ava::core::json::object_field(item, "pricing")) return pricing_from_object(*object);
   return pricing_from_object(item);
 }
 
-long double millionths(long long tokens, long double price_per_million) {
+long double millionths(long long tokens, long double price_per_million)
+{
   return (static_cast<long double>(tokens) * price_per_million) / 1'000'000.0L;
 }
 
 }  // namespace
 
-ModelRegistry builtin_model_registry() { return builtin_model_profiles(); }
+ModelRegistry builtin_model_registry()
+{
+  return builtin_model_profiles();
+}
 
-ModelRegistry parse_model_registry(std::string_view content) {
+ModelRegistry parse_model_registry(std::string_view content)
+{
   auto registry = builtin_model_registry();
   if (auto provider = ava::core::json::string_field(content, "default_provider"))
     registry.default_provider_id = *provider;
@@ -290,7 +306,8 @@ ModelRegistry parse_model_registry(std::string_view content) {
   return registry;
 }
 
-ava::core::Result<ModelRegistry> load_model_registry(XdgPaths const& paths) {
+ava::core::Result<ModelRegistry> load_model_registry(XdgPaths const& paths)
+{
   if (!std::filesystem::exists(paths.models_file)) return builtin_model_registry();
   auto content = read_text(paths.models_file);
   if (!content) return std::unexpected(content.error());
@@ -298,7 +315,8 @@ ava::core::Result<ModelRegistry> load_model_registry(XdgPaths const& paths) {
 }
 
 std::optional<ModelInfo> find_model(ModelRegistry const& registry, std::string_view provider_id,
-                                    std::string_view model_id) {
+                                    std::string_view model_id)
+{
   for (auto it = registry.models.rbegin(); it != registry.models.rend(); ++it) {
     auto const& model = *it;
     if (model.provider_id == provider_id && model.model_id == model_id) return model;
@@ -306,7 +324,8 @@ std::optional<ModelInfo> find_model(ModelRegistry const& registry, std::string_v
   return std::nullopt;
 }
 
-ModelInfo select_default_model(ModelRegistry const& registry) {
+ModelInfo select_default_model(ModelRegistry const& registry)
+{
   if (auto model = find_model(registry, registry.default_provider_id, registry.default_model_id)) return *model;
   return ModelInfo{
       .provider_id = registry.default_provider_id,
@@ -329,7 +348,8 @@ ModelInfo select_default_model(ModelRegistry const& registry) {
   };
 }
 
-std::optional<long double> usage_cost_usd(ModelPricing const& pricing, ava::provider::TokenUsage const& usage) {
+std::optional<long double> usage_cost_usd(ModelPricing const& pricing, ava::provider::TokenUsage const& usage)
+{
   if (usage.estimated) return std::nullopt;
 
   long long const input_tokens = usage.input_tokens.value_or(0);

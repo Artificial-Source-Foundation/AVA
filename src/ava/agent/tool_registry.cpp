@@ -10,7 +10,8 @@
 namespace ava::agent {
 namespace {
 
-std::optional<std::string> tool_name_from_schema(std::string_view schema_json) {
+std::optional<std::string> tool_name_from_schema(std::string_view schema_json)
+{
   if (auto name = ava::core::json::string_field(schema_json, "name")) return name;
   if (auto function = ava::core::json::object_field(schema_json, "function")) {
     return ava::core::json::string_field(*function, "name");
@@ -20,7 +21,8 @@ std::optional<std::string> tool_name_from_schema(std::string_view schema_json) {
 
 }  // namespace
 
-std::string_view to_string(ToolSource source) noexcept {
+std::string_view to_string(ToolSource source) noexcept
+{
   switch (source) {
     case ToolSource::Builtin:
       return "builtin";
@@ -32,7 +34,8 @@ std::string_view to_string(ToolSource source) noexcept {
   return "unknown";
 }
 
-ToolMetadata RegisteredToolMetadata::view() const noexcept {
+ToolMetadata RegisteredToolMetadata::view() const noexcept
+{
   return ToolMetadata{.name = name,
                       .description = description,
                       .schema_json = schema_json,
@@ -45,7 +48,8 @@ ToolMetadata RegisteredToolMetadata::view() const noexcept {
                                                 : std::nullopt};
 }
 
-RegisteredToolMetadata own_tool_metadata(ToolMetadata const& metadata) {
+RegisteredToolMetadata own_tool_metadata(ToolMetadata const& metadata)
+{
   return RegisteredToolMetadata{
       .name = std::string(metadata.name),
       .description = std::string(metadata.description),
@@ -59,7 +63,8 @@ RegisteredToolMetadata own_tool_metadata(ToolMetadata const& metadata) {
                                 : std::nullopt};
 }
 
-ava::core::VoidResult ToolRegistry::register_tool(RegisteredTool tool) {
+ava::core::VoidResult ToolRegistry::register_tool(RegisteredTool tool)
+{
   if (tool.metadata.name.empty()) {
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "tool registry entry requires a name"));
@@ -103,25 +108,29 @@ ava::core::VoidResult ToolRegistry::register_tool(RegisteredTool tool) {
   return {};
 }
 
-RegisteredTool const* ToolRegistry::find(std::string_view name) const noexcept {
+RegisteredTool const* ToolRegistry::find(std::string_view name) const noexcept
+{
   auto const it =
       std::ranges::find_if(tools_, [name](RegisteredTool const& tool) { return tool.metadata.name == name; });
   if (it == tools_.end()) return nullptr;
   return &*it;
 }
 
-std::span<RegisteredTool const> ToolRegistry::entries() const noexcept {
+std::span<RegisteredTool const> ToolRegistry::entries() const noexcept
+{
   return std::span<RegisteredTool const>(tools_.data(), tools_.size());
 }
 
-std::vector<ToolMetadata> ToolRegistry::metadata() const {
+std::vector<ToolMetadata> ToolRegistry::metadata() const
+{
   std::vector<ToolMetadata> result;
   result.reserve(tools_.size());
   for (auto const& tool : tools_) result.push_back(tool.metadata.view());
   return result;
 }
 
-std::vector<std::string> ToolRegistry::tool_schemas_json(ava::tools::ToolContext const& context) const {
+std::vector<std::string> ToolRegistry::tool_schemas_json(ava::tools::ToolContext const& context) const
+{
   std::vector<std::string> schemas;
   schemas.reserve(tools_.size());
   for (auto const& tool : tools_) {

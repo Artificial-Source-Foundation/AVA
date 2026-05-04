@@ -27,20 +27,23 @@ struct PermissionDiffPreview {
 };
 
 std::string effective_tool_name(ToolContext const& context, ava::permissions::Operation operation,
-                                std::string_view tool_name) {
+                                std::string_view tool_name)
+{
   if (!tool_name.empty()) return std::string(tool_name);
   if (!context.permission_tool_name.empty()) return context.permission_tool_name;
   return ava::permissions::to_string(operation);
 }
 
-ava::core::VoidResult record_permission_audit(ToolContext const& context, PermissionAuditEvent const& event) {
+ava::core::VoidResult record_permission_audit(ToolContext const& context, PermissionAuditEvent const& event)
+{
   if (!context.permission_audit_sink) return {};
   return context.permission_audit_sink(event);
 }
 
 PermissionAuditEvent audit_event(ToolContext const& context, ava::permissions::Operation operation,
                                  std::string tool_name, ava::permissions::PermissionDecision const& decision,
-                                 std::filesystem::path const& target_path, std::string_view command) {
+                                 std::filesystem::path const& target_path, std::string_view command)
+{
   return PermissionAuditEvent{.operation = operation,
                               .mode = context.mode,
                               .tool_name = std::move(tool_name),
@@ -55,7 +58,8 @@ PermissionAuditEvent audit_event(ToolContext const& context, ava::permissions::O
 ava::core::Error permission_denied_error(std::string_view error_message,
                                          ava::permissions::PermissionDecision const& decision,
                                          std::filesystem::path const& target_path, std::string_view command,
-                                         std::string_view resolution_context) {
+                                         std::string_view resolution_context)
+{
   auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, std::string(error_message));
   error.with_context("action", ava::permissions::to_string(decision.action));
   error.with_context("reason", decision.reason);
@@ -70,9 +74,13 @@ ava::core::Error permission_denied_error(std::string_view error_message,
   return error;
 }
 
-bool is_canceled(ToolContext const& context) { return context.cancel_requested && context.cancel_requested(); }
+bool is_canceled(ToolContext const& context)
+{
+  return context.cancel_requested && context.cancel_requested();
+}
 
-ava::core::Error canceled_error(std::string_view operation, std::filesystem::path const& path) {
+ava::core::Error canceled_error(std::string_view operation, std::filesystem::path const& path)
+{
   auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled");
   error.with_context("operation", std::string(operation));
   if (!path.empty()) error.with_context("path", path.string());
@@ -80,15 +88,20 @@ ava::core::Error canceled_error(std::string_view operation, std::filesystem::pat
 }
 
 ava::core::VoidResult check_canceled(ToolContext const& context, std::string_view operation,
-                                     std::filesystem::path const& path = {}) {
+                                     std::filesystem::path const& path = {})
+{
   if (!is_canceled(context)) return {};
   return std::unexpected(canceled_error(operation, path));
 }
 
-bool is_canceled_error(ava::core::Error const& error) { return error.message().find("canceled") != std::string::npos; }
+bool is_canceled_error(ava::core::Error const& error)
+{
+  return error.message().find("canceled") != std::string::npos;
+}
 
 ava::core::Result<std::string> read_all_text(ToolContext const& context, std::filesystem::path const& path,
-                                             std::string_view operation) {
+                                             std::string_view operation)
+{
   if (auto canceled = check_canceled(context, operation, path); !canceled) {
     return std::unexpected(std::move(canceled.error()));
   }
@@ -130,7 +143,8 @@ ava::core::Result<std::string> read_all_text(ToolContext const& context, std::fi
 }
 
 ava::core::Result<TextOutput> read_head_text(ToolContext const& context, std::filesystem::path const& path,
-                                             std::size_t max_bytes) {
+                                             std::size_t max_bytes)
+{
   if (auto canceled = check_canceled(context, "read_file", path); !canceled) {
     return std::unexpected(std::move(canceled.error()));
   }
@@ -171,13 +185,15 @@ ava::core::Result<TextOutput> read_head_text(ToolContext const& context, std::fi
   return output;
 }
 
-std::filesystem::path write_parent_path(std::filesystem::path const& path) {
+std::filesystem::path write_parent_path(std::filesystem::path const& path)
+{
   auto const parent = path.parent_path();
   if (!parent.empty()) return parent;
   return ".";
 }
 
-std::filesystem::path unique_write_temp_path(std::filesystem::path const& target) {
+std::filesystem::path unique_write_temp_path(std::filesystem::path const& target)
+{
   auto const parent = write_parent_path(target);
   auto const filename = target.filename().empty() ? std::string("file") : target.filename().string();
   auto const stem = "." + filename + ".ava-write-";
@@ -189,7 +205,8 @@ std::filesystem::path unique_write_temp_path(std::filesystem::path const& target
   return parent / (stem + ava::core::make_id("tmp") + ".tmp");
 }
 
-ava::core::Error io_error(std::string message, std::filesystem::path const& path, std::string cause) {
+ava::core::Error io_error(std::string message, std::filesystem::path const& path, std::string cause)
+{
   auto error = ava::core::Error(ava::core::ErrorCategory::Io, std::move(message));
   error.with_context("path", path.string());
   if (!cause.empty()) error.with_context("cause", std::move(cause));
@@ -197,7 +214,8 @@ ava::core::Error io_error(std::string message, std::filesystem::path const& path
 }
 
 ava::core::Error staged_io_error(std::string message, std::filesystem::path const& target_path,
-                                 std::filesystem::path const& temp_path, std::string cause) {
+                                 std::filesystem::path const& temp_path, std::string cause)
+{
   auto error = ava::core::Error(ava::core::ErrorCategory::Io, std::move(message));
   error.with_context("path", target_path.string());
   error.with_context("temp_path", temp_path.string());
@@ -205,19 +223,22 @@ ava::core::Error staged_io_error(std::string message, std::filesystem::path cons
   return error;
 }
 
-std::string errno_cause(int value) {
+std::string errno_cause(int value)
+{
   if (value == 0) return "stream operation failed";
   return std::generic_category().message(value);
 }
 
-std::shared_ptr<MutationQueue> effective_mutation_queue(ToolContext const& context) {
+std::shared_ptr<MutationQueue> effective_mutation_queue(ToolContext const& context)
+{
   if (context.mutation_queue) return context.mutation_queue;
   return default_mutation_queue();
 }
 
 ava::core::Result<std::optional<PermissionDiffPreview>> write_permission_diff_preview(ToolContext const& context,
                                                                                       std::filesystem::path const& path,
-                                                                                      std::string_view content) {
+                                                                                      std::string_view content)
+{
   if (auto canceled = check_canceled(context, "write_file_permission_preview", path); !canceled) {
     return std::unexpected(std::move(canceled.error()));
   }
@@ -251,7 +272,8 @@ ava::core::Result<std::optional<PermissionDiffPreview>> write_permission_diff_pr
 }
 
 ava::core::Result<FileMutationResult> write_file_unlocked(ToolContext const& context, std::filesystem::path const& path,
-                                                          std::string_view content) {
+                                                          std::string_view content)
+{
   if (auto canceled = check_canceled(context, "write_file", path); !canceled) {
     return std::unexpected(std::move(canceled.error()));
   }
@@ -357,7 +379,8 @@ ava::core::Result<FileMutationResult> write_file_unlocked(ToolContext const& con
 ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permissions::Operation operation,
                                         std::filesystem::path const& target_path, std::string_view command,
                                         std::string_view tool_name, std::string_view error_message,
-                                        std::string_view diff_preview, bool diff_truncated) {
+                                        std::string_view diff_preview, bool diff_truncated)
+{
   auto const request_tool_name = effective_tool_name(context, operation, tool_name);
   auto const decision = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = operation,
@@ -419,7 +442,8 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   return std::unexpected(permission_denied_error(error_message, decision, target_path, command, resolution_context));
 }
 
-std::string permission_audit_data_json(PermissionAuditEvent const& event) {
+std::string permission_audit_data_json(PermissionAuditEvent const& event)
+{
   std::string data = "{\"operation\":\"" + ava::core::json::escape(ava::permissions::to_string(event.operation)) +
                      "\",\"mode\":\"" + ava::core::json::escape(ava::agent::to_string(event.mode)) +
                      "\",\"tool_name\":\"" + ava::core::json::escape(event.tool_name) + "\",\"action\":\"" +
@@ -443,7 +467,8 @@ std::string permission_audit_data_json(PermissionAuditEvent const& event) {
 }
 
 ava::core::Result<TextOutput> read_file(ToolContext const& context, std::filesystem::path const& path,
-                                        ReadOptions options) {
+                                        ReadOptions options)
+{
   if (auto canceled = check_canceled(context, "read_file", path); !canceled) {
     return std::unexpected(std::move(canceled.error()));
   }
@@ -462,7 +487,8 @@ ava::core::Result<TextOutput> read_file(ToolContext const& context, std::filesys
 }
 
 ava::core::Result<FileMutationResult> write_file(ToolContext const& context, std::filesystem::path const& path,
-                                                 std::string_view content, WriteOptions options) {
+                                                 std::string_view content, WriteOptions options)
+{
   if (auto canceled = check_canceled(context, "write_file", path); !canceled) {
     return std::unexpected(std::move(canceled.error()));
   }
@@ -489,7 +515,8 @@ ava::core::Result<FileMutationResult> write_file(ToolContext const& context, std
 }
 
 ava::core::Result<FileMutationResult> edit_file(ToolContext const& context, std::filesystem::path const& path,
-                                                std::string_view old_text, std::string_view new_text) {
+                                                std::string_view old_text, std::string_view new_text)
+{
   if (old_text.empty()) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "old_text must not be empty");
     error.with_context("path", path.string());
@@ -570,7 +597,8 @@ ava::core::Result<FileMutationResult> edit_file(ToolContext const& context, std:
 }
 
 ava::core::VoidResult replace_file_with_staged_file(std::filesystem::path const& staged_path,
-                                                    std::filesystem::path const& target_path) {
+                                                    std::filesystem::path const& target_path)
+{
   std::error_code rename_error;
   std::filesystem::rename(staged_path, target_path, rename_error);
   if (!rename_error) return {};
@@ -582,7 +610,8 @@ ava::core::VoidResult replace_file_with_staged_file(std::filesystem::path const&
   return std::unexpected(std::move(error));
 }
 
-void remove_staged_file_best_effort(std::filesystem::path const& staged_path) {
+void remove_staged_file_best_effort(std::filesystem::path const& staged_path)
+{
   std::error_code remove_error;
   std::filesystem::remove(staged_path, remove_error);
 }

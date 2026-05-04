@@ -10,39 +10,46 @@
 namespace ava::agent {
 namespace {
 
-bool has_json_value_terminator(std::string_view object, std::size_t offset) {
+bool has_json_value_terminator(std::string_view object, std::size_t offset)
+{
   return offset >= object.size() || object[offset] == ',' || object[offset] == '}' || object[offset] == ']' ||
          object[offset] == ' ' || object[offset] == '\t' || object[offset] == '\n' || object[offset] == '\r';
 }
 
-bool bool_field_is_true(std::string_view object, std::string_view key) {
+bool bool_field_is_true(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   return start && object.substr(*start, 4) == "true" && has_json_value_terminator(object, *start + 4);
 }
 
-std::optional<std::size_t> optional_size_field(std::string_view object, std::string_view key) {
+std::optional<std::size_t> optional_size_field(std::string_view object, std::string_view key)
+{
   auto const value = ava::core::json::integer_field(object, key);
   if (!value || *value < 0) return std::nullopt;
   return static_cast<std::size_t>(*value);
 }
 
-void add_changed_path(ToolResultPayload& payload, std::string path) {
+void add_changed_path(ToolResultPayload& payload, std::string path)
+{
   if (path.empty()) return;
   if (std::ranges::find(payload.changed_paths, path) == payload.changed_paths.end()) {
     payload.changed_paths.push_back(std::move(path));
   }
 }
 
-void assign_size_field(std::optional<std::size_t>& target, std::string_view object, std::string_view key) {
+void assign_size_field(std::optional<std::size_t>& target, std::string_view object, std::string_view key)
+{
   if (auto value = optional_size_field(object, key)) target = *value;
 }
 
-bool has_error_fields(ToolResultPayload const& payload) {
+bool has_error_fields(ToolResultPayload const& payload)
+{
   return !payload.error_category.empty() || !payload.error_code.empty() || !payload.error_message.empty() ||
          !payload.error_details.empty();
 }
 
-void append_string_field(std::string& out, std::string_view key, std::string_view value) {
+void append_string_field(std::string& out, std::string_view key, std::string_view value)
+{
   if (value.empty()) return;
   out += ",\"";
   out += key;
@@ -51,7 +58,8 @@ void append_string_field(std::string& out, std::string_view key, std::string_vie
   out += '"';
 }
 
-void append_required_string_field(std::string& out, std::string_view key, std::string_view value) {
+void append_required_string_field(std::string& out, std::string_view key, std::string_view value)
+{
   out += ",\"";
   out += key;
   out += "\":\"";
@@ -59,14 +67,16 @@ void append_required_string_field(std::string& out, std::string_view key, std::s
   out += '"';
 }
 
-void append_bool_field(std::string& out, std::string_view key, bool value) {
+void append_bool_field(std::string& out, std::string_view key, bool value)
+{
   out += ",\"";
   out += key;
   out += "\":";
   out += value ? "true" : "false";
 }
 
-void append_optional_number_field(std::string& out, std::string_view key, std::optional<std::size_t> const& value) {
+void append_optional_number_field(std::string& out, std::string_view key, std::optional<std::size_t> const& value)
+{
   if (!value) return;
   out += ",\"";
   out += key;
@@ -74,7 +84,8 @@ void append_optional_number_field(std::string& out, std::string_view key, std::o
   out += std::to_string(*value);
 }
 
-void append_string_array_field(std::string& out, std::string_view key, std::vector<std::string> const& values) {
+void append_string_array_field(std::string& out, std::string_view key, std::vector<std::string> const& values)
+{
   if (values.empty()) return;
   out += ",\"";
   out += key;
@@ -88,7 +99,8 @@ void append_string_array_field(std::string& out, std::string_view key, std::vect
   out += ']';
 }
 
-void append_content_field(std::string& out, ToolResultPayload const& payload) {
+void append_content_field(std::string& out, ToolResultPayload const& payload)
+{
   out += ",\"content\":";
   if (payload.content_type == "application/json" && ava::core::json::is_valid_object(payload.content)) {
     out += payload.content;
@@ -100,7 +112,8 @@ void append_content_field(std::string& out, ToolResultPayload const& payload) {
 }
 
 ToolResultPayload merge_payload_defaults(ToolResultPayload payload, std::string_view tool_name, bool success,
-                                         std::string_view result_text) {
+                                         std::string_view result_text)
+{
   auto const explicit_status = payload.status;
   auto parsed = parse_tool_result_payload(tool_name, success, result_text);
   if (payload.summary.empty()) payload.summary = std::move(parsed.summary);
@@ -128,7 +141,8 @@ ToolResultPayload merge_payload_defaults(ToolResultPayload payload, std::string_
 
 }  // namespace
 
-std::string_view to_string(ToolResultStatus status) noexcept {
+std::string_view to_string(ToolResultStatus status) noexcept
+{
   switch (status) {
     case ToolResultStatus::Success:
       return "success";
@@ -140,7 +154,8 @@ std::string_view to_string(ToolResultStatus status) noexcept {
   return "error";
 }
 
-ToolResultPayload parse_tool_result_payload(std::string_view tool_name, bool success, std::string_view result_text) {
+ToolResultPayload parse_tool_result_payload(std::string_view tool_name, bool success, std::string_view result_text)
+{
   ToolResultPayload payload;
   payload.status = success ? ToolResultStatus::Success : ToolResultStatus::Error;
   if (bool_field_is_true(result_text, "canceled")) payload.status = ToolResultStatus::Canceled;
@@ -184,12 +199,14 @@ ToolResultPayload parse_tool_result_payload(std::string_view tool_name, bool suc
   return payload;
 }
 
-ToolDispatchResult with_tool_result_payload(ToolDispatchResult result) {
+ToolDispatchResult with_tool_result_payload(ToolDispatchResult result)
+{
   result.payload = merge_payload_defaults(std::move(result.payload), result.name, result.success, result.result_text);
   return result;
 }
 
-std::string serialize_tool_result_payload_json(ToolDispatchResult const& result) {
+std::string serialize_tool_result_payload_json(ToolDispatchResult const& result)
+{
   auto const payload = merge_payload_defaults(result.payload, result.name, result.success, result.result_text);
   std::string out = "{\"schema_version\":1";
   append_required_string_field(out, "call_id", result.call_id);

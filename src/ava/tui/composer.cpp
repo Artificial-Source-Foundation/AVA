@@ -64,7 +64,8 @@ struct CursorPlacement {
   std::size_t column = 0;
 };
 
-void initialize_color_pairs() {
+void initialize_color_pairs()
+{
   static bool initialized = false;
   if (initialized || !has_colors()) return;
   initialized = true;
@@ -92,7 +93,8 @@ void initialize_color_pairs() {
   static_cast<void>(init_pair(kPairComposerAccent, COLOR_CYAN, composer_bg));
 }
 
-short color_pair_for(CursesStyle const& style) {
+short color_pair_for(CursesStyle const& style)
+{
   if (style.background == BackgroundRole::Composer) {
     switch (style.color) {
       case ColorRole::Muted:
@@ -127,12 +129,14 @@ short color_pair_for(CursesStyle const& style) {
   return kPairText;
 }
 
-attr_t curses_attributes(CursesStyle const& style) {
+attr_t curses_attributes(CursesStyle const& style)
+{
   if (!has_colors()) return style.attributes;
   return style.attributes | COLOR_PAIR(color_pair_for(style));
 }
 
-bool parse_sgr_codes(std::string_view sequence, std::vector<int>& codes) {
+bool parse_sgr_codes(std::string_view sequence, std::vector<int>& codes)
+{
   codes.clear();
   if (sequence.empty()) return false;
   std::size_t start = 0;
@@ -154,7 +158,8 @@ bool parse_sgr_codes(std::string_view sequence, std::vector<int>& codes) {
   return true;
 }
 
-void apply_sgr_codes(std::vector<int> const& codes, CursesStyle& style) {
+void apply_sgr_codes(std::vector<int> const& codes, CursesStyle& style)
+{
   if (codes.empty()) {
     style = CursesStyle{};
     return;
@@ -206,13 +211,15 @@ void apply_sgr_codes(std::vector<int> const& codes, CursesStyle& style) {
   }
 }
 
-void add_text_chunk(std::string_view text, CursesStyle style) {
+void add_text_chunk(std::string_view text, CursesStyle style)
+{
   if (text.empty()) return;
   attrset(curses_attributes(style));
   static_cast<void>(addnstr(text.data(), static_cast<int>(std::min<std::size_t>(text.size(), INT_MAX))));
 }
 
-void draw_styled_line(std::string_view line) {
+void draw_styled_line(std::string_view line)
+{
   CursesStyle style{.attributes = A_NORMAL, .color = ColorRole::Text, .background = BackgroundRole::Screen};
   std::vector<int> codes;
   std::size_t chunk_start = 0;
@@ -240,7 +247,8 @@ void draw_styled_line(std::string_view line) {
 }
 
 CursorPlacement input_cursor_placement(ComposerSnapshot const& snapshot, std::size_t rendered_line_count,
-                                       std::size_t width) {
+                                       std::size_t width)
+{
   auto const input_lines = detail::input_render_lines(snapshot.input);
   auto const composer_lines = detail::composer_block_line_count(snapshot, rendered_line_count);
   auto const layout = detail::composer_input_layout(input_lines.size(), composer_lines, snapshot.draft_scroll_offset);
@@ -259,17 +267,20 @@ CursorPlacement input_cursor_placement(ComposerSnapshot const& snapshot, std::si
 constexpr auto kSidebarWidth = std::size_t{38};
 constexpr auto kSidebarMinTerminalWidth = std::size_t{112};
 
-bool sidebar_visible(ComposerSnapshot const& snapshot, std::size_t width) {
+bool sidebar_visible(ComposerSnapshot const& snapshot, std::size_t width)
+{
   return snapshot.sidebar.has_value() && width >= kSidebarMinTerminalWidth;
 }
 
-std::size_t main_width_for(ComposerSnapshot const& snapshot, std::size_t width) {
+std::size_t main_width_for(ComposerSnapshot const& snapshot, std::size_t width)
+{
   if (!sidebar_visible(snapshot, width)) return width;
   auto const sidebar_width = std::min<std::size_t>(kSidebarWidth, width / 3);
   return width > sidebar_width + 1 ? width - sidebar_width - 1 : width;
 }
 
-std::string status_marker(ToolTimelineStatus status) {
+std::string status_marker(ToolTimelineStatus status)
+{
   switch (status) {
     case ToolTimelineStatus::Running:
       return std::string(kSgrWarning) + "[~]" + std::string(kSgrReset);
@@ -281,11 +292,13 @@ std::string status_marker(ToolTimelineStatus status) {
   return std::string(kSgrDim) + "[?]" + std::string(kSgrReset);
 }
 
-void push_sidebar_line(std::vector<std::string>& lines, std::string line, std::size_t width) {
+void push_sidebar_line(std::vector<std::string>& lines, std::string line, std::size_t width)
+{
   lines.push_back(detail::fit_line_preserving_sgr(" " + std::move(line), width));
 }
 
-std::vector<std::string> render_sidebar(SidebarSnapshot const& sidebar, std::size_t width, std::size_t height) {
+std::vector<std::string> render_sidebar(SidebarSnapshot const& sidebar, std::size_t width, std::size_t height)
+{
   std::vector<std::string> lines;
   lines.reserve(height);
   push_sidebar_line(lines, std::string(kSgrBold) + std::string(kSgrAccent) + "AVA" + std::string(kSgrReset), width);
@@ -357,32 +370,37 @@ std::vector<std::string> render_sidebar(SidebarSnapshot const& sidebar, std::siz
   return lines;
 }
 
-std::vector<std::string> render_composer_main(ComposerSnapshot snapshot, std::size_t width, std::size_t height) {
+std::vector<std::string> render_composer_main(ComposerSnapshot snapshot, std::size_t width, std::size_t height)
+{
   snapshot.width = width;
   snapshot.height = height;
   snapshot.sidebar = std::nullopt;
   return render_composer(snapshot);
 }
 
-std::string pad_line_to_width(std::string line, std::size_t width) {
+std::string pad_line_to_width(std::string line, std::size_t width)
+{
   auto fitted = detail::fit_line_preserving_sgr(std::move(line), width);
   auto const columns = detail::terminal_text_columns(fitted);
   if (columns < width) fitted.append(width - columns, ' ');
   return fitted;
 }
 
-std::size_t modal_width_for(std::size_t width) {
+std::size_t modal_width_for(std::size_t width)
+{
   if (width < 48) return width;
   return std::min<std::size_t>(76, std::max<std::size_t>(44, (width * 4) / 5));
 }
 
-std::size_t modal_height_for(std::size_t height) {
+std::size_t modal_height_for(std::size_t height)
+{
   if (height < 10) return height;
   return std::min<std::size_t>(18, height > 4 ? height - 4 : height);
 }
 
 std::vector<std::string> overlay_question_modal(std::vector<std::string> lines, QuestionPromptView const& prompt,
-                                                std::size_t width, std::size_t height) {
+                                                std::size_t width, std::size_t height)
+{
   while (lines.size() < height) lines.emplace_back();
   auto const modal_width = std::min(modal_width_for(width), width);
   auto const modal_height = std::min(modal_height_for(height), height);
@@ -397,7 +415,8 @@ std::vector<std::string> overlay_question_modal(std::vector<std::string> lines, 
 }
 
 std::vector<std::string> render_queued_message_lines(ComposerSnapshot const& snapshot, std::size_t width,
-                                                     std::size_t max_lines) {
+                                                     std::size_t max_lines)
+{
   std::vector<std::string> lines;
   if (max_lines == 0 || snapshot.queued_messages.empty()) return lines;
 
@@ -422,7 +441,8 @@ std::vector<std::string> render_queued_message_lines(ComposerSnapshot const& sna
 
 }  // namespace
 
-std::vector<std::string> render_composer(ComposerSnapshot const& snapshot) {
+std::vector<std::string> render_composer(ComposerSnapshot const& snapshot)
+{
   auto const width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
   auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
   if (snapshot.question_prompt && snapshot.question_prompt->modal) {
@@ -505,12 +525,14 @@ std::vector<std::string> render_composer(ComposerSnapshot const& snapshot) {
   return lines;
 }
 
-std::size_t composer_main_width(ComposerSnapshot const& snapshot) {
+std::size_t composer_main_width(ComposerSnapshot const& snapshot)
+{
   auto const width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
   return main_width_for(snapshot, width);
 }
 
-bool draw_screen(ComposerSnapshot const& snapshot) {
+bool draw_screen(ComposerSnapshot const& snapshot)
+{
   initialize_color_pairs();
   if (has_colors()) {
     static_cast<void>(

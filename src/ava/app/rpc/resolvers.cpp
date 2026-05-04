@@ -9,17 +9,22 @@
 namespace ava::app::rpc {
 namespace {
 
-ava::core::Error no_pending_request_error(std::string_view request_id) {
+ava::core::Error no_pending_request_error(std::string_view request_id)
+{
   auto error = invalid_rpc("RPC resolver reply has no matching pending request");
   error.with_context("request_id", std::string(request_id));
   return error;
 }
 
-std::string next_resolver_request_id(std::string_view prefix) { return ava::core::make_id(prefix); }
+std::string next_resolver_request_id(std::string_view prefix)
+{
+  return ava::core::make_id(prefix);
+}
 
 }  // namespace
 
-bool cancel_pending_resolvers(PendingResolverState& pending_state) {
+bool cancel_pending_resolvers(PendingResolverState& pending_state)
+{
   std::lock_guard lock(pending_state.mutex);
   bool const had_pending = !pending_state.permission_requests.empty() || !pending_state.question_requests.empty();
   for (auto& [request_id, request] : pending_state.permission_requests) {
@@ -41,7 +46,8 @@ bool cancel_pending_resolvers(PendingResolverState& pending_state) {
 
 ava::permissions::PermissionResolver make_rpc_permission_resolver(
     PendingResolverState& pending_state, RpcOutput& output, RpcRunState& run_state, RuntimeSession const& session,
-    std::mutex& session_mutex, ava::permissions::PermissionResolver policy_resolver, std::string prompt_request_id) {
+    std::mutex& session_mutex, ava::permissions::PermissionResolver policy_resolver, std::string prompt_request_id)
+{
   return [&pending_state, &output, &run_state, &session, &session_mutex, policy_resolver = std::move(policy_resolver),
           prompt_request_id = std::move(prompt_request_id)](ava::permissions::PermissionPrompt const& prompt)
              -> ava::core::Result<ava::permissions::PermissionResolution> {
@@ -90,7 +96,8 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(
 
 ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pending_state, RpcOutput& output,
                                                         RpcRunState& run_state, RuntimeSession const& session,
-                                                        std::mutex& session_mutex, std::string prompt_request_id) {
+                                                        std::mutex& session_mutex, std::string prompt_request_id)
+{
   return
       [&pending_state, &output, &run_state, &session, &session_mutex, prompt_request_id = std::move(prompt_request_id)](
           ava::agent::QuestionPrompt const& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
@@ -135,7 +142,8 @@ ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pe
 }
 
 ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_state, std::string_view request_id,
-                                               std::string_view correlation_id, std::string_view decision) {
+                                               std::string_view correlation_id, std::string_view decision)
+{
   ava::permissions::PermissionResolution resolution = ava::permissions::PermissionResolution::Deny;
   if (decision == "allow") {
     resolution = ava::permissions::PermissionResolution::Allow;
@@ -170,7 +178,8 @@ ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_sta
 
 ava::core::VoidResult resolve_question_reply(PendingResolverState& pending_state, std::string_view request_id,
                                              std::string_view correlation_id, std::optional<std::string> const& answer,
-                                             std::optional<std::string> const& selected) {
+                                             std::optional<std::string> const& selected)
+{
   if (answer && selected) return std::unexpected(invalid_rpc("question_reply requires answer or selected, not both"));
 
   std::shared_ptr<PendingQuestionRequest> pending;

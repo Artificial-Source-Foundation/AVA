@@ -25,7 +25,8 @@ namespace {
 
 namespace version = ava::core::version;
 
-void print_help() {
+void print_help()
+{
   std::cout << "AVA " << version::kDisplayVersion << "\n\n";
   std::cout << "Usage:\n";
   std::cout << "  ava [--help]\n";
@@ -46,23 +47,32 @@ void print_help() {
   std::cout << version::kDisplayVersion << " status: ncursesw TUI replacement on the hardened 0.2 backend.\n";
 }
 
-bool stdin_is_tty() { return isatty(STDIN_FILENO) == 1; }
+bool stdin_is_tty()
+{
+  return isatty(STDIN_FILENO) == 1;
+}
 
-bool stdout_is_tty() { return isatty(STDOUT_FILENO) == 1; }
+bool stdout_is_tty()
+{
+  return isatty(STDOUT_FILENO) == 1;
+}
 
-bool is_cli_option(std::string_view arg) {
+bool is_cli_option(std::string_view arg)
+{
   return arg == "--help" || arg == "-h" || arg == "--version" || arg == "--mode" || arg == "--session" ||
          arg == "--continue" || arg == "-c" || arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--json" ||
          arg == "--output" || arg == "--allow" || arg == "--allow-tool";
 }
 
-std::string_view exit_status_text(int status) {
+std::string_view exit_status_text(int status)
+{
   if (status == 0) return "session saved";
   if (status == 130) return "interrupted, session saved";
   return "session saved with warnings";
 }
 
-void print_exit_card(ava::app::RuntimeSession const& session, int status) {
+void print_exit_card(ava::app::RuntimeSession const& session, int status)
+{
   bool const use_color = stdout_is_tty() && std::getenv("NO_COLOR") == nullptr;
   auto const blue = use_color ? std::string_view("\x1b[38;2;77;158;246m") : std::string_view("");
   auto const muted = use_color ? std::string_view("\x1b[38;2;148;163;184m") : std::string_view("");
@@ -91,7 +101,8 @@ void print_exit_card(ava::app::RuntimeSession const& session, int status) {
 
 namespace ava::app {
 
-int run(int argc, char** argv) {
+int run(int argc, char** argv)
+{
   auto mode = ava::agent::Mode::Build;
   std::optional<std::string> requested_session_id;
   bool continue_last_session = false;

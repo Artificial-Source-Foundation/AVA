@@ -24,7 +24,8 @@ enum class Mode {
   HugeHeader,
 };
 
-ssize_t read_retry(char* data, std::size_t size) {
+ssize_t read_retry(char* data, std::size_t size)
+{
   while (true) {
     auto const bytes = read(STDIN_FILENO, data, size);
     if (bytes < 0 && errno == EINTR) continue;
@@ -32,7 +33,8 @@ ssize_t read_retry(char* data, std::size_t size) {
   }
 }
 
-std::optional<std::string> read_exact(std::size_t size) {
+std::optional<std::string> read_exact(std::size_t size)
+{
   std::string result(size, '\0');
   std::size_t offset = 0;
   while (offset < size) {
@@ -43,7 +45,8 @@ std::optional<std::string> read_exact(std::size_t size) {
   return result;
 }
 
-std::optional<std::size_t> content_length(std::string_view header) {
+std::optional<std::size_t> content_length(std::string_view header)
+{
   constexpr std::string_view key = "Content-Length:";
   auto const position = header.find(key);
   if (position == std::string_view::npos) return std::nullopt;
@@ -55,7 +58,8 @@ std::optional<std::size_t> content_length(std::string_view header) {
   return static_cast<std::size_t>(std::stoull(std::string(header.substr(index, end - index))));
 }
 
-std::optional<std::string> read_message() {
+std::optional<std::string> read_message()
+{
   std::string header;
   char ch = '\0';
   while (header.find("\r\n\r\n") == std::string::npos) {
@@ -68,12 +72,14 @@ std::optional<std::string> read_message() {
   return read_exact(*length);
 }
 
-void write_message(std::string_view body) {
+void write_message(std::string_view body)
+{
   std::cout << "Content-Length: " << body.size() << "\r\n\r\n" << body;
   std::cout.flush();
 }
 
-Mode parse_mode(int argc, char** argv) {
+Mode parse_mode(int argc, char** argv)
+{
   for (int index = 1; index < argc; ++index) {
     if (std::strcmp(argv[index], "--malformed-diagnostics") == 0) return Mode::MalformedDiagnostics;
     if (std::strcmp(argv[index], "--crash-diagnostics") == 0) return Mode::CrashDiagnostics;
@@ -86,21 +92,24 @@ Mode parse_mode(int argc, char** argv) {
   return Mode::Normal;
 }
 
-void respond_initialize(long long id) {
+void respond_initialize(long long id)
+{
   std::string const body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) +
                            ",\"result\":{\"capabilities\":{\"diagnosticProvider\":{\"interFileDependencies\":false,"
                            "\"workspaceDiagnostics\":false}}}}";
   write_message(body);
 }
 
-std::string request_uri(std::string_view message) {
+std::string request_uri(std::string_view message)
+{
   auto const params = ava::core::json::object_field(message, "params");
   auto const document = params ? ava::core::json::object_field(*params, "textDocument") : std::nullopt;
   auto const uri = document ? ava::core::json::string_field(*document, "uri") : std::nullopt;
   return uri.value_or(std::string{});
 }
 
-void respond_diagnostics(long long id, Mode mode, std::string_view uri) {
+void respond_diagnostics(long long id, Mode mode, std::string_view uri)
+{
   if (mode == Mode::CrashDiagnostics) std::exit(23);
   if (mode == Mode::SleepDiagnostics) {
     usleep(1000000);
@@ -132,7 +141,8 @@ void respond_diagnostics(long long id, Mode mode, std::string_view uri) {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
   auto const mode = parse_mode(argc, argv);
   while (auto message = read_message()) {
     auto const method = ava::core::json::string_field(*message, "method");

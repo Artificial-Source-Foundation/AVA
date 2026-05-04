@@ -10,12 +10,14 @@
 namespace ava::tui::detail {
 namespace {
 
-std::string composer_bar() {
+std::string composer_bar()
+{
   return std::string(kSgrAccent) + std::string(kComposerBar) + std::string(kSgrReset) + std::string(kSgrComposerBg) +
          "  ";
 }
 
-std::string composer_mode_badge(std::string_view mode) {
+std::string composer_mode_badge(std::string_view mode)
+{
   std::string mode_text = sanitize_terminal_text(mode);
   if (!mode_text.empty())
     mode_text.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(mode_text.front())));
@@ -23,15 +25,18 @@ std::string composer_mode_badge(std::string_view mode) {
   return std::string(color) + mode_text + std::string(kSgrReset) + std::string(kSgrComposerBg);
 }
 
-std::string provider_label(std::string_view provider) {
+std::string provider_label(std::string_view provider)
+{
   return sanitize_terminal_text(ava::config::provider_display_name(provider));
 }
 
-std::string model_label(std::string_view model) {
+std::string model_label(std::string_view model)
+{
   return sanitize_terminal_text(ava::config::model_display_label(model));
 }
 
-std::string render_status_line(ComposerSnapshot const& snapshot, std::size_t width) {
+std::string render_status_line(ComposerSnapshot const& snapshot, std::size_t width)
+{
   auto const provider = provider_label(snapshot.provider);
   auto const model = model_label(snapshot.model);
 
@@ -82,7 +87,8 @@ std::string render_status_line(ComposerSnapshot const& snapshot, std::size_t wid
   return composer_surface_line(std::move(line), width);
 }
 
-std::string render_input_line(ComposerSnapshot const& snapshot, std::size_t width) {
+std::string render_input_line(ComposerSnapshot const& snapshot, std::size_t width)
+{
   std::string line = composer_bar() + std::string(kSgrBold) + std::string(kSgrAccent) + std::string(kComposerPrompt) +
                      std::string(kSgrReset) + std::string(kSgrComposerBg) + " ";
   if (snapshot.input.empty()) {
@@ -94,7 +100,8 @@ std::string render_input_line(ComposerSnapshot const& snapshot, std::size_t widt
   return composer_surface_line(std::move(line), width);
 }
 
-std::string render_input_fragment_line(std::string_view text, bool first_line, std::size_t width) {
+std::string render_input_fragment_line(std::string_view text, bool first_line, std::size_t width)
+{
   std::string line = composer_bar();
   if (first_line) {
     line += std::string(kSgrBold) + std::string(kSgrAccent) + std::string(kComposerPrompt) + std::string(kSgrReset) +
@@ -106,27 +113,31 @@ std::string render_input_fragment_line(std::string_view text, bool first_line, s
   return composer_surface_line(std::move(line), width);
 }
 
-std::size_t effective_input_cursor(ComposerSnapshot const& snapshot) {
+std::size_t effective_input_cursor(ComposerSnapshot const& snapshot)
+{
   if (snapshot.input_cursor == std::string::npos) return snapshot.input.size();
   return std::min(snapshot.input_cursor, snapshot.input.size());
 }
 
 }  // namespace
 
-std::vector<std::string> input_render_lines(std::string_view input) {
+std::vector<std::string> input_render_lines(std::string_view input)
+{
   auto lines = split_lines(input);
   if (lines.empty()) lines.push_back("");
   return lines;
 }
 
-std::size_t composer_block_line_count(ComposerSnapshot const& snapshot, std::size_t height) {
+std::size_t composer_block_line_count(ComposerSnapshot const& snapshot, std::size_t height)
+{
   auto const input_lines = snapshot.input.empty() ? std::size_t{1} : input_render_lines(snapshot.input).size();
   auto const desired = std::clamp(input_lines + 2, kMinComposerBlockLines, kMaxComposerBlockLines);
   return std::min(height, desired);
 }
 
 ComposerInputLayout composer_input_layout(std::size_t input_line_count, std::size_t max_lines,
-                                          std::size_t draft_scroll_offset) {
+                                          std::size_t draft_scroll_offset)
+{
   auto const effective_input_lines = std::max<std::size_t>(input_line_count, 1);
   if (max_lines <= 1) {
     auto const visible_input_lines = std::size_t{1};
@@ -157,7 +168,8 @@ ComposerInputLayout composer_input_layout(std::size_t input_line_count, std::siz
 }
 
 std::vector<std::string> render_composer_block(ComposerSnapshot const& snapshot, std::size_t width,
-                                               std::size_t max_lines) {
+                                               std::size_t max_lines)
+{
   if (max_lines == 0) return {};
   if (snapshot.input.empty()) {
     if (max_lines == 1) return {render_input_line(snapshot, width)};
@@ -192,7 +204,8 @@ std::vector<std::string> render_composer_block(ComposerSnapshot const& snapshot,
   return lines;
 }
 
-std::size_t input_cursor_column(ComposerSnapshot const& snapshot, std::size_t width) {
+std::size_t input_cursor_column(ComposerSnapshot const& snapshot, std::size_t width)
+{
   auto const cursor = effective_input_cursor(snapshot);
   auto const before_cursor = snapshot.input.substr(0, cursor);
   auto const line_start = before_cursor.rfind('\n');
@@ -205,7 +218,8 @@ std::size_t input_cursor_column(ComposerSnapshot const& snapshot, std::size_t wi
   return std::min(column, std::max<std::size_t>(width, 1));
 }
 
-std::size_t input_cursor_line(ComposerSnapshot const& snapshot) {
+std::size_t input_cursor_line(ComposerSnapshot const& snapshot)
+{
   auto const cursor = effective_input_cursor(snapshot);
   return static_cast<std::size_t>(
       std::count(snapshot.input.begin(), snapshot.input.begin() + static_cast<std::ptrdiff_t>(cursor), '\n'));

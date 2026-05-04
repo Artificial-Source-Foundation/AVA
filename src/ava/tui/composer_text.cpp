@@ -6,7 +6,8 @@
 
 namespace ava::tui {
 
-std::string sanitize_terminal_text(std::string_view text) {
+std::string sanitize_terminal_text(std::string_view text)
+{
   std::string sanitized;
   sanitized.reserve(text.size());
   for (std::size_t index = 0; index < text.size();) {
@@ -39,7 +40,8 @@ std::string sanitize_terminal_text(std::string_view text) {
   return sanitized;
 }
 
-std::vector<std::string> split_lines(std::string_view text) {
+std::vector<std::string> split_lines(std::string_view text)
+{
   std::vector<std::string> lines;
   std::size_t start = 0;
   for (std::size_t index = 0; index <= text.size(); ++index) {
@@ -61,9 +63,13 @@ std::vector<std::string> split_lines(std::string_view text) {
 
 namespace detail {
 
-bool is_utf8_continuation(unsigned char byte) { return (byte & 0xC0U) == 0x80U; }
+bool is_utf8_continuation(unsigned char byte)
+{
+  return (byte & 0xC0U) == 0x80U;
+}
 
-std::size_t utf8_sequence_length(unsigned char byte) {
+std::size_t utf8_sequence_length(unsigned char byte)
+{
   if ((byte & 0x80U) == 0) return 1;
   if (byte >= 0xC2U && byte <= 0xDFU) return 2;
   if ((byte & 0xF0U) == 0xE0U) return 3;
@@ -71,7 +77,8 @@ std::size_t utf8_sequence_length(unsigned char byte) {
   return 0;
 }
 
-bool decode_utf8_codepoint(std::string_view text, std::size_t start, std::size_t length, char32_t& codepoint) {
+bool decode_utf8_codepoint(std::string_view text, std::size_t start, std::size_t length, char32_t& codepoint)
+{
   if (start + length > text.size() || length == 0) return false;
   auto const first = static_cast<unsigned char>(text[start]);
   if (utf8_sequence_length(first) != length) return false;
@@ -93,7 +100,8 @@ bool decode_utf8_codepoint(std::string_view text, std::size_t start, std::size_t
   return true;
 }
 
-bool is_wide_codepoint(char32_t codepoint) {
+bool is_wide_codepoint(char32_t codepoint)
+{
   return (codepoint >= 0x1100 && codepoint <= 0x115F) || (codepoint >= 0x2329 && codepoint <= 0x232A) ||
          (codepoint >= 0x2E80 && codepoint <= 0xA4CF) || (codepoint >= 0xAC00 && codepoint <= 0xD7A3) ||
          (codepoint >= 0xF900 && codepoint <= 0xFAFF) || (codepoint >= 0xFE10 && codepoint <= 0xFE19) ||
@@ -102,7 +110,8 @@ bool is_wide_codepoint(char32_t codepoint) {
          (codepoint >= 0x20000 && codepoint <= 0x3FFFD);
 }
 
-bool is_zero_width_codepoint(char32_t codepoint) {
+bool is_zero_width_codepoint(char32_t codepoint)
+{
   return (codepoint >= 0x0300 && codepoint <= 0x036F) || (codepoint >= 0x0483 && codepoint <= 0x0489) ||
          (codepoint >= 0x0591 && codepoint <= 0x05BD) || codepoint == 0x05BF ||
          (codepoint >= 0x05C1 && codepoint <= 0x05C2) || (codepoint >= 0x05C4 && codepoint <= 0x05C5) ||
@@ -123,7 +132,8 @@ bool is_zero_width_codepoint(char32_t codepoint) {
          (codepoint >= 0xE0100 && codepoint <= 0xE01EF);
 }
 
-std::size_t codepoint_columns(char32_t codepoint) {
+std::size_t codepoint_columns(char32_t codepoint)
+{
   if (is_zero_width_codepoint(codepoint)) return 0;
   if (codepoint == 0 || codepoint > static_cast<char32_t>(WCHAR_MAX)) return 1;
   auto const width = ::wcwidth(static_cast<wchar_t>(codepoint));
@@ -131,7 +141,8 @@ std::size_t codepoint_columns(char32_t codepoint) {
   return is_wide_codepoint(codepoint) ? std::size_t{2} : std::size_t{1};
 }
 
-bool skip_sgr_sequence(std::string_view text, std::size_t& index) {
+bool skip_sgr_sequence(std::string_view text, std::size_t& index)
+{
   if (index + 1 >= text.size() || text[index] != '\x1b' || text[index + 1] != '[') {
     return false;
   }
@@ -146,7 +157,8 @@ bool skip_sgr_sequence(std::string_view text, std::size_t& index) {
   return true;
 }
 
-std::size_t terminal_text_columns(std::string_view text) {
+std::size_t terminal_text_columns(std::string_view text)
+{
   std::size_t columns = 0;
   for (std::size_t index = 0; index < text.size();) {
     if (skip_sgr_sequence(text, index)) {
@@ -165,7 +177,8 @@ std::size_t terminal_text_columns(std::string_view text) {
   return columns;
 }
 
-std::string fit_line(std::string text, std::size_t width) {
+std::string fit_line(std::string text, std::size_t width)
+{
   if (width == 0) return {};
   text = sanitize_terminal_text(text);
   if (terminal_text_columns(text) <= width) return text;
@@ -212,7 +225,8 @@ std::string fit_line(std::string text, std::size_t width) {
   return output;
 }
 
-std::string fit_line_preserving_sgr(std::string text, std::size_t width) {
+std::string fit_line_preserving_sgr(std::string text, std::size_t width)
+{
   if (width == 0) return {};
   auto const cols = terminal_text_columns(text);
   if (cols <= width) return text;
@@ -251,7 +265,8 @@ std::string fit_line_preserving_sgr(std::string text, std::size_t width) {
   return output;
 }
 
-std::string surface_line(std::string_view background_sgr, std::string line, std::size_t width) {
+std::string surface_line(std::string_view background_sgr, std::string line, std::size_t width)
+{
   auto const background = std::string(background_sgr);
   std::string painted;
   painted.reserve(background.size() + line.size());
@@ -276,15 +291,18 @@ std::string surface_line(std::string_view background_sgr, std::string line, std:
   return line;
 }
 
-std::string screen_surface_line(std::string line, std::size_t width) {
+std::string screen_surface_line(std::string line, std::size_t width)
+{
   return surface_line(kSgrScreenBg, std::move(line), width);
 }
 
-std::string composer_surface_line(std::string line, std::size_t width) {
+std::string composer_surface_line(std::string line, std::size_t width)
+{
   return surface_line(kSgrComposerBg, std::move(line), width);
 }
 
-std::vector<std::string> wrap_transcript_text(std::string_view text, std::size_t width) {
+std::vector<std::string> wrap_transcript_text(std::string_view text, std::size_t width)
+{
   auto const sanitized = sanitize_terminal_text(text);
   auto const content_width = std::max<std::size_t>(1, width > 4 ? width - 4 : width);
   std::vector<std::string> wrapped;

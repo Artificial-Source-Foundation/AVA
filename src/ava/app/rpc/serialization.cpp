@@ -15,36 +15,42 @@
 namespace ava::app::rpc {
 namespace {
 
-std::string decimal_field_json(std::string_view key, long double value) {
+std::string decimal_field_json(std::string_view key, long double value)
+{
   std::ostringstream out;
   out << std::setprecision(12) << value;
   return "\"" + std::string(key) + "\":" + out.str();
 }
 
-std::string model_key(std::string_view provider_id, std::string_view model_id) {
+std::string model_key(std::string_view provider_id, std::string_view model_id)
+{
   return std::string(provider_id) + "\n" + std::string(model_id);
 }
 
-bool has_model_key(std::vector<std::string> const& keys, std::string_view key) {
+bool has_model_key(std::vector<std::string> const& keys, std::string_view key)
+{
   for (auto const& existing : keys) {
     if (existing == key) return true;
   }
   return false;
 }
 
-void append_optional_bool(std::string& json, std::string_view key, std::optional<bool> const& value) {
+void append_optional_bool(std::string& json, std::string_view key, std::optional<bool> const& value)
+{
   if (!value) return;
   json += ',';
   json += bool_field_json(key, *value);
 }
 
-void append_optional_integer(std::string& json, std::string_view key, std::optional<long long> const& value) {
+void append_optional_integer(std::string& json, std::string_view key, std::optional<long long> const& value)
+{
   if (!value) return;
   json += ',';
   json += integer_field_json(key, *value);
 }
 
-std::string model_info_json(ava::config::ModelInfo const& model, RuntimeSession const& session, bool configured) {
+std::string model_info_json(ava::config::ModelInfo const& model, RuntimeSession const& session, bool configured)
+{
   bool const registered = ava::provider::builtin_provider_registry().contains(model.provider_id);
   std::string json = "{";
   json += string_field_json("provider", model.provider_id);
@@ -85,7 +91,8 @@ std::string model_info_json(ava::config::ModelInfo const& model, RuntimeSession 
   return json;
 }
 
-std::string joined_output(std::vector<std::string> const& output) {
+std::string joined_output(std::vector<std::string> const& output)
+{
   std::string text;
   for (std::size_t index = 0; index < output.size(); ++index) {
     if (index > 0) text += '\n';
@@ -94,7 +101,8 @@ std::string joined_output(std::vector<std::string> const& output) {
   return text;
 }
 
-std::string context_sources_json(RuntimeSession const& session) {
+std::string context_sources_json(RuntimeSession const& session)
+{
   std::string json = "[";
   for (std::size_t index = 0; index < session.context_sources.size(); ++index) {
     auto const& source = session.context_sources[index];
@@ -111,7 +119,8 @@ std::string context_sources_json(RuntimeSession const& session) {
   return json;
 }
 
-std::string session_entry_json(ava::session::SessionEntry const& entry) {
+std::string session_entry_json(ava::session::SessionEntry const& entry)
+{
   std::string json = "{";
   json += integer_field_json("version", entry.version);
   json += ',';
@@ -128,13 +137,15 @@ std::string session_entry_json(ava::session::SessionEntry const& entry) {
   return json;
 }
 
-std::string_view trim(std::string_view value) {
+std::string_view trim(std::string_view value)
+{
   while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) value.remove_prefix(1);
   while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) value.remove_suffix(1);
   return value;
 }
 
-bool json_bool_field(std::string_view object, std::string_view key) {
+bool json_bool_field(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return false;
   auto const value = trim(object.substr(*start));
@@ -143,7 +154,8 @@ bool json_bool_field(std::string_view object, std::string_view key) {
   return rest.empty() || rest.front() == ',' || rest.front() == '}';
 }
 
-std::string sanitized_reasoning_entry_json(ava::session::SessionEntry const& entry) {
+std::string sanitized_reasoning_entry_json(ava::session::SessionEntry const& entry)
+{
   std::string data = "{";
   bool first = true;
   auto append_string = [&](std::string_view key, std::optional<std::string> const& value) {
@@ -183,7 +195,8 @@ std::string sanitized_reasoning_entry_json(ava::session::SessionEntry const& ent
   return json;
 }
 
-std::string capped_session_entry_json(ava::session::SessionEntry const& entry) {
+std::string capped_session_entry_json(ava::session::SessionEntry const& entry)
+{
   auto json = entry.type == ava::session::EntryType::ReasoningBlock ? sanitized_reasoning_entry_json(entry)
                                                                     : session_entry_json(entry);
   if (json.size() <= 8192) return json;
@@ -205,7 +218,8 @@ std::string capped_session_entry_json(ava::session::SessionEntry const& entry) {
   return capped;
 }
 
-std::string_view utf8_prefix_within(std::string_view value, std::size_t max_bytes) {
+std::string_view utf8_prefix_within(std::string_view value, std::size_t max_bytes)
+{
   if (value.size() <= max_bytes) return value;
 
   std::size_t index = 0;
@@ -240,7 +254,8 @@ std::string_view utf8_prefix_within(std::string_view value, std::size_t max_byte
   return value.substr(0, end);
 }
 
-std::string question_options_json(std::vector<ava::agent::QuestionOption> const& options) {
+std::string question_options_json(std::vector<ava::agent::QuestionOption> const& options)
+{
   std::string json = "[";
   for (std::size_t index = 0; index < options.size(); ++index) {
     if (index > 0) json += ',';
@@ -256,23 +271,28 @@ std::string question_options_json(std::vector<ava::agent::QuestionOption> const&
 
 }  // namespace
 
-std::string string_field_json(std::string_view key, std::string_view value) {
+std::string string_field_json(std::string_view key, std::string_view value)
+{
   return "\"" + std::string(key) + "\":\"" + ava::core::json::escape(value) + "\"";
 }
 
-std::string bool_field_json(std::string_view key, bool value) {
+std::string bool_field_json(std::string_view key, bool value)
+{
   return "\"" + std::string(key) + "\":" + (value ? "true" : "false");
 }
 
-std::string number_field_json(std::string_view key, std::size_t value) {
+std::string number_field_json(std::string_view key, std::size_t value)
+{
   return "\"" + std::string(key) + "\":" + std::to_string(value);
 }
 
-std::string integer_field_json(std::string_view key, long long value) {
+std::string integer_field_json(std::string_view key, long long value)
+{
   return "\"" + std::string(key) + "\":" + std::to_string(value);
 }
 
-std::string output_array_json(std::vector<std::string> const& output) {
+std::string output_array_json(std::vector<std::string> const& output)
+{
   std::string json = "[";
   for (std::size_t index = 0; index < output.size(); ++index) {
     if (index > 0) json += ',';
@@ -284,7 +304,8 @@ std::string output_array_json(std::vector<std::string> const& output) {
   return json;
 }
 
-std::string string_array_json(std::vector<std::string> const& values) {
+std::string string_array_json(std::vector<std::string> const& values)
+{
   std::string json = "[";
   for (std::size_t index = 0; index < values.size(); ++index) {
     if (index > 0) json += ',';
@@ -296,7 +317,8 @@ std::string string_array_json(std::vector<std::string> const& values) {
   return json;
 }
 
-std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry) {
+std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry)
+{
   std::vector<ava::config::ModelInfo> models;
   std::vector<std::string> seen;
   for (auto model = registry.models.rbegin(); model != registry.models.rend(); ++model) {
@@ -309,7 +331,8 @@ std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry 
   return models;
 }
 
-std::string state_result_json(RuntimeSession const& session, bool cancel_requested) {
+std::string state_result_json(RuntimeSession const& session, bool cancel_requested)
+{
   std::string json = "{";
   json += "\"protocol_version\":";
   json += std::to_string(kRpcProtocolVersion);
@@ -353,7 +376,8 @@ std::string state_result_json(RuntimeSession const& session, bool cancel_request
   return json;
 }
 
-ava::core::Result<std::string> list_sessions_result_json(RuntimeSession const& session) {
+ava::core::Result<std::string> list_sessions_result_json(RuntimeSession const& session)
+{
   auto sessions = ava::session::SessionStore::list_sessions(session.workspace_dir, session.paths.sessions_dir);
   if (!sessions) return std::unexpected(sessions.error());
   std::string json = "{\"sessions\":[";
@@ -374,7 +398,8 @@ ava::core::Result<std::string> list_sessions_result_json(RuntimeSession const& s
   return json;
 }
 
-ava::core::Result<std::string> list_models_result_json(RuntimeSession const& session) {
+ava::core::Result<std::string> list_models_result_json(RuntimeSession const& session)
+{
   auto registry = ava::config::load_model_registry(session.paths);
   if (!registry) return std::unexpected(std::move(registry.error()));
 
@@ -405,7 +430,8 @@ ava::core::Result<std::string> list_models_result_json(RuntimeSession const& ses
   return json;
 }
 
-std::string command_result_json(CommandResult const& result) {
+std::string command_result_json(CommandResult const& result)
+{
   std::string json = "{";
   json += bool_field_json("handled", result.handled);
   json += ',';
@@ -418,7 +444,8 @@ std::string command_result_json(CommandResult const& result) {
   return json;
 }
 
-ava::core::Result<std::string> messages_result_json(RuntimeSession const& session) {
+ava::core::Result<std::string> messages_result_json(RuntimeSession const& session)
+{
   auto entries = session.store.load();
   if (!entries) return std::unexpected(entries.error());
 
@@ -458,7 +485,8 @@ ava::core::Result<std::string> messages_result_json(RuntimeSession const& sessio
   return json;
 }
 
-ava::core::Result<std::string> session_stats_result_json(RuntimeSession const& session) {
+ava::core::Result<std::string> session_stats_result_json(RuntimeSession const& session)
+{
   auto entries = session.store.load();
   if (!entries) return std::unexpected(entries.error());
   auto const stats = ava::session::compute_session_stats(*entries);
@@ -555,7 +583,8 @@ ava::core::Result<std::string> session_stats_result_json(RuntimeSession const& s
   return json;
 }
 
-ava::core::Result<std::string> session_validation_result_json(RuntimeSession const& session) {
+ava::core::Result<std::string> session_validation_result_json(RuntimeSession const& session)
+{
   auto entries = session.store.load();
   if (!entries) return std::unexpected(entries.error());
   auto const validation = ava::session::validate_session_replay(*entries);
@@ -599,7 +628,8 @@ ava::core::Result<std::string> session_validation_result_json(RuntimeSession con
 }
 
 std::string permission_request_payload_json(std::string_view resolver_request_id,
-                                            ava::permissions::PermissionPrompt const& prompt) {
+                                            ava::permissions::PermissionPrompt const& prompt)
+{
   std::string json = "{";
   json += string_field_json("resolver_request_id", resolver_request_id);
   json += ',';
@@ -625,7 +655,8 @@ std::string permission_request_payload_json(std::string_view resolver_request_id
 }
 
 std::string question_request_payload_json(std::string_view resolver_request_id,
-                                          ava::agent::QuestionPrompt const& prompt) {
+                                          ava::agent::QuestionPrompt const& prompt)
+{
   std::string json = "{";
   json += string_field_json("resolver_request_id", resolver_request_id);
   json += ',';
@@ -648,7 +679,8 @@ std::string question_request_payload_json(std::string_view resolver_request_id,
   return json;
 }
 
-std::string permission_reply_payload_json(std::string_view resolver_request_id, std::string_view decision) {
+std::string permission_reply_payload_json(std::string_view resolver_request_id, std::string_view decision)
+{
   std::string json = "{";
   json += string_field_json("resolver_request_id", resolver_request_id);
   json += ',';
@@ -658,7 +690,8 @@ std::string permission_reply_payload_json(std::string_view resolver_request_id, 
 }
 
 std::string question_reply_payload_json(std::string_view resolver_request_id, std::optional<std::string> const& answer,
-                                        std::optional<std::string> const& selected) {
+                                        std::optional<std::string> const& selected)
+{
   std::string json = "{";
   json += string_field_json("resolver_request_id", resolver_request_id);
   if (answer) {
@@ -674,7 +707,8 @@ std::string question_reply_payload_json(std::string_view resolver_request_id, st
 }
 
 std::string cancel_requested_payload_json(bool active_run, std::size_t cleared_steer, std::size_t cleared_follow_up,
-                                          std::string_view active_request_id) {
+                                          std::string_view active_request_id)
+{
   std::string json = "{";
   json += bool_field_json("active_run", active_run);
   json += ',';
@@ -689,7 +723,8 @@ std::string cancel_requested_payload_json(bool active_run, std::size_t cleared_s
   return json;
 }
 
-std::string queued_message_payload_json(std::string_view message, std::string_view reason) {
+std::string queued_message_payload_json(std::string_view message, std::string_view reason)
+{
   bool const truncated = message.size() > kMaxRpcQueueEventMessageBytes;
   auto const event_message = truncated ? utf8_prefix_within(message, kMaxRpcQueueEventMessageBytes) : message;
   std::string json = "{";
@@ -708,7 +743,8 @@ std::string queued_message_payload_json(std::string_view message, std::string_vi
   return json;
 }
 
-std::string prompt_result_json(std::string_view session_id, ava::agent::AgentLoopResult const& result) {
+std::string prompt_result_json(std::string_view session_id, ava::agent::AgentLoopResult const& result)
+{
   std::string json = "{";
   json += string_field_json("session_id", session_id);
   json += ',';

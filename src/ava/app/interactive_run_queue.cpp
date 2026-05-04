@@ -10,7 +10,8 @@
 namespace ava::app {
 namespace {
 
-std::string_view utf8_prefix_within(std::string_view value, std::size_t max_bytes) {
+std::string_view utf8_prefix_within(std::string_view value, std::size_t max_bytes)
+{
   if (value.size() <= max_bytes) return value;
 
   std::size_t index = 0;
@@ -45,17 +46,20 @@ std::string_view utf8_prefix_within(std::string_view value, std::size_t max_byte
   return value.substr(0, end);
 }
 
-std::size_t queued_message_bytes(std::deque<InteractiveQueuedMessage> const& messages) {
+std::size_t queued_message_bytes(std::deque<InteractiveQueuedMessage> const& messages)
+{
   std::size_t bytes = 0;
   for (auto const& message : messages) bytes += message.message.size();
   return bytes;
 }
 
-std::string json_string_field(std::string_view key, std::string_view value) {
+std::string json_string_field(std::string_view key, std::string_view value)
+{
   return "\"" + std::string(key) + "\":\"" + ava::session::json_escape(value) + "\"";
 }
 
-std::string queue_payload_json(std::string_view message, std::string_view reason) {
+std::string queue_payload_json(std::string_view message, std::string_view reason)
+{
   bool const truncated = message.size() > kMaxInteractiveQueueEventMessageBytes;
   auto const event_message = truncated ? utf8_prefix_within(message, kMaxInteractiveQueueEventMessageBytes) : message;
 
@@ -72,23 +76,27 @@ std::string queue_payload_json(std::string_view message, std::string_view reason
   return json;
 }
 
-ava::core::Error inactive_error() {
+ava::core::Error inactive_error()
+{
   return ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                           "interactive queue requires an active backend run");
 }
 
-ava::core::Error empty_message_error() {
+ava::core::Error empty_message_error()
+{
   return ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "interactive queued message is empty");
 }
 
-ava::core::Error queue_limit_error() {
+ava::core::Error queue_limit_error()
+{
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "interactive queued message limit exceeded");
   error.with_context("max_entries", std::to_string(kMaxInteractiveQueuedMessages));
   error.with_context("max_message_bytes", std::to_string(kMaxInteractiveQueuedMessageBytes));
   return error;
 }
 
-ava::core::Error no_queued_messages_error() {
+ava::core::Error no_queued_messages_error()
+{
   return ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "no active queued message to restore");
 }
 
@@ -98,21 +106,29 @@ InteractiveRunQueue::InteractiveRunQueue(std::string session_id, std::string act
                                          EventEnvelopeSink event_sink)
     : session_id_(std::move(session_id)),
       active_request_id_(std::move(active_request_id)),
-      event_sink_(std::move(event_sink)) {}
+      event_sink_(std::move(event_sink))
+{
+}
 
-std::string const& InteractiveRunQueue::active_request_id() const noexcept { return active_request_id_; }
+std::string const& InteractiveRunQueue::active_request_id() const noexcept
+{
+  return active_request_id_;
+}
 
-ava::core::VoidResult InteractiveRunQueue::queue_steering(std::string message) {
+ava::core::VoidResult InteractiveRunQueue::queue_steering(std::string message)
+{
   std::lock_guard lock(mutex_);
   return queue_message_locked(steering_messages_, std::move(message), "steer_queued");
 }
 
-ava::core::VoidResult InteractiveRunQueue::queue_follow_up(std::string message) {
+ava::core::VoidResult InteractiveRunQueue::queue_follow_up(std::string message)
+{
   std::lock_guard lock(mutex_);
   return queue_message_locked(follow_up_messages_, std::move(message), "follow_up_queued");
 }
 
-ava::core::Result<std::vector<std::string>> InteractiveRunQueue::take_steering_messages() {
+ava::core::Result<std::vector<std::string>> InteractiveRunQueue::take_steering_messages()
+{
   std::lock_guard lock(mutex_);
   std::vector<std::string> messages;
   std::deque<InteractiveQueuedMessage> remaining;
@@ -132,7 +148,8 @@ ava::core::Result<std::vector<std::string>> InteractiveRunQueue::take_steering_m
   return messages;
 }
 
-ava::core::VoidResult InteractiveRunQueue::skip_active_steering(std::string_view reason) {
+ava::core::VoidResult InteractiveRunQueue::skip_active_steering(std::string_view reason)
+{
   std::lock_guard lock(mutex_);
   std::deque<InteractiveQueuedMessage> remaining;
   while (!steering_messages_.empty()) {
@@ -148,7 +165,8 @@ ava::core::VoidResult InteractiveRunQueue::skip_active_steering(std::string_view
   return {};
 }
 
-std::optional<InteractiveQueuedMessage> InteractiveRunQueue::take_next_follow_up() {
+std::optional<InteractiveQueuedMessage> InteractiveRunQueue::take_next_follow_up()
+{
   std::lock_guard lock(mutex_);
   if (!active_ || follow_up_messages_.empty()) return std::nullopt;
   auto next = std::move(follow_up_messages_.front());
@@ -156,7 +174,8 @@ std::optional<InteractiveQueuedMessage> InteractiveRunQueue::take_next_follow_up
   return next;
 }
 
-ava::core::VoidResult InteractiveRunQueue::mark_follow_up_started(InteractiveQueuedMessage const& message) {
+ava::core::VoidResult InteractiveRunQueue::mark_follow_up_started(InteractiveQueuedMessage const& message)
+{
   std::lock_guard lock(mutex_);
   if (!active_) return std::unexpected(inactive_error());
   active_request_id_ = message.request_id;
@@ -165,7 +184,8 @@ ava::core::VoidResult InteractiveRunQueue::mark_follow_up_started(InteractiveQue
   return emit_event("follow_up_started", started);
 }
 
-ava::core::Result<InteractiveRestoredMessage> InteractiveRunQueue::restore_latest() {
+ava::core::Result<InteractiveRestoredMessage> InteractiveRunQueue::restore_latest()
+{
   std::lock_guard lock(mutex_);
   if (!active_) return std::unexpected(inactive_error());
 
@@ -187,7 +207,8 @@ ava::core::Result<InteractiveRestoredMessage> InteractiveRunQueue::restore_lates
   return result;
 }
 
-ava::core::VoidResult InteractiveRunQueue::finish(bool canceled) {
+ava::core::VoidResult InteractiveRunQueue::finish(bool canceled)
+{
   std::lock_guard lock(mutex_);
   active_ = false;
 
@@ -206,7 +227,8 @@ ava::core::VoidResult InteractiveRunQueue::finish(bool canceled) {
 }
 
 ava::core::VoidResult InteractiveRunQueue::queue_message_locked(std::deque<InteractiveQueuedMessage>& queue,
-                                                                std::string message, std::string_view event_name) {
+                                                                std::string message, std::string_view event_name)
+{
   if (message.empty()) return std::unexpected(empty_message_error());
   if (!active_) return std::unexpected(inactive_error());
   if (queue.size() >= kMaxInteractiveQueuedMessages || message.size() > kMaxInteractiveQueuedMessageBytes ||
@@ -227,7 +249,8 @@ ava::core::VoidResult InteractiveRunQueue::queue_message_locked(std::deque<Inter
 }
 
 ava::core::VoidResult InteractiveRunQueue::emit_event(std::string_view name, InteractiveQueuedMessage const& message,
-                                                      std::string_view reason) const {
+                                                      std::string_view reason) const
+{
   if (!event_sink_) return {};
 
   EventEnvelope envelope;

@@ -39,7 +39,8 @@ constexpr auto kSpinnerFrameDelay = std::chrono::milliseconds(80);
 
 class SignalBlockGuard {
  public:
-  SignalBlockGuard() {
+  SignalBlockGuard()
+  {
     sigset_t blocked{};
     sigemptyset(&blocked);
     sigaddset(&blocked, SIGINT);
@@ -50,7 +51,8 @@ class SignalBlockGuard {
   SignalBlockGuard(SignalBlockGuard const&) = delete;
   SignalBlockGuard& operator=(SignalBlockGuard const&) = delete;
 
-  ~SignalBlockGuard() {
+  ~SignalBlockGuard()
+  {
     if (active_) static_cast<void>(sigprocmask(SIG_SETMASK, &previous_, nullptr));
   }
 
@@ -59,7 +61,8 @@ class SignalBlockGuard {
   bool active_ = false;
 };
 
-std::pair<std::size_t, std::size_t> terminal_size() {
+std::pair<std::size_t, std::size_t> terminal_size()
+{
   int height = 0;
   int width = 0;
   getmaxyx(stdscr, height, width);
@@ -97,7 +100,8 @@ struct EventEnvelopeQueue {
   std::vector<ava::app::EventEnvelope> events;
   bool received = false;
 
-  [[nodiscard]] ava::app::EventEnvelopeSink sink() {
+  [[nodiscard]] ava::app::EventEnvelopeSink sink()
+  {
     return [this](ava::app::EventEnvelope const& event) -> ava::core::VoidResult {
       std::lock_guard<std::mutex> lock(mutex);
       events.push_back(event);
@@ -106,14 +110,16 @@ struct EventEnvelopeQueue {
     };
   }
 
-  [[nodiscard]] std::vector<ava::app::EventEnvelope> drain() {
+  [[nodiscard]] std::vector<ava::app::EventEnvelope> drain()
+  {
     std::lock_guard<std::mutex> lock(mutex);
     auto drained = std::move(events);
     events.clear();
     return drained;
   }
 
-  [[nodiscard]] bool received_any() {
+  [[nodiscard]] bool received_any()
+  {
     std::lock_guard<std::mutex> lock(mutex);
     return received;
   }
@@ -121,16 +127,21 @@ struct EventEnvelopeQueue {
 
 enum class RuntimeEventDrainResult { NoEvents, Rendered, RenderFailed };
 
-bool mouse_state_matches(mmask_t state, mmask_t mask) { return (state & mask) != 0; }
+bool mouse_state_matches(mmask_t state, mmask_t mask)
+{
+  return (state & mask) != 0;
+}
 
-CursesInput key_input(Key key) {
+CursesInput key_input(Key key)
+{
   return CursesInput{.event = InputEvent{.key = key, .character = '\0', .text = {}, .mouse_column = 0, .mouse_row = 0},
                      .text = {},
                      .bracketed_paste = false,
                      .resize = false};
 }
 
-CursesInput mouse_key_input(Key key, const MEVENT& mouse) {
+CursesInput mouse_key_input(Key key, const MEVENT& mouse)
+{
   return CursesInput{.event = InputEvent{.key = key,
                                          .character = '\0',
                                          .text = {},
@@ -141,9 +152,13 @@ CursesInput mouse_key_input(Key key, const MEVENT& mouse) {
                      .resize = false};
 }
 
-CursesInput unknown_input() { return key_input(Key::Unknown); }
+CursesInput unknown_input()
+{
+  return key_input(Key::Unknown);
+}
 
-std::string title_case_ascii(std::string_view text) {
+std::string title_case_ascii(std::string_view text)
+{
   std::string output;
   output.reserve(text.size());
   bool at_word_start = true;
@@ -164,18 +179,21 @@ std::string title_case_ascii(std::string_view text) {
   return output;
 }
 
-std::string assistant_meta_for_snapshot(ComposerSnapshot const& snapshot) {
+std::string assistant_meta_for_snapshot(ComposerSnapshot const& snapshot)
+{
   if (snapshot.model.empty()) return {};
   auto mode = title_case_ascii(snapshot.mode);
   if (mode.empty()) mode = "AVA";
   return mode + " - " + snapshot.model;
 }
 
-bool is_compact_command(std::string_view line) noexcept {
+bool is_compact_command(std::string_view line) noexcept
+{
   return line == "/compact" || (line.starts_with("/compact") && line.size() > 8 && line[8] == ' ');
 }
 
-std::size_t transcript_height_for_snapshot(ComposerSnapshot const& snapshot, std::size_t width, std::size_t height) {
+std::size_t transcript_height_for_snapshot(ComposerSnapshot const& snapshot, std::size_t width, std::size_t height)
+{
   auto const normal_composer_lines = detail::composer_block_line_count(snapshot, height);
   auto const modal_question = snapshot.question_prompt && snapshot.question_prompt->modal;
   auto const prompt_active = snapshot.permission_prompt.has_value() || (snapshot.question_prompt && !modal_question);
@@ -200,7 +218,8 @@ std::size_t transcript_height_for_snapshot(ComposerSnapshot const& snapshot, std
 }
 
 std::size_t max_transcript_scroll_offset_for_snapshot(ComposerSnapshot const& snapshot, std::size_t width,
-                                                      std::size_t height) {
+                                                      std::size_t height)
+{
   auto const transcript_height = transcript_height_for_snapshot(snapshot, width, height);
   if (transcript_height == 0) return 0;
   auto const rendered_transcript = detail::render_transcript_lines(
@@ -208,7 +227,8 @@ std::size_t max_transcript_scroll_offset_for_snapshot(ComposerSnapshot const& sn
   return rendered_transcript.size() > transcript_height ? rendered_transcript.size() - transcript_height : 0;
 }
 
-std::optional<std::string> encode_wide_character(wchar_t character) {
+std::optional<std::string> encode_wide_character(wchar_t character)
+{
   std::mbstate_t state{};
   char buffer[MB_LEN_MAX]{};
   auto const length = std::wcrtomb(buffer, character, &state);
@@ -216,7 +236,8 @@ std::optional<std::string> encode_wide_character(wchar_t character) {
   return std::string(buffer, length);
 }
 
-CursesInput character_input(std::string text, bool bracketed_paste = false) {
+CursesInput character_input(std::string text, bool bracketed_paste = false)
+{
   auto const first_byte = text.empty() ? '\0' : text[0];
   auto event_text = text;
   return CursesInput{.event = InputEvent{.key = Key::Character,
@@ -229,14 +250,16 @@ CursesInput character_input(std::string text, bool bracketed_paste = false) {
                      .resize = false};
 }
 
-std::optional<wchar_t> read_plain_wide_character() {
+std::optional<wchar_t> read_plain_wide_character()
+{
   wint_t value = 0;
   auto const result = wget_wch(stdscr, &value);
   if (result == ERR || result == KEY_CODE_YES) return std::nullopt;
   return static_cast<wchar_t>(value);
 }
 
-std::pair<bool, std::string> read_ascii_sequence(std::string_view expected) {
+std::pair<bool, std::string> read_ascii_sequence(std::string_view expected)
+{
   std::string consumed;
   consumed.reserve(expected.size());
   for (auto const expected_char : expected) {
@@ -249,7 +272,8 @@ std::pair<bool, std::string> read_ascii_sequence(std::string_view expected) {
   return {true, consumed};
 }
 
-CursesInput read_bracketed_paste() {
+CursesInput read_bracketed_paste()
+{
   std::string pasted;
   static_cast<void>(wtimeout(stdscr, 1000));
   while (!terminal_signal_received() && pasted.size() < kMaxBracketedPasteBytes) {
@@ -276,7 +300,8 @@ CursesInput read_bracketed_paste() {
   return character_input(normalize_composer_paste_text(pasted), true);
 }
 
-std::optional<CursesInput> read_escape_sequence_input() {
+std::optional<CursesInput> read_escape_sequence_input()
+{
   static_cast<void>(wtimeout(stdscr, 50));
   std::string consumed;
   consumed.reserve(32);
@@ -297,7 +322,8 @@ std::optional<CursesInput> read_escape_sequence_input() {
   return unknown_input();
 }
 
-CursesInput read_curses_input() {
+CursesInput read_curses_input()
+{
   wint_t value = 0;
   auto const result = wget_wch(stdscr, &value);
   if (terminal_signal_received()) return key_input(Key::CtrlC);
@@ -393,7 +419,8 @@ CursesInput read_curses_input() {
   return unknown_input();
 }
 
-std::optional<CursesInput> poll_curses_input() {
+std::optional<CursesInput> poll_curses_input()
+{
   static_cast<void>(wtimeout(stdscr, 0));
   auto input = read_curses_input();
   static_cast<void>(wtimeout(stdscr, -1));
@@ -403,19 +430,22 @@ std::optional<CursesInput> poll_curses_input() {
   return input;
 }
 
-void truncate_transcript(std::vector<TranscriptItem>& transcript) {
+void truncate_transcript(std::vector<TranscriptItem>& transcript)
+{
   if (transcript.size() > kMaxTranscriptItems) {
     transcript.erase(transcript.begin(),
                      transcript.begin() + static_cast<std::ptrdiff_t>(transcript.size() - kMaxTranscriptItems));
   }
 }
 
-void push_transcript(ComposerSnapshot& snapshot, TranscriptItem item) {
+void push_transcript(ComposerSnapshot& snapshot, TranscriptItem item)
+{
   snapshot.transcript.push_back(std::move(item));
   truncate_transcript(snapshot.transcript);
 }
 
-void push_history(std::vector<std::string>& history, std::string input) {
+void push_history(std::vector<std::string>& history, std::string input)
+{
   constexpr std::size_t kMaxHistoryItems = 100;
   if (input.empty()) return;
   if (!history.empty() && history.back() == input) return;
@@ -425,7 +455,8 @@ void push_history(std::vector<std::string>& history, std::string input) {
   }
 }
 
-PermissionPromptView permission_prompt_view(ava::permissions::PermissionPrompt const& prompt) {
+PermissionPromptView permission_prompt_view(ava::permissions::PermissionPrompt const& prompt)
+{
   PermissionPromptView view;
   view.tool_name = prompt.tool_name;
   view.operation = ava::permissions::to_string(prompt.operation);
@@ -437,7 +468,8 @@ PermissionPromptView permission_prompt_view(ava::permissions::PermissionPrompt c
   return view;
 }
 
-QuestionPromptView question_prompt_view(ava::agent::QuestionPrompt const& prompt) {
+QuestionPromptView question_prompt_view(ava::agent::QuestionPrompt const& prompt)
+{
   QuestionPromptView view;
   view.header = prompt.header;
   view.question = prompt.question;
@@ -453,7 +485,8 @@ QuestionPromptView question_prompt_view(ava::agent::QuestionPrompt const& prompt
   return view;
 }
 
-ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_view(QuestionPromptView const& prompt) {
+ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_view(QuestionPromptView const& prompt)
+{
   ava::agent::QuestionAnswer answer;
   for (auto const& option : prompt.options) {
     if (option.selected) answer.selected_options.push_back(option.value);
@@ -473,11 +506,13 @@ ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_view(Question
 
 }  // namespace
 
-ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_prompt_view(QuestionPromptView const& prompt) {
+ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_prompt_view(QuestionPromptView const& prompt)
+{
   return question_answer_from_view(prompt);
 }
 
-int run_interactive_composer(TuiRuntimeOptions options) {
+int run_interactive_composer(TuiRuntimeOptions options)
+{
   if (!terminal_is_tty()) {
     std::cerr << "interactive TUI requires stdin and stdout to be terminals\n";
     return 1;

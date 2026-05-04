@@ -11,13 +11,15 @@
 namespace ava::session {
 namespace {
 
-void add_optional_integer(std::optional<long long>& total, std::optional<long long> value) {
+void add_optional_integer(std::optional<long long>& total, std::optional<long long> value)
+{
   if (!value || *value < 0) return;
   if (!total) total = 0;
   *total += *value;
 }
 
-std::optional<long long> integer_field_from_usage_or_entry(std::string_view data_json, std::string_view key) {
+std::optional<long long> integer_field_from_usage_or_entry(std::string_view data_json, std::string_view key)
+{
   if (auto const usage = ava::core::json::object_field(data_json, "usage")) {
     if (auto const value = ava::core::json::integer_field(*usage, key)) return value;
   }
@@ -25,29 +27,34 @@ std::optional<long long> integer_field_from_usage_or_entry(std::string_view data
 }
 
 std::optional<long long> integer_field_from_usage_or_entry(std::string_view data_json,
-                                                           std::initializer_list<std::string_view> keys) {
+                                                           std::initializer_list<std::string_view> keys)
+{
   for (auto const key : keys) {
     if (auto const value = integer_field_from_usage_or_entry(data_json, key)) return value;
   }
   return std::nullopt;
 }
 
-bool bool_field_is_true(std::string_view object, std::string_view key) {
+bool bool_field_is_true(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   return start && object.substr(*start, 4) == "true";
 }
 
-bool usage_is_estimated(std::string_view usage) {
+bool usage_is_estimated(std::string_view usage)
+{
   if (bool_field_is_true(usage, "estimated")) return true;
   return ava::core::json::string_field(usage, "source").value_or("") == "estimated";
 }
 
-bool positive_integer_field(std::string_view object, std::string_view key) {
+bool positive_integer_field(std::string_view object, std::string_view key)
+{
   auto const value = ava::core::json::integer_field(object, key);
   return value && *value > 0;
 }
 
-bool object_has_billable_tokens(std::string_view object) {
+bool object_has_billable_tokens(std::string_view object)
+{
   return positive_integer_field(object, "input_tokens") || positive_integer_field(object, "output_tokens") ||
          positive_integer_field(object, "reasoning_tokens") || positive_integer_field(object, "cache_read_tokens") ||
          positive_integer_field(object, "cache_read_input_tokens") ||
@@ -56,11 +63,13 @@ bool object_has_billable_tokens(std::string_view object) {
          positive_integer_field(object, "total_tokens");
 }
 
-bool is_number_delimiter(char ch) {
+bool is_number_delimiter(char ch)
+{
   return ch == ',' || ch == '}' || ch == ']' || std::isspace(static_cast<unsigned char>(ch)) != 0;
 }
 
-std::optional<long double> number_field(std::string_view object, std::string_view key) {
+std::optional<long double> number_field(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start || *start >= object.size()) return std::nullopt;
 
@@ -91,7 +100,8 @@ std::optional<long double> number_field(std::string_view object, std::string_vie
   }
 }
 
-std::optional<long double> cost_field_from_usage_or_entry(std::string_view data_json) {
+std::optional<long double> cost_field_from_usage_or_entry(std::string_view data_json)
+{
   if (auto const usage = ava::core::json::object_field(data_json, "usage")) {
     if (auto const value = number_field(*usage, "cost_usd")) return value;
     if (auto const value = number_field(*usage, "total_cost_usd")) return value;
@@ -100,7 +110,8 @@ std::optional<long double> cost_field_from_usage_or_entry(std::string_view data_
   return number_field(data_json, "total_cost_usd");
 }
 
-void add_optional_cost(std::optional<long double>& total, std::optional<long double> value) {
+void add_optional_cost(std::optional<long double>& total, std::optional<long double> value)
+{
   if (!value || *value < 0.0L) return;
   if (!total) total = 0.0L;
   *total += *value;
@@ -108,7 +119,8 @@ void add_optional_cost(std::optional<long double>& total, std::optional<long dou
 
 }  // namespace
 
-SessionStats compute_session_stats(std::vector<SessionEntry> const& entries) {
+SessionStats compute_session_stats(std::vector<SessionEntry> const& entries)
+{
   SessionStats stats;
   stats.entry_count = entries.size();
 

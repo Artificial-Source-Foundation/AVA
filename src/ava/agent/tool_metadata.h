@@ -127,7 +127,8 @@ inline constexpr std::array<ToolMetadata, 10>
                          .description_family = std::string_view("interaction")},
         }};
 
-[[nodiscard]] inline constexpr std::span<ToolMetadata const> builtin_tool_metadata() noexcept {
+[[nodiscard]] inline constexpr std::span<ToolMetadata const> builtin_tool_metadata() noexcept
+{
   return std::span<ToolMetadata const>(kBuiltinToolMetadata.data(), kBuiltinToolMetadata.size());
 }
 

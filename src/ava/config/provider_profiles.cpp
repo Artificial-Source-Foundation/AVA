@@ -15,7 +15,8 @@ constexpr long long kDefaultAnthropicThinkingBudgetTokens = 4096;
 constexpr long long kMinimumAnthropicThinkingBudgetTokens = 1024;
 
 std::optional<ProviderProfile> fallback_profile_for_api_family(std::string_view api_family,
-                                                               std::string_view reasoning_format) {
+                                                               std::string_view reasoning_format)
+{
   if (api_family == openai_responses_reasoning_profile().api_family) {
     return openai_provider_profile();
   }
@@ -35,18 +36,21 @@ std::optional<ProviderProfile> fallback_profile_for_api_family(std::string_view 
   return std::nullopt;
 }
 
-bool display_value_allowed(ProviderProfile const& profile, std::string_view display) {
+bool display_value_allowed(ProviderProfile const& profile, std::string_view display)
+{
   if (display.empty()) return true;
   return std::ranges::find(profile.reasoning_display_values, display) != profile.reasoning_display_values.end();
 }
 
-bool has_compatibility_quirk(ModelInfo const& model, std::string_view quirk) {
+bool has_compatibility_quirk(ModelInfo const& model, std::string_view quirk)
+{
   return std::ranges::find(model.compatibility_quirks, quirk) != model.compatibility_quirks.end();
 }
 
 }  // namespace
 
-ProviderProfile const& anthropic_provider_profile() {
+ProviderProfile const& anthropic_provider_profile()
+{
   static ProviderProfile const profile{
       .provider_id = "anthropic",
       .display_name = "Anthropic",
@@ -65,7 +69,8 @@ ProviderProfile const& anthropic_provider_profile() {
   return profile;
 }
 
-ProviderProfile const& kimi_provider_profile() {
+ProviderProfile const& kimi_provider_profile()
+{
   static ProviderProfile const profile{
       .provider_id = "kimi",
       .display_name = "Kimi",
@@ -85,7 +90,8 @@ ProviderProfile const& kimi_provider_profile() {
   return profile;
 }
 
-ProviderProfile const& moonshot_provider_profile() {
+ProviderProfile const& moonshot_provider_profile()
+{
   static ProviderProfile const profile{
       .provider_id = "moonshot",
       .display_name = "Moonshot",
@@ -102,7 +108,8 @@ ProviderProfile const& moonshot_provider_profile() {
   return profile;
 }
 
-ProviderProfile const& openai_provider_profile() {
+ProviderProfile const& openai_provider_profile()
+{
   static ProviderProfile const profile{
       .provider_id = "openai",
       .display_name = "OpenAI",
@@ -115,7 +122,8 @@ ProviderProfile const& openai_provider_profile() {
   return profile;
 }
 
-ProviderProfile const& openrouter_provider_profile() {
+ProviderProfile const& openrouter_provider_profile()
+{
   static ProviderProfile const profile{
       .provider_id = "openrouter",
       .display_name = "OpenRouter",
@@ -132,43 +140,50 @@ ProviderProfile const& openrouter_provider_profile() {
   return profile;
 }
 
-ProviderProfile const& vercel_provider_profile() {
+ProviderProfile const& vercel_provider_profile()
+{
   static ProviderProfile const profile{
       .provider_id = "vercel", .display_name = "Vercel AI Gateway", .connect_detail = "API key"};
   return profile;
 }
 
-std::vector<ProviderProfile> builtin_provider_profiles() {
+std::vector<ProviderProfile> builtin_provider_profiles()
+{
   return {openai_provider_profile(), anthropic_provider_profile(),  moonshot_provider_profile(),
           kimi_provider_profile(),   openrouter_provider_profile(), vercel_provider_profile()};
 }
 
-std::optional<ProviderProfile> find_provider_profile(std::string_view provider_id) {
+std::optional<ProviderProfile> find_provider_profile(std::string_view provider_id)
+{
   for (auto const& profile : builtin_provider_profiles()) {
     if (profile.provider_id == provider_id) return profile;
   }
   return std::nullopt;
 }
 
-std::optional<ProviderProfile> provider_profile_for_model(ModelInfo const& model) {
+std::optional<ProviderProfile> provider_profile_for_model(ModelInfo const& model)
+{
   return find_provider_profile(model.provider_id);
 }
 
-std::optional<ProviderProfile> reasoning_provider_profile_for_model(ModelInfo const& model) {
+std::optional<ProviderProfile> reasoning_provider_profile_for_model(ModelInfo const& model)
+{
   auto profile = provider_profile_for_model(model);
   if (profile && !model.api_family.empty() && profile->api_family != model.api_family) profile = std::nullopt;
   if (profile) return profile;
   return fallback_profile_for_api_family(model.api_family, model.reasoning_format);
 }
 
-std::string provider_display_name(std::string_view provider_id) {
+std::string provider_display_name(std::string_view provider_id)
+{
   if (auto profile = find_provider_profile(provider_id)) return profile->display_name;
   std::string label(provider_id);
   if (!label.empty()) label.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(label.front())));
   return label;
 }
 
-bool provider_accepts_reasoning_format(ModelInfo const& model, std::string_view format) {
+bool provider_accepts_reasoning_format(ModelInfo const& model, std::string_view format)
+{
   if (format.empty()) return false;
   auto profile = reasoning_provider_profile_for_model(model);
   if (!profile || profile->api_family != model.api_family || profile->default_reasoning_format != format) return false;
@@ -181,7 +196,8 @@ bool provider_accepts_reasoning_format(ModelInfo const& model, std::string_view 
 }
 
 ava::core::VoidResult validate_reasoning_request(ModelInfo const& model, std::string_view level,
-                                                 std::optional<long long> budget_tokens, std::string_view display) {
+                                                 std::optional<long long> budget_tokens, std::string_view display)
+{
   auto profile = reasoning_provider_profile_for_model(model);
   if (!profile) return {};
   auto const provider_label = provider_display_name(model.provider_id);

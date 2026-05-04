@@ -52,7 +52,8 @@
 
 namespace {
 
-std::string read_text_file_for_test(std::filesystem::path const& path) {
+std::string read_text_file_for_test(std::filesystem::path const& path)
+{
   std::ifstream file(path, std::ios::binary);
   std::ostringstream out;
   out << file.rdbuf();
@@ -63,8 +64,8 @@ class StaticTransport final : public ava::provider::Transport {
  public:
   explicit StaticTransport(ava::provider::HttpResponse response) : response_(std::move(response)) {}
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
-      ava::provider::HttpRequest const& request) override {
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  {
     requests.push_back(request);
     return response_;
   }
@@ -77,14 +78,15 @@ class StaticTransport final : public ava::provider::Transport {
 
 class CancelAwareTransport final : public ava::provider::Transport {
  public:
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
-      ava::provider::HttpRequest const& request) override {
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  {
     requests.push_back(request);
     return ava::provider::HttpResponse{.status_code = 200, .headers = {{"content-type", "text/plain"}}, .body = "ok"};
   }
 
   [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request,
-                                                                    CancelCallback cancel_requested) override {
+                                                                    CancelCallback cancel_requested) override
+  {
     requests.push_back(request);
     saw_cancel_callback = static_cast<bool>(cancel_requested);
     if (cancel_requested && cancel_requested()) {
@@ -97,7 +99,8 @@ class CancelAwareTransport final : public ava::provider::Transport {
   std::vector<ava::provider::HttpRequest> requests;
 };
 
-void test_file_tools() {
+void test_file_tools()
+{
   std::error_code remove_error;
   std::filesystem::remove_all(temp_root(), remove_error);
   std::filesystem::create_directories(temp_root());
@@ -574,7 +577,8 @@ void test_file_tools() {
          "edit_file resolves external read permission before edit permission");
 }
 
-void test_permission_audit_persistence() {
+void test_permission_audit_persistence()
+{
   auto const root = temp_root() / "permission-audit";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -677,7 +681,8 @@ void test_permission_audit_persistence() {
          "session export includes permission decision audit data");
 }
 
-void test_search_tools() {
+void test_search_tools()
+{
   std::error_code remove_error;
   std::filesystem::remove_all(temp_root(), remove_error);
 
@@ -933,7 +938,8 @@ void test_search_tools() {
   }
 }
 
-void test_search_gitignore_rules() {
+void test_search_gitignore_rules()
+{
   auto const root = temp_root() / "search-ignore";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1077,7 +1083,8 @@ void test_search_gitignore_rules() {
          "grep_files no_ignore opt-out searches files ignored by .gitignore");
 }
 
-void test_bash_tool() {
+void test_bash_tool()
+{
   std::error_code remove_error;
   std::filesystem::remove_all(temp_root(), remove_error);
   std::filesystem::create_directories(temp_root());
@@ -1235,7 +1242,8 @@ void test_bash_tool() {
          "run_bash fails closed when resolver fails");
 }
 
-void test_webfetch_tool() {
+void test_webfetch_tool()
+{
   std::error_code remove_error;
   std::filesystem::remove_all(temp_root(), remove_error);
   std::filesystem::create_directories(temp_root());
@@ -1341,7 +1349,8 @@ void test_webfetch_tool() {
 
 }  // namespace
 
-void run_tools_tests() {
+void run_tools_tests()
+{
   test_file_tools();
   test_permission_audit_persistence();
   test_search_tools();

@@ -24,26 +24,33 @@ struct PluginToolBinding {
   std::string model_tool_name;
 };
 
-std::string json_bool(bool value) { return value ? "true" : "false"; }
+std::string json_bool(bool value)
+{
+  return value ? "true" : "false";
+}
 
-std::string error_json(std::string_view tool, ava::core::Error const& error) {
+std::string error_json(std::string_view tool, ava::core::Error const& error)
+{
   return "{\"tool\":\"" + ava::core::json::escape(tool) + "\",\"ok\":false,\"error\":{\"category\":\"" +
          ava::core::json::escape(ava::core::to_string(error.category())) + "\",\"message\":\"" +
          ava::core::json::escape(error.message()) + "\",\"details\":\"" + ava::core::json::escape(error.format()) +
          "\"}}";
 }
 
-bool is_canceled_error(ava::core::Error const& error) {
+bool is_canceled_error(ava::core::Error const& error)
+{
   return error.message().find("canceled") != std::string::npos ||
          error.message().find("cancelled") != std::string::npos;
 }
 
-bool is_canceled(ava::tools::ToolContext const& context) {
+bool is_canceled(ava::tools::ToolContext const& context)
+{
   return context.cancel_requested && context.cancel_requested();
 }
 
 ava::agent::ToolDispatchResult tool_error_result(ava::agent::ProviderToolCall const& call,
-                                                 ava::core::Error const& error) {
+                                                 ava::core::Error const& error)
+{
   return ava::agent::ToolDispatchResult{.call_id = call.id,
                                         .name = call.name,
                                         .success = false,
@@ -58,7 +65,8 @@ ava::agent::ToolDispatchResult tool_error_result(ava::agent::ProviderToolCall co
 }
 
 std::string result_json(ava::agent::ProviderToolCall const& call, PluginToolBinding const& binding,
-                        PluginToolCallResult const& result) {
+                        PluginToolCallResult const& result)
+{
   std::string text = "{\"tool\":\"" + ava::core::json::escape(call.name) + "\",\"ok\":" + json_bool(result.ok) +
                      ",\"plugin\":\"" + ava::core::json::escape(binding.manifest.id) + "\",\"plugin_tool\":\"" +
                      ava::core::json::escape(binding.contribution.name) + "\",\"content\":\"" +
@@ -69,7 +77,8 @@ std::string result_json(ava::agent::ProviderToolCall const& call, PluginToolBind
 }
 
 ava::core::Error plugin_tool_error(ava::core::ErrorCategory category, std::string message,
-                                   PluginToolBinding const& binding) {
+                                   PluginToolBinding const& binding)
+{
   auto error = ava::core::Error(category, std::move(message));
   error.with_context("plugin", binding.manifest.id);
   error.with_context("plugin_tool", binding.contribution.name);
@@ -80,7 +89,8 @@ ava::core::Error plugin_tool_error(ava::core::ErrorCategory category, std::strin
 
 ava::agent::ToolDispatchResult dispatch_plugin_tool(ava::tools::ToolContext const& context,
                                                     ava::agent::ProviderToolCall const& call,
-                                                    PluginToolBinding const& binding) {
+                                                    PluginToolBinding const& binding)
+{
   if (is_canceled(context)) {
     return tool_error_result(
         call, plugin_tool_error(ava::core::ErrorCategory::Unknown, "plugin tool call canceled", binding));
@@ -132,7 +142,8 @@ ava::agent::ToolDispatchResult dispatch_plugin_tool(ava::tools::ToolContext cons
       .call_id = call.id, .name = call.name, .success = result->ok, .result_text = result_json(call, binding, *result)};
 }
 
-std::string schema_json(std::string_view model_tool_name, PluginToolContribution const& contribution) {
+std::string schema_json(std::string_view model_tool_name, PluginToolContribution const& contribution)
+{
   auto const description =
       contribution.description.empty() ? std::string("Plugin tool ") + contribution.name : contribution.description;
   return "{\"type\":\"function\",\"name\":\"" + ava::core::json::escape(model_tool_name) + "\",\"description\":\"" +
@@ -140,7 +151,8 @@ std::string schema_json(std::string_view model_tool_name, PluginToolContribution
 }
 
 ava::agent::RegisteredToolMetadata metadata_for_tool(std::string model_tool_name,
-                                                     PluginToolContribution const& contribution) {
+                                                     PluginToolContribution const& contribution)
+{
   auto const description =
       contribution.description.empty() ? std::string("Plugin tool ") + contribution.name : contribution.description;
   auto const schema = schema_json(model_tool_name, contribution);
@@ -155,21 +167,24 @@ ava::agent::RegisteredToolMetadata metadata_for_tool(std::string model_tool_name
       .description_family = "plugin"};
 }
 
-PluginDiscoveryOptions discovery_options_for_context(ava::tools::ToolContext const& context) {
+PluginDiscoveryOptions discovery_options_for_context(ava::tools::ToolContext const& context)
+{
   auto options = default_plugin_discovery_options(context.workspace_dir);
   if (!context.plugin_global_plugins_dir.empty()) options.global_plugins_dir = context.plugin_global_plugins_dir;
   if (!context.plugin_project_plugins_dir.empty()) options.project_plugins_dir = context.plugin_project_plugins_dir;
   return options;
 }
 
-std::filesystem::path enablement_file_for_context(ava::tools::ToolContext const& context) {
+std::filesystem::path enablement_file_for_context(ava::tools::ToolContext const& context)
+{
   if (!context.plugin_enablement_file.empty()) return context.plugin_enablement_file;
   return default_plugin_enablement_file();
 }
 
 }  // namespace
 
-std::string plugin_model_tool_name(std::string_view plugin_id, std::string_view tool_name) {
+std::string plugin_model_tool_name(std::string_view plugin_id, std::string_view tool_name)
+{
   auto sanitize = [](std::string_view value) {
     std::string sanitized;
     sanitized.reserve(value.size());
@@ -191,7 +206,8 @@ std::string plugin_model_tool_name(std::string_view plugin_id, std::string_view 
   return "plugin_" + sanitize(plugin_id) + "_" + sanitize(tool_name);
 }
 
-void register_enabled_plugin_tools(ava::agent::ToolRegistry& registry, ava::tools::ToolContext const& context) {
+void register_enabled_plugin_tools(ava::agent::ToolRegistry& registry, ava::tools::ToolContext const& context)
+{
   if (context.workspace_dir.empty()) return;
 
   auto diagnostics = collect_plugin_diagnostics(discovery_options_for_context(context),

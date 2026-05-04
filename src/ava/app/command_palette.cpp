@@ -18,7 +18,8 @@
 namespace ava::app {
 namespace {
 
-std::string hotkeys_for_action(std::vector<CommandHotkey> const& hotkeys, std::string_view action) {
+std::string hotkeys_for_action(std::vector<CommandHotkey> const& hotkeys, std::string_view action)
+{
   for (auto const& hotkey : hotkeys) {
     if (hotkey.action == action) return hotkey.keys;
   }
@@ -26,7 +27,8 @@ std::string hotkeys_for_action(std::vector<CommandHotkey> const& hotkeys, std::s
 }
 
 bool completion_exists(std::vector<tui::SlashCommandArgumentCompletion> const& completions, std::size_t argument_index,
-                       std::vector<std::string> const& previous_args, std::string_view value) {
+                       std::vector<std::string> const& previous_args, std::string_view value)
+{
   return std::ranges::any_of(completions, [&](auto const& completion) {
     return completion.argument_index == argument_index && completion.required_previous_args == previous_args &&
            completion.value == value;
@@ -36,7 +38,8 @@ bool completion_exists(std::vector<tui::SlashCommandArgumentCompletion> const& c
 void add_completion(tui::SlashCommandItem& item, std::size_t argument_index, std::string value,
                     std::string description = {}, std::string category = {},
                     std::vector<std::string> previous_args = {}, bool append_space = true, bool enabled = true,
-                    std::string disabled_reason = {}) {
+                    std::string disabled_reason = {})
+{
   if (value.empty() || completion_exists(item.argument_completions, argument_index, previous_args, value)) return;
   item.argument_completions.push_back(
       tui::SlashCommandArgumentCompletion{.value = std::move(value),
@@ -49,14 +52,16 @@ void add_completion(tui::SlashCommandItem& item, std::size_t argument_index, std
                                           .disabled_reason = std::move(disabled_reason)});
 }
 
-std::optional<std::size_t> find_item_index(std::vector<tui::SlashCommandItem> const& items, std::string_view command) {
+std::optional<std::size_t> find_item_index(std::vector<tui::SlashCommandItem> const& items, std::string_view command)
+{
   for (std::size_t index = 0; index < items.size(); ++index) {
     if (items[index].command == command) return index;
   }
   return std::nullopt;
 }
 
-std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry) {
+std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry)
+{
   std::vector<ava::config::ModelInfo> models;
   std::vector<std::string> seen;
   for (auto model = registry.models.rbegin(); model != registry.models.rend(); ++model) {
@@ -69,7 +74,8 @@ std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry 
   return models;
 }
 
-std::string model_completion_description(ava::config::ModelInfo const& model, bool registered) {
+std::string model_completion_description(ava::config::ModelInfo const& model, bool registered)
+{
   auto description = model.display_name.empty() ? model.model_id : model.display_name;
   if (!registered) {
     if (!description.empty()) description += " - ";
@@ -84,23 +90,27 @@ std::string model_completion_description(ava::config::ModelInfo const& model, bo
   return description;
 }
 
-ava::mcp::McpConfigLoadOptions mcp_config_options(RuntimeSession const& session) {
+ava::mcp::McpConfigLoadOptions mcp_config_options(RuntimeSession const& session)
+{
   auto options = ava::mcp::default_mcp_config_options(session.workspace_dir);
   options.global_config_file = session.paths.ava_config_dir / "mcp.json";
   options.project_config_file = session.workspace_dir / ".ava" / "mcp.json";
   return options;
 }
 
-ava::plugin::PluginDiscoveryOptions plugin_discovery_options(RuntimeSession const& session) {
+ava::plugin::PluginDiscoveryOptions plugin_discovery_options(RuntimeSession const& session)
+{
   return ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = session.paths.ava_config_dir / "plugins",
                                              .project_plugins_dir = session.workspace_dir / ".ava" / "plugins"};
 }
 
-std::filesystem::path plugin_enablement_file(RuntimeSession const& session) {
+std::filesystem::path plugin_enablement_file(RuntimeSession const& session)
+{
   return session.paths.ava_state_dir / "plugin-enablement.json";
 }
 
-void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, RuntimeSession const& session) {
+void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, RuntimeSession const& session)
+{
   if (auto index = find_item_index(items, "/connect")) {
     auto& item = items[*index];
     if (!session.model.provider_id.empty()) {
@@ -205,7 +215,8 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
 
 }  // namespace
 
-std::vector<tui::SlashCommandItem> command_catalog_slash_items(std::vector<CommandHotkey> const& hotkeys) {
+std::vector<tui::SlashCommandItem> command_catalog_slash_items(std::vector<CommandHotkey> const& hotkeys)
+{
   std::vector<tui::SlashCommandItem> items;
   items.reserve(command_catalog().size());
   for (auto const& entry : command_catalog()) {
@@ -226,7 +237,8 @@ std::vector<tui::SlashCommandItem> command_catalog_slash_items(std::vector<Comma
 }
 
 std::vector<tui::SlashCommandItem> command_catalog_slash_items(RuntimeSession const& session,
-                                                               std::vector<CommandHotkey> const& hotkeys) {
+                                                               std::vector<CommandHotkey> const& hotkeys)
+{
   auto items = command_catalog_slash_items(hotkeys);
   add_backend_argument_completions(items, session);
   return items;

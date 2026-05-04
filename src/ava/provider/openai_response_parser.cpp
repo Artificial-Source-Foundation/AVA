@@ -14,7 +14,8 @@
 namespace ava::provider {
 namespace {
 
-std::string normalized_openai_stop_reason(std::string_view reason) {
+std::string normalized_openai_stop_reason(std::string_view reason)
+{
   if (reason == "completed") return "completed";
   if (reason == "incomplete") return "incomplete";
   if (reason == "max_output_tokens" || reason == "max_tokens") return "max_tokens";
@@ -24,26 +25,30 @@ std::string normalized_openai_stop_reason(std::string_view reason) {
   return std::string(reason);
 }
 
-std::optional<long long> non_negative_integer_field(std::string_view object, std::string_view key) {
+std::optional<long long> non_negative_integer_field(std::string_view object, std::string_view key)
+{
   auto const value = ava::core::json::integer_field(object, key);
   if (!value || *value < 0) return std::nullopt;
   return value;
 }
 
-std::optional<long long> first_integer_field(std::string_view object, std::initializer_list<std::string_view> keys) {
+std::optional<long long> first_integer_field(std::string_view object, std::initializer_list<std::string_view> keys)
+{
   for (auto const key : keys) {
     if (auto const value = non_negative_integer_field(object, key)) return value;
   }
   return std::nullopt;
 }
 
-void append_joined_text(std::string& output, std::string_view text) {
+void append_joined_text(std::string& output, std::string_view text)
+{
   if (text.empty()) return;
   if (!output.empty()) output += "\n\n";
   output += text;
 }
 
-std::optional<TokenUsage> usage_from_object(std::string_view usage_object) {
+std::optional<TokenUsage> usage_from_object(std::string_view usage_object)
+{
   TokenUsage usage;
   usage.input_tokens = first_integer_field(usage_object, {"input_tokens", "prompt_tokens"});
   usage.output_tokens = first_integer_field(usage_object, {"output_tokens", "completion_tokens"});
@@ -93,14 +98,16 @@ std::optional<TokenUsage> usage_from_object(std::string_view usage_object) {
 
 namespace detail {
 
-std::optional<std::string> first_string_field(std::string_view object, std::initializer_list<std::string_view> keys) {
+std::optional<std::string> first_string_field(std::string_view object, std::initializer_list<std::string_view> keys)
+{
   for (auto const key : keys) {
     if (auto value = ava::core::json::string_field(object, key)) return value;
   }
   return std::nullopt;
 }
 
-std::string openai_response_stop_reason(std::string_view object) {
+std::string openai_response_stop_reason(std::string_view object)
+{
   std::string status = ava::core::json::string_field(object, "status").value_or("");
   if (auto const response = ava::core::json::object_field(object, "response")) {
     if (status.empty()) status = ava::core::json::string_field(*response, "status").value_or("");
@@ -115,7 +122,8 @@ std::string openai_response_stop_reason(std::string_view object) {
   return normalized_openai_stop_reason(status);
 }
 
-std::string reasoning_summary_text_from_object(std::string_view object) {
+std::string reasoning_summary_text_from_object(std::string_view object)
+{
   std::string text;
   if (auto summary_text = ava::core::json::string_field(object, "summary_text")) {
     append_joined_text(text, *summary_text);
@@ -141,7 +149,8 @@ std::string reasoning_summary_text_from_object(std::string_view object) {
 
 }  // namespace detail
 
-ava::core::Result<std::vector<StreamEvent>> parse_openai_sse(std::string_view sse) {
+ava::core::Result<std::vector<StreamEvent>> parse_openai_sse(std::string_view sse)
+{
   OpenAIStreamParser parser;
   auto events = parser.append(sse);
   if (!events) return std::unexpected(std::move(events.error()));
@@ -151,7 +160,8 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_sse(std::string_view ss
   return events;
 }
 
-ava::core::Result<std::vector<StreamEvent>> parse_openai_sse_response(HttpResponse const& response) {
+ava::core::Result<std::vector<StreamEvent>> parse_openai_sse_response(HttpResponse const& response)
+{
   if (response.status_code < 200 || response.status_code >= 300) {
     auto const kind = classify_provider_error(response);
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider,
@@ -168,7 +178,8 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_sse_response(HttpRespon
   return parse_openai_sse(response.body);
 }
 
-ava::core::Result<std::string> parse_openai_response_text(std::string_view body) {
+ava::core::Result<std::string> parse_openai_response_text(std::string_view body)
+{
   if (auto output = ava::core::json::string_field(body, "output_text")) return *output;
   if (auto text = ava::core::json::string_field(body, "text")) return *text;
   for (auto const& item : ava::core::json::objects_in_array_field(body, "output")) {
@@ -182,7 +193,8 @@ ava::core::Result<std::string> parse_openai_response_text(std::string_view body)
 
 namespace detail {
 
-ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std::string_view body) {
+ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std::string_view body)
+{
   std::vector<StreamEvent> events;
   auto const stop_reason = openai_response_stop_reason(body);
   for (auto const& item : ava::core::json::objects_in_array_field(body, "output")) {
@@ -260,7 +272,8 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std
 
 }  // namespace detail
 
-std::optional<TokenUsage> parse_openai_usage(std::string_view body) {
+std::optional<TokenUsage> parse_openai_usage(std::string_view body)
+{
   if (auto const usage = ava::core::json::object_field(body, "usage")) return usage_from_object(*usage);
   if (auto const response = ava::core::json::object_field(body, "response")) {
     if (auto const usage = ava::core::json::object_field(*response, "usage")) return usage_from_object(*usage);
@@ -268,10 +281,14 @@ std::optional<TokenUsage> parse_openai_usage(std::string_view body) {
   return usage_from_object(body);
 }
 
-bool is_retryable_status(int status_code) noexcept {
+bool is_retryable_status(int status_code) noexcept
+{
   return status_code == 408 || status_code == 409 || status_code == 429 || (status_code >= 500 && status_code < 600);
 }
 
-bool is_auth_status(int status_code) noexcept { return status_code == 401 || status_code == 403; }
+bool is_auth_status(int status_code) noexcept
+{
+  return status_code == 401 || status_code == 403;
+}
 
 }  // namespace ava::provider

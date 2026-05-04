@@ -18,7 +18,8 @@ namespace {
 constexpr std::size_t kSearchVisitedProgressInterval = 10000;
 constexpr std::size_t kSearchMatchProgressInterval = 500;
 
-std::string regex_escape(char ch) {
+std::string regex_escape(char ch)
+{
   static std::string const special = R"(\.^$|()[]{}+)";
   if (special.find(ch) != std::string::npos) {
     return std::string("\\") + ch;
@@ -26,7 +27,8 @@ std::string regex_escape(char ch) {
   return std::string(1, ch);
 }
 
-ava::core::Result<std::regex> glob_to_regex(std::string_view pattern) {
+ava::core::Result<std::regex> glob_to_regex(std::string_view pattern)
+{
   if (pattern.find('[') != std::string_view::npos || pattern.find(']') != std::string_view::npos) {
     auto error =
         ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "glob bracket character classes are not supported");
@@ -67,7 +69,8 @@ ava::core::Result<std::regex> glob_to_regex(std::string_view pattern) {
   }
 }
 
-std::string relative_slash_path(std::filesystem::path const& root, std::filesystem::path const& path) {
+std::string relative_slash_path(std::filesystem::path const& root, std::filesystem::path const& path)
+{
   std::error_code error;
   auto relative = std::filesystem::relative(path, root, error);
   if (error) {
@@ -76,26 +79,36 @@ std::string relative_slash_path(std::filesystem::path const& root, std::filesyst
   return relative.generic_string();
 }
 
-bool looks_binary(std::string_view line) { return line.find('\0') != std::string_view::npos; }
+bool looks_binary(std::string_view line)
+{
+  return line.find('\0') != std::string_view::npos;
+}
 
-std::string search_permission_tool_name(ToolContext const& context) {
+std::string search_permission_tool_name(ToolContext const& context)
+{
   return context.permission_tool_name.empty() ? std::string("search") : context.permission_tool_name;
 }
 
-bool is_canceled(ToolContext const& context) { return context.cancel_requested && context.cancel_requested(); }
+bool is_canceled(ToolContext const& context)
+{
+  return context.cancel_requested && context.cancel_requested();
+}
 
-ava::core::Error search_canceled_error(std::string_view tool_name) {
+ava::core::Error search_canceled_error(std::string_view tool_name)
+{
   auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled");
   error.with_context("tool", std::string(tool_name));
   return error;
 }
 
-ava::core::VoidResult check_canceled(ToolContext const& context, std::string_view tool_name) {
+ava::core::VoidResult check_canceled(ToolContext const& context, std::string_view tool_name)
+{
   if (!is_canceled(context)) return {};
   return std::unexpected(search_canceled_error(tool_name));
 }
 
-ava::core::Result<bool> can_read_search_match(ToolContext const& context, std::filesystem::path const& path) {
+ava::core::Result<bool> can_read_search_match(ToolContext const& context, std::filesystem::path const& path)
+{
   auto const decision = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::ReadFile,
       .mode = context.mode,
@@ -115,7 +128,8 @@ ava::core::Result<bool> can_read_search_match(ToolContext const& context, std::f
 }
 
 ava::core::Result<bool> read_limited_line(std::ifstream& file, std::string& line, std::filesystem::path const& path,
-                                          std::size_t max_line_length, bool& line_truncated, bool& line_binary) {
+                                          std::size_t max_line_length, bool& line_truncated, bool& line_binary)
+{
   line.clear();
   line_truncated = false;
   line_binary = false;
@@ -145,7 +159,8 @@ ava::core::Result<bool> read_limited_line(std::ifstream& file, std::string& line
 
 }  // namespace
 
-ava::core::Result<GlobResult> glob_files(ToolContext const& context, std::string_view pattern, GlobOptions options) {
+ava::core::Result<GlobResult> glob_files(ToolContext const& context, std::string_view pattern, GlobOptions options)
+{
   if (pattern.empty()) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "glob pattern must not be empty");
     return std::unexpected(std::move(error));
@@ -284,7 +299,8 @@ ava::core::Result<GlobResult> glob_files(ToolContext const& context, std::string
 }
 
 ava::core::Result<GrepResult> grep_files(ToolContext const& context, std::string_view literal_pattern,
-                                         std::string_view include_glob, GrepOptions options) {
+                                         std::string_view include_glob, GrepOptions options)
+{
   if (literal_pattern.empty()) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "grep pattern must not be empty");
     return std::unexpected(std::move(error));

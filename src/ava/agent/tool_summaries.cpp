@@ -13,12 +13,14 @@ namespace {
 constexpr std::size_t kMaxSummaryValueBytes = 80;
 constexpr std::size_t kMaxToolSummaryBytes = 180;
 
-bool bool_field_is_true(std::string_view object, std::string_view key) {
+bool bool_field_is_true(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   return start && object.substr(*start, 4) == "true";
 }
 
-std::string safe_summary_text(std::string text, std::size_t max_bytes = kMaxSummaryValueBytes) {
+std::string safe_summary_text(std::string text, std::size_t max_bytes = kMaxSummaryValueBytes)
+{
   for (char& ch : text) {
     auto const byte = static_cast<unsigned char>(ch);
     if (byte < 0x20 || byte == 0x7F) ch = '?';
@@ -34,24 +36,28 @@ std::string safe_summary_text(std::string text, std::size_t max_bytes = kMaxSumm
   return text;
 }
 
-std::string size_summary(std::string_view name, std::size_t bytes) {
+std::string size_summary(std::string_view name, std::size_t bytes)
+{
   return std::string(name) + "=" + std::to_string(bytes) + " bytes";
 }
 
-std::string append_summary_part(std::string summary, std::string part) {
+std::string append_summary_part(std::string summary, std::string part)
+{
   if (part.empty()) return summary;
   if (!summary.empty()) summary += ", ";
   summary += std::move(part);
   return safe_summary_text(std::move(summary), kMaxToolSummaryBytes);
 }
 
-std::string string_arg_summary(std::string_view arguments, std::string_view field) {
+std::string string_arg_summary(std::string_view arguments, std::string_view field)
+{
   auto const value = ava::core::json::string_field(arguments, field);
   if (!value) return {};
   return std::string(field) + "=" + safe_summary_text(*value);
 }
 
-std::string summarize_tool_error(std::string_view result_text) {
+std::string summarize_tool_error(std::string_view result_text)
+{
   auto const error = ava::core::json::object_field(result_text, "error");
   if (!error) return "error";
   auto const message = ava::core::json::string_field(*error, "message");
@@ -61,7 +67,8 @@ std::string summarize_tool_error(std::string_view result_text) {
 
 }  // namespace
 
-std::string summarize_tool_arguments(ProviderToolCall const& call) {
+std::string summarize_tool_arguments(ProviderToolCall const& call)
+{
   auto const arguments = call.arguments_json.empty() ? std::string_view("{}") : std::string_view(call.arguments_json);
   std::string summary;
   if (call.name == "read_file") {
@@ -111,7 +118,8 @@ std::string summarize_tool_arguments(ProviderToolCall const& call) {
   return call.arguments_json.empty() ? std::string{} : "arguments provided";
 }
 
-std::string summarize_tool_result(ToolDispatchResult const& result) {
+std::string summarize_tool_result(ToolDispatchResult const& result)
+{
   if (!result.payload.summary.empty()) return result.payload.summary;
   auto const& payload = result.payload;
   if (!result.success && !payload.error_message.empty()) return "error: " + safe_summary_text(payload.error_message);

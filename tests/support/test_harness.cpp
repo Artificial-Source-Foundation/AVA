@@ -18,14 +18,21 @@ namespace {
 int failures_value = 0;
 }
 
-int& failure_count() { return failures_value; }
+int& failure_count()
+{
+  return failures_value;
+}
 
-int failures() { return failures_value; }
+int failures()
+{
+  return failures_value;
+}
 }  // namespace ava::test
 
 namespace {
 
-bool is_zero_width_codepoint(char32_t codepoint) {
+bool is_zero_width_codepoint(char32_t codepoint)
+{
   return (codepoint >= 0x0300 && codepoint <= 0x036F) || (codepoint >= 0x0483 && codepoint <= 0x0489) ||
          (codepoint >= 0x0591 && codepoint <= 0x05BD) || codepoint == 0x05BF ||
          (codepoint >= 0x05C1 && codepoint <= 0x05C2) || (codepoint >= 0x05C4 && codepoint <= 0x05C5) ||
@@ -48,37 +55,43 @@ bool is_zero_width_codepoint(char32_t codepoint) {
 
 }  // namespace
 
-void expect(bool condition, std::string const& message) {
+void expect(bool condition, std::string const& message)
+{
   if (!condition) {
     std::cerr << "FAIL: " << message << '\n';
     ++ava::test::failure_count();
   }
 }
 
-int FailingStreambuf::overflow(int ch) {
+int FailingStreambuf::overflow(int ch)
+{
   static_cast<void>(ch);
   return traits_type::eof();
 }
 
-std::streamsize FailingStreambuf::xsputn(char const* s, std::streamsize count) {
+std::streamsize FailingStreambuf::xsputn(char const* s, std::streamsize count)
+{
   static_cast<void>(s);
   static_cast<void>(count);
   return 0;
 }
 
-std::filesystem::path temp_root() {
+std::filesystem::path temp_root()
+{
   auto const build_name = std::filesystem::current_path().filename();
   return std::filesystem::temp_directory_path() / ("ava_core_tests_" + build_name.string());
 }
 
-ScopedEnvVar::ScopedEnvVar(std::string name, std::string value) : name_(std::move(name)) {
+ScopedEnvVar::ScopedEnvVar(std::string name, std::string value) : name_(std::move(name))
+{
   if (char const* current = std::getenv(name_.c_str())) {
     previous_ = current;
   }
   setenv(name_.c_str(), value.c_str(), 1);
 }
 
-ScopedEnvVar::~ScopedEnvVar() {
+ScopedEnvVar::~ScopedEnvVar()
+{
   if (previous_) {
     setenv(name_.c_str(), previous_->c_str(), 1);
   } else {
@@ -86,7 +99,8 @@ ScopedEnvVar::~ScopedEnvVar() {
   }
 }
 
-std::string strip_sgr(std::string_view text) {
+std::string strip_sgr(std::string_view text)
+{
   std::string stripped;
   stripped.reserve(text.size());
   for (std::size_t index = 0; index < text.size();) {
@@ -106,7 +120,8 @@ std::string strip_sgr(std::string_view text) {
   return stripped;
 }
 
-bool has_active_sgr_at_text(std::string_view line, std::string_view text, std::string_view sgr) {
+bool has_active_sgr_at_text(std::string_view line, std::string_view text, std::string_view sgr)
+{
   auto const text_pos = line.find(text);
   if (text_pos == std::string_view::npos) return false;
   auto const sgr_pos = line.rfind(sgr, text_pos);
@@ -116,7 +131,8 @@ bool has_active_sgr_at_text(std::string_view line, std::string_view text, std::s
 }
 
 ava::core::VoidResult append_permission_audit_for_test(ava::session::SessionStore& store,
-                                                       ava::tools::PermissionAuditEvent const& event) {
+                                                       ava::tools::PermissionAuditEvent const& event)
+{
   return store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                  .parent_id = "",
                                                  .type = ava::session::EntryType::PermissionDecision,
@@ -124,7 +140,8 @@ ava::core::VoidResult append_permission_audit_for_test(ava::session::SessionStor
                                                  .data_json = ava::tools::permission_audit_data_json(event)});
 }
 
-std::vector<ava::session::SessionEntry> permission_entries(std::vector<ava::session::SessionEntry> const& entries) {
+std::vector<ava::session::SessionEntry> permission_entries(std::vector<ava::session::SessionEntry> const& entries)
+{
   std::vector<ava::session::SessionEntry> filtered;
   for (auto const& entry : entries) {
     if (entry.type == ava::session::EntryType::PermissionDecision) filtered.push_back(entry);
@@ -132,7 +149,8 @@ std::vector<ava::session::SessionEntry> permission_entries(std::vector<ava::sess
   return filtered;
 }
 
-std::size_t visible_columns(std::string_view text) {
+std::size_t visible_columns(std::string_view text)
+{
   auto const stripped = strip_sgr(text);
   std::size_t columns = 0;
   for (std::size_t index = 0; index < stripped.size();) {

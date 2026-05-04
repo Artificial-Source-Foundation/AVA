@@ -79,7 +79,8 @@ class ScopedStdinTerminalState {
 
   ~ScopedStdinTerminalState() { restore(); }
 
-  void restore() noexcept {
+  void restore() noexcept
+  {
     if (!active_) return;
     static_cast<void>(::tcsetattr(STDIN_FILENO, TCSANOW, &original_));
     active_ = false;
@@ -90,7 +91,8 @@ class ScopedStdinTerminalState {
   bool active_ = false;
 };
 
-ava::config::XdgPaths app_test_paths(std::filesystem::path const& root) {
+ava::config::XdgPaths app_test_paths(std::filesystem::path const& root)
+{
   auto const config_home = root / "config";
   auto const state_home = root / "state";
   auto const data_home = root / "data";
@@ -109,7 +111,8 @@ ava::config::XdgPaths app_test_paths(std::filesystem::path const& root) {
                                .sessions_dir = ava_state / "sessions"};
 }
 
-std::string app_test_plugin_manifest_json(std::string_view id, std::string_view name = "Test Plugin") {
+std::string app_test_plugin_manifest_json(std::string_view id, std::string_view name = "Test Plugin")
+{
   return std::string("{\n") +
          "  \"schema_version\": 1,\n"
          "  \"id\": \"" +
@@ -131,13 +134,15 @@ std::string app_test_plugin_manifest_json(std::string_view id, std::string_view 
          "}";
 }
 
-std::string app_test_mcp_config_json(std::string_view id, std::string_view name, std::string_view command) {
+std::string app_test_mcp_config_json(std::string_view id, std::string_view name, std::string_view command)
+{
   return std::string("{\"servers\":[{\"id\":\"") + ava::core::json::escape(id) + "\",\"name\":\"" +
          ava::core::json::escape(name) + "\",\"command\":\"" + ava::core::json::escape(command) +
          "\",\"enabled\":true}]}";
 }
 
-void write_app_test_file(std::filesystem::path const& path, std::string const& text) {
+void write_app_test_file(std::filesystem::path const& path, std::string const& text)
+{
   std::filesystem::create_directories(path.parent_path());
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file << text;
@@ -145,7 +150,8 @@ void write_app_test_file(std::filesystem::path const& path, std::string const& t
 
 class BlockingInputBuf final : public std::streambuf {
  public:
-  void push(std::string text) {
+  void push(std::string text)
+  {
     {
       std::lock_guard lock(mutex_);
       for (char const ch : text) buffer_.push_back(ch);
@@ -153,7 +159,8 @@ class BlockingInputBuf final : public std::streambuf {
     cv_.notify_all();
   }
 
-  void close() {
+  void close()
+  {
     {
       std::lock_guard lock(mutex_);
       closed_ = true;
@@ -162,7 +169,8 @@ class BlockingInputBuf final : public std::streambuf {
   }
 
  protected:
-  int underflow() override {
+  int underflow() override
+  {
     std::unique_lock lock(mutex_);
     cv_.wait(lock, [&] { return closed_ || !buffer_.empty(); });
     if (buffer_.empty()) return traits_type::eof();
@@ -182,18 +190,21 @@ class BlockingInputBuf final : public std::streambuf {
 
 class ThreadSafeStringBuf final : public std::streambuf {
  public:
-  std::string str() const {
+  std::string str() const
+  {
     std::lock_guard lock(mutex_);
     return text_;
   }
 
-  bool wait_contains(std::string_view value, std::chrono::milliseconds timeout) const {
+  bool wait_contains(std::string_view value, std::chrono::milliseconds timeout) const
+  {
     std::unique_lock lock(mutex_);
     return cv_.wait_for(lock, timeout, [&] { return text_.find(value) != std::string::npos; });
   }
 
  protected:
-  int overflow(int ch) override {
+  int overflow(int ch) override
+  {
     if (ch == traits_type::eof()) return traits_type::not_eof(ch);
     {
       std::lock_guard lock(mutex_);
@@ -203,7 +214,8 @@ class ThreadSafeStringBuf final : public std::streambuf {
     return ch;
   }
 
-  std::streamsize xsputn(char const* s, std::streamsize count) override {
+  std::streamsize xsputn(char const* s, std::streamsize count) override
+  {
     {
       std::lock_guard lock(mutex_);
       text_.append(s, static_cast<std::size_t>(count));
@@ -221,12 +233,13 @@ class ThreadSafeStringBuf final : public std::streambuf {
 class ChunkedStreamingTransport final : public ava::provider::Transport {
  public:
   explicit ChunkedStreamingTransport(std::vector<std::string> chunks, int status_code = 200)
-      : chunks_(std::move(chunks)), status_code_(status_code) {
+      : chunks_(std::move(chunks)), status_code_(status_code)
+  {
     for (auto const& chunk : chunks_) response_body_ += chunk;
   }
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
-      ava::provider::HttpRequest const& request) override {
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  {
     requests_.push_back(request);
     return ava::provider::HttpResponse{.status_code = status_code_, .headers = {}, .body = response_body_};
   }
@@ -235,7 +248,8 @@ class ChunkedStreamingTransport final : public ava::provider::Transport {
 
   [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send_streaming(
       ava::provider::HttpRequest const& request, BodyChunkSink on_body_chunk,
-      CancelCallback cancel_requested = nullptr) override {
+      CancelCallback cancel_requested = nullptr) override
+  {
     requests_.push_back(request);
     for (auto const& chunk : chunks_) {
       if (cancel_requested && cancel_requested()) {
@@ -259,8 +273,8 @@ class BlockingResponseTransport final : public ava::provider::Transport {
  public:
   explicit BlockingResponseTransport(ava::provider::HttpResponse response) : response_(std::move(response)) {}
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
-      ava::provider::HttpRequest const& request) override {
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  {
     {
       std::lock_guard lock(mutex_);
       requests_.push_back(request);
@@ -272,12 +286,14 @@ class BlockingResponseTransport final : public ava::provider::Transport {
     return response_;
   }
 
-  bool wait_for_request(std::chrono::milliseconds timeout) const {
+  bool wait_for_request(std::chrono::milliseconds timeout) const
+  {
     std::unique_lock lock(mutex_);
     return cv_.wait_for(lock, timeout, [&] { return requested_; });
   }
 
-  void release() {
+  void release()
+  {
     {
       std::lock_guard lock(mutex_);
       released_ = true;
@@ -285,7 +301,8 @@ class BlockingResponseTransport final : public ava::provider::Transport {
     cv_.notify_all();
   }
 
-  [[nodiscard]] std::vector<ava::provider::HttpRequest> requests() const {
+  [[nodiscard]] std::vector<ava::provider::HttpRequest> requests() const
+  {
     std::lock_guard lock(mutex_);
     return requests_;
   }
@@ -299,11 +316,13 @@ class BlockingResponseTransport final : public ava::provider::Transport {
   std::vector<ava::provider::HttpRequest> requests_;
 };
 
-ava::provider::HttpResponse sse_response(std::string body) {
+ava::provider::HttpResponse sse_response(std::string body)
+{
   return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = std::move(body)};
 }
 
-std::string read_file_call_sse(std::string_view path = "note.txt") {
+std::string read_file_call_sse(std::string_view path = "note.txt")
+{
   return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_read\",\"name\":\"read_file\"}\n\n"
          "data: "
          "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_read\",\"delta\":\"{\\\"path\\\":"
@@ -313,7 +332,8 @@ std::string read_file_call_sse(std::string_view path = "note.txt") {
          "data: [DONE]\n\n";
 }
 
-std::string write_file_call_sse(std::string_view path, std::string_view content) {
+std::string write_file_call_sse(std::string_view path, std::string_view content)
+{
   auto const args =
       "{\"path\":\"" + ava::core::json::escape(path) + "\",\"content\":\"" + ava::core::json::escape(content) + "\"}";
   return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_write\",\"name\":\"write_file\"}\n\n"
@@ -324,7 +344,8 @@ std::string write_file_call_sse(std::string_view path, std::string_view content)
          "data: [DONE]\n\n";
 }
 
-std::string question_call_sse() {
+std::string question_call_sse()
+{
   return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_question\",\"name\":\"question\"}\n\n"
          "data: "
          "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_question\",\"delta\":\"{"
@@ -333,13 +354,15 @@ std::string question_call_sse() {
          "data: [DONE]\n\n";
 }
 
-std::string final_text_sse(std::string_view text) {
+std::string final_text_sse(std::string_view text)
+{
   return "data: {\"type\":\"response.output_text.delta\",\"delta\":\"" + ava::core::json::escape(text) +
          "\"}\n\n"
          "data: [DONE]\n\n";
 }
 
-std::string extract_json_string_field(std::string_view text, std::string_view key) {
+std::string extract_json_string_field(std::string_view text, std::string_view key)
+{
   std::string const needle = "\"" + std::string(key) + "\":\"";
   auto const start = text.find(needle);
   if (start == std::string_view::npos) return "";
@@ -349,7 +372,8 @@ std::string extract_json_string_field(std::string_view text, std::string_view ke
   return std::string(text.substr(value_start, value_end - value_start));
 }
 
-std::string extract_last_json_string_field(std::string_view text, std::string_view key) {
+std::string extract_last_json_string_field(std::string_view text, std::string_view key)
+{
   std::string const needle = "\"" + std::string(key) + "\":\"";
   auto const start = text.rfind(needle);
   if (start == std::string_view::npos) return "";
@@ -359,7 +383,8 @@ std::string extract_last_json_string_field(std::string_view text, std::string_vi
   return std::string(text.substr(value_start, value_end - value_start));
 }
 
-std::size_t count_substrings(std::string_view text, std::string_view needle) {
+std::size_t count_substrings(std::string_view text, std::string_view needle)
+{
   std::size_t count = 0;
   std::size_t position = 0;
   while ((position = text.find(needle, position)) != std::string_view::npos) {
@@ -369,13 +394,15 @@ std::size_t count_substrings(std::string_view text, std::string_view needle) {
   return count;
 }
 
-std::size_t count_compaction_entries(std::vector<ava::session::SessionEntry> const& entries) {
+std::size_t count_compaction_entries(std::vector<ava::session::SessionEntry> const& entries)
+{
   return static_cast<std::size_t>(std::ranges::count_if(
       entries, [](auto const& entry) { return entry.type == ava::session::EntryType::Compaction; }));
 }
 
 std::optional<ava::session::SessionEntry> latest_compaction_entry(
-    std::vector<ava::session::SessionEntry> const& entries) {
+    std::vector<ava::session::SessionEntry> const& entries)
+{
   for (auto iterator = entries.rbegin(); iterator != entries.rend(); ++iterator) {
     if (iterator->type == ava::session::EntryType::Compaction) return *iterator;
   }
@@ -386,9 +413,12 @@ class MutatingSummaryTransport final : public ava::provider::Transport {
  public:
   MutatingSummaryTransport(ava::session::SessionStore& store, std::vector<ava::provider::HttpResponse> responses,
                            std::size_t mutate_requests = 1)
-      : store_(store), responses_(std::move(responses)), mutate_requests_(mutate_requests) {}
+      : store_(store), responses_(std::move(responses)), mutate_requests_(mutate_requests)
+  {
+  }
 
-  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override {
+  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  {
     requests_.push_back(request);
     if (requests_.size() <= mutate_requests_) {
       static_cast<void>(
@@ -415,7 +445,8 @@ class MutatingSummaryTransport final : public ava::provider::Transport {
   std::vector<ava::provider::HttpRequest> requests_;
 };
 
-void test_command_classification() {
+void test_command_classification()
+{
   expect(ava::permissions::classify_command("git status --short").action == ava::permissions::PermissionAction::Allow,
          "git status is allowed for non-TTY line shell inspection");
   expect(ava::permissions::classify_command("git diff").action == ava::permissions::PermissionAction::Allow,
@@ -472,7 +503,8 @@ void test_command_classification() {
          "shell interpreters remain denied");
 }
 
-void test_app_event_serialization() {
+void test_app_event_serialization()
+{
   ava::app::RuntimeEvent session_event;
   session_event.type = ava::app::RuntimeEventType::SessionStart;
   session_event.timestamp = "2026-04-29T00:00:00Z";
@@ -499,7 +531,8 @@ void test_app_event_serialization() {
          "runtime event JSONL contains one terminating newline only");
 }
 
-void test_app_rpc_prompt_payload_serialization() {
+void test_app_rpc_prompt_payload_serialization()
+{
   auto const permission_json = ava::app::rpc::permission_request_payload_json(
       "permission_1", ava::permissions::PermissionPrompt{.operation = ava::permissions::Operation::EditFile,
                                                          .mode = ava::agent::Mode::Build,
@@ -535,7 +568,8 @@ void test_app_rpc_prompt_payload_serialization() {
          "RPC question request payload preserves options, selection metadata, and local prompt flags");
 }
 
-void test_app_runtime_open_session_and_context_prompt() {
+void test_app_runtime_open_session_and_context_prompt()
+{
   auto const root = temp_root() / "app-runtime-open";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -596,7 +630,8 @@ void test_app_runtime_open_session_and_context_prompt() {
   }
 }
 
-void test_app_run_prompt_emits_events() {
+void test_app_run_prompt_emits_events()
+{
   auto const root = temp_root() / "app-runtime-run";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -649,7 +684,8 @@ void test_app_run_prompt_emits_events() {
          "runtime run_prompt persists user and assistant entries in the runtime session");
 }
 
-void test_app_run_prompt_emits_provider_retry_events_when_enabled() {
+void test_app_run_prompt_emits_provider_retry_events_when_enabled()
+{
   auto const root = temp_root() / "app-runtime-provider-retry";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -716,7 +752,8 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled() {
   }
 }
 
-void test_app_run_prompt_emits_tool_progress_and_session_spill() {
+void test_app_run_prompt_emits_tool_progress_and_session_spill()
+{
   auto const root = temp_root() / "app-runtime-tool-progress";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -794,7 +831,8 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill() {
   expect(has_spill_file, "runtime run_prompt configures session-local spill files for truncated tool output");
 }
 
-void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call() {
+void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call()
+{
   auto const root = temp_root() / "app-runtime-event-sink-cancel";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -851,7 +889,8 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call() 
   expect(transport.requests().size() == 1, "event sink failure cancels before the next provider request");
 }
 
-void test_app_print_prompt_merging() {
+void test_app_print_prompt_merging()
+{
   auto explicit_only = ava::app::merge_print_prompt(
       ava::app::PrintPromptInputs{.explicit_prompt = std::string("explicit"), .stdin_prompt = std::nullopt});
   expect(explicit_only && *explicit_only == "explicit", "print prompt uses explicit prompt when stdin is absent");
@@ -870,7 +909,8 @@ void test_app_print_prompt_merging() {
          "print prompt rejects missing prompt input");
 }
 
-void test_headless_permission_policy() {
+void test_headless_permission_policy()
+{
   auto const workspace = temp_root() / "headless-policy" / "workspace";
   auto const outside = temp_root() / "headless-policy" / "outside.txt";
 
@@ -981,7 +1021,8 @@ void test_headless_permission_policy() {
          "headless --allow-tool rejects empty tool names");
 }
 
-void test_app_print_text_mode_outputs_final_text_only() {
+void test_app_print_text_mode_outputs_final_text_only()
+{
   auto const root = temp_root() / "app-print-text";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1018,7 +1059,8 @@ void test_app_print_text_mode_outputs_final_text_only() {
          "print text mode sends prompt through shared runtime");
 }
 
-void test_app_print_text_mode_with_streaming_keeps_stdout_final_only() {
+void test_app_print_text_mode_with_streaming_keeps_stdout_final_only()
+{
   auto const root = temp_root() / "app-print-text-streaming";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1051,7 +1093,8 @@ void test_app_print_text_mode_with_streaming_keeps_stdout_final_only() {
   expect(out.str() == "live answer" && err.str().empty(), "print text streaming mode keeps stdout final-answer-only");
 }
 
-void test_app_print_text_mode_reports_stdout_write_failure() {
+void test_app_print_text_mode_reports_stdout_write_failure()
+{
   auto const root = temp_root() / "app-print-text-write-failure";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1088,7 +1131,8 @@ void test_app_print_text_mode_reports_stdout_write_failure() {
          "print text mode reports stdout write failures");
 }
 
-void test_app_print_mode_uses_headless_permission_policy() {
+void test_app_print_mode_uses_headless_permission_policy()
+{
   auto const root = temp_root() / "app-print-policy";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1151,7 +1195,8 @@ void test_app_print_mode_uses_headless_permission_policy() {
          "print mode continuation includes allow-tool-approved read_file result");
 }
 
-void test_app_print_mode_refreshes_expired_oauth_before_provider_request() {
+void test_app_print_mode_refreshes_expired_oauth_before_provider_request()
+{
   auto const root = temp_root() / "app-print-oauth-refresh";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1209,7 +1254,8 @@ void test_app_print_mode_refreshes_expired_oauth_before_provider_request() {
          "print mode OAuth preflight persists refreshed credential before provider startup");
 }
 
-void test_app_connect_provider_credentials_headlessly() {
+void test_app_connect_provider_credentials_headlessly()
+{
   ScopedStdinTerminalState terminal_state;
   auto const root = temp_root() / "app-connect-provider-credentials";
   std::error_code remove_error;
@@ -1388,7 +1434,8 @@ void test_app_connect_provider_credentials_headlessly() {
          "interactive provider wizard refuses to prompt without a tty");
 }
 
-void test_app_print_json_mode_outputs_runtime_events() {
+void test_app_print_json_mode_outputs_runtime_events()
+{
   auto const root = temp_root() / "app-print-json";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1453,7 +1500,8 @@ void test_app_print_json_mode_outputs_runtime_events() {
          "print json mode writes failed turns as JSONL envelopes ending in error");
 }
 
-void test_app_print_json_mode_streams_provider_deltas_before_final_message() {
+void test_app_print_json_mode_streams_provider_deltas_before_final_message()
+{
   auto const root = temp_root() / "app-print-json-streaming";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1491,7 +1539,8 @@ void test_app_print_json_mode_streams_provider_deltas_before_final_message() {
          "print json mode emits streaming message deltas before final assistant message");
 }
 
-void test_app_command_dispatcher() {
+void test_app_command_dispatcher()
+{
   auto const root = temp_root() / "app-command-dispatcher";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1858,7 +1907,8 @@ void test_app_command_dispatcher() {
   expect(quit && quit->handled && quit->quit, "command dispatcher /quit requests shell exit");
 }
 
-void test_app_compact_provider_summary_success() {
+void test_app_compact_provider_summary_success()
+{
   auto const root = temp_root() / "app-compact-provider-success";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1942,7 +1992,8 @@ void test_app_compact_provider_summary_success() {
          "/compact appends returned summary with summary_unavailable false");
 }
 
-void test_app_compact_openai_oauth_streaming_summary_success() {
+void test_app_compact_openai_oauth_streaming_summary_success()
+{
   auto const root = temp_root() / "app-compact-oauth-streaming";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1985,7 +2036,8 @@ void test_app_compact_openai_oauth_streaming_summary_success() {
          "OAuth compaction summary request uses Codex streaming request shape");
 }
 
-void test_app_compact_provider_failure_leaves_session_untouched() {
+void test_app_compact_provider_failure_leaves_session_untouched()
+{
   auto const root = temp_root() / "app-compact-provider-failure";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2028,7 +2080,8 @@ void test_app_compact_provider_failure_leaves_session_untouched() {
          "provider-backed /compact failure leaves session without compaction entry");
 }
 
-void test_app_compact_oversized_summary_leaves_session_untouched() {
+void test_app_compact_oversized_summary_leaves_session_untouched()
+{
   auto const root = temp_root() / "app-compact-oversized";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2068,7 +2121,8 @@ void test_app_compact_oversized_summary_leaves_session_untouched() {
          "oversized generated summary leaves session without compaction entry");
 }
 
-void test_app_compaction_prompt_builder_sections() {
+void test_app_compaction_prompt_builder_sections()
+{
   auto config = ava::session::default_compaction_config();
   std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "entry_tool",
@@ -2092,7 +2146,8 @@ void test_app_compaction_prompt_builder_sections() {
          "compaction prompt builder includes source data and skips internal replay messages");
 }
 
-void test_app_auto_compaction_appends_summary_and_rebuilds_context() {
+void test_app_auto_compaction_appends_summary_and_rebuilds_context()
+{
   auto const root = temp_root() / "app-auto-compact";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2152,7 +2207,8 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context() {
          "auto compaction entry records trigger, summary, threshold, retention, and model metadata");
 }
 
-void test_app_auto_compaction_recent_context_respects_token_budget() {
+void test_app_auto_compaction_recent_context_respects_token_budget()
+{
   auto const root = temp_root() / "app-auto-compact-recent-budget";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2200,7 +2256,8 @@ void test_app_auto_compaction_recent_context_respects_token_budget() {
          "auto compaction stores recent context bounded by keep_recent_tokens with an explicit marker");
 }
 
-void test_app_auto_compaction_recent_context_truncates_utf8_safely() {
+void test_app_auto_compaction_recent_context_truncates_utf8_safely()
+{
   auto const root = temp_root() / "app-auto-compact-recent-utf8";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2253,7 +2310,8 @@ void test_app_auto_compaction_recent_context_truncates_utf8_safely() {
          "recent context truncation starts UTF-8 suffix on a code point boundary");
 }
 
-void test_app_auto_compaction_explicit_zero_disables() {
+void test_app_auto_compaction_explicit_zero_disables()
+{
   auto const root = temp_root() / "app-auto-compact-disabled";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2293,7 +2351,8 @@ void test_app_auto_compaction_explicit_zero_disables() {
   expect(entries && count_compaction_entries(*entries) == 0, "explicit disabled auto compaction appends no compaction");
 }
 
-void test_app_auto_compaction_uses_default_threshold_without_context_window_metadata() {
+void test_app_auto_compaction_uses_default_threshold_without_context_window_metadata()
+{
   auto const root = temp_root() / "app-auto-compact-default-threshold";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2338,7 +2397,8 @@ void test_app_auto_compaction_uses_default_threshold_without_context_window_meta
          "default threshold auto compaction keeps the active prompt as a normal user message");
 }
 
-void test_app_auto_compaction_retries_stale_snapshot_before_append() {
+void test_app_auto_compaction_retries_stale_snapshot_before_append()
+{
   auto const root = temp_root() / "app-auto-compact-revalidate";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2389,7 +2449,8 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append() {
          "auto compaction retry test introduced a concurrent session change");
 }
 
-void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append() {
+void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append()
+{
   auto const root = temp_root() / "app-auto-compact-repeated-stale";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2431,7 +2492,8 @@ void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append() {
          "repeated stale auto compaction appends no summary from stale snapshots");
 }
 
-void test_app_context_overflow_compacts_and_retries_once_successfully() {
+void test_app_context_overflow_compacts_and_retries_once_successfully()
+{
   auto const root = temp_root() / "app-context-overflow-retry";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2507,7 +2569,8 @@ void test_app_context_overflow_compacts_and_retries_once_successfully() {
          "consumer-facing export and stats hide internal active prompt replays");
 }
 
-void test_app_context_overflow_compaction_failure_leaves_no_partial_entry() {
+void test_app_context_overflow_compaction_failure_leaves_no_partial_entry()
+{
   auto const root = temp_root() / "app-context-overflow-compaction-fails";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2545,7 +2608,8 @@ void test_app_context_overflow_compaction_failure_leaves_no_partial_entry() {
          "failed context overflow compaction leaves no partial compaction entry");
 }
 
-void test_app_non_overflow_provider_error_does_not_compact_or_retry() {
+void test_app_non_overflow_provider_error_does_not_compact_or_retry()
+{
   auto const root = temp_root() / "app-non-overflow-error";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2581,7 +2645,8 @@ void test_app_non_overflow_provider_error_does_not_compact_or_retry() {
       "context overflow helper distinguishes token-window errors from unrelated provider errors");
 }
 
-void test_app_context_overflow_retry_is_bounded() {
+void test_app_context_overflow_retry_is_bounded()
+{
   auto const root = temp_root() / "app-context-overflow-bounded";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2618,7 +2683,8 @@ void test_app_context_overflow_retry_is_bounded() {
          "bounded context overflow retry appends one compaction entry");
 }
 
-void test_app_rpc_parsing_and_response_serialization() {
+void test_app_rpc_parsing_and_response_serialization()
+{
   auto command = ava::app::parse_rpc_command_line(
       "{\"id\":\"1\",\"type\":\"prompt\",\"message\":\"hello\\nava\",\"instructions\":\"keep\"}");
   expect(command && command->id == "1" && command->type == "prompt" && command->message &&
@@ -2645,7 +2711,8 @@ void test_app_rpc_parsing_and_response_serialization() {
          "RPC error response serializes JSONL error details");
 }
 
-void test_app_rpc_identifier_validation() {
+void test_app_rpc_identifier_validation()
+{
   auto allowed = ava::app::parse_rpc_command_line(
       R"JSON({"id":"rpc.1","type":"set_model","request_id":"req_1","correlation_id":"corr-1",)JSON"
       R"JSON("provider":"openai","model":"openai/gpt-5.5","plugin_id":"com.example.rpc",)JSON"
@@ -2680,7 +2747,8 @@ void test_app_rpc_identifier_validation() {
          "RPC parser leaves validate_plugin path validation to the plugin path handler");
 }
 
-void test_app_rpc_prompt_with_fake_transport_streams_events() {
+void test_app_rpc_prompt_with_fake_transport_streams_events()
+{
   auto const root = temp_root() / "app-rpc-prompt";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2729,7 +2797,8 @@ void test_app_rpc_prompt_with_fake_transport_streams_events() {
          "RPC prompt streams runtime event envelopes and ends with a successful response");
 }
 
-void test_app_rpc_prompt_streams_provider_deltas_before_final_response() {
+void test_app_rpc_prompt_streams_provider_deltas_before_final_response()
+{
   auto const root = temp_root() / "app-rpc-prompt-streaming";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2774,7 +2843,8 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response() {
          "RPC prompt emits live provider deltas before final assistant event and command response");
 }
 
-void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request() {
+void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request()
+{
   auto const root = temp_root() / "app-rpc-oauth-refresh";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2842,7 +2912,8 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request() {
          "RPC OAuth preflight persists refreshed credential before provider startup");
 }
 
-void test_app_rpc_malformed_line_recovery_and_unknown_command() {
+void test_app_rpc_malformed_line_recovery_and_unknown_command()
+{
   auto const root = temp_root() / "app-rpc-recovery";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2876,7 +2947,8 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command() {
          "RPC loop writes error responses and recovers for subsequent JSONL records");
 }
 
-void test_app_rpc_state_list_sessions_and_open_session() {
+void test_app_rpc_state_list_sessions_and_open_session()
+{
   auto const root = temp_root() / "app-rpc-state";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2914,7 +2986,8 @@ void test_app_rpc_state_list_sessions_and_open_session() {
   expect(second->store.session_id() == first_id, "RPC open_session switches the active runtime session");
 }
 
-void test_app_runtime_model_switch_persists_and_reopens() {
+void test_app_runtime_model_switch_persists_and_reopens()
+{
   auto const root = temp_root() / "app-runtime-model-switch";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -3024,7 +3097,8 @@ void test_app_runtime_model_switch_persists_and_reopens() {
   }
 }
 
-void test_app_runtime_model_switch_rejects_incompatible_history() {
+void test_app_runtime_model_switch_rejects_incompatible_history()
+{
   auto const root = temp_root() / "app-runtime-model-switch-compatibility";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -3172,7 +3246,8 @@ void test_app_runtime_model_switch_rejects_incompatible_history() {
   }
 }
 
-void test_app_runtime_reasoning_selection_persists_and_requests() {
+void test_app_runtime_reasoning_selection_persists_and_requests()
+{
   auto const root = temp_root() / "app-runtime-reasoning-selection";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -3359,7 +3434,8 @@ void test_app_runtime_reasoning_selection_persists_and_requests() {
   }
 }
 
-void test_app_rpc_model_commands() {
+void test_app_rpc_model_commands()
+{
   auto const root = temp_root() / "app-rpc-model-commands";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -3407,7 +3483,8 @@ void test_app_rpc_model_commands() {
   expect(session->model.provider_id == "kimi", "RPC cycle_model updates active session model");
 }
 
-void test_app_rpc_reasoning_commands() {
+void test_app_rpc_reasoning_commands()
+{
   auto const root = temp_root() / "app-rpc-reasoning-commands";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -3459,7 +3536,8 @@ void test_app_rpc_reasoning_commands() {
   }
 }
 
-void test_app_rpc_protocol_version_and_session_commands() {
+void test_app_rpc_protocol_version_and_session_commands()
+{
   auto const root = temp_root() / "app-rpc-protocol-session";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -3601,7 +3679,8 @@ void test_app_rpc_protocol_version_and_session_commands() {
          "RPC switch_session switches back to the requested session");
 }
 
-void test_app_rpc_protocol_version_and_resolver_reply_errors() {
+void test_app_rpc_protocol_version_and_resolver_reply_errors()
+{
   auto const root = temp_root() / "app-rpc-protocol-errors";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -3645,7 +3724,8 @@ void test_app_rpc_protocol_version_and_resolver_reply_errors() {
          "RPC version and resolver reply errors are in-band and recoverable");
 }
 
-void test_app_rpc_mcp_command_responses() {
+void test_app_rpc_mcp_command_responses()
+{
   expect(!std::string_view(AVA_FAKE_MCP_SERVER_PATH).empty(), "RPC MCP command test has fake server path");
   if (std::string_view(AVA_FAKE_MCP_SERVER_PATH).empty()) return;
 
@@ -3709,7 +3789,8 @@ void test_app_rpc_mcp_command_responses() {
          "RPC list_mcp_tools requests MCP launch and connect permissions before allowing discovery");
 }
 
-void test_app_rpc_command_responses_for_context_compact_export() {
+void test_app_rpc_command_responses_for_context_compact_export()
+{
   auto const root = temp_root() / "app-rpc-commands";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -3776,7 +3857,8 @@ void test_app_rpc_command_responses_for_context_compact_export() {
          "RPC command responses expose command dispatcher output as JSONL protocol records");
 }
 
-void test_app_rpc_compact_provider_failure_is_error_response() {
+void test_app_rpc_compact_provider_failure_is_error_response()
+{
   auto const root = temp_root() / "app-rpc-compact-failure";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -3813,7 +3895,8 @@ void test_app_rpc_compact_provider_failure_is_error_response() {
          "RPC compact provider failure leaves session without a compaction entry");
 }
 
-void test_app_rpc_cancel_affects_subsequent_prompt() {
+void test_app_rpc_cancel_affects_subsequent_prompt()
+{
   auto const root = temp_root() / "app-rpc-cancel";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -3852,7 +3935,8 @@ void test_app_rpc_cancel_affects_subsequent_prompt() {
          "RPC cancel response updates state and canceled prompts return protocol errors");
 }
 
-void test_app_rpc_active_prompt_cancel_unblocks_pending_permission() {
+void test_app_rpc_active_prompt_cancel_unblocks_pending_permission()
+{
   auto const root = temp_root() / "app-rpc-active-cancel";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -3907,7 +3991,8 @@ void test_app_rpc_active_prompt_cancel_unblocks_pending_permission() {
       "RPC cancel is processed while prompt waits and prompt receives one canceled response");
 }
 
-void test_app_rpc_steer_applies_before_next_provider_request() {
+void test_app_rpc_steer_applies_before_next_provider_request()
+{
   auto const root = temp_root() / "app-rpc-steer";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -3963,7 +4048,8 @@ void test_app_rpc_steer_applies_before_next_provider_request() {
          "RPC steer emits queued/applied events and active prompt completes");
 }
 
-void test_app_rpc_follow_up_runs_after_active_prompt() {
+void test_app_rpc_follow_up_runs_after_active_prompt()
+{
   auto const root = temp_root() / "app-rpc-follow-up";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -4022,7 +4108,8 @@ void test_app_rpc_follow_up_runs_after_active_prompt() {
          "RPC follow_up emits queued/started events and responds after the active prompt response");
 }
 
-void test_app_rpc_prompt_start_failure_cleans_queued_messages() {
+void test_app_rpc_prompt_start_failure_cleans_queued_messages()
+{
   auto const root = temp_root() / "app-rpc-prompt-start-fail-queue";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -4079,7 +4166,8 @@ void test_app_rpc_prompt_start_failure_cleans_queued_messages() {
   expect(transport.requests().size() == 1, "RPC prompt startup failure does not run queued follow-up provider calls");
 }
 
-void test_app_rpc_steer_after_follow_up_started_targets_follow_up() {
+void test_app_rpc_steer_after_follow_up_started_targets_follow_up()
+{
   auto const root = temp_root() / "app-rpc-follow-up-steer";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -4149,7 +4237,8 @@ void test_app_rpc_steer_after_follow_up_started_targets_follow_up() {
          "RPC follow_up_started and subsequent steer use follow-up correlation");
 }
 
-void test_app_rpc_queue_limit_rejects_new_items() {
+void test_app_rpc_queue_limit_rejects_new_items()
+{
   auto const root = temp_root() / "app-rpc-queue-limit";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -4203,7 +4292,8 @@ void test_app_rpc_queue_limit_rejects_new_items() {
          "RPC queue limit accepts bounded entries, rejects the next steer, and cancel clears the bounded queue");
 }
 
-void test_app_rpc_eof_clears_queued_follow_up_without_running() {
+void test_app_rpc_eof_clears_queued_follow_up_without_running()
+{
   auto const root = temp_root() / "app-rpc-eof-clears-follow-up";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -4257,7 +4347,8 @@ void test_app_rpc_eof_clears_queued_follow_up_without_running() {
          "RPC EOF clears queued follow-up and sends its canceled response");
 }
 
-void test_app_rpc_cancel_clears_queued_steer_and_follow_up() {
+void test_app_rpc_cancel_clears_queued_steer_and_follow_up()
+{
   auto const root = temp_root() / "app-rpc-queue-cancel";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -4313,7 +4404,8 @@ void test_app_rpc_cancel_clears_queued_steer_and_follow_up() {
          "RPC cancel clears queued steer/follow-up items and reports skipped outcomes");
 }
 
-void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch() {
+void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch()
+{
   auto const root = temp_root() / "app-rpc-active-rejects";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -4372,7 +4464,8 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch() {
          "RPC rejects active-run mutations and session materialization queries");
 }
 
-void test_app_rpc_permission_policy_auto_allows_before_resolver_event() {
+void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
+{
   auto const root = temp_root() / "app-rpc-policy-auto-allow";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -4421,7 +4514,8 @@ void test_app_rpc_permission_policy_auto_allows_before_resolver_event() {
          "RPC permission policy auto-allows matching read prompt before resolver event");
 }
 
-void test_app_rpc_permission_reply_allow_and_deny_flows() {
+void test_app_rpc_permission_reply_allow_and_deny_flows()
+{
   for (std::string_view decision : {"allow", "deny"}) {
     auto const decision_text = std::string(decision);
     auto const root = temp_root() / ("app-rpc-permission-" + decision_text);
@@ -4483,7 +4577,8 @@ void test_app_rpc_permission_reply_allow_and_deny_flows() {
   }
 }
 
-void test_app_rpc_permission_request_includes_mutation_diff_preview() {
+void test_app_rpc_permission_request_includes_mutation_diff_preview()
+{
   auto const root = temp_root() / "app-rpc-permission-diff";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -4534,7 +4629,8 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview() {
          "RPC permission request payload includes backend-provided unified diff preview and reply event");
 }
 
-void test_app_rpc_question_reply_flow() {
+void test_app_rpc_question_reply_flow()
+{
   auto const root = temp_root() / "app-rpc-question";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -4582,7 +4678,8 @@ void test_app_rpc_question_reply_flow() {
          "RPC question reply emits a reply event and unblocks question tool");
 }
 
-void test_app_rpc_question_reply_selected_option_flow() {
+void test_app_rpc_question_reply_selected_option_flow()
+{
   auto const root = temp_root() / "app-rpc-question-selected";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -4639,14 +4736,19 @@ void test_app_rpc_question_reply_selected_option_flow() {
 
 }  // namespace
 
-void run_app_command_classification_tests() { test_command_classification(); }
+void run_app_command_classification_tests()
+{
+  test_command_classification();
+}
 
-void run_app_event_serialization_tests() {
+void run_app_event_serialization_tests()
+{
   test_app_event_serialization();
   test_app_rpc_prompt_payload_serialization();
 }
 
-void run_app_runtime_tests() {
+void run_app_runtime_tests()
+{
   test_app_runtime_open_session_and_context_prompt();
   test_app_run_prompt_emits_events();
   test_app_run_prompt_emits_provider_retry_events_when_enabled();

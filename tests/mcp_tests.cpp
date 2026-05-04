@@ -20,19 +20,22 @@
 
 namespace {
 
-void write_text(std::filesystem::path const& path, std::string const& text) {
+void write_text(std::filesystem::path const& path, std::string const& text)
+{
   std::filesystem::create_directories(path.parent_path());
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file << text;
 }
 
-std::string mcp_config_json(std::string id, std::string command, bool enabled = true, std::string args_json = "[]") {
+std::string mcp_config_json(std::string id, std::string command, bool enabled = true, std::string args_json = "[]")
+{
   return std::string("{\"servers\":[{\"id\":\"") + ava::core::json::escape(id) +
          "\",\"name\":\"Demo MCP\",\"command\":\"" + ava::core::json::escape(command) + "\",\"args\":" + args_json +
          ",\"enabled\":" + (enabled ? "true" : "false") + "}]}";
 }
 
-ava::mcp::McpServerConfig fake_server_config(std::filesystem::path const& root) {
+ava::mcp::McpServerConfig fake_server_config(std::filesystem::path const& root)
+{
   return ava::mcp::McpServerConfig{.id = "demo",
                                    .name = "Demo MCP",
                                    .command = AVA_FAKE_MCP_SERVER_PATH,
@@ -42,7 +45,8 @@ ava::mcp::McpServerConfig fake_server_config(std::filesystem::path const& root) 
                                    .source_path = root / "mcp.json"};
 }
 
-ava::mcp::McpStdioClientOptions fake_client_options(std::filesystem::path const& workspace) {
+ava::mcp::McpStdioClientOptions fake_client_options(std::filesystem::path const& workspace)
+{
   ava::mcp::McpStdioClientOptions options;
   options.workspace_dir = workspace;
   options.startup_timeout = std::chrono::milliseconds(500);
@@ -50,7 +54,8 @@ ava::mcp::McpStdioClientOptions fake_client_options(std::filesystem::path const&
   return options;
 }
 
-void test_mcp_config_parsing() {
+void test_mcp_config_parsing()
+{
   auto global =
       ava::mcp::parse_mcp_config("{\"servers\":[{\"id\":\"demo\",\"command\":\"/bin/demo\",\"args\":[\"--stdio\"]}]}",
                                  "/tmp/global-mcp.json", ava::mcp::McpServerScope::Global);
@@ -83,7 +88,8 @@ void test_mcp_config_parsing() {
          "MCP config rejects duplicate server ids across scopes");
 }
 
-void test_mcp_stdio_client_lists_and_calls_tools() {
+void test_mcp_stdio_client_lists_and_calls_tools()
+{
   auto const root = temp_root() / "mcp-client";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -195,7 +201,8 @@ void test_mcp_stdio_client_lists_and_calls_tools() {
   }
 }
 
-void test_mcp_tool_dispatcher() {
+void test_mcp_tool_dispatcher()
+{
   auto const root = temp_root() / "mcp-dispatcher";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -276,7 +283,8 @@ void test_mcp_tool_dispatcher() {
          "MCP tool dispatcher reports semantic cancellation before permission or process execution");
 }
 
-void test_mcp_tool_dispatcher_contains_tool_errors() {
+void test_mcp_tool_dispatcher_contains_tool_errors()
+{
   auto const root = temp_root() / "mcp-dispatcher-tool-error";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -312,7 +320,8 @@ void test_mcp_tool_dispatcher_contains_tool_errors() {
 
 }  // namespace
 
-void run_mcp_tests() {
+void run_mcp_tests()
+{
   test_mcp_config_parsing();
   test_mcp_stdio_client_lists_and_calls_tools();
   test_mcp_tool_dispatcher();

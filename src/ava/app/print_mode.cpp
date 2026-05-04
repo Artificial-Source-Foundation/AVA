@@ -14,19 +14,25 @@
 namespace ava::app {
 namespace {
 
-bool has_value(std::optional<std::string> const& value) { return value && !value->empty(); }
+bool has_value(std::optional<std::string> const& value)
+{
+  return value && !value->empty();
+}
 
-std::string read_all(std::istream& in) {
+std::string read_all(std::istream& in)
+{
   return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
-ava::permissions::PermissionResolver deny_permission_resolver() {
+ava::permissions::PermissionResolver deny_permission_resolver()
+{
   return [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
     return ava::permissions::PermissionResolution::Deny;
   };
 }
 
-void write_text_event_diagnostic(RuntimeEvent const& event, std::ostream& err) {
+void write_text_event_diagnostic(RuntimeEvent const& event, std::ostream& err)
+{
   if (event.type == RuntimeEventType::ToolStart) {
     err << "tool_start";
     if (!event.tool_name.empty()) err << " " << event.tool_name;
@@ -47,7 +53,8 @@ void write_text_event_diagnostic(RuntimeEvent const& event, std::ostream& err) {
   }
 }
 
-RuntimeRunOptions print_runtime_options(RuntimeRunOptions options) {
+RuntimeRunOptions print_runtime_options(RuntimeRunOptions options)
+{
   if (!options.permission_resolver) {
     options.permission_resolver = deny_permission_resolver();
   }
@@ -55,7 +62,8 @@ RuntimeRunOptions print_runtime_options(RuntimeRunOptions options) {
   return options;
 }
 
-RuntimeEvent runtime_error_event(RuntimeSession const& session, ava::core::Error const& error) {
+RuntimeEvent runtime_error_event(RuntimeSession const& session, ava::core::Error const& error)
+{
   RuntimeEvent event;
   event.type = RuntimeEventType::Error;
   event.timestamp = ava::session::now_timestamp();
@@ -71,7 +79,8 @@ RuntimeEvent runtime_error_event(RuntimeSession const& session, ava::core::Error
 
 }  // namespace
 
-ava::core::Result<std::string> merge_print_prompt(PrintPromptInputs const& inputs) {
+ava::core::Result<std::string> merge_print_prompt(PrintPromptInputs const& inputs)
+{
   bool const has_explicit = has_value(inputs.explicit_prompt);
   bool const has_stdin = has_value(inputs.stdin_prompt);
   if (has_explicit && has_stdin) return *inputs.explicit_prompt + "\n\n" + *inputs.stdin_prompt;
@@ -85,7 +94,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& 
                                                                 ava::provider::Provider const& provider,
                                                                 ava::provider::Transport& transport,
                                                                 PrintModeRunOptions const& options, std::ostream& out,
-                                                                std::ostream& err) {
+                                                                std::ostream& err)
+{
   bool emitted_error = false;
   auto runtime_options = print_runtime_options(options.runtime_options);
   EventBus event_bus;
@@ -134,7 +144,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& 
   return result;
 }
 
-int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err) {
+int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err)
+{
   std::optional<std::string> stdin_prompt;
   if (options.read_stdin) stdin_prompt = read_all(in);
 

@@ -11,12 +11,14 @@
 
 namespace {
 
-std::string lowercase(std::string value) {
+std::string lowercase(std::string value)
+{
   std::ranges::transform(value, value.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   return value;
 }
 
-std::string trim(std::string value) {
+std::string trim(std::string value)
+{
   auto first = value.begin();
   while (first != value.end() && std::isspace(static_cast<unsigned char>(*first)) != 0) ++first;
   auto last = value.end();
@@ -24,7 +26,8 @@ std::string trim(std::string value) {
   return std::string(first, last);
 }
 
-std::optional<std::string> read_message() {
+std::optional<std::string> read_message()
+{
   std::optional<std::size_t> content_length;
   std::string line;
   bool saw_header = false;
@@ -49,25 +52,32 @@ std::optional<std::string> read_message() {
   return body;
 }
 
-void write_message(std::string_view body) {
+void write_message(std::string_view body)
+{
   std::cout << "Content-Length: " << body.size() << "\r\n\r\n" << body;
   std::cout.flush();
 }
 
-std::string json_string(std::string_view value) { return "\"" + ava::core::json::escape(value) + "\""; }
+std::string json_string(std::string_view value)
+{
+  return "\"" + ava::core::json::escape(value) + "\"";
+}
 
-std::string response(std::string_view id, std::string_view result) {
+std::string response(std::string_view id, std::string_view result)
+{
   return "{\"jsonrpc\":\"2.0\",\"id\":" + json_string(id) + ",\"result\":" + std::string(result) + "}";
 }
 
-std::string error_response(std::string_view id, std::string_view message) {
+std::string error_response(std::string_view id, std::string_view message)
+{
   return "{\"jsonrpc\":\"2.0\",\"id\":" + json_string(id) +
          ",\"error\":{\"code\":-32000,\"message\":" + json_string(message) + "}}";
 }
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
   std::string mode = "ok";
   if (argc > 1) mode = argv[1];
   if (mode == "stderr-noise") {

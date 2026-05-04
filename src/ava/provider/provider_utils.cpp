@@ -6,21 +6,29 @@
 namespace ava::provider {
 namespace {
 
-std::string_view trim(std::string_view value) {
+std::string_view trim(std::string_view value)
+{
   while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) value.remove_prefix(1);
   while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) value.remove_suffix(1);
   return value;
 }
 
-bool is_hex_digit(char ch) { return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F'); }
+bool is_hex_digit(char ch)
+{
+  return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
+}
 
-bool is_json_whitespace(char ch) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; }
+bool is_json_whitespace(char ch)
+{
+  return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
+}
 
 class JsonValidator {
  public:
   explicit JsonValidator(std::string_view value) : value_(value) {}
 
-  [[nodiscard]] bool valid_object() {
+  [[nodiscard]] bool valid_object()
+  {
     skip_ws();
     if (!parse_object()) return false;
     skip_ws();
@@ -28,23 +36,27 @@ class JsonValidator {
   }
 
  private:
-  void skip_ws() {
+  void skip_ws()
+  {
     while (offset_ < value_.size() && is_json_whitespace(value_[offset_])) ++offset_;
   }
 
-  [[nodiscard]] bool consume(char expected) {
+  [[nodiscard]] bool consume(char expected)
+  {
     if (offset_ >= value_.size() || value_[offset_] != expected) return false;
     ++offset_;
     return true;
   }
 
-  [[nodiscard]] bool consume_literal(std::string_view literal) {
+  [[nodiscard]] bool consume_literal(std::string_view literal)
+  {
     if (value_.substr(offset_, literal.size()) != literal) return false;
     offset_ += literal.size();
     return true;
   }
 
-  [[nodiscard]] bool parse_value() {
+  [[nodiscard]] bool parse_value()
+  {
     skip_ws();
     if (offset_ >= value_.size()) return false;
     char const ch = value_[offset_];
@@ -58,7 +70,8 @@ class JsonValidator {
     return false;
   }
 
-  [[nodiscard]] bool parse_object() {
+  [[nodiscard]] bool parse_object()
+  {
     if (!consume('{')) return false;
     skip_ws();
     if (consume('}')) return true;
@@ -74,7 +87,8 @@ class JsonValidator {
     }
   }
 
-  [[nodiscard]] bool parse_array() {
+  [[nodiscard]] bool parse_array()
+  {
     if (!consume('[')) return false;
     skip_ws();
     if (consume(']')) return true;
@@ -86,7 +100,8 @@ class JsonValidator {
     }
   }
 
-  [[nodiscard]] bool parse_string() {
+  [[nodiscard]] bool parse_string()
+  {
     if (!consume('"')) return false;
     while (offset_ < value_.size()) {
       char const ch = value_[offset_++];
@@ -108,7 +123,8 @@ class JsonValidator {
     return false;
   }
 
-  [[nodiscard]] bool parse_number() {
+  [[nodiscard]] bool parse_number()
+  {
     if (consume('-') && offset_ >= value_.size()) return false;
     if (consume('0')) {
       if (offset_ < value_.size() && std::isdigit(static_cast<unsigned char>(value_[offset_])) != 0) return false;
@@ -133,7 +149,8 @@ class JsonValidator {
   std::size_t offset_ = 0;
 };
 
-void redact_json_string_value(std::string& snippet, std::string_view key) {
+void redact_json_string_value(std::string& snippet, std::string_view key)
+{
   std::string const needle = "\"" + std::string(key) + "\"";
   std::size_t position = 0;
   while ((position = snippet.find(needle, position)) != std::string::npos) {
@@ -177,7 +194,8 @@ void redact_json_string_value(std::string& snippet, std::string_view key) {
 
 }  // namespace
 
-bool is_json_object_shape(std::string_view value) {
+bool is_json_object_shape(std::string_view value)
+{
   value = trim(value);
   if (value.size() < 2 || value.front() != '{') return false;
   bool in_string = false;
@@ -215,9 +233,13 @@ bool is_json_object_shape(std::string_view value) {
   return first_member.empty() || first_member.front() == '"';
 }
 
-bool is_valid_json_object(std::string_view value) { return JsonValidator(value).valid_object(); }
+bool is_valid_json_object(std::string_view value)
+{
+  return JsonValidator(value).valid_object();
+}
 
-std::string sanitized_body_snippet(std::string_view body, std::initializer_list<std::string_view> secret_keys) {
+std::string sanitized_body_snippet(std::string_view body, std::initializer_list<std::string_view> secret_keys)
+{
   constexpr std::size_t kMaxSnippet = 256;
   constexpr std::size_t kMaxSanitizeBytes = 4096;
   std::string snippet(body.substr(0, std::min(body.size(), kMaxSanitizeBytes)));

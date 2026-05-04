@@ -11,11 +11,15 @@ namespace {
 constexpr auto kBlockMinWidth = std::size_t{32};
 constexpr auto kTurnSpacingMinWidth = std::size_t{44};
 
-bool wide_blocks(std::size_t width) { return width >= kBlockMinWidth; }
+bool wide_blocks(std::size_t width)
+{
+  return width >= kBlockMinWidth;
+}
 
 std::vector<std::string> render_thinking_block(std::string const& text, std::size_t width);
 
-std::string trim_left(std::string_view text) {
+std::string trim_left(std::string_view text)
+{
   std::size_t start = 0;
   while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start])) != 0) {
     ++start;
@@ -23,11 +27,13 @@ std::string trim_left(std::string_view text) {
   return std::string(text.substr(start));
 }
 
-bool is_blank(std::string_view text) {
+bool is_blank(std::string_view text)
+{
   return std::ranges::all_of(text, [](char ch) { return std::isspace(static_cast<unsigned char>(ch)) != 0; });
 }
 
-std::string trim_ascii(std::string text) {
+std::string trim_ascii(std::string text)
+{
   auto begin = text.begin();
   while (begin != text.end() && std::isspace(static_cast<unsigned char>(*begin)) != 0) {
     ++begin;
@@ -39,7 +45,8 @@ std::string trim_ascii(std::string text) {
   return std::string(begin, end);
 }
 
-std::string remove_redacted_markers(std::string text) {
+std::string remove_redacted_markers(std::string text)
+{
   constexpr std::string_view marker = "[REDACTED]";
   for (auto found = text.find(marker); found != std::string::npos; found = text.find(marker, found)) {
     text.erase(found, marker.size());
@@ -47,7 +54,8 @@ std::string remove_redacted_markers(std::string text) {
   return text;
 }
 
-std::vector<std::string> hard_wrap_sanitized(std::string_view text, std::size_t width) {
+std::vector<std::string> hard_wrap_sanitized(std::string_view text, std::size_t width)
+{
   auto const content_width = std::max<std::size_t>(1, width);
   std::vector<std::string> wrapped;
   std::string current;
@@ -72,7 +80,8 @@ std::vector<std::string> hard_wrap_sanitized(std::string_view text, std::size_t 
   return wrapped;
 }
 
-std::vector<std::string> words_in(std::string_view text) {
+std::vector<std::string> words_in(std::string_view text)
+{
   std::vector<std::string> words;
   for (std::size_t index = 0; index < text.size();) {
     while (index < text.size() && std::isspace(static_cast<unsigned char>(text[index])) != 0) {
@@ -87,7 +96,8 @@ std::vector<std::string> words_in(std::string_view text) {
   return words;
 }
 
-std::string text_span_sgr(Rendition const& rendition) {
+std::string text_span_sgr(Rendition const& rendition)
+{
   std::string sgr;
   if (rendition.bold) sgr += std::string(kSgrBold);
   if (rendition.code) {
@@ -108,7 +118,8 @@ std::string text_span_sgr(Rendition const& rendition) {
   return sgr;
 }
 
-std::string render_inline_text(Text const& text) {
+std::string render_inline_text(Text const& text)
+{
   std::string rendered;
   for (auto const& run : text.runs) {
     if (std::holds_alternative<NewLine>(run)) {
@@ -129,13 +140,15 @@ std::string render_inline_text(Text const& text) {
   return rendered;
 }
 
-std::string text_model_or(Text const& model, std::string const& fallback) {
+std::string text_model_or(Text const& model, std::string const& fallback)
+{
   if (text_empty(model)) return fallback;
   return to_plain_text(model);
 }
 
 void push_wrapped_word(std::vector<std::string>& output, std::string const& word, std::string const& next_prefix,
-                       std::string& current, std::size_t& current_cols, std::size_t width) {
+                       std::string& current, std::size_t& current_cols, std::size_t width)
+{
   auto remaining = word;
   while (!remaining.empty()) {
     auto const prefix_cols = terminal_text_columns(current);
@@ -154,7 +167,8 @@ void push_wrapped_word(std::vector<std::string>& output, std::string const& word
 
 std::vector<std::string> wrap_words_with_prefix(std::string_view text, std::size_t width,
                                                 std::string const& first_prefix = {},
-                                                std::string const& next_prefix = {}) {
+                                                std::string const& next_prefix = {})
+{
   auto const content_width = std::max<std::size_t>(1, width);
   std::vector<std::string> output;
   std::string current = first_prefix;
@@ -197,17 +211,19 @@ std::vector<std::string> wrap_words_with_prefix(std::string_view text, std::size
   return output;
 }
 
-std::string render_inline_markup(std::string_view sanitized_text) {
+std::string render_inline_markup(std::string_view sanitized_text)
+{
   return render_inline_text(text_from_markdown(sanitized_text));
 }
 
-std::string render_wide_content(std::string_view border_sgr, std::string content, std::size_t width) {
+std::string render_wide_content(std::string_view border_sgr, std::string content, std::size_t width)
+{
   auto line = std::string("  ") + std::string(border_sgr) + "│" + std::string(kSgrReset) + " " + std::move(content);
   return fit_line_preserving_sgr(std::move(line), width);
 }
 
-std::vector<std::string> render_narrow_assistant_lines(std::vector<std::string> const& content_lines,
-                                                       std::size_t width) {
+std::vector<std::string> render_narrow_assistant_lines(std::vector<std::string> const& content_lines, std::size_t width)
+{
   std::vector<std::string> lines;
   auto const prefix = std::string("  ");
   auto const content_width = width > prefix.size() ? width - prefix.size() : std::size_t{1};
@@ -227,7 +243,8 @@ std::vector<std::string> render_narrow_assistant_lines(std::vector<std::string> 
   return lines;
 }
 
-std::vector<std::string> render_assistant_meta_lines(std::string const& meta, std::size_t width) {
+std::vector<std::string> render_assistant_meta_lines(std::string const& meta, std::size_t width)
+{
   if (meta.empty()) return {};
   auto const sanitized = sanitize_terminal_text(meta);
   if (!wide_blocks(width)) {
@@ -239,7 +256,8 @@ std::vector<std::string> render_assistant_meta_lines(std::string const& meta, st
   return {render_wide_content(kSgrMuted, std::move(line), width)};
 }
 
-std::vector<std::string> render_user_block(std::string const& text, std::size_t width) {
+std::vector<std::string> render_user_block(std::string const& text, std::size_t width)
+{
   std::vector<std::string> lines;
   std::vector<std::string> plain_lines;
   for (auto const& raw_line : split_lines(text)) {
@@ -271,7 +289,8 @@ std::vector<std::string> render_user_block(std::string const& text, std::size_t 
   return lines;
 }
 
-bool parse_bullet(std::string_view line, std::string& marker, std::string& body) {
+bool parse_bullet(std::string_view line, std::string& marker, std::string& body)
+{
   auto const trimmed = trim_left(line);
   if (trimmed.size() >= 2 && (trimmed[0] == '-' || trimmed[0] == '*') && trimmed[1] == ' ') {
     marker = std::string(1, trimmed[0]) + " ";
@@ -281,7 +300,8 @@ bool parse_bullet(std::string_view line, std::string& marker, std::string& body)
   return false;
 }
 
-bool parse_numbered(std::string_view line, std::string& marker, std::string& body) {
+bool parse_numbered(std::string_view line, std::string& marker, std::string& body)
+{
   auto const trimmed = trim_left(line);
   std::size_t index = 0;
   while (index < trimmed.size() && std::isdigit(static_cast<unsigned char>(trimmed[index])) != 0) {
@@ -295,7 +315,8 @@ bool parse_numbered(std::string_view line, std::string& marker, std::string& bod
   return true;
 }
 
-bool parse_blockquote(std::string_view line, std::string& body) {
+bool parse_blockquote(std::string_view line, std::string& body)
+{
   auto const trimmed = trim_left(line);
   if (trimmed.size() >= 2 && trimmed[0] == '>' && trimmed[1] == ' ') {
     body = std::string(trimmed.substr(2));
@@ -304,7 +325,8 @@ bool parse_blockquote(std::string_view line, std::string& body) {
   return false;
 }
 
-std::vector<std::string> assistant_content_lines(std::string const& text, std::size_t content_width) {
+std::vector<std::string> assistant_content_lines(std::string const& text, std::size_t content_width)
+{
   std::vector<std::string> output;
   auto const raw_lines = split_lines(text);
   bool in_code = false;
@@ -351,7 +373,8 @@ std::vector<std::string> assistant_content_lines(std::string const& text, std::s
   return output;
 }
 
-std::vector<std::string> render_assistant_text_block(std::vector<std::string> const& content, std::size_t width) {
+std::vector<std::string> render_assistant_text_block(std::vector<std::string> const& content, std::size_t width)
+{
   std::vector<std::string> lines;
   bool in_code = false;
   for (auto const& part : content) {
@@ -369,7 +392,8 @@ std::vector<std::string> render_assistant_text_block(std::vector<std::string> co
 }
 
 std::vector<std::string> render_assistant_block(std::string const& text, std::string const& meta,
-                                                std::string const& thinking, std::size_t width) {
+                                                std::string const& thinking, std::size_t width)
+{
   auto const content_width = width > 4 ? width - 4 : std::size_t{1};
   auto const content = text.empty() ? std::vector<std::string>{} : assistant_content_lines(text, content_width);
   std::vector<std::string> lines;
@@ -396,7 +420,8 @@ std::vector<std::string> render_assistant_block(std::string const& text, std::st
   return lines;
 }
 
-std::vector<std::string> render_thinking_block(std::string const& text, std::size_t width) {
+std::vector<std::string> render_thinking_block(std::string const& text, std::size_t width)
+{
   auto const visible_text = trim_ascii(remove_redacted_markers(text));
   if (visible_text.empty()) return {};
 
@@ -435,7 +460,8 @@ std::vector<std::string> render_thinking_block(std::string const& text, std::siz
   return lines;
 }
 
-std::string render_error_line(std::string const& text, std::size_t width) {
+std::string render_error_line(std::string const& text, std::size_t width)
+{
   auto prefix = std::string("  ") + std::string(kSgrError) + '!' + std::string(kSgrReset) + " ";
   constexpr auto kPrefixCols = std::size_t{4};
   auto content_width = width > kPrefixCols ? width - kPrefixCols : 0;
@@ -445,7 +471,8 @@ std::string render_error_line(std::string const& text, std::size_t width) {
 
 }  // namespace
 
-std::string render_generic_line(std::string const& text, std::size_t width) {
+std::string render_generic_line(std::string const& text, std::size_t width)
+{
   auto prefix = std::string("  ") + std::string(kSgrDim) + "·" + std::string(kSgrReset) + " ";
   constexpr auto kPrefixCols = std::size_t{4};
   auto content_width = width > kPrefixCols ? width - kPrefixCols : 0;
@@ -454,7 +481,8 @@ std::string render_generic_line(std::string const& text, std::size_t width) {
 }
 
 std::vector<std::string> render_transcript_lines(std::vector<TranscriptItem> const& transcript, std::size_t width,
-                                                 bool tool_details_visible, bool thinking_visible) {
+                                                 bool tool_details_visible, bool thinking_visible)
+{
   std::vector<std::string> rendered_transcript;
   for (auto const& item : transcript) {
     auto const should_space = width >= kTurnSpacingMinWidth && !rendered_transcript.empty() &&
@@ -496,7 +524,8 @@ std::vector<std::string> render_transcript_lines(std::vector<TranscriptItem> con
 
 std::vector<std::string> visible_transcript_lines(std::vector<std::string> const& rendered_transcript,
                                                   std::size_t width, std::size_t transcript_height,
-                                                  std::size_t transcript_scroll_offset) {
+                                                  std::size_t transcript_scroll_offset)
+{
   static_cast<void>(width);
   std::vector<std::string> visible_transcript;
   if (rendered_transcript.size() > transcript_height && transcript_height > 0) {
@@ -518,7 +547,8 @@ std::vector<std::string> visible_transcript_lines(std::vector<std::string> const
 
 }  // namespace detail
 
-std::string to_string(ToolTimelineStatus status) {
+std::string to_string(ToolTimelineStatus status)
+{
   switch (status) {
     case ToolTimelineStatus::Running:
       return "running";

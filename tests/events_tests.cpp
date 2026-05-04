@@ -10,7 +10,8 @@
 
 namespace {
 
-void test_event_envelope_serialization_is_deterministic() {
+void test_event_envelope_serialization_is_deterministic()
+{
   ava::app::EventEnvelope const envelope{.schema_version = 1,
                                          .event_id = "event_1",
                                          .timestamp = "2026-04-30T00:00:00Z",
@@ -37,7 +38,8 @@ void test_event_envelope_serialization_is_deterministic() {
   expect(jsonl == json + '\n', "event envelope JSONL appends one newline");
 }
 
-void test_runtime_event_conversion_preserves_legacy_payload_shape() {
+void test_runtime_event_conversion_preserves_legacy_payload_shape()
+{
   ava::app::RuntimeEvent event;
   event.type = ava::app::RuntimeEventType::ToolResult;
   event.timestamp = "2026-04-30T00:00:01Z";
@@ -63,7 +65,8 @@ void test_runtime_event_conversion_preserves_legacy_payload_shape() {
          "runtime event conversion maps legacy event fields into payload object");
 }
 
-void test_runtime_event_bus_adapter_publishes_and_forwards() {
+void test_runtime_event_bus_adapter_publishes_and_forwards()
+{
   ava::app::EventBus bus;
   std::vector<ava::app::EventEnvelope> published;
   std::vector<ava::app::RuntimeEvent> forwarded;
@@ -95,7 +98,8 @@ void test_runtime_event_bus_adapter_publishes_and_forwards() {
          "runtime event bus adapter forwards runtime events to legacy sink");
 }
 
-void test_runtime_event_bus_adapter_allows_default_legacy_sink() {
+void test_runtime_event_bus_adapter_allows_default_legacy_sink()
+{
   ava::app::EventBus bus;
   std::vector<ava::app::EventEnvelope> published;
   bus.subscribe([&published](ava::app::EventEnvelope const& envelope) {
@@ -114,7 +118,8 @@ void test_runtime_event_bus_adapter_allows_default_legacy_sink() {
          "runtime event bus adapter supports a null legacy sink");
 }
 
-void test_tool_progress_runtime_event_serialization_and_bus_adapter() {
+void test_tool_progress_runtime_event_serialization_and_bus_adapter()
+{
   ava::app::RuntimeEvent event;
   event.type = ava::app::RuntimeEventType::ToolProgress;
   event.timestamp = "2026-04-30T00:00:04Z";
@@ -148,7 +153,8 @@ void test_tool_progress_runtime_event_serialization_and_bus_adapter() {
          "tool progress envelope payload keeps existing tool event fields");
 }
 
-void test_tool_runtime_event_serializes_semantic_frontend_payloads() {
+void test_tool_runtime_event_serializes_semantic_frontend_payloads()
+{
   ava::app::RuntimeEvent event;
   event.type = ava::app::RuntimeEventType::ToolResult;
   event.timestamp = "2026-04-30T00:00:04Z";
@@ -200,7 +206,8 @@ void test_tool_runtime_event_serializes_semantic_frontend_payloads() {
          "tool event envelopes preserve semantic payloads for frontend replay");
 }
 
-void test_reasoning_runtime_event_serialization_hides_provider_private_state() {
+void test_reasoning_runtime_event_serialization_hides_provider_private_state()
+{
   ava::app::RuntimeEvent event;
   event.type = ava::app::RuntimeEventType::ReasoningDelta;
   event.timestamp = "2026-04-30T00:00:05Z";
@@ -233,7 +240,8 @@ void test_reasoning_runtime_event_serialization_hides_provider_private_state() {
          "reasoning frontend event envelope never exposes provider-private signatures");
 }
 
-void test_lifecycle_runtime_event_serialization_and_aliases() {
+void test_lifecycle_runtime_event_serialization_and_aliases()
+{
   ava::app::RuntimeEvent event;
   event.type = ava::app::RuntimeEventType::CompactionEnd;
   event.timestamp = "2026-04-30T00:00:06Z";
@@ -294,7 +302,8 @@ void test_lifecycle_runtime_event_serialization_and_aliases() {
          "retry countdown tick runtime events serialize explicit backend timing data");
 }
 
-void test_interactive_run_queue_emits_steer_queued_and_applied_events() {
+void test_interactive_run_queue_emits_steer_queued_and_applied_events()
+{
   std::vector<ava::app::EventEnvelope> events;
   ava::app::InteractiveRunQueue queue("session_queue", "request_active",
                                       [&events](ava::app::EventEnvelope const& envelope) {
@@ -318,7 +327,8 @@ void test_interactive_run_queue_emits_steer_queued_and_applied_events() {
       "interactive run queue emits a steer applied event when consumed by the backend");
 }
 
-void test_interactive_run_queue_runs_follow_up_lifecycle() {
+void test_interactive_run_queue_runs_follow_up_lifecycle()
+{
   std::vector<ava::app::EventEnvelope> events;
   ava::app::InteractiveRunQueue queue("session_queue", "request_active",
                                       [&events](ava::app::EventEnvelope const& envelope) {
@@ -340,7 +350,8 @@ void test_interactive_run_queue_runs_follow_up_lifecycle() {
          "interactive run queue retargets active correlation when a follow-up starts");
 }
 
-void test_interactive_run_queue_skips_pending_messages_on_finish() {
+void test_interactive_run_queue_skips_pending_messages_on_finish()
+{
   std::vector<ava::app::EventEnvelope> events;
   ava::app::InteractiveRunQueue queue("session_queue", "request_active",
                                       [&events](ava::app::EventEnvelope const& envelope) {
@@ -360,7 +371,8 @@ void test_interactive_run_queue_skips_pending_messages_on_finish() {
          "interactive run queue emits skipped events for unconsumed messages");
 }
 
-void test_interactive_run_queue_restores_latest_pending_message() {
+void test_interactive_run_queue_restores_latest_pending_message()
+{
   std::vector<ava::app::EventEnvelope> events;
   ava::app::InteractiveRunQueue queue("session_queue", "request_active",
                                       [&events](ava::app::EventEnvelope const& envelope) {
@@ -384,7 +396,8 @@ void test_interactive_run_queue_restores_latest_pending_message() {
          "interactive run queue emits a skipped event when restoring a queued message to the composer");
 }
 
-void test_interactive_run_queue_bounds_and_truncates_event_payloads() {
+void test_interactive_run_queue_bounds_and_truncates_event_payloads()
+{
   std::vector<ava::app::EventEnvelope> events;
   ava::app::InteractiveRunQueue queue("session_queue", "request_active",
                                       [&events](ava::app::EventEnvelope const& envelope) {
@@ -410,7 +423,8 @@ void test_interactive_run_queue_bounds_and_truncates_event_payloads() {
 
 }  // namespace
 
-void run_app_event_bus_tests() {
+void run_app_event_bus_tests()
+{
   test_event_envelope_serialization_is_deterministic();
   test_runtime_event_conversion_preserves_legacy_payload_shape();
   test_runtime_event_bus_adapter_publishes_and_forwards();

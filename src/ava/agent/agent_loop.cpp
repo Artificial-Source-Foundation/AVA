@@ -21,29 +21,34 @@
 namespace ava::agent {
 namespace {
 
-std::string dispatch_error_result_json(ProviderToolCall const& call, ava::core::Error const& error) {
+std::string dispatch_error_result_json(ProviderToolCall const& call, ava::core::Error const& error)
+{
   return "{\"tool\":\"" + ava::core::json::escape(call.name) + "\",\"ok\":false,\"error\":{\"category\":\"" +
          ava::core::json::escape(ava::core::to_string(error.category())) + "\",\"message\":\"" +
          ava::core::json::escape(error.message()) + "\",\"details\":\"" + ava::core::json::escape(error.format()) +
          "\"}}";
 }
 
-ToolDispatchResult synthetic_failed_dispatch_result(ProviderToolCall const& call, ava::core::Error const& error) {
+ToolDispatchResult synthetic_failed_dispatch_result(ProviderToolCall const& call, ava::core::Error const& error)
+{
   return with_tool_result_payload(ToolDispatchResult{
       .call_id = call.id, .name = call.name, .success = false, .result_text = dispatch_error_result_json(call, error)});
 }
 
-void publish_tool_event(AgentLoopOptions const& options, ToolTimelineEntry const& event) {
+void publish_tool_event(AgentLoopOptions const& options, ToolTimelineEntry const& event)
+{
   if (options.on_tool_event) options.on_tool_event(event);
 }
 
-ava::core::VoidResult publish_tool_progress(AgentLoopOptions const& options, ToolProgressEntry const& event) {
+ava::core::VoidResult publish_tool_progress(AgentLoopOptions const& options, ToolProgressEntry const& event)
+{
   if (!options.on_tool_progress) return {};
   return options.on_tool_progress(event);
 }
 
 ava::core::VoidResult append_entry_with_id(ava::session::SessionStore& store, ava::session::EntryType type,
-                                           std::string const& id, std::string data_json) {
+                                           std::string const& id, std::string data_json)
+{
   return store.append(ava::session::SessionEntry{.id = id,
                                                  .parent_id = "",
                                                  .type = type,
@@ -52,11 +57,13 @@ ava::core::VoidResult append_entry_with_id(ava::session::SessionStore& store, av
 }
 
 ava::core::VoidResult append_entry(ava::session::SessionStore& store, ava::session::EntryType type,
-                                   std::string data_json) {
+                                   std::string data_json)
+{
   return append_entry_with_id(store, type, ava::core::make_id("entry"), std::move(data_json));
 }
 
-ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text) {
+ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text)
+{
   auto id = ava::core::make_id("entry");
   auto appended = append_entry_with_id(store, ava::session::EntryType::UserMessage, id,
                                        "{\"text\":\"" + ava::core::json::escape(text) + "\"}");
@@ -65,7 +72,8 @@ ava::core::Result<std::string> append_user_message(ava::session::SessionStore& s
 }
 
 ava::core::VoidResult append_replay_user_message(ava::session::SessionStore& store, std::string const& text,
-                                                 std::string const& replay_of) {
+                                                 std::string const& replay_of)
+{
   return append_entry(store, ava::session::EntryType::UserMessage,
                       "{\"text\":\"" + ava::core::json::escape(text) + "\",\"internal_replay\":true,\"replay_of\":\"" +
                           ava::core::json::escape(replay_of) +
@@ -74,14 +82,16 @@ ava::core::VoidResult append_replay_user_message(ava::session::SessionStore& sto
 
 ava::core::VoidResult append_assistant_message(ava::session::SessionStore& store, std::string const& text,
                                                std::size_t tool_call_count, ava::provider::TokenUsage const& usage,
-                                               std::optional<long double> const& cost_usd) {
+                                               std::optional<long double> const& cost_usd)
+{
   return append_entry(store, ava::session::EntryType::AssistantMessage,
                       "{\"text\":\"" + ava::core::json::escape(text) + "\",\"tool_calls\":" +
                           std::to_string(tool_call_count) + ",\"usage\":" + usage_json(usage, cost_usd) + "}");
 }
 
 std::string reasoning_block_data_json(ParsedReasoningBlock const& block, std::string_view provider_id,
-                                      std::string_view model_id) {
+                                      std::string_view model_id)
+{
   std::string json = "{\"provider\":\"" + ava::core::json::escape(provider_id) + "\",\"model\":\"" +
                      ava::core::json::escape(model_id) + "\"";
   if (!block.format.empty()) json += ",\"format\":\"" + ava::core::json::escape(block.format) + "\"";
@@ -97,20 +107,23 @@ std::string reasoning_block_data_json(ParsedReasoningBlock const& block, std::st
 }
 
 ava::core::VoidResult append_reasoning_block(ava::session::SessionStore& store, ParsedReasoningBlock const& block,
-                                             std::string_view provider_id, std::string_view model_id) {
+                                             std::string_view provider_id, std::string_view model_id)
+{
   if (block.text.empty() && block.signature.empty() && block.redacted_data.empty()) return {};
   return append_entry(store, ava::session::EntryType::ReasoningBlock,
                       reasoning_block_data_json(block, provider_id, model_id));
 }
 
-ava::core::VoidResult append_tool_call(ava::session::SessionStore& store, ProviderToolCall const& call) {
+ava::core::VoidResult append_tool_call(ava::session::SessionStore& store, ProviderToolCall const& call)
+{
   return append_entry(store, ava::session::EntryType::ToolCall,
                       "{\"call_id\":\"" + ava::core::json::escape(call.id) + "\",\"name\":\"" +
                           ava::core::json::escape(call.name) + "\",\"arguments\":\"" +
                           ava::core::json::escape(call.arguments_json) + "\"}");
 }
 
-ava::core::VoidResult append_tool_result(ava::session::SessionStore& store, ToolDispatchResult const& result) {
+ava::core::VoidResult append_tool_result(ava::session::SessionStore& store, ToolDispatchResult const& result)
+{
   return append_entry(store, ava::session::EntryType::ToolResult,
                       "{\"call_id\":\"" + ava::core::json::escape(result.call_id) + "\",\"name\":\"" +
                           ava::core::json::escape(result.name) +
@@ -121,24 +134,28 @@ ava::core::VoidResult append_tool_result(ava::session::SessionStore& store, Tool
 }
 
 ava::core::VoidResult append_permission_decision(ava::session::SessionStore& store,
-                                                 ava::tools::PermissionAuditEvent const& event) {
+                                                 ava::tools::PermissionAuditEvent const& event)
+{
   return append_entry(store, ava::session::EntryType::PermissionDecision,
                       ava::tools::permission_audit_data_json(event));
 }
 
-ava::core::VoidResult append_error(ava::session::SessionStore& store, ava::core::Error const& error) {
+ava::core::VoidResult append_error(ava::session::SessionStore& store, ava::core::Error const& error)
+{
   return append_entry(store, ava::session::EntryType::Error,
                       "{\"category\":\"" + ava::core::json::escape(ava::core::to_string(error.category())) +
                           "\",\"message\":\"" + ava::core::json::escape(error.message()) + "\",\"details\":\"" +
                           ava::core::json::escape(error.format()) + "\"}");
 }
 
-ava::core::VoidResult append_cancel(ava::session::SessionStore& store, std::string_view boundary) {
+ava::core::VoidResult append_cancel(ava::session::SessionStore& store, std::string_view boundary)
+{
   return append_entry(store, ava::session::EntryType::Cancel,
                       "{\"reason\":\"cancel_requested\",\"boundary\":\"" + ava::core::json::escape(boundary) + "\"}");
 }
 
-void populate_tool_timeline_metadata(ToolTimelineEntry& entry, ToolDispatchResult const& result) {
+void populate_tool_timeline_metadata(ToolTimelineEntry& entry, ToolDispatchResult const& result)
+{
   auto const& payload = result.payload;
   entry.result_json = result.result_text;
   entry.structured_result_json = serialize_tool_result_payload_json(result);
@@ -161,10 +178,14 @@ void populate_tool_timeline_metadata(ToolTimelineEntry& entry, ToolDispatchResul
   entry.changed_paths = payload.changed_paths;
 }
 
-bool is_canceled(AgentLoopOptions const& options) { return options.cancel_requested && options.cancel_requested(); }
+bool is_canceled(AgentLoopOptions const& options)
+{
+  return options.cancel_requested && options.cancel_requested();
+}
 
 ava::core::VoidResult check_canceled(AgentLoopOptions const& options, ava::session::SessionStore& store,
-                                     std::string_view boundary) {
+                                     std::string_view boundary)
+{
   if (!is_canceled(options)) return {};
   static_cast<void>(append_cancel(store, boundary));
   auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled");
@@ -174,9 +195,12 @@ ava::core::VoidResult check_canceled(AgentLoopOptions const& options, ava::sessi
 
 }  // namespace
 
-AgentLoop::AgentLoop(AgentLoopOptions options) : options_(std::move(options)) {}
+AgentLoop::AgentLoop(AgentLoopOptions options) : options_(std::move(options))
+{
+}
 
-std::string to_string(ToolTimelineStatus status) {
+std::string to_string(ToolTimelineStatus status)
+{
   switch (status) {
     case ToolTimelineStatus::Running:
       return "running";
@@ -191,7 +215,8 @@ std::string to_string(ToolTimelineStatus status) {
 ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_message,
                                                        ava::session::SessionStore& store,
                                                        ava::provider::Provider const& provider,
-                                                       ava::provider::Transport& transport) {
+                                                       ava::provider::Transport& transport)
+{
   auto check_canceled_locked = [&](std::string_view boundary) -> ava::core::VoidResult {
     if (options_.session_mutex) {
       std::lock_guard lock(*options_.session_mutex);

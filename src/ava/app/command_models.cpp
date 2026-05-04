@@ -13,11 +13,13 @@
 namespace ava::app {
 namespace {
 
-std::string model_key(std::string_view provider_id, std::string_view model_id) {
+std::string model_key(std::string_view provider_id, std::string_view model_id)
+{
   return std::string(provider_id) + "\n" + std::string(model_id);
 }
 
-std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry) {
+std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry)
+{
   std::vector<ava::config::ModelInfo> models;
   std::vector<std::string> seen;
   for (auto model = registry.models.rbegin(); model != registry.models.rend(); ++model) {
@@ -30,25 +32,29 @@ std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry 
   return models;
 }
 
-std::string trim_ascii(std::string_view text) {
+std::string trim_ascii(std::string_view text)
+{
   while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) text.remove_prefix(1);
   while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) text.remove_suffix(1);
   return std::string(text);
 }
 
-std::string lower_ascii(std::string_view text) {
+std::string lower_ascii(std::string_view text)
+{
   std::string lowered(text);
   std::ranges::transform(lowered, lowered.begin(),
                          [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   return lowered;
 }
 
-bool contains_ascii_case_insensitive(std::string_view text, std::string_view query) {
+bool contains_ascii_case_insensitive(std::string_view text, std::string_view query)
+{
   if (query.empty()) return true;
   return lower_ascii(text).find(lower_ascii(query)) != std::string::npos;
 }
 
-bool model_matches_query(ava::config::ModelInfo const& model, std::string_view query) {
+bool model_matches_query(ava::config::ModelInfo const& model, std::string_view query)
+{
   if (query.empty()) return true;
   return contains_ascii_case_insensitive(model.provider_id + "/" + model.model_id, query) ||
          contains_ascii_case_insensitive(model.model_id, query) ||
@@ -56,13 +62,15 @@ bool model_matches_query(ava::config::ModelInfo const& model, std::string_view q
          contains_ascii_case_insensitive(model.family, query);
 }
 
-std::string optional_bool_text(std::optional<bool> const& value) {
+std::string optional_bool_text(std::optional<bool> const& value)
+{
   if (!value) return "unknown";
   return *value ? "yes" : "no";
 }
 
 std::string format_models_text(RuntimeSession const& session, ava::config::ModelRegistry const& registry,
-                               std::string_view query) {
+                               std::string_view query)
+{
   auto const providers = ava::provider::builtin_provider_registry();
   auto models = effective_models(registry);
   bool current_in_catalog = false;
@@ -112,7 +120,8 @@ std::string format_models_text(RuntimeSession const& session, ava::config::Model
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_models_command(RuntimeSession& session, std::string_view query) {
+ava::core::Result<CommandResult> run_models_command(RuntimeSession& session, std::string_view query)
+{
   CommandResult result;
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);

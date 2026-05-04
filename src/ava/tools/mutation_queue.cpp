@@ -7,14 +7,18 @@
 
 namespace ava::tools {
 
-MutationQueue::Lock::Lock(std::vector<std::unique_lock<std::mutex>> locks) : locks_(std::move(locks)) {}
+MutationQueue::Lock::Lock(std::vector<std::unique_lock<std::mutex>> locks) : locks_(std::move(locks))
+{
+}
 
-MutationQueue::Lock MutationQueue::lock_path(std::filesystem::path const& path) {
+MutationQueue::Lock MutationQueue::lock_path(std::filesystem::path const& path)
+{
   std::array const paths{path};
   return lock_paths(paths);
 }
 
-MutationQueue::Lock MutationQueue::lock_paths(std::span<std::filesystem::path const> paths) {
+MutationQueue::Lock MutationQueue::lock_paths(std::span<std::filesystem::path const> paths)
+{
   std::vector<std::filesystem::path> keys;
   keys.reserve(paths.size());
   for (auto const& path : paths) {
@@ -44,7 +48,8 @@ MutationQueue::Lock MutationQueue::lock_paths(std::span<std::filesystem::path co
   return Lock(std::move(locks));
 }
 
-std::filesystem::path MutationQueue::normalized_key(std::filesystem::path const& path) {
+std::filesystem::path MutationQueue::normalized_key(std::filesystem::path const& path)
+{
   std::error_code error;
   auto canonical = std::filesystem::weakly_canonical(path, error);
   if (!error) return canonical.lexically_normal();
@@ -53,7 +58,8 @@ std::filesystem::path MutationQueue::normalized_key(std::filesystem::path const&
   return path.lexically_normal();
 }
 
-std::shared_ptr<MutationQueue> default_mutation_queue() {
+std::shared_ptr<MutationQueue> default_mutation_queue()
+{
   static auto queue = std::make_shared<MutationQueue>();
   return queue;
 }

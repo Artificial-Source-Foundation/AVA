@@ -15,15 +15,20 @@
 namespace ava::app {
 namespace {
 
-std::string json_bool(bool value) { return value ? "true" : "false"; }
+std::string json_bool(bool value)
+{
+  return value ? "true" : "false";
+}
 
-void append_spill_fields(std::string& text, std::filesystem::path const& path, bool spill_truncated) {
+void append_spill_fields(std::string& text, std::filesystem::path const& path, bool spill_truncated)
+{
   if (path.empty()) return;
   text += ",\"spill_file\":\"" + ava::core::json::escape(path.filename().generic_string()) + "\"";
   text += ",\"spill_truncated\":" + json_bool(spill_truncated);
 }
 
-RuntimeEvent command_event(RuntimeSession const& session, RuntimeEventType type) {
+RuntimeEvent command_event(RuntimeSession const& session, RuntimeEventType type)
+{
   RuntimeEvent event;
   event.type = type;
   event.timestamp = ava::session::now_timestamp();
@@ -35,7 +40,8 @@ RuntimeEvent command_event(RuntimeSession const& session, RuntimeEventType type)
 }
 
 ava::core::VoidResult emit_tool_event(RuntimeSession const& session, RuntimeEventSink const& sink,
-                                      ava::agent::ToolTimelineEntry const& entry) {
+                                      ava::agent::ToolTimelineEntry const& entry)
+{
   auto event =
       command_event(session, entry.status == ava::agent::ToolTimelineStatus::Running ? RuntimeEventType::ToolStart
                                                                                      : RuntimeEventType::ToolResult);
@@ -68,7 +74,8 @@ ava::core::VoidResult emit_tool_event(RuntimeSession const& session, RuntimeEven
 
 ava::agent::ToolTimelineEntry command_result_entry(std::string const& call_id, std::string name,
                                                    ava::agent::ToolTimelineStatus status, std::string result_summary,
-                                                   std::string result_content) {
+                                                   std::string result_content)
+{
   if (result_content.empty()) result_content = result_summary;
   auto dispatch_result = ava::agent::with_tool_result_payload(ava::agent::ToolDispatchResult{
       .call_id = call_id,
@@ -112,7 +119,8 @@ ava::agent::ToolTimelineEntry command_result_entry(std::string const& call_id, s
 }
 
 ava::core::VoidResult record_tool_event(RuntimeSession const& session, RuntimeEventSink const& sink,
-                                        CommandResult& result, ava::agent::ToolTimelineEntry entry) {
+                                        CommandResult& result, ava::agent::ToolTimelineEntry entry)
+{
   if (auto emitted = emit_tool_event(session, sink, entry); !emitted)
     return std::unexpected(std::move(emitted.error()));
   result.tool_timeline.push_back(std::move(entry));
@@ -122,7 +130,8 @@ ava::core::VoidResult record_tool_event(RuntimeSession const& session, RuntimeEv
 }  // namespace
 
 ava::tools::ToolContext make_tool_context(RuntimeSession& session,
-                                          ava::permissions::PermissionResolver permission_resolver) {
+                                          ava::permissions::PermissionResolver permission_resolver)
+{
   return ava::tools::ToolContext{
       .workspace_dir = session.workspace_dir,
       .spill_dir = session.store.session_path().parent_path() / "spill",
@@ -147,7 +156,8 @@ ava::tools::ToolContext make_tool_context(RuntimeSession& session,
 
 ava::core::VoidResult record_tool_start(RuntimeSession const& session, RuntimeEventSink const& sink,
                                         CommandResult& result, std::string const& call_id, std::string name,
-                                        std::string argument_summary) {
+                                        std::string argument_summary)
+{
   return record_tool_event(session, sink, result,
                            ava::agent::ToolTimelineEntry{.status = ava::agent::ToolTimelineStatus::Running,
                                                          .call_id = call_id,
@@ -158,13 +168,15 @@ ava::core::VoidResult record_tool_start(RuntimeSession const& session, RuntimeEv
 ava::core::VoidResult record_tool_result(RuntimeSession const& session, RuntimeEventSink const& sink,
                                          CommandResult& result, std::string const& call_id, std::string name,
                                          ava::agent::ToolTimelineStatus status, std::string result_summary,
-                                         std::string result_content) {
+                                         std::string result_content)
+{
   return record_tool_event(
       session, sink, result,
       command_result_entry(call_id, std::move(name), status, std::move(result_summary), std::move(result_content)));
 }
 
-ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, CommandRequest& request) {
+ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, CommandRequest& request)
+{
   CommandResult result;
   result.handled = true;
   auto const& line = request.command;

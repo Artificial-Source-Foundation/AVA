@@ -28,11 +28,13 @@ struct NativeToolReplayBatch {
   std::vector<NativeToolReplayPair> pairs;
 };
 
-std::string entry_text(ava::session::SessionEntry const& entry) {
+std::string entry_text(ava::session::SessionEntry const& entry)
+{
   return ava::core::json::string_field(entry.data_json, "text").value_or("");
 }
 
-std::string compaction_context_text(ava::session::SessionEntry const& entry) {
+std::string compaction_context_text(ava::session::SessionEntry const& entry)
+{
   auto const summary = ava::core::json::string_field(entry.data_json, "summary")
                            .value_or("Prior context was compacted, but the summary is unavailable.");
   auto const instructions = ava::core::json::string_field(entry.data_json, "instructions").value_or("");
@@ -49,7 +51,8 @@ std::string compaction_context_text(ava::session::SessionEntry const& entry) {
   return text;
 }
 
-std::string tool_context_text(ava::session::SessionEntry const& entry) {
+std::string tool_context_text(ava::session::SessionEntry const& entry)
+{
   auto const call_id = ava::core::json::string_field(entry.data_json, "call_id").value_or("");
   auto const name = ava::core::json::string_field(entry.data_json, "name").value_or("");
   auto const result = ava::core::json::string_field(entry.data_json, "result").value_or("");
@@ -57,22 +60,26 @@ std::string tool_context_text(ava::session::SessionEntry const& entry) {
          " result_json=" + result;
 }
 
-std::string tool_call_context_text(ava::session::SessionEntry const& entry) {
+std::string tool_call_context_text(ava::session::SessionEntry const& entry)
+{
   auto const call_id = ava::core::json::string_field(entry.data_json, "call_id").value_or("");
   auto const name = ava::core::json::string_field(entry.data_json, "name").value_or("");
   auto const arguments = ava::core::json::string_field(entry.data_json, "arguments").value_or("");
   return "Tool call requested by assistant. call_id=" + call_id + " name=" + name + " arguments_json=" + arguments;
 }
 
-bool is_json_value_terminator(char ch) {
+bool is_json_value_terminator(char ch)
+{
   return ch == ',' || ch == '}' || ch == ']' || ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
 }
 
-bool has_json_value_terminator(std::string_view object, std::size_t offset) {
+bool has_json_value_terminator(std::string_view object, std::size_t offset)
+{
   return offset >= object.size() || is_json_value_terminator(object[offset]);
 }
 
-std::optional<bool> bool_field(std::string_view object, std::string_view key) {
+std::optional<bool> bool_field(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return std::nullopt;
   if (object.substr(*start, 4) == "true" && has_json_value_terminator(object, *start + 4)) return true;
@@ -80,9 +87,13 @@ std::optional<bool> bool_field(std::string_view object, std::string_view key) {
   return std::nullopt;
 }
 
-bool is_utf8_continuation(unsigned char ch) { return (ch & 0xc0U) == 0x80U; }
+bool is_utf8_continuation(unsigned char ch)
+{
+  return (ch & 0xc0U) == 0x80U;
+}
 
-std::size_t utf8_prefix_boundary(std::string_view text, std::size_t max_bytes) {
+std::size_t utf8_prefix_boundary(std::string_view text, std::size_t max_bytes)
+{
   std::size_t offset = 0;
   while (offset < text.size() && offset < max_bytes) {
     auto const first = static_cast<unsigned char>(text[offset]);
@@ -112,7 +123,8 @@ std::size_t utf8_prefix_boundary(std::string_view text, std::size_t max_bytes) {
   return offset;
 }
 
-std::vector<ava::provider::ContentPart> tool_call_content_parts(ava::session::SessionEntry const& entry) {
+std::vector<ava::provider::ContentPart> tool_call_content_parts(ava::session::SessionEntry const& entry)
+{
   auto const call_id = ava::core::json::string_field(entry.data_json, "call_id").value_or("");
   auto const name = ava::core::json::string_field(entry.data_json, "name").value_or("");
   if (call_id.empty() || name.empty()) return {};
@@ -128,7 +140,8 @@ std::vector<ava::provider::ContentPart> tool_call_content_parts(ava::session::Se
                                      .is_error = false}};
 }
 
-std::string truncate_native_tool_result(std::string text, std::size_t max_bytes) {
+std::string truncate_native_tool_result(std::string text, std::size_t max_bytes)
+{
   if (text.size() <= max_bytes) return text;
   constexpr std::string_view marker = "\n[AVA: tool result content truncated]";
   if (max_bytes <= marker.size()) return std::string(marker.substr(0, max_bytes));
@@ -138,7 +151,8 @@ std::string truncate_native_tool_result(std::string text, std::size_t max_bytes)
 }
 
 std::vector<ava::provider::ContentPart> tool_result_content_parts(ava::session::SessionEntry const& entry,
-                                                                  std::size_t max_tool_result_context_bytes) {
+                                                                  std::size_t max_tool_result_context_bytes)
+{
   auto const call_id = ava::core::json::string_field(entry.data_json, "call_id").value_or("");
   if (call_id.empty()) return {};
   if (!validate_provider_tool_call_id(call_id)) return {};
@@ -152,7 +166,8 @@ std::vector<ava::provider::ContentPart> tool_result_content_parts(ava::session::
                                  .is_error = !bool_field(entry.data_json, "success").value_or(true)}};
 }
 
-std::optional<ava::provider::ContentPart> reasoning_content_part(ava::session::SessionEntry const& entry) {
+std::optional<ava::provider::ContentPart> reasoning_content_part(ava::session::SessionEntry const& entry)
+{
   auto const text = ava::core::json::string_field(entry.data_json, "text").value_or("");
   auto const signature = ava::core::json::string_field(entry.data_json, "signature").value_or("");
   auto const redacted_data = ava::core::json::string_field(entry.data_json, "redacted_data").value_or("");
@@ -172,14 +187,16 @@ std::optional<ava::provider::ContentPart> reasoning_content_part(ava::session::S
 }
 
 void append_pending_reasoning_parts(std::vector<ava::provider::ContentPart>& target,
-                                    std::vector<ava::provider::ContentPart>& pending) {
+                                    std::vector<ava::provider::ContentPart>& pending)
+{
   if (pending.empty()) return;
   target.insert(target.end(), std::make_move_iterator(pending.begin()), std::make_move_iterator(pending.end()));
   pending.clear();
 }
 
 std::optional<std::size_t> matching_tool_result_index(std::vector<ava::session::SessionEntry> const& entries,
-                                                      std::size_t index, std::string_view call_id) {
+                                                      std::size_t index, std::string_view call_id)
+{
   if (call_id.empty()) return std::nullopt;
   for (std::size_t next_index = index + 1; next_index < entries.size(); ++next_index) {
     auto const& next = entries[next_index];
@@ -194,11 +211,13 @@ std::optional<std::size_t> matching_tool_result_index(std::vector<ava::session::
 }
 
 bool next_entry_is_matching_tool_result(std::vector<ava::session::SessionEntry> const& entries, std::size_t index,
-                                        std::string_view call_id) {
+                                        std::string_view call_id)
+{
   return matching_tool_result_index(entries, index, call_id).has_value();
 }
 
-std::string truncate_tool_context(std::string text, std::size_t max_bytes) {
+std::string truncate_tool_context(std::string text, std::size_t max_bytes)
+{
   if (text.size() <= max_bytes) return text;
   constexpr std::string_view marker = "\n[AVA: tool result context truncated]";
   if (max_bytes <= marker.size()) {
@@ -209,22 +228,26 @@ std::string truncate_tool_context(std::string text, std::size_t max_bytes) {
   return text;
 }
 
-void append_fallback_text(std::string& target, std::string text) {
+void append_fallback_text(std::string& target, std::string text)
+{
   if (text.empty()) return;
   if (!target.empty()) target += "\n\n";
   target += std::move(text);
 }
 
-std::size_t assistant_tool_call_count(ava::session::SessionEntry const& entry) {
+std::size_t assistant_tool_call_count(ava::session::SessionEntry const& entry)
+{
   auto const count = ava::core::json::integer_field(entry.data_json, "tool_calls").value_or(0);
   return count > 0 ? static_cast<std::size_t>(count) : 0;
 }
 
-bool contains_string(std::vector<std::string> const& values, std::string_view value) {
+bool contains_string(std::vector<std::string> const& values, std::string_view value)
+{
   return std::find(values.begin(), values.end(), value) != values.end();
 }
 
-bool erase_first_string(std::vector<std::string>& values, std::string_view value) {
+bool erase_first_string(std::vector<std::string>& values, std::string_view value)
+{
   auto const match = std::find(values.begin(), values.end(), value);
   if (match == values.end()) return false;
   values.erase(match);
@@ -233,7 +256,8 @@ bool erase_first_string(std::vector<std::string>& values, std::string_view value
 
 std::optional<NativeToolReplayBatch> collect_native_tool_replay_batch(
     std::vector<ava::session::SessionEntry> const& entries, std::size_t assistant_index, std::size_t tool_call_count,
-    std::vector<std::string> const& emitted_native_tool_use_ids, std::size_t max_tool_result_context_bytes) {
+    std::vector<std::string> const& emitted_native_tool_use_ids, std::size_t max_tool_result_context_bytes)
+{
   if (tool_call_count <= 1) return std::nullopt;
   NativeToolReplayBatch batch;
   std::vector<std::string> batch_tool_use_ids;
@@ -262,7 +286,8 @@ std::optional<NativeToolReplayBatch> collect_native_tool_replay_batch(
 }
 
 std::vector<std::string> next_tool_call_ids(std::vector<ava::session::SessionEntry> const& entries,
-                                            std::size_t assistant_index, std::size_t tool_call_count) {
+                                            std::size_t assistant_index, std::size_t tool_call_count)
+{
   std::vector<std::string> ids;
   for (std::size_t index = assistant_index + 1; index < entries.size() && ids.size() < tool_call_count; ++index) {
     auto const type = entries[index].type;
@@ -280,7 +305,8 @@ std::vector<std::string> next_tool_call_ids(std::vector<ava::session::SessionEnt
 }  // namespace
 
 ava::core::Result<BuiltProviderMessages> build_messages(ava::session::SessionStore const& store,
-                                                        std::size_t max_tool_result_context_bytes) {
+                                                        std::size_t max_tool_result_context_bytes)
+{
   auto entries = store.load();
   if (!entries) return std::unexpected(entries.error());
   bool used_compacted_context = false;
@@ -294,7 +320,8 @@ ava::core::Result<BuiltProviderMessages> build_messages(ava::session::SessionSto
 }
 
 ava::core::Result<std::vector<ava::provider::ChatMessage>> build_provider_messages_from_entries(
-    std::vector<ava::session::SessionEntry> const& entries, MessageBuildOptions options) {
+    std::vector<ava::session::SessionEntry> const& entries, MessageBuildOptions options)
+{
   std::vector<ava::provider::ChatMessage> messages;
 
   std::size_t start_index = 0;

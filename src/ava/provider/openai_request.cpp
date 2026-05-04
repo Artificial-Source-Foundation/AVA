@@ -13,12 +13,14 @@ namespace {
 
 constexpr std::string_view kCodexResponsesUrl = "https://chatgpt.com/backend-api/codex/responses";
 
-std::string input_item_json(ChatMessage const& message) {
+std::string input_item_json(ChatMessage const& message)
+{
   return "{\"role\":\"" + ava::core::json::escape(message.role) + "\",\"content\":\"" +
          ava::core::json::escape(message.content) + "\"}";
 }
 
-ava::core::VoidResult validate_tools_json(ProviderRequest const& request) {
+ava::core::VoidResult validate_tools_json(ProviderRequest const& request)
+{
   for (std::size_t index = 0; index < request.tools_json.size(); ++index) {
     if (is_json_object_shape(request.tools_json[index])) continue;
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "OpenAI tool JSON must be an object");
@@ -28,12 +30,14 @@ ava::core::VoidResult validate_tools_json(ProviderRequest const& request) {
   return {};
 }
 
-bool valid_openai_reasoning_effort(std::string_view effort) {
+bool valid_openai_reasoning_effort(std::string_view effort)
+{
   return effort == "none" || effort == "minimal" || effort == "low" || effort == "medium" || effort == "high" ||
          effort == "xhigh";
 }
 
-ava::core::VoidResult validate_reasoning_options(ProviderRequest const& request) {
+ava::core::VoidResult validate_reasoning_options(ProviderRequest const& request)
+{
   if (!request.reasoning) return {};
   if (!valid_openai_reasoning_effort(request.reasoning->type)) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
@@ -48,7 +52,8 @@ ava::core::VoidResult validate_reasoning_options(ProviderRequest const& request)
   return {};
 }
 
-std::string reasoning_options_json(ProviderRequest const& request) {
+std::string reasoning_options_json(ProviderRequest const& request)
+{
   if (!request.reasoning) return {};
   std::string json = ",\"reasoning\":{\"effort\":\"" + ava::core::json::escape(request.reasoning->type) + "\"";
   if (request.reasoning->type != "none") {
@@ -58,7 +63,8 @@ std::string reasoning_options_json(ProviderRequest const& request) {
   return json;
 }
 
-std::string request_body_json(ProviderRequest const& request) {
+std::string request_body_json(ProviderRequest const& request)
+{
   std::string body = "{\"model\":\"" + ava::core::json::escape(request.model_id) + "\",\"instructions\":\"" +
                      ava::core::json::escape(request.system_prompt) +
                      "\",\"stream\":" + (request.stream ? "true" : "false") + ",\"input\":[";
@@ -81,7 +87,8 @@ std::string request_body_json(ProviderRequest const& request) {
   return body;
 }
 
-void apply_codex_oauth_request_options(HttpRequest& request) {
+void apply_codex_oauth_request_options(HttpRequest& request)
+{
   request.url = std::string(kCodexResponsesUrl);
   request.headers["OpenAI-Beta"] = "responses=experimental";
   request.headers["originator"] = "ava";
@@ -93,8 +100,8 @@ void apply_codex_oauth_request_options(HttpRequest& request) {
 }  // namespace
 
 ava::core::Result<HttpRequest> build_openai_responses_request(ProviderRequest const& request,
-                                                              std::string_view access_token,
-                                                              std::string_view base_url) {
+                                                              std::string_view access_token, std::string_view base_url)
+{
   if (request.model_id.empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model id is required"));
   }
@@ -123,7 +130,8 @@ ava::core::Result<HttpRequest> build_openai_responses_request(ProviderRequest co
   };
 }
 
-ava::core::VoidResult apply_openai_auth_options(HttpRequest& request, ProviderAuthContext const& auth) {
+ava::core::VoidResult apply_openai_auth_options(HttpRequest& request, ProviderAuthContext const& auth)
+{
   if (auth.credential_type != "oauth") return {};
   apply_codex_oauth_request_options(request);
   if (!auth.account_id.empty()) {
@@ -136,17 +144,20 @@ ava::core::VoidResult apply_openai_auth_options(HttpRequest& request, ProviderAu
 }  // namespace detail
 
 ava::core::Result<HttpRequest> OpenAIProvider::build_request(ProviderRequest const& request,
-                                                             std::string_view access_token) const {
+                                                             std::string_view access_token) const
+{
   return detail::build_openai_responses_request(request, access_token, base_url_);
 }
 
-ava::core::VoidResult OpenAIProvider::apply_auth_options(HttpRequest& request, ProviderAuthContext const& auth) const {
+ava::core::VoidResult OpenAIProvider::apply_auth_options(HttpRequest& request, ProviderAuthContext const& auth) const
+{
   return detail::apply_openai_auth_options(request, auth);
 }
 
 ava::core::Result<HttpRequest> OpenAIProvider::build_request(ProviderRequest const& request,
                                                              ava::config::OpenAICredential const& credential,
-                                                             long long now_seconds) const {
+                                                             long long now_seconds) const
+{
   auto access_token = ava::config::openai_access_token_for_request(credential, now_seconds);
   if (!access_token) return std::unexpected(std::move(access_token.error()));
   auto http_request = build_request(request, *access_token);
@@ -162,7 +173,8 @@ ava::core::Result<HttpRequest> OpenAIProvider::build_request(ProviderRequest con
 }
 
 ava::core::Result<HttpRequest> OpenAIProvider::build_request(ProviderRequest const& request,
-                                                             ava::config::OpenAICredential const& credential) const {
+                                                             ava::config::OpenAICredential const& credential) const
+{
   auto access_token = ava::config::openai_access_token_for_request(credential);
   if (!access_token) return std::unexpected(std::move(access_token.error()));
   auto http_request = build_request(request, *access_token);

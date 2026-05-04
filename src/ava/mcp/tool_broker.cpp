@@ -20,26 +20,33 @@ struct McpToolBinding {
   std::string model_tool_name;
 };
 
-std::string json_bool(bool value) { return value ? "true" : "false"; }
+std::string json_bool(bool value)
+{
+  return value ? "true" : "false";
+}
 
-std::string error_json(std::string_view tool, ava::core::Error const& error) {
+std::string error_json(std::string_view tool, ava::core::Error const& error)
+{
   return "{\"tool\":\"" + ava::core::json::escape(tool) + "\",\"ok\":false,\"error\":{\"category\":\"" +
          ava::core::json::escape(ava::core::to_string(error.category())) + "\",\"message\":\"" +
          ava::core::json::escape(error.message()) + "\",\"details\":\"" + ava::core::json::escape(error.format()) +
          "\"}}";
 }
 
-bool is_canceled_error(ava::core::Error const& error) {
+bool is_canceled_error(ava::core::Error const& error)
+{
   return error.message().find("canceled") != std::string::npos ||
          error.message().find("cancelled") != std::string::npos;
 }
 
-bool is_canceled(ava::tools::ToolContext const& context) {
+bool is_canceled(ava::tools::ToolContext const& context)
+{
   return context.cancel_requested && context.cancel_requested();
 }
 
 ava::agent::ToolDispatchResult tool_error_result(ava::agent::ProviderToolCall const& call,
-                                                 ava::core::Error const& error) {
+                                                 ava::core::Error const& error)
+{
   return ava::agent::ToolDispatchResult{.call_id = call.id,
                                         .name = call.name,
                                         .success = false,
@@ -53,7 +60,8 @@ ava::agent::ToolDispatchResult tool_error_result(ava::agent::ProviderToolCall co
                                         }()};
 }
 
-ava::core::Error mcp_tool_error(ava::core::ErrorCategory category, std::string message, McpToolBinding const& binding) {
+ava::core::Error mcp_tool_error(ava::core::ErrorCategory category, std::string message, McpToolBinding const& binding)
+{
   auto error = ava::core::Error(category, std::move(message));
   error.with_context("mcp_server", binding.server.id);
   error.with_context("mcp_tool", binding.tool.name);
@@ -62,22 +70,24 @@ ava::core::Error mcp_tool_error(ava::core::ErrorCategory category, std::string m
   return error;
 }
 
-ava::core::Error mcp_server_error(ava::core::ErrorCategory category, std::string message,
-                                  McpServerConfig const& server) {
+ava::core::Error mcp_server_error(ava::core::ErrorCategory category, std::string message, McpServerConfig const& server)
+{
   auto error = ava::core::Error(category, std::move(message));
   error.with_context("mcp_server", server.id);
   if (!server.source_path.empty()) error.with_context("config", server.source_path.string());
   return error;
 }
 
-std::string command_text(McpServerConfig const& server) {
+std::string command_text(McpServerConfig const& server)
+{
   std::string text = server.command;
   for (auto const& arg : server.args) text += " " + arg;
   return text;
 }
 
 ava::core::VoidResult ensure_mcp_server_permission(ava::tools::ToolContext const& context,
-                                                   McpServerConfig const& server, std::string_view tool_name) {
+                                                   McpServerConfig const& server, std::string_view tool_name)
+{
   if (auto permission =
           ava::tools::ensure_permission(context, ava::permissions::Operation::McpServerLaunch, server.source_path,
                                         command_text(server), tool_name, "MCP server launch requires permission");
@@ -93,14 +103,16 @@ ava::core::VoidResult ensure_mcp_server_permission(ava::tools::ToolContext const
   return {};
 }
 
-McpStdioClientOptions client_options_for_context(ava::tools::ToolContext const& context) {
+McpStdioClientOptions client_options_for_context(ava::tools::ToolContext const& context)
+{
   McpStdioClientOptions options;
   options.workspace_dir = context.workspace_dir;
   return options;
 }
 
 std::string result_json(ava::agent::ProviderToolCall const& call, McpToolBinding const& binding,
-                        McpToolCallResult const& result) {
+                        McpToolCallResult const& result)
+{
   return "{\"tool\":\"" + ava::core::json::escape(call.name) + "\",\"ok\":" + json_bool(!result.is_error) +
          ",\"server\":\"" + ava::core::json::escape(binding.server.id) + "\",\"mcp_tool\":\"" +
          ava::core::json::escape(binding.tool.name) + "\",\"content\":\"" + ava::core::json::escape(result.content) +
@@ -109,7 +121,8 @@ std::string result_json(ava::agent::ProviderToolCall const& call, McpToolBinding
 
 ava::agent::ToolDispatchResult dispatch_mcp_tool(ava::tools::ToolContext const& context,
                                                  ava::agent::ProviderToolCall const& call,
-                                                 McpToolBinding const& binding) {
+                                                 McpToolBinding const& binding)
+{
   if (is_canceled(context)) {
     return tool_error_result(call,
                              mcp_tool_error(ava::core::ErrorCategory::Unknown, "MCP tool call canceled", binding));
@@ -156,14 +169,16 @@ ava::agent::ToolDispatchResult dispatch_mcp_tool(ava::tools::ToolContext const& 
                                         .result_text = result_json(call, binding, *result)};
 }
 
-std::string schema_json(std::string_view model_tool_name, McpToolDescription const& tool) {
+std::string schema_json(std::string_view model_tool_name, McpToolDescription const& tool)
+{
   auto const description = tool.description.empty() ? std::string("MCP tool ") + tool.name : tool.description;
   return "{\"type\":\"function\",\"name\":\"" + ava::core::json::escape(model_tool_name) + "\",\"description\":\"" +
          ava::core::json::escape(description) + "\",\"parameters\":" + tool.input_schema_json + '}';
 }
 
 ava::agent::RegisteredToolMetadata metadata_for_tool(std::string model_tool_name, McpServerConfig const& server,
-                                                     McpToolDescription const& tool) {
+                                                     McpToolDescription const& tool)
+{
   auto const description =
       tool.description.empty() ? std::string("MCP tool ") + tool.name + " from " + server.id : tool.description;
   auto const schema = schema_json(model_tool_name, tool);
@@ -178,7 +193,8 @@ ava::agent::RegisteredToolMetadata metadata_for_tool(std::string model_tool_name
       .description_family = "mcp"};
 }
 
-McpConfigLoadOptions config_options_for_context(ava::tools::ToolContext const& context) {
+McpConfigLoadOptions config_options_for_context(ava::tools::ToolContext const& context)
+{
   auto options = default_mcp_config_options(context.workspace_dir);
   if (!context.mcp_global_config_file.empty()) options.global_config_file = context.mcp_global_config_file;
   if (!context.mcp_project_config_file.empty()) options.project_config_file = context.mcp_project_config_file;
@@ -186,7 +202,8 @@ McpConfigLoadOptions config_options_for_context(ava::tools::ToolContext const& c
 }
 
 ava::core::Result<std::vector<McpToolDescription>> discover_server_tools(ava::tools::ToolContext const& context,
-                                                                         McpServerConfig const& server) {
+                                                                         McpServerConfig const& server)
+{
   if (is_canceled(context)) {
     return std::unexpected(mcp_server_error(ava::core::ErrorCategory::Unknown, "MCP tool discovery canceled", server));
   }
@@ -210,7 +227,8 @@ ava::core::Result<std::vector<McpToolDescription>> discover_server_tools(ava::to
 
 }  // namespace
 
-std::string mcp_model_tool_name(std::string_view server_id, std::string_view tool_name) {
+std::string mcp_model_tool_name(std::string_view server_id, std::string_view tool_name)
+{
   auto sanitize = [](std::string_view value) {
     std::string sanitized;
     sanitized.reserve(value.size());
@@ -232,7 +250,8 @@ std::string mcp_model_tool_name(std::string_view server_id, std::string_view too
   return "mcp_" + sanitize(server_id) + "_" + sanitize(tool_name);
 }
 
-void register_enabled_mcp_tools(ava::agent::ToolRegistry& registry, ava::tools::ToolContext const& context) {
+void register_enabled_mcp_tools(ava::agent::ToolRegistry& registry, ava::tools::ToolContext const& context)
+{
   auto config = load_mcp_config(config_options_for_context(context));
   if (!config) return;
 

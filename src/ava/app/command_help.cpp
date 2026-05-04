@@ -7,7 +7,8 @@
 namespace ava::app {
 namespace {
 
-std::vector<CommandHotkey> default_command_hotkeys() {
+std::vector<CommandHotkey> default_command_hotkeys()
+{
   std::vector<CommandHotkey> hotkeys;
   for (auto const& item : ava::tui::key_binding_help_items(ava::tui::default_key_bindings())) {
     hotkeys.push_back(CommandHotkey{.action = item.action, .description = item.description, .keys = item.keys});
@@ -15,11 +16,13 @@ std::vector<CommandHotkey> default_command_hotkeys() {
   return hotkeys;
 }
 
-std::vector<CommandHotkey> effective_hotkeys(std::vector<CommandHotkey> const& hotkeys) {
+std::vector<CommandHotkey> effective_hotkeys(std::vector<CommandHotkey> const& hotkeys)
+{
   return hotkeys.empty() ? default_command_hotkeys() : hotkeys;
 }
 
-std::string aliases_text(CommandCatalogEntry const& entry) {
+std::string aliases_text(CommandCatalogEntry const& entry)
+{
   std::string text;
   for (auto const& alias : entry.aliases) {
     if (!text.empty()) text += ", ";
@@ -28,7 +31,8 @@ std::string aliases_text(CommandCatalogEntry const& entry) {
   return text;
 }
 
-std::string command_display(CommandCatalogEntry const& entry) {
+std::string command_display(CommandCatalogEntry const& entry)
+{
   auto text = entry.command;
   if (!entry.hint.empty()) text += " " + entry.hint;
   auto const aliases = aliases_text(entry);
@@ -36,7 +40,8 @@ std::string command_display(CommandCatalogEntry const& entry) {
   return text;
 }
 
-std::string command_rows(bool enabled) {
+std::string command_rows(bool enabled)
+{
   std::size_t width = 0;
   std::vector<CommandCatalogEntry const*> entries;
   for (auto const& entry : command_catalog()) {
@@ -59,7 +64,8 @@ std::string command_rows(bool enabled) {
 
 }  // namespace
 
-std::string command_hotkeys_text(std::vector<CommandHotkey> const& hotkeys) {
+std::string command_hotkeys_text(std::vector<CommandHotkey> const& hotkeys)
+{
   auto const items = effective_hotkeys(hotkeys);
   std::size_t action_width = 0;
   std::size_t keys_width = 0;
@@ -79,7 +85,8 @@ std::string command_hotkeys_text(std::vector<CommandHotkey> const& hotkeys) {
   return output;
 }
 
-std::string command_help_text(std::vector<CommandHotkey> const& hotkeys) {
+std::string command_help_text(std::vector<CommandHotkey> const& hotkeys)
+{
   std::string output = "Commands:\n";
   output += command_rows(true);
   output += "\nUnavailable commands:\n";

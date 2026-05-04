@@ -21,29 +21,40 @@
 namespace ava::app {
 namespace {
 
-std::string plugin_display_path(std::filesystem::path const& path, RuntimeSession const& session) {
+std::string plugin_display_path(std::filesystem::path const& path, RuntimeSession const& session)
+{
   return sanitize_inline_text(display_path(path, session.current_dir));
 }
 
-ava::plugin::PluginDiscoveryOptions plugin_discovery_options(RuntimeSession const& session) {
+ava::plugin::PluginDiscoveryOptions plugin_discovery_options(RuntimeSession const& session)
+{
   return ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = session.paths.ava_config_dir / "plugins",
                                              .project_plugins_dir = session.workspace_dir / ".ava" / "plugins"};
 }
 
-std::filesystem::path plugin_enablement_file(RuntimeSession const& session) {
+std::filesystem::path plugin_enablement_file(RuntimeSession const& session)
+{
   return session.paths.ava_state_dir / "plugin-enablement.json";
 }
 
-ava::plugin::PluginDiagnostics plugin_diagnostics(RuntimeSession const& session) {
+ava::plugin::PluginDiagnostics plugin_diagnostics(RuntimeSession const& session)
+{
   return ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session),
                                                  session.workspace_dir);
 }
 
-std::string plugin_scope_text(ava::plugin::PluginScope scope) { return std::string(ava::plugin::to_string(scope)); }
+std::string plugin_scope_text(ava::plugin::PluginScope scope)
+{
+  return std::string(ava::plugin::to_string(scope));
+}
 
-std::string plugin_status_text(bool enabled) { return enabled ? "enabled" : "disabled"; }
+std::string plugin_status_text(bool enabled)
+{
+  return enabled ? "enabled" : "disabled";
+}
 
-std::string plugin_capabilities_text(ava::plugin::PluginManifest const& manifest) {
+std::string plugin_capabilities_text(ava::plugin::PluginManifest const& manifest)
+{
   if (manifest.capabilities.empty()) return "none";
   std::vector<std::string> capabilities;
   capabilities.reserve(manifest.capabilities.size());
@@ -51,14 +62,16 @@ std::string plugin_capabilities_text(ava::plugin::PluginManifest const& manifest
   return joined_strings(capabilities, ", ");
 }
 
-std::string plugin_entrypoint_text(ava::plugin::PluginEntrypoint const& entrypoint) {
+std::string plugin_entrypoint_text(ava::plugin::PluginEntrypoint const& entrypoint)
+{
   std::string text = sanitize_inline_text(entrypoint.command);
   for (auto const& arg : entrypoint.args) text += " " + sanitize_inline_text(arg);
   return text;
 }
 
 ava::plugin::PluginCommandContribution const* find_plugin_command(ava::plugin::PluginManifest const& manifest,
-                                                                  std::string_view command_name) {
+                                                                  std::string_view command_name)
+{
   for (auto const& command : manifest.contributes.commands) {
     if (command.name == command_name) return &command;
   }
@@ -66,14 +79,16 @@ ava::plugin::PluginCommandContribution const* find_plugin_command(ava::plugin::P
 }
 
 ava::plugin::PluginResourceContribution const* find_plugin_resource(
-    std::vector<ava::plugin::PluginResourceContribution> const& resources, std::string_view name) {
+    std::vector<ava::plugin::PluginResourceContribution> const& resources, std::string_view name)
+{
   for (auto const& resource : resources) {
     if (resource.name == name) return &resource;
   }
   return nullptr;
 }
 
-bool path_is_within(std::filesystem::path const& base, std::filesystem::path const& target) {
+bool path_is_within(std::filesystem::path const& base, std::filesystem::path const& target)
+{
   if (target == base) return true;
   std::error_code relative_error;
   auto const relative = std::filesystem::relative(target, base, relative_error);
@@ -82,7 +97,8 @@ bool path_is_within(std::filesystem::path const& base, std::filesystem::path con
 }
 
 ava::core::Result<std::filesystem::path> plugin_resource_path(ava::plugin::PluginManifest const& manifest,
-                                                              ava::plugin::PluginResourceContribution const& resource) {
+                                                              ava::plugin::PluginResourceContribution const& resource)
+{
   std::error_code base_error;
   auto const canonical_base = std::filesystem::weakly_canonical(manifest.directory, base_error);
   auto const base_path = base_error ? std::filesystem::absolute(manifest.directory).lexically_normal() : canonical_base;
@@ -102,7 +118,8 @@ ava::core::Result<std::filesystem::path> plugin_resource_path(ava::plugin::Plugi
 }
 
 ava::core::Result<std::string> read_plugin_resource(ava::plugin::PluginManifest const& manifest,
-                                                    ava::plugin::PluginResourceContribution const& resource) {
+                                                    ava::plugin::PluginResourceContribution const& resource)
+{
   constexpr std::size_t max_resource_bytes = 64 * 1024;
   auto path = plugin_resource_path(manifest, resource);
   if (!path) return std::unexpected(std::move(path.error()));
@@ -170,7 +187,8 @@ ava::core::Result<std::string> read_plugin_resource(ava::plugin::PluginManifest 
 
 std::string format_plugin_resource_list_text(ava::plugin::PluginStatus const& status, RuntimeSession const& session,
                                              std::string_view label,
-                                             std::vector<ava::plugin::PluginResourceContribution> const& resources) {
+                                             std::vector<ava::plugin::PluginResourceContribution> const& resources)
+{
   std::ostringstream output;
   output << "Plugin " << label << " for " << sanitize_inline_text(status.plugin.manifest.id) << "\n";
   if (!status.enabled) output << "  status: disabled\n";
@@ -190,7 +208,8 @@ std::string format_plugin_resource_list_text(ava::plugin::PluginStatus const& st
 
 std::string format_plugin_resource_text(ava::plugin::PluginManifest const& manifest,
                                         ava::plugin::PluginResourceContribution const& resource, std::string_view label,
-                                        RuntimeSession const& session, std::string content) {
+                                        RuntimeSession const& session, std::string content)
+{
   std::ostringstream output;
   output << "Plugin " << label << " " << sanitize_inline_text(manifest.id) << "/" << sanitize_inline_text(resource.name)
          << "\n";
@@ -200,28 +219,32 @@ std::string format_plugin_resource_text(ava::plugin::PluginManifest const& manif
 }
 
 ava::plugin::PluginStatus const* find_plugin_status(ava::plugin::PluginDiagnostics const& diagnostics,
-                                                    std::string_view plugin_id) {
+                                                    std::string_view plugin_id)
+{
   for (auto const& status : diagnostics.plugins) {
     if (status.plugin.manifest.id == plugin_id) return &status;
   }
   return nullptr;
 }
 
-bool has_duplicate_plugin_failure(ava::plugin::PluginDiagnostics const& diagnostics, std::string_view plugin_id) {
+bool has_duplicate_plugin_failure(ava::plugin::PluginDiagnostics const& diagnostics, std::string_view plugin_id)
+{
   auto const details = "plugin=" + std::string(plugin_id);
   return std::ranges::any_of(diagnostics.failures, [&](ava::plugin::PluginFailure const& failure) {
     return failure.message == "duplicate plugin id discovered" && failure.details == details;
   });
 }
 
-std::string plugin_not_found_text(ava::plugin::PluginDiagnostics const& diagnostics, std::string_view plugin_id) {
+std::string plugin_not_found_text(ava::plugin::PluginDiagnostics const& diagnostics, std::string_view plugin_id)
+{
   if (has_duplicate_plugin_failure(diagnostics, plugin_id)) {
     return "plugin id is ambiguous: " + sanitize_inline_text(std::string(plugin_id)) + " (see /plugins failures)";
   }
   return "plugin not found: " + sanitize_inline_text(std::string(plugin_id));
 }
 
-std::string format_plugin_list_text(ava::plugin::PluginDiagnostics const& diagnostics, RuntimeSession const& session) {
+std::string format_plugin_list_text(ava::plugin::PluginDiagnostics const& diagnostics, RuntimeSession const& session)
+{
   std::ostringstream output;
   output << "Plugins:\n";
   if (diagnostics.plugins.empty()) {
@@ -244,7 +267,8 @@ std::string format_plugin_list_text(ava::plugin::PluginDiagnostics const& diagno
   return output.str();
 }
 
-std::string format_plugin_failure_text(ava::plugin::PluginFailure const& failure, RuntimeSession const& session) {
+std::string format_plugin_failure_text(ava::plugin::PluginFailure const& failure, RuntimeSession const& session)
+{
   std::string text = "  " + plugin_scope_text(failure.scope) + "  " + plugin_display_path(failure.path, session) +
                      "\n    " + sanitize_inline_text(failure.message);
   if (!failure.details.empty()) text += "\n    " + sanitize_inline_text(failure.details);
@@ -252,7 +276,8 @@ std::string format_plugin_failure_text(ava::plugin::PluginFailure const& failure
 }
 
 std::string format_plugin_failures_text(ava::plugin::PluginDiagnostics const& diagnostics,
-                                        RuntimeSession const& session) {
+                                        RuntimeSession const& session)
+{
   if (diagnostics.failures.empty()) return "No plugin discovery or enablement failures.";
   std::string output = "Plugin failures:\n";
   for (auto const& failure : diagnostics.failures) output += format_plugin_failure_text(failure, session) + "\n";
@@ -260,7 +285,8 @@ std::string format_plugin_failures_text(ava::plugin::PluginDiagnostics const& di
   return output;
 }
 
-std::string format_plugin_inspect_text(ava::plugin::PluginStatus const& status, RuntimeSession const& session) {
+std::string format_plugin_inspect_text(ava::plugin::PluginStatus const& status, RuntimeSession const& session)
+{
   auto const& manifest = status.plugin.manifest;
   std::ostringstream output;
   output << "Plugin " << sanitize_inline_text(manifest.id) << "\n";
@@ -310,7 +336,8 @@ std::string format_plugin_inspect_text(ava::plugin::PluginStatus const& status, 
 }
 
 std::string format_valid_plugin_manifest_text(ava::plugin::PluginManifest const& manifest,
-                                              RuntimeSession const& session) {
+                                              RuntimeSession const& session)
+{
   std::ostringstream output;
   output << "Valid plugin manifest\n";
   output << "  id: " << sanitize_inline_text(manifest.id) << "\n";
@@ -328,13 +355,15 @@ std::string format_valid_plugin_manifest_text(ava::plugin::PluginManifest const&
   return output.str();
 }
 
-std::filesystem::path plugin_validate_path(RuntimeSession const& session, std::string_view path_text) {
+std::filesystem::path plugin_validate_path(RuntimeSession const& session, std::string_view path_text)
+{
   auto path = std::filesystem::path(std::string(path_text));
   if (path.is_relative()) path = session.current_dir / path;
   return path.lexically_normal();
 }
 
-std::string trim_ascii_whitespace(std::string_view text) {
+std::string trim_ascii_whitespace(std::string_view text)
+{
   std::size_t start = 0;
   while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start])) != 0) ++start;
   auto end = text.size();
@@ -342,7 +371,8 @@ std::string trim_ascii_whitespace(std::string_view text) {
   return std::string(text.substr(start, end - start));
 }
 
-std::string plugin_validate_argument(std::string_view plugins_argument) {
+std::string plugin_validate_argument(std::string_view plugins_argument)
+{
   std::size_t index = 0;
   while (index < plugins_argument.size() && std::isspace(static_cast<unsigned char>(plugins_argument[index])) != 0) {
     ++index;
@@ -359,7 +389,8 @@ struct PluginRunArguments {
   std::string arguments_json = "{}";
 };
 
-std::optional<std::string_view> consume_token(std::string_view& text) {
+std::optional<std::string_view> consume_token(std::string_view& text)
+{
   while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) text.remove_prefix(1);
   if (text.empty()) return std::nullopt;
   auto const end = text.find_first_of(" \t\r\n");
@@ -368,7 +399,8 @@ std::optional<std::string_view> consume_token(std::string_view& text) {
   return token;
 }
 
-ava::core::Result<PluginRunArguments> parse_plugin_run_arguments(std::string_view argument) {
+ava::core::Result<PluginRunArguments> parse_plugin_run_arguments(std::string_view argument)
+{
   auto const subcommand = consume_token(argument);
   auto const plugin_id = consume_token(argument);
   auto const command_name = consume_token(argument);
@@ -390,7 +422,8 @@ ava::core::Result<PluginRunArguments> parse_plugin_run_arguments(std::string_vie
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_plugins_command(RuntimeSession& session, CommandRequest const& request) {
+ava::core::Result<CommandResult> run_plugins_command(RuntimeSession& session, CommandRequest const& request)
+{
   CommandResult result;
   result.handled = true;
   auto const usage = [&]() {
@@ -503,7 +536,8 @@ ava::core::Result<CommandResult> run_plugins_command(RuntimeSession& session, Co
   return usage();
 }
 
-ava::core::Result<CommandResult> run_plugin_command(RuntimeSession& session, CommandRequest const& request) {
+ava::core::Result<CommandResult> run_plugin_command(RuntimeSession& session, CommandRequest const& request)
+{
   CommandResult result;
   result.handled = true;
   auto run_args = parse_plugin_run_arguments(command_argument(request.command, "/plugin"));

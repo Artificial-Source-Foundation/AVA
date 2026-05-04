@@ -11,7 +11,8 @@
 namespace ava::app {
 namespace {
 
-ava::core::Result<std::filesystem::path> current_path_result() {
+ava::core::Result<std::filesystem::path> current_path_result()
+{
   std::error_code error;
   auto path = std::filesystem::current_path(error);
   if (!error) return path;
@@ -21,8 +22,8 @@ ava::core::Result<std::filesystem::path> current_path_result() {
 }
 
 ava::core::Result<std::string> resolve_session_id(std::filesystem::path const& workspace_dir,
-                                                  std::filesystem::path const& root_dir,
-                                                  std::string_view requested_id) {
+                                                  std::filesystem::path const& root_dir, std::string_view requested_id)
+{
   auto sessions = ava::session::SessionStore::list_sessions(workspace_dir, root_dir);
   if (!sessions) return std::unexpected(sessions.error());
 
@@ -48,7 +49,8 @@ ava::core::Result<std::string> resolve_session_id(std::filesystem::path const& w
 
 }  // namespace
 
-ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const& options) {
+ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const& options)
+{
   if (options.requested_session_id && options.continue_last_session) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                             "use either requested session id or continue, not both"));

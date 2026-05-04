@@ -10,7 +10,8 @@
 namespace ava::agent {
 namespace {
 
-ProviderToolCall& pending_call_for(std::vector<ProviderToolCall>& calls, std::string_view id) {
+ProviderToolCall& pending_call_for(std::vector<ProviderToolCall>& calls, std::string_view id)
+{
   for (auto& call : calls) {
     if (call.id == id) return call;
   }
@@ -18,14 +19,16 @@ ProviderToolCall& pending_call_for(std::vector<ProviderToolCall>& calls, std::st
   return calls.back();
 }
 
-std::size_t reasoning_block_bytes(ParsedReasoningBlock const& block) {
+std::size_t reasoning_block_bytes(ParsedReasoningBlock const& block)
+{
   return block.text.size() + block.signature.size() + block.redacted_data.size();
 }
 
 }  // namespace
 
 ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(std::vector<ava::provider::StreamEvent> const& events,
-                                                            ProviderOutputLimits limits) {
+                                                            ProviderOutputLimits limits)
+{
   if (limits.max_events > 0 && events.size() > limits.max_events) {
     return std::unexpected(
         output_limit_error("provider output event limit exceeded", "max_provider_events", limits.max_events));

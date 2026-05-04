@@ -10,7 +10,8 @@
 
 namespace ava::core {
 
-std::string make_id(std::string_view prefix) {
+std::string make_id(std::string_view prefix)
+{
   auto const now = std::chrono::system_clock::now().time_since_epoch().count();
   std::uint64_t seed = static_cast<std::uint64_t>(now);
   try {

@@ -14,23 +14,27 @@
 namespace ava::provider {
 namespace {
 
-bool is_ignored_lifecycle_event(std::string_view type) {
+bool is_ignored_lifecycle_event(std::string_view type)
+{
   return type == "response.created" || type == "response.in_progress" || type == "response.output_item.added" ||
          type == "response.output_item.done" || type == "response.content_part.added" ||
          type == "response.content_part.done" || type == "response.output_text.done" ||
          type == "response.function_call_arguments.done";
 }
 
-bool contains_string(std::vector<std::string> const& values, std::string_view value) {
+bool contains_string(std::vector<std::string> const& values, std::string_view value)
+{
   return std::ranges::find(values, value) != values.end();
 }
 
-void remember_string(std::vector<std::string>& values, std::string value) {
+void remember_string(std::vector<std::string>& values, std::string value)
+{
   if (value.empty() || contains_string(values, value)) return;
   values.push_back(std::move(value));
 }
 
-std::string reasoning_item_id_from_event(std::string_view data, std::optional<std::string_view> item = std::nullopt) {
+std::string reasoning_item_id_from_event(std::string_view data, std::optional<std::string_view> item = std::nullopt)
+{
   if (auto id = detail::first_string_field(data, {"item_id", "output_item_id"})) return *id;
   if (item) {
     if (auto id = detail::first_string_field(*item, {"id", "item_id"})) return *id;
@@ -38,12 +42,14 @@ std::string reasoning_item_id_from_event(std::string_view data, std::optional<st
   return {};
 }
 
-void set_active_reasoning_item_id(std::string& active_item_id, std::string_view item_id) {
+void set_active_reasoning_item_id(std::string& active_item_id, std::string_view item_id)
+{
   if (item_id.empty() || !active_item_id.empty()) return;
   active_item_id = std::string(item_id);
 }
 
-void append_start_reasoning_if_needed(std::vector<StreamEvent>& events, bool& reasoning_open) {
+void append_start_reasoning_if_needed(std::vector<StreamEvent>& events, bool& reasoning_open)
+{
   if (reasoning_open) return;
   reasoning_open = true;
   events.push_back(StreamEvent{.type = StreamEventType::ReasoningStart,
@@ -56,7 +62,8 @@ void append_start_reasoning_if_needed(std::vector<StreamEvent>& events, bool& re
 }
 
 void append_reasoning_delta(std::vector<StreamEvent>& events, bool& reasoning_open, bool& reasoning_text_seen,
-                            std::string& active_reasoning_text, std::string_view text) {
+                            std::string& active_reasoning_text, std::string_view text)
+{
   append_start_reasoning_if_needed(events, reasoning_open);
   if (text.empty()) return;
   reasoning_text_seen = true;
@@ -73,7 +80,8 @@ void append_reasoning_delta(std::vector<StreamEvent>& events, bool& reasoning_op
 void append_finish_reasoning_if_open(std::vector<StreamEvent>& events, bool& reasoning_open, bool& reasoning_text_seen,
                                      std::string& active_reasoning_item_id, std::string& active_reasoning_text,
                                      std::vector<std::string>& completed_reasoning_item_ids,
-                                     std::vector<std::string>& completed_reasoning_texts) {
+                                     std::vector<std::string>& completed_reasoning_texts)
+{
   if (!reasoning_open) return;
   reasoning_open = false;
   reasoning_text_seen = false;
@@ -93,7 +101,8 @@ void append_finish_reasoning_if_open(std::vector<StreamEvent>& events, bool& rea
 void append_event_for_data(std::vector<StreamEvent>& events, std::string_view data, bool& saw_content,
                            bool& reasoning_open, bool& reasoning_text_seen, std::string& active_reasoning_item_id,
                            std::string& active_reasoning_text, std::vector<std::string>& completed_reasoning_item_ids,
-                           std::vector<std::string>& completed_reasoning_texts, bool& done_seen, bool& error_seen) {
+                           std::vector<std::string>& completed_reasoning_texts, bool& done_seen, bool& error_seen)
+{
   if (data == "[DONE]") {
     if (done_seen) return;
     done_seen = true;
@@ -296,7 +305,8 @@ void append_events_for_sse_line(std::vector<StreamEvent>& events, std::string& d
                                 std::string& active_reasoning_text,
                                 std::vector<std::string>& completed_reasoning_item_ids,
                                 std::vector<std::string>& completed_reasoning_texts, bool& done_seen, bool& error_seen,
-                                std::string line) {
+                                std::string line)
+{
   if (!line.empty() && line.back() == '\r') line.pop_back();
   if (line.empty()) {
     if (!data.empty()) {
@@ -317,7 +327,8 @@ void append_events_for_sse_line(std::vector<StreamEvent>& events, std::string& d
 
 }  // namespace
 
-ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::append(std::string_view chunk) {
+ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::append(std::string_view chunk)
+{
   std::vector<StreamEvent> events;
   pending_line_.append(chunk);
   std::size_t line_start = 0;
@@ -337,7 +348,8 @@ ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::append(std::stri
   return events;
 }
 
-ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::finish() {
+ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::finish()
+{
   std::vector<StreamEvent> events;
   if (!pending_line_.empty()) {
     append_events_for_sse_line(events, data_, saw_content_, reasoning_open_, reasoning_text_seen_,

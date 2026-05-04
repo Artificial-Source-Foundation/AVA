@@ -35,9 +35,13 @@ namespace {
 
 namespace version = ava::core::version;
 
-void print_shell_help() { std::cout << ava::app::command_help_text() << '\n'; }
+void print_shell_help()
+{
+  std::cout << ava::app::command_help_text() << '\n';
+}
 
-std::string git_branch_for_sidebar(std::filesystem::path const& workspace) {
+std::string git_branch_for_sidebar(std::filesystem::path const& workspace)
+{
   auto const head_path = workspace / ".git" / "HEAD";
   std::ifstream input(head_path);
   if (!input) return {};
@@ -48,7 +52,8 @@ std::string git_branch_for_sidebar(std::filesystem::path const& workspace) {
   return head.size() > 12 ? head.substr(0, 12) : head;
 }
 
-std::vector<ava::app::CommandHotkey> command_hotkeys_from_key_bindings(ava::tui::TuiKeyBindings const& key_bindings) {
+std::vector<ava::app::CommandHotkey> command_hotkeys_from_key_bindings(ava::tui::TuiKeyBindings const& key_bindings)
+{
   std::vector<ava::app::CommandHotkey> hotkeys;
   for (auto const& item : ava::tui::key_binding_help_items(key_bindings)) {
     hotkeys.push_back(
@@ -57,7 +62,8 @@ std::vector<ava::app::CommandHotkey> command_hotkeys_from_key_bindings(ava::tui:
   return hotkeys;
 }
 
-ava::tui::ToolTimelineStatus tui_tool_status(ava::agent::ToolTimelineStatus status) {
+ava::tui::ToolTimelineStatus tui_tool_status(ava::agent::ToolTimelineStatus status)
+{
   switch (status) {
     case ava::agent::ToolTimelineStatus::Running:
       return ava::tui::ToolTimelineStatus::Running;
@@ -69,7 +75,8 @@ ava::tui::ToolTimelineStatus tui_tool_status(ava::agent::ToolTimelineStatus stat
   return ava::tui::ToolTimelineStatus::Error;
 }
 
-std::vector<ava::tui::ToolTimelineItem> tui_tool_timeline(std::vector<ava::agent::ToolTimelineEntry> const& entries) {
+std::vector<ava::tui::ToolTimelineItem> tui_tool_timeline(std::vector<ava::agent::ToolTimelineEntry> const& entries)
+{
   std::vector<ava::tui::ToolTimelineItem> items;
   items.reserve(entries.size());
   for (auto const& entry : entries) {
@@ -81,21 +88,25 @@ std::vector<ava::tui::ToolTimelineItem> tui_tool_timeline(std::vector<ava::agent
   return items;
 }
 
-void print_resume_command(ava::session::SessionStore const& store) {
+void print_resume_command(ava::session::SessionStore const& store)
+{
   std::cout << "Resume this session with: ava --session " << store.session_id() << '\n';
 }
 
-bool is_compact_command(std::string_view line) noexcept {
+bool is_compact_command(std::string_view line) noexcept
+{
   return line == "/compact" || (line.starts_with("/compact") && line.size() > 8 && line[8] == ' ');
 }
 
-void add_token_component(std::optional<long long>& total, std::optional<long long> value) {
+void add_token_component(std::optional<long long>& total, std::optional<long long> value)
+{
   if (!value) return;
   if (!total) total = 0;
   *total += *value;
 }
 
-std::optional<long long> compact_token_total(ava::session::SessionStats const& stats) {
+std::optional<long long> compact_token_total(ava::session::SessionStats const& stats)
+{
   if (stats.total_tokens) return stats.total_tokens;
 
   std::optional<long long> total;
@@ -107,7 +118,8 @@ std::optional<long long> compact_token_total(ava::session::SessionStats const& s
   return total;
 }
 
-std::string format_compact_token_count(long long value) {
+std::string format_compact_token_count(long long value)
+{
   if (value < 1000) return std::to_string(value);
 
   auto const format_scaled = [](long long tenths, std::string_view suffix) {
@@ -123,7 +135,8 @@ std::string format_compact_token_count(long long value) {
 }
 
 std::optional<std::string> format_context_window_percent(long long tokens,
-                                                         std::optional<long long> context_window_tokens) {
+                                                         std::optional<long long> context_window_tokens)
+{
   if (!context_window_tokens || *context_window_tokens <= 0) return std::nullopt;
   if (tokens <= 0) return std::string("0.0%");
 
@@ -136,7 +149,8 @@ std::optional<std::string> format_context_window_percent(long long tokens,
 }
 
 std::optional<std::string> compact_token_status(ava::session::SessionStats const& stats,
-                                                std::optional<long long> context_window_tokens) {
+                                                std::optional<long long> context_window_tokens)
+{
   auto const tokens = compact_token_total(stats);
   if (!tokens) return std::nullopt;
 
@@ -148,7 +162,8 @@ std::optional<std::string> compact_token_status(ava::session::SessionStats const
   return output.str();
 }
 
-std::optional<std::string> token_status_for_session(ava::app::RuntimeSession const& session) {
+std::optional<std::string> token_status_for_session(ava::app::RuntimeSession const& session)
+{
   auto entries = session.store.load();
   if (!entries) return std::nullopt;
   return compact_token_status(ava::session::compute_session_stats(*entries), session.model.context_window_tokens);
@@ -165,10 +180,14 @@ struct LineResult {
   std::vector<ava::agent::ToolTimelineEntry> tool_timeline;
 };
 
-void add_output(LineResult& result, std::string text) { result.output.push_back(std::move(text)); }
+void add_output(LineResult& result, std::string text)
+{
+  result.output.push_back(std::move(text));
+}
 
 template <typename Callback>
-LineResult with_provider_runtime(ShellState& state, std::string_view offline_suffix, Callback callback) {
+LineResult with_provider_runtime(ShellState& state, std::string_view offline_suffix, Callback callback)
+{
   LineResult line_result;
   ava::provider::CurlCliTransport transport;
   auto credential =
@@ -204,7 +223,8 @@ LineResult handle_line(ShellState& state, std::string const& line,
                        std::vector<ava::app::CommandHotkey> const& hotkeys = {},
                        ava::app::RuntimeEventSink event_sink = nullptr,
                        std::function<bool()> cancel_requested = nullptr,
-                       std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr) {
+                       std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr)
+{
   LineResult line_result;
   if (line.empty()) return line_result;
   if (ava::app::is_backend_command(line)) {
@@ -280,7 +300,8 @@ LineResult handle_line(ShellState& state, std::string const& line,
                                });
 }
 
-int run_line_shell(ShellState state) {
+int run_line_shell(ShellState state)
+{
   std::cout << "AVA " << version::kDisplayVersion << " terminal shell\n";
   std::cout << "mode: " << ava::agent::to_string(state.session.mode)
             << " | session: " << state.session.store.session_id() << "\n";
@@ -309,7 +330,8 @@ int run_line_shell(ShellState state) {
   }
 }
 
-int run_tui(ShellState state) {
+int run_tui(ShellState state)
+{
   auto key_bindings = ava::tui::default_key_bindings();
   std::string keybind_status;
   if (auto loaded = ava::tui::load_key_bindings(state.session.paths.ava_config_dir / "keybinds.json"); loaded) {
@@ -418,7 +440,8 @@ int run_tui(ShellState state) {
 
 namespace ava::app {
 
-int run_interactive(RuntimeSession& session) {
+int run_interactive(RuntimeSession& session)
+{
   ShellState state{.session = session};
   if (ava::tui::terminal_is_tty()) return run_tui(state);
   return run_line_shell(state);

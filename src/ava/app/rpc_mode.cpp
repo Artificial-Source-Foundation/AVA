@@ -25,7 +25,8 @@ namespace ava::app {
 ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options,
                                    ava::provider::Provider const& provider, ava::provider::Transport& transport,
                                    ava::provider::Transport& auth_transport, RuntimeRunOptions runtime_options,
-                                   std::istream& in, std::ostream& out) {
+                                   std::istream& in, std::ostream& out)
+{
   rpc::RpcOutput output(out);
   rpc::RpcRunState run_state;
   rpc::PendingResolverState pending_state;
@@ -754,11 +755,13 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
 
 ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options,
                                    ava::provider::Provider const& provider, ava::provider::Transport& transport,
-                                   RuntimeRunOptions runtime_options, std::istream& in, std::ostream& out) {
+                                   RuntimeRunOptions runtime_options, std::istream& in, std::ostream& out)
+{
   return run_rpc_loop(session, open_options, provider, transport, transport, std::move(runtime_options), in, out);
 }
 
-int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err) {
+int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err)
+{
   auto session = open_runtime_session(options.open_options);
   if (!session) {
     err << session.error().format() << '\n';

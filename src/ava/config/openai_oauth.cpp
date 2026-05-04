@@ -31,7 +31,8 @@ class ScopedFd {
   ScopedFd(ScopedFd const&) = delete;
   ScopedFd& operator=(ScopedFd const&) = delete;
   ScopedFd(ScopedFd&& other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
-  ScopedFd& operator=(ScopedFd&& other) noexcept {
+  ScopedFd& operator=(ScopedFd&& other) noexcept
+  {
     if (this != &other) {
       close_if_open();
       fd_ = std::exchange(other.fd_, -1);
@@ -43,16 +44,21 @@ class ScopedFd {
   [[nodiscard]] int get() const noexcept { return fd_; }
 
  private:
-  void close_if_open() noexcept {
+  void close_if_open() noexcept
+  {
     if (fd_ >= 0) static_cast<void>(::close(fd_));
   }
 
   int fd_ = -1;
 };
 
-std::string errno_message() { return std::strerror(errno); }
+std::string errno_message()
+{
+  return std::strerror(errno);
+}
 
-std::string base64_url_encode(std::span<std::uint8_t const> bytes) {
+std::string base64_url_encode(std::span<std::uint8_t const> bytes)
+{
   std::string output;
   output.reserve(((bytes.size() + 2) / 3) * 4);
   std::size_t index = 0;
@@ -81,7 +87,8 @@ std::string base64_url_encode(std::span<std::uint8_t const> bytes) {
   return output;
 }
 
-std::optional<std::vector<std::uint8_t>> base64_url_decode(std::string_view value) {
+std::optional<std::vector<std::uint8_t>> base64_url_decode(std::string_view value)
+{
   std::vector<std::uint8_t> output;
   output.reserve((value.size() * 3) / 4);
   std::uint32_t buffer = 0;
@@ -100,14 +107,33 @@ std::optional<std::vector<std::uint8_t>> base64_url_decode(std::string_view valu
   return output;
 }
 
-std::uint32_t choose(std::uint32_t x, std::uint32_t y, std::uint32_t z) { return (x & y) ^ (~x & z); }
-std::uint32_t majority(std::uint32_t x, std::uint32_t y, std::uint32_t z) { return (x & y) ^ (x & z) ^ (y & z); }
-std::uint32_t big_sigma0(std::uint32_t x) { return std::rotr(x, 2) ^ std::rotr(x, 13) ^ std::rotr(x, 22); }
-std::uint32_t big_sigma1(std::uint32_t x) { return std::rotr(x, 6) ^ std::rotr(x, 11) ^ std::rotr(x, 25); }
-std::uint32_t small_sigma0(std::uint32_t x) { return std::rotr(x, 7) ^ std::rotr(x, 18) ^ (x >> 3U); }
-std::uint32_t small_sigma1(std::uint32_t x) { return std::rotr(x, 17) ^ std::rotr(x, 19) ^ (x >> 10U); }
+std::uint32_t choose(std::uint32_t x, std::uint32_t y, std::uint32_t z)
+{
+  return (x & y) ^ (~x & z);
+}
+std::uint32_t majority(std::uint32_t x, std::uint32_t y, std::uint32_t z)
+{
+  return (x & y) ^ (x & z) ^ (y & z);
+}
+std::uint32_t big_sigma0(std::uint32_t x)
+{
+  return std::rotr(x, 2) ^ std::rotr(x, 13) ^ std::rotr(x, 22);
+}
+std::uint32_t big_sigma1(std::uint32_t x)
+{
+  return std::rotr(x, 6) ^ std::rotr(x, 11) ^ std::rotr(x, 25);
+}
+std::uint32_t small_sigma0(std::uint32_t x)
+{
+  return std::rotr(x, 7) ^ std::rotr(x, 18) ^ (x >> 3U);
+}
+std::uint32_t small_sigma1(std::uint32_t x)
+{
+  return std::rotr(x, 17) ^ std::rotr(x, 19) ^ (x >> 10U);
+}
 
-std::array<std::uint8_t, 32> sha256(std::string_view text) {
+std::array<std::uint8_t, 32> sha256(std::string_view text)
+{
   constexpr std::array<std::uint32_t, 64> kConstants{
       0x428a2f98U, 0x71374491U, 0xb5c0fbcfU, 0xe9b5dba5U, 0x3956c25bU, 0x59f111f1U, 0x923f82a4U, 0xab1c5ed5U,
       0xd807aa98U, 0x12835b01U, 0x243185beU, 0x550c7dc3U, 0x72be5d74U, 0x80deb1feU, 0x9bdc06a7U, 0xc19bf174U,
@@ -182,7 +208,8 @@ std::array<std::uint8_t, 32> sha256(std::string_view text) {
   return digest;
 }
 
-std::string url_encode(std::string_view value) {
+std::string url_encode(std::string_view value)
+{
   constexpr std::string_view hex = "0123456789ABCDEF";
   std::string output;
   output.reserve(value.size());
@@ -199,13 +226,15 @@ std::string url_encode(std::string_view value) {
   return output;
 }
 
-std::string_view trim_ascii(std::string_view value) {
+std::string_view trim_ascii(std::string_view value)
+{
   while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) value.remove_prefix(1);
   while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) value.remove_suffix(1);
   return value;
 }
 
-bool is_complete_json_object(std::string_view value) {
+bool is_complete_json_object(std::string_view value)
+{
   value = trim_ascii(value);
   if (value.empty() || value.front() != '{') return false;
 
@@ -240,12 +269,14 @@ bool is_complete_json_object(std::string_view value) {
   return false;
 }
 
-long long token_response_expiry(std::string_view body, long long now_seconds) {
+long long token_response_expiry(std::string_view body, long long now_seconds)
+{
   if (auto const expires_at = ava::core::json::integer_field(body, "expires_at")) return *expires_at;
   return now_seconds + ava::core::json::integer_field(body, "expires_in").value_or(3600);
 }
 
-std::optional<std::string> token_response_account_id(std::string_view body, std::string_view access_token) {
+std::optional<std::string> token_response_account_id(std::string_view body, std::string_view access_token)
+{
   auto account_id = ava::core::json::string_field(body, "account_id");
   if (account_id && !account_id->empty()) return account_id;
   auto id_token = ava::core::json::string_field(body, "id_token");
@@ -256,7 +287,8 @@ std::optional<std::string> token_response_account_id(std::string_view body, std:
 
 ava::core::Result<OpenAICredential> parse_openai_oauth_token_response(std::string_view body, long long now_seconds,
                                                                       std::string_view refresh_fallback,
-                                                                      std::string_view account_id_fallback) {
+                                                                      std::string_view account_id_fallback)
+{
   if (!is_complete_json_object(body)) {
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI OAuth token response was malformed JSON"));
@@ -281,7 +313,8 @@ ava::core::Result<OpenAICredential> parse_openai_oauth_token_response(std::strin
 
 ava::core::Result<ava::provider::HttpResponse> post_openai_oauth_token_form(std::string body,
                                                                             ava::provider::Transport& transport,
-                                                                            std::string_view failure_message) {
+                                                                            std::string_view failure_message)
+{
   auto response =
       transport.send(ava::provider::HttpRequest{.method = "POST",
                                                 .url = std::string(kTokenUrl),
@@ -300,7 +333,8 @@ ava::core::Result<ava::provider::HttpResponse> post_openai_oauth_token_form(std:
   return response;
 }
 
-std::optional<std::string> jwt_payload(std::string_view token) {
+std::optional<std::string> jwt_payload(std::string_view token)
+{
   auto const first = token.find('.');
   if (first == std::string_view::npos) return std::nullopt;
   auto const second = token.find('.', first + 1);
@@ -310,7 +344,8 @@ std::optional<std::string> jwt_payload(std::string_view token) {
   return std::string(decoded->begin(), decoded->end());
 }
 
-std::optional<std::string> account_id_from_payload(std::string_view payload) {
+std::optional<std::string> account_id_from_payload(std::string_view payload)
+{
   auto account = ava::core::json::string_field(payload, "chatgpt_account_id");
   if (account && !account->empty()) return account;
   auto auth = ava::core::json::object_field(payload, "https://api.openai.com/auth");
@@ -326,7 +361,8 @@ std::optional<std::string> account_id_from_payload(std::string_view payload) {
   return std::nullopt;
 }
 
-ava::core::Result<std::string> random_token(std::size_t bytes) {
+ava::core::Result<std::string> random_token(std::size_t bytes)
+{
   std::vector<std::uint8_t> data(bytes);
   ScopedFd const fd(::open("/dev/urandom", O_RDONLY | O_CLOEXEC));
   if (fd.get() < 0) {
@@ -355,15 +391,20 @@ ava::core::Result<std::string> random_token(std::size_t bytes) {
 
 }  // namespace
 
-std::string openai_oauth_code_challenge(std::string_view verifier) { return base64_url_encode(sha256(verifier)); }
+std::string openai_oauth_code_challenge(std::string_view verifier)
+{
+  return base64_url_encode(sha256(verifier));
+}
 
-std::optional<std::string> openai_oauth_account_id_from_token(std::string_view token) {
+std::optional<std::string> openai_oauth_account_id_from_token(std::string_view token)
+{
   auto const payload = jwt_payload(token);
   if (!payload) return std::nullopt;
   return account_id_from_payload(*payload);
 }
 
-ava::core::Result<OpenAIOAuthSession> make_openai_oauth_session() {
+ava::core::Result<OpenAIOAuthSession> make_openai_oauth_session()
+{
   auto verifier = random_token(32);
   if (!verifier) return std::unexpected(verifier.error());
   auto state = random_token(24);
@@ -371,7 +412,8 @@ ava::core::Result<OpenAIOAuthSession> make_openai_oauth_session() {
   return make_openai_oauth_session(*verifier, *state);
 }
 
-ava::core::Result<OpenAIOAuthSession> make_openai_oauth_session(std::string verifier, std::string state) {
+ava::core::Result<OpenAIOAuthSession> make_openai_oauth_session(std::string verifier, std::string state)
+{
   if (verifier.size() < 43 || verifier.size() > 128) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "OAuth PKCE verifier length is invalid");
     error.with_context("length", std::to_string(verifier.size()));
@@ -397,7 +439,8 @@ ava::core::Result<OpenAIOAuthSession> make_openai_oauth_session(std::string veri
 
 ava::core::Result<OpenAICredential> exchange_openai_oauth_code(std::string_view code, std::string_view verifier,
                                                                ava::provider::Transport& transport,
-                                                               long long now_seconds) {
+                                                               long long now_seconds)
+{
   std::string body = "grant_type=authorization_code";
   body += "&client_id=" + url_encode(kClientId);
   body += "&code=" + url_encode(code);
@@ -411,7 +454,8 @@ ava::core::Result<OpenAICredential> exchange_openai_oauth_code(std::string_view 
 
 ava::core::Result<OpenAICredential> refresh_openai_oauth_credential(OpenAICredential const& credential,
                                                                     ava::provider::Transport& transport,
-                                                                    long long now_seconds) {
+                                                                    long long now_seconds)
+{
   if (credential.type != OpenAICredentialType::OAuth) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                             "OpenAI OAuth refresh requires an OAuth credential"));

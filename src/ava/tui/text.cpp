@@ -7,9 +7,13 @@
 namespace ava::tui {
 namespace {
 
-bool starts_fence(std::string_view line) { return line.starts_with("```"); }
+bool starts_fence(std::string_view line)
+{
+  return line.starts_with("```");
+}
 
-std::size_t heading_marker_size(std::string_view line) {
+std::size_t heading_marker_size(std::string_view line)
+{
   std::size_t marker_size = 0;
   while (marker_size < line.size() && marker_size < 6 && line[marker_size] == '#') {
     ++marker_size;
@@ -18,12 +22,14 @@ std::size_t heading_marker_size(std::string_view line) {
   return marker_size + 1;
 }
 
-void append_plain_segment(Text& text, std::string_view value) {
+void append_plain_segment(Text& text, std::string_view value)
+{
   if (value.empty()) return;
   text.runs.push_back(String{.text = std::string(value)});
 }
 
-void append_markdown_inline(Text& text, std::string_view line) {
+void append_markdown_inline(Text& text, std::string_view line)
+{
   std::size_t plain_start = 0;
   for (std::size_t index = 0; index < line.size();) {
     if (line[index] == '[') {
@@ -83,13 +89,18 @@ void append_markdown_inline(Text& text, std::string_view line) {
 
 }  // namespace
 
-bool text_run_has_embedded_newline(std::string_view text) {
+bool text_run_has_embedded_newline(std::string_view text)
+{
   return text.find('\n') != std::string_view::npos || text.find('\r') != std::string_view::npos;
 }
 
-bool text_empty(Text const& text) { return text.runs.empty(); }
+bool text_empty(Text const& text)
+{
+  return text.runs.empty();
+}
 
-ava::core::VoidResult append_string(Text& text, std::string value) {
+ava::core::VoidResult append_string(Text& text, std::string value)
+{
   if (text_run_has_embedded_newline(value)) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                             "text string run must not contain embedded newlines"));
@@ -98,7 +109,8 @@ ava::core::VoidResult append_string(Text& text, std::string value) {
   return {};
 }
 
-ava::core::VoidResult append_span(Text& text, std::string value, Rendition rendition) {
+ava::core::VoidResult append_span(Text& text, std::string value, Rendition rendition)
+{
   if (text_run_has_embedded_newline(value)) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                             "text span run must not contain embedded newlines"));
@@ -107,9 +119,13 @@ ava::core::VoidResult append_span(Text& text, std::string value, Rendition rendi
   return {};
 }
 
-void append_newline(Text& text) { text.runs.push_back(NewLine{}); }
+void append_newline(Text& text)
+{
+  text.runs.push_back(NewLine{});
+}
 
-void append_plain_text(Text& text, std::string_view value) {
+void append_plain_text(Text& text, std::string_view value)
+{
   std::size_t start = 0;
   for (std::size_t index = 0; index < value.size(); ++index) {
     if (value[index] != '\n' && value[index] != '\r') continue;
@@ -121,13 +137,15 @@ void append_plain_text(Text& text, std::string_view value) {
   append_plain_segment(text, value.substr(start));
 }
 
-Text text_from_plain(std::string_view value) {
+Text text_from_plain(std::string_view value)
+{
   Text text;
   append_plain_text(text, value);
   return text;
 }
 
-Text text_from_markdown(std::string_view value) {
+Text text_from_markdown(std::string_view value)
+{
   Text text;
   bool in_fence = false;
   std::size_t start = 0;
@@ -159,7 +177,8 @@ Text text_from_markdown(std::string_view value) {
   return text;
 }
 
-std::string to_plain_text(Text const& text) {
+std::string to_plain_text(Text const& text)
+{
   std::string output;
   for (auto const& run : text.runs) {
     if (std::holds_alternative<NewLine>(run)) {
@@ -173,7 +192,8 @@ std::string to_plain_text(Text const& text) {
   return output;
 }
 
-ava::core::VoidResult validate_text(Text const& text) {
+ava::core::VoidResult validate_text(Text const& text)
+{
   for (auto const& run : text.runs) {
     if (auto const* string = std::get_if<String>(&run)) {
       if (text_run_has_embedded_newline(string->text)) {

@@ -12,14 +12,16 @@
 namespace ava::context {
 namespace {
 
-std::filesystem::path normalized_absolute(std::filesystem::path const& path) {
+std::filesystem::path normalized_absolute(std::filesystem::path const& path)
+{
   std::error_code error;
   auto normalized = std::filesystem::weakly_canonical(path, error);
   if (!error) return normalized.lexically_normal();
   return std::filesystem::absolute(path, error).lexically_normal();
 }
 
-bool is_same_or_child(std::filesystem::path const& child, std::filesystem::path const& parent) {
+bool is_same_or_child(std::filesystem::path const& child, std::filesystem::path const& parent)
+{
   auto const child_text = child.lexically_normal().string();
   auto const parent_text = parent.lexically_normal().string();
   if (child_text == parent_text) return true;
@@ -27,7 +29,8 @@ bool is_same_or_child(std::filesystem::path const& child, std::filesystem::path 
   return child_text.starts_with(parent_text + "/");
 }
 
-ava::core::Result<std::string> read_file_limited(std::filesystem::path const& path, std::size_t max_file_bytes) {
+ava::core::Result<std::string> read_file_limited(std::filesystem::path const& path, std::size_t max_file_bytes)
+{
   std::error_code status_error;
   auto const status = std::filesystem::symlink_status(path, status_error);
   if (status_error || std::filesystem::is_symlink(status) || !std::filesystem::is_regular_file(status)) {
@@ -76,7 +79,8 @@ ava::core::Result<std::string> read_file_limited(std::filesystem::path const& pa
 
 ava::core::VoidResult append_if_present(std::vector<LoadedContextFile>& files, std::set<std::string>& seen_paths,
                                         std::filesystem::path const& path, ContextSourceType source_type,
-                                        std::size_t max_file_bytes) {
+                                        std::size_t max_file_bytes)
+{
   std::error_code status_error;
   auto const status = std::filesystem::symlink_status(path, status_error);
   if (status_error) return {};
@@ -96,7 +100,8 @@ ava::core::VoidResult append_if_present(std::vector<LoadedContextFile>& files, s
 }
 
 std::vector<std::filesystem::path> context_dirs_root_to_current(std::filesystem::path const& workspace_root,
-                                                                std::filesystem::path const& current_dir) {
+                                                                std::filesystem::path const& current_dir)
+{
   std::vector<std::filesystem::path> dirs;
   auto const root = normalized_absolute(workspace_root);
   auto const current = normalized_absolute(current_dir.empty() ? workspace_root : current_dir);
@@ -117,7 +122,8 @@ std::vector<std::filesystem::path> context_dirs_root_to_current(std::filesystem:
 
 }  // namespace
 
-std::string to_string(ContextSourceType source_type) {
+std::string to_string(ContextSourceType source_type)
+{
   switch (source_type) {
     case ContextSourceType::Workspace:
       return "workspace";
@@ -127,7 +133,8 @@ std::string to_string(ContextSourceType source_type) {
   return "unknown";
 }
 
-ava::core::Result<std::vector<LoadedContextFile>> load_context_files(ContextLoadOptions const& options) {
+ava::core::Result<std::vector<LoadedContextFile>> load_context_files(ContextLoadOptions const& options)
+{
   std::vector<LoadedContextFile> files;
   std::set<std::string> seen_paths;
 
@@ -146,7 +153,8 @@ ava::core::Result<std::vector<LoadedContextFile>> load_context_files(ContextLoad
   return files;
 }
 
-std::string format_context_for_prompt(std::vector<LoadedContextFile> const& files) {
+std::string format_context_for_prompt(std::vector<LoadedContextFile> const& files)
+{
   if (files.empty()) return {};
   std::string output = "\n\n# Loaded Project Instructions\n";
   for (auto const& file : files) {

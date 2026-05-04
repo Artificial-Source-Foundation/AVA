@@ -7,14 +7,16 @@
 namespace ava::core::json {
 namespace {
 
-int hex_value(char ch) {
+int hex_value(char ch)
+{
   if (ch >= '0' && ch <= '9') return ch - '0';
   if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
   if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
   return -1;
 }
 
-void append_utf8(std::string& out, int codepoint) {
+void append_utf8(std::string& out, int codepoint)
+{
   if (codepoint <= 0x7F) {
     out.push_back(static_cast<char>(codepoint));
   } else if (codepoint <= 0x7FF) {
@@ -32,7 +34,8 @@ void append_utf8(std::string& out, int codepoint) {
   }
 }
 
-std::optional<int> parse_hex_code_unit(std::string_view text, std::size_t hex_start) {
+std::optional<int> parse_hex_code_unit(std::string_view text, std::size_t hex_start)
+{
   if (hex_start + 3 >= text.size()) return std::nullopt;
   int const a = hex_value(text[hex_start]);
   int const b = hex_value(text[hex_start + 1]);
@@ -42,19 +45,32 @@ std::optional<int> parse_hex_code_unit(std::string_view text, std::size_t hex_st
   return (a << 12) | (b << 8) | (c << 4) | d;
 }
 
-bool is_high_surrogate(int code_unit) { return code_unit >= 0xD800 && code_unit <= 0xDBFF; }
+bool is_high_surrogate(int code_unit)
+{
+  return code_unit >= 0xD800 && code_unit <= 0xDBFF;
+}
 
-bool is_low_surrogate(int code_unit) { return code_unit >= 0xDC00 && code_unit <= 0xDFFF; }
+bool is_low_surrogate(int code_unit)
+{
+  return code_unit >= 0xDC00 && code_unit <= 0xDFFF;
+}
 
-bool is_hex_digit(char ch) { return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F'); }
+bool is_hex_digit(char ch)
+{
+  return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
+}
 
-bool is_json_whitespace(char ch) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; }
+bool is_json_whitespace(char ch)
+{
+  return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
+}
 
 class JsonValidator {
  public:
   explicit JsonValidator(std::string_view value) : value_(value) {}
 
-  [[nodiscard]] bool valid_object() {
+  [[nodiscard]] bool valid_object()
+  {
     skip_ws();
     if (!parse_object()) return false;
     skip_ws();
@@ -62,23 +78,27 @@ class JsonValidator {
   }
 
  private:
-  void skip_ws() {
+  void skip_ws()
+  {
     while (offset_ < value_.size() && is_json_whitespace(value_[offset_])) ++offset_;
   }
 
-  [[nodiscard]] bool consume(char expected) {
+  [[nodiscard]] bool consume(char expected)
+  {
     if (offset_ >= value_.size() || value_[offset_] != expected) return false;
     ++offset_;
     return true;
   }
 
-  [[nodiscard]] bool consume_literal(std::string_view literal) {
+  [[nodiscard]] bool consume_literal(std::string_view literal)
+  {
     if (value_.substr(offset_, literal.size()) != literal) return false;
     offset_ += literal.size();
     return true;
   }
 
-  [[nodiscard]] bool parse_value() {
+  [[nodiscard]] bool parse_value()
+  {
     skip_ws();
     if (offset_ >= value_.size()) return false;
     char const ch = value_[offset_];
@@ -92,7 +112,8 @@ class JsonValidator {
     return false;
   }
 
-  [[nodiscard]] bool parse_object() {
+  [[nodiscard]] bool parse_object()
+  {
     if (!consume('{')) return false;
     skip_ws();
     if (consume('}')) return true;
@@ -108,7 +129,8 @@ class JsonValidator {
     }
   }
 
-  [[nodiscard]] bool parse_array() {
+  [[nodiscard]] bool parse_array()
+  {
     if (!consume('[')) return false;
     skip_ws();
     if (consume(']')) return true;
@@ -120,7 +142,8 @@ class JsonValidator {
     }
   }
 
-  [[nodiscard]] bool parse_string() {
+  [[nodiscard]] bool parse_string()
+  {
     if (!consume('"')) return false;
     while (offset_ < value_.size()) {
       char const ch = value_[offset_++];
@@ -142,7 +165,8 @@ class JsonValidator {
     return false;
   }
 
-  [[nodiscard]] bool parse_number() {
+  [[nodiscard]] bool parse_number()
+  {
     if (consume('-') && offset_ >= value_.size()) return false;
     if (consume('0')) {
       if (offset_ < value_.size() && std::isdigit(static_cast<unsigned char>(value_[offset_])) != 0) return false;
@@ -167,7 +191,8 @@ class JsonValidator {
   std::size_t offset_ = 0;
 };
 
-std::optional<std::string> parse_string_at(std::string_view text, std::size_t start) {
+std::optional<std::string> parse_string_at(std::string_view text, std::size_t start)
+{
   if (start >= text.size() || text[start] != '"') return std::nullopt;
   std::string result;
   bool escaped = false;
@@ -242,7 +267,8 @@ std::optional<std::string> parse_string_at(std::string_view text, std::size_t st
   return std::nullopt;
 }
 
-std::optional<std::size_t> string_literal_end(std::string_view text, std::size_t start) {
+std::optional<std::size_t> string_literal_end(std::string_view text, std::size_t start)
+{
   if (start >= text.size() || text[start] != '"') return std::nullopt;
   bool escaped = false;
   for (std::size_t index = start + 1; index < text.size(); ++index) {
@@ -260,7 +286,8 @@ std::optional<std::size_t> string_literal_end(std::string_view text, std::size_t
   return std::nullopt;
 }
 
-std::optional<std::string> parse_balanced(std::string_view text, std::size_t start, char open, char close) {
+std::optional<std::string> parse_balanced(std::string_view text, std::size_t start, char open, char close)
+{
   if (start >= text.size() || text[start] != open) return std::nullopt;
   bool in_string = false;
   bool escaped = false;
@@ -291,7 +318,8 @@ std::optional<std::string> parse_balanced(std::string_view text, std::size_t sta
 
 }  // namespace
 
-std::string escape(std::string_view value) {
+std::string escape(std::string_view value)
+{
   std::string result;
   result.reserve(value.size());
   for (char const ch : value) {
@@ -332,7 +360,8 @@ std::string escape(std::string_view value) {
   return result;
 }
 
-std::optional<std::size_t> field_value_start(std::string_view object, std::string_view key) {
+std::optional<std::size_t> field_value_start(std::string_view object, std::string_view key)
+{
   std::string const needle = "\"" + escape(key) + "\"";
   bool in_string = false;
   bool escaped = false;
@@ -380,13 +409,15 @@ std::optional<std::size_t> field_value_start(std::string_view object, std::strin
   return std::nullopt;
 }
 
-std::optional<std::string> string_field(std::string_view object, std::string_view key) {
+std::optional<std::string> string_field(std::string_view object, std::string_view key)
+{
   auto const start = field_value_start(object, key);
   if (!start) return std::nullopt;
   return parse_string_at(object, *start);
 }
 
-std::optional<long long> integer_field(std::string_view object, std::string_view key) {
+std::optional<long long> integer_field(std::string_view object, std::string_view key)
+{
   auto const start = field_value_start(object, key);
   if (!start) return std::nullopt;
   std::size_t end = *start;
@@ -400,13 +431,15 @@ std::optional<long long> integer_field(std::string_view object, std::string_view
   }
 }
 
-std::optional<std::string> object_field(std::string_view object, std::string_view key) {
+std::optional<std::string> object_field(std::string_view object, std::string_view key)
+{
   auto const start = field_value_start(object, key);
   if (!start) return std::nullopt;
   return parse_balanced(object, *start, '{', '}');
 }
 
-std::vector<std::string> objects_in_array_field(std::string_view object, std::string_view key) {
+std::vector<std::string> objects_in_array_field(std::string_view object, std::string_view key)
+{
   std::vector<std::string> result;
   auto const start = field_value_start(object, key);
   if (!start || *start >= object.size() || object[*start] != '[') return result;
@@ -438,7 +471,8 @@ std::vector<std::string> objects_in_array_field(std::string_view object, std::st
   return result;
 }
 
-std::vector<std::string> strings_in_array_field(std::string_view object, std::string_view key) {
+std::vector<std::string> strings_in_array_field(std::string_view object, std::string_view key)
+{
   std::vector<std::string> result;
   auto const start = field_value_start(object, key);
   if (!start || *start >= object.size() || object[*start] != '[') return result;
@@ -478,6 +512,9 @@ std::vector<std::string> strings_in_array_field(std::string_view object, std::st
   return result;
 }
 
-bool is_valid_object(std::string_view value) { return JsonValidator(value).valid_object(); }
+bool is_valid_object(std::string_view value)
+{
+  return JsonValidator(value).valid_object();
+}
 
 }  // namespace ava::core::json

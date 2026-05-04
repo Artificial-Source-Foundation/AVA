@@ -11,7 +11,8 @@
 namespace ava::provider {
 namespace {
 
-std::string env_or_default(char const* name, std::string fallback) {
+std::string env_or_default(char const* name, std::string fallback)
+{
   char const* value = std::getenv(name);
   if (value == nullptr || std::string_view(value).empty()) return fallback;
   return value;
@@ -19,7 +20,8 @@ std::string env_or_default(char const* name, std::string fallback) {
 
 }  // namespace
 
-ava::core::VoidResult ProviderRegistry::register_provider(std::string provider_id, Factory factory) {
+ava::core::VoidResult ProviderRegistry::register_provider(std::string provider_id, Factory factory)
+{
   if (provider_id.empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider id is required"));
   }
@@ -37,14 +39,16 @@ ava::core::VoidResult ProviderRegistry::register_provider(std::string provider_i
   return {};
 }
 
-bool ProviderRegistry::contains(std::string_view provider_id) const noexcept {
+bool ProviderRegistry::contains(std::string_view provider_id) const noexcept
+{
   for (auto const& [id, _] : providers_) {
     if (id == provider_id) return true;
   }
   return false;
 }
 
-ava::core::Result<std::unique_ptr<Provider>> ProviderRegistry::create(std::string_view provider_id) const {
+ava::core::Result<std::unique_ptr<Provider>> ProviderRegistry::create(std::string_view provider_id) const
+{
   for (auto const& [id, factory] : providers_) {
     if (id == provider_id) return factory();
   }
@@ -53,14 +57,16 @@ ava::core::Result<std::unique_ptr<Provider>> ProviderRegistry::create(std::strin
   return std::unexpected(std::move(error));
 }
 
-std::vector<std::string> ProviderRegistry::provider_ids() const {
+std::vector<std::string> ProviderRegistry::provider_ids() const
+{
   std::vector<std::string> ids;
   ids.reserve(providers_.size());
   for (auto const& [id, _] : providers_) ids.push_back(id);
   return ids;
 }
 
-ProviderRegistry builtin_provider_registry() {
+ProviderRegistry builtin_provider_registry()
+{
   ProviderRegistry registry;
   static_cast<void>(registry.register_provider(ava::config::anthropic_provider_profile().provider_id,
                                                [] { return std::make_unique<AnthropicProvider>(); }));

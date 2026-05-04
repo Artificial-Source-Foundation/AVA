@@ -2,7 +2,8 @@
 
 namespace ava::agent {
 
-ava::core::VoidResult publish_stream_event(AgentLoopOptions const& options, ava::provider::StreamEvent const& event) {
+ava::core::VoidResult publish_stream_event(AgentLoopOptions const& options, ava::provider::StreamEvent const& event)
+{
   if (!options.on_stream_event) return {};
   auto safe_event = event;
   safe_event.reasoning_signature_present =

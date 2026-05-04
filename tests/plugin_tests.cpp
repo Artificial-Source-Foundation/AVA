@@ -21,7 +21,8 @@
 
 namespace {
 
-std::string valid_manifest_json(std::string id = "com.example.todo") {
+std::string valid_manifest_json(std::string id = "com.example.todo")
+{
   return std::string("{\n") +
          "  \"schema_version\": 1,\n"
          "  \"id\": \"" +
@@ -47,20 +48,23 @@ std::string valid_manifest_json(std::string id = "com.example.todo") {
          "}";
 }
 
-void write_text(std::filesystem::path const& path, std::string const& text) {
+void write_text(std::filesystem::path const& path, std::string const& text)
+{
   std::filesystem::create_directories(path.parent_path());
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file << text;
 }
 
-std::string read_text(std::filesystem::path const& path) {
+std::string read_text(std::filesystem::path const& path)
+{
   std::ifstream file(path, std::ios::binary);
   std::ostringstream buffer;
   buffer << file.rdbuf();
   return buffer.str();
 }
 
-std::string runner_manifest_json(std::string id, std::string script_name) {
+std::string runner_manifest_json(std::string id, std::string script_name)
+{
   return std::string("{\n") +
          "  \"schema_version\": 1,\n"
          "  \"id\": \"" +
@@ -77,7 +81,8 @@ std::string runner_manifest_json(std::string id, std::string script_name) {
          "}";
 }
 
-std::string tool_manifest_json(std::string id, std::string script_name, std::string tool_name = "todo_add") {
+std::string tool_manifest_json(std::string id, std::string script_name, std::string tool_name = "todo_add")
+{
   return std::string("{\n") +
          "  \"schema_version\": 1,\n"
          "  \"id\": \"" +
@@ -98,7 +103,8 @@ std::string tool_manifest_json(std::string id, std::string script_name, std::str
          "}";
 }
 
-std::string event_hook_manifest_json(std::string id, std::string script_name, std::string event_name = "tool.result") {
+std::string event_hook_manifest_json(std::string id, std::string script_name, std::string event_name = "tool.result")
+{
   return std::string("{\n") +
          "  \"schema_version\": 1,\n"
          "  \"id\": \"" +
@@ -118,7 +124,8 @@ std::string event_hook_manifest_json(std::string id, std::string script_name, st
 }
 
 ava::plugin::PluginManifest runner_manifest(std::filesystem::path const& plugin_dir, std::string id,
-                                            std::string script_name) {
+                                            std::string script_name)
+{
   auto parsed = ava::plugin::parse_plugin_manifest(runner_manifest_json(std::move(id), std::move(script_name)),
                                                    plugin_dir / "plugin.json");
   expect(parsed.has_value(),
@@ -127,7 +134,8 @@ ava::plugin::PluginManifest runner_manifest(std::filesystem::path const& plugin_
 }
 
 ava::plugin::PluginRunnerOptions runner_options(std::filesystem::path const& workspace,
-                                                std::chrono::milliseconds startup_timeout) {
+                                                std::chrono::milliseconds startup_timeout)
+{
   ava::plugin::PluginRunnerOptions options;
   options.workspace_dir = workspace;
   options.startup_timeout = startup_timeout;
@@ -136,7 +144,8 @@ ava::plugin::PluginRunnerOptions runner_options(std::filesystem::path const& wor
   return options;
 }
 
-void test_plugin_manifest_parsing() {
+void test_plugin_manifest_parsing()
+{
   auto parsed = ava::plugin::parse_plugin_manifest(valid_manifest_json(), "/tmp/plugin/plugin.json");
   expect(parsed.has_value(), parsed ? "plugin manifest parses valid JSON"
                                     : "plugin manifest parses valid JSON: " + parsed.error().format());
@@ -196,7 +205,8 @@ void test_plugin_manifest_parsing() {
          "plugin manifest rejects prompt and skill paths that escape the plugin directory");
 }
 
-void test_plugin_discovery() {
+void test_plugin_discovery()
+{
   auto const root = temp_root() / "plugins";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -266,7 +276,8 @@ void test_plugin_discovery() {
          "plugin manifest load rejects non-regular files");
 }
 
-void test_plugin_enablement() {
+void test_plugin_enablement()
+{
   auto const root = temp_root() / "plugin-enable";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -325,7 +336,8 @@ void test_plugin_enablement() {
          "plugin enablement parses escaped keys and braces inside strings");
 }
 
-void test_plugin_runner_initializes_and_shuts_down() {
+void test_plugin_runner_initializes_and_shuts_down()
+{
   auto const root = temp_root() / "plugin-runner";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -368,7 +380,8 @@ void test_plugin_runner_initializes_and_shuts_down() {
   }
 }
 
-void test_plugin_runner_accepts_buffered_extra_records() {
+void test_plugin_runner_accepts_buffered_extra_records()
+{
   auto const root = temp_root() / "plugin-runner-buffered";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -398,7 +411,8 @@ void test_plugin_runner_accepts_buffered_extra_records() {
   }
 }
 
-void test_plugin_runner_contained_failures() {
+void test_plugin_runner_contained_failures()
+{
   auto const root = temp_root() / "plugin-runner-failures";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -492,7 +506,8 @@ void test_plugin_runner_contained_failures() {
          "plugin runner bounds newline-free stdout floods");
 }
 
-void test_plugin_runner_tool_calls() {
+void test_plugin_runner_tool_calls()
+{
   auto const root = temp_root() / "plugin-runner-tools";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -604,7 +619,8 @@ void test_plugin_runner_tool_calls() {
   }
 }
 
-void test_plugin_runner_command_calls() {
+void test_plugin_runner_command_calls()
+{
   auto const root = temp_root() / "plugin-runner-commands";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -644,7 +660,8 @@ void test_plugin_runner_command_calls() {
   }
 }
 
-void test_plugin_runner_event_observation() {
+void test_plugin_runner_event_observation()
+{
   auto const root = temp_root() / "plugin-runner-events";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -683,7 +700,8 @@ void test_plugin_runner_event_observation() {
   }
 }
 
-void test_enabled_plugin_event_hooks_observe_runtime_events() {
+void test_enabled_plugin_event_hooks_observe_runtime_events()
+{
   auto const root = temp_root() / "plugin-event-hooks";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -745,7 +763,8 @@ void test_enabled_plugin_event_hooks_observe_runtime_events() {
          "enabled plugin event hook observes matching runtime event aliases");
 }
 
-void test_plugin_event_hook_failures_report_to_opt_in_sink() {
+void test_plugin_event_hook_failures_report_to_opt_in_sink()
+{
   struct CapturedFailure {
     std::string plugin_id;
     std::string event_name;
@@ -824,7 +843,8 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink() {
   }
 }
 
-void test_plugin_tool_dispatcher() {
+void test_plugin_tool_dispatcher()
+{
   auto const root = temp_root() / "plugin-tool-dispatcher";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -930,7 +950,8 @@ void test_plugin_tool_dispatcher() {
          "plugin tool dispatcher reports semantic cancellation before permission or process execution");
 }
 
-void test_plugin_tool_dispatcher_rejects_invalid_result() {
+void test_plugin_tool_dispatcher_rejects_invalid_result()
+{
   auto const root = temp_root() / "plugin-tool-invalid-result";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -969,7 +990,8 @@ void test_plugin_tool_dispatcher_rejects_invalid_result() {
          "dispatcher reports malformed plugin tool results as tool errors");
 }
 
-void test_plugin_tool_registry_skips_name_collisions() {
+void test_plugin_tool_registry_skips_name_collisions()
+{
   auto const root = temp_root() / "plugin-tool-collisions";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1002,7 +1024,8 @@ void test_plugin_tool_registry_skips_name_collisions() {
 
 }  // namespace
 
-void run_plugin_tests() {
+void run_plugin_tests()
+{
   test_plugin_manifest_parsing();
   test_plugin_discovery();
   test_plugin_enablement();

@@ -6,26 +6,30 @@
 namespace ava::tools {
 namespace {
 
-bool has_utf8_bom_prefix(std::string_view text) {
+bool has_utf8_bom_prefix(std::string_view text)
+{
   return text.size() >= 3 && static_cast<unsigned char>(text[0]) == 0xEF &&
          static_cast<unsigned char>(text[1]) == 0xBB && static_cast<unsigned char>(text[2]) == 0xBF;
 }
 
-bool contains_lf_only_newline(std::string_view text) {
+bool contains_lf_only_newline(std::string_view text)
+{
   for (std::size_t index = 0; index < text.size(); ++index) {
     if (text[index] == '\n' && (index == 0 || text[index - 1] != '\r')) return true;
   }
   return false;
 }
 
-bool could_bom_affect_beginning_match(std::string_view content, std::string_view old_text) {
+bool could_bom_affect_beginning_match(std::string_view content, std::string_view old_text)
+{
   if (!has_utf8_bom_prefix(content) || old_text.empty() || has_utf8_bom_prefix(old_text)) return false;
   return content.substr(3).starts_with(old_text.substr(0, std::min<std::size_t>(old_text.size(), content.size() - 3)));
 }
 
 }  // namespace
 
-TextAnalysis analyze_text(std::string_view text) {
+TextAnalysis analyze_text(std::string_view text)
+{
   TextAnalysis analysis{.has_utf8_bom = has_utf8_bom_prefix(text), .line_endings = LineEndingStyle::None};
   bool saw_lf = false;
   bool saw_crlf = false;
@@ -52,7 +56,8 @@ TextAnalysis analyze_text(std::string_view text) {
   return analysis;
 }
 
-std::string to_string(LineEndingStyle style) {
+std::string to_string(LineEndingStyle style)
+{
   switch (style) {
     case LineEndingStyle::None:
       return "none";
@@ -68,7 +73,8 @@ std::string to_string(LineEndingStyle style) {
 
 ava::core::Result<TextMatch> find_unique_text_match(std::string_view content, std::string_view old_text,
                                                     std::filesystem::path const& path, std::string_view missing_message,
-                                                    std::string_view non_unique_message) {
+                                                    std::string_view non_unique_message)
+{
   auto const content_analysis = analyze_text(content);
   auto const old_text_analysis = analyze_text(old_text);
   auto const first = content.find(old_text);

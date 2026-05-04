@@ -16,11 +16,13 @@
 namespace ava::app {
 namespace {
 
-bool starts_with_command(std::string_view line, std::string_view command) noexcept {
+bool starts_with_command(std::string_view line, std::string_view command) noexcept
+{
   return line == command || (line.starts_with(command) && line.size() > command.size() && line[command.size()] == ' ');
 }
 
-CommandResult handled_text(std::string text) {
+CommandResult handled_text(std::string text)
+{
   CommandResult result;
   result.handled = true;
   add_output(result, std::move(text));
@@ -29,9 +31,13 @@ CommandResult handled_text(std::string text) {
 
 }  // namespace
 
-bool is_backend_command(std::string_view line) noexcept { return find_command_catalog_entry(line) != nullptr; }
+bool is_backend_command(std::string_view line) noexcept
+{
+  return find_command_catalog_entry(line) != nullptr;
+}
 
-ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandRequest request) {
+ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandRequest request)
+{
   CommandResult result;
   if (request.command.empty()) return result;
 

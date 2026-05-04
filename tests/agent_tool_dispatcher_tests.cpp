@@ -53,17 +53,20 @@
 
 namespace {
 
-ava::provider::HttpResponse sse_response(std::string const& body) {
+ava::provider::HttpResponse sse_response(std::string const& body)
+{
   return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = body};
 }
 
 class CallbackTransport final : public ava::provider::Transport {
  public:
   CallbackTransport(std::vector<ava::provider::HttpResponse> responses, std::function<void()> after_send)
-      : responses_(std::move(responses)), after_send_(std::move(after_send)) {}
+      : responses_(std::move(responses)), after_send_(std::move(after_send))
+  {
+  }
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
-      ava::provider::HttpRequest const& request) override {
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  {
     requests_.push_back(request);
     if (responses_.empty()) {
       return std::unexpected(
@@ -86,7 +89,8 @@ class CallbackTransport final : public ava::provider::Transport {
 class EmptyDiagnosticsProvider final : public ava::lsp::DiagnosticsProvider {
  public:
   [[nodiscard]] ava::core::Result<std::vector<ava::lsp::Diagnostic>> diagnostics(
-      std::filesystem::path const&, ava::lsp::CancelCallback = nullptr) override {
+      std::filesystem::path const&, ava::lsp::CancelCallback = nullptr) override
+  {
     return std::vector<ava::lsp::Diagnostic>{};
   }
 };
@@ -96,7 +100,8 @@ class OverflowOnceProvider final : public ava::provider::Provider {
   explicit OverflowOnceProvider(std::string base_url) : delegate_(std::move(base_url)) {}
 
   [[nodiscard]] ava::core::Result<ava::provider::HttpRequest> build_request(
-      ava::provider::ProviderRequest const& request, std::string_view access_token) const override {
+      ava::provider::ProviderRequest const& request, std::string_view access_token) const override
+  {
     ++build_calls_;
     if (build_calls_ == 1) {
       return std::unexpected(
@@ -105,12 +110,14 @@ class OverflowOnceProvider final : public ava::provider::Provider {
     return delegate_.build_request(request, access_token);
   }
 
-  [[nodiscard]] std::unique_ptr<ava::provider::StreamParser> create_stream_parser() const override {
+  [[nodiscard]] std::unique_ptr<ava::provider::StreamParser> create_stream_parser() const override
+  {
     return delegate_.create_stream_parser();
   }
 
   [[nodiscard]] ava::core::Result<std::vector<ava::provider::StreamEvent>> parse_response(
-      ava::provider::HttpResponse const& response, bool stream) const override {
+      ava::provider::HttpResponse const& response, bool stream) const override
+  {
     return delegate_.parse_response(response, stream);
   }
 
@@ -119,7 +126,8 @@ class OverflowOnceProvider final : public ava::provider::Provider {
   mutable int build_calls_ = 0;
 };
 
-void test_tool_dispatcher() {
+void test_tool_dispatcher()
+{
   auto const root = temp_root() / "dispatcher";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -998,7 +1006,8 @@ void test_tool_dispatcher() {
   expect(question_has_allow_multiple, "question tool schema exposes the allow_multiple alias");
 }
 
-void test_tool_dispatcher_plan_mode_denies_mutation() {
+void test_tool_dispatcher_plan_mode_denies_mutation()
+{
   auto const root = temp_root() / "dispatcher-plan";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1014,7 +1023,8 @@ void test_tool_dispatcher_plan_mode_denies_mutation() {
   expect(!std::filesystem::exists(workspace / "main.cpp"), "denied plan mode write does not create source file");
 }
 
-void test_agent_loop_text_only_turn() {
+void test_agent_loop_text_only_turn()
+{
   auto const root = temp_root() / "agent-text";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1053,7 +1063,8 @@ void test_agent_loop_text_only_turn() {
          "agent loop persists user and assistant entries for text-only turn");
 }
 
-void test_agent_loop_model_capability_gating() {
+void test_agent_loop_model_capability_gating()
+{
   auto const root = temp_root() / "agent-capabilities";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1082,7 +1093,8 @@ void test_agent_loop_model_capability_gating() {
          "agent loop disables streaming for models without streaming support");
 }
 
-void test_agent_loop_usage_and_cost_persistence() {
+void test_agent_loop_usage_and_cost_persistence()
+{
   auto const root = temp_root() / "agent-usage";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1158,7 +1170,8 @@ void test_agent_loop_usage_and_cost_persistence() {
          "agent loop estimates byte usage without persisting fake cost when provider usage is unavailable");
 }
 
-void test_agent_loop_tool_turn_and_continuation() {
+void test_agent_loop_tool_turn_and_continuation()
+{
   auto const root = temp_root() / "agent-tool";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1245,7 +1258,8 @@ void test_agent_loop_tool_turn_and_continuation() {
          "agent loop persists assistant, tool call, and semantic structured tool result entries");
 }
 
-void test_agent_loop_permission_resolver_threads_to_tools() {
+void test_agent_loop_permission_resolver_threads_to_tools()
+{
   auto const root = temp_root() / "agent-permission-resolver";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1424,7 +1438,8 @@ void test_agent_loop_permission_resolver_threads_to_tools() {
   }
 }
 
-void test_agent_loop_question_resolver_threads_to_tools() {
+void test_agent_loop_question_resolver_threads_to_tools()
+{
   auto const root = temp_root() / "agent-question-resolver";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1466,7 +1481,8 @@ void test_agent_loop_question_resolver_threads_to_tools() {
          "agent loop continuation includes serialized question answer");
 }
 
-void test_agent_loop_non_stream_response() {
+void test_agent_loop_non_stream_response()
+{
   auto const root = temp_root() / "agent-non-stream";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1491,7 +1507,8 @@ void test_agent_loop_non_stream_response() {
          "agent loop passes explicit non-stream request expectation");
 }
 
-void test_agent_loop_compaction_status_metadata() {
+void test_agent_loop_compaction_status_metadata()
+{
   auto const root = temp_root() / "agent-compaction-status";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1524,7 +1541,8 @@ void test_agent_loop_compaction_status_metadata() {
          "agent loop sends compacted context in initial provider request");
 }
 
-void test_agent_loop_replays_steering_after_mid_turn_auto_compaction() {
+void test_agent_loop_replays_steering_after_mid_turn_auto_compaction()
+{
   auto const root = temp_root() / "agent-steering-compaction-replay";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1572,7 +1590,8 @@ void test_agent_loop_replays_steering_after_mid_turn_auto_compaction() {
          "mid-turn auto compaction replays both the initial prompt and consumed steering messages");
 }
 
-void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction() {
+void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction()
+{
   auto const root = temp_root() / "agent-overflow-skip-auto";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1646,7 +1665,8 @@ void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction() {
          "context overflow retry rebuilds context from the overflow compaction boundary");
 }
 
-void test_agent_loop_cancellation_boundaries() {
+void test_agent_loop_cancellation_boundaries()
+{
   ava::provider::OpenAIProvider const provider("https://api.example.test");
 
   {
@@ -1820,7 +1840,8 @@ void test_agent_loop_cancellation_boundaries() {
   }
 }
 
-void test_agent_loop_error_paths_and_bounds() {
+void test_agent_loop_error_paths_and_bounds()
+{
   ava::provider::OpenAIProvider const provider("https://api.example.test");
 
   {
@@ -2010,7 +2031,8 @@ void test_agent_loop_error_paths_and_bounds() {
   }
 }
 
-void test_agent_loop_multiple_tools_and_denied_continuation() {
+void test_agent_loop_multiple_tools_and_denied_continuation()
+{
   auto const root = temp_root() / "agent-multi-tools";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2088,7 +2110,8 @@ void test_agent_loop_multiple_tools_and_denied_continuation() {
          "permission-denied tool result is framed into continuation context");
 }
 
-void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids() {
+void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
+{
   ava::provider::OpenAIProvider const provider("https://api.example.test");
 
   {
@@ -2168,7 +2191,8 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids() {
   }
 }
 
-void test_agent_loop_truncates_tool_context() {
+void test_agent_loop_truncates_tool_context()
+{
   auto const root = temp_root() / "agent-tool-truncate";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2203,7 +2227,8 @@ void test_agent_loop_truncates_tool_context() {
          "agent loop truncates tool results before provider continuation context");
 }
 
-void test_agent_loop_max_iteration_guard() {
+void test_agent_loop_max_iteration_guard()
+{
   auto const root = temp_root() / "agent-max";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -2241,7 +2266,8 @@ void test_agent_loop_max_iteration_guard() {
 
 }  // namespace
 
-void run_agent_tool_dispatcher_tests() {
+void run_agent_tool_dispatcher_tests()
+{
   test_tool_dispatcher();
   test_tool_dispatcher_plan_mode_denies_mutation();
   test_agent_loop_text_only_turn();

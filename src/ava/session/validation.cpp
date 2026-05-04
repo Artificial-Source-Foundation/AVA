@@ -28,7 +28,8 @@ struct ActiveModelState {
   std::string model_id;
 };
 
-std::string permission_key(SessionEntry const& entry) {
+std::string permission_key(SessionEntry const& entry)
+{
   std::string key = ava::core::json::string_field(entry.data_json, "operation").value_or("");
   key += '\x1F';
   key += ava::core::json::string_field(entry.data_json, "tool_name").value_or("");
@@ -41,11 +42,13 @@ std::string permission_key(SessionEntry const& entry) {
   return key;
 }
 
-bool supported_entry_version(long long version) {
+bool supported_entry_version(long long version)
+{
   return version == 0 || (version >= 1 && version <= kCurrentSessionEntryVersion);
 }
 
-bool bool_field_is_true(std::string_view object, std::string_view key) {
+bool bool_field_is_true(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return false;
   auto const end = *start + std::string_view("true").size();
@@ -54,7 +57,8 @@ bool bool_field_is_true(std::string_view object, std::string_view key) {
          object[end] == '\t' || object[end] == '\n' || object[end] == '\r';
 }
 
-bool bool_field_is_false(std::string_view object, std::string_view key) {
+bool bool_field_is_false(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return false;
   auto const end = *start + std::string_view("false").size();
@@ -63,49 +67,68 @@ bool bool_field_is_false(std::string_view object, std::string_view key) {
          object[end] == '\t' || object[end] == '\n' || object[end] == '\r';
 }
 
-bool valid_status(std::string_view status) { return status == "success" || status == "error" || status == "canceled"; }
+bool valid_status(std::string_view status)
+{
+  return status == "success" || status == "error" || status == "canceled";
+}
 
-bool valid_operation(std::string_view operation) {
+bool valid_operation(std::string_view operation)
+{
   return operation == "read" || operation == "search" || operation == "edit" || operation == "bash" ||
          operation == "network.fetch" || operation == "lsp.query" || operation == "plugin.execute" ||
          operation == "plugin.tool.call" || operation == "plugin.command.run" || operation == "plugin.event.observe" ||
          operation == "mcp.server.launch" || operation == "mcp.server.connect" || operation == "mcp.tool.call";
 }
 
-bool valid_mode(std::string_view mode) { return mode == "build" || mode == "plan"; }
+bool valid_mode(std::string_view mode)
+{
+  return mode == "build" || mode == "plan";
+}
 
-bool valid_action(std::string_view action) { return action == "allow" || action == "ask" || action == "deny"; }
+bool valid_action(std::string_view action)
+{
+  return action == "allow" || action == "ask" || action == "deny";
+}
 
-bool valid_resolution(std::string_view resolution) { return resolution == "allow" || resolution == "deny"; }
+bool valid_resolution(std::string_view resolution)
+{
+  return resolution == "allow" || resolution == "deny";
+}
 
-bool valid_resolution_source(std::string_view source) {
+bool valid_resolution_source(std::string_view source)
+{
   return source == "policy" || source == "resolver" || source == "no_resolver" || source == "resolver_failed";
 }
 
-bool present_non_empty_string(std::string_view object, std::string_view key) {
+bool present_non_empty_string(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return true;
   auto const value = ava::core::json::string_field(object, key);
   return value && !value->empty();
 }
 
-bool present_boolean(std::string_view object, std::string_view key) {
+bool present_boolean(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return true;
   return bool_field_is_true(object, key) || bool_field_is_false(object, key);
 }
 
-bool required_boolean(std::string_view object, std::string_view key) {
+bool required_boolean(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return false;
   return bool_field_is_true(object, key) || bool_field_is_false(object, key);
 }
 
-bool is_json_value_delimiter(char ch) {
+bool is_json_value_delimiter(char ch)
+{
   return ch == ',' || ch == '}' || std::isspace(static_cast<unsigned char>(ch)) != 0;
 }
 
-bool present_integer_matching(std::string_view object, std::string_view key, bool require_positive) {
+bool present_integer_matching(std::string_view object, std::string_view key, bool require_positive)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return true;
   std::size_t end = *start;
@@ -120,7 +143,8 @@ bool present_integer_matching(std::string_view object, std::string_view key, boo
   return require_positive ? *value > 0 : *value >= 0;
 }
 
-void add_issue(SessionReplayValidation& validation, SessionReplayIssue issue) {
+void add_issue(SessionReplayValidation& validation, SessionReplayIssue issue)
+{
   if (issue.severity == SessionReplayIssueSeverity::Warning) {
     ++validation.warning_count;
   } else {
@@ -130,7 +154,8 @@ void add_issue(SessionReplayValidation& validation, SessionReplayIssue issue) {
 }
 
 void add_error(SessionReplayValidation& validation, SessionReplayIssueKind kind, std::size_t index,
-               SessionEntry const& entry, std::string call_id, std::string message) {
+               SessionEntry const& entry, std::string call_id, std::string message)
+{
   add_issue(validation, SessionReplayIssue{.severity = SessionReplayIssueSeverity::Error,
                                            .kind = kind,
                                            .entry_index = index,
@@ -140,7 +165,8 @@ void add_error(SessionReplayValidation& validation, SessionReplayIssueKind kind,
 }
 
 void validate_structured_tool_result(SessionReplayValidation& validation, std::size_t index, SessionEntry const& entry,
-                                     std::string_view call_id, std::string_view tool_name) {
+                                     std::string_view call_id, std::string_view tool_name)
+{
   auto const structured = ava::core::json::object_field(entry.data_json, "structured_result");
   if (!structured) {
     add_error(validation, SessionReplayIssueKind::MissingStructuredToolResult, index, entry, std::string(call_id),
@@ -188,7 +214,8 @@ void validate_structured_tool_result(SessionReplayValidation& validation, std::s
 
 void validate_permission_decision(SessionReplayValidation& validation,
                                   std::unordered_map<std::string, std::vector<PendingPermissionPrompt>>& pending,
-                                  std::size_t index, SessionEntry const& entry) {
+                                  std::size_t index, SessionEntry const& entry)
+{
   auto const operation = ava::core::json::string_field(entry.data_json, "operation").value_or("");
   auto const mode = ava::core::json::string_field(entry.data_json, "mode").value_or("");
   auto const tool_name = ava::core::json::string_field(entry.data_json, "tool_name").value_or("");
@@ -248,7 +275,8 @@ void validate_permission_decision(SessionReplayValidation& validation,
   if (pending_for_key->second.empty()) pending.erase(pending_for_key);
 }
 
-void validate_compaction_entry(SessionReplayValidation& validation, std::size_t index, SessionEntry const& entry) {
+void validate_compaction_entry(SessionReplayValidation& validation, std::size_t index, SessionEntry const& entry)
+{
   if (!ava::core::json::is_valid_object(entry.data_json)) {
     add_error(validation, SessionReplayIssueKind::InvalidCompactionEntry, index, entry, "",
               "compaction entry data is not valid JSON");
@@ -293,7 +321,8 @@ void validate_compaction_boundaries(
     SessionReplayValidation& validation, std::size_t index, SessionEntry const& entry,
     std::unordered_map<std::string, ToolCallState> const& tool_calls,
     std::unordered_map<std::string, std::vector<PendingPermissionPrompt>> const& pending_permissions,
-    SessionReplayValidationOptions const& options) {
+    SessionReplayValidationOptions const& options)
+{
   if (options.require_tool_result_pairing) {
     for (auto const& [call_id, state] : tool_calls) {
       if (state.result_seen) continue;
@@ -320,7 +349,8 @@ void validate_compaction_boundaries(
 }
 
 void validate_session_start_entry(SessionReplayValidation& validation, ActiveModelState& active_model,
-                                  std::size_t index, SessionEntry const& entry) {
+                                  std::size_t index, SessionEntry const& entry)
+{
   if (!ava::core::json::is_valid_object(entry.data_json)) {
     add_error(validation, SessionReplayIssueKind::InvalidModelEntry, index, entry, "",
               "session_start entry data is not valid JSON");
@@ -347,7 +377,8 @@ void validate_session_start_entry(SessionReplayValidation& validation, ActiveMod
 }
 
 void validate_model_change_entry(SessionReplayValidation& validation, ActiveModelState& active_model, std::size_t index,
-                                 SessionEntry const& entry) {
+                                 SessionEntry const& entry)
+{
   if (!ava::core::json::is_valid_object(entry.data_json)) {
     add_error(validation, SessionReplayIssueKind::InvalidModelEntry, index, entry, "",
               "model_change entry data is not valid JSON");
@@ -376,7 +407,8 @@ void validate_model_change_entry(SessionReplayValidation& validation, ActiveMode
 }
 
 void validate_reasoning_change_entry(SessionReplayValidation& validation, ActiveModelState const& active_model,
-                                     std::size_t index, SessionEntry const& entry) {
+                                     std::size_t index, SessionEntry const& entry)
+{
   if (!ava::core::json::is_valid_object(entry.data_json)) {
     add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "",
               "reasoning_change entry data is not valid JSON");
@@ -408,7 +440,8 @@ void validate_reasoning_change_entry(SessionReplayValidation& validation, Active
   }
 }
 
-void validate_reasoning_block_entry(SessionReplayValidation& validation, std::size_t index, SessionEntry const& entry) {
+void validate_reasoning_block_entry(SessionReplayValidation& validation, std::size_t index, SessionEntry const& entry)
+{
   if (!ava::core::json::is_valid_object(entry.data_json)) {
     add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "",
               "reasoning_block entry data is not valid JSON");
@@ -429,7 +462,8 @@ void validate_reasoning_block_entry(SessionReplayValidation& validation, std::si
 
 }  // namespace
 
-std::string_view to_string(SessionReplayIssueSeverity severity) noexcept {
+std::string_view to_string(SessionReplayIssueSeverity severity) noexcept
+{
   switch (severity) {
     case SessionReplayIssueSeverity::Warning:
       return "warning";
@@ -439,7 +473,8 @@ std::string_view to_string(SessionReplayIssueSeverity severity) noexcept {
   return "error";
 }
 
-std::string_view to_string(SessionReplayIssueKind kind) noexcept {
+std::string_view to_string(SessionReplayIssueKind kind) noexcept
+{
   switch (kind) {
     case SessionReplayIssueKind::UnsupportedEntryVersion:
       return "unsupported_entry_version";
@@ -486,7 +521,8 @@ std::string_view to_string(SessionReplayIssueKind kind) noexcept {
 }
 
 SessionReplayValidation validate_session_replay(std::vector<SessionEntry> const& entries,
-                                                SessionReplayValidationOptions options) {
+                                                SessionReplayValidationOptions options)
+{
   SessionReplayValidation validation;
   std::unordered_set<std::string> seen_entry_ids;
   std::unordered_map<std::string, ToolCallState> tool_calls;

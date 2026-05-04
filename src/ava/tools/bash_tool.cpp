@@ -32,7 +32,8 @@ class UniqueFd {
   UniqueFd(UniqueFd const&) = delete;
   UniqueFd& operator=(UniqueFd const&) = delete;
   UniqueFd(UniqueFd&& other) noexcept : fd_(other.release()) {}
-  UniqueFd& operator=(UniqueFd&& other) noexcept {
+  UniqueFd& operator=(UniqueFd&& other) noexcept
+  {
     if (this != &other) {
       reset(other.release());
     }
@@ -41,12 +42,14 @@ class UniqueFd {
   ~UniqueFd() { reset(); }
 
   [[nodiscard]] int get() const noexcept { return fd_; }
-  [[nodiscard]] int release() noexcept {
+  [[nodiscard]] int release() noexcept
+  {
     int const fd = fd_;
     fd_ = -1;
     return fd;
   }
-  void reset(int fd = -1) noexcept {
+  void reset(int fd = -1) noexcept
+  {
     if (fd_ >= 0) {
       close(fd_);
     }
@@ -57,7 +60,8 @@ class UniqueFd {
   int fd_ = -1;
 };
 
-bool is_shell_metacharacter(char ch) {
+bool is_shell_metacharacter(char ch)
+{
   switch (ch) {
     case ';':
     case '&':
@@ -74,7 +78,8 @@ bool is_shell_metacharacter(char ch) {
   }
 }
 
-ava::core::Result<std::vector<std::string>> parse_command_argv(std::string_view command) {
+ava::core::Result<std::vector<std::string>> parse_command_argv(std::string_view command)
+{
   std::vector<std::string> argv;
   std::string current;
   char quote = '\0';
@@ -133,7 +138,8 @@ ava::core::Result<std::vector<std::string>> parse_command_argv(std::string_view 
   return argv;
 }
 
-void append_tail(BashResult& result, std::string_view chunk, std::size_t max_bytes) {
+void append_tail(BashResult& result, std::string_view chunk, std::size_t max_bytes)
+{
   result.total_bytes += chunk.size();
   if (max_bytes == 0) {
     result.truncated = result.total_bytes > 0;
@@ -154,7 +160,8 @@ void append_tail(BashResult& result, std::string_view chunk, std::size_t max_byt
   result.output.append(chunk);
 }
 
-ssize_t read_retry(int fd, char* data, std::size_t size) {
+ssize_t read_retry(int fd, char* data, std::size_t size)
+{
   while (true) {
     auto const bytes = read(fd, data, size);
     if (bytes < 0 && errno == EINTR) {
@@ -164,7 +171,8 @@ ssize_t read_retry(int fd, char* data, std::size_t size) {
   }
 }
 
-pid_t waitpid_retry(pid_t pid, int* status, int options) {
+pid_t waitpid_retry(pid_t pid, int* status, int options)
+{
   while (true) {
     auto const waited = waitpid(pid, status, options);
     if (waited < 0 && errno == EINTR) {
@@ -174,7 +182,8 @@ pid_t waitpid_retry(pid_t pid, int* status, int options) {
   }
 }
 
-ava::core::Result<std::array<int, 2>> make_pipe() {
+ava::core::Result<std::array<int, 2>> make_pipe()
+{
   std::array<int, 2> pipe_fds{-1, -1};
   if (pipe(pipe_fds.data()) != 0) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to create process pipe");
@@ -184,7 +193,8 @@ ava::core::Result<std::array<int, 2>> make_pipe() {
   return pipe_fds;
 }
 
-void close_nonstandard_fds() {
+void close_nonstandard_fds()
+{
   long const open_max = sysconf(_SC_OPEN_MAX);
   int const max_fd = open_max > 0 ? static_cast<int>(open_max) : 1024;
   for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd) {
@@ -192,23 +202,29 @@ void close_nonstandard_fds() {
   }
 }
 
-ava::core::Error pipe_read_error(std::string_view command) {
+ava::core::Error pipe_read_error(std::string_view command)
+{
   auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to read process output");
   error.with_context("command", std::string(command));
   error.with_context("cause", std::strerror(errno));
   return error;
 }
 
-ava::core::Error waitpid_error(std::string_view command) {
+ava::core::Error waitpid_error(std::string_view command)
+{
   auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to wait for process");
   error.with_context("command", std::string(command));
   error.with_context("cause", std::strerror(errno));
   return error;
 }
 
-void signal_process(pid_t pid, bool can_signal_group, int signal) { kill(can_signal_group ? -pid : pid, signal); }
+void signal_process(pid_t pid, bool can_signal_group, int signal)
+{
+  kill(can_signal_group ? -pid : pid, signal);
+}
 
-ava::core::VoidResult stop_process(pid_t pid, bool can_signal_group, int& status, std::string_view command) {
+ava::core::VoidResult stop_process(pid_t pid, bool can_signal_group, int& status, std::string_view command)
+{
   signal_process(pid, can_signal_group, SIGTERM);
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
   pid_t const terminated = waitpid_retry(pid, &status, WNOHANG);
@@ -224,11 +240,15 @@ ava::core::VoidResult stop_process(pid_t pid, bool can_signal_group, int& status
   return {};
 }
 
-bool is_canceled(ToolContext const& context) { return context.cancel_requested && context.cancel_requested(); }
+bool is_canceled(ToolContext const& context)
+{
+  return context.cancel_requested && context.cancel_requested();
+}
 
 }  // namespace
 
-ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_view command, BashOptions options) {
+ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_view command, BashOptions options)
+{
   if (command.empty()) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "command must not be empty");
     return std::unexpected(std::move(error));

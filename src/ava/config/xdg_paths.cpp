@@ -10,7 +10,8 @@
 namespace ava::config {
 namespace {
 
-std::filesystem::path home_dir() {
+std::filesystem::path home_dir()
+{
   char const* home = std::getenv("HOME");
   if (home != nullptr && !std::string_view(home).empty()) {
     auto home_path = std::filesystem::path(home).lexically_normal();
@@ -26,7 +27,8 @@ std::filesystem::path home_dir() {
   return std::filesystem::path("/nonexistent");
 }
 
-std::filesystem::path env_path_or(std::string_view name, std::filesystem::path const& fallback) {
+std::filesystem::path env_path_or(std::string_view name, std::filesystem::path const& fallback)
+{
   std::string const key(name);
   char const* value = std::getenv(key.c_str());
   if (value == nullptr || std::string_view(value).empty()) return fallback;
@@ -37,7 +39,8 @@ std::filesystem::path env_path_or(std::string_view name, std::filesystem::path c
 
 }  // namespace
 
-XdgPaths xdg_paths() {
+XdgPaths xdg_paths()
+{
   auto const home = home_dir();
   auto const config_home = env_path_or("XDG_CONFIG_HOME", home / ".config");
   auto const state_home = env_path_or("XDG_STATE_HOME", home / ".local" / "state");
@@ -59,8 +62,14 @@ XdgPaths xdg_paths() {
   };
 }
 
-std::filesystem::path legacy_ava_credentials_path() { return home_dir() / ".ava" / "credentials.json"; }
+std::filesystem::path legacy_ava_credentials_path()
+{
+  return home_dir() / ".ava" / "credentials.json";
+}
 
-std::filesystem::path opencode_auth_path() { return xdg_paths().data_home / "opencode" / "auth.json"; }
+std::filesystem::path opencode_auth_path()
+{
+  return xdg_paths().data_home / "opencode" / "auth.json";
+}
 
 }  // namespace ava::config

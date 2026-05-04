@@ -48,7 +48,8 @@
 
 namespace {
 
-void test_mode_parsing() {
+void test_mode_parsing()
+{
   auto const build = ava::agent::parse_mode("build");
   auto const plan = ava::agent::parse_mode("plan");
   auto const bad = ava::agent::parse_mode("other");
@@ -59,12 +60,14 @@ void test_mode_parsing() {
   expect(ava::agent::toggle_mode(ava::agent::Mode::Build) == ava::agent::Mode::Plan, "build toggles to plan");
 }
 
-void test_json_escape_control_characters() {
+void test_json_escape_control_characters()
+{
   auto const escaped = ava::session::json_escape(std::string("a\x01\b\f", 4));
   expect(escaped == "a\\u0001\\b\\f", "json_escape escapes all JSON control characters");
 }
 
-void test_core_json_top_level_lookup() {
+void test_core_json_top_level_lookup()
+{
   std::string const document =
       "{\"data\":{\"type\":\"bad\"},\"items\":[{\"type\":\"array_bad\"}],"
       "\"text\":\"contains \\\"type\\\":\\\"string_bad\\\"\",\"type\":\"good\"}";
@@ -100,7 +103,8 @@ void test_core_json_top_level_lookup() {
   expect(!ava::core::json::string_field("{\"text\":\"\\q\"}", "text"), "JSON string_field rejects invalid escapes");
 }
 
-void test_permission_defaults() {
+void test_permission_defaults()
+{
   auto const workspace = std::filesystem::current_path();
 
   auto const normal_edit = ava::permissions::decide(ava::permissions::PermissionRequest{
@@ -217,9 +221,13 @@ void test_permission_defaults() {
 
 }  // namespace
 
-void run_core_mode_tests() { test_mode_parsing(); }
+void run_core_mode_tests()
+{
+  test_mode_parsing();
+}
 
-void run_core_json_permission_tests() {
+void run_core_json_permission_tests()
+{
   test_json_escape_control_characters();
   test_core_json_top_level_lookup();
   test_permission_defaults();

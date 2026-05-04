@@ -51,12 +51,14 @@
 namespace {
 
 bool has_replay_issue(ava::session::SessionReplayValidation const& validation,
-                      ava::session::SessionReplayIssueKind kind) {
+                      ava::session::SessionReplayIssueKind kind)
+{
   return std::ranges::any_of(validation.issues,
                              [kind](ava::session::SessionReplayIssue const& issue) { return issue.kind == kind; });
 }
 
-void test_session_store_round_trip() {
+void test_session_store_round_trip()
+{
   std::error_code remove_error;
   std::filesystem::remove_all(temp_root(), remove_error);
 
@@ -321,7 +323,8 @@ void test_session_store_round_trip() {
   expect(!invalid_parent_append, "session append rejects unsafe parent_id values");
 }
 
-void test_session_stats_helper() {
+void test_session_stats_helper()
+{
   std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "start_1",
                                  .parent_id = "",
@@ -412,7 +415,8 @@ void test_session_stats_helper() {
          "session stats helper leaves token and cost totals absent when no entry JSON supplies them");
 }
 
-void test_session_stats_omits_incomplete_cost_total() {
+void test_session_stats_omits_incomplete_cost_total()
+{
   std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "assistant_priced",
                                  .parent_id = "",
@@ -438,7 +442,8 @@ void test_session_stats_omits_incomplete_cost_total() {
          "session stats omits total cost when exact billable usage has unknown cost");
 }
 
-void test_session_stats_flags_legacy_assistant_tokens_without_cost() {
+void test_session_stats_flags_legacy_assistant_tokens_without_cost()
+{
   std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "assistant_legacy_tokens",
                                  .parent_id = "",
@@ -458,7 +463,8 @@ void test_session_stats_flags_legacy_assistant_tokens_without_cost() {
          "legacy top-level assistant tokens without cost make cost stats incomplete");
 }
 
-void test_session_replay_validation() {
+void test_session_replay_validation()
+{
   std::vector<ava::session::SessionEntry> const valid_entries = {
       ava::session::SessionEntry{.id = "start",
                                  .parent_id = "",
@@ -822,7 +828,8 @@ void test_session_replay_validation() {
       "session replay issue kind names include reasoning validation failures");
 }
 
-void test_session_resume_and_listing() {
+void test_session_resume_and_listing()
+{
   auto const root = temp_root() / "session-resume";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -947,7 +954,8 @@ void test_session_resume_and_listing() {
          "resume rejects invalid session id");
 }
 
-void test_session_compaction_entry_round_trip() {
+void test_session_compaction_entry_round_trip()
+{
   auto const root = temp_root() / "compaction-round-trip";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1039,7 +1047,8 @@ void test_session_compaction_entry_round_trip() {
          "manual compaction rejects oversized user summary with tiny summary limit");
 }
 
-void test_session_markdown_export() {
+void test_session_markdown_export()
+{
   std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "start_1",
                                  .parent_id = "",
@@ -1174,7 +1183,8 @@ void test_session_markdown_export() {
          "markdown export includes entry and compaction metadata when requested");
 }
 
-void test_compaction_config_and_thresholds() {
+void test_compaction_config_and_thresholds()
+{
   auto const root = temp_root() / "compaction-config";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1245,7 +1255,8 @@ void test_compaction_config_and_thresholds() {
          "explicit auto_threshold_tokens zero remains disabled without model metadata");
 }
 
-void test_compaction_context_reconstruction() {
+void test_compaction_context_reconstruction()
+{
   std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "old_user",
                                  .parent_id = "",
@@ -1341,7 +1352,8 @@ void test_compaction_context_reconstruction() {
          "tool-call and tool-result entries carry native provider content parts");
 }
 
-void test_tool_content_parts_reconstruction() {
+void test_tool_content_parts_reconstruction()
+{
   std::string const long_result(80, 'r');
   std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "tool_call",
@@ -1594,7 +1606,8 @@ void test_tool_content_parts_reconstruction() {
 
 }  // namespace
 
-void run_session_tests() {
+void run_session_tests()
+{
   test_session_store_round_trip();
   test_session_stats_helper();
   test_session_stats_omits_incomplete_cost_total();

@@ -42,7 +42,8 @@ constexpr std::array kActions = {TuiAction::Submit,
                                  TuiAction::Exit,
                                  TuiAction::VariantCycle};
 
-std::string normalize_token(std::string_view text) {
+std::string normalize_token(std::string_view text)
+{
   std::string result;
   result.reserve(text.size());
   for (char const ch : text) {
@@ -52,7 +53,8 @@ std::string normalize_token(std::string_view text) {
   return result;
 }
 
-std::string trim(std::string_view text) {
+std::string trim(std::string_view text)
+{
   std::size_t begin = 0;
   while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin])) != 0) ++begin;
   std::size_t end = text.size();
@@ -60,14 +62,16 @@ std::string trim(std::string_view text) {
   return std::string(text.substr(begin, end - begin));
 }
 
-int hex_value(char ch) {
+int hex_value(char ch)
+{
   if (ch >= '0' && ch <= '9') return ch - '0';
   if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
   if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
   return -1;
 }
 
-std::optional<int> parse_hex_code_unit(std::string_view text, std::size_t hex_start) {
+std::optional<int> parse_hex_code_unit(std::string_view text, std::size_t hex_start)
+{
   if (hex_start + 3 >= text.size()) return std::nullopt;
   int const a = hex_value(text[hex_start]);
   int const b = hex_value(text[hex_start + 1]);
@@ -77,7 +81,8 @@ std::optional<int> parse_hex_code_unit(std::string_view text, std::size_t hex_st
   return (a << 12) | (b << 8) | (c << 4) | d;
 }
 
-void append_utf8(std::string& out, int codepoint) {
+void append_utf8(std::string& out, int codepoint)
+{
   if (codepoint <= 0x7F) {
     out.push_back(static_cast<char>(codepoint));
   } else if (codepoint <= 0x7FF) {
@@ -95,7 +100,8 @@ void append_utf8(std::string& out, int codepoint) {
   }
 }
 
-std::vector<std::string> split_comma_list(std::string_view text) {
+std::vector<std::string> split_comma_list(std::string_view text)
+{
   std::vector<std::string> parts;
   std::size_t start = 0;
   while (start <= text.size()) {
@@ -109,7 +115,8 @@ std::vector<std::string> split_comma_list(std::string_view text) {
   return parts;
 }
 
-ava::core::Result<std::vector<Key>> parse_key_list(std::string_view text) {
+ava::core::Result<std::vector<Key>> parse_key_list(std::string_view text)
+{
   std::vector<Key> keys;
   for (auto const& part : split_comma_list(text)) {
     auto const key = parse_key_name(part);
@@ -128,15 +135,18 @@ ava::core::Result<std::vector<Key>> parse_key_list(std::string_view text) {
   return keys;
 }
 
-ava::core::Error keybinds_error(std::string message) {
+ava::core::Error keybinds_error(std::string message)
+{
   return ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
 }
 
-void skip_json_whitespace(std::string_view json, std::size_t& offset) {
+void skip_json_whitespace(std::string_view json, std::size_t& offset)
+{
   while (offset < json.size() && std::isspace(static_cast<unsigned char>(json[offset])) != 0) ++offset;
 }
 
-ava::core::Result<std::string> parse_json_key(std::string_view json, std::size_t& offset) {
+ava::core::Result<std::string> parse_json_key(std::string_view json, std::size_t& offset)
+{
   if (offset >= json.size() || json[offset] != '"') {
     return std::unexpected(keybinds_error("expected JSON object key"));
   }
@@ -193,14 +203,16 @@ ava::core::Result<std::string> parse_json_key(std::string_view json, std::size_t
   return std::unexpected(keybinds_error("unterminated JSON object key"));
 }
 
-std::optional<TuiAction> action_from_name(std::string_view name) {
+std::optional<TuiAction> action_from_name(std::string_view name)
+{
   for (auto const action : kActions) {
     if (action_name(action) == name) return action;
   }
   return std::nullopt;
 }
 
-ava::core::Result<std::vector<std::pair<TuiAction, std::string>>> parse_key_binding_entries(std::string_view json) {
+ava::core::Result<std::vector<std::pair<TuiAction, std::string>>> parse_key_binding_entries(std::string_view json)
+{
   std::vector<std::pair<TuiAction, std::string>> entries;
   std::size_t offset = 0;
   skip_json_whitespace(json, offset);
@@ -256,15 +268,16 @@ ava::core::Result<std::vector<std::pair<TuiAction, std::string>>> parse_key_bind
   }
 }
 
-std::optional<std::vector<Key>*> keys_for_action(TuiKeyBindings& bindings, TuiAction action) {
+std::optional<std::vector<Key>*> keys_for_action(TuiKeyBindings& bindings, TuiAction action)
+{
   for (auto& [candidate, keys] : bindings.bindings) {
     if (candidate == action) return &keys;
   }
   return std::nullopt;
 }
 
-void remove_keys_from_other_actions(TuiKeyBindings& bindings, TuiAction action,
-                                    std::vector<Key> const& keys_to_remove) {
+void remove_keys_from_other_actions(TuiKeyBindings& bindings, TuiAction action, std::vector<Key> const& keys_to_remove)
+{
   for (auto& [candidate, keys] : bindings.bindings) {
     if (candidate == action) continue;
     std::erase_if(keys, [&](Key key) { return std::ranges::find(keys_to_remove, key) != keys_to_remove.end(); });
@@ -273,7 +286,8 @@ void remove_keys_from_other_actions(TuiKeyBindings& bindings, TuiAction action,
 
 }  // namespace
 
-TuiKeyBindings default_key_bindings() {
+TuiKeyBindings default_key_bindings()
+{
   return TuiKeyBindings{.bindings = {{TuiAction::Submit, {Key::Enter}},
                                      {TuiAction::NewLine, {Key::ShiftEnter}},
                                      {TuiAction::Cancel, {Key::Escape}},
@@ -306,21 +320,24 @@ TuiKeyBindings default_key_bindings() {
                                      {TuiAction::VariantCycle, {Key::CtrlT}}}};
 }
 
-std::optional<TuiAction> action_for_key(TuiKeyBindings const& bindings, Key key) {
+std::optional<TuiAction> action_for_key(TuiKeyBindings const& bindings, Key key)
+{
   for (auto const& [action, keys] : bindings.bindings) {
     if (std::ranges::find(keys, key) != keys.end()) return action;
   }
   return std::nullopt;
 }
 
-bool key_matches_action(TuiKeyBindings const& bindings, TuiAction action, Key key) {
+bool key_matches_action(TuiKeyBindings const& bindings, TuiAction action, Key key)
+{
   for (auto const& [candidate, keys] : bindings.bindings) {
     if (candidate == action && std::ranges::find(keys, key) != keys.end()) return true;
   }
   return false;
 }
 
-std::optional<Key> parse_key_name(std::string_view text) {
+std::optional<Key> parse_key_name(std::string_view text)
+{
   auto const normalized = normalize_token(text);
   if (normalized == "enter" || normalized == "return") return Key::Enter;
   if (normalized == "shift+enter" || normalized == "ctrl+j" || normalized == "ctrlj") return Key::ShiftEnter;
@@ -348,7 +365,8 @@ std::optional<Key> parse_key_name(std::string_view text) {
   return std::nullopt;
 }
 
-std::string key_display(Key key) {
+std::string key_display(Key key)
+{
   switch (key) {
     case Key::Enter:
       return "Enter";
@@ -409,7 +427,8 @@ std::string key_display(Key key) {
   return "";
 }
 
-std::string action_name(TuiAction action) {
+std::string action_name(TuiAction action)
+{
   switch (action) {
     case TuiAction::Submit:
       return "submit";
@@ -475,7 +494,8 @@ std::string action_name(TuiAction action) {
   return "unknown";
 }
 
-std::string action_description(TuiAction action) {
+std::string action_description(TuiAction action)
+{
   switch (action) {
     case TuiAction::Submit:
       return "Submit input or select the highlighted slash command";
@@ -541,7 +561,8 @@ std::string action_description(TuiAction action) {
   return "Unknown action";
 }
 
-std::string keys_display(TuiKeyBindings const& bindings, TuiAction action) {
+std::string keys_display(TuiKeyBindings const& bindings, TuiAction action)
+{
   for (auto const& [candidate, keys] : bindings.bindings) {
     if (candidate != action) continue;
     std::string text;
@@ -556,7 +577,8 @@ std::string keys_display(TuiKeyBindings const& bindings, TuiAction action) {
   return "";
 }
 
-std::vector<TuiKeyBindingHelpItem> key_binding_help_items(TuiKeyBindings const& bindings) {
+std::vector<TuiKeyBindingHelpItem> key_binding_help_items(TuiKeyBindings const& bindings)
+{
   std::vector<TuiKeyBindingHelpItem> items;
   items.reserve(bindings.bindings.size());
   for (auto const& [action, keys] : bindings.bindings) {
@@ -569,11 +591,13 @@ std::vector<TuiKeyBindingHelpItem> key_binding_help_items(TuiKeyBindings const& 
   return items;
 }
 
-ava::core::Result<TuiKeyBindings> parse_key_bindings_json(std::string_view json) {
+ava::core::Result<TuiKeyBindings> parse_key_bindings_json(std::string_view json)
+{
   return parse_key_bindings_json(json, default_key_bindings());
 }
 
-ava::core::Result<TuiKeyBindings> parse_key_bindings_json(std::string_view json, TuiKeyBindings base) {
+ava::core::Result<TuiKeyBindings> parse_key_bindings_json(std::string_view json, TuiKeyBindings base)
+{
   auto entries = parse_key_binding_entries(json);
   if (!entries) return std::unexpected(std::move(entries.error()));
 
@@ -592,7 +616,8 @@ ava::core::Result<TuiKeyBindings> parse_key_bindings_json(std::string_view json,
   return base;
 }
 
-ava::core::Result<TuiKeyBindings> load_key_bindings(std::filesystem::path const& keybinds_file) {
+ava::core::Result<TuiKeyBindings> load_key_bindings(std::filesystem::path const& keybinds_file)
+{
   std::error_code exists_error;
   if (!std::filesystem::exists(keybinds_file, exists_error)) return default_key_bindings();
   if (exists_error) {

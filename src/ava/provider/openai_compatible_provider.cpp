@@ -16,7 +16,8 @@
 namespace ava::provider {
 namespace {
 
-std::string join_url(std::string_view base_url, std::string_view path) {
+std::string join_url(std::string_view base_url, std::string_view path)
+{
   std::string result(base_url);
   while (!result.empty() && result.back() == '/') result.pop_back();
   if (path.empty()) return result;
@@ -25,7 +26,8 @@ std::string join_url(std::string_view base_url, std::string_view path) {
   return result;
 }
 
-std::string normalized_finish_reason(std::string_view reason) {
+std::string normalized_finish_reason(std::string_view reason)
+{
   if (reason == "stop") return "completed";
   if (reason == "length") return "max_tokens";
   if (reason == "tool_calls" || reason == "function_call") return "tool_calls";
@@ -34,7 +36,8 @@ std::string normalized_finish_reason(std::string_view reason) {
   return std::string(reason);
 }
 
-bool true_field(std::string_view object, std::string_view key) {
+bool true_field(std::string_view object, std::string_view key)
+{
   bool in_string = false;
   bool escaped = false;
   int object_depth = 0;
@@ -95,19 +98,22 @@ bool true_field(std::string_view object, std::string_view key) {
   return false;
 }
 
-std::string temperature_json(double value) {
+std::string temperature_json(double value)
+{
   std::ostringstream stream;
   stream.imbue(std::locale::classic());
   stream << value;
   return stream.str();
 }
 
-std::string sanitized_openai_compatible_snippet(std::string_view body) {
+std::string sanitized_openai_compatible_snippet(std::string_view body)
+{
   return sanitized_body_snippet(body, {"access_token", "refresh_token", "api_key", "Authorization", "authorization",
                                        "reasoning_content", "thinking"});
 }
 
-ava::core::VoidResult validate_tools_json(ProviderRequest const& request) {
+ava::core::VoidResult validate_tools_json(ProviderRequest const& request)
+{
   for (std::size_t index = 0; index < request.tools_json.size(); ++index) {
     if (is_valid_json_object(request.tools_json[index])) continue;
     auto error =
@@ -118,7 +124,8 @@ ava::core::VoidResult validate_tools_json(ProviderRequest const& request) {
   return {};
 }
 
-ava::core::Result<std::string> chat_completion_tool_json(std::string_view schema) {
+ava::core::Result<std::string> chat_completion_tool_json(std::string_view schema)
+{
   if (!is_valid_json_object(schema)) {
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "OpenAI-compatible tool JSON must be valid JSON"));
@@ -154,25 +161,29 @@ ava::core::Result<std::string> chat_completion_tool_json(std::string_view schema
   return "{\"type\":\"function\",\"function\":" + function + "}";
 }
 
-std::string tool_call_json(ContentPart const& part, std::size_t index) {
+std::string tool_call_json(ContentPart const& part, std::size_t index)
+{
   return "{\"id\":\"" +
          ava::core::json::escape(part.tool_call_id.empty() ? "call_" + std::to_string(index) : part.tool_call_id) +
          "\",\"type\":\"function\",\"function\":{\"name\":\"" + ava::core::json::escape(part.tool_name) +
          "\",\"arguments\":\"" + ava::core::json::escape(part.input_json.empty() ? "{}" : part.input_json) + "\"}}";
 }
 
-std::string role_content_message_json(std::string_view role, std::string_view content) {
+std::string role_content_message_json(std::string_view role, std::string_view content)
+{
   return "{\"role\":\"" + ava::core::json::escape(role) + "\",\"content\":\"" + ava::core::json::escape(content) +
          "\"}";
 }
 
-std::string tool_result_message_json(ContentPart const& part) {
+std::string tool_result_message_json(ContentPart const& part)
+{
   return "{\"role\":\"tool\",\"tool_call_id\":\"" + ava::core::json::escape(part.tool_call_id) + "\",\"content\":\"" +
          ava::core::json::escape(part.text) + "\"}";
 }
 
 std::vector<std::string> chat_messages_for_message(ChatMessage const& message, std::string_view reasoning_format,
-                                                   bool preserve_reasoning_content) {
+                                                   bool preserve_reasoning_content)
+{
   if (message.content_parts.empty()) return {role_content_message_json(message.role, message.content)};
 
   std::vector<std::string> result;
@@ -229,7 +240,8 @@ std::vector<std::string> chat_messages_for_message(ChatMessage const& message, s
 }
 
 std::string reasoning_options_json(ProviderRequest const& request, bool preserve_reasoning_content,
-                                   std::string_view reasoning_request_field) {
+                                   std::string_view reasoning_request_field)
+{
   if (!request.reasoning || reasoning_request_field.empty()) return {};
   auto const type = request.reasoning->type.empty() ? "enabled" : request.reasoning->type;
   std::string json = ",\"" + ava::core::json::escape(reasoning_request_field) + "\":{\"type\":\"" +
@@ -245,7 +257,8 @@ std::string reasoning_options_json(ProviderRequest const& request, bool preserve
   return json;
 }
 
-bool has_replayable_reasoning(std::vector<ChatMessage> const& messages, std::string_view reasoning_format) {
+bool has_replayable_reasoning(std::vector<ChatMessage> const& messages, std::string_view reasoning_format)
+{
   for (auto const& message : messages) {
     if (message.role != "assistant") continue;
     for (auto const& part : message.content_parts) {
@@ -258,7 +271,8 @@ bool has_replayable_reasoning(std::vector<ChatMessage> const& messages, std::str
   return false;
 }
 
-std::string request_body_json(ProviderRequest const& request, OpenAICompatibleProviderOptions const& options) {
+std::string request_body_json(ProviderRequest const& request, OpenAICompatibleProviderOptions const& options)
+{
   std::string body = "{\"model\":\"" + ava::core::json::escape(request.model_id) +
                      "\",\"stream\":" + (request.stream ? "true" : "false") + ",\"messages\":[";
   bool first_message = true;
@@ -294,7 +308,8 @@ std::string request_body_json(ProviderRequest const& request, OpenAICompatiblePr
   return body;
 }
 
-std::vector<StreamEvent> finish_reasoning_if_open(bool& reasoning_open, std::string_view reasoning_format) {
+std::vector<StreamEvent> finish_reasoning_if_open(bool& reasoning_open, std::string_view reasoning_format)
+{
   if (!reasoning_open) return {};
   reasoning_open = false;
   return {StreamEvent{.type = StreamEventType::ReasoningEnd,
@@ -307,12 +322,14 @@ std::vector<StreamEvent> finish_reasoning_if_open(bool& reasoning_open, std::str
 }
 
 void append_finish_reasoning_if_open(std::vector<StreamEvent>& events, bool& reasoning_open,
-                                     std::string_view reasoning_format) {
+                                     std::string_view reasoning_format)
+{
   auto reasoning_end = finish_reasoning_if_open(reasoning_open, reasoning_format);
   events.insert(events.end(), reasoning_end.begin(), reasoning_end.end());
 }
 
-void append_done(std::vector<StreamEvent>& events, std::optional<TokenUsage> usage, std::string stop_reason) {
+void append_done(std::vector<StreamEvent>& events, std::optional<TokenUsage> usage, std::string stop_reason)
+{
   events.push_back(StreamEvent{.type = StreamEventType::Done,
                                .text = "",
                                .tool_call_id = "",
@@ -322,7 +339,8 @@ void append_done(std::vector<StreamEvent>& events, std::optional<TokenUsage> usa
                                .stop_reason = std::move(stop_reason)});
 }
 
-void append_tool_call_end_events(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids) {
+void append_tool_call_end_events(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids)
+{
   for (auto const& [_, id] : open_tool_call_ids) {
     events.push_back(StreamEvent{.type = StreamEventType::ToolCallEnd,
                                  .text = "",
@@ -335,7 +353,8 @@ void append_tool_call_end_events(std::vector<StreamEvent>& events, std::map<int,
 }
 
 void append_tool_call_delta_events(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids,
-                                   std::string_view delta) {
+                                   std::string_view delta)
+{
   for (auto const& call : ava::core::json::objects_in_array_field(delta, "tool_calls")) {
     auto const index_value = ava::core::json::integer_field(call, "index").value_or(0);
     auto const index = static_cast<int>(index_value);
@@ -366,7 +385,8 @@ void append_tool_call_delta_events(std::vector<StreamEvent>& events, std::map<in
 
 void append_choice_delta_events(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids,
                                 bool& reasoning_open, std::string& stop_reason, std::string_view choice,
-                                std::string_view reasoning_format) {
+                                std::string_view reasoning_format)
+{
   if (auto finish_reason = ava::core::json::string_field(choice, "finish_reason")) {
     stop_reason = normalized_finish_reason(*finish_reason);
     if (*finish_reason == "tool_calls" || *finish_reason == "function_call") {
@@ -414,7 +434,8 @@ void append_choice_delta_events(std::vector<StreamEvent>& events, std::map<int, 
 void append_event_for_data(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids,
                            bool& reasoning_open, std::optional<TokenUsage>& usage, std::string& stop_reason,
                            bool& saw_data, bool& done_seen, bool& error_seen, std::string_view data,
-                           std::string_view reasoning_format) {
+                           std::string_view reasoning_format)
+{
   if (data == "[DONE]") {
     done_seen = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_format);
@@ -455,7 +476,8 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<int, std::
 void append_events_for_sse_line(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids,
                                 bool& reasoning_open, std::optional<TokenUsage>& usage, std::string& stop_reason,
                                 bool& saw_data, bool& done_seen, bool& error_seen, std::string& data, std::string line,
-                                std::string_view reasoning_format) {
+                                std::string_view reasoning_format)
+{
   if (!line.empty() && line.back() == '\r') line.pop_back();
   if (line.empty()) {
     if (!data.empty()) {
@@ -474,7 +496,8 @@ void append_events_for_sse_line(std::vector<StreamEvent>& events, std::map<int, 
 }
 
 ava::core::Result<std::vector<StreamEvent>> parse_chat_completion_message(std::string_view body,
-                                                                          std::string_view reasoning_format) {
+                                                                          std::string_view reasoning_format)
+{
   std::vector<StreamEvent> events;
   auto const usage = parse_openai_usage(body);
   std::string stop_reason;
@@ -573,9 +596,12 @@ ava::core::Result<std::vector<StreamEvent>> parse_chat_completion_message(std::s
 }  // namespace
 
 OpenAICompatibleStreamParser::OpenAICompatibleStreamParser(std::string reasoning_format)
-    : reasoning_format_(std::move(reasoning_format)) {}
+    : reasoning_format_(std::move(reasoning_format))
+{
+}
 
-ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleStreamParser::append(std::string_view chunk) {
+ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleStreamParser::append(std::string_view chunk)
+{
   std::vector<StreamEvent> events;
   pending_line_.append(chunk);
   std::size_t line_start = 0;
@@ -594,7 +620,8 @@ ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleStreamParser::append
   return events;
 }
 
-ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleStreamParser::finish() {
+ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleStreamParser::finish()
+{
   std::vector<StreamEvent> events;
   if (!pending_line_.empty()) {
     append_events_for_sse_line(events, open_tool_call_ids_, reasoning_open_, usage_, stop_reason_, saw_data_,
@@ -628,10 +655,13 @@ ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleStreamParser::finish
 }
 
 OpenAICompatibleProvider::OpenAICompatibleProvider(OpenAICompatibleProviderOptions options)
-    : options_(std::move(options)) {}
+    : options_(std::move(options))
+{
+}
 
 ava::core::Result<HttpRequest> OpenAICompatibleProvider::build_request(ProviderRequest const& request,
-                                                                       std::string_view access_token) const {
+                                                                       std::string_view access_token) const
+{
   if (request.model_id.empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model id is required"));
   }
@@ -660,12 +690,14 @@ ava::core::Result<HttpRequest> OpenAICompatibleProvider::build_request(ProviderR
                      .resolve_hosts = {}};
 }
 
-std::unique_ptr<StreamParser> OpenAICompatibleProvider::create_stream_parser() const {
+std::unique_ptr<StreamParser> OpenAICompatibleProvider::create_stream_parser() const
+{
   return std::make_unique<OpenAICompatibleStreamParser>(options_.reasoning_format);
 }
 
 ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleProvider::parse_response(HttpResponse const& response,
-                                                                                     bool stream) const {
+                                                                                     bool stream) const
+{
   if (response.status_code < 200 || response.status_code >= 300) {
     auto const kind = classify_provider_error(response);
     auto error = ava::core::Error(
@@ -684,7 +716,8 @@ ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleProvider::parse_resp
 }
 
 ava::core::Result<std::vector<StreamEvent>> parse_openai_compatible_sse(std::string_view sse,
-                                                                        std::string reasoning_format) {
+                                                                        std::string reasoning_format)
+{
   OpenAICompatibleStreamParser parser(std::move(reasoning_format));
   auto events = parser.append(sse);
   if (!events) return std::unexpected(std::move(events.error()));

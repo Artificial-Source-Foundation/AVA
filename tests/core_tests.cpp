@@ -47,7 +47,8 @@ constexpr std::array kTestSuites{
     TestSuite{"tui_composer", run_tui_composer_tests},
 };
 
-void run_suite(TestSuite const& suite) {
+void run_suite(TestSuite const& suite)
+{
   suite.run();
 
   int const failures = ava::test::failures();
@@ -56,7 +57,8 @@ void run_suite(TestSuite const& suite) {
   }
 }
 
-int print_failures() {
+int print_failures()
+{
   int const failures = ava::test::failures();
   if (failures != 0) {
     std::cerr << failures << " test failure(s)\n";
@@ -67,7 +69,8 @@ int print_failures() {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
   if (argc > 2) {
     std::cerr << "usage: ava_tests [suite]\n";
     return 2;

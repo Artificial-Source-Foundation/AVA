@@ -17,11 +17,13 @@
 
 namespace {
 
-ava::provider::HttpResponse sse_response(std::string body) {
+ava::provider::HttpResponse sse_response(std::string body)
+{
   return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = std::move(body)};
 }
 
-void test_json_object_validator() {
+void test_json_object_validator()
+{
   expect(ava::provider::is_valid_json_object(R"({})"), "JSON validator accepts empty objects");
   expect(ava::provider::is_valid_json_object(
              R"({"path":"note.txt","nested":{"enabled":true},"list":[1,-2.5e+3,null,false]})"),
@@ -38,7 +40,8 @@ void test_json_object_validator() {
          "JSON validator rejects non-JSON whitespace");
 }
 
-void test_anthropic_provider_contract() {
+void test_anthropic_provider_contract()
+{
   ava::provider::AnthropicProvider const provider("https://anthropic.example.test/");
   auto const request = provider.build_request(
       ava::provider::ProviderRequest{
@@ -365,7 +368,8 @@ void test_anthropic_provider_contract() {
          "Anthropic request rejects empty token");
 }
 
-void test_anthropic_native_content_parts_request() {
+void test_anthropic_native_content_parts_request()
+{
   ava::provider::AnthropicProvider const provider("https://anthropic.example.test");
   auto const request = provider.build_request(
       ava::provider::ProviderRequest{
@@ -746,7 +750,8 @@ void test_anthropic_native_content_parts_request() {
       "Anthropic request rejects native tool_results that do not follow tool_use order");
 }
 
-void test_anthropic_parsing() {
+void test_anthropic_parsing()
+{
   std::string const sse =
       "event: message_start\n"
       "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,"
@@ -994,7 +999,8 @@ void test_anthropic_parsing() {
          "Anthropic HTTP errors carry normalized kind without provider-private snippets");
 }
 
-void test_anthropic_registry_and_env_auth() {
+void test_anthropic_registry_and_env_auth()
+{
   auto registry = ava::provider::builtin_provider_registry();
   expect(registry.contains("anthropic"), "builtin provider registry contains Anthropic");
   auto provider = registry.create("anthropic");
@@ -1032,7 +1038,8 @@ void test_anthropic_registry_and_env_auth() {
          "Anthropic OAuth token environment variable takes precedence over API key");
 }
 
-void test_anthropic_agent_tool_loop_native_replay() {
+void test_anthropic_agent_tool_loop_native_replay()
+{
   auto const root = temp_root() / "anthropic-tool-loop";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1089,7 +1096,8 @@ void test_anthropic_agent_tool_loop_native_replay() {
          "Anthropic continuation omits fallback tool replay text when native content parts are available");
 }
 
-void test_anthropic_agent_reasoning_native_replay() {
+void test_anthropic_agent_reasoning_native_replay()
+{
   auto const root = temp_root() / "anthropic-reasoning-replay";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1160,7 +1168,8 @@ void test_anthropic_agent_reasoning_native_replay() {
   expect(saw_reasoning, "Anthropic reasoning block is persisted for replay");
 }
 
-void test_anthropic_agent_redacted_reasoning_native_replay() {
+void test_anthropic_agent_redacted_reasoning_native_replay()
+{
   auto const root = temp_root() / "anthropic-redacted-reasoning-replay";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1213,7 +1222,8 @@ void test_anthropic_agent_redacted_reasoning_native_replay() {
          "Anthropic continuation does not expose redacted thinking data as visible text");
 }
 
-void test_anthropic_agent_non_stream_reasoning_events() {
+void test_anthropic_agent_non_stream_reasoning_events()
+{
   auto const root = temp_root() / "anthropic-non-stream-reasoning-events";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1262,7 +1272,8 @@ void test_anthropic_agent_non_stream_reasoning_events() {
          "Anthropic stream callbacks receive sanitized reasoning provider-private state");
 }
 
-void test_anthropic_agent_multi_tool_native_replay() {
+void test_anthropic_agent_multi_tool_native_replay()
+{
   auto const root = temp_root() / "anthropic-multi-tool-loop";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1338,7 +1349,8 @@ void test_anthropic_agent_multi_tool_native_replay() {
          "Anthropic continuation batches parallel tool_use blocks before matching tool_result blocks");
 }
 
-void test_anthropic_agent_non_stream_tool_loop_native_replay() {
+void test_anthropic_agent_non_stream_tool_loop_native_replay()
+{
   auto const root = temp_root() / "anthropic-non-stream-tool-loop";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
@@ -1385,7 +1397,8 @@ void test_anthropic_agent_non_stream_tool_loop_native_replay() {
 
 }  // namespace
 
-void run_provider_anthropic_tests() {
+void run_provider_anthropic_tests()
+{
   test_json_object_validator();
   test_anthropic_provider_contract();
   test_anthropic_native_content_parts_request();

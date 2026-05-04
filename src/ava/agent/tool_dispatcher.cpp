@@ -38,10 +38,13 @@ constexpr std::size_t kMaxLspProviderDiagnostics = 200;
 constexpr std::size_t kMaxLspProviderJsonBytes = 64 * 1024;
 constexpr std::size_t kMaxLspProviderPathBytes = 4096;
 
-std::string json_bool(bool value) { return value ? "true" : "false"; }
+std::string json_bool(bool value)
+{
+  return value ? "true" : "false";
+}
 
-ava::tools::ToolContext context_for_provider_tool(ava::tools::ToolContext const& context,
-                                                  ProviderToolCall const& call) {
+ava::tools::ToolContext context_for_provider_tool(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
   auto tool_context = context;
   tool_context.permission_tool_name = call.name;
   tool_context.current_tool_name = call.name;
@@ -49,22 +52,28 @@ ava::tools::ToolContext context_for_provider_tool(ava::tools::ToolContext const&
   return tool_context;
 }
 
-void append_spill_fields(std::string& text, std::filesystem::path const& path, bool spill_truncated) {
+void append_spill_fields(std::string& text, std::filesystem::path const& path, bool spill_truncated)
+{
   if (path.empty()) return;
   text += ",\"spill_file\":\"" + ava::core::json::escape(path.filename().generic_string()) + "\"";
   text += ",\"spill_truncated\":" + json_bool(spill_truncated);
 }
 
-std::string error_json(std::string_view tool, ava::core::Error const& error) {
+std::string error_json(std::string_view tool, ava::core::Error const& error)
+{
   return "{\"tool\":\"" + ava::core::json::escape(tool) + "\",\"ok\":false,\"error\":{\"category\":\"" +
          ava::core::json::escape(ava::core::to_string(error.category())) + "\",\"message\":\"" +
          ava::core::json::escape(error.message()) + "\",\"details\":\"" + ava::core::json::escape(error.format()) +
          "\"}}";
 }
 
-bool is_lsp_diagnostics_metadata(ToolMetadata const& tool) { return tool.name == std::string_view("lsp_diagnostics"); }
+bool is_lsp_diagnostics_metadata(ToolMetadata const& tool)
+{
+  return tool.name == std::string_view("lsp_diagnostics");
+}
 
-ToolDispatchResult tool_error_result(ProviderToolCall const& call, ava::core::Error const& error) {
+ToolDispatchResult tool_error_result(ProviderToolCall const& call, ava::core::Error const& error)
+{
   return ToolDispatchResult{.call_id = call.id,
                             .name = call.name,
                             .success = false,
@@ -79,7 +88,8 @@ ToolDispatchResult tool_error_result(ProviderToolCall const& call, ava::core::Er
                             }()};
 }
 
-ToolDispatchResult lsp_error_result(ProviderToolCall const& call, ava::core::Error const& error) {
+ToolDispatchResult lsp_error_result(ProviderToolCall const& call, ava::core::Error const& error)
+{
   if (error.message().find("canceled") != std::string::npos || error.message().find("cancelled") != std::string::npos) {
     return tool_error_result(call, error);
   }
@@ -92,30 +102,35 @@ ToolDispatchResult lsp_error_result(ProviderToolCall const& call, ava::core::Err
   return tool_error_result(call, redacted);
 }
 
-bool is_canceled(ava::tools::ToolContext const& context) {
+bool is_canceled(ava::tools::ToolContext const& context)
+{
   return context.cancel_requested && context.cancel_requested();
 }
 
-ava::core::Error canceled_error(ProviderToolCall const& call) {
+ava::core::Error canceled_error(ProviderToolCall const& call)
+{
   auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled");
   error.with_context("tool", call.name);
   error.with_context("call_id", call.id);
   return error;
 }
 
-ava::core::VoidResult check_canceled(ava::tools::ToolContext const& context, ProviderToolCall const& call) {
+ava::core::VoidResult check_canceled(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
   if (!is_canceled(context)) return {};
   return std::unexpected(canceled_error(call));
 }
 
 ToolDispatchResult simple_error_result(ProviderToolCall const& call, ava::core::ErrorCategory category,
-                                       std::string message) {
+                                       std::string message)
+{
   auto const error = ava::core::Error(category, std::move(message));
   return tool_error_result(call, error);
 }
 
 ava::core::Result<std::string> required_string_arg(std::string_view arguments, std::string_view field,
-                                                   std::string_view tool_name) {
+                                                   std::string_view tool_name)
+{
   auto value = ava::core::json::string_field(arguments, field);
   if (value) return *value;
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "tool argument is required");
@@ -124,7 +139,8 @@ ava::core::Result<std::string> required_string_arg(std::string_view arguments, s
   return std::unexpected(std::move(error));
 }
 
-ava::core::VoidResult reject_nul_arg(std::string_view value, std::string_view field, std::string_view tool_name) {
+ava::core::VoidResult reject_nul_arg(std::string_view value, std::string_view field, std::string_view tool_name)
+{
   if (value.find('\0') == std::string_view::npos) return {};
   auto error =
       ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "tool argument contains a forbidden NUL byte");
@@ -133,7 +149,8 @@ ava::core::VoidResult reject_nul_arg(std::string_view value, std::string_view fi
   return std::unexpected(std::move(error));
 }
 
-ava::core::VoidResult reject_control_arg(std::string_view value, std::string_view field, std::string_view tool_name) {
+ava::core::VoidResult reject_control_arg(std::string_view value, std::string_view field, std::string_view tool_name)
+{
   for (char const ch : value) {
     auto const byte = static_cast<unsigned char>(ch);
     if (byte < 0x20 || byte == 0x7F) {
@@ -147,7 +164,8 @@ ava::core::VoidResult reject_control_arg(std::string_view value, std::string_vie
   return {};
 }
 
-ava::core::VoidResult reject_control_value(std::string_view value, std::string_view field, std::string_view message) {
+ava::core::VoidResult reject_control_value(std::string_view value, std::string_view field, std::string_view message)
+{
   for (char const ch : value) {
     auto const byte = static_cast<unsigned char>(ch);
     if (byte < 0x20 || byte == 0x7F) {
@@ -159,14 +177,16 @@ ava::core::VoidResult reject_control_value(std::string_view value, std::string_v
   return {};
 }
 
-ava::core::Error question_answer_error(std::string_view tool_name, std::string_view field, std::string message) {
+ava::core::Error question_answer_error(std::string_view tool_name, std::string_view field, std::string message)
+{
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
   error.with_context("tool", std::string(tool_name));
   error.with_context("field", std::string(field));
   return error;
 }
 
-ava::core::VoidResult validate_question_answer(QuestionAnswer const& answer, std::string_view tool_name) {
+ava::core::VoidResult validate_question_answer(QuestionAnswer const& answer, std::string_view tool_name)
+{
   if (answer.selected_options.size() > kMaxQuestionAnswerSelectedOptions) {
     auto error = question_answer_error(tool_name, "selected_options", "question answer has too many selected options");
     error.with_context("max_options", std::to_string(kMaxQuestionAnswerSelectedOptions));
@@ -189,7 +209,8 @@ ava::core::VoidResult validate_question_answer(QuestionAnswer const& answer, std
 }
 
 ava::core::Result<std::string> required_text_arg(std::string_view arguments, std::string_view field,
-                                                 std::string_view tool_name) {
+                                                 std::string_view tool_name)
+{
   auto value = required_string_arg(arguments, field, tool_name);
   if (!value) return std::unexpected(value.error());
   if (auto safe = reject_nul_arg(*value, field, tool_name); !safe) return std::unexpected(safe.error());
@@ -197,20 +218,23 @@ ava::core::Result<std::string> required_text_arg(std::string_view arguments, std
 }
 
 ava::core::Result<std::string> required_safe_string_arg(std::string_view arguments, std::string_view field,
-                                                        std::string_view tool_name) {
+                                                        std::string_view tool_name)
+{
   auto value = required_string_arg(arguments, field, tool_name);
   if (!value) return std::unexpected(value.error());
   if (auto safe = reject_control_arg(*value, field, tool_name); !safe) return std::unexpected(safe.error());
   return *value;
 }
 
-std::filesystem::path workspace_path(ava::tools::ToolContext const& context, std::string_view path) {
+std::filesystem::path workspace_path(ava::tools::ToolContext const& context, std::string_view path)
+{
   std::filesystem::path const parsed(path);
   if (parsed.is_absolute()) return parsed;
   return context.workspace_dir / parsed;
 }
 
-std::filesystem::path permission_dedupe_path(std::filesystem::path const& path) {
+std::filesystem::path permission_dedupe_path(std::filesystem::path const& path)
+{
   std::error_code error;
   auto const canonical = std::filesystem::weakly_canonical(path, error);
   if (!error) return canonical;
@@ -218,7 +242,8 @@ std::filesystem::path permission_dedupe_path(std::filesystem::path const& path) 
 }
 
 std::size_t optional_size_arg(std::string_view arguments, std::string_view field, std::size_t fallback,
-                              std::size_t maximum) {
+                              std::size_t maximum)
+{
   auto const value = ava::core::json::integer_field(arguments, field);
   if (!value || *value <= 0) return fallback;
   auto const converted = static_cast<unsigned long long>(*value);
@@ -226,7 +251,8 @@ std::size_t optional_size_arg(std::string_view arguments, std::string_view field
   return static_cast<std::size_t>(converted);
 }
 
-void append_changed_files_json(std::string& text, std::vector<std::filesystem::path> const& paths) {
+void append_changed_files_json(std::string& text, std::vector<std::filesystem::path> const& paths)
+{
   text += ",\"changed_files\":[";
   for (std::size_t index = 0; index < paths.size(); ++index) {
     if (index > 0) text += ',';
@@ -235,13 +261,15 @@ void append_changed_files_json(std::string& text, std::vector<std::filesystem::p
   text += ']';
 }
 
-void append_diff_json(std::string& text, std::string_view diff, bool truncated) {
+void append_diff_json(std::string& text, std::string_view diff, bool truncated)
+{
   text += ",\"diff\":\"" + ava::core::json::escape(diff) + "\"";
   text += ",\"diff_truncated\":" + json_bool(truncated);
 }
 
 ava::core::Result<bool> optional_bool_arg(std::string_view arguments, std::string_view field, bool fallback,
-                                          std::string_view tool_name) {
+                                          std::string_view tool_name)
+{
   auto const start = ava::core::json::field_value_start(arguments, field);
   if (!start) return fallback;
   auto const is_value_boundary = [&arguments](std::size_t index) {
@@ -257,7 +285,8 @@ ava::core::Result<bool> optional_bool_arg(std::string_view arguments, std::strin
   return std::unexpected(std::move(error));
 }
 
-ava::core::VoidResult reject_provider_no_ignore(std::string_view arguments, std::string_view tool_name) {
+ava::core::VoidResult reject_provider_no_ignore(std::string_view arguments, std::string_view tool_name)
+{
   auto no_ignore = optional_bool_arg(arguments, "no_ignore", false, tool_name);
   if (!no_ignore) return std::unexpected(no_ignore.error());
   if (!*no_ignore) return {};
@@ -269,7 +298,8 @@ ava::core::VoidResult reject_provider_no_ignore(std::string_view arguments, std:
   return std::unexpected(std::move(error));
 }
 
-std::filesystem::path unique_patch_temp_path(std::filesystem::path const& target) {
+std::filesystem::path unique_patch_temp_path(std::filesystem::path const& target)
+{
   auto const stem = target.filename().string() + ".ava-patch-";
   for (int attempt = 0; attempt < 8; ++attempt) {
     auto candidate = target.parent_path() / (stem + ava::core::make_id("tmp") + ".tmp");
@@ -285,14 +315,16 @@ struct StagedPatchWrite {
   std::size_t bytes_written = 0;
 };
 
-void cleanup_staged_patch_writes(std::vector<StagedPatchWrite> const& writes, std::size_t start_index = 0) {
+void cleanup_staged_patch_writes(std::vector<StagedPatchWrite> const& writes, std::size_t start_index = 0)
+{
   for (std::size_t index = start_index; index < writes.size(); ++index) {
     ava::tools::remove_staged_file_best_effort(writes[index].temp);
   }
 }
 
 ava::core::VoidResult apply_existing_target_permissions_to_staged_file(std::filesystem::path const& target,
-                                                                       std::filesystem::path const& temp) {
+                                                                       std::filesystem::path const& temp)
+{
   std::error_code status_error;
   auto const target_status = std::filesystem::status(target, status_error);
   if (status_error) {
@@ -319,7 +351,8 @@ ava::core::VoidResult apply_existing_target_permissions_to_staged_file(std::file
 
 ava::core::Result<std::vector<StagedPatchWrite>> stage_patch_writes(
     ava::tools::ToolContext const& context, std::vector<std::filesystem::path> const& paths,
-    std::map<std::filesystem::path, std::string> const& final_contents) {
+    std::map<std::filesystem::path, std::string> const& final_contents)
+{
   std::vector<StagedPatchWrite> staged;
   staged.reserve(paths.size());
 
@@ -359,7 +392,8 @@ ava::core::Result<std::vector<StagedPatchWrite>> stage_patch_writes(
   return staged;
 }
 
-ava::core::VoidResult commit_staged_patch_writes(std::vector<StagedPatchWrite> const& staged) {
+ava::core::VoidResult commit_staged_patch_writes(std::vector<StagedPatchWrite> const& staged)
+{
   for (std::size_t index = 0; index < staged.size(); ++index) {
     auto const& write = staged[index];
     if (auto committed = ava::tools::replace_file_with_staged_file(write.temp, write.target); !committed) {
@@ -373,7 +407,8 @@ ava::core::VoidResult commit_staged_patch_writes(std::vector<StagedPatchWrite> c
   return {};
 }
 
-ToolDispatchResult read_file_result(ava::tools::ToolContext const& context, ProviderToolCall const& call) {
+ToolDispatchResult read_file_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
   auto path = required_safe_string_arg(call.arguments_json, "path", call.name);
   if (!path) return tool_error_result(call, path.error());
   auto const tool_context = context_for_provider_tool(context, call);
@@ -391,7 +426,8 @@ ToolDispatchResult read_file_result(ava::tools::ToolContext const& context, Prov
                      ",\"output_bytes\":" + std::to_string(result->output_bytes) + "}"};
 }
 
-ToolDispatchResult write_file_result(ava::tools::ToolContext const& context, ProviderToolCall const& call) {
+ToolDispatchResult write_file_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
   auto path = required_safe_string_arg(call.arguments_json, "path", call.name);
   if (!path) return tool_error_result(call, path.error());
   auto content = required_text_arg(call.arguments_json, "content", call.name);
@@ -407,7 +443,8 @@ ToolDispatchResult write_file_result(ava::tools::ToolContext const& context, Pro
                                            "\",\"bytes_written\":" + std::to_string(result->bytes_written) + "}"};
 }
 
-ToolDispatchResult edit_file_result(ava::tools::ToolContext const& context, ProviderToolCall const& call) {
+ToolDispatchResult edit_file_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
   auto path = required_safe_string_arg(call.arguments_json, "path", call.name);
   if (!path) return tool_error_result(call, path.error());
   auto old_text = required_text_arg(call.arguments_json, "old_text", call.name);
@@ -429,7 +466,8 @@ ToolDispatchResult edit_file_result(ava::tools::ToolContext const& context, Prov
                                            "\",\"utf8_bom\":" + json_bool(result->had_utf8_bom) + "}"};
 }
 
-ToolDispatchResult glob_result(ava::tools::ToolContext const& context, ProviderToolCall const& call) {
+ToolDispatchResult glob_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
   auto pattern = required_safe_string_arg(call.arguments_json, "pattern", call.name);
   if (!pattern) return tool_error_result(call, pattern.error());
   if (auto no_ignore_allowed = reject_provider_no_ignore(call.arguments_json, call.name); !no_ignore_allowed) {
@@ -453,7 +491,8 @@ ToolDispatchResult glob_result(ava::tools::ToolContext const& context, ProviderT
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text};
 }
 
-ToolDispatchResult grep_result(ava::tools::ToolContext const& context, ProviderToolCall const& call) {
+ToolDispatchResult grep_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
   auto pattern = required_text_arg(call.arguments_json, "pattern", call.name);
   if (!pattern) return tool_error_result(call, pattern.error());
   auto const include_value = ava::core::json::string_field(call.arguments_json, "include");
@@ -487,7 +526,8 @@ ToolDispatchResult grep_result(ava::tools::ToolContext const& context, ProviderT
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text};
 }
 
-ToolDispatchResult bash_result(ava::tools::ToolContext const& context, ProviderToolCall const& call) {
+ToolDispatchResult bash_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
   auto command = required_safe_string_arg(call.arguments_json, "command", call.name);
   if (!command) return tool_error_result(call, command.error());
   auto const tool_context = context_for_provider_tool(context, call);
@@ -524,7 +564,8 @@ ToolDispatchResult bash_result(ava::tools::ToolContext const& context, ProviderT
                                 }()};
 }
 
-ToolDispatchResult webfetch_result(ava::tools::ToolContext const& context, ProviderToolCall const& call) {
+ToolDispatchResult webfetch_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
   auto url = required_safe_string_arg(call.arguments_json, "url", call.name);
   if (!url) return tool_error_result(call, url.error());
   auto const tool_context = context_for_provider_tool(context, call);
@@ -547,7 +588,8 @@ ToolDispatchResult webfetch_result(ava::tools::ToolContext const& context, Provi
                      ",\"output_bytes\":" + std::to_string(result->output_bytes) + "}"};
 }
 
-ToolDispatchResult lsp_diagnostics_result(ava::tools::ToolContext const& context, ProviderToolCall const& call) {
+ToolDispatchResult lsp_diagnostics_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
   auto path = required_safe_string_arg(call.arguments_json, "path", call.name);
   if (!path) return tool_error_result(call, path.error());
   if (path->size() > kMaxLspProviderPathBytes) {
@@ -585,7 +627,8 @@ ToolDispatchResult lsp_diagnostics_result(ava::tools::ToolContext const& context
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
 }
 
-ToolDispatchResult apply_patch_result(ava::tools::ToolContext const& context, ProviderToolCall const& call) {
+ToolDispatchResult apply_patch_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
   auto const edits = ava::core::json::objects_in_array_field(call.arguments_json, "edits");
   if (edits.empty()) {
     return simple_error_result(call, ava::core::ErrorCategory::InvalidArgument,
@@ -754,7 +797,8 @@ ToolDispatchResult apply_patch_result(ava::tools::ToolContext const& context, Pr
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
 }
 
-ToolDispatchResult question_result(ava::tools::ToolContext const& context, ProviderToolCall const& call) {
+ToolDispatchResult question_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
   auto prompt = parse_question_prompt(call.arguments_json, call.name);
   if (!prompt) return tool_error_result(call, prompt.error());
   if (!context.question_resolver) {
@@ -773,7 +817,8 @@ ToolDispatchResult question_result(ava::tools::ToolContext const& context, Provi
                             .result_text = serialize_question_answer_result(*prompt, *answer)};
 }
 
-ToolExecutor builtin_tool_executor(std::string_view name) {
+ToolExecutor builtin_tool_executor(std::string_view name)
+{
   if (name == "read_file") return read_file_result;
   if (name == "write_file") return write_file_result;
   if (name == "edit_file") return edit_file_result;
@@ -787,7 +832,8 @@ ToolExecutor builtin_tool_executor(std::string_view name) {
   return nullptr;
 }
 
-ToolRegistry build_tool_registry(ava::tools::ToolContext const& context) {
+ToolRegistry build_tool_registry(ava::tools::ToolContext const& context)
+{
   ToolRegistry registry;
   for (auto const& entry : builtin_tool_registry().entries()) {
     auto registered = registry.register_tool(entry);
@@ -803,7 +849,8 @@ ToolRegistry build_tool_registry(ava::tools::ToolContext const& context) {
 
 }  // namespace
 
-ToolRegistry const& builtin_tool_registry() {
+ToolRegistry const& builtin_tool_registry()
+{
   static auto const registry = [] {
     ToolRegistry builtins;
     for (auto const& metadata : builtin_tool_metadata()) {
@@ -823,13 +870,15 @@ ToolRegistry const& builtin_tool_registry() {
   return registry;
 }
 
-ToolDispatcher::ToolDispatcher(ava::tools::ToolContext context) {
+ToolDispatcher::ToolDispatcher(ava::tools::ToolContext context)
+{
   if (!context.mutation_queue) context.mutation_queue = std::make_shared<ava::tools::MutationQueue>();
   context_ = std::move(context);
   registry_ = build_tool_registry(context_);
 }
 
-ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(ProviderToolCall const& call) const {
+ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(ProviderToolCall const& call) const
+{
   auto const arguments = call.arguments_json.empty() ? std::string("{}") : call.arguments_json;
   ProviderToolCall const normalized{.id = call.id, .name = call.name, .arguments_json = arguments};
   if (normalized.id.empty()) {
@@ -857,15 +906,23 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(ProviderToolCall 
   return with_tool_result_payload(simple_error_result(normalized, ava::core::ErrorCategory::Tool, "unknown tool"));
 }
 
-std::span<ToolMetadata const> ToolDispatcher::tool_metadata() { return builtin_tool_metadata(); }
+std::span<ToolMetadata const> ToolDispatcher::tool_metadata()
+{
+  return builtin_tool_metadata();
+}
 
-std::vector<ToolMetadata> ToolDispatcher::tool_metadata(ava::tools::ToolContext const& context) {
+std::vector<ToolMetadata> ToolDispatcher::tool_metadata(ava::tools::ToolContext const& context)
+{
   return build_tool_registry(context).metadata();
 }
 
-std::vector<std::string> ToolDispatcher::tool_schemas_json() { return tool_schemas_json(ava::tools::ToolContext{}); }
+std::vector<std::string> ToolDispatcher::tool_schemas_json()
+{
+  return tool_schemas_json(ava::tools::ToolContext{});
+}
 
-std::vector<std::string> ToolDispatcher::tool_schemas_json(ava::tools::ToolContext const& context) {
+std::vector<std::string> ToolDispatcher::tool_schemas_json(ava::tools::ToolContext const& context)
+{
   return build_tool_registry(context).tool_schemas_json(context);
 }
 

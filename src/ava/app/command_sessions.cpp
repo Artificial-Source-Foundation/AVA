@@ -18,7 +18,8 @@
 namespace ava::app {
 namespace {
 
-ava::core::VoidResult append_mode_change(ava::session::SessionStore& store, ava::agent::Mode mode) {
+ava::core::VoidResult append_mode_change(ava::session::SessionStore& store, ava::agent::Mode mode)
+{
   return store.append(ava::session::SessionEntry{
       .id = ava::core::make_id("entry"),
       .parent_id = "",
@@ -28,41 +29,48 @@ ava::core::VoidResult append_mode_change(ava::session::SessionStore& store, ava:
   });
 }
 
-std::string format_cost_usd(long double value) {
+std::string format_cost_usd(long double value)
+{
   std::ostringstream output;
   output << '$' << std::fixed << std::setprecision(6) << value;
   return output.str();
 }
 
-std::string trim_ascii(std::string_view text) {
+std::string trim_ascii(std::string_view text)
+{
   while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) text.remove_prefix(1);
   while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) text.remove_suffix(1);
   return std::string(text);
 }
 
-std::string lower_ascii(std::string_view text) {
+std::string lower_ascii(std::string_view text)
+{
   std::string lowered(text);
   std::ranges::transform(lowered, lowered.begin(),
                          [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   return lowered;
 }
 
-bool contains_ascii_case_insensitive(std::string_view text, std::string_view query) {
+bool contains_ascii_case_insensitive(std::string_view text, std::string_view query)
+{
   if (query.empty()) return true;
   return lower_ascii(text).find(lower_ascii(query)) != std::string::npos;
 }
 
-bool session_matches_query(ava::session::SessionSummary const& summary, std::string_view query) {
+bool session_matches_query(ava::session::SessionSummary const& summary, std::string_view query)
+{
   return contains_ascii_case_insensitive(summary.session_id, query) ||
          contains_ascii_case_insensitive(summary.last_updated, query);
 }
 
-bool context_source_matches_query(ContextSourceMetadata const& source, std::string_view query) {
+bool context_source_matches_query(ContextSourceMetadata const& source, std::string_view query)
+{
   return contains_ascii_case_insensitive(source.path.generic_string(), query) ||
          contains_ascii_case_insensitive(ava::context::to_string(source.source_type), query);
 }
 
-RuntimeEvent base_command_event(RuntimeSession const& session, RuntimeEventType type) {
+RuntimeEvent base_command_event(RuntimeSession const& session, RuntimeEventType type)
+{
   RuntimeEvent event;
   event.type = type;
   event.timestamp = ava::session::now_timestamp();
@@ -73,40 +81,46 @@ RuntimeEvent base_command_event(RuntimeSession const& session, RuntimeEventType 
   return event;
 }
 
-ava::core::VoidResult emit_command_event(CommandRequest const& request, RuntimeEvent event) {
+ava::core::VoidResult emit_command_event(CommandRequest const& request, RuntimeEvent event)
+{
   if (!request.event_sink) return {};
   return emit_event(request.event_sink, event);
 }
 
 template <typename Value>
 void append_known_value(std::ostringstream& output, bool& wrote_any, std::string_view label,
-                        std::optional<Value> const& value) {
+                        std::optional<Value> const& value)
+{
   if (!value) return;
   if (wrote_any) output << ' ';
   output << label << '=' << *value;
   wrote_any = true;
 }
 
-std::string shorten_middle(std::string text, std::size_t max_columns) {
+std::string shorten_middle(std::string text, std::size_t max_columns)
+{
   if (text.size() <= max_columns || max_columns < 8) return text;
   auto const front = (max_columns - 3) / 2;
   auto const back = max_columns - 3 - front;
   return text.substr(0, front) + "..." + text.substr(text.size() - back);
 }
 
-std::string compact_workspace_label(std::filesystem::path const& workspace) {
+std::string compact_workspace_label(std::filesystem::path const& workspace)
+{
   auto const filename = workspace.filename().generic_string();
   if (!filename.empty()) return shorten_middle(filename, 32);
   return shorten_middle(workspace.generic_string(), 48);
 }
 
-std::string compact_cwd_label(std::filesystem::path const& cwd, std::filesystem::path const& workspace) {
+std::string compact_cwd_label(std::filesystem::path const& cwd, std::filesystem::path const& workspace)
+{
   auto text = display_path(cwd, workspace);
   if (text.empty()) text = ".";
   return shorten_middle(std::move(text), 48);
 }
 
-std::string known_values_text(ava::session::SessionStats const& stats) {
+std::string known_values_text(ava::session::SessionStats const& stats)
+{
   std::ostringstream output;
   bool wrote_any = false;
   append_known_value(output, wrote_any, "input", stats.input_tokens);
@@ -118,7 +132,8 @@ std::string known_values_text(ava::session::SessionStats const& stats) {
   return wrote_any ? output.str() : std::string("unavailable");
 }
 
-std::string estimated_bytes_text(ava::session::SessionStats const& stats) {
+std::string estimated_bytes_text(ava::session::SessionStats const& stats)
+{
   std::ostringstream output;
   bool wrote_any = false;
   append_known_value(output, wrote_any, "input", stats.estimated_input_bytes);
@@ -127,7 +142,8 @@ std::string estimated_bytes_text(ava::session::SessionStats const& stats) {
   return wrote_any ? output.str() : std::string("unavailable");
 }
 
-std::string cost_text(ava::session::SessionStats const& stats) {
+std::string cost_text(ava::session::SessionStats const& stats)
+{
   if (stats.cost_complete) return stats.total_cost_usd ? format_cost_usd(*stats.total_cost_usd) : "unavailable";
   if (stats.known_cost_usd) {
     return "at least " + format_cost_usd(*stats.known_cost_usd) + " (" + std::to_string(stats.unknown_cost_entries) +
@@ -136,7 +152,8 @@ std::string cost_text(ava::session::SessionStats const& stats) {
   return "incomplete (" + std::to_string(stats.unknown_cost_entries) + " unknown)";
 }
 
-std::string format_session_stats_text(RuntimeSession const& session, ava::session::SessionStats const& stats) {
+std::string format_session_stats_text(RuntimeSession const& session, ava::session::SessionStats const& stats)
+{
   std::ostringstream output;
   output << "Session stats\n";
   output << "  session: " << shorten_middle(session.store.session_id(), 32) << "   entries: " << stats.entry_count
@@ -171,7 +188,8 @@ std::string format_session_stats_text(RuntimeSession const& session, ava::sessio
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_sessions_command(RuntimeSession& session, std::string_view query) {
+ava::core::Result<CommandResult> run_sessions_command(RuntimeSession& session, std::string_view query)
+{
   CommandResult result;
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);
@@ -199,7 +217,8 @@ ava::core::Result<CommandResult> run_sessions_command(RuntimeSession& session, s
   return result;
 }
 
-ava::core::Result<CommandResult> run_mode_command(RuntimeSession& session) {
+ava::core::Result<CommandResult> run_mode_command(RuntimeSession& session)
+{
   CommandResult result;
   result.handled = true;
   auto const new_mode = ava::agent::toggle_mode(session.mode);
@@ -213,7 +232,8 @@ ava::core::Result<CommandResult> run_mode_command(RuntimeSession& session) {
   return result;
 }
 
-ava::core::Result<CommandResult> run_context_command(RuntimeSession& session, std::string_view query) {
+ava::core::Result<CommandResult> run_context_command(RuntimeSession& session, std::string_view query)
+{
   CommandResult result;
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);
@@ -235,7 +255,8 @@ ava::core::Result<CommandResult> run_context_command(RuntimeSession& session, st
   return result;
 }
 
-ava::core::Result<CommandResult> run_stats_command(RuntimeSession& session) {
+ava::core::Result<CommandResult> run_stats_command(RuntimeSession& session)
+{
   CommandResult result;
   result.handled = true;
   auto entries = session.store.load();
@@ -247,7 +268,8 @@ ava::core::Result<CommandResult> run_stats_command(RuntimeSession& session) {
   return result;
 }
 
-ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, CommandRequest const& request) {
+ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, CommandRequest const& request)
+{
   CommandResult result;
   result.handled = true;
   auto fail_compaction = [&](ava::core::Error error) -> ava::core::Result<CommandResult> {
@@ -366,7 +388,8 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, Co
   return fail_compaction(stale_compaction_snapshot_error("manual", last_snapshot_entries, last_current_entries));
 }
 
-ava::core::Result<CommandResult> run_export_command(RuntimeSession& session) {
+ava::core::Result<CommandResult> run_export_command(RuntimeSession& session)
+{
   CommandResult result;
   result.handled = true;
   auto entries = session.store.load();

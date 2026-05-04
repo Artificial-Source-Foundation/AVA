@@ -9,7 +9,8 @@ namespace {
 
 constexpr std::size_t kMaxSummaryValueBytes = 80;
 
-std::string safe_summary_text(std::string text, std::size_t max_bytes = kMaxSummaryValueBytes) {
+std::string safe_summary_text(std::string text, std::size_t max_bytes = kMaxSummaryValueBytes)
+{
   for (char& ch : text) {
     auto const byte = static_cast<unsigned char>(ch);
     if (byte < 0x20 || byte == 0x7F) ch = '?';
@@ -25,7 +26,8 @@ std::string safe_summary_text(std::string text, std::size_t max_bytes = kMaxSumm
   return text;
 }
 
-bool has_control_byte(std::string_view value) {
+bool has_control_byte(std::string_view value)
+{
   for (char const ch : value) {
     auto const byte = static_cast<unsigned char>(ch);
     if (byte < 0x20 || byte == 0x7F) return true;
@@ -35,17 +37,20 @@ bool has_control_byte(std::string_view value) {
 
 }  // namespace
 
-ava::core::Error output_limit_error(std::string message, std::string_view limit_name, std::size_t limit) {
+ava::core::Error output_limit_error(std::string message, std::string_view limit_name, std::size_t limit)
+{
   auto error = ava::core::Error(ava::core::ErrorCategory::Provider, std::move(message));
   error.with_context(std::string(limit_name), std::to_string(limit));
   return error;
 }
 
-bool would_exceed(std::size_t current, std::size_t added, std::size_t limit) {
+bool would_exceed(std::size_t current, std::size_t added, std::size_t limit)
+{
   return limit > 0 && (current > limit || added > limit - current);
 }
 
-ava::core::VoidResult validate_provider_tool_call_id(std::string_view id) {
+ava::core::VoidResult validate_provider_tool_call_id(std::string_view id)
+{
   constexpr std::size_t kMaxProviderToolCallIdBytes = 256;
   if (id.empty()) {
     return std::unexpected(

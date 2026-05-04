@@ -33,19 +33,22 @@ class UniqueFd {
   UniqueFd(UniqueFd const&) = delete;
   UniqueFd& operator=(UniqueFd const&) = delete;
   UniqueFd(UniqueFd&& other) noexcept : fd_(other.release()) {}
-  UniqueFd& operator=(UniqueFd&& other) noexcept {
+  UniqueFd& operator=(UniqueFd&& other) noexcept
+  {
     if (this != &other) reset(other.release());
     return *this;
   }
   ~UniqueFd() { reset(); }
 
   [[nodiscard]] int get() const noexcept { return fd_; }
-  [[nodiscard]] int release() noexcept {
+  [[nodiscard]] int release() noexcept
+  {
     int const fd = fd_;
     fd_ = -1;
     return fd;
   }
-  void reset(int fd = -1) noexcept {
+  void reset(int fd = -1) noexcept
+  {
     if (fd_ >= 0) close(fd_);
     fd_ = fd;
   }
@@ -60,7 +63,8 @@ class TempBodyFile {
   TempBodyFile(TempBodyFile const&) = delete;
   TempBodyFile& operator=(TempBodyFile const&) = delete;
   TempBodyFile(TempBodyFile&& other) noexcept : path_(std::move(other.path_)) { other.path_.clear(); }
-  TempBodyFile& operator=(TempBodyFile&& other) noexcept {
+  TempBodyFile& operator=(TempBodyFile&& other) noexcept
+  {
     if (this != &other) {
       cleanup();
       path_ = std::move(other.path_);
@@ -72,7 +76,8 @@ class TempBodyFile {
 
   [[nodiscard]] std::string const& path() const noexcept { return path_; }
 
-  [[nodiscard]] static ava::core::Result<TempBodyFile> create(std::string_view body) {
+  [[nodiscard]] static ava::core::Result<TempBodyFile> create(std::string_view body)
+  {
     std::error_code temp_error;
     auto temp_dir = std::filesystem::temp_directory_path(temp_error);
     if (temp_error) {
@@ -116,7 +121,8 @@ class TempBodyFile {
   }
 
  private:
-  void cleanup() noexcept {
+  void cleanup() noexcept
+  {
     if (!path_.empty()) {
       unlink(path_.c_str());
       path_.clear();
@@ -128,7 +134,8 @@ class TempBodyFile {
 
 class ScopedSignalIgnore {
  public:
-  explicit ScopedSignalIgnore(int signal) : signal_(signal) {
+  explicit ScopedSignalIgnore(int signal) : signal_(signal)
+  {
     struct sigaction action{};
     action.sa_handler = SIG_IGN;
     sigemptyset(&action.sa_mask);
@@ -136,7 +143,8 @@ class ScopedSignalIgnore {
   }
   ScopedSignalIgnore(ScopedSignalIgnore const&) = delete;
   ScopedSignalIgnore& operator=(ScopedSignalIgnore const&) = delete;
-  ~ScopedSignalIgnore() {
+  ~ScopedSignalIgnore()
+  {
     if (active_) sigaction(signal_, &previous_, nullptr);
   }
 
@@ -146,7 +154,8 @@ class ScopedSignalIgnore {
   struct sigaction previous_{};
 };
 
-ava::core::Result<std::array<int, 2>> make_pipe() {
+ava::core::Result<std::array<int, 2>> make_pipe()
+{
   std::array<int, 2> pipe_fds{-1, -1};
   if (pipe(pipe_fds.data()) != 0) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to create curl pipe");
@@ -156,7 +165,8 @@ ava::core::Result<std::array<int, 2>> make_pipe() {
   return pipe_fds;
 }
 
-void close_nonstandard_fds() {
+void close_nonstandard_fds()
+{
   long const open_max = sysconf(_SC_OPEN_MAX);
   int const max_fd = open_max > 0 ? static_cast<int>(open_max) : 1024;
   for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd) {
@@ -164,7 +174,8 @@ void close_nonstandard_fds() {
   }
 }
 
-std::string curl_config_escape(std::string_view value) {
+std::string curl_config_escape(std::string_view value)
+{
   std::string escaped;
   escaped.reserve(value.size());
   for (char const ch : value) {
@@ -187,7 +198,8 @@ std::string curl_config_escape(std::string_view value) {
   return escaped;
 }
 
-std::string build_curl_config(HttpRequest const& request, std::string const& body_path) {
+std::string build_curl_config(HttpRequest const& request, std::string const& body_path)
+{
   std::string config;
   config += "url = \"" + curl_config_escape(request.url) + "\"\n";
   config += "request = \"" + curl_config_escape(request.method.empty() ? "POST" : request.method) + "\"\n";
@@ -219,7 +231,8 @@ std::string build_curl_config(HttpRequest const& request, std::string const& bod
   return config;
 }
 
-ssize_t read_retry(int fd, char* data, std::size_t size) {
+ssize_t read_retry(int fd, char* data, std::size_t size)
+{
   while (true) {
     auto const bytes = read(fd, data, size);
     if (bytes < 0 && errno == EINTR) continue;
@@ -227,7 +240,8 @@ ssize_t read_retry(int fd, char* data, std::size_t size) {
   }
 }
 
-pid_t waitpid_retry(pid_t pid, int* status, int options) {
+pid_t waitpid_retry(pid_t pid, int* status, int options)
+{
   while (true) {
     auto const waited = waitpid(pid, status, options);
     if (waited < 0 && errno == EINTR) continue;
@@ -235,13 +249,15 @@ pid_t waitpid_retry(pid_t pid, int* status, int options) {
   }
 }
 
-void kill_and_wait(pid_t pid) {
+void kill_and_wait(pid_t pid)
+{
   kill(pid, SIGKILL);
   int status = 0;
   waitpid_retry(pid, &status, 0);
 }
 
-ava::core::VoidResult write_curl_config(int fd, pid_t pid, std::string_view config) {
+ava::core::VoidResult write_curl_config(int fd, pid_t pid, std::string_view config)
+{
   ScopedSignalIgnore const ignore_sigpipe(SIGPIPE);
   std::size_t written = 0;
   while (written < config.size()) {
@@ -258,20 +274,23 @@ ava::core::VoidResult write_curl_config(int fd, pid_t pid, std::string_view conf
   return {};
 }
 
-void append_bounded(std::string& value, char const* data, std::size_t size, std::size_t limit) {
+void append_bounded(std::string& value, char const* data, std::size_t size, std::size_t limit)
+{
   if (value.size() >= limit) return;
   auto const available = limit - value.size();
   value.append(data, std::min(size, available));
 }
 
-bool is_http_status_line(std::string_view line) {
+bool is_http_status_line(std::string_view line)
+{
   if (!line.starts_with("HTTP/")) return false;
   auto const space = line.find(' ');
   if (space == std::string_view::npos || space + 4 > line.size()) return false;
   return std::ranges::all_of(line.substr(space + 1, 3), [](char ch) { return ch >= '0' && ch <= '9'; });
 }
 
-int http_status_line_code(std::string_view line) {
+int http_status_line_code(std::string_view line)
+{
   auto const space = line.find(' ');
   if (space == std::string_view::npos || space + 4 > line.size()) return 0;
   int code = 0;
@@ -282,7 +301,8 @@ int http_status_line_code(std::string_view line) {
   return code;
 }
 
-ava::core::Result<HttpResponse> parse_curl_output(std::string output, bool include_response_headers) {
+ava::core::Result<HttpResponse> parse_curl_output(std::string output, bool include_response_headers)
+{
   auto const marker_pos = output.rfind(kStatusMarker);
   if (marker_pos == std::string::npos) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "curl response did not include an HTTP status");
@@ -340,9 +360,13 @@ ava::core::Result<HttpResponse> parse_curl_output(std::string output, bool inclu
 
 }  // namespace
 
-ava::core::Result<HttpResponse> CurlCliTransport::send(HttpRequest const& request) { return send(request, nullptr); }
+ava::core::Result<HttpResponse> CurlCliTransport::send(HttpRequest const& request)
+{
+  return send(request, nullptr);
+}
 
-ava::core::Result<HttpResponse> CurlCliTransport::send(HttpRequest const& request, CancelCallback cancel_requested) {
+ava::core::Result<HttpResponse> CurlCliTransport::send(HttpRequest const& request, CancelCallback cancel_requested)
+{
   if (cancel_requested && cancel_requested()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
   }
@@ -452,11 +476,15 @@ ava::core::Result<HttpResponse> CurlCliTransport::send(HttpRequest const& reques
   return parse_curl_output(std::move(output), request.include_response_headers);
 }
 
-bool CurlCliTransport::supports_streaming() const noexcept { return true; }
+bool CurlCliTransport::supports_streaming() const noexcept
+{
+  return true;
+}
 
 ava::core::Result<HttpResponse> CurlCliTransport::send_streaming(HttpRequest const& request,
                                                                  BodyChunkSink on_body_chunk,
-                                                                 CancelCallback cancel_requested) {
+                                                                 CancelCallback cancel_requested)
+{
   if (request.include_response_headers) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                             "streaming curl transport does not support response headers"));

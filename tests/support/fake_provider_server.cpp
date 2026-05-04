@@ -24,7 +24,8 @@ class Fd {
   Fd(Fd const&) = delete;
   Fd& operator=(Fd const&) = delete;
   Fd(Fd&& other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
-  Fd& operator=(Fd&& other) noexcept {
+  Fd& operator=(Fd&& other) noexcept
+  {
     if (this != &other) {
       close();
       fd_ = std::exchange(other.fd_, -1);
@@ -36,7 +37,8 @@ class Fd {
   [[nodiscard]] int get() const noexcept { return fd_; }
 
  private:
-  void close() noexcept {
+  void close() noexcept
+  {
     if (fd_ >= 0) static_cast<void>(::close(fd_));
     fd_ = -1;
   }
@@ -44,15 +46,20 @@ class Fd {
   int fd_ = -1;
 };
 
-std::string errno_text() { return std::strerror(errno); }
+std::string errno_text()
+{
+  return std::strerror(errno);
+}
 
-std::string_view trim_ascii(std::string_view text) {
+std::string_view trim_ascii(std::string_view text)
+{
   while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.remove_prefix(1);
   while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\r')) text.remove_suffix(1);
   return text;
 }
 
-bool starts_with_case_insensitive(std::string_view text, std::string_view prefix) {
+bool starts_with_case_insensitive(std::string_view text, std::string_view prefix)
+{
   if (text.size() < prefix.size()) return false;
   for (std::size_t index = 0; index < prefix.size(); ++index) {
     auto const left = static_cast<unsigned char>(text[index]);
@@ -64,7 +71,8 @@ bool starts_with_case_insensitive(std::string_view text, std::string_view prefix
   return true;
 }
 
-std::optional<std::size_t> content_length(std::string_view headers) {
+std::optional<std::size_t> content_length(std::string_view headers)
+{
   std::size_t start = 0;
   while (start < headers.size()) {
     auto const end = headers.find('\n', start);
@@ -84,7 +92,8 @@ std::optional<std::size_t> content_length(std::string_view headers) {
   return std::nullopt;
 }
 
-bool write_all(int fd, std::string_view text) {
+bool write_all(int fd, std::string_view text)
+{
   while (!text.empty()) {
     auto const written = ::send(fd, text.data(), text.size(), 0);
     if (written <= 0) return false;
@@ -93,7 +102,8 @@ bool write_all(int fd, std::string_view text) {
   return true;
 }
 
-std::string json_escape(std::string_view text) {
+std::string json_escape(std::string_view text)
+{
   std::string escaped;
   escaped.reserve(text.size());
   for (char const ch : text) {
@@ -125,7 +135,8 @@ std::string json_escape(std::string_view text) {
   return escaped;
 }
 
-std::string read_http_request(int fd) {
+std::string read_http_request(int fd)
+{
   std::string request;
   std::array<char, 4096> buffer{};
   constexpr std::size_t kMaxRequestBytes = 1024 * 1024;
@@ -141,27 +152,31 @@ std::string read_http_request(int fd) {
   return request;
 }
 
-std::string text_body(std::string_view text) {
+std::string text_body(std::string_view text)
+{
   return "{\"choices\":[{\"message\":{\"content\":\"" + json_escape(text) +
          "\"},\"finish_reason\":\"stop\"}],"
          "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}";
 }
 
-std::string read_tool_body(std::string_view path) {
+std::string read_tool_body(std::string_view path)
+{
   auto const arguments = std::string("{\"path\":\"") + json_escape(path) + "\"}";
   return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_read\",\"type\":\"function\","
          "\"function\":{\"name\":\"read_file\",\"arguments\":\"" +
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
 }
 
-std::string write_tool_body(std::string_view path) {
+std::string write_tool_body(std::string_view path)
+{
   auto const arguments = std::string("{\"path\":\"") + json_escape(path) + "\",\"content\":\"rpc new\\n\"}";
   return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_write\",\"type\":\"function\","
          "\"function\":{\"name\":\"write_file\",\"arguments\":\"" +
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
 }
 
-std::string question_tool_body() {
+std::string question_tool_body()
+{
   std::string const arguments =
       "{\"header\":\"Pick\",\"question\":\"Continue?\",\"options\":[{\"value\":\"yes\",\"label\":\"Yes\"}],"
       "\"allow_custom\":true}";
@@ -176,7 +191,8 @@ struct ProviderResponse {
   std::string body;
 };
 
-ProviderResponse response_for(std::string_view scenario, int request_index, std::string_view target_path) {
+ProviderResponse response_for(std::string_view scenario, int request_index, std::string_view target_path)
+{
   if (scenario == "http-error") {
     return ProviderResponse{.status_code = 500,
                             .reason = "Internal Server Error",
@@ -209,7 +225,8 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
   if (argc != 4 && argc != 6) {
     std::cerr << "usage: ava_fake_provider_server PORT_FILE REQUEST_LOG DELAY_MS [SCENARIO TARGET_PATH]\n";
     return 2;
@@ -262,7 +279,9 @@ int main(int argc, char** argv) {
     file << ntohs(address.sin_port) << '\n';
   }
 
-  { std::ofstream file(request_log, std::ios::binary | std::ios::trunc); }
+  {
+    std::ofstream file(request_log, std::ios::binary | std::ios::trunc);
+  }
 
   for (int request_index = 0; request_index < request_count; ++request_index) {
     Fd client(::accept(server.get(), nullptr, nullptr));

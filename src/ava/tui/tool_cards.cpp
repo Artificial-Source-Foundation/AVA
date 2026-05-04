@@ -9,10 +9,14 @@ namespace {
 
 constexpr auto kBlockMinWidth = std::size_t{32};
 
-bool wide_blocks(std::size_t width) { return width >= kBlockMinWidth; }
+bool wide_blocks(std::size_t width)
+{
+  return width >= kBlockMinWidth;
+}
 
 void append_tool_detail_lines(std::vector<std::string>& lines, std::string_view label, std::string const& text,
-                              std::size_t width) {
+                              std::size_t width)
+{
   if (text.empty()) return;
   auto const prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
   auto const label_prefix =
@@ -22,7 +26,8 @@ void append_tool_detail_lines(std::vector<std::string>& lines, std::string_view 
   }
 }
 
-void append_diff_lines(std::vector<std::string>& lines, ToolTimelineItem const& item, std::size_t width) {
+void append_diff_lines(std::vector<std::string>& lines, ToolTimelineItem const& item, std::size_t width)
+{
   if (item.diff.empty()) return;
   auto const prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
   lines.push_back(detail::fit_line_preserving_sgr(
@@ -46,7 +51,8 @@ void append_diff_lines(std::vector<std::string>& lines, ToolTimelineItem const& 
   }
 }
 
-std::string truncation_summary(ToolTimelineItem const& item) {
+std::string truncation_summary(ToolTimelineItem const& item)
+{
   if (!item.truncated && item.spill_path.empty() && !item.spill_truncated) return {};
 
   std::string summary;
@@ -81,7 +87,8 @@ std::string truncation_summary(ToolTimelineItem const& item) {
   return summary;
 }
 
-std::string status_marker(ToolTimelineStatus status) {
+std::string status_marker(ToolTimelineStatus status)
+{
   switch (status) {
     case ToolTimelineStatus::Running:
       return "[~]";
@@ -93,7 +100,8 @@ std::string status_marker(ToolTimelineStatus status) {
   return "[?]";
 }
 
-std::string_view status_sgr(ToolTimelineStatus status) {
+std::string_view status_sgr(ToolTimelineStatus status)
+{
   switch (status) {
     case ToolTimelineStatus::Running:
       return detail::kSgrWarning;
@@ -107,7 +115,8 @@ std::string_view status_sgr(ToolTimelineStatus status) {
 
 }  // namespace
 
-std::string to_string(ToolLifecycleState state) {
+std::string to_string(ToolLifecycleState state)
+{
   switch (state) {
     case ToolLifecycleState::ProviderAnnounced:
       return "announced";
@@ -129,12 +138,13 @@ std::string to_string(ToolLifecycleState state) {
 
 namespace detail {
 
-bool tool_card_details_visible(ToolTimelineItem const& item, bool global_details_visible) {
+bool tool_card_details_visible(ToolTimelineItem const& item, bool global_details_visible)
+{
   return item.details_visible.value_or(global_details_visible);
 }
 
-std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::size_t width,
-                                          bool global_details_visible) {
+std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::size_t width, bool global_details_visible)
+{
   std::vector<std::string> lines;
   auto const details_visible = tool_card_details_visible(item, global_details_visible);
 

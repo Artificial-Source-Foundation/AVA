@@ -6,7 +6,8 @@
 namespace ava::tui {
 namespace detail {
 
-std::string slash_command_prefix(std::string_view input) {
+std::string slash_command_prefix(std::string_view input)
+{
   if (!input.starts_with('/')) return {};
   auto const end = input.find_first_of(" \t\r\n");
   auto prefix = input.substr(1, end == std::string_view::npos ? std::string_view::npos : end - 1);
@@ -15,20 +16,26 @@ std::string slash_command_prefix(std::string_view input) {
 
 namespace {
 
-std::string_view command_token(std::string_view input) {
+std::string_view command_token(std::string_view input)
+{
   auto const end = input.find_first_of(" \t\r\n");
   return input.substr(0, end == std::string_view::npos ? input.size() : end);
 }
 
-std::string_view argument_text(std::string_view input) {
+std::string_view argument_text(std::string_view input)
+{
   auto const start = input.find_first_of(" \t\r\n");
   if (start == std::string_view::npos) return {};
   return input.substr(start + 1);
 }
 
-bool has_argument_text(std::string_view input) { return input.find_first_of(" \t\r\n") != std::string_view::npos; }
+bool has_argument_text(std::string_view input)
+{
+  return input.find_first_of(" \t\r\n") != std::string_view::npos;
+}
 
-std::vector<std::string> split_argument_tokens(std::string_view text) {
+std::vector<std::string> split_argument_tokens(std::string_view text)
+{
   std::vector<std::string> tokens;
   std::size_t index = 0;
   while (index < text.size()) {
@@ -40,49 +47,58 @@ std::vector<std::string> split_argument_tokens(std::string_view text) {
   return tokens;
 }
 
-bool ends_with_ascii_space(std::string_view text) {
+bool ends_with_ascii_space(std::string_view text)
+{
   if (text.empty()) return false;
   auto const byte = static_cast<unsigned char>(text.back());
   return byte == ' ' || byte == '\t' || byte == '\r' || byte == '\n';
 }
 
-std::size_t current_argument_index(std::string_view text, std::vector<std::string> const& tokens) {
+std::size_t current_argument_index(std::string_view text, std::vector<std::string> const& tokens)
+{
   return ends_with_ascii_space(text) ? tokens.size() : tokens.empty() ? std::size_t{0} : tokens.size() - 1;
 }
 
-std::string current_argument_prefix(std::string_view text, std::vector<std::string> const& tokens) {
+std::string current_argument_prefix(std::string_view text, std::vector<std::string> const& tokens)
+{
   if (ends_with_ascii_space(text) || tokens.empty()) return {};
   return tokens.back();
 }
 
-bool slash_command_matches(std::string_view command, std::string_view prefix) {
+bool slash_command_matches(std::string_view command, std::string_view prefix)
+{
   if (command.starts_with('/')) command.remove_prefix(1);
   return prefix.empty() || command.starts_with(prefix);
 }
 
-bool slash_command_item_matches(SlashCommandItem const& item, std::string_view prefix) {
+bool slash_command_item_matches(SlashCommandItem const& item, std::string_view prefix)
+{
   if (slash_command_matches(item.command, prefix)) return true;
   return std::ranges::any_of(item.aliases,
                              [&](std::string_view alias) { return slash_command_matches(alias, prefix); });
 }
 
-bool slash_command_name_exact_match(std::string_view command, std::string_view prefix) {
+bool slash_command_name_exact_match(std::string_view command, std::string_view prefix)
+{
   if (command.starts_with('/')) command.remove_prefix(1);
   return command == prefix;
 }
 
-bool slash_command_exact_match(SlashCommandItem const& item, std::string_view prefix) {
+bool slash_command_exact_match(SlashCommandItem const& item, std::string_view prefix)
+{
   if (slash_command_name_exact_match(item.command, prefix)) return true;
   return std::ranges::any_of(item.aliases,
                              [&](std::string_view alias) { return slash_command_name_exact_match(alias, prefix); });
 }
 
-bool slash_command_token_exact_match(SlashCommandItem const& item, std::string_view token) {
+bool slash_command_token_exact_match(SlashCommandItem const& item, std::string_view token)
+{
   return item.command == token || std::ranges::find(item.aliases, token) != item.aliases.end();
 }
 
 SlashCommandItem const* find_slash_command_for_arguments(std::string_view input,
-                                                         std::vector<SlashCommandItem> const& commands) {
+                                                         std::vector<SlashCommandItem> const& commands)
+{
   auto const token = command_token(input);
   if (token.empty()) return nullptr;
   for (auto const& command : commands) {
@@ -92,7 +108,8 @@ SlashCommandItem const* find_slash_command_for_arguments(std::string_view input,
 }
 
 bool completion_previous_args_match(SlashCommandArgumentCompletion const& completion,
-                                    std::vector<std::string> const& tokens) {
+                                    std::vector<std::string> const& tokens)
+{
   if (completion.required_previous_args.empty()) return true;
   if (tokens.size() < completion.required_previous_args.size()) return false;
   for (std::size_t index = 0; index < completion.required_previous_args.size(); ++index) {
@@ -102,7 +119,8 @@ bool completion_previous_args_match(SlashCommandArgumentCompletion const& comple
 }
 
 std::string completion_insert_text(SlashCommandItem const& command, SlashCommandArgumentCompletion const& completion,
-                                   std::vector<std::string> const& tokens, std::size_t argument_index) {
+                                   std::vector<std::string> const& tokens, std::size_t argument_index)
+{
   std::string text = command.command;
   std::vector<std::string> next_tokens;
   next_tokens.reserve(std::max(tokens.size(), argument_index + 1));
@@ -117,12 +135,14 @@ std::string completion_insert_text(SlashCommandItem const& command, SlashCommand
   return text;
 }
 
-bool slash_command_has_argument_completions(std::string_view input, std::vector<SlashCommandItem> const& commands) {
+bool slash_command_has_argument_completions(std::string_view input, std::vector<SlashCommandItem> const& commands)
+{
   auto const* command = find_slash_command_for_arguments(input, commands);
   return command != nullptr && !command->argument_completions.empty();
 }
 
-std::string slash_command_display(SlashCommandItem const& item) {
+std::string slash_command_display(SlashCommandItem const& item)
+{
   if (item.argument_completion) return item.command;
   auto text = item.command;
   if (!item.aliases.empty()) {
@@ -136,7 +156,8 @@ std::string slash_command_display(SlashCommandItem const& item) {
   return text;
 }
 
-std::string slash_command_hint_display(SlashCommandItem const& item) {
+std::string slash_command_hint_display(SlashCommandItem const& item)
+{
   if (item.argument_completion) return item.hint;
   auto text = item.hint;
   if (!item.key_display.empty()) {
@@ -146,7 +167,8 @@ std::string slash_command_hint_display(SlashCommandItem const& item) {
   return text;
 }
 
-std::string slash_command_description_display(SlashCommandItem const& item) {
+std::string slash_command_description_display(SlashCommandItem const& item)
+{
   auto text = item.description;
   if (!item.enabled) {
     if (!text.empty()) text += " — ";
@@ -157,7 +179,8 @@ std::string slash_command_description_display(SlashCommandItem const& item) {
 }
 
 std::vector<SlashCommandItem> filter_slash_argument_completions(std::string_view input,
-                                                                std::vector<SlashCommandItem> const& commands) {
+                                                                std::vector<SlashCommandItem> const& commands)
+{
   std::vector<SlashCommandItem> matches;
   auto const* command = find_slash_command_for_arguments(input, commands);
   if (!command || command->argument_completions.empty()) return matches;
@@ -183,23 +206,27 @@ std::vector<SlashCommandItem> filter_slash_argument_completions(std::string_view
   return matches;
 }
 
-std::string palette_prefix() {
+std::string palette_prefix()
+{
   return std::string(kSgrAccent) + std::string(kComposerBar) + std::string(kSgrReset) + std::string(kSgrComposerBg) +
          "  ";
 }
 
-std::size_t palette_content_width(std::size_t width) {
+std::size_t palette_content_width(std::size_t width)
+{
   auto const prefix_cols = detail::terminal_text_columns(palette_prefix());
   return width > prefix_cols ? width - prefix_cols : width;
 }
 
-std::string palette_surface_line(std::string content, std::size_t width) {
+std::string palette_surface_line(std::string content, std::size_t width)
+{
   return detail::composer_surface_line(palette_prefix() + std::move(content), width);
 }
 
 std::string render_palette_item_columns(SlashCommandItem const& item, bool selected, std::size_t selected_index,
                                         std::size_t match_count, std::size_t width, std::size_t cmd_col_width,
-                                        std::size_t category_col_width, std::size_t hint_col_width) {
+                                        std::size_t category_col_width, std::size_t hint_col_width)
+{
   static_cast<void>(selected_index);
   static_cast<void>(match_count);
   auto command_text = slash_command_display(item);
@@ -245,7 +272,8 @@ std::string render_palette_item_columns(SlashCommandItem const& item, bool selec
 }
 
 std::string render_palette_item_compact(SlashCommandItem const& item, bool selected, std::size_t selected_index,
-                                        std::size_t match_count, std::size_t width) {
+                                        std::size_t match_count, std::size_t width)
+{
   static_cast<void>(selected_index);
   static_cast<void>(match_count);
   std::string line = selected ? "› " : "  ";
@@ -273,7 +301,8 @@ std::string render_palette_item_compact(SlashCommandItem const& item, bool selec
 }  // namespace
 
 std::vector<std::string> render_slash_palette(ComposerSnapshot const& snapshot, std::size_t width,
-                                              std::size_t max_lines) {
+                                              std::size_t max_lines)
+{
   std::vector<std::string> lines;
   if (max_lines == 0) return lines;
   auto const matches = filter_slash_commands(snapshot.input, snapshot.slash_commands);
@@ -339,7 +368,8 @@ std::vector<std::string> render_slash_palette(ComposerSnapshot const& snapshot, 
 }  // namespace detail
 
 std::vector<SlashCommandItem> filter_slash_commands(std::string_view input,
-                                                    std::vector<SlashCommandItem> const& commands) {
+                                                    std::vector<SlashCommandItem> const& commands)
+{
   std::vector<SlashCommandItem> matches;
   if (!input.starts_with('/')) return matches;
   if (detail::has_argument_text(input)) return detail::filter_slash_argument_completions(input, commands);
@@ -353,7 +383,8 @@ std::vector<SlashCommandItem> filter_slash_commands(std::string_view input,
   return matches;
 }
 
-bool slash_palette_visible(std::string_view input, std::vector<SlashCommandItem> const& commands) {
+bool slash_palette_visible(std::string_view input, std::vector<SlashCommandItem> const& commands)
+{
   if (!input.starts_with('/') || commands.empty()) return false;
   if (detail::has_argument_text(input)) return detail::slash_command_has_argument_completions(input, commands);
 
@@ -365,14 +396,16 @@ bool slash_palette_visible(std::string_view input, std::vector<SlashCommandItem>
 }
 
 std::size_t clamp_slash_palette_selection(std::string_view input, std::vector<SlashCommandItem> const& commands,
-                                          std::size_t selected_index) {
+                                          std::size_t selected_index)
+{
   auto const matches = filter_slash_commands(input, commands);
   if (matches.empty()) return 0;
   return std::min(selected_index, matches.size() - 1);
 }
 
 std::size_t previous_slash_palette_selection(std::string_view input, std::vector<SlashCommandItem> const& commands,
-                                             std::size_t selected_index) {
+                                             std::size_t selected_index)
+{
   auto const matches = filter_slash_commands(input, commands);
   if (matches.empty()) return 0;
   auto const selected = std::min(selected_index, matches.size() - 1);
@@ -380,7 +413,8 @@ std::size_t previous_slash_palette_selection(std::string_view input, std::vector
 }
 
 std::size_t next_slash_palette_selection(std::string_view input, std::vector<SlashCommandItem> const& commands,
-                                         std::size_t selected_index) {
+                                         std::size_t selected_index)
+{
   auto const matches = filter_slash_commands(input, commands);
   if (matches.empty()) return 0;
   auto const selected = std::min(selected_index, matches.size() - 1);
@@ -388,7 +422,8 @@ std::size_t next_slash_palette_selection(std::string_view input, std::vector<Sla
 }
 
 std::string slash_command_selection_text(std::string_view input, std::vector<SlashCommandItem> const& commands,
-                                         std::size_t selected_index) {
+                                         std::size_t selected_index)
+{
   auto const matches = filter_slash_commands(input, commands);
   if (matches.empty()) return std::string(input);
   auto const selected = std::min(selected_index, matches.size() - 1);
@@ -400,7 +435,8 @@ std::string slash_command_selection_text(std::string_view input, std::vector<Sla
 
 std::optional<std::string> slash_command_selection_disabled_reason(std::string_view input,
                                                                    std::vector<SlashCommandItem> const& commands,
-                                                                   std::size_t selected_index) {
+                                                                   std::size_t selected_index)
+{
   auto const matches = filter_slash_commands(input, commands);
   if (matches.empty()) return std::nullopt;
   auto const selected = std::min(selected_index, matches.size() - 1);
@@ -409,7 +445,8 @@ std::optional<std::string> slash_command_selection_disabled_reason(std::string_v
   return std::string("command is disabled");
 }
 
-std::optional<std::size_t> slash_palette_selection_for_screen_row(ComposerSnapshot const& snapshot, std::size_t row) {
+std::optional<std::size_t> slash_palette_selection_for_screen_row(ComposerSnapshot const& snapshot, std::size_t row)
+{
   if (row == 0 || snapshot.permission_prompt || snapshot.question_prompt || snapshot.slash_palette_suppressed ||
       !slash_palette_visible(snapshot.input, snapshot.slash_commands)) {
     return std::nullopt;

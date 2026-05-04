@@ -19,13 +19,15 @@ namespace {
 #define AVA_FAKE_LSP_SERVER_PATH ""
 #endif
 
-std::vector<std::string> fake_lsp_argv(std::vector<std::string> extra = {}) {
+std::vector<std::string> fake_lsp_argv(std::vector<std::string> extra = {})
+{
   std::vector<std::string> argv{AVA_FAKE_LSP_SERVER_PATH};
   argv.insert(argv.end(), extra.begin(), extra.end());
   return argv;
 }
 
-std::filesystem::path make_lsp_workspace(std::string_view name) {
+std::filesystem::path make_lsp_workspace(std::string_view name)
+{
   auto const workspace = temp_root() / std::string(name);
   std::error_code remove_error;
   std::filesystem::remove_all(workspace, remove_error);
@@ -38,7 +40,8 @@ std::filesystem::path make_lsp_workspace(std::string_view name) {
 class ManyDiagnosticsProvider final : public ava::lsp::DiagnosticsProvider {
  public:
   [[nodiscard]] ava::core::Result<std::vector<ava::lsp::Diagnostic>> diagnostics(
-      std::filesystem::path const&, ava::lsp::CancelCallback = nullptr) override {
+      std::filesystem::path const&, ava::lsp::CancelCallback = nullptr) override
+  {
     std::vector<ava::lsp::Diagnostic> diagnostics;
     diagnostics.reserve(300);
     for (int index = 0; index < 300; ++index) {
@@ -49,7 +52,8 @@ class ManyDiagnosticsProvider final : public ava::lsp::DiagnosticsProvider {
   }
 };
 
-void test_lsp_manager_fake_server_diagnostics() {
+void test_lsp_manager_fake_server_diagnostics()
+{
   auto const workspace = make_lsp_workspace("lsp-manager");
   auto client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
       .argv = fake_lsp_argv(),
@@ -66,7 +70,8 @@ void test_lsp_manager_fake_server_diagnostics() {
          "LSP manager requests and parses fake diagnostics");
 }
 
-void test_lsp_manager_malformed_response_error() {
+void test_lsp_manager_malformed_response_error()
+{
   auto const workspace = make_lsp_workspace("lsp-malformed");
   auto client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
       .argv = fake_lsp_argv({"--malformed-diagnostics"}),
@@ -81,7 +86,8 @@ void test_lsp_manager_malformed_response_error() {
          "LSP manager reports malformed diagnostics responses cleanly");
 }
 
-void test_lsp_manager_crash_error() {
+void test_lsp_manager_crash_error()
+{
   auto const workspace = make_lsp_workspace("lsp-crash");
   auto client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
       .argv = fake_lsp_argv({"--crash-diagnostics"}),
@@ -96,7 +102,8 @@ void test_lsp_manager_crash_error() {
          "LSP manager reports crashed diagnostics server cleanly");
 }
 
-void test_lsp_manager_timeout_error() {
+void test_lsp_manager_timeout_error()
+{
   auto const workspace = make_lsp_workspace("lsp-timeout");
   auto client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
       .argv = fake_lsp_argv({"--sleep-diagnostics"}),
@@ -111,7 +118,8 @@ void test_lsp_manager_timeout_error() {
          "LSP manager times out and terminates unresponsive diagnostics requests");
 }
 
-void test_lsp_manager_cancellation() {
+void test_lsp_manager_cancellation()
+{
   auto const startup_workspace = make_lsp_workspace("lsp-startup-cancel");
   int startup_cancel_checks = 0;
   auto startup_canceled = ava::lsp::SubprocessLspClient::start(
@@ -139,7 +147,8 @@ void test_lsp_manager_cancellation() {
   }
 }
 
-void test_lsp_manager_huge_response_caps() {
+void test_lsp_manager_huge_response_caps()
+{
   auto const content_workspace = make_lsp_workspace("lsp-huge-content-length");
   auto content_client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
       .argv = fake_lsp_argv({"--huge-content-length"}),
@@ -168,7 +177,8 @@ void test_lsp_manager_huge_response_caps() {
          "LSP manager rejects oversized response headers");
 }
 
-void test_lsp_diagnostics_tool_and_dispatcher_json() {
+void test_lsp_diagnostics_tool_and_dispatcher_json()
+{
   auto const workspace = make_lsp_workspace("lsp-tool");
   auto client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
       .argv = fake_lsp_argv(),
@@ -204,7 +214,8 @@ void test_lsp_diagnostics_tool_and_dispatcher_json() {
          "tool dispatcher preserves semantic cancellation for lsp_diagnostics");
 }
 
-void test_lsp_file_uri_escapes_encoded_separators() {
+void test_lsp_file_uri_escapes_encoded_separators()
+{
   auto const workspace = make_lsp_workspace("lsp-uri-escape");
   auto const literal_name = std::string("x%2F..%2F..%2F.env");
   std::ofstream file(workspace / literal_name, std::ios::binary | std::ios::trunc);
@@ -226,7 +237,8 @@ void test_lsp_file_uri_escapes_encoded_separators() {
          "LSP file URIs percent-encode literal percent sequences before server parsing");
 }
 
-void test_lsp_dispatcher_redacts_server_error_context() {
+void test_lsp_dispatcher_redacts_server_error_context()
+{
   auto const workspace = make_lsp_workspace("lsp-redacted-error");
   auto client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
       .argv = fake_lsp_argv({"--crash-diagnostics"}),
@@ -247,7 +259,8 @@ void test_lsp_dispatcher_redacts_server_error_context() {
          "provider-facing LSP errors redact local server command and workspace context");
 }
 
-void test_lsp_dispatcher_bounds_provider_json() {
+void test_lsp_dispatcher_bounds_provider_json()
+{
   auto const workspace = make_lsp_workspace("lsp-bounded-json");
   ava::tools::ToolContext const context{.workspace_dir = workspace,
                                         .lsp_diagnostics_provider = std::make_shared<ManyDiagnosticsProvider>()};
@@ -273,7 +286,8 @@ void test_lsp_dispatcher_bounds_provider_json() {
 
 }  // namespace
 
-void run_lsp_tests() {
+void run_lsp_tests()
+{
   test_lsp_manager_fake_server_diagnostics();
   test_lsp_manager_malformed_response_error();
   test_lsp_manager_crash_error();

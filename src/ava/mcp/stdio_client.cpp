@@ -37,19 +37,22 @@ class UniqueFd {
   UniqueFd(UniqueFd const&) = delete;
   UniqueFd& operator=(UniqueFd const&) = delete;
   UniqueFd(UniqueFd&& other) noexcept : fd_(other.release()) {}
-  UniqueFd& operator=(UniqueFd&& other) noexcept {
+  UniqueFd& operator=(UniqueFd&& other) noexcept
+  {
     if (this != &other) reset(other.release());
     return *this;
   }
   ~UniqueFd() { reset(); }
 
   [[nodiscard]] int get() const noexcept { return fd_; }
-  [[nodiscard]] int release() noexcept {
+  [[nodiscard]] int release() noexcept
+  {
     int const fd = fd_;
     fd_ = -1;
     return fd;
   }
-  void reset(int fd = -1) noexcept {
+  void reset(int fd = -1) noexcept
+  {
     if (fd_ >= 0) close(fd_);
     fd_ = fd;
   }
@@ -60,7 +63,8 @@ class UniqueFd {
 
 class ScopedSignalIgnore {
  public:
-  explicit ScopedSignalIgnore(int signal) : signal_(signal) {
+  explicit ScopedSignalIgnore(int signal) : signal_(signal)
+  {
     struct sigaction action{};
     action.sa_handler = SIG_IGN;
     sigemptyset(&action.sa_mask);
@@ -70,7 +74,8 @@ class ScopedSignalIgnore {
   ScopedSignalIgnore& operator=(ScopedSignalIgnore const&) = delete;
   ScopedSignalIgnore(ScopedSignalIgnore&&) = delete;
   ScopedSignalIgnore& operator=(ScopedSignalIgnore&&) = delete;
-  ~ScopedSignalIgnore() {
+  ~ScopedSignalIgnore()
+  {
     if (installed_) sigaction(signal_, &previous_, nullptr);
   }
 
@@ -80,32 +85,40 @@ class ScopedSignalIgnore {
   bool installed_ = false;
 };
 
-ava::core::Error mcp_error(ava::core::ErrorCategory category, std::string message, McpServerConfig const& server) {
+ava::core::Error mcp_error(ava::core::ErrorCategory category, std::string message, McpServerConfig const& server)
+{
   auto error = ava::core::Error(category, std::move(message));
   error.with_context("mcp_server", server.id);
   if (!server.source_path.empty()) error.with_context("config", server.source_path.string());
   return error;
 }
 
-ava::core::Error errno_error(std::string message, McpServerConfig const& server) {
+ava::core::Error errno_error(std::string message, McpServerConfig const& server)
+{
   auto error = mcp_error(ava::core::ErrorCategory::Io, std::move(message), server);
   error.with_context("cause", std::strerror(errno));
   return error;
 }
 
-ava::core::Error protocol_error(std::string message, McpServerConfig const& server) {
+ava::core::Error protocol_error(std::string message, McpServerConfig const& server)
+{
   return mcp_error(ava::core::ErrorCategory::Tool, std::move(message), server);
 }
 
-bool is_canceled(CancelCallback const& cancel_requested) { return cancel_requested && cancel_requested(); }
+bool is_canceled(CancelCallback const& cancel_requested)
+{
+  return cancel_requested && cancel_requested();
+}
 
-ava::core::Error canceled_error(std::string message, McpServerConfig const& server) {
+ava::core::Error canceled_error(std::string message, McpServerConfig const& server)
+{
   auto error = mcp_error(ava::core::ErrorCategory::Unknown, std::move(message), server);
   error.with_context("canceled", "true");
   return error;
 }
 
-ava::core::Result<std::array<int, 2>> make_pipe(McpServerConfig const& server) {
+ava::core::Result<std::array<int, 2>> make_pipe(McpServerConfig const& server)
+{
   std::array<int, 2> fds{-1, -1};
   if (pipe(fds.data()) != 0) return std::unexpected(errno_error("failed to create MCP process pipe", server));
   for (auto& fd : fds) {
@@ -125,7 +138,8 @@ ava::core::Result<std::array<int, 2>> make_pipe(McpServerConfig const& server) {
   return fds;
 }
 
-bool set_child_process_group(pid_t pid) {
+bool set_child_process_group(pid_t pid)
+{
   for (int attempt = 0; attempt < 20; ++attempt) {
     if (setpgid(pid, pid) == 0 || errno == EACCES) return true;
     if (errno != EINTR && errno != ESRCH) return false;
@@ -134,7 +148,8 @@ bool set_child_process_group(pid_t pid) {
   return false;
 }
 
-pid_t waitpid_retry(pid_t pid, int* status, int options) {
+pid_t waitpid_retry(pid_t pid, int* status, int options)
+{
   while (true) {
     auto const waited = waitpid(pid, status, options);
     if (waited < 0 && errno == EINTR) continue;
@@ -142,7 +157,8 @@ pid_t waitpid_retry(pid_t pid, int* status, int options) {
   }
 }
 
-ssize_t read_retry(int fd, char* data, std::size_t size) {
+ssize_t read_retry(int fd, char* data, std::size_t size)
+{
   while (true) {
     auto const bytes = read(fd, data, size);
     if (bytes < 0 && errno == EINTR) continue;
@@ -150,7 +166,8 @@ ssize_t read_retry(int fd, char* data, std::size_t size) {
   }
 }
 
-ssize_t write_retry(int fd, char const* data, std::size_t size) {
+ssize_t write_retry(int fd, char const* data, std::size_t size)
+{
   while (true) {
     auto const bytes = write(fd, data, size);
     if (bytes < 0 && errno == EINTR) continue;
@@ -158,20 +175,23 @@ ssize_t write_retry(int fd, char const* data, std::size_t size) {
   }
 }
 
-std::size_t remaining_ms(std::chrono::steady_clock::time_point deadline) {
+std::size_t remaining_ms(std::chrono::steady_clock::time_point deadline)
+{
   auto const now = std::chrono::steady_clock::now();
   if (now >= deadline) return 0;
   return static_cast<std::size_t>(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count());
 }
 
-void close_fd(int& fd) noexcept {
+void close_fd(int& fd) noexcept
+{
   if (fd >= 0) {
     close(fd);
     fd = -1;
   }
 }
 
-void close_nonstandard_fds() {
+void close_nonstandard_fds()
+{
 #if defined(__linux__) && defined(SYS_close_range)
   if (syscall(SYS_close_range, static_cast<unsigned int>(STDERR_FILENO + 1), ~0U, 0U) == 0) return;
 #endif
@@ -180,9 +200,13 @@ void close_nonstandard_fds() {
   for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd) close(fd);
 }
 
-std::string json_string(std::string_view value) { return "\"" + ava::core::json::escape(value) + "\""; }
+std::string json_string(std::string_view value)
+{
+  return "\"" + ava::core::json::escape(value) + "\"";
+}
 
-std::optional<bool> bool_field(std::string_view object, std::string_view key) {
+std::optional<bool> bool_field(std::string_view object, std::string_view key)
+{
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return std::nullopt;
   auto const valid_terminator = [](std::string_view value, std::size_t offset) {
@@ -194,7 +218,8 @@ std::optional<bool> bool_field(std::string_view object, std::string_view key) {
   return std::nullopt;
 }
 
-std::optional<std::size_t> field_value_start_any_depth(std::string_view object, std::string_view key) {
+std::optional<std::size_t> field_value_start_any_depth(std::string_view object, std::string_view key)
+{
   std::string const needle = "\"" + ava::core::json::escape(key) + "\"";
   bool in_string = false;
   bool escaped = false;
@@ -227,7 +252,8 @@ std::optional<std::size_t> field_value_start_any_depth(std::string_view object, 
   return std::nullopt;
 }
 
-bool json_depth_within_limit(std::string_view value, int max_depth) {
+bool json_depth_within_limit(std::string_view value, int max_depth)
+{
   bool in_string = false;
   bool escaped = false;
   int depth = 0;
@@ -256,13 +282,15 @@ bool json_depth_within_limit(std::string_view value, int max_depth) {
   return true;
 }
 
-std::string exit_detail(int status) {
+std::string exit_detail(int status)
+{
   if (WIFEXITED(status)) return "exit " + std::to_string(WEXITSTATUS(status));
   if (WIFSIGNALED(status)) return "signal " + std::to_string(WTERMSIG(status));
   return "unknown status " + std::to_string(status);
 }
 
-std::vector<std::string> mcp_argv(McpServerConfig const& server) {
+std::vector<std::string> mcp_argv(McpServerConfig const& server)
+{
   std::vector<std::string> argv;
   argv.reserve(server.args.size() + 1);
   argv.push_back(server.command);
@@ -270,12 +298,14 @@ std::vector<std::string> mcp_argv(McpServerConfig const& server) {
   return argv;
 }
 
-std::filesystem::path child_working_dir(McpStdioClientOptions const& options) {
+std::filesystem::path child_working_dir(McpStdioClientOptions const& options)
+{
   if (!options.workspace_dir.empty()) return options.workspace_dir;
   return std::filesystem::current_path();
 }
 
-std::string trim_ascii(std::string text) {
+std::string trim_ascii(std::string text)
+{
   auto first = text.begin();
   while (first != text.end() && std::isspace(static_cast<unsigned char>(*first)) != 0) ++first;
   auto last = text.end();
@@ -283,13 +313,15 @@ std::string trim_ascii(std::string text) {
   return std::string(first, last);
 }
 
-std::string lowercase_ascii(std::string text) {
+std::string lowercase_ascii(std::string text)
+{
   for (auto& ch : text) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
   return text;
 }
 
 ava::core::Result<std::size_t> parse_content_length(std::string_view headers, McpServerConfig const& server,
-                                                    std::size_t max_message_bytes) {
+                                                    std::size_t max_message_bytes)
+{
   std::optional<std::size_t> content_length;
   std::size_t line_start = 0;
   while (line_start <= headers.size()) {
@@ -325,13 +357,15 @@ ava::core::Result<std::size_t> parse_content_length(std::string_view headers, Mc
   return *content_length;
 }
 
-std::optional<std::size_t> header_end_offset(std::string_view buffer) {
+std::optional<std::size_t> header_end_offset(std::string_view buffer)
+{
   if (auto const crlf = buffer.find("\r\n\r\n"); crlf != std::string_view::npos) return crlf + 4;
   if (auto const lf = buffer.find("\n\n"); lf != std::string_view::npos) return lf + 2;
   return std::nullopt;
 }
 
-std::optional<std::string> response_id(std::string_view message) {
+std::optional<std::string> response_id(std::string_view message)
+{
   auto id = ava::core::json::string_field(message, "id");
   if (id) return id;
   auto const numeric_start = field_value_start_any_depth(message, "id");
@@ -342,11 +376,13 @@ std::optional<std::string> response_id(std::string_view message) {
   return std::string(message.substr(*numeric_start, end - *numeric_start));
 }
 
-std::optional<std::string> error_message_from_response(std::string_view error_json) {
+std::optional<std::string> error_message_from_response(std::string_view error_json)
+{
   return ava::core::json::string_field(error_json, "message");
 }
 
-bool is_valid_mcp_tool_name(std::string_view name) {
+bool is_valid_mcp_tool_name(std::string_view name)
+{
   if (name.empty() || name.size() > 128) return false;
   for (char const ch : name) {
     auto const byte = static_cast<unsigned char>(ch);
@@ -355,7 +391,8 @@ bool is_valid_mcp_tool_name(std::string_view name) {
   return true;
 }
 
-std::string text_content_from_result(std::string_view result_json) {
+std::string text_content_from_result(std::string_view result_json)
+{
   std::string content;
   for (auto const& item : ava::core::json::objects_in_array_field(result_json, "content")) {
     auto const type = ava::core::json::string_field(item, "type");
@@ -373,16 +410,20 @@ std::string text_content_from_result(std::string_view result_json) {
 }  // namespace
 
 McpStdioClient::McpStdioClient(McpServerConfig server, McpStdioClientOptions options)
-    : server_(std::move(server)), options_(std::move(options)) {}
+    : server_(std::move(server)), options_(std::move(options))
+{
+}
 
-McpStdioClient::~McpStdioClient() {
+McpStdioClient::~McpStdioClient()
+{
   terminate_child();
   close_fds();
 }
 
 ava::core::Result<std::unique_ptr<McpStdioClient>> McpStdioClient::start(McpServerConfig server,
                                                                          McpStdioClientOptions options,
-                                                                         CancelCallback cancel_requested) {
+                                                                         CancelCallback cancel_requested)
+{
   if (server.command.empty()) {
     return std::unexpected(
         mcp_error(ava::core::ErrorCategory::InvalidArgument, "MCP server command must not be empty", server));
@@ -416,15 +457,28 @@ ava::core::Result<std::unique_ptr<McpStdioClient>> McpStdioClient::start(McpServ
   return client;
 }
 
-McpServerConfig const& McpStdioClient::server() const noexcept { return server_; }
+McpServerConfig const& McpStdioClient::server() const noexcept
+{
+  return server_;
+}
 
-McpInitialization const& McpStdioClient::initialization() const noexcept { return initialization_; }
+McpInitialization const& McpStdioClient::initialization() const noexcept
+{
+  return initialization_;
+}
 
-std::string const& McpStdioClient::stderr_tail() const noexcept { return stderr_tail_; }
+std::string const& McpStdioClient::stderr_tail() const noexcept
+{
+  return stderr_tail_;
+}
 
-bool McpStdioClient::stderr_truncated() const noexcept { return stderr_truncated_; }
+bool McpStdioClient::stderr_truncated() const noexcept
+{
+  return stderr_truncated_;
+}
 
-ava::core::VoidResult McpStdioClient::launch() {
+ava::core::VoidResult McpStdioClient::launch()
+{
   auto stdin_pipe = make_pipe(server_);
   if (!stdin_pipe) return std::unexpected(std::move(stdin_pipe.error()));
   UniqueFd stdin_read((*stdin_pipe)[0]);
@@ -495,7 +549,8 @@ ava::core::VoidResult McpStdioClient::launch() {
   return {};
 }
 
-ava::core::VoidResult McpStdioClient::initialize(CancelCallback cancel_requested) {
+ava::core::VoidResult McpStdioClient::initialize(CancelCallback cancel_requested)
+{
   std::string const params =
       "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"ava\","
       "\"version\":\"" +
@@ -522,7 +577,8 @@ ava::core::VoidResult McpStdioClient::initialize(CancelCallback cancel_requested
                        "timed out writing MCP initialized notification", cancel_requested);
 }
 
-ava::core::Result<std::vector<McpToolDescription>> McpStdioClient::list_tools(CancelCallback cancel_requested) {
+ava::core::Result<std::vector<McpToolDescription>> McpStdioClient::list_tools(CancelCallback cancel_requested)
+{
   if (is_canceled(cancel_requested)) {
     return std::unexpected(canceled_error("MCP tools/list canceled", server_));
   }
@@ -560,7 +616,8 @@ ava::core::Result<std::vector<McpToolDescription>> McpStdioClient::list_tools(Ca
 
 ava::core::Result<McpToolCallResult> McpStdioClient::call_tool(std::string_view tool_name,
                                                                std::string_view arguments_json,
-                                                               CancelCallback cancel_requested) {
+                                                               CancelCallback cancel_requested)
+{
   if (!is_valid_mcp_tool_name(tool_name)) {
     return std::unexpected(mcp_error(ava::core::ErrorCategory::InvalidArgument, "MCP tool name is invalid", server_));
   }
@@ -589,7 +646,8 @@ ava::core::Result<McpStdioClient::JsonRpcResponse> McpStdioClient::request(std::
                                                                            std::string_view params_json,
                                                                            std::chrono::milliseconds timeout,
                                                                            std::string_view timeout_message,
-                                                                           CancelCallback cancel_requested) {
+                                                                           CancelCallback cancel_requested)
+{
   auto const deadline = std::chrono::steady_clock::now() + timeout;
   auto const request_id = "ava_mcp_" + std::to_string(next_request_id_++);
   std::string const request_json = "{\"jsonrpc\":\"2.0\",\"id\":" + json_string(request_id) +
@@ -637,7 +695,8 @@ ava::core::Result<McpStdioClient::JsonRpcResponse> McpStdioClient::request(std::
 ava::core::VoidResult McpStdioClient::write_message(std::string_view message,
                                                     std::chrono::steady_clock::time_point deadline,
                                                     std::chrono::milliseconds timeout, std::string_view timeout_message,
-                                                    CancelCallback cancel_requested) {
+                                                    CancelCallback cancel_requested)
+{
   if (stdin_fd_ < 0) return std::unexpected(protocol_error("MCP stdin is closed", server_));
   std::string const frame = "Content-Length: " + std::to_string(message.size()) + "\r\n\r\n" + std::string(message);
   std::size_t offset = 0;
@@ -664,7 +723,8 @@ ava::core::VoidResult McpStdioClient::write_message(std::string_view message,
   return {};
 }
 
-ava::core::Result<std::optional<std::string>> McpStdioClient::try_extract_message() {
+ava::core::Result<std::optional<std::string>> McpStdioClient::try_extract_message()
+{
   auto const header_end = header_end_offset(stdout_buffer_);
   if (!header_end) {
     if (stdout_buffer_.size() > kMaxMcpHeaderBytes) {
@@ -698,7 +758,8 @@ ava::core::Result<std::string> McpStdioClient::read_message(std::chrono::steady_
                                                             std::chrono::milliseconds timeout,
                                                             std::string_view timeout_message,
                                                             std::string_view closed_message,
-                                                            CancelCallback cancel_requested) {
+                                                            CancelCallback cancel_requested)
+{
   while (true) {
     if (is_canceled(cancel_requested)) {
       terminate_child();
@@ -752,7 +813,8 @@ ava::core::Result<std::string> McpStdioClient::read_message(std::chrono::steady_
 ava::core::VoidResult McpStdioClient::wait_for_writable(std::chrono::steady_clock::time_point deadline,
                                                         std::chrono::milliseconds timeout,
                                                         std::string_view timeout_message,
-                                                        CancelCallback cancel_requested) {
+                                                        CancelCallback cancel_requested)
+{
   while (true) {
     if (is_canceled(cancel_requested)) {
       terminate_child();
@@ -786,7 +848,8 @@ ava::core::VoidResult McpStdioClient::wait_for_writable(std::chrono::steady_cloc
   }
 }
 
-ava::core::VoidResult McpStdioClient::drain_stdout() {
+ava::core::VoidResult McpStdioClient::drain_stdout()
+{
   if (stdout_fd_ < 0) return {};
   std::array<char, 4096> buffer{};
   int reads = 0;
@@ -806,7 +869,8 @@ ava::core::VoidResult McpStdioClient::drain_stdout() {
   }
 }
 
-ava::core::VoidResult McpStdioClient::drain_stderr() {
+ava::core::VoidResult McpStdioClient::drain_stderr()
+{
   if (stderr_fd_ < 0) return {};
   std::array<char, 4096> buffer{};
   int reads = 0;
@@ -826,7 +890,8 @@ ava::core::VoidResult McpStdioClient::drain_stderr() {
   }
 }
 
-ava::core::VoidResult McpStdioClient::reap_child() {
+ava::core::VoidResult McpStdioClient::reap_child()
+{
   if (pid_ <= 0 || child_exited_) return {};
   int status = 0;
   auto const waited = waitpid_retry(static_cast<pid_t>(pid_), &status, WNOHANG);
@@ -845,7 +910,8 @@ ava::core::VoidResult McpStdioClient::reap_child() {
   return {};
 }
 
-ava::core::VoidResult McpStdioClient::set_pipe_nonblocking(int fd, std::string_view pipe_name) {
+ava::core::VoidResult McpStdioClient::set_pipe_nonblocking(int fd, std::string_view pipe_name)
+{
   int const flags = fcntl(fd, F_GETFL, 0);
   if (flags < 0) return std::unexpected(errno_error("failed to inspect MCP pipe flags", server_));
   if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
@@ -856,7 +922,8 @@ ava::core::VoidResult McpStdioClient::set_pipe_nonblocking(int fd, std::string_v
   return {};
 }
 
-void McpStdioClient::append_stderr(std::string_view chunk) {
+void McpStdioClient::append_stderr(std::string_view chunk)
+{
   if (chunk.size() >= options_.max_stderr_bytes) {
     stderr_tail_ = std::string(chunk.substr(chunk.size() - options_.max_stderr_bytes));
     stderr_truncated_ = true;
@@ -870,13 +937,15 @@ void McpStdioClient::append_stderr(std::string_view chunk) {
   stderr_tail_.append(chunk);
 }
 
-void McpStdioClient::close_fds() noexcept {
+void McpStdioClient::close_fds() noexcept
+{
   close_fd(stdin_fd_);
   close_fd(stdout_fd_);
   close_fd(stderr_fd_);
 }
 
-void McpStdioClient::terminate_child() noexcept {
+void McpStdioClient::terminate_child() noexcept
+{
   if (pid_ <= 0 || child_exited_) return;
   close_fd(stdin_fd_);
   if (can_signal_group_) {
@@ -908,7 +977,8 @@ void McpStdioClient::terminate_child() noexcept {
   }
 }
 
-ava::core::VoidResult McpStdioClient::shutdown(std::chrono::milliseconds grace) {
+ava::core::VoidResult McpStdioClient::shutdown(std::chrono::milliseconds grace)
+{
   close_fd(stdin_fd_);
   auto const deadline = std::chrono::steady_clock::now() + grace;
   while (pid_ > 0 && !child_exited_ && std::chrono::steady_clock::now() < deadline) {

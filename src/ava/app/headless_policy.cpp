@@ -10,34 +10,40 @@
 namespace ava::app {
 namespace {
 
-ava::core::Error unsupported_allow_error(std::string_view value) {
+ava::core::Error unsupported_allow_error(std::string_view value)
+{
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "unsupported --allow value");
   error.with_context("value", std::string(value));
   error.with_context("supported", "read-only");
   return error;
 }
 
-ava::core::Error unsupported_allow_tool_error(std::string_view value) {
+ava::core::Error unsupported_allow_tool_error(std::string_view value)
+{
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "unsupported --allow-tool value");
   error.with_context("value", std::string(value));
   error.with_context("supported", "glob, grep, read_file, webfetch");
   return error;
 }
 
-bool is_supported_tool(std::string_view value) {
+bool is_supported_tool(std::string_view value)
+{
   return value == "glob" || value == "grep" || value == "read_file" || value == "webfetch";
 }
 
-bool contains_tool(std::vector<std::string> const& tools, std::string_view value) {
+bool contains_tool(std::vector<std::string> const& tools, std::string_view value)
+{
   return std::ranges::any_of(tools, [value](std::string const& tool) { return tool == value; });
 }
 
-bool prompt_matches_read_only(ava::permissions::PermissionPrompt const& prompt) {
+bool prompt_matches_read_only(ava::permissions::PermissionPrompt const& prompt)
+{
   return prompt.operation == ava::permissions::Operation::ReadFile ||
          prompt.operation == ava::permissions::Operation::SearchFiles;
 }
 
-bool prompt_matches_allowed_tool(ava::permissions::PermissionPrompt const& prompt, std::set<std::string> const& tools) {
+bool prompt_matches_allowed_tool(ava::permissions::PermissionPrompt const& prompt, std::set<std::string> const& tools)
+{
   if (prompt.tool_name == "read_file") {
     return prompt.operation == ava::permissions::Operation::ReadFile && tools.contains("read_file");
   }
@@ -52,7 +58,8 @@ bool prompt_matches_allowed_tool(ava::permissions::PermissionPrompt const& promp
 
 }  // namespace
 
-ava::core::VoidResult add_headless_allow_policy(HeadlessPermissionPolicyOptions& options, std::string_view value) {
+ava::core::VoidResult add_headless_allow_policy(HeadlessPermissionPolicyOptions& options, std::string_view value)
+{
   if (value != "read-only") {
     return std::unexpected(unsupported_allow_error(value));
   }
@@ -60,7 +67,8 @@ ava::core::VoidResult add_headless_allow_policy(HeadlessPermissionPolicyOptions&
   return {};
 }
 
-ava::core::VoidResult add_headless_allowed_tools(HeadlessPermissionPolicyOptions& options, std::string_view value) {
+ava::core::VoidResult add_headless_allowed_tools(HeadlessPermissionPolicyOptions& options, std::string_view value)
+{
   std::size_t start = 0;
   while (start <= value.size()) {
     auto const comma = value.find(',', start);
@@ -80,7 +88,8 @@ ava::core::VoidResult add_headless_allowed_tools(HeadlessPermissionPolicyOptions
   return {};
 }
 
-ava::permissions::PermissionResolver build_headless_permission_resolver(HeadlessPermissionPolicyOptions options) {
+ava::permissions::PermissionResolver build_headless_permission_resolver(HeadlessPermissionPolicyOptions options)
+{
   std::set<std::string> allowed_tools(options.allowed_tools.begin(), options.allowed_tools.end());
   return [allow_read_only = options.allow_read_only,
           allowed_tools = std::move(allowed_tools)](ava::permissions::PermissionPrompt const& prompt)

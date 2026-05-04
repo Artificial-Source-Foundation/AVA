@@ -54,10 +54,12 @@ namespace {
 class StreamingFakeTransport final : public ava::provider::Transport {
  public:
   explicit StreamingFakeTransport(std::vector<ava::provider::HttpResponse> responses)
-      : responses_(responses.begin(), responses.end()) {}
+      : responses_(responses.begin(), responses.end())
+  {
+  }
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
-      ava::provider::HttpRequest const& request) override {
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  {
     return send_streaming(request, nullptr);
   }
 
@@ -65,7 +67,8 @@ class StreamingFakeTransport final : public ava::provider::Transport {
 
   [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send_streaming(
       ava::provider::HttpRequest const& request, BodyChunkSink on_body_chunk,
-      CancelCallback cancel_requested = nullptr) override {
+      CancelCallback cancel_requested = nullptr) override
+  {
     requests_.push_back(request);
     if (responses_.empty()) {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "fake transport has no response"));
@@ -91,8 +94,8 @@ class StreamingFakeTransport final : public ava::provider::Transport {
 
 class FailingOnceTransport final : public ava::provider::Transport {
  public:
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
-      ava::provider::HttpRequest const& request) override {
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  {
     requests_.push_back(request);
     if (requests_.size() == 1) {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "temporary transport failure"));
@@ -106,7 +109,8 @@ class FailingOnceTransport final : public ava::provider::Transport {
   std::vector<ava::provider::HttpRequest> requests_;
 };
 
-void test_openai_provider_contract() {
+void test_openai_provider_contract()
+{
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   auto const request = provider.build_request(
       ava::provider::ProviderRequest{
@@ -661,7 +665,8 @@ void test_openai_provider_contract() {
   }
 }
 
-void test_openai_incremental_sse_parser() {
+void test_openai_incremental_sse_parser()
+{
   ava::provider::OpenAIStreamParser parser;
   std::vector<ava::provider::StreamEvent> events;
   auto append = [&](std::string_view chunk) {
@@ -701,7 +706,8 @@ void test_openai_incremental_sse_parser() {
   }
 }
 
-void test_openai_compatible_provider_contract() {
+void test_openai_compatible_provider_contract()
+{
   ava::provider::OpenAICompatibleProvider const provider(
       ava::provider::OpenAICompatibleProviderOptions{.base_url = "https://compat.example.test/api",
                                                      .chat_completions_path = "/v1/chat/completions",
@@ -859,7 +865,8 @@ void test_openai_compatible_provider_contract() {
          "OpenAI-compatible request only replays reasoning_content when explicitly enabled");
 }
 
-void test_openai_compatible_parsing() {
+void test_openai_compatible_parsing()
+{
   auto stream = ava::provider::parse_openai_compatible_sse(
       "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"plan\"}}]}\n\n"
       "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\n"
@@ -1009,7 +1016,8 @@ void test_openai_compatible_parsing() {
          "OpenAI-compatible HTTP errors reuse normalized context-overflow classification");
 }
 
-void test_builtin_provider_registry() {
+void test_builtin_provider_registry()
+{
   auto registry = ava::provider::builtin_provider_registry();
   expect(registry.contains("openai"), "builtin provider registry contains OpenAI");
   expect(registry.contains("kimi") && registry.contains("moonshot") && registry.contains("openrouter"),
@@ -1026,7 +1034,8 @@ void test_builtin_provider_registry() {
 
 }  // namespace
 
-void run_provider_openai_tests() {
+void run_provider_openai_tests()
+{
   test_openai_provider_contract();
   test_openai_incremental_sse_parser();
   test_openai_compatible_provider_contract();

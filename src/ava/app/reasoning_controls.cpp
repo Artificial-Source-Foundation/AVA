@@ -11,7 +11,8 @@
 namespace ava::app {
 namespace {
 
-std::string reasoning_selected_status(RuntimeReasoningSelection const& selection) {
+std::string reasoning_selected_status(RuntimeReasoningSelection const& selection)
+{
   std::string status = "reasoning set to " + selection.level;
   if (selection.budget_tokens) status += " budget " + std::to_string(*selection.budget_tokens);
   if (!selection.display.empty()) status += " display " + selection.display;
@@ -20,7 +21,8 @@ std::string reasoning_selected_status(RuntimeReasoningSelection const& selection
 
 }  // namespace
 
-std::optional<std::string> reasoning_status_for_session(RuntimeSession const& session) {
+std::optional<std::string> reasoning_status_for_session(RuntimeSession const& session)
+{
   auto const& model = session.model;
   if (!model.supports_reasoning.value_or(false) || model.reasoning_levels.empty()) return std::nullopt;
   if (!session.reasoning || session.reasoning->level.empty()) return std::nullopt;
@@ -28,7 +30,8 @@ std::optional<std::string> reasoning_status_for_session(RuntimeSession const& se
 }
 
 ava::core::Result<RuntimeReasoningSelection> reasoning_selection_for_level(ava::config::ModelInfo const& model,
-                                                                           std::string level) {
+                                                                           std::string level)
+{
   auto profile = ava::config::reasoning_provider_profile_for_model(model);
   if (!profile || !profile->enabled_reasoning_requires_budget_tokens || level != "enabled") {
     return RuntimeReasoningSelection{.level = std::move(level), .budget_tokens = std::nullopt, .display = {}};
@@ -51,7 +54,8 @@ ava::core::Result<RuntimeReasoningSelection> reasoning_selection_for_level(ava::
   return RuntimeReasoningSelection{.level = std::move(level), .budget_tokens = budget, .display = {}};
 }
 
-ava::core::Result<std::string> cycle_runtime_reasoning(RuntimeSession& session) {
+ava::core::Result<std::string> cycle_runtime_reasoning(RuntimeSession& session)
+{
   auto const& model = session.model;
   if (!model.supports_reasoning.value_or(false)) {
     return std::string("reasoning unavailable: current model does not declare reasoning support");

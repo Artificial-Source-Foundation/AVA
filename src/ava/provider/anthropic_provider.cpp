@@ -24,19 +24,25 @@ struct PendingToolUse {
   std::size_t part_index = 0;
 };
 
-std::string configured_base_url() {
+std::string configured_base_url()
+{
   if (char const* value = std::getenv("ANTHROPIC_BASE_URL"); value && value[0] != '\0') return value;
   return std::string(kDefaultAnthropicBaseUrl);
 }
 
-std::string trim_trailing_slashes(std::string value) {
+std::string trim_trailing_slashes(std::string value)
+{
   while (value.size() > 1 && value.back() == '/') value.pop_back();
   return value;
 }
 
-std::string message_role(ChatMessage const& message) { return message.role == "assistant" ? "assistant" : "user"; }
+std::string message_role(ChatMessage const& message)
+{
+  return message.role == "assistant" ? "assistant" : "user";
+}
 
-std::vector<ContentPart> message_content_parts(ChatMessage const& message) {
+std::vector<ContentPart> message_content_parts(ChatMessage const& message)
+{
   if (!message.content_parts.empty()) return message.content_parts;
   if (message.content.empty()) return {};
   return {ContentPart{.type = ContentPartType::Text,
@@ -47,7 +53,8 @@ std::vector<ContentPart> message_content_parts(ChatMessage const& message) {
                       .is_error = false}};
 }
 
-ContentPart text_separator_part() {
+ContentPart text_separator_part()
+{
   return ContentPart{.type = ContentPartType::Text,
                      .text = "\n\n",
                      .tool_call_id = "",
@@ -56,8 +63,8 @@ ContentPart text_separator_part() {
                      .is_error = false};
 }
 
-void append_content_parts(std::vector<ContentPart>& target, std::vector<ContentPart> const& source,
-                          bool separate_text) {
+void append_content_parts(std::vector<ContentPart>& target, std::vector<ContentPart> const& source, bool separate_text)
+{
   for (auto const& part : source) {
     if (part.type == ContentPartType::Text && part.text.empty()) continue;
     if (separate_text && part.type == ContentPartType::Text && !target.empty() &&
@@ -77,7 +84,8 @@ void append_content_parts(std::vector<ContentPart>& target, std::vector<ContentP
   }
 }
 
-ava::core::Error invalid_content_part_error(std::string message, std::size_t message_index, std::size_t part_index) {
+ava::core::Error invalid_content_part_error(std::string message, std::size_t message_index, std::size_t part_index)
+{
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
   error.with_context("provider", "anthropic");
   error.with_context("message_index", std::to_string(message_index));
@@ -85,26 +93,41 @@ ava::core::Error invalid_content_part_error(std::string message, std::size_t mes
   return error;
 }
 
-bool contains_tool_use_id(std::vector<std::string> const& ids, std::string_view id) {
+bool contains_tool_use_id(std::vector<std::string> const& ids, std::string_view id)
+{
   for (auto const& seen : ids) {
     if (seen == id) return true;
   }
   return false;
 }
 
-bool valid_cache_control_ttl(std::string_view ttl) { return ttl == "5m" || ttl == "1h"; }
+bool valid_cache_control_ttl(std::string_view ttl)
+{
+  return ttl == "5m" || ttl == "1h";
+}
 
-std::string cache_control_json(std::string_view ttl) {
+std::string cache_control_json(std::string_view ttl)
+{
   return ",\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"" + std::string(ttl) + "\"}";
 }
 
-std::string cache_control_suffix(std::string_view ttl) { return ttl.empty() ? std::string{} : cache_control_json(ttl); }
+std::string cache_control_suffix(std::string_view ttl)
+{
+  return ttl.empty() ? std::string{} : cache_control_json(ttl);
+}
 
-bool valid_reasoning_type(std::string_view type) { return type == "enabled" || type == "adaptive"; }
+bool valid_reasoning_type(std::string_view type)
+{
+  return type == "enabled" || type == "adaptive";
+}
 
-bool valid_reasoning_display(std::string_view display) { return display == "summarized" || display == "omitted"; }
+bool valid_reasoning_display(std::string_view display)
+{
+  return display == "summarized" || display == "omitted";
+}
 
-std::string normalized_anthropic_stop_reason(std::string_view reason) {
+std::string normalized_anthropic_stop_reason(std::string_view reason)
+{
   if (reason == "end_turn") return "completed";
   if (reason == "tool_use") return "tool_calls";
   if (reason == "max_tokens") return "max_tokens";
@@ -115,7 +138,8 @@ std::string normalized_anthropic_stop_reason(std::string_view reason) {
   return std::string(reason);
 }
 
-ava::core::VoidResult validate_anthropic_content_parts(std::vector<ChatMessage> const& messages) {
+ava::core::VoidResult validate_anthropic_content_parts(std::vector<ChatMessage> const& messages)
+{
   std::vector<PendingToolUse> pending_tool_uses;
   std::vector<std::string> seen_tool_use_ids;
   for (std::size_t message_index = 0; message_index < messages.size(); ++message_index) {
@@ -219,7 +243,8 @@ ava::core::VoidResult validate_anthropic_content_parts(std::vector<ChatMessage> 
   return {};
 }
 
-std::string anthropic_content_part_json(ContentPart const& part) {
+std::string anthropic_content_part_json(ContentPart const& part)
+{
   switch (part.type) {
     case ContentPartType::Text:
       return "{\"type\":\"text\",\"text\":\"" + ava::core::json::escape(part.text) + "\"" +
@@ -254,7 +279,8 @@ std::string anthropic_content_part_json(ContentPart const& part) {
   return "{\"type\":\"text\",\"text\":\"\"}";
 }
 
-std::string message_json(ChatMessage const& message) {
+std::string message_json(ChatMessage const& message)
+{
   std::string const role = message_role(message);
   if (message.content_parts.empty()) {
     return "{\"role\":\"" + role + "\",\"content\":\"" + ava::core::json::escape(message.content) + "\"}";
@@ -272,7 +298,8 @@ std::string message_json(ChatMessage const& message) {
   return json;
 }
 
-std::vector<ChatMessage> collapse_consecutive_roles(std::vector<ChatMessage> const& messages) {
+std::vector<ChatMessage> collapse_consecutive_roles(std::vector<ChatMessage> const& messages)
+{
   std::vector<ChatMessage> collapsed;
   for (auto const& message : messages) {
     std::string const role = message_role(message);
@@ -297,12 +324,14 @@ std::vector<ChatMessage> collapse_consecutive_roles(std::vector<ChatMessage> con
   return collapsed;
 }
 
-long long max_tokens_for_request(ProviderRequest const& request) {
+long long max_tokens_for_request(ProviderRequest const& request)
+{
   long long const value = request.max_output_tokens.value_or(kDefaultMaxTokens);
   return value > 0 ? value : kDefaultMaxTokens;
 }
 
-ava::core::VoidResult validate_anthropic_request_options(ProviderRequest const& request) {
+ava::core::VoidResult validate_anthropic_request_options(ProviderRequest const& request)
+{
   if (!request.system_prompt_cache_ttl.empty() && !valid_cache_control_ttl(request.system_prompt_cache_ttl)) {
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "Anthropic system cache ttl must be 5m or 1h"));
@@ -349,7 +378,8 @@ ava::core::VoidResult validate_anthropic_request_options(ProviderRequest const& 
 }
 
 ava::core::VoidResult validate_cache_control_order(ProviderRequest const& request,
-                                                   std::vector<ChatMessage> const& messages) {
+                                                   std::vector<ChatMessage> const& messages)
+{
   bool saw_short_ttl = false;
   std::size_t breakpoints = 0;
   auto observe = [&](std::string_view ttl) -> ava::core::VoidResult {
@@ -376,7 +406,8 @@ ava::core::VoidResult validate_cache_control_order(ProviderRequest const& reques
   return {};
 }
 
-std::string system_prompt_json(ProviderRequest const& request) {
+std::string system_prompt_json(ProviderRequest const& request)
+{
   if (request.system_prompt.empty() && request.system_prompt_cache_ttl.empty()) return {};
   if (request.system_prompt_cache_ttl.empty()) {
     return "\"system\":\"" + ava::core::json::escape(request.system_prompt) + "\"";
@@ -385,7 +416,8 @@ std::string system_prompt_json(ProviderRequest const& request) {
          cache_control_json(request.system_prompt_cache_ttl) + "}]";
 }
 
-std::string reasoning_options_json(ProviderReasoningOptions const& reasoning) {
+std::string reasoning_options_json(ProviderReasoningOptions const& reasoning)
+{
   std::string json = ",\"thinking\":{\"type\":\"" + ava::core::json::escape(reasoning.type) + "\"";
   if (reasoning.budget_tokens) json += ",\"budget_tokens\":" + std::to_string(*reasoning.budget_tokens);
   if (!reasoning.display.empty()) json += ",\"display\":\"" + ava::core::json::escape(reasoning.display) + "\"";
@@ -393,26 +425,31 @@ std::string reasoning_options_json(ProviderReasoningOptions const& reasoning) {
   return json;
 }
 
-std::string stream_error_message(std::string_view message) {
+std::string stream_error_message(std::string_view message)
+{
   return message.empty() ? "unrecognized Anthropic stream event" : std::string(message);
 }
 
-std::string sanitized_anthropic_body_snippet(std::string_view body) {
+std::string sanitized_anthropic_body_snippet(std::string_view body)
+{
   return sanitized_body_snippet(body, {"access_token", "refresh_token", "api_key", "x-api-key", "Authorization",
                                        "signature", "redacted_data", "data", "thinking"});
 }
 
-std::string stop_details_explanation(std::string_view object) {
+std::string stop_details_explanation(std::string_view object)
+{
   auto const stop_details = ava::core::json::object_field(object, "stop_details");
   if (!stop_details) return {};
   return ava::core::json::string_field(*stop_details, "explanation").value_or("");
 }
 
-bool has_stop_details(std::string_view object) {
+bool has_stop_details(std::string_view object)
+{
   return ava::core::json::object_field(object, "stop_details").has_value();
 }
 
-void append_stream_error(std::vector<StreamEvent>& events, std::string_view message) {
+void append_stream_error(std::vector<StreamEvent>& events, std::string_view message)
+{
   events.push_back(StreamEvent{.type = StreamEventType::Error,
                                .text = "",
                                .tool_call_id = "",
@@ -421,7 +458,8 @@ void append_stream_error(std::vector<StreamEvent>& events, std::string_view mess
                                .usage = std::nullopt});
 }
 
-std::string anthropic_tool_json(std::string_view tool_json) {
+std::string anthropic_tool_json(std::string_view tool_json)
+{
   auto const name = ava::core::json::string_field(tool_json, "name").value_or("");
   auto const description = ava::core::json::string_field(tool_json, "description").value_or("");
   auto const parameters = ava::core::json::object_field(tool_json, "parameters").value_or("{\"type\":\"object\"}");
@@ -429,7 +467,8 @@ std::string anthropic_tool_json(std::string_view tool_json) {
          ava::core::json::escape(description) + "\",\"input_schema\":" + parameters + "}";
 }
 
-std::string request_body_json(ProviderRequest const& request, std::vector<ChatMessage> const& messages) {
+std::string request_body_json(ProviderRequest const& request, std::vector<ChatMessage> const& messages)
+{
   std::string body = "{\"model\":\"" + ava::core::json::escape(request.model_id) +
                      "\",\"max_tokens\":" + std::to_string(max_tokens_for_request(request)) +
                      ",\"stream\":" + (request.stream ? "true" : "false");
@@ -453,13 +492,15 @@ std::string request_body_json(ProviderRequest const& request, std::vector<ChatMe
   return body;
 }
 
-std::optional<long long> non_negative_integer_field(std::string_view object, std::string_view key) {
+std::optional<long long> non_negative_integer_field(std::string_view object, std::string_view key)
+{
   auto const value = ava::core::json::integer_field(object, key);
   if (!value || *value < 0) return std::nullopt;
   return value;
 }
 
-void merge_usage(TokenUsage& target, TokenUsage const& source) {
+void merge_usage(TokenUsage& target, TokenUsage const& source)
+{
   if (source.input_tokens) target.input_tokens = source.input_tokens;
   if (source.output_tokens) target.output_tokens = source.output_tokens;
   if (source.cache_read_tokens) target.cache_read_tokens = source.cache_read_tokens;
@@ -471,7 +512,8 @@ void append_event_for_data(std::vector<StreamEvent>& events,
                            std::map<long long, AnthropicStreamParser::ToolBlock>& tools,
                            std::map<long long, AnthropicStreamParser::ReasoningBlock>& reasoning_blocks,
                            std::optional<TokenUsage>& usage, std::string& stop_reason, bool& saw_data,
-                           bool& message_stop_seen, bool& error_seen, std::string_view data) {
+                           bool& message_stop_seen, bool& error_seen, std::string_view data)
+{
   auto append_terminal_error = [&](std::string_view message) {
     error_seen = true;
     append_stream_error(events, message);
@@ -678,7 +720,8 @@ void append_events_for_sse_line(std::vector<StreamEvent>& events,
                                 std::map<long long, AnthropicStreamParser::ToolBlock>& tools,
                                 std::map<long long, AnthropicStreamParser::ReasoningBlock>& reasoning_blocks,
                                 std::optional<TokenUsage>& usage, std::string& stop_reason, std::string& data,
-                                bool& saw_data, bool& message_stop_seen, bool& error_seen, std::string line) {
+                                bool& saw_data, bool& message_stop_seen, bool& error_seen, std::string line)
+{
   if (!line.empty() && line.back() == '\r') line.pop_back();
   if (line.empty()) {
     if (!data.empty()) {
@@ -699,10 +742,13 @@ void append_events_for_sse_line(std::vector<StreamEvent>& events,
 }  // namespace
 
 AnthropicProvider::AnthropicProvider(std::string base_url)
-    : base_url_(trim_trailing_slashes(base_url.empty() ? configured_base_url() : std::move(base_url))) {}
+    : base_url_(trim_trailing_slashes(base_url.empty() ? configured_base_url() : std::move(base_url)))
+{
+}
 
 ava::core::Result<HttpRequest> AnthropicProvider::build_request(ProviderRequest const& request,
-                                                                std::string_view access_token) const {
+                                                                std::string_view access_token) const
+{
   if (request.model_id.empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model id is required"));
   }
@@ -729,12 +775,13 @@ ava::core::Result<HttpRequest> AnthropicProvider::build_request(ProviderRequest 
                      .resolve_hosts = {}};
 }
 
-std::unique_ptr<StreamParser> AnthropicProvider::create_stream_parser() const {
+std::unique_ptr<StreamParser> AnthropicProvider::create_stream_parser() const
+{
   return std::make_unique<AnthropicStreamParser>();
 }
 
-ava::core::VoidResult AnthropicProvider::apply_auth_options(HttpRequest& request,
-                                                            ProviderAuthContext const& auth) const {
+ava::core::VoidResult AnthropicProvider::apply_auth_options(HttpRequest& request, ProviderAuthContext const& auth) const
+{
   if (auth.credential_type != "oauth") return {};
   request.headers.erase("x-api-key");
   request.headers["Authorization"] = "Bearer " + auth.access_token;
@@ -744,11 +791,13 @@ ava::core::VoidResult AnthropicProvider::apply_auth_options(HttpRequest& request
 }
 
 ava::core::Result<std::vector<StreamEvent>> AnthropicProvider::parse_response(HttpResponse const& response,
-                                                                              bool stream) const {
+                                                                              bool stream) const
+{
   return stream ? parse_anthropic_sse_response(response) : parse_anthropic_response(response);
 }
 
-ava::core::Result<std::vector<StreamEvent>> AnthropicStreamParser::append(std::string_view chunk) {
+ava::core::Result<std::vector<StreamEvent>> AnthropicStreamParser::append(std::string_view chunk)
+{
   std::vector<StreamEvent> events;
   pending_line_.append(chunk);
   std::size_t line_start = 0;
@@ -766,7 +815,8 @@ ava::core::Result<std::vector<StreamEvent>> AnthropicStreamParser::append(std::s
   return events;
 }
 
-ava::core::Result<std::vector<StreamEvent>> AnthropicStreamParser::finish() {
+ava::core::Result<std::vector<StreamEvent>> AnthropicStreamParser::finish()
+{
   std::vector<StreamEvent> events;
   if (!pending_line_.empty()) {
     append_events_for_sse_line(events, tool_blocks_, reasoning_blocks_, usage_, stop_reason_, data_, saw_data_,
@@ -792,7 +842,8 @@ ava::core::Result<std::vector<StreamEvent>> AnthropicStreamParser::finish() {
   return events;
 }
 
-ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse(std::string_view sse) {
+ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse(std::string_view sse)
+{
   AnthropicStreamParser parser;
   auto events = parser.append(sse);
   if (!events) return std::unexpected(std::move(events.error()));
@@ -802,7 +853,8 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse(std::string_view
   return events;
 }
 
-ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse_response(HttpResponse const& response) {
+ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse_response(HttpResponse const& response)
+{
   if (response.status_code < 200 || response.status_code >= 300) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider,
                                   "Anthropic HTTP request failed with status " + std::to_string(response.status_code));
@@ -817,7 +869,8 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse_response(HttpRes
   return parse_anthropic_sse(response.body);
 }
 
-ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(HttpResponse const& response) {
+ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(HttpResponse const& response)
+{
   if (response.status_code < 200 || response.status_code >= 300) return parse_anthropic_sse_response(response);
   std::vector<StreamEvent> events;
   bool parsed_content = false;
@@ -952,7 +1005,8 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(HttpRespons
   return events;
 }
 
-std::optional<TokenUsage> parse_anthropic_usage(std::string_view body) {
+std::optional<TokenUsage> parse_anthropic_usage(std::string_view body)
+{
   auto const usage_object = ava::core::json::object_field(body, "usage");
   auto const usage_view = usage_object ? std::string_view(*usage_object) : body;
   TokenUsage usage;

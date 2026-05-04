@@ -5,7 +5,8 @@
 
 namespace ava::agent {
 
-std::string to_string(Mode mode) {
+std::string to_string(Mode mode)
+{
   switch (mode) {
     case Mode::Build:
       return "build";
@@ -15,7 +16,8 @@ std::string to_string(Mode mode) {
   return "build";
 }
 
-ava::core::Result<Mode> parse_mode(std::string_view value) {
+ava::core::Result<Mode> parse_mode(std::string_view value)
+{
   if (value == "build") {
     return Mode::Build;
   }
@@ -28,6 +30,9 @@ ava::core::Result<Mode> parse_mode(std::string_view value) {
   return std::unexpected(std::move(error));
 }
 
-Mode toggle_mode(Mode mode) noexcept { return mode == Mode::Build ? Mode::Plan : Mode::Build; }
+Mode toggle_mode(Mode mode) noexcept
+{
+  return mode == Mode::Build ? Mode::Plan : Mode::Build;
+}
 
 }  // namespace ava::agent

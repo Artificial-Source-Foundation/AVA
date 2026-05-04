@@ -15,22 +15,26 @@ struct ParsedCommand {
   std::vector<std::string> argv;
 };
 
-std::string lowercase(std::string_view value) {
+std::string lowercase(std::string_view value)
+{
   std::string result(value);
   std::ranges::transform(result, result.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   return result;
 }
 
-bool contains_any(std::string_view value, std::vector<std::string_view> const& needles) {
+bool contains_any(std::string_view value, std::vector<std::string_view> const& needles)
+{
   return std::ranges::any_of(needles,
                              [value](std::string_view needle) { return value.find(needle) != std::string_view::npos; });
 }
 
-bool equals_any(std::string_view value, std::vector<std::string_view> const& candidates) {
+bool equals_any(std::string_view value, std::vector<std::string_view> const& candidates)
+{
   return std::ranges::any_of(candidates, [value](std::string_view candidate) { return value == candidate; });
 }
 
-bool is_shell_metacharacter(char ch) {
+bool is_shell_metacharacter(char ch)
+{
   switch (ch) {
     case ';':
     case '&':
@@ -47,7 +51,8 @@ bool is_shell_metacharacter(char ch) {
   }
 }
 
-ParsedCommand parse_command_argv(std::string_view command) {
+ParsedCommand parse_command_argv(std::string_view command)
+{
   ParsedCommand parsed;
   std::string current;
   char quote = '\0';
@@ -107,14 +112,16 @@ ParsedCommand parse_command_argv(std::string_view command) {
   return parsed;
 }
 
-std::vector<std::string> lowercase_argv(std::vector<std::string> const& argv) {
+std::vector<std::string> lowercase_argv(std::vector<std::string> const& argv)
+{
   std::vector<std::string> result;
   result.reserve(argv.size());
   for (auto const& arg : argv) result.push_back(lowercase(arg));
   return result;
 }
 
-bool is_within_workspace(std::filesystem::path const& workspace_dir, std::filesystem::path const& target_path) {
+bool is_within_workspace(std::filesystem::path const& workspace_dir, std::filesystem::path const& target_path)
+{
   if (target_path.empty()) {
     return true;
   }
@@ -138,7 +145,8 @@ bool is_within_workspace(std::filesystem::path const& workspace_dir, std::filesy
   return first != "..";
 }
 
-std::filesystem::path policy_path(std::filesystem::path const& path) {
+std::filesystem::path policy_path(std::filesystem::path const& path)
+{
   std::error_code error;
   auto const normalized = std::filesystem::weakly_canonical(path, error);
   if (!error) {
@@ -147,7 +155,8 @@ std::filesystem::path policy_path(std::filesystem::path const& path) {
   return std::filesystem::absolute(path).lexically_normal();
 }
 
-bool is_secret_path(std::filesystem::path const& path) {
+bool is_secret_path(std::filesystem::path const& path)
+{
   for (auto const& part : path.lexically_normal()) {
     auto const component = lowercase(part.string());
     if (equals_any(component, {".ssh", ".aws", ".gnupg", ".config/gcloud"})) {
@@ -170,16 +179,21 @@ bool is_secret_path(std::filesystem::path const& path) {
                              "/.gnupg/", "\\.gnupg\\", "credentials", "secret", "token"});
 }
 
-bool is_markdown_path(std::filesystem::path const& path) { return lowercase(path.extension().string()) == ".md"; }
+bool is_markdown_path(std::filesystem::path const& path)
+{
+  return lowercase(path.extension().string()) == ".md";
+}
 
-bool is_planning_markdown(std::filesystem::path const& path) {
+bool is_planning_markdown(std::filesystem::path const& path)
+{
   auto const normalized = lowercase(path.lexically_normal().string());
   return is_markdown_path(path) &&
          (normalized.find("docs/") != std::string::npos || normalized.find("plan") != std::string::npos ||
           normalized.find("version") != std::string::npos);
 }
 
-bool is_safe_relative_path_arg(std::string_view value) {
+bool is_safe_relative_path_arg(std::string_view value)
+{
   if (value.empty() || value.starts_with("-")) return true;
   std::filesystem::path const path(value);
   if (path.is_absolute()) return false;
@@ -189,7 +203,8 @@ bool is_safe_relative_path_arg(std::string_view value) {
   return !is_secret_path(path);
 }
 
-bool is_path_carrying_option(std::string_view value) {
+bool is_path_carrying_option(std::string_view value)
+{
   auto const lower = lowercase(value);
   if (equals_any(lower, {"-o", "--output", "--git-dir", "--work-tree", "--exec-path", "--config-env"})) {
     return true;
@@ -198,7 +213,8 @@ bool is_path_carrying_option(std::string_view value) {
          lower.starts_with("--exec-path=") || lower.starts_with("--config-env=");
 }
 
-bool has_unsafe_path_arg(std::vector<std::string> const& argv, std::size_t start) {
+bool has_unsafe_path_arg(std::vector<std::string> const& argv, std::size_t start)
+{
   for (std::size_t index = start; index < argv.size(); ++index) {
     if (is_path_carrying_option(argv[index])) return true;
     if (!is_safe_relative_path_arg(argv[index])) return true;
@@ -206,11 +222,13 @@ bool has_unsafe_path_arg(std::vector<std::string> const& argv, std::size_t start
   return false;
 }
 
-bool is_dangerous_cmake_arg(std::string_view value) {
+bool is_dangerous_cmake_arg(std::string_view value)
+{
   return value == "-e" || value == "-p" || value == "--install" || value == "--open";
 }
 
-bool is_safe_cmake_build(std::vector<std::string> const& argv, std::vector<std::string> const& lower) {
+bool is_safe_cmake_build(std::vector<std::string> const& argv, std::vector<std::string> const& lower)
+{
   if (argv.size() < 3 || lower[1] != "--build") return false;
   if (!is_safe_relative_path_arg(argv[2])) return false;
   for (std::size_t index = 3; index < argv.size(); ++index) {
@@ -222,7 +240,8 @@ bool is_safe_cmake_build(std::vector<std::string> const& argv, std::vector<std::
   return true;
 }
 
-bool is_safe_ctest(std::vector<std::string> const& argv, std::vector<std::string> const& lower) {
+bool is_safe_ctest(std::vector<std::string> const& argv, std::vector<std::string> const& lower)
+{
   for (std::size_t index = 1; index < argv.size(); ++index) {
     auto const& arg = lower[index];
     if (arg == "--build-and-test" || arg == "--test-command" || arg == "--build-generator" ||
@@ -234,7 +253,8 @@ bool is_safe_ctest(std::vector<std::string> const& argv, std::vector<std::string
   return true;
 }
 
-bool is_simple_number(std::string_view value) {
+bool is_simple_number(std::string_view value)
+{
   if (value.empty()) return false;
   bool saw_digit = false;
   bool saw_dot = false;
@@ -252,7 +272,8 @@ bool is_simple_number(std::string_view value) {
 
 }  // namespace
 
-PermissionDecision decide(PermissionRequest const& request) {
+PermissionDecision decide(PermissionRequest const& request)
+{
   auto const checked_path = policy_path(request.target_path);
 
   if ((request.operation == Operation::ReadFile || request.operation == Operation::EditFile ||
@@ -309,7 +330,8 @@ PermissionDecision decide(PermissionRequest const& request) {
   return {.action = PermissionAction::Allow, .reason = "allowed by default workspace policy"};
 }
 
-PermissionDecision classify_command(std::string_view command) {
+PermissionDecision classify_command(std::string_view command)
+{
   auto const parsed = parse_command_argv(command);
   if (!parsed.ok) {
     return {.action = PermissionAction::Deny, .reason = parsed.reason};
@@ -374,7 +396,8 @@ PermissionDecision classify_command(std::string_view command) {
   return {.action = PermissionAction::Ask, .reason = "command risk is unknown"};
 }
 
-std::string to_string(PermissionAction action) {
+std::string to_string(PermissionAction action)
+{
   switch (action) {
     case PermissionAction::Allow:
       return "allow";
@@ -386,7 +409,8 @@ std::string to_string(PermissionAction action) {
   return "deny";
 }
 
-std::string to_string(PermissionResolution resolution) {
+std::string to_string(PermissionResolution resolution)
+{
   switch (resolution) {
     case PermissionResolution::Allow:
       return "allow";
@@ -396,7 +420,8 @@ std::string to_string(PermissionResolution resolution) {
   return "deny";
 }
 
-std::string to_string(Operation operation) {
+std::string to_string(Operation operation)
+{
   switch (operation) {
     case Operation::ReadFile:
       return "read";

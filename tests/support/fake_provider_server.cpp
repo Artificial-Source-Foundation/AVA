@@ -180,6 +180,10 @@ std::string response_body(std::string_view scenario, int request_index, std::str
   if (scenario == "question-tool") {
     return request_index == 0 ? question_tool_body() : text_body("after question reply");
   }
+  if (scenario == "compact") {
+    return request_index == 0 ? text_body("before compact")
+                              : text_body("# Goal\nHeadless compact summary\n# Next Steps\nContinue.");
+  }
   return text_body("headless active prompt complete");
 }
 
@@ -196,7 +200,9 @@ int main(int argc, char** argv) {
   const auto delay = std::chrono::milliseconds(std::stoi(argv[3]));
   const std::string scenario = argc == 6 ? argv[4] : "text";
   const std::string target_path = argc == 6 ? argv[5] : "";
-  const int request_count = scenario == "read-tool" || scenario == "write-tool" || scenario == "question-tool" ? 2 : 1;
+  const int request_count =
+      scenario == "read-tool" || scenario == "write-tool" || scenario == "question-tool" || scenario == "compact" ? 2
+                                                                                                                  : 1;
 
   Fd server(::socket(AF_INET, SOCK_STREAM, 0));
   if (server.get() < 0) {

@@ -5,5 +5,16 @@ build*/
 compile_commands.json
 .cache/
 
+# Local scratch/log output
+*.log
+*.tmp
+*.bak
+*.orig
+*~
+.DS_Store
+/a.out
+/core
+/core.*
+
 # Local reference repositories used for comparison only
 docs/reference-code/

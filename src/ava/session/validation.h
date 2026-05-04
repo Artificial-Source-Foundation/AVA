@@ -14,6 +14,7 @@ enum class SessionReplayIssueSeverity {
 };
 
 enum class SessionReplayIssueKind {
+  UnsupportedEntryVersion,
   DuplicateEntryId,
   UnknownParentId,
   EmptyToolCallId,
@@ -45,6 +46,7 @@ struct SessionReplayIssue {
 };
 
 struct SessionReplayValidationOptions {
+  bool require_entry_versions = true;
   bool require_known_parent_ids = true;
   bool require_tool_result_pairing = true;
   bool require_permission_decision_integrity = true;

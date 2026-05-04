@@ -3544,8 +3544,8 @@ void test_app_rpc_protocol_version_and_session_commands() {
              jsonl.find("\"supported_protocol_versions\":[1]") != std::string::npos,
          "RPC get_protocol reports supported protocol version");
   expect(jsonl.find("\"id\":\"messages\"") != std::string::npos && jsonl.find("\"messages\"") != std::string::npos &&
-             jsonl.find("hello") != std::string::npos && jsonl.find("answer") != std::string::npos &&
-             jsonl.find("visible reasoning") != std::string::npos &&
+             jsonl.find("\"version\":2") != std::string::npos && jsonl.find("hello") != std::string::npos &&
+             jsonl.find("answer") != std::string::npos && jsonl.find("visible reasoning") != std::string::npos &&
              jsonl.find("hidden redacted rpc reasoning") == std::string::npos &&
              jsonl.find("\"signature_present\":true") != std::string::npos &&
              jsonl.find("hidden rpc replay") == std::string::npos &&

@@ -9,6 +9,8 @@
 
 namespace ava::session {
 
+inline constexpr long long kCurrentSessionEntryVersion = 2;
+
 enum class EntryType {
   SessionStart,
   UserMessage,
@@ -31,6 +33,7 @@ struct SessionEntry {
   EntryType type;
   std::string timestamp;
   std::string data_json;
+  long long version = kCurrentSessionEntryVersion;
 };
 
 struct SessionStoreOptions {

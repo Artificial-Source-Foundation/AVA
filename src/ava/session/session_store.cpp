@@ -21,7 +21,6 @@ namespace ava::session {
 namespace {
 
 constexpr std::size_t max_session_line_bytes = 1024 * 1024;
-constexpr long long current_session_entry_version = 2;
 
 int hex_value(char ch) {
   if (ch >= '0' && ch <= '9') return ch - '0';
@@ -168,20 +167,20 @@ ava::core::Result<std::optional<long long>> extract_entry_version(std::string_vi
   }
 }
 
-ava::core::VoidResult validate_entry_version(std::string_view line, const std::filesystem::path& path) {
+ava::core::Result<long long> read_supported_entry_version(std::string_view line, const std::filesystem::path& path) {
   auto version = extract_entry_version(line);
   if (!version) {
     auto error = std::move(version.error());
     error.with_context("path", path.string());
     return std::unexpected(std::move(error));
   }
-  if (!*version) return {};
-  if (**version >= 1 && **version <= current_session_entry_version) return {};
+  if (!*version) return 0;
+  if (**version >= 1 && **version <= kCurrentSessionEntryVersion) return **version;
 
   auto error = ava::core::Error(ava::core::ErrorCategory::Session, "unsupported session entry version");
   error.with_context("path", path.string());
   error.with_context("version", std::to_string(**version));
-  error.with_context("supported_version", std::to_string(current_session_entry_version));
+  error.with_context("supported_version", std::to_string(kCurrentSessionEntryVersion));
   return std::unexpected(std::move(error));
 }
 
@@ -424,7 +423,7 @@ ava::core::VoidResult SessionStore::append(const SessionEntry& entry) {
     return std::unexpected(std::move(error));
   }
 
-  std::string line = "{\"version\":" + std::to_string(current_session_entry_version) + ",";
+  std::string line = "{\"version\":" + std::to_string(kCurrentSessionEntryVersion) + ",";
   line += "\"id\":\"" + json_escape(entry.id) + "\",";
   line += "\"parent_id\":\"" + json_escape(entry.parent_id) + "\",";
   line += "\"type\":\"" + std::string(to_string(entry.type)) + "\",";
@@ -490,8 +489,9 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const {
     if (!*line_read) {
       break;
     }
-    if (auto valid_version = validate_entry_version(line, session_path()); !valid_version) {
-      return std::unexpected(std::move(valid_version.error()));
+    auto version = read_supported_entry_version(line, session_path());
+    if (!version) {
+      return std::unexpected(std::move(version.error()));
     }
     const auto id = extract_json_string(line, "id");
     const auto type_text = extract_json_string(line, "type");
@@ -523,6 +523,7 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const {
         .type = *type,
         .timestamp = timestamp,
         .data_json = extract_json_object(line, "data"),
+        .version = *version,
     });
   }
   return entries;

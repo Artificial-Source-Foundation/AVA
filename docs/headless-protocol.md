@@ -186,7 +186,7 @@ Messages:
 {"id":"3a","type":"get_messages"}
 ```
 
-Returns durable message-like session entries for the active session in append order. The current response is `{session_id,messages,truncated,message_count}` where each message includes `id`, `parent_id`, `type`, `timestamp`, and object-shaped `data` unless the individual entry is too large, in which case the entry is marked `truncated`. Responses are capped to protect headless clients and the AVA process. Reasoning entries are sanitized: visible non-redacted text may be returned, but raw provider signatures and opaque redacted-thinking payloads are replaced by safe status fields such as `signature_present` and `redacted`. This intentionally excludes non-message bookkeeping entries such as `session_start`, `model_change`, `compaction`, and permission audit rows. Internal replay user messages inserted after context compaction are also hidden because they are provider-context repair entries, not user-visible transcript turns.
+Returns durable message-like session entries for the active session in append order. The current response is `{session_id,messages,truncated,message_count}` where each message includes `version`, `id`, `parent_id`, `type`, `timestamp`, and object-shaped `data` unless the individual entry is too large, in which case the entry is marked `truncated`. Responses are capped to protect headless clients and the AVA process. Reasoning entries are sanitized: visible non-redacted text may be returned, but raw provider signatures and opaque redacted-thinking payloads are replaced by safe status fields such as `signature_present` and `redacted`. This intentionally excludes non-message bookkeeping entries such as `session_start`, `model_change`, `compaction`, and permission audit rows. Internal replay user messages inserted after context compaction are also hidden because they are provider-context repair entries, not user-visible transcript turns.
 
 Session stats:
 
@@ -206,7 +206,7 @@ Session validation:
 {"id":"3b2","type":"validate_session"}
 ```
 
-Runs the backend replay validator over the active session and returns `{session_id,session_path,ok,error_count,warning_count,issues}`. Issues include stable `kind` strings, severity, entry index, entry id when available, tool call id when relevant, and a short diagnostic message. The validator currently checks entry ids, parent links, tool call/result pairing, permission prompt/resolution pairing, structured tool results when required by callers, compaction integrity, and durable model/reasoning entry shape. Compaction validation requires a durable summary and reports compaction boundaries that occur while tool calls or permission prompts are unresolved.
+Runs the backend replay validator over the active session and returns `{session_id,session_path,ok,error_count,warning_count,issues}`. Issues include stable `kind` strings, severity, entry index, entry id when available, tool call id when relevant, and a short diagnostic message. The validator currently checks entry versions, entry ids, parent links, tool call/result pairing, permission prompt/resolution pairing, structured tool results when required by callers, compaction integrity, and durable model/reasoning entry shape. Compaction validation requires a durable summary and reports compaction boundaries that occur while tool calls or permission prompts are unresolved.
 
 Model catalog and switching:
 

@@ -90,6 +90,8 @@ void test_session_store_round_trip() {
   expect(loaded->size() == 1, "one entry loaded");
   expect((*loaded)[0].id == "entry_1", "entry id round trips");
   expect((*loaded)[0].type == ava::session::EntryType::SessionStart, "entry type round trips");
+  expect((*loaded)[0].version == ava::session::kCurrentSessionEntryVersion,
+         "session entry version round trips from current JSONL records");
 
   auto text_store = ava::session::SessionStore::create(std::filesystem::current_path(), temp_root());
   expect(text_store.has_value(), "text session store creates");
@@ -276,7 +278,7 @@ void test_session_store_round_trip() {
   }
   auto missing_version_loaded = missing_version_store.load();
   expect(missing_version_loaded && missing_version_loaded->size() == 1 &&
-             (*missing_version_loaded)[0].id == "entry_legacy",
+             (*missing_version_loaded)[0].id == "entry_legacy" && (*missing_version_loaded)[0].version == 0,
          "session loader treats missing entry version as legacy-compatible");
 
   ava::session::SessionStore future_version_store(ava::session::SessionStoreOptions{
@@ -495,6 +497,13 @@ void test_session_replay_validation() {
   const auto valid = ava::session::validate_session_replay(
       valid_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
   expect(valid.ok() && valid.issues.empty(), "session replay validator accepts paired structured tool history");
+
+  auto unsupported_version_entries = valid_entries;
+  unsupported_version_entries[1].version = ava::session::kCurrentSessionEntryVersion + 1;
+  const auto unsupported_version = ava::session::validate_session_replay(unsupported_version_entries);
+  expect(!unsupported_version.ok() &&
+             has_replay_issue(unsupported_version, ava::session::SessionReplayIssueKind::UnsupportedEntryVersion),
+         "session replay validator flags unsupported in-memory entry versions");
 
   const std::vector<ava::session::SessionEntry> duplicate_entry_entries = {
       valid_entries[0],
@@ -805,6 +814,9 @@ void test_session_replay_validation() {
   expect(ava::session::to_string(ava::session::SessionReplayIssueKind::InvalidCompactionEntry) ==
              "invalid_compaction_entry",
          "session replay issue kind names include compaction validation failures");
+  expect(ava::session::to_string(ava::session::SessionReplayIssueKind::UnsupportedEntryVersion) ==
+             "unsupported_entry_version",
+         "session replay issue kind names include entry version validation failures");
   expect(
       ava::session::to_string(ava::session::SessionReplayIssueKind::InvalidReasoningEntry) == "invalid_reasoning_entry",
       "session replay issue kind names include reasoning validation failures");

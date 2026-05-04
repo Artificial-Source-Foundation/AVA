@@ -41,6 +41,10 @@ std::string permission_key(const SessionEntry& entry) {
   return key;
 }
 
+bool supported_entry_version(long long version) {
+  return version == 0 || (version >= 1 && version <= kCurrentSessionEntryVersion);
+}
+
 bool bool_field_is_true(std::string_view object, std::string_view key) {
   const auto start = ava::core::json::field_value_start(object, key);
   if (!start) return false;
@@ -437,6 +441,8 @@ std::string_view to_string(SessionReplayIssueSeverity severity) noexcept {
 
 std::string_view to_string(SessionReplayIssueKind kind) noexcept {
   switch (kind) {
+    case SessionReplayIssueKind::UnsupportedEntryVersion:
+      return "unsupported_entry_version";
     case SessionReplayIssueKind::DuplicateEntryId:
       return "duplicate_entry_id";
     case SessionReplayIssueKind::UnknownParentId:
@@ -489,6 +495,10 @@ SessionReplayValidation validate_session_replay(const std::vector<SessionEntry>&
 
   for (std::size_t index = 0; index < entries.size(); ++index) {
     const auto& entry = entries[index];
+    if (options.require_entry_versions && !supported_entry_version(entry.version)) {
+      add_error(validation, SessionReplayIssueKind::UnsupportedEntryVersion, index, entry, "",
+                "session entry version is outside the supported range");
+    }
     if (options.require_known_parent_ids && !entry.parent_id.empty() &&
         seen_entry_ids.find(entry.parent_id) == seen_entry_ids.end()) {
       add_error(validation, SessionReplayIssueKind::UnknownParentId, index, entry, "",

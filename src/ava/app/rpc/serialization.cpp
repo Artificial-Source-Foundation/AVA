@@ -113,6 +113,8 @@ std::string context_sources_json(const RuntimeSession& session) {
 
 std::string session_entry_json(const ava::session::SessionEntry& entry) {
   std::string json = "{";
+  json += integer_field_json("version", entry.version);
+  json += ',';
   json += string_field_json("id", entry.id);
   json += ',';
   json += string_field_json("parent_id", entry.parent_id);
@@ -166,6 +168,8 @@ std::string sanitized_reasoning_entry_json(const ava::session::SessionEntry& ent
   data += '}';
 
   std::string json = "{";
+  json += integer_field_json("version", entry.version);
+  json += ',';
   json += string_field_json("id", entry.id);
   json += ',';
   json += string_field_json("parent_id", entry.parent_id);
@@ -184,6 +188,8 @@ std::string capped_session_entry_json(const ava::session::SessionEntry& entry) {
                                                                     : session_entry_json(entry);
   if (json.size() <= 8192) return json;
   std::string capped = "{";
+  capped += integer_field_json("version", entry.version);
+  capped += ',';
   capped += string_field_json("id", entry.id);
   capped += ',';
   capped += string_field_json("parent_id", entry.parent_id);

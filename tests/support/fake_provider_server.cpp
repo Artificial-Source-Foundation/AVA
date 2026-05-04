@@ -189,6 +189,9 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
     return ProviderResponse{.body =
                                 request_index == 0 ? read_tool_body(target_path) : text_body("after permission deny")};
   }
+  if (scenario == "read-missing-tool") {
+    return ProviderResponse{.body = request_index == 0 ? read_tool_body(target_path) : text_body("after tool failure")};
+  }
   if (scenario == "write-tool") {
     return ProviderResponse{.body =
                                 request_index == 0 ? write_tool_body(target_path) : text_body("after permission deny")};
@@ -218,7 +221,8 @@ int main(int argc, char** argv) {
   std::string const scenario = argc == 6 ? argv[4] : "text";
   std::string const target_path = argc == 6 ? argv[5] : "";
   int const request_count = scenario == "http-error" ? 3
-                                                     : (scenario == "read-tool" || scenario == "write-tool" ||
+                                                     : (scenario == "read-tool" || scenario == "read-missing-tool" ||
+                                                                scenario == "write-tool" ||
                                                                 scenario == "question-tool" || scenario == "compact"
                                                             ? 2
                                                             : 1);
@@ -258,9 +262,7 @@ int main(int argc, char** argv) {
     file << ntohs(address.sin_port) << '\n';
   }
 
-  {
-    std::ofstream file(request_log, std::ios::binary | std::ios::trunc);
-  }
+  { std::ofstream file(request_log, std::ios::binary | std::ios::trunc); }
 
   for (int request_index = 0; request_index < request_count; ++request_index) {
     Fd client(::accept(server.get(), nullptr, nullptr));

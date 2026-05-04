@@ -185,7 +185,7 @@ Deliverables:
   requests, provider-backed compaction success through a fake provider, active-run command rejection through a delayed
   fake provider, permission resolver replies through a fake provider tool-call loop, question resolver replies through a
   fake provider tool-call loop, provider HTTP error containment with redacted diagnostics, MCP and plugin command
-  surfaces, invalid MCP config containment, and context/export materialization.
+  surfaces, invalid MCP config containment, tool execution failure containment, and context/export materialization.
 
 Exit gate:
 
@@ -196,7 +196,8 @@ Exit gate:
 Deliverables:
 
 - Document normal, sanitizer, and opt-in live-smoke commands.
-- Add deterministic subprocess/RPC smokes that exercise resolver replies, cancellation, tool failures, compaction, and session export.
+- Add deterministic subprocess/RPC smokes that exercise resolver replies, cancellation, tool failures, compaction, and
+  session export. Initial direct smokes now cover all five categories.
 - Keep live provider smokes opt-in and credential-gated.
 
 Exit gate:

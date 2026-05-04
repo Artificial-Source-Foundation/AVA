@@ -308,6 +308,14 @@ if(AVA_BUILD_TESTS)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_provider_error.cmake)
 
   add_test(
+    NAME ava_cli.headless_rpc_tool_failure
+    COMMAND ${CMAKE_COMMAND}
+            -DAVA_EXE=$<TARGET_FILE:ava>
+            -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+            -DAVA_CLI_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cli-headless-rpc-tool-failure
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_tool_failure.cmake)
+
+  add_test(
     NAME ava_cli.headless_rpc_cancel
     COMMAND ${CMAKE_COMMAND}
             -DAVA_EXE=$<TARGET_FILE:ava>

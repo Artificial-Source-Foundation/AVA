@@ -153,7 +153,7 @@ Missing or incomplete:
 
 ### Tools And Operations
 
-AVA has a strong small tool set with permissioned atomic file writes where practical, Phase 4 search/edit/web/LSP improvements, and remaining maturity work around deeper abstractions and expanded code intelligence.
+AVA has a strong small tool set with permissioned atomic file writes where practical, cooperative cancellation for read/write/edit file operations, Phase 4 search/edit/web/LSP improvements, and remaining maturity work around deeper abstractions and expanded code intelligence.
 
 Missing or incomplete:
 

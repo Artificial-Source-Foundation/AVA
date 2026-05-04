@@ -244,6 +244,46 @@ void test_tool_dispatcher() {
              canceled_glob->payload.status == ava::agent::ToolResultStatus::Canceled &&
              canceled_structured.find("\"status\":\"canceled\"") != std::string::npos,
          "tool dispatcher maps tool cancellation errors to semantic canceled payloads");
+  auto canceled_read = canceled_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_canceled_read", .name = "read_file", .arguments_json = "{\"path\":\"note.txt\"}"});
+  auto canceled_write = canceled_dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_canceled_write",
+                                   .name = "write_file",
+                                   .arguments_json = "{\"path\":\"cancel.txt\",\"content\":\"bad\"}"});
+  auto canceled_edit = canceled_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_canceled_edit",
+      .name = "edit_file",
+      .arguments_json = "{\"path\":\"note.txt\",\"old_text\":\"hello\",\"new_text\":\"bad\"}"});
+  expect(canceled_read && canceled_write && canceled_edit && !canceled_read->success && !canceled_write->success &&
+             !canceled_edit->success && canceled_read->payload.status == ava::agent::ToolResultStatus::Canceled &&
+             canceled_write->payload.status == ava::agent::ToolResultStatus::Canceled &&
+             canceled_edit->payload.status == ava::agent::ToolResultStatus::Canceled &&
+             !std::filesystem::exists(workspace / "cancel.txt"),
+         "tool dispatcher reports semantic cancellation for file tools without filesystem mutation");
+
+  const auto canceled_outside_path = root / "dispatcher-canceled-outside.txt";
+  {
+    std::ofstream file(canceled_outside_path, std::ios::binary | std::ios::trunc);
+    file << "outside canceled";
+  }
+  int canceled_permission_prompts = 0;
+  const ava::agent::ToolDispatcher canceled_permission_dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&canceled_permission_prompts](const ava::permissions::PermissionPrompt&)
+          -> ava::core::Result<ava::permissions::PermissionResolution> {
+        ++canceled_permission_prompts;
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .cancel_requested = [] { return true; }});
+  auto canceled_outside_read = canceled_permission_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_canceled_outside_read",
+      .name = "read_file",
+      .arguments_json = "{\"path\":\"" + ava::core::json::escape(canceled_outside_path.generic_string()) + "\"}"});
+  expect(canceled_outside_read && !canceled_outside_read->success &&
+             canceled_outside_read->payload.status == ava::agent::ToolResultStatus::Canceled &&
+             canceled_permission_prompts == 0,
+         "tool dispatcher cancellation prevents permission prompts for file tools");
 
   auto malformed_args = dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "call_bad_args", .name = "read_file", .arguments_json = "{not-json}"});
@@ -663,6 +703,36 @@ void test_tool_dispatcher() {
           "apply_patch stages all writes before commit and leaves originals unchanged when staging later files fails");
     }
   }
+
+  const auto patch_cancel_path = workspace / "patch-cancel-stage.txt";
+  {
+    std::ofstream file(patch_cancel_path, std::ios::binary | std::ios::trunc);
+    file << "stage cancel old";
+  }
+  const auto has_patch_temp = [&workspace] {
+    std::error_code iter_error;
+    for (std::filesystem::directory_iterator it(workspace, iter_error), end; !iter_error && it != end;
+         it.increment(iter_error)) {
+      if (it->path().filename().string().find(".ava-patch-") != std::string::npos) return true;
+    }
+    return false;
+  };
+  const ava::agent::ToolDispatcher patch_cancel_dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .cancel_requested = has_patch_temp,
+  });
+  auto patch_canceled_after_stage = patch_cancel_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_patch_cancel_after_stage",
+      .name = "apply_patch",
+      .arguments_json =
+          "{\"edits\":[{\"path\":\"patch-cancel-stage.txt\",\"old_text\":\"old\",\"new_text\":\"new\"}]}"});
+  auto patch_canceled_read = ava::tools::read_file(
+      ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build}, patch_cancel_path);
+  expect(patch_canceled_after_stage && !patch_canceled_after_stage->success &&
+             patch_canceled_after_stage->payload.status == ava::agent::ToolResultStatus::Canceled &&
+             patch_canceled_read && patch_canceled_read->content == "stage cancel old" && !has_patch_temp(),
+         "apply_patch cleanup removes staged files when cancellation arrives before commit");
 
   const auto too_large_patch_path = workspace / "too-large-patch.txt";
   {

@@ -331,6 +331,51 @@ void test_file_tools() {
   expect(large_read && large_read->content.size() == 16 && large_read->total_bytes == 8192,
          "read_file bounds output while counting bytes");
 
+  const auto canceled_existing_path = workspace / "canceled-existing.txt";
+  {
+    std::ofstream canceled_file(canceled_existing_path, std::ios::binary | std::ios::trunc);
+    canceled_file << "keep original";
+  }
+  const auto canceled_outside_path = temp_root() / "canceled-outside.txt";
+  {
+    std::ofstream canceled_outside(canceled_outside_path, std::ios::binary | std::ios::trunc);
+    canceled_outside << "outside original";
+  }
+  int canceled_file_prompts = 0;
+  const ava::tools::ToolContext canceled_file_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&canceled_file_prompts](const ava::permissions::PermissionPrompt&)
+          -> ava::core::Result<ava::permissions::PermissionResolution> {
+        ++canceled_file_prompts;
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .cancel_requested = [] { return true; }};
+  auto canceled_read = ava::tools::read_file(canceled_file_context, canceled_outside_path);
+  expect(!canceled_read && canceled_read.error().message() == "tool canceled" && canceled_file_prompts == 0,
+         "read_file observes cancellation before prompting for permission");
+  auto canceled_write = ava::tools::write_file(canceled_file_context, workspace / "canceled-write.txt", "bad");
+  expect(!canceled_write && canceled_write.error().message() == "tool canceled" &&
+             !std::filesystem::exists(workspace / "canceled-write.txt") && !has_write_temp(workspace),
+         "write_file observes cancellation before mutating the filesystem");
+  auto canceled_edit = ava::tools::edit_file(canceled_file_context, canceled_existing_path, "original", "changed");
+  expect(!canceled_edit && canceled_edit.error().message() == "tool canceled" &&
+             read_text_file_for_test(canceled_existing_path) == "keep original",
+         "edit_file observes cancellation before mutating the filesystem");
+
+  int write_cancel_checks = 0;
+  const ava::tools::ToolContext cancel_during_write_context{
+      .workspace_dir = workspace, .mode = ava::agent::Mode::Build, .cancel_requested = [&write_cancel_checks] {
+        ++write_cancel_checks;
+        return write_cancel_checks >= 8;
+      }};
+  const auto canceled_large_write_path = workspace / "canceled-large-write.txt";
+  auto canceled_large_write =
+      ava::tools::write_file(cancel_during_write_context, canceled_large_write_path, std::string(64 * 1024, 'x'));
+  expect(!canceled_large_write && canceled_large_write.error().message() == "tool canceled" &&
+             !std::filesystem::exists(canceled_large_write_path) && !has_write_temp(workspace),
+         "write_file cleans staged data when cancellation arrives during chunked writes");
+
   const auto outside_path = temp_root() / "outside.txt";
   {
     std::ofstream outside_file(outside_path, std::ios::binary | std::ios::trunc);

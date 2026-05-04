@@ -92,6 +92,22 @@ ToolDispatchResult lsp_error_result(const ProviderToolCall& call, const ava::cor
   return tool_error_result(call, redacted);
 }
 
+bool is_canceled(const ava::tools::ToolContext& context) {
+  return context.cancel_requested && context.cancel_requested();
+}
+
+ava::core::Error canceled_error(const ProviderToolCall& call) {
+  auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled");
+  error.with_context("tool", call.name);
+  error.with_context("call_id", call.id);
+  return error;
+}
+
+ava::core::VoidResult check_canceled(const ava::tools::ToolContext& context, const ProviderToolCall& call) {
+  if (!is_canceled(context)) return {};
+  return std::unexpected(canceled_error(call));
+}
+
 ToolDispatchResult simple_error_result(const ProviderToolCall& call, ava::core::ErrorCategory category,
                                        std::string message) {
   const auto error = ava::core::Error(category, std::move(message));
@@ -596,6 +612,7 @@ ToolDispatchResult apply_patch_result(const ava::tools::ToolContext& context, co
   parsed_edits.reserve(edits.size());
   std::map<std::filesystem::path, std::filesystem::path> permission_targets;
   for (std::size_t index = 0; index < edits.size(); ++index) {
+    if (auto canceled = check_canceled(context, call); !canceled) return tool_error_result(call, canceled.error());
     auto path = required_safe_string_arg(edits[index], "path", call.name);
     if (!path) return tool_error_result(call, path.error());
     auto old_text = required_text_arg(edits[index], "old_text", call.name);
@@ -614,6 +631,7 @@ ToolDispatchResult apply_patch_result(const ava::tools::ToolContext& context, co
         PatchEdit{.target = target, .old_text = std::move(*old_text), .new_text = std::move(*new_text)});
   }
 
+  if (auto canceled = check_canceled(context, call); !canceled) return tool_error_result(call, canceled.error());
   for (const auto& [dedupe_path, target] : permission_targets) {
     static_cast<void>(dedupe_path);
     if (auto permission = ava::tools::ensure_permission(context, ava::permissions::Operation::ReadFile, target, "",
@@ -632,10 +650,12 @@ ToolDispatchResult apply_patch_result(const ava::tools::ToolContext& context, co
   auto patch_queue = context.mutation_queue ? context.mutation_queue : ava::tools::default_mutation_queue();
   [[maybe_unused]] auto mutation_lock = patch_queue->lock_paths(lock_paths);
 
+  if (auto canceled = check_canceled(context, call); !canceled) return tool_error_result(call, canceled.error());
   std::map<std::filesystem::path, std::string> original_contents;
   std::map<std::filesystem::path, std::vector<PatchReplacement>> replacements_by_path;
   std::vector<std::filesystem::path> applied_paths;
   for (const auto& edit : parsed_edits) {
+    if (auto canceled = check_canceled(context, call); !canceled) return tool_error_result(call, canceled.error());
     const auto& target = edit.target;
     if (!original_contents.contains(target)) {
       auto content = ava::tools::read_file(
@@ -697,6 +717,7 @@ ToolDispatchResult apply_patch_result(const ava::tools::ToolContext& context, co
   }
 
   for (const auto& target : applied_paths) {
+    if (auto canceled = check_canceled(context, call); !canceled) return tool_error_result(call, canceled.error());
     const auto diff = permission_diffs.find(target);
     const auto diff_preview = diff == permission_diffs.end() ? std::string_view{} : std::string_view(diff->second.text);
     const auto permission_diff_truncated = diff != permission_diffs.end() && diff->second.truncated;
@@ -708,8 +729,13 @@ ToolDispatchResult apply_patch_result(const ava::tools::ToolContext& context, co
     }
   }
 
+  if (auto canceled = check_canceled(context, call); !canceled) return tool_error_result(call, canceled.error());
   auto staged = stage_patch_writes(context, applied_paths, final_contents);
   if (!staged) return tool_error_result(call, staged.error());
+  if (auto canceled = check_canceled(context, call); !canceled) {
+    cleanup_staged_patch_writes(*staged);
+    return tool_error_result(call, canceled.error());
+  }
   if (auto committed = commit_staged_patch_writes(*staged); !committed)
     return tool_error_result(call, committed.error());
 
@@ -823,7 +849,11 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(const ProviderToo
     return std::unexpected(std::move(safe_id.error()));
   }
   const auto* tool = registry_.find(normalized.name);
-  if (tool != nullptr) return with_tool_result_payload(tool->executor(context_, normalized));
+  if (tool != nullptr) {
+    if (is_canceled(context_))
+      return with_tool_result_payload(tool_error_result(normalized, canceled_error(normalized)));
+    return with_tool_result_payload(tool->executor(context_, normalized));
+  }
   return with_tool_result_payload(simple_error_result(normalized, ava::core::ErrorCategory::Tool, "unknown tool"));
 }
 

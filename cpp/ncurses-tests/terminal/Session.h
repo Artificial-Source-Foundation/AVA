@@ -35,8 +35,10 @@ class Session final
   Window const& stdscr() const { return stdscr_; }
   Window& stdscr() { return stdscr_; }
 
-  int rows() const;
-  int cols() const;
+  uint32_t rows() const;
+  uint32_t cols() const;
+  Dimension size() const { return {rows(), cols()}; }
+
   int get_wch();
 };
 

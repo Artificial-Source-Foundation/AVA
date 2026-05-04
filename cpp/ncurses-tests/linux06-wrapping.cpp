@@ -8,16 +8,14 @@ int main()
   {
     terminal::Session terminal_session;
 
-    int height = 15;
-    int width = 20;
-    int y = terminal_session.rows() - height;
-    int x = 10;
+    terminal::Dimension const size{15, 20};
+    terminal::Position const top_left{terminal_session.rows() - size.height(), 10};
 
-    terminal::Window window(height, width, y, x);
+    terminal::Window window(size, top_left);
     window.set_background(terminal_session.default_rendition());
     window.set_border({});
     auto long_line = u8"Dark red window: αβγ this line is longer than the width of the window.";
-    window.addstr(1, 2, long_line);
+    window.addstr({1, 2}, long_line);
     terminal_session.stdscr().refresh();
     window.refresh();
     wch = terminal_session.get_wch();

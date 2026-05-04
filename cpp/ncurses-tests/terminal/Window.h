@@ -2,6 +2,8 @@
 
 #include "ComplexChar.h"
 #include "Border.h"
+#include "Dimension.h"
+#include "Position.h"
 #include <memory>
 
 namespace terminal {
@@ -18,8 +20,8 @@ class Window
   void init_as_stdscr();        // Initialize a default constructed window with stdscr.
 
  public:
-  // Construct a new Window at y,x with `height` rows x `width` cols.
-  Window(int height, int width, int y, int x);
+  // Construct a new Window with its top-left cell at `pos` with dimension `size`.
+  Window(Dimension size, Position pos);
 
   // The destructor must be defined in the .cxx file because of the std::unique_ptr<Impl> with incomplete `Impl`.
   ~Window();
@@ -36,25 +38,25 @@ class Window
   void addstr(char const* str);                                 // waddstr
   void addstr(char8_t const* str);                              //
 
-  void addstr(int y, int x, char const* str);                   // mvwaddstr
-  void addstr(int y, int x, char8_t const* wstr);               //
+  void addstr(Position pos, char const* str);                   // mvwaddstr
+  void addstr(Position pos, char8_t const* wstr);               //
 
   void addstr(char const* str, int n);                          // waddnstr
   void addstr(char8_t const* str, int n);                       //
 
-  void addstr(int y, int x, char const* str, int n);            // mvwaddnstr
-  void addstr(int y, int x, char8_t const* str, int n);         //
+  void addstr(Position pos, char const* str, int n);            // mvwaddnstr
+  void addstr(Position pos, char8_t const* str, int n);         //
 
   // https://invisible-island.net/ncurses/man/curs_add_wch.3x.html
 
   void addch(ComplexChar const& complex_char);                  // wadd_wch
-  void addch(int y, int x, ComplexChar const& complex_char);    // mvwadd_wch
+  void addch(Position pos, ComplexChar const& complex_char);    // mvwadd_wch
 
   void echochar(ComplexChar const& complex_char);               // wecho_wchar
 
   // https://invisible-island.net/ncurses/man/curs_move.3x.html
 
-  void move(int y, int x);
+  void move(Position pos);
 
  private:
   struct Impl;

@@ -38,12 +38,12 @@ Session::~Session()
   endwin();
 }
 
-int Session::rows() const
+uint32_t Session::rows() const
 {
   return LINES;
 }
 
-int Session::cols() const
+uint32_t Session::cols() const
 {
   return COLS;
 }

@@ -15,14 +15,14 @@ struct Window::Impl
   {
   }
 
-  Impl(int nlines, int ncols, int begin_y, int begin_x)
+  Impl(Dimension size, Position pos)
   {
     // From https://docs.oracle.com/cd/E86824_01/html/E54767/newwin-3curses.html
     //
     // The newwin() routine creates and returns a pointer to a new window with the given number of lines, nlines, and columns, ncols.
     // The upper left-hand corner of the window is at line begin_y, column begin_x . If either nlines or ncols is zero, they default
     // to LINES — begin_y and COLS — begin_x. A new full-screen window is created by calling newwin(0,0,0,0).
-    ncurses_window_ = ::newwin(nlines, ncols, begin_y, begin_x);
+    ncurses_window_ = ::newwin(size.height(), size.width(), pos.row(), pos.col());
   }
 
   ~Impl()
@@ -72,16 +72,16 @@ struct Window::Impl
     ::waddstr(ncurses_window_, reinterpret_cast<char const*>(utf8_str));
   }
 
-  void addstr(int y, int x, char const* str)
+  void addstr(Position pos, char const* str)
   {
-    ::mvwaddstr(ncurses_window_, y, x, str);
+    ::mvwaddstr(ncurses_window_, pos.row(), pos.col(), str);
   }
 
-  void addstr(int y, int x, char8_t const* utf8_str)
+  void addstr(Position pos, char8_t const* utf8_str)
   {
     // Instead of using mvwaddwstr, which would require application-side conversion from char8_t (utf8) to wchar_t,
     // it is better to just cast to `char const*` and let the terminal do that.
-    ::mvwaddstr(ncurses_window_, y, x, reinterpret_cast<char const*>(utf8_str));
+    ::mvwaddstr(ncurses_window_, pos.row(), pos.col(), reinterpret_cast<char const*>(utf8_str));
   }
 
   void addstr(char const* str, int n)
@@ -94,14 +94,14 @@ struct Window::Impl
     ::waddnstr(ncurses_window_, reinterpret_cast<char const*>(utf8_str), n);
   }
 
-  void addstr(int y, int x, char const* str, int n)
+  void addstr(Position pos, char const* str, int n)
   {
-    ::mvwaddnstr(ncurses_window_, y, x, str, n);
+    ::mvwaddnstr(ncurses_window_, pos.row(), pos.col(), str, n);
   }
 
-  void addstr(int y, int x, char8_t const* utf8_str, int n)
+  void addstr(Position pos, char8_t const* utf8_str, int n)
   {
-    ::mvwaddnstr(ncurses_window_, y, x, reinterpret_cast<char const*>(utf8_str), n);
+    ::mvwaddnstr(ncurses_window_, pos.row(), pos.col(), reinterpret_cast<char const*>(utf8_str), n);
   }
 
   void addstr(cchar_t const* wchstr)
@@ -114,14 +114,14 @@ struct Window::Impl
     ::wadd_wchnstr(ncurses_window_, wchstr, n);
   }
 
-  void addstr(int y, int x, cchar_t const* wchstr)
+  void addstr(Position pos, cchar_t const* wchstr)
   {
-    ::mvwadd_wchstr(ncurses_window_, y, x, wchstr);
+    ::mvwadd_wchstr(ncurses_window_, pos.row(), pos.col(), wchstr);
   }
 
-  void addstr(int y, int x, cchar_t const* wchstr, int n)
+  void addstr(Position pos, cchar_t const* wchstr, int n)
   {
-    ::mvwadd_wchnstr(ncurses_window_, y, x, wchstr, n);
+    ::mvwadd_wchnstr(ncurses_window_, pos.row(), pos.col(), wchstr, n);
   }
 
   void addch(ComplexChar const& complex_char)
@@ -130,10 +130,10 @@ struct Window::Impl
     ::wadd_wch(ncurses_window_, &wch);
   }
 
-  void addch(int y, int x, ComplexChar const& complex_char)
+  void addch(Position pos, ComplexChar const& complex_char)
   {
     cchar_t wch = convert_to_cchar(complex_char);
-    ::mvwadd_wch(ncurses_window_, y, x, &wch);
+    ::mvwadd_wch(ncurses_window_, pos.row(), pos.col(), &wch);
   }
 
   void echochar(ComplexChar const& complex_char)
@@ -142,7 +142,7 @@ struct Window::Impl
     ::wecho_wchar(ncurses_window_, &wch);
   }
 
-  void move(int y, int x)
+  void move(Position pos)
   {
     // https://invisible-island.net/ncurses/man/curs_move.3x.html
     //
@@ -150,7 +150,7 @@ struct Window::Impl
     // line y and column x. The terminal's cursor does not move until
     // refresh(3x) is called. The position (y, x) is relative to the upper
     // left-hand corner of the window, which has coordinates (0, 0).
-    ::wmove(ncurses_window_, y, x);
+    ::wmove(ncurses_window_, pos.row(), pos.col());
   }
 };
 
@@ -165,7 +165,7 @@ void Window::init_as_stdscr()
   impl_ = std::make_unique<Impl>();
 }
 
-Window::Window(int height, int width, int y, int x) : impl_(std::make_unique<Impl>(height, width, y, x))
+Window::Window(Dimension size, Position pos) : impl_(std::make_unique<Impl>(size, pos))
 {
 }
 
@@ -234,14 +234,14 @@ void Window::addstr(char8_t const* wstr)
   impl_->addstr(wstr);
 }
 
-void Window::addstr(int y, int x, char const* str)
+void Window::addstr(Position pos, char const* str)
 {
-  impl_->addstr(y, x, str);
+  impl_->addstr(pos, str);
 }
 
-void Window::addstr(int y, int x, char8_t const* wstr)
+void Window::addstr(Position pos, char8_t const* wstr)
 {
-  impl_->addstr(y, x, wstr);
+  impl_->addstr(pos, wstr);
 }
 
 void Window::addstr(char const* str, int n)
@@ -254,14 +254,14 @@ void Window::addstr(char8_t const* wstr, int n)
   impl_->addstr(wstr, n);
 }
 
-void Window::addstr(int y, int x, char const* str, int n)
+void Window::addstr(Position pos, char const* str, int n)
 {
-  impl_->addstr(y, x, str, n);
+  impl_->addstr(pos, str, n);
 }
 
-void Window::addstr(int y, int x, char8_t const* wstr, int n)
+void Window::addstr(Position pos, char8_t const* wstr, int n)
 {
-  impl_->addstr(y, x, wstr, n);
+  impl_->addstr(pos, wstr, n);
 }
 
 void Window::addch(ComplexChar const& complex_char)
@@ -269,9 +269,9 @@ void Window::addch(ComplexChar const& complex_char)
   impl_->addch(complex_char);
 }
 
-void Window::addch(int y, int x, ComplexChar const& complex_char)
+void Window::addch(Position pos, ComplexChar const& complex_char)
 {
-  impl_->addch(y, x, complex_char);
+  impl_->addch(pos, complex_char);
 }
 
 void Window::echochar(ComplexChar const& complex_char)
@@ -279,9 +279,9 @@ void Window::echochar(ComplexChar const& complex_char)
   impl_->echochar(complex_char);
 }
 
-void Window::move(int y, int x)
+void Window::move(Position pos)
 {
-  impl_->move(y, x);
+  impl_->move(pos);
 }
 
 } // namespace terminal

@@ -54,7 +54,9 @@ int main()
     terminal::Session terminal_session;
     terminal::Rendition const green_rendition(terminal_session.create_color_pair({}, {0x008800}));
     terminal_session.stdscr().set_background({green_rendition});
-    terminal::Window window{terminal_session.rows() / 2, terminal_session.cols() / 2, terminal_session.rows() / 4, terminal_session.cols() / 4};
+    terminal::Dimension screen_size = terminal_session.size();
+    terminal::Position offset{screen_size.height() / 4, screen_size.width() / 4};
+    terminal::Window window{screen_size / 2, offset};
     window.set_background(source);
     window.set_border({});
     terminal::ComplexChar const round_trip = window.get_background();
@@ -65,7 +67,7 @@ int main()
         require((round_trip.rendition().attributes().mask() & static_cast<terminal::Attributes::attr_t>(terminal::Attribute::bold)) != 0,
             "Window background round-trip should preserve bold attribute");
 
-    window.move(1, 1);
+    window.move({1, 1});
     terminal_session.stdscr().refresh();
     window.refresh();
     terminal_session.get_wch();

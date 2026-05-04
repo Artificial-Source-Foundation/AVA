@@ -279,6 +279,13 @@ if(AVA_BUILD_TESTS)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_mcp_commands.cmake)
 
   add_test(
+    NAME ava_cli.headless_rpc_plugin_commands
+    COMMAND ${CMAKE_COMMAND}
+            -DAVA_EXE=$<TARGET_FILE:ava>
+            -DAVA_CLI_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cli-headless-rpc-plugin-commands
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_plugin_commands.cmake)
+
+  add_test(
     NAME ava_cli.headless_rpc_mcp_config_errors
     COMMAND ${CMAKE_COMMAND}
             -DAVA_EXE=$<TARGET_FILE:ava>

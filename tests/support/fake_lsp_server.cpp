@@ -16,6 +16,7 @@ namespace {
 enum class Mode {
   Normal,
   EchoUriDiagnostics,
+  SleepInitialize,
   MalformedDiagnostics,
   CrashDiagnostics,
   SleepDiagnostics,
@@ -77,6 +78,7 @@ Mode parse_mode(int argc, char** argv) {
     if (std::strcmp(argv[index], "--malformed-diagnostics") == 0) return Mode::MalformedDiagnostics;
     if (std::strcmp(argv[index], "--crash-diagnostics") == 0) return Mode::CrashDiagnostics;
     if (std::strcmp(argv[index], "--echo-uri-diagnostics") == 0) return Mode::EchoUriDiagnostics;
+    if (std::strcmp(argv[index], "--sleep-initialize") == 0) return Mode::SleepInitialize;
     if (std::strcmp(argv[index], "--sleep-diagnostics") == 0) return Mode::SleepDiagnostics;
     if (std::strcmp(argv[index], "--huge-content-length") == 0) return Mode::HugeContentLength;
     if (std::strcmp(argv[index], "--huge-header") == 0) return Mode::HugeHeader;
@@ -123,7 +125,8 @@ void respond_diagnostics(long long id, Mode mode, std::string_view uri) {
                            ",\"result\":{\"kind\":\"full\",\"items\":[{\"range\":{\"start\":{\"line\":2,"
                            "\"character\":4},\"end\":{\"line\":2,\"character\":9}},\"severity\":1,"
                            "\"code\":\"AVA_FAKE\",\"source\":\"ava_fake_lsp\","
-                           "\"message\":\"" + ava::core::json::escape(message) + "\"}]}}";
+                           "\"message\":\"" +
+                           ava::core::json::escape(message) + "\"}]}}";
   write_message(body);
 }
 
@@ -136,6 +139,10 @@ int main(int argc, char** argv) {
     const auto id = ava::core::json::integer_field(*message, "id");
     if (!method) continue;
     if (*method == "initialize" && id) {
+      if (mode == Mode::SleepInitialize) {
+        usleep(1000000);
+        continue;
+      }
       respond_initialize(*id);
     } else if (*method == "textDocument/diagnostic" && id) {
       respond_diagnostics(*id, mode, request_uri(*message));

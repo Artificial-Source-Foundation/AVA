@@ -80,6 +80,9 @@ ToolDispatchResult tool_error_result(const ProviderToolCall& call, const ava::co
 }
 
 ToolDispatchResult lsp_error_result(const ProviderToolCall& call, const ava::core::Error& error) {
+  if (error.message().find("canceled") != std::string::npos || error.message().find("cancelled") != std::string::npos) {
+    return tool_error_result(call, error);
+  }
   if (error.category() == ava::core::ErrorCategory::PermissionDenied ||
       error.category() == ava::core::ErrorCategory::InvalidArgument) {
     return tool_error_result(call, error);

@@ -38,15 +38,12 @@ std::filesystem::path make_lsp_workspace(std::string_view name) {
 class ManyDiagnosticsProvider final : public ava::lsp::DiagnosticsProvider {
  public:
   [[nodiscard]] ava::core::Result<std::vector<ava::lsp::Diagnostic>> diagnostics(
-      const std::filesystem::path&) override {
+      const std::filesystem::path&, ava::lsp::CancelCallback = nullptr) override {
     std::vector<ava::lsp::Diagnostic> diagnostics;
     diagnostics.reserve(300);
     for (int index = 0; index < 300; ++index) {
-      diagnostics.push_back(ava::lsp::Diagnostic{.severity = 2,
-                                                 .message = std::string(1024, 'x'),
-                                                 .line = index,
-                                                 .column = 1,
-                                                 .code = "MANY"});
+      diagnostics.push_back(ava::lsp::Diagnostic{
+          .severity = 2, .message = std::string(1024, 'x'), .line = index, .column = 1, .code = "MANY"});
     }
     return diagnostics;
   }
@@ -96,7 +93,7 @@ void test_lsp_manager_crash_error() {
                             : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{
                                   std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing client"))};
   expect(!diagnostics && diagnostics.error().format().find("LSP server") != std::string::npos,
-          "LSP manager reports crashed diagnostics server cleanly");
+         "LSP manager reports crashed diagnostics server cleanly");
 }
 
 void test_lsp_manager_timeout_error() {
@@ -114,6 +111,34 @@ void test_lsp_manager_timeout_error() {
          "LSP manager times out and terminates unresponsive diagnostics requests");
 }
 
+void test_lsp_manager_cancellation() {
+  const auto startup_workspace = make_lsp_workspace("lsp-startup-cancel");
+  int startup_cancel_checks = 0;
+  auto startup_canceled = ava::lsp::SubprocessLspClient::start(
+      ava::lsp::ServerConfig{
+          .argv = fake_lsp_argv({"--sleep-initialize"}),
+          .workspace_root = startup_workspace,
+          .request_timeout = std::chrono::milliseconds(1000),
+      },
+      [&] { return ++startup_cancel_checks > 2; });
+  expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos,
+         "LSP manager cancels hung startup before timeout");
+
+  const auto diagnostics_workspace = make_lsp_workspace("lsp-diagnostics-cancel");
+  auto client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
+      .argv = fake_lsp_argv({"--sleep-diagnostics"}),
+      .workspace_root = diagnostics_workspace,
+      .request_timeout = std::chrono::milliseconds(1000),
+  });
+  expect(client.has_value(), "LSP cancellation test starts sleeping fake server");
+  if (client) {
+    int cancel_checks = 0;
+    auto diagnostics = (*client)->diagnostics(diagnostics_workspace / "main.cpp", [&] { return ++cancel_checks > 2; });
+    expect(!diagnostics && diagnostics.error().message().find("canceled") != std::string::npos,
+           "LSP manager cancels hung diagnostics before timeout");
+  }
+}
+
 void test_lsp_manager_huge_response_caps() {
   const auto content_workspace = make_lsp_workspace("lsp-huge-content-length");
   auto content_client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
@@ -125,8 +150,8 @@ void test_lsp_manager_huge_response_caps() {
   auto content_result = content_client ? (*content_client)->diagnostics(content_workspace / "main.cpp")
                                        : ava::core::Result<std::vector<ava::lsp::Diagnostic>>{std::unexpected(
                                              ava::core::Error(ava::core::ErrorCategory::Tool, "missing client"))};
-  expect(!content_result && content_result.error().format().find("Content-Length exceeds message cap") !=
-                                std::string::npos,
+  expect(!content_result &&
+             content_result.error().format().find("Content-Length exceeds message cap") != std::string::npos,
          "LSP manager rejects oversized Content-Length before reading the body");
 
   const auto header_workspace = make_lsp_workspace("lsp-huge-header");
@@ -151,9 +176,9 @@ void test_lsp_diagnostics_tool_and_dispatcher_json() {
       .request_timeout = std::chrono::milliseconds(3000),
   });
   expect(client.has_value(), "LSP tool test starts fake server provider");
-  const ava::tools::ToolContext context{.workspace_dir = workspace,
-                                        .lsp_diagnostics_provider = client ? std::shared_ptr<ava::lsp::DiagnosticsProvider>(*client)
-                                                                           : nullptr};
+  const ava::tools::ToolContext context{
+      .workspace_dir = workspace,
+      .lsp_diagnostics_provider = client ? std::shared_ptr<ava::lsp::DiagnosticsProvider>(*client) : nullptr};
   auto tool = ava::tools::lsp_diagnostics(context, workspace / "main.cpp");
   expect(tool && tool->diagnostics.size() == 1 && tool->diagnostics[0].message == "fake diagnostic from LSP",
          "lsp_diagnostics tool returns structured diagnostics");
@@ -167,7 +192,16 @@ void test_lsp_diagnostics_tool_and_dispatcher_json() {
              dispatched->result_text.find("\"severity\":1") != std::string::npos &&
              dispatched->result_text.find("fake diagnostic from LSP") != std::string::npos &&
              dispatched->result_text.find("\"code\":\"AVA_FAKE\"") != std::string::npos,
-          "tool dispatcher returns expected lsp_diagnostics JSON");
+         "tool dispatcher returns expected lsp_diagnostics JSON");
+
+  auto canceled_context = context;
+  canceled_context.cancel_requested = [] { return true; };
+  const ava::agent::ToolDispatcher canceled_dispatcher(canceled_context);
+  auto canceled = canceled_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_lsp_canceled", .name = "lsp_diagnostics", .arguments_json = "{\"path\":\"main.cpp\"}"});
+  expect(canceled && !canceled->success && canceled->payload.status == ava::agent::ToolResultStatus::Canceled &&
+             canceled->result_text.find("canceled") != std::string::npos,
+         "tool dispatcher preserves semantic cancellation for lsp_diagnostics");
 }
 
 void test_lsp_file_uri_escapes_encoded_separators() {
@@ -182,9 +216,9 @@ void test_lsp_file_uri_escapes_encoded_separators() {
       .request_timeout = std::chrono::milliseconds(3000),
   });
   expect(client.has_value(), "LSP URI escaping test starts fake server");
-  const ava::tools::ToolContext context{.workspace_dir = workspace,
-                                        .lsp_diagnostics_provider = client ? std::shared_ptr<ava::lsp::DiagnosticsProvider>(*client)
-                                                                           : nullptr};
+  const ava::tools::ToolContext context{
+      .workspace_dir = workspace,
+      .lsp_diagnostics_provider = client ? std::shared_ptr<ava::lsp::DiagnosticsProvider>(*client) : nullptr};
   auto tool = ava::tools::lsp_diagnostics(context, workspace / literal_name);
   expect(tool && tool->diagnostics.size() == 1 &&
              tool->diagnostics[0].message.find("%252F..%252F..%252F.env") != std::string::npos &&
@@ -200,13 +234,14 @@ void test_lsp_dispatcher_redacts_server_error_context() {
       .request_timeout = std::chrono::milliseconds(3000),
   });
   expect(client.has_value(), "LSP redaction test starts crashing fake server");
-  const ava::tools::ToolContext context{.workspace_dir = workspace,
-                                        .lsp_diagnostics_provider = client ? std::shared_ptr<ava::lsp::DiagnosticsProvider>(*client)
-                                                                           : nullptr};
+  const ava::tools::ToolContext context{
+      .workspace_dir = workspace,
+      .lsp_diagnostics_provider = client ? std::shared_ptr<ava::lsp::DiagnosticsProvider>(*client) : nullptr};
   const ava::agent::ToolDispatcher dispatcher(context);
   auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "call_lsp_redacted", .name = "lsp_diagnostics", .arguments_json = "{\"path\":\"main.cpp\"}"});
-  expect(dispatched && !dispatched->success && dispatched->result_text.find("LSP diagnostics failed") != std::string::npos &&
+  expect(dispatched && !dispatched->success &&
+             dispatched->result_text.find("LSP diagnostics failed") != std::string::npos &&
              dispatched->result_text.find(AVA_FAKE_LSP_SERVER_PATH) == std::string::npos &&
              dispatched->result_text.find(workspace.generic_string()) == std::string::npos,
          "provider-facing LSP errors redact local server command and workspace context");
@@ -222,7 +257,7 @@ void test_lsp_dispatcher_bounds_provider_json() {
   expect(dispatched && dispatched->success && dispatched->result_text.size() <= 64 * 1024 &&
              dispatched->result_text.find("\"truncated\":true") != std::string::npos &&
              dispatched->result_text.find("\"total_diagnostics\":300") != std::string::npos,
-          "lsp_diagnostics provider JSON is bounded and reports diagnostic truncation");
+         "lsp_diagnostics provider JSON is bounded and reports diagnostic truncation");
 
   auto long_path = std::string(5000, 'a');
   auto long_path_result = dispatcher.dispatch(ava::agent::ProviderToolCall{
@@ -243,6 +278,7 @@ void run_lsp_tests() {
   test_lsp_manager_malformed_response_error();
   test_lsp_manager_crash_error();
   test_lsp_manager_timeout_error();
+  test_lsp_manager_cancellation();
   test_lsp_manager_huge_response_caps();
   test_lsp_diagnostics_tool_and_dispatcher_json();
   test_lsp_file_uri_escapes_encoded_separators();

@@ -163,7 +163,7 @@ Missing or incomplete:
 - Search parity for unsupported `.gitignore` edge syntax such as bracket character classes; current native matcher documents its subset.
 - Process-tree cleanup on cancellation and timeout.
 - Image/file attachment reads if AVA wants multimodal model support.
-- LSP symbols, definitions, references, document sync, and configured production server discovery beyond the current diagnostics first slice.
+- LSP diagnostics now share the active run cancellation callback for startup and request waits; symbols, definitions, references, document sync, and configured production server discovery remain beyond the current diagnostics first slice.
 - Delete/move tools, only after audit and permissions are stronger.
 
 1.0 target:

@@ -6,10 +6,16 @@
 namespace ava::tools {
 
 ava::core::Result<LspDiagnosticsResult> lsp_diagnostics(const ToolContext& context, const std::filesystem::path& path) {
+  if (context.cancel_requested && context.cancel_requested()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled"));
+  }
   if (auto permission = ensure_permission(context, ava::permissions::Operation::LspQuery, path, "", "lsp_diagnostics",
                                           "LSP diagnostics require permission");
       !permission) {
     return std::unexpected(std::move(permission.error()));
+  }
+  if (context.cancel_requested && context.cancel_requested()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled"));
   }
 
   std::shared_ptr<ava::lsp::DiagnosticsProvider> provider = context.lsp_diagnostics_provider;
@@ -20,7 +26,7 @@ ava::core::Result<LspDiagnosticsResult> lsp_diagnostics(const ToolContext& conte
     return std::unexpected(std::move(error));
   }
 
-  auto diagnostics = provider->diagnostics(path);
+  auto diagnostics = provider->diagnostics(path, context.cancel_requested);
   if (!diagnostics) return std::unexpected(std::move(diagnostics.error()));
   return LspDiagnosticsResult{.path = path, .diagnostics = std::move(*diagnostics)};
 }

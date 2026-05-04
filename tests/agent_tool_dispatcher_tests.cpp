@@ -86,7 +86,7 @@ class CallbackTransport final : public ava::provider::Transport {
 class EmptyDiagnosticsProvider final : public ava::lsp::DiagnosticsProvider {
  public:
   [[nodiscard]] ava::core::Result<std::vector<ava::lsp::Diagnostic>> diagnostics(
-      const std::filesystem::path&) override {
+      const std::filesystem::path&, ava::lsp::CancelCallback = nullptr) override {
     return std::vector<ava::lsp::Diagnostic>{};
   }
 };

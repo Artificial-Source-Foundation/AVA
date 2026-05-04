@@ -24,6 +24,7 @@ struct RpcCommand {
   std::optional<std::string> reasoning_display;
   std::optional<std::string> request_id;
   std::optional<std::string> correlation_id;
+  std::optional<std::string> grant_id;
   std::optional<std::string> decision;
   std::optional<std::string> answer;
   std::optional<std::string> selected;

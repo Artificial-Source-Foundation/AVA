@@ -209,6 +209,14 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
     if (request_index == 0 || request_index == 2) return ProviderResponse{.body = read_tool_body(target_path)};
     return ProviderResponse{.body = text_body(request_index == 1 ? "first session grant" : "second session grant")};
   }
+  if (scenario == "read-tool-thrice") {
+    if (request_index == 0 || request_index == 2 || request_index == 4) {
+      return ProviderResponse{.body = read_tool_body(target_path)};
+    }
+    if (request_index == 1) return ProviderResponse{.body = text_body("first controlled grant")};
+    return ProviderResponse{.body =
+                                text_body(request_index == 3 ? "second controlled grant" : "third controlled grant")};
+  }
   if (scenario == "read-missing-tool") {
     return ProviderResponse{.body = request_index == 0 ? read_tool_body(target_path) : text_body("after tool failure")};
   }
@@ -241,8 +249,9 @@ int main(int argc, char** argv)
   auto const delay = std::chrono::milliseconds(std::stoi(argv[3]));
   std::string const scenario = argc == 6 ? argv[4] : "text";
   std::string const target_path = argc == 6 ? argv[5] : "";
-  int const request_count = scenario == "http-error"        ? 3
-                            : scenario == "read-tool-twice" ? 4
+  int const request_count = scenario == "http-error"         ? 3
+                            : scenario == "read-tool-twice"  ? 4
+                            : scenario == "read-tool-thrice" ? 6
                             : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "write-tool" ||
                                scenario == "question-tool" || scenario == "compact")
                                 ? 2

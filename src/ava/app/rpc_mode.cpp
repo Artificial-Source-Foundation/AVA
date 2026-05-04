@@ -111,6 +111,36 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       continue;
     }
 
+    if (command->type == "permission_grant_revoke") {
+      if (!command->grant_id || command->grant_id->empty()) {
+        if (auto written =
+                rpc::write_error(output, command->id, rpc::invalid_rpc("permission_grant_revoke requires grant_id"));
+            !written) {
+          return written;
+        }
+        continue;
+      }
+      auto revoked = rpc::permission_session_grant_revoke_result_json(pending_state, *command->grant_id);
+      if (!revoked) {
+        if (auto written = rpc::write_error(output, command->id, revoked.error()); !written) return written;
+        continue;
+      }
+      auto envelope = rpc::resolver_event_envelope("permission_grant_revoked", command->id, command->id,
+                                                   rpc::session_id_snapshot(session, session_mutex), *revoked);
+      if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
+      if (auto written = rpc::write_success(output, command->id, *revoked); !written) return written;
+      continue;
+    }
+
+    if (command->type == "permission_grants_clear") {
+      auto const cleared = rpc::permission_session_grants_clear_result_json(pending_state);
+      auto envelope = rpc::resolver_event_envelope("permission_grants_cleared", command->id, command->id,
+                                                   rpc::session_id_snapshot(session, session_mutex), cleared);
+      if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
+      if (auto written = rpc::write_success(output, command->id, cleared); !written) return written;
+      continue;
+    }
+
     if (command->type == "list_sessions") {
       std::lock_guard lock(session_mutex);
       auto sessions_json = rpc::list_sessions_result_json(session);

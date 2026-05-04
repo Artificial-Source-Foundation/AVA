@@ -66,6 +66,9 @@ struct PendingResolverState {
 
 [[nodiscard]] bool cancel_pending_resolvers(PendingResolverState& pending_state);
 [[nodiscard]] std::string permission_session_grants_result_json(PendingResolverState& pending_state);
+[[nodiscard]] ava::core::Result<std::string> permission_session_grant_revoke_result_json(
+    PendingResolverState& pending_state, std::string_view grant_id);
+[[nodiscard]] std::string permission_session_grants_clear_result_json(PendingResolverState& pending_state);
 
 [[nodiscard]] ava::permissions::PermissionResolver make_rpc_permission_resolver(
     PendingResolverState& pending_state, RpcOutput& output, RpcRunState& run_state, RuntimeSession const& session,

@@ -42,7 +42,7 @@ ava --print "fetch release notes" --allow-tool webfetch
 ava --rpc --allow read-only
 ```
 
-Invalid permission flag values exit with code `2` and write a usage error to stderr before provider/auth startup. AVA does not persist headless permission rules; every headless invocation must provide the desired policy explicitly. In RPC mode, matching read/search or exact `webfetch` network prompts are auto-allowed before `permission_requested`; non-matching ask prompts still require an explicit `permission_reply`.
+Invalid permission flag values exit with code `2` and write a usage error to stderr before provider/auth startup. AVA does not persist headless permission rules; every headless invocation must provide the desired policy explicitly. In RPC mode, matching read/search or exact `webfetch` network prompts are auto-allowed before `permission_requested`; non-matching ask prompts still require an explicit `permission_reply`. RPC clients may reply with `allow_session` to create an in-memory exact-match grant for the current RPC process. Those grants are inspectable, revocable, and clearable through RPC commands; they are not persisted across AVA restarts.
 
 ## Stdout / Stderr Contract
 
@@ -98,6 +98,7 @@ Current event names:
 - `retry`: bounded backend retry lifecycle event. Payloads include `attempt`, `max_attempts`, and `delay_ms` when the backend retry path has those values. Provider transport retries use `trigger:"provider_transport"` with provider-neutral reasons such as `rate_limited`, `transient`, or `transport_io`; context-overflow retries use `reason:"context_overflow"`; stale compaction snapshot retries use `reason:"stale_compaction_snapshot"`.
 - `retry_tick`: backend retry countdown tick emitted while a bounded retry delay is sleeping. Payloads include `remaining_ms` plus the same retry correlation metadata where available. Clients should treat it as status/progress, not a final failure.
 - `cancel_requested`: RPC cancel request was accepted. Payload includes `active_run`, `cleared_steer`, `cleared_follow_up`, and the active prompt request id when one exists.
+- `permission_grant_revoked`, `permission_grants_cleared`: RPC session-grant lifecycle events. Payloads include the revoked grant or the number of grants cleared.
 - `canceled`: terminal event for a cooperatively canceled runtime turn.
 - `error`: runtime, provider, or tool boundary failure; includes `category`, `message`, and optional `details`.
 - `done`: terminal event for a successful turn; includes `stop_reason` and small counters when available.
@@ -178,7 +179,7 @@ State:
 
 Returns the active protocol version, session id/path, mode, provider/model, workspace/current directory, cancel flag, current reasoning selection, and loaded context source summary. Reasoning fields are `reasoning_enabled` plus optional `reasoning_level`, `reasoning_budget_tokens`, and `reasoning_display` when enabled.
 
-`get_state`, `list_models`, and `list_sessions` remain available while a prompt is active. `get_messages`, `get_session_stats`, `validate_session`, `set_model`, `cycle_model`, `set_reasoning`, `clear_reasoning`, `compact`, `export`, and `context` materialize or mutate session history and are rejected while a prompt is active. RPC `/compact` also marks the session busy while it generates and records the provider summary, so a prompt cannot start midway through compaction.
+`get_state`, `list_models`, `list_sessions`, `permission_grants`, `permission_grant_revoke`, and `permission_grants_clear` remain available while a prompt is active. `get_messages`, `get_session_stats`, `validate_session`, `set_model`, `cycle_model`, `set_reasoning`, `clear_reasoning`, `compact`, `export`, and `context` materialize or mutate session history and are rejected while a prompt is active. RPC `/compact` also marks the session busy while it generates and records the provider summary, so a prompt cannot start midway through compaction.
 
 Messages:
 
@@ -304,16 +305,27 @@ The event top-level `request_id` remains the prompt command id. The client must 
 
 ```json
 {"id":"perm_reply_1","type":"permission_reply","request_id":"permission_...","correlation_id":"prompt_req","decision":"allow"}
+{"id":"perm_reply_1b","type":"permission_reply","request_id":"permission_...","correlation_id":"prompt_req","decision":"allow_session"}
 {"id":"perm_reply_2","type":"permission_reply","request_id":"permission_...","correlation_id":"prompt_req","decision":"deny"}
 ```
 
-`decision` must be exactly `allow` or `deny`. A successful reply emits `permission_replied` before the in-band response:
+`decision` must be exactly `allow`, `allow_session`, or `deny`. `allow_session` resolves the current prompt as allow and records an in-memory exact-match grant for later permission prompts with the same operation, mode, tool name, target path, and command. A successful reply emits `permission_replied` before the in-band response:
 
 ```json
 {"schema_version":1,"name":"permission_replied","type":"permission_replied","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","decision":"allow"}}
 ```
 
 Missing, unknown, or wrong-correlation resolver ids return in-band errors. Cancellation unblocks pending permission requests fail-closed.
+
+RPC session grants can be inspected, revoked by id, or cleared:
+
+```json
+{"id":"perm_grants_1","type":"permission_grants"}
+{"id":"perm_grants_2","type":"permission_grant_revoke","grant_id":"permgrant_..."}
+{"id":"perm_grants_3","type":"permission_grants_clear"}
+```
+
+`permission_grants` returns `{"grants":[...]}`. Each grant includes `grant_id`, the original `permission_request_id`, `operation`, `mode`, `tool_name`, `target_path`, `command`, `reason`, and `risk`. `permission_grant_revoke` returns `success:false` if the grant id is unknown; otherwise it emits `permission_grant_revoked` and returns the revoked grant. `permission_grants_clear` emits `permission_grants_cleared` and returns the number of grants removed. Session grants are process-local RPC state, not durable permission rules.
 
 When an active prompt reaches the `question` tool, RPC emits:
 

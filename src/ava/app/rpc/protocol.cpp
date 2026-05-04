@@ -221,6 +221,10 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   if (auto valid = rpc::validate_optional_rpc_identifier(correlation_id, "correlation_id"); !valid) {
     return std::unexpected(std::move(valid.error()));
   }
+  auto grant_id = ava::core::json::string_field(line, "grant_id");
+  if (auto valid = rpc::validate_optional_rpc_identifier(grant_id, "grant_id"); !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
   auto provider = ava::core::json::string_field(line, "provider");
   if (auto valid = rpc::validate_optional_rpc_identifier(provider, "provider"); !valid) {
     return std::unexpected(std::move(valid.error()));
@@ -257,6 +261,7 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
                     .reasoning_display = ava::core::json::string_field(line, "reasoning_display"),
                     .request_id = std::move(request_id),
                     .correlation_id = std::move(correlation_id),
+                    .grant_id = std::move(grant_id),
                     .decision = ava::core::json::string_field(line, "decision"),
                     .answer = ava::core::json::string_field(line, "answer"),
                     .selected = ava::core::json::string_field(line, "selected"),

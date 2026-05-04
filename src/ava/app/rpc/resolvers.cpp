@@ -110,6 +110,52 @@ std::string permission_session_grants_result_json(PendingResolverState& pending_
   return json;
 }
 
+ava::core::Result<std::string> permission_session_grant_revoke_result_json(PendingResolverState& pending_state,
+                                                                           std::string_view grant_id)
+{
+  PermissionSessionGrant grant;
+  {
+    std::lock_guard lock(pending_state.mutex);
+    auto found = pending_state.permission_session_grants.end();
+    for (auto it = pending_state.permission_session_grants.begin(); it != pending_state.permission_session_grants.end();
+         ++it) {
+      if (it->grant_id == grant_id) {
+        found = it;
+        break;
+      }
+    }
+    if (found == pending_state.permission_session_grants.end()) {
+      auto error = invalid_rpc("permission_grant_revoke has no matching grant_id");
+      error.with_context("grant_id", std::string(grant_id));
+      return std::unexpected(std::move(error));
+    }
+    grant = *found;
+    pending_state.permission_session_grants.erase(found);
+  }
+
+  std::string json = "{";
+  json += bool_field_json("revoked", true);
+  json += ",\"grant\":";
+  json += permission_session_grant_json(grant);
+  json += '}';
+  return json;
+}
+
+std::string permission_session_grants_clear_result_json(PendingResolverState& pending_state)
+{
+  std::size_t cleared = 0;
+  {
+    std::lock_guard lock(pending_state.mutex);
+    cleared = pending_state.permission_session_grants.size();
+    pending_state.permission_session_grants.clear();
+  }
+
+  std::string json = "{";
+  json += number_field_json("cleared", cleared);
+  json += '}';
+  return json;
+}
+
 ava::permissions::PermissionResolver make_rpc_permission_resolver(
     PendingResolverState& pending_state, RpcOutput& output, RpcRunState& run_state, RuntimeSession const& session,
     std::mutex& session_mutex, ava::permissions::PermissionResolver policy_resolver, std::string prompt_request_id)

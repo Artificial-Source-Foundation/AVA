@@ -197,6 +197,10 @@ if(AVA_BUILD_TESTS)
   ava_apply_warnings(ava_fake_mcp_server)
   ava_apply_sanitizers(ava_fake_mcp_server)
 
+  add_executable(ava_fake_provider_server tests/support/fake_provider_server.cpp)
+  ava_apply_warnings(ava_fake_provider_server)
+  ava_apply_sanitizers(ava_fake_provider_server)
+
   add_executable(ava_tests
     tests/agent_tool_dispatcher_tests.cpp
     tests/app_runtime_tests.cpp
@@ -214,7 +218,7 @@ if(AVA_BUILD_TESTS)
     tests/tui_composer_tests.cpp
   )
   target_link_libraries(ava_tests PRIVATE ava_core ava_tui ava_app ava_test_support)
-  add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server)
+  add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_provider_server)
   target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")
   target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_FILE:ava_fake_mcp_server>")
   ava_apply_warnings(ava_tests)
@@ -262,6 +266,14 @@ if(AVA_BUILD_TESTS)
             -DAVA_EXE=$<TARGET_FILE:ava>
             -DAVA_CLI_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cli-headless-rpc-context-export
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_context_export.cmake)
+
+  add_test(
+    NAME ava_cli.headless_rpc_active_run_rejection
+    COMMAND ${CMAKE_COMMAND}
+            -DAVA_EXE=$<TARGET_FILE:ava>
+            -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+            -DAVA_CLI_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cli-headless-rpc-active-run-rejection
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_active_run_rejection.cmake)
 
   add_test(
     NAME ava_cli.headless_rpc_cancel

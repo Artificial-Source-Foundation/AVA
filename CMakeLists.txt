@@ -241,4 +241,11 @@ if(AVA_BUILD_TESTS)
   foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
     add_test(NAME ava_tests.${AVA_TEST_SUITE} COMMAND ava_tests ${AVA_TEST_SUITE})
   endforeach()
+
+  add_test(
+    NAME ava_cli.headless_rpc_validate_session
+    COMMAND ${CMAKE_COMMAND}
+            -DAVA_EXE=$<TARGET_FILE:ava>
+            -DAVA_CLI_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cli-headless-rpc-validate
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_validate.cmake)
 endif()

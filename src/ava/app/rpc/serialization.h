@@ -32,6 +32,7 @@ namespace ava::app::rpc {
 [[nodiscard]] std::string command_result_json(const CommandResult& result);
 [[nodiscard]] ava::core::Result<std::string> messages_result_json(const RuntimeSession& session);
 [[nodiscard]] ava::core::Result<std::string> session_stats_result_json(const RuntimeSession& session);
+[[nodiscard]] ava::core::Result<std::string> session_validation_result_json(const RuntimeSession& session);
 [[nodiscard]] std::string permission_request_payload_json(std::string_view resolver_request_id,
                                                           const ava::permissions::PermissionPrompt& prompt);
 [[nodiscard]] std::string question_request_payload_json(std::string_view resolver_request_id,

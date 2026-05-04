@@ -10,6 +10,7 @@
 #include "ava/core/json.h"
 #include "ava/provider/registry.h"
 #include "ava/session/stats.h"
+#include "ava/session/validation.h"
 
 namespace ava::app::rpc {
 namespace {
@@ -545,6 +546,49 @@ ava::core::Result<std::string> session_stats_result_json(const RuntimeSession& s
   json += ',';
   json += number_field_json("cancel", stats.counts.cancel);
   json += "}}";
+  return json;
+}
+
+ava::core::Result<std::string> session_validation_result_json(const RuntimeSession& session) {
+  auto entries = session.store.load();
+  if (!entries) return std::unexpected(entries.error());
+  const auto validation = ava::session::validate_session_replay(*entries);
+
+  std::string json = "{";
+  json += string_field_json("session_id", session.store.session_id());
+  json += ',';
+  json += string_field_json("session_path", session.store.session_path().string());
+  json += ',';
+  json += bool_field_json("ok", validation.ok());
+  json += ',';
+  json += number_field_json("error_count", validation.error_count);
+  json += ',';
+  json += number_field_json("warning_count", validation.warning_count);
+  json += ",\"issues\":[";
+  for (std::size_t index = 0; index < validation.issues.size(); ++index) {
+    const auto& issue = validation.issues[index];
+    if (index > 0) json += ',';
+    json += '{';
+    json += string_field_json("severity", ava::session::to_string(issue.severity));
+    json += ',';
+    json += string_field_json("kind", ava::session::to_string(issue.kind));
+    json += ',';
+    json += number_field_json("entry_index", issue.entry_index);
+    if (!issue.entry_id.empty()) {
+      json += ',';
+      json += string_field_json("entry_id", issue.entry_id);
+    }
+    if (!issue.call_id.empty()) {
+      json += ',';
+      json += string_field_json("call_id", issue.call_id);
+    }
+    if (!issue.message.empty()) {
+      json += ',';
+      json += string_field_json("message", issue.message);
+    }
+    json += '}';
+  }
+  json += "]}";
   return json;
 }
 

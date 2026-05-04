@@ -178,7 +178,7 @@ State:
 
 Returns the active protocol version, session id/path, mode, provider/model, workspace/current directory, cancel flag, current reasoning selection, and loaded context source summary. Reasoning fields are `reasoning_enabled` plus optional `reasoning_level`, `reasoning_budget_tokens`, and `reasoning_display` when enabled.
 
-`get_state`, `list_models`, and `list_sessions` remain available while a prompt is active. `get_messages`, `get_session_stats`, `set_model`, `cycle_model`, `set_reasoning`, `clear_reasoning`, `compact`, `export`, and `context` materialize or mutate session history and are rejected while a prompt is active. RPC `/compact` also marks the session busy while it generates and records the provider summary, so a prompt cannot start midway through compaction.
+`get_state`, `list_models`, and `list_sessions` remain available while a prompt is active. `get_messages`, `get_session_stats`, `validate_session`, `set_model`, `cycle_model`, `set_reasoning`, `clear_reasoning`, `compact`, `export`, and `context` materialize or mutate session history and are rejected while a prompt is active. RPC `/compact` also marks the session busy while it generates and records the provider summary, so a prompt cannot start midway through compaction.
 
 Messages:
 
@@ -199,6 +199,14 @@ Returns `session_id`, `session_path`, `entry_count`, first/last timestamps, usag
 Usage fields are additive and appear only when present in saved assistant entries: `input_tokens`, `output_tokens`, `reasoning_tokens`, `cache_read_tokens`, `cache_write_tokens`, and `total_tokens`. Exact provider token totals are kept separate from byte-count fallback estimates: `estimated_input_bytes`, `estimated_output_bytes`, and `estimated_total_bytes` report fallback byte estimates when provider usage was unavailable. `exact_usage_entries` and `estimated_usage_entries` show how many assistant entries contributed to each category.
 
 Cost fields are conservative. `known_cost_usd` is the sum of assistant entries whose model pricing was known. `total_cost_usd` is emitted only when `cost_complete:true`, meaning every exact billable usage entry had known pricing. If any exact billable entry lacks pricing, `cost_complete:false`, `unknown_cost_entries` is greater than zero, and clients should treat `known_cost_usd` as a partial subtotal.
+
+Session validation:
+
+```json
+{"id":"3b2","type":"validate_session"}
+```
+
+Runs the backend replay validator over the active session and returns `{session_id,session_path,ok,error_count,warning_count,issues}`. Issues include stable `kind` strings, severity, entry index, entry id when available, tool call id when relevant, and a short diagnostic message. The validator currently checks entry ids, parent links, tool call/result pairing, permission prompt/resolution pairing, structured tool results when required by callers, and compaction integrity. Compaction validation requires a durable summary and reports compaction boundaries that occur while tool calls or permission prompts are unresolved.
 
 Model catalog and switching:
 

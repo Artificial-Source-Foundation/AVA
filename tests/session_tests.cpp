@@ -645,6 +645,83 @@ void test_session_replay_validation() {
   expect(!unresolved_permission.ok() &&
              has_replay_issue(unresolved_permission, ava::session::SessionReplayIssueKind::UnresolvedPermissionPrompt),
          "session replay validator flags ask permission prompts without outcomes");
+
+  auto valid_compaction_entries = valid_entries;
+  valid_compaction_entries.push_back(ava::session::SessionEntry{
+      .id = "compaction",
+      .parent_id = "tool_result",
+      .type = ava::session::EntryType::Compaction,
+      .timestamp = "2026-04-29T00:00:05Z",
+      .data_json = "{\"trigger\":\"manual\",\"status\":\"recorded\",\"summary_unavailable\":false,"
+                   "\"summary\":\"read_file returned note contents\","
+                   "\"instructions\":\"keep the file result\",\"model\":\"gpt-5.5\","
+                   "\"threshold_tokens\":100,\"estimated_tokens\":125,"
+                   "\"keep_recent_tokens\":64,\"keep_recent_messages\":4,\"max_summary_bytes\":65536}"});
+  const auto valid_compaction = ava::session::validate_session_replay(
+      valid_compaction_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
+  expect(valid_compaction.ok() && valid_compaction.issues.empty(),
+         "session replay validator accepts compaction after resolved tool state");
+
+  auto invalid_compaction_entries = valid_entries;
+  invalid_compaction_entries.push_back(ava::session::SessionEntry{.id = "compaction_invalid",
+                                                                  .parent_id = "tool_result",
+                                                                  .type = ava::session::EntryType::Compaction,
+                                                                  .timestamp = "2026-04-29T00:00:05Z",
+                                                                  .data_json = "{\"status\":\"recorded\","
+                                                                               "\"summary_unavailable\":false,"
+                                                                               "\"summary\":\"\"}"});
+  const auto invalid_compaction = ava::session::validate_session_replay(invalid_compaction_entries);
+  expect(!invalid_compaction.ok() &&
+             has_replay_issue(invalid_compaction, ava::session::SessionReplayIssueKind::InvalidCompactionEntry),
+         "session replay validator flags compaction entries without durable summaries");
+
+  auto malformed_compaction_metadata_entries = valid_entries;
+  malformed_compaction_metadata_entries.push_back(
+      ava::session::SessionEntry{.id = "compaction_malformed_metadata",
+                                 .parent_id = "tool_result",
+                                 .type = ava::session::EntryType::Compaction,
+                                 .timestamp = "2026-04-29T00:00:05Z",
+                                 .data_json = "{\"status\":\"recorded\",\"summary\":\"durable summary\","
+                                              "\"summary_unavailable\":false,\"threshold_tokens\":1.5}"});
+  const auto malformed_compaction_metadata =
+      ava::session::validate_session_replay(malformed_compaction_metadata_entries);
+  expect(
+      !malformed_compaction_metadata.ok() &&
+          has_replay_issue(malformed_compaction_metadata, ava::session::SessionReplayIssueKind::InvalidCompactionEntry),
+      "session replay validator flags non-integer compaction token metadata");
+
+  auto unresolved_tool_compaction_entries = valid_entries;
+  unresolved_tool_compaction_entries.pop_back();
+  unresolved_tool_compaction_entries.push_back(
+      ava::session::SessionEntry{.id = "compaction_before_tool_result",
+                                 .parent_id = "tool_call",
+                                 .type = ava::session::EntryType::Compaction,
+                                 .timestamp = "2026-04-29T00:00:04Z",
+                                 .data_json = "{\"summary\":\"tool call still pending\"}"});
+  const auto unresolved_tool_compaction = ava::session::validate_session_replay(unresolved_tool_compaction_entries);
+  expect(!unresolved_tool_compaction.ok() &&
+             has_replay_issue(unresolved_tool_compaction,
+                              ava::session::SessionReplayIssueKind::CompactionWithUnresolvedToolCall),
+         "session replay validator flags compaction before unresolved tool results");
+
+  const std::vector<ava::session::SessionEntry> unresolved_permission_compaction_entries = {
+      unresolved_permission_entries[0],
+      ava::session::SessionEntry{.id = "compaction_before_permission_resolution",
+                                 .parent_id = "permission_unresolved",
+                                 .type = ava::session::EntryType::Compaction,
+                                 .timestamp = "2026-04-29T00:00:01Z",
+                                 .data_json = "{\"summary\":\"permission prompt still pending\"}"},
+  };
+  const auto unresolved_permission_compaction =
+      ava::session::validate_session_replay(unresolved_permission_compaction_entries);
+  expect(!unresolved_permission_compaction.ok() &&
+             has_replay_issue(unresolved_permission_compaction,
+                              ava::session::SessionReplayIssueKind::CompactionWithUnresolvedPermissionPrompt),
+         "session replay validator flags compaction before unresolved permission decisions");
+
+  expect(ava::session::to_string(ava::session::SessionReplayIssueKind::InvalidCompactionEntry) ==
+             "invalid_compaction_entry",
+         "session replay issue kind names include compaction validation failures");
 }
 
 void test_session_resume_and_listing() {

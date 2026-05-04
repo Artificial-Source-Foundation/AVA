@@ -159,6 +159,24 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
       continue;
     }
 
+    if (command->type == "validate_session") {
+      if (rpc::active_run(run_state)) {
+        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
+            !written) {
+          return written;
+        }
+        continue;
+      }
+      std::lock_guard lock(session_mutex);
+      auto validation_json = rpc::session_validation_result_json(session);
+      if (!validation_json) {
+        if (auto written = rpc::write_error(output, command->id, validation_json.error()); !written) return written;
+        continue;
+      }
+      if (auto written = rpc::write_success(output, command->id, *validation_json); !written) return written;
+      continue;
+    }
+
     if (command->type == "set_model" || command->type == "cycle_model") {
       if (rpc::active_run(run_state)) {
         if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));

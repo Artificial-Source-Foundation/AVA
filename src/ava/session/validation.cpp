@@ -1,6 +1,7 @@
 #include "ava/session/validation.h"
 
 #include <algorithm>
+#include <cctype>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -70,6 +71,32 @@ bool valid_resolution(std::string_view resolution) { return resolution == "allow
 
 bool valid_resolution_source(std::string_view source) {
   return source == "policy" || source == "resolver" || source == "no_resolver" || source == "resolver_failed";
+}
+
+bool present_non_empty_string(std::string_view object, std::string_view key) {
+  const auto start = ava::core::json::field_value_start(object, key);
+  if (!start) return true;
+  const auto value = ava::core::json::string_field(object, key);
+  return value && !value->empty();
+}
+
+bool is_json_value_delimiter(char ch) {
+  return ch == ',' || ch == '}' || std::isspace(static_cast<unsigned char>(ch)) != 0;
+}
+
+bool present_integer_matching(std::string_view object, std::string_view key, bool require_positive) {
+  const auto start = ava::core::json::field_value_start(object, key);
+  if (!start) return true;
+  std::size_t end = *start;
+  if (end < object.size() && object[end] == '-') ++end;
+  const auto digits_start = end;
+  while (end < object.size() && std::isdigit(static_cast<unsigned char>(object[end])) != 0) ++end;
+  if (end == digits_start) return false;
+  while (end < object.size() && std::isspace(static_cast<unsigned char>(object[end])) != 0) ++end;
+  if (end < object.size() && !is_json_value_delimiter(object[end])) return false;
+  const auto value = ava::core::json::integer_field(object, key);
+  if (!value) return false;
+  return require_positive ? *value > 0 : *value >= 0;
 }
 
 void add_issue(SessionReplayValidation& validation, SessionReplayIssue issue) {
@@ -200,6 +227,77 @@ void validate_permission_decision(SessionReplayValidation& validation,
   if (pending_for_key->second.empty()) pending.erase(pending_for_key);
 }
 
+void validate_compaction_entry(SessionReplayValidation& validation, std::size_t index, const SessionEntry& entry) {
+  if (!ava::core::json::is_valid_object(entry.data_json)) {
+    add_error(validation, SessionReplayIssueKind::InvalidCompactionEntry, index, entry, "",
+              "compaction entry data is not valid JSON");
+    return;
+  }
+
+  const auto summary = ava::core::json::string_field(entry.data_json, "summary");
+  if (!summary || summary->empty()) {
+    add_error(validation, SessionReplayIssueKind::InvalidCompactionEntry, index, entry, "",
+              "compaction entry is missing a non-empty summary");
+    return;
+  }
+
+  const auto unavailable_present = ava::core::json::field_value_start(entry.data_json, "summary_unavailable");
+  if (unavailable_present && !bool_field_is_true(entry.data_json, "summary_unavailable") &&
+      !bool_field_is_false(entry.data_json, "summary_unavailable")) {
+    add_error(validation, SessionReplayIssueKind::InvalidCompactionEntry, index, entry, "",
+              "compaction entry summary_unavailable must be a boolean");
+    return;
+  }
+
+  const auto status_present = ava::core::json::field_value_start(entry.data_json, "status");
+  const auto status = ava::core::json::string_field(entry.data_json, "status");
+  if (status_present && (!status || *status != "recorded")) {
+    add_error(validation, SessionReplayIssueKind::InvalidCompactionEntry, index, entry, "",
+              "compaction entry status must be recorded when present");
+    return;
+  }
+
+  if (!present_non_empty_string(entry.data_json, "trigger") || !present_non_empty_string(entry.data_json, "model") ||
+      !present_integer_matching(entry.data_json, "threshold_tokens", false) ||
+      !present_integer_matching(entry.data_json, "estimated_tokens", false) ||
+      !present_integer_matching(entry.data_json, "keep_recent_tokens", false) ||
+      !present_integer_matching(entry.data_json, "keep_recent_messages", false) ||
+      !present_integer_matching(entry.data_json, "max_summary_bytes", true)) {
+    add_error(validation, SessionReplayIssueKind::InvalidCompactionEntry, index, entry, "",
+              "compaction entry has malformed semantic metadata");
+  }
+}
+
+void validate_compaction_boundaries(
+    SessionReplayValidation& validation, std::size_t index, const SessionEntry& entry,
+    const std::unordered_map<std::string, ToolCallState>& tool_calls,
+    const std::unordered_map<std::string, std::vector<PendingPermissionPrompt>>& pending_permissions,
+    const SessionReplayValidationOptions& options) {
+  if (options.require_tool_result_pairing) {
+    for (const auto& [call_id, state] : tool_calls) {
+      if (state.result_seen) continue;
+      add_error(validation, SessionReplayIssueKind::CompactionWithUnresolvedToolCall, index, entry, call_id,
+                "compaction occurred while a tool_call had no matching tool_result");
+    }
+  }
+
+  if (options.require_permission_decision_integrity) {
+    for (const auto& [unused_key, prompts] : pending_permissions) {
+      (void)unused_key;
+      for (const auto& prompt : prompts) {
+        add_issue(validation,
+                  SessionReplayIssue{.severity = SessionReplayIssueSeverity::Error,
+                                     .kind = SessionReplayIssueKind::CompactionWithUnresolvedPermissionPrompt,
+                                     .entry_index = index,
+                                     .entry_id = entry.id,
+                                     .call_id = "",
+                                     .message = "compaction occurred while a permission prompt was unresolved"});
+        (void)prompt;
+      }
+    }
+  }
+}
+
 }  // namespace
 
 std::string_view to_string(SessionReplayIssueSeverity severity) noexcept {
@@ -242,6 +340,12 @@ std::string_view to_string(SessionReplayIssueKind kind) noexcept {
       return "permission_resolution_without_ask";
     case SessionReplayIssueKind::UnresolvedPermissionPrompt:
       return "unresolved_permission_prompt";
+    case SessionReplayIssueKind::InvalidCompactionEntry:
+      return "invalid_compaction_entry";
+    case SessionReplayIssueKind::CompactionWithUnresolvedToolCall:
+      return "compaction_with_unresolved_tool_call";
+    case SessionReplayIssueKind::CompactionWithUnresolvedPermissionPrompt:
+      return "compaction_with_unresolved_permission_prompt";
   }
   return "invalid_structured_tool_result";
 }
@@ -266,6 +370,12 @@ SessionReplayValidation validate_session_replay(const std::vector<SessionEntry>&
 
     if (entry.type == EntryType::PermissionDecision && options.require_permission_decision_integrity) {
       validate_permission_decision(validation, pending_permissions, index, entry);
+      continue;
+    }
+
+    if (entry.type == EntryType::Compaction && options.require_compaction_integrity) {
+      validate_compaction_entry(validation, index, entry);
+      validate_compaction_boundaries(validation, index, entry, tool_calls, pending_permissions, options);
       continue;
     }
 

@@ -3529,6 +3529,7 @@ void test_app_rpc_protocol_version_and_session_commands() {
       "{\"id\":\"proto\",\"type\":\"get_protocol\",\"protocol_version\":1}\n"
       "{\"id\":\"messages\",\"type\":\"get_messages\"}\n"
       "{\"id\":\"stats\",\"type\":\"get_session_stats\"}\n"
+      "{\"id\":\"validate\",\"type\":\"validate_session\"}\n"
       "{\"id\":\"new\",\"type\":\"new_session\"}\n"
       "{\"id\":\"switch\",\"type\":\"switch_session\",\"session_id\":\"" +
       initial_id + "\"}\n");
@@ -3563,6 +3564,9 @@ void test_app_rpc_protocol_version_and_session_commands() {
              jsonl.find("\"unknown_cost_entries\":1") != std::string::npos &&
              jsonl.find("\"total_cost_usd\"") == std::string::npos,
          "RPC get_session_stats omits incomplete total cost and reports known cost metadata");
+  expect(jsonl.find("\"id\":\"validate\"") != std::string::npos && jsonl.find("\"ok\":true") != std::string::npos &&
+             jsonl.find("\"error_count\":0") != std::string::npos,
+         "RPC validate_session reports a clean replay audit for the active session");
   expect(jsonl.find("\"id\":\"new\"") != std::string::npos && jsonl.find("\"created\":true") != std::string::npos,
          "RPC new_session creates and switches to a new active session");
   expect(session->store.session_id() == initial_id && jsonl.find("\"id\":\"switch\"") != std::string::npos,

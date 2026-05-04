@@ -89,7 +89,7 @@ The backend is not yet PI-baseline because several seams are still thinner than 
 | Permissions | Shared policy for interactive/headless/plugin/MCP; persistent rules; audit links request/decision/operation/result | Partial. Policy/prompt/resolver/audit foundation exists | Add persistent rules/session grants, risk/severity fields where real, richer audit records, plugin/MCP categories in execution path | Permission parity tests across TUI/RPC/tool/plugin/MCP fakes |
 | Sessions/context | Durable semantic transcript with versioning, compaction, usage, model/reasoning changes, replay, branch-ready shape | Partial. JSONL store, key entry types, stats, and replay validation cover entry versions, IDs, parent links, tool/permission pairing, compaction boundaries, and model/reasoning entry shape | Extend replay validation to migration/repair coverage and branch metadata | Session replay/repair tests, compaction semantic preservation tests, stats/context tests |
 | RPC/headless | Versioned protocol can drive all backend behavior without TUI dependencies | Partial to strong. Protocol exists with resolver, state, stats, validation paths, and direct headless CLI smokes for protocol/state/model/reasoning/session/validation/cancel/error-recovery/MCP command behavior | Add full protocol golden suite, active-run command rejection coverage at the executable boundary, and fork-ready operations | JSONL protocol tests, subprocess smokes, resolver-flow tests |
-| Extensibility/MCP | Out-of-process plugin/MCP tools use same registry/policy/events/session path and fail contained | Partial. Plugin/MCP registry, permission, audit, bounded protocol/stderr, timeout, cancellation, and headless command paths exist; baseline containment still needs broader proof | Manifest/handshake hardening, richer event/session integration, bounded output/errors, audit labels, fake-server/plugin failure matrix | Plugin/MCP contract tests for crash, timeout, cancellation, malformed JSON, unsupported version, denied permission |
+| Extensibility/MCP | Out-of-process plugin/MCP tools use same registry/policy/events/session path and fail contained | Partial. Plugin/MCP registry, permission, audit, bounded protocol/stderr, timeout, cancellation, malformed MCP startup, early exit diagnostics, tool-error containment, and headless command/config smokes exist; baseline containment still needs broader proof | Manifest/handshake hardening, richer event/session integration, bounded output/errors, audit labels, remaining fake-server/plugin failure matrix | Plugin/MCP contract tests for crash, timeout, cancellation, malformed JSON, unsupported version, denied permission |
 | Observability/tests | Contract-focused tests and opt-in live smokes prevent backend regressions | Partial. Good focused CTest set; matrix/stress coverage incomplete | Add deterministic fake-provider and fake-server suites, sanitizer preset in release checklist, documented live-smoke scripts | `cmake`, `ctest`, sanitizer CTest, `git diff --check`, opt-in live smokes |
 
 ## Staged Hardening Plan
@@ -177,7 +177,9 @@ Deliverables:
 
 - Finalize manifest schema, API versioning, discovery paths, enable/disable rules, and capability declarations.
 - Route plugin tools and MCP tools through shared validation, permission, event, audit, cancellation, truncation, and session paths.
-- Add malformed JSONL, timeout, crash, unsupported version, denied permission, bad result schema, and stderr diagnostics tests.
+- Add malformed JSONL, timeout, crash, unsupported version, denied permission, bad result schema, and stderr diagnostics
+  tests. MCP stdio now covers malformed initialize responses, early startup/discovery exits, tool-level errors, timeout,
+  cancellation, stderr tails, and direct headless invalid-config containment.
 - Keep direct `ava --rpc` headless smokes for backend command surfaces that can run without live provider credentials.
 
 Exit gate:

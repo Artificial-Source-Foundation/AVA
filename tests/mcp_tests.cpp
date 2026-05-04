@@ -98,6 +98,21 @@ void test_mcp_stdio_client_lists_and_calls_tools() {
   expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos,
          "MCP stdio client cancels hung startup before timeout");
 
+  auto malformed_server = fake_server_config(root);
+  malformed_server.args = {"malformed"};
+  auto malformed = ava::mcp::McpStdioClient::start(malformed_server, fake_client_options(workspace));
+  expect(!malformed && malformed.error().message().find("valid JSON object") != std::string::npos,
+         "MCP stdio client contains malformed initialize responses");
+
+  auto exit_start_server = fake_server_config(root);
+  exit_start_server.args = {"exit-initialize"};
+  auto exit_start = ava::mcp::McpStdioClient::start(exit_start_server, fake_client_options(workspace));
+  const auto exit_start_format = exit_start ? std::string{} : exit_start.error().format();
+  expect(!exit_start && exit_start.error().message().find("closed stdout") != std::string::npos &&
+             exit_start_format.find("status: exit 42") != std::string::npos &&
+             exit_start_format.find("fake MCP exited during initialize") != std::string::npos,
+         "MCP stdio client reports early startup exit with status and stderr diagnostics: " + exit_start_format);
+
   auto client = ava::mcp::McpStdioClient::start(fake_server_config(root), fake_client_options(workspace));
   expect(client.has_value(), client ? "MCP stdio client initializes fake server"
                                     : "MCP stdio client initializes fake server: " + client.error().format());
@@ -114,6 +129,38 @@ void test_mcp_stdio_client_lists_and_calls_tools() {
   auto shutdown = (*client)->shutdown(std::chrono::milliseconds(500));
   expect(shutdown.has_value(), shutdown ? "MCP stdio client shuts down cleanly"
                                         : "MCP stdio client shuts down cleanly: " + shutdown.error().format());
+
+  auto tool_error_server = fake_server_config(root);
+  tool_error_server.args = {"tool-error"};
+  auto tool_error_client = ava::mcp::McpStdioClient::start(tool_error_server, fake_client_options(workspace));
+  expect(tool_error_client.has_value(), tool_error_client ? "MCP stdio client initializes tool-error fake server"
+                                                          : "MCP stdio client initializes tool-error fake server: " +
+                                                                tool_error_client.error().format());
+  if (tool_error_client) {
+    auto tool_error = (*tool_error_client)->call_tool("echo", "{\"text\":\"hello\"}");
+    expect(tool_error && tool_error->is_error && tool_error->content == "MCP tool failed",
+           tool_error ? "MCP stdio client preserves tool-level error results"
+                      : "MCP stdio client preserves tool-level error results: " + tool_error.error().format());
+    auto tool_error_shutdown = (*tool_error_client)->shutdown(std::chrono::milliseconds(500));
+    expect(tool_error_shutdown.has_value(), "MCP stdio client shuts down after tool-level error result");
+  }
+
+  auto exit_list_server = fake_server_config(root);
+  exit_list_server.args = {"exit-after-initialize"};
+  auto exit_list_client = ava::mcp::McpStdioClient::start(exit_list_server, fake_client_options(workspace));
+  expect(exit_list_client.has_value(),
+         exit_list_client
+             ? "MCP stdio client initializes exit-after-initialize fake server"
+             : "MCP stdio client initializes exit-after-initialize fake server: " + exit_list_client.error().format());
+  if (exit_list_client) {
+    auto exited_tools = (*exit_list_client)->list_tools();
+    expect(!exited_tools && exited_tools.error().message().find("closed stdout") != std::string::npos &&
+               exited_tools.error().format().find("status: exit 43") != std::string::npos &&
+               exited_tools.error().format().find("fake MCP exited during tools/list") != std::string::npos,
+           "MCP stdio client reports discovery-time process exit with status and stderr diagnostics");
+    auto exit_list_shutdown = (*exit_list_client)->shutdown(std::chrono::milliseconds(500));
+    expect(exit_list_shutdown.has_value(), "MCP stdio client shuts down after discovery-time exit");
+  }
 
   auto stderr_server = fake_server_config(root);
   stderr_server.args = {"stderr-noise"};
@@ -229,10 +276,45 @@ void test_mcp_tool_dispatcher() {
          "MCP tool dispatcher reports semantic cancellation before permission or process execution");
 }
 
+void test_mcp_tool_dispatcher_contains_tool_errors() {
+  const auto root = temp_root() / "mcp-dispatcher-tool-error";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  const auto project_config = workspace / ".ava" / "mcp.json";
+  std::filesystem::create_directories(workspace);
+  write_text(project_config, mcp_config_json("demo", AVA_FAKE_MCP_SERVER_PATH, true, "[\"tool-error\"]"));
+
+  std::vector<ava::permissions::PermissionPrompt> prompts;
+  ava::tools::ToolContext context;
+  context.workspace_dir = workspace;
+  context.mcp_global_config_file = root / "missing-global-mcp.json";
+  context.mcp_project_config_file = project_config;
+  context.permission_resolver = [&prompts](const ava::permissions::PermissionPrompt& prompt)
+      -> ava::core::Result<ava::permissions::PermissionResolution> {
+    prompts.push_back(prompt);
+    return ava::permissions::PermissionResolution::Allow;
+  };
+
+  const auto model_tool_name = ava::mcp::mcp_model_tool_name("demo", "echo");
+  ava::agent::ToolDispatcher dispatcher(context);
+  auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_mcp_tool_error", .name = model_tool_name, .arguments_json = "{\"text\":\"hello\"}"});
+  expect(dispatched && !dispatched->success && dispatched->payload.status == ava::agent::ToolResultStatus::Error &&
+             dispatched->payload.content_type == "application/json" &&
+             dispatched->payload.content.find("\"ok\":false") != std::string::npos &&
+             dispatched->payload.content.find("MCP tool failed") != std::string::npos,
+         dispatched ? "MCP tool dispatcher contains tool-level error results as semantic payloads"
+                    : "MCP tool dispatcher contains tool-level error results as semantic payloads: " +
+                          dispatched.error().format());
+  expect(!prompts.empty(), "MCP tool dispatcher still gates tool-level error calls through permission prompts");
+}
+
 }  // namespace
 
 void run_mcp_tests() {
   test_mcp_config_parsing();
   test_mcp_stdio_client_lists_and_calls_tools();
   test_mcp_tool_dispatcher();
+  test_mcp_tool_dispatcher_contains_tool_errors();
 }

@@ -337,8 +337,10 @@ Minimum regression coverage:
 - Permission denial for plugin execution and plugin tool calls.
 - Audit/session records for plugin execution and tool calls.
 - Fake MCP server initialize/list-tools/call-tool success.
-- Fake MCP server tool error, malformed response, timeout, cancellation, stderr bounding, and process cleanup.
-- Direct `ava --rpc` headless smoke coverage for MCP list/inspect/restart commands and fail-closed `list_mcp_tools` behavior without a TUI resolver.
+- Fake MCP server tool error, malformed initialize response, early startup/discovery exit, timeout, cancellation,
+  stderr bounding, and process cleanup.
+- Direct `ava --rpc` headless smoke coverage for MCP list/inspect/restart commands, invalid-config containment, and
+  fail-closed `list_mcp_tools` behavior without a TUI resolver.
 - Tool name collision behavior between built-in, plugin, and MCP tools.
 
 ## Implemented 1.0 Foundation
@@ -347,7 +349,9 @@ Minimum regression coverage:
 - Plugin manifest parsing, diagnostics, discovery, local enable/disable state, and validation commands.
 - Out-of-process plugin runner with initialize, tool call, command call, event observation, cancellation, bounded stderr, timeouts, and shutdown.
 - Plugin tool contributions, plugin command contributions, static prompt/skill resources, and non-mutating event hooks.
-- Stdio MCP config loading, initialize, `tools/list`, `tools/call`, bounded stderr diagnostics, tool broker registration, slash/RPC diagnostics, direct headless command smokes, and fake-server regression coverage.
+- Stdio MCP config loading, initialize, `tools/list`, `tools/call`, bounded stderr diagnostics, tool broker
+  registration, slash/RPC diagnostics, direct headless command smokes, and fake-server success/error/exit regression
+  coverage.
 
 ## 1.0 Decisions
 

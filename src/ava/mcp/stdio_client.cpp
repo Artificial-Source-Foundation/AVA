@@ -709,7 +709,12 @@ ava::core::Result<std::string> McpStdioClient::read_message(std::chrono::steady_
     if (*extracted) return std::move(**extracted);
 
     if (stdout_fd_ < 0) {
-      if (auto reaped = reap_child(); !reaped) return std::unexpected(std::move(reaped.error()));
+      const auto reap_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
+      do {
+        if (auto reaped = reap_child(); !reaped) return std::unexpected(std::move(reaped.error()));
+        if (child_exited_) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      } while (std::chrono::steady_clock::now() < reap_deadline);
       auto error = protocol_error(
           stdout_buffer_.empty() ? std::string(closed_message) : "MCP protocol message ended before full frame",
           server_);

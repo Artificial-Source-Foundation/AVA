@@ -84,6 +84,11 @@ int main(int argc, char** argv) {
       std::this_thread::sleep_for(std::chrono::seconds(2));
       continue;
     }
+    if (mode == "exit-initialize" && *method == "initialize") {
+      std::cerr << "fake MCP exited during initialize";
+      std::cerr.flush();
+      return 42;
+    }
     if (mode == "malformed" && *method == "initialize") {
       write_message("not-json");
       continue;
@@ -94,6 +99,11 @@ int main(int argc, char** argv) {
                              "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},"
                              "\"serverInfo\":{\"name\":\"fake-mcp\",\"version\":\"1.0.0\"}}"));
     } else if (*method == "tools/list") {
+      if (mode == "exit-after-initialize") {
+        std::cerr << "fake MCP exited during tools/list";
+        std::cerr.flush();
+        return 43;
+      }
       write_message(response(*id,
                              "{\"tools\":[{\"name\":\"echo\",\"description\":\"Echo test tool\","
                              "\"inputSchema\":{\"type\":\"object\",\"properties\":{\"text\":{\"type\":"

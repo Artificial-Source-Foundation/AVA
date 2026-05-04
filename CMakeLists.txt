@@ -277,4 +277,11 @@ if(AVA_BUILD_TESTS)
             -DAVA_FAKE_MCP_SERVER_EXE=$<TARGET_FILE:ava_fake_mcp_server>
             -DAVA_CLI_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cli-headless-rpc-mcp-commands
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_mcp_commands.cmake)
+
+  add_test(
+    NAME ava_cli.headless_rpc_mcp_config_errors
+    COMMAND ${CMAKE_COMMAND}
+            -DAVA_EXE=$<TARGET_FILE:ava>
+            -DAVA_CLI_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cli-headless-rpc-mcp-config-errors
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_mcp_config_errors.cmake)
 endif()

@@ -184,8 +184,8 @@ Deliverables:
   Current subprocess coverage includes protocol/state/model/session/stat validation, cancellation, recoverable malformed
   requests, provider-backed compaction success through a fake provider, active-run command rejection through a delayed
   fake provider, permission resolver replies through a fake provider tool-call loop, question resolver replies through a
-  fake provider tool-call loop, MCP and plugin command surfaces, invalid MCP config containment, and context/export
-  materialization.
+  fake provider tool-call loop, provider HTTP error containment with redacted diagnostics, MCP and plugin command
+  surfaces, invalid MCP config containment, and context/export materialization.
 
 Exit gate:
 

@@ -170,21 +170,38 @@ std::string question_tool_body() {
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
 }
 
-std::string response_body(std::string_view scenario, int request_index, std::string_view target_path) {
+struct ProviderResponse {
+  int status_code = 200;
+  std::string reason = "OK";
+  std::string body;
+};
+
+ProviderResponse response_for(std::string_view scenario, int request_index, std::string_view target_path) {
+  if (scenario == "http-error") {
+    return ProviderResponse{.status_code = 500,
+                            .reason = "Internal Server Error",
+                            .body =
+                                "{\"error\":{\"message\":\"provider unavailable\","
+                                "\"reasoning_content\":\"secret reasoning\","
+                                "\"thinking\":\"secret thinking\",\"api_key\":\"secret-key\"}}"};
+  }
   if (scenario == "read-tool") {
-    return request_index == 0 ? read_tool_body(target_path) : text_body("after permission deny");
+    return ProviderResponse{.body =
+                                request_index == 0 ? read_tool_body(target_path) : text_body("after permission deny")};
   }
   if (scenario == "write-tool") {
-    return request_index == 0 ? write_tool_body(target_path) : text_body("after permission deny");
+    return ProviderResponse{.body =
+                                request_index == 0 ? write_tool_body(target_path) : text_body("after permission deny")};
   }
   if (scenario == "question-tool") {
-    return request_index == 0 ? question_tool_body() : text_body("after question reply");
+    return ProviderResponse{.body = request_index == 0 ? question_tool_body() : text_body("after question reply")};
   }
   if (scenario == "compact") {
-    return request_index == 0 ? text_body("before compact")
-                              : text_body("# Goal\nHeadless compact summary\n# Next Steps\nContinue.");
+    return ProviderResponse{.body = request_index == 0
+                                        ? text_body("before compact")
+                                        : text_body("# Goal\nHeadless compact summary\n# Next Steps\nContinue.")};
   }
-  return text_body("headless active prompt complete");
+  return ProviderResponse{.body = text_body("headless active prompt complete")};
 }
 
 }  // namespace
@@ -200,9 +217,11 @@ int main(int argc, char** argv) {
   const auto delay = std::chrono::milliseconds(std::stoi(argv[3]));
   const std::string scenario = argc == 6 ? argv[4] : "text";
   const std::string target_path = argc == 6 ? argv[5] : "";
-  const int request_count =
-      scenario == "read-tool" || scenario == "write-tool" || scenario == "question-tool" || scenario == "compact" ? 2
-                                                                                                                  : 1;
+  const int request_count = scenario == "http-error" ? 3
+                                                     : (scenario == "read-tool" || scenario == "write-tool" ||
+                                                                scenario == "question-tool" || scenario == "compact"
+                                                            ? 2
+                                                            : 1);
 
   Fd server(::socket(AF_INET, SOCK_STREAM, 0));
   if (server.get() < 0) {
@@ -255,10 +274,11 @@ int main(int argc, char** argv) {
     }
     if (request_index == 0) std::this_thread::sleep_for(delay);
 
-    const std::string body = response_body(scenario, request_index, target_path);
+    const auto provider_response = response_for(scenario, request_index, target_path);
     const std::string response =
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) +
-        "\r\nConnection: close\r\n\r\n" + body;
+        "HTTP/1.1 " + std::to_string(provider_response.status_code) + " " + provider_response.reason +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(provider_response.body.size()) +
+        "\r\nConnection: close\r\n\r\n" + provider_response.body;
     if (!write_all(client.get(), response)) {
       std::cerr << "response write failed: " << errno_text() << '\n';
       return 1;

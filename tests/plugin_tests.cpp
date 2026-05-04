@@ -844,6 +844,11 @@ void test_plugin_tool_dispatcher() {
   expect(dispatched && dispatched->success && dispatched->result_text.find("Added via dispatcher") != std::string::npos,
          dispatched ? "dispatcher calls enabled plugin tool through broker"
                     : "dispatcher calls enabled plugin tool through broker: " + dispatched.error().format());
+  expect(dispatched && dispatched->payload.status == ava::agent::ToolResultStatus::Success &&
+             dispatched->payload.content_type == "application/json" &&
+             dispatched->payload.content.find("com.example.todo") != std::string::npos &&
+             dispatched->payload.content.find("Added via dispatcher") != std::string::npos,
+         "plugin tool dispatcher attaches structured semantic result payloads");
   expect(prompts.size() == 2 && prompts[0].operation == ava::permissions::Operation::PluginExecute &&
              prompts[1].operation == ava::permissions::Operation::PluginToolCall &&
              prompts[1].tool_name == model_tool_name && prompts[1].command == "com.example.todo:todo_add",
@@ -860,6 +865,9 @@ void test_plugin_tool_dispatcher() {
       ava::agent::ProviderToolCall{.id = "call_invalid", .name = model_tool_name, .arguments_json = "[]"});
   expect(invalid_args && !invalid_args->success && invalid_args->result_text.find("JSON object") != std::string::npos,
          "plugin tool dispatcher rejects non-object arguments before execution");
+  expect(invalid_args && invalid_args->payload.status == ava::agent::ToolResultStatus::Error &&
+             invalid_args->payload.error_category == "invalid_argument",
+         "plugin tool dispatcher attaches structured semantic error payloads");
 
   std::vector<ava::permissions::PermissionPrompt> denied_prompts;
   auto denied_context = context;

@@ -94,15 +94,26 @@ ava::core::VoidResult publish_retry_event(const RetryOptions& options, std::size
                                               .countdown_tick = countdown_tick});
 }
 
+bool retry_cancel_requested(const RetryOptions& options, const Transport::CancelCallback& cancel_requested) {
+  return (options.cancel_requested && options.cancel_requested()) || (cancel_requested && cancel_requested());
+}
+
+ava::core::Error retry_canceled_error() {
+  return ava::core::Error(ava::core::ErrorCategory::Unknown, "transport retry canceled");
+}
+
 ava::core::VoidResult sleep_before_retry(const RetryOptions& options, std::size_t attempt, std::size_t max_attempts,
-                                         int delay_ms, std::string_view reason, int status_code, bool streaming) {
+                                         int delay_ms, std::string_view reason, int status_code, bool streaming,
+                                         const Transport::CancelCallback& cancel_requested = nullptr) {
   if (delay_ms <= 0) return {};
   const auto tick_ms = std::max(0, options.countdown_tick_ms);
   auto remaining_ms = delay_ms;
   while (remaining_ms > 0) {
+    if (retry_cancel_requested(options, cancel_requested)) return std::unexpected(retry_canceled_error());
     const auto chunk_ms = tick_ms > 0 ? std::min(tick_ms, remaining_ms) : remaining_ms;
     std::this_thread::sleep_for(std::chrono::milliseconds(chunk_ms));
     remaining_ms -= chunk_ms;
+    if (retry_cancel_requested(options, cancel_requested)) return std::unexpected(retry_canceled_error());
     if (tick_ms > 0) {
       if (auto published =
               publish_retry_event(options, attempt, max_attempts, delay_ms, static_cast<std::size_t>(remaining_ms),
@@ -324,7 +335,7 @@ ava::core::Result<HttpResponse> RetryTransport::send_streaming(const HttpRequest
         }
         if (auto slept = sleep_before_retry(options_, static_cast<std::size_t>(attempt + 1),
                                             static_cast<std::size_t>(max_attempts), delay_ms, reason,
-                                            response->status_code, true);
+                                            response->status_code, true, cancel_requested);
             !slept) {
           return std::unexpected(std::move(slept.error()));
         }
@@ -342,8 +353,9 @@ ava::core::Result<HttpResponse> RetryTransport::send_streaming(const HttpRequest
         !published) {
       return std::unexpected(std::move(published.error()));
     }
-    if (auto slept = sleep_before_retry(options_, static_cast<std::size_t>(attempt + 1),
-                                        static_cast<std::size_t>(max_attempts), delay_ms, "transport_io", 0, true);
+    if (auto slept =
+            sleep_before_retry(options_, static_cast<std::size_t>(attempt + 1), static_cast<std::size_t>(max_attempts),
+                               delay_ms, "transport_io", 0, true, cancel_requested);
         !slept) {
       return std::unexpected(std::move(slept.error()));
     }

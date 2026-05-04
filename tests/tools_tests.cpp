@@ -1102,6 +1102,17 @@ void test_bash_tool() {
       ava::tools::run_bash(context, "sleep 2", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(50)});
   expect(timeout && timeout->timed_out, "run_bash times out long command");
 
+  int cancel_checks = 0;
+  const ava::tools::ToolContext cancel_context{
+      .workspace_dir = temp_root(), .mode = ava::agent::Mode::Build, .cancel_requested = [&cancel_checks] {
+        ++cancel_checks;
+        return cancel_checks >= 3;
+      }};
+  auto canceled = ava::tools::run_bash(cancel_context, "sleep 2",
+                                       ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
+  expect(canceled && canceled->canceled && !canceled->timed_out && canceled->exit_code == -1,
+         "run_bash observes tool cancellation and reports a canceled process result");
+
   auto ask_without_resolver = ava::tools::run_bash(context, "true");
   expect(!ask_without_resolver &&
              ask_without_resolver.error().format().find("resolution: no_resolver") != std::string::npos,

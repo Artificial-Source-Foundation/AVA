@@ -149,10 +149,13 @@ std::string payload_json_for_runtime_event(const RuntimeEvent& event) {
   append_payload_string_field(out, has_field, "tool", event.tool_name);
   append_payload_json_object_field(out, has_field, "args", event.tool_arguments_json);
   append_payload_json_object_field(out, has_field, "result", event.tool_result_json);
+  append_payload_json_object_field(out, has_field, "structured_result", event.tool_structured_result_json);
   append_payload_string_field(out, has_field, "status", event.status);
   append_payload_string_field(out, has_field, "category", event.error_category);
+  append_payload_string_field(out, has_field, "error_code", event.error_code);
   append_payload_string_field(out, has_field, "message", event.error_message);
   append_payload_string_field(out, has_field, "details", event.error_details);
+  append_payload_string_field(out, has_field, "content_type", event.content_type);
   append_payload_string_field(out, has_field, "stop_reason", event.stop_reason);
   append_payload_string_field(out, has_field, "trigger", event.trigger);
   append_payload_string_field(out, has_field, "reason", event.reason);
@@ -188,8 +191,8 @@ std::string payload_json_for_runtime_event(const RuntimeEvent& event) {
 
 void append_payload_aliases(std::string& out, std::string_view payload_json) {
   for (std::string_view key :
-       {"mode", "provider", "model", "text", "call_id", "tool", "status", "category", "message", "details",
-        "stop_reason", "trigger", "reason", "reasoning_format", "diff", "spill_path"}) {
+       {"mode", "provider", "model", "text", "call_id", "tool", "status", "category", "error_code", "message",
+        "details", "content_type", "stop_reason", "trigger", "reason", "reasoning_format", "diff", "spill_path"}) {
     if (auto value = ava::core::json::string_field(payload_json, key); value && !value->empty()) {
       append_required_string_field(out, key, *value);
     }
@@ -267,10 +270,13 @@ std::string serialize_event_json(const RuntimeEvent& event) {
   append_string_field(out, "tool", event.tool_name);
   append_json_object_field(out, "args", event.tool_arguments_json);
   append_json_object_field(out, "result", event.tool_result_json);
+  append_json_object_field(out, "structured_result", event.tool_structured_result_json);
   append_string_field(out, "status", event.status);
   append_string_field(out, "category", event.error_category);
+  append_string_field(out, "error_code", event.error_code);
   append_string_field(out, "message", event.error_message);
   append_string_field(out, "details", event.error_details);
+  append_string_field(out, "content_type", event.content_type);
   append_string_field(out, "stop_reason", event.stop_reason);
   append_string_field(out, "trigger", event.trigger);
   append_string_field(out, "reason", event.reason);

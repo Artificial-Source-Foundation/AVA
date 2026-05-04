@@ -206,6 +206,26 @@ ava::core::Error waitpid_error(std::string_view command) {
   return error;
 }
 
+void signal_process(pid_t pid, bool can_signal_group, int signal) { kill(can_signal_group ? -pid : pid, signal); }
+
+ava::core::VoidResult stop_process(pid_t pid, bool can_signal_group, int& status, std::string_view command) {
+  signal_process(pid, can_signal_group, SIGTERM);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  const pid_t terminated = waitpid_retry(pid, &status, WNOHANG);
+  if (terminated < 0) {
+    return std::unexpected(waitpid_error(command));
+  }
+  if (terminated == 0) {
+    signal_process(pid, can_signal_group, SIGKILL);
+    if (waitpid_retry(pid, &status, 0) < 0) {
+      return std::unexpected(waitpid_error(command));
+    }
+  }
+  return {};
+}
+
+bool is_canceled(const ToolContext& context) { return context.cancel_requested && context.cancel_requested(); }
+
 }  // namespace
 
 ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_view command, BashOptions options) {
@@ -218,6 +238,12 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
                                           command, tool_name, "command requires permission");
       !permission) {
     return std::unexpected(permission.error());
+  }
+  if (is_canceled(context)) {
+    BashResult result;
+    result.exit_code = -1;
+    result.canceled = true;
+    return result;
   }
 
   auto argv_strings = parse_command_argv(command);
@@ -272,7 +298,7 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to read process pipe flags");
     error.with_context("command", std::string(command));
     error.with_context("cause", std::strerror(errno));
-    kill(can_signal_group ? -pid : pid, SIGKILL);
+    signal_process(pid, can_signal_group, SIGKILL);
     waitpid_retry(pid, &status, 0);
     return std::unexpected(std::move(error));
   }
@@ -280,7 +306,7 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to set process pipe nonblocking");
     error.with_context("command", std::string(command));
     error.with_context("cause", std::strerror(errno));
-    kill(can_signal_group ? -pid : pid, SIGKILL);
+    signal_process(pid, can_signal_group, SIGKILL);
     waitpid_retry(pid, &status, 0);
     return std::unexpected(std::move(error));
   }
@@ -310,7 +336,7 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
         spill_buffer.append(chunk);
         append_tail(result, chunk, options.max_bytes);
         if (auto progress = maybe_emit_progress(); !progress) {
-          kill(can_signal_group ? -pid : pid, SIGKILL);
+          signal_process(pid, can_signal_group, SIGKILL);
           waitpid_retry(pid, &status, 0);
           return std::unexpected(std::move(progress.error()));
         }
@@ -320,9 +346,18 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
         break;
       }
       auto error = pipe_read_error(command);
-      kill(can_signal_group ? -pid : pid, SIGKILL);
+      signal_process(pid, can_signal_group, SIGKILL);
       waitpid_retry(pid, &status, 0);
       return std::unexpected(std::move(error));
+    }
+
+    if (is_canceled(context)) {
+      result.canceled = true;
+      if (auto stopped = stop_process(pid, can_signal_group, status, command); !stopped) {
+        return std::unexpected(std::move(stopped.error()));
+      }
+      running = false;
+      break;
     }
 
     const pid_t waited = waitpid_retry(pid, &status, WNOHANG);
@@ -336,17 +371,8 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
 
     if (std::chrono::steady_clock::now() >= deadline) {
       result.timed_out = true;
-      kill(can_signal_group ? -pid : pid, SIGTERM);
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
-      const pid_t terminated = waitpid_retry(pid, &status, WNOHANG);
-      if (terminated < 0) {
-        return std::unexpected(waitpid_error(command));
-      }
-      if (terminated == 0) {
-        kill(can_signal_group ? -pid : pid, SIGKILL);
-        if (waitpid_retry(pid, &status, 0) < 0) {
-          return std::unexpected(waitpid_error(command));
-        }
+      if (auto stopped = stop_process(pid, can_signal_group, status, command); !stopped) {
+        return std::unexpected(std::move(stopped.error()));
       }
       running = false;
       break;
@@ -371,7 +397,7 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
   }
   read_fd.reset();
 
-  if (result.timed_out) {
+  if (result.timed_out || result.canceled) {
     result.exit_code = -1;
   } else if (WIFEXITED(status)) {
     result.exit_code = WEXITSTATUS(status);

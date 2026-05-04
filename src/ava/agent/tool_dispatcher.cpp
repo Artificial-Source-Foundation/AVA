@@ -14,6 +14,7 @@
 
 #include "ava/agent/question.h"
 #include "ava/agent/tool_registry.h"
+#include "ava/agent/tool_result.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 #include "ava/mcp/tool_broker.h"
@@ -467,21 +468,31 @@ ToolDispatchResult bash_result(const ava::tools::ToolContext& context, const Pro
           .timeout = std::chrono::milliseconds(optional_size_arg(call.arguments_json, "timeout_ms", 30000, 120000)),
           .max_bytes = optional_size_arg(call.arguments_json, "max_bytes", 50 * 1024, 512 * 1024)});
   if (!result) return tool_error_result(call, result.error());
-  return ToolDispatchResult{
-      .call_id = call.id,
-      .name = call.name,
-      .success = result->exit_code == 0 && !result->timed_out,
-      .result_text = [&] {
-        std::string text = "{\"tool\":\"bash\",\"ok\":" + json_bool(result->exit_code == 0 && !result->timed_out) +
-                           ",\"exit_code\":" + std::to_string(result->exit_code) +
-                           ",\"timed_out\":" + json_bool(result->timed_out) +
-                           ",\"truncated\":" + json_bool(result->truncated) +
-                           ",\"total_bytes\":" + std::to_string(result->total_bytes) + ",\"output\":\"" +
-                           ava::core::json::escape(result->output) + "\"";
-        append_spill_fields(text, result->spill_path, result->spill_truncated);
-        text += "}";
-        return text;
-      }()};
+  return ToolDispatchResult{.call_id = call.id,
+                            .name = call.name,
+                            .success = result->exit_code == 0 && !result->timed_out && !result->canceled,
+                            .result_text =
+                                [&] {
+                                  std::string text =
+                                      "{\"tool\":\"bash\",\"ok\":" +
+                                      json_bool(result->exit_code == 0 && !result->timed_out && !result->canceled) +
+                                      ",\"exit_code\":" + std::to_string(result->exit_code) +
+                                      ",\"timed_out\":" + json_bool(result->timed_out) +
+                                      ",\"canceled\":" + json_bool(result->canceled) +
+                                      ",\"truncated\":" + json_bool(result->truncated) +
+                                      ",\"total_bytes\":" + std::to_string(result->total_bytes) + ",\"output\":\"" +
+                                      ava::core::json::escape(result->output) + "\"";
+                                  append_spill_fields(text, result->spill_path, result->spill_truncated);
+                                  text += "}";
+                                  return text;
+                                }(),
+                            .payload =
+                                [&] {
+                                  ava::agent::ToolResultPayload payload;
+                                  payload.status = result->canceled ? ava::agent::ToolResultStatus::Canceled
+                                                                    : ava::agent::ToolResultStatus::Success;
+                                  return payload;
+                                }()};
 }
 
 ToolDispatchResult webfetch_result(const ava::tools::ToolContext& context, const ProviderToolCall& call) {
@@ -799,8 +810,8 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(const ProviderToo
     return std::unexpected(std::move(safe_id.error()));
   }
   const auto* tool = registry_.find(normalized.name);
-  if (tool != nullptr) return tool->executor(context_, normalized);
-  return simple_error_result(normalized, ava::core::ErrorCategory::Tool, "unknown tool");
+  if (tool != nullptr) return with_tool_result_payload(tool->executor(context_, normalized));
+  return with_tool_result_payload(simple_error_result(normalized, ava::core::ErrorCategory::Tool, "unknown tool"));
 }
 
 std::span<const ToolMetadata> ToolDispatcher::tool_metadata() { return builtin_tool_metadata(); }

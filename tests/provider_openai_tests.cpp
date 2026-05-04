@@ -442,6 +442,28 @@ void test_openai_provider_contract() {
              countdown_events[1].remaining_ms == 0 && countdown_events[1].reason == "transient",
          "retry transport emits explicit backend countdown ticks while waiting to retry");
 
+  ava::tests::FakeTransport cancel_retry_inner(
+      {ava::provider::HttpResponse{.status_code = 503, .headers = {}, .body = "try again"},
+       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  std::vector<ava::provider::RetryOptions::Event> cancel_retry_events;
+  ava::provider::RetryTransport cancel_retry_transport(
+      cancel_retry_inner, ava::provider::RetryOptions{
+                              .max_attempts = 2,
+                              .base_delay_ms = 10,
+                              .max_retry_after_ms = 0,
+                              .countdown_tick_ms = 10,
+                              .on_retry =
+                                  [&cancel_retry_events](const ava::provider::RetryOptions::Event& event) {
+                                    cancel_retry_events.push_back(event);
+                                    return ava::core::VoidResult{};
+                                  },
+                              .cancel_requested = [&cancel_retry_events] { return !cancel_retry_events.empty(); },
+                          });
+  auto canceled_retry = cancel_retry_transport.send(retry_request);
+  expect(!canceled_retry && canceled_retry.error().message().find("retry canceled") != std::string::npos &&
+             cancel_retry_inner.requests().size() == 1 && cancel_retry_events.size() == 1,
+         "retry transport observes cancellation before sleeping for a retry");
+
   FailingOnceTransport failing_once;
   ava::provider::RetryTransport retry_transport_error(
       failing_once, ava::provider::RetryOptions{.max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0});

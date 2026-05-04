@@ -33,6 +33,12 @@ struct ToolTimelineEntry {
   std::string result_summary = {};
   std::string arguments_json = {};
   std::string result_json = {};
+  std::string structured_result_json = {};
+  std::string content_type = {};
+  std::string error_category = {};
+  std::string error_code = {};
+  std::string error_message = {};
+  std::string error_details = {};
   std::string diff = {};
   bool diff_truncated = false;
   std::vector<std::string> changed_paths = {};

@@ -18,6 +18,7 @@ struct BashOptions {
 struct BashResult {
   int exit_code = -1;
   bool timed_out = false;
+  bool canceled = false;
   bool truncated = false;
   bool spill_truncated = false;
   std::size_t total_bytes = 0;

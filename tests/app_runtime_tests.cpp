@@ -652,6 +652,8 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled() {
     events.push_back(event);
     return ava::core::VoidResult{};
   };
+  bool runtime_retry_cancel = false;
+  run_options.cancel_requested = [&runtime_retry_cancel] { return runtime_retry_cancel; };
 
   auto result = ava::app::run_prompt(*session, "retry runtime", provider, transport, run_options);
   expect(result && result->final_text == "retried answer" && transport.requests().size() == 2,
@@ -667,6 +669,10 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled() {
   events.clear();
   auto retry_options = ava::app::runtime::runtime_retry_options(*session, run_options);
   expect(retry_options.on_retry != nullptr, "runtime retry options expose provider retry event mapping");
+  runtime_retry_cancel = true;
+  expect(retry_options.cancel_requested && retry_options.cancel_requested(),
+         "runtime retry options preserve the active run cancellation callback");
+  runtime_retry_cancel = false;
   if (retry_options.on_retry) {
     auto emitted_tick = retry_options.on_retry(ava::provider::RetryOptions::Event{.attempt = 2,
                                                                                   .max_attempts = 3,
@@ -1693,13 +1699,26 @@ void test_app_command_dispatcher() {
              connect_without_tui->output[0].find("--oauth-token-env") != std::string::npos,
          "command dispatcher /connect no-TUI error lists OAuth headless setup flags");
 
-  auto glob = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/glob **/*.cpp"});
+  std::vector<ava::app::RuntimeEvent> command_tool_events;
+  auto glob = ava::app::run_command(
+      *session, ava::app::CommandRequest{.command = "/glob **/*.cpp",
+                                         .event_sink = [&command_tool_events](const ava::app::RuntimeEvent& event) {
+                                           command_tool_events.push_back(event);
+                                           return ava::core::VoidResult{};
+                                         }});
   expect(glob && glob->handled && !glob->output.empty() && glob->output[0].find("src/main.cpp") != std::string::npos,
          "command dispatcher /glob runs existing safe file search command");
   expect(glob && glob->tool_timeline.size() == 2 &&
              glob->tool_timeline[0].status == ava::agent::ToolTimelineStatus::Running &&
-             glob->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success,
-         "command dispatcher records running and completed timeline entries");
+             glob->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success &&
+             glob->tool_timeline[1].structured_result_json.find("\"status\":\"success\"") != std::string::npos &&
+             glob->tool_timeline[1].total_matches,
+         "command dispatcher records running and completed timeline entries with structured result metadata");
+  expect(command_tool_events.size() == 2 && command_tool_events[1].type == ava::app::RuntimeEventType::ToolResult &&
+             !command_tool_events[1].tool_structured_result_json.empty() &&
+             command_tool_events[1].tool_structured_result_json.find("\"tool\":\"glob\"") != std::string::npos &&
+             command_tool_events[1].total_matches > 0,
+         "command dispatcher emits structured tool result runtime events");
 
   std::size_t compact_generator_calls = 0;
   auto compact_generator = [&](const std::vector<ava::session::SessionEntry>& entries,

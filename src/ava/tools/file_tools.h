@@ -49,6 +49,7 @@ struct ToolContext {
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   PermissionAuditSink permission_audit_sink = nullptr;
   ToolProgressSink progress_sink = nullptr;
+  std::function<bool()> cancel_requested = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;
   std::string permission_tool_name = {};
   std::string current_tool_name = {};

@@ -138,6 +138,12 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
                 entry.status == ava::agent::ToolTimelineStatus::Running ? entry.argument_summary : entry.result_summary;
             event.tool_arguments_json = entry.arguments_json;
             event.tool_result_json = entry.result_json;
+            event.tool_structured_result_json = entry.structured_result_json;
+            event.content_type = entry.content_type;
+            event.error_category = entry.error_category;
+            event.error_code = entry.error_code;
+            event.error_message = entry.error_message;
+            event.error_details = entry.error_details;
             event.diff = entry.diff;
             event.diff_truncated = entry.diff_truncated;
             event.changed_paths = entry.changed_paths;

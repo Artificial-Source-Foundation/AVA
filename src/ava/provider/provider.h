@@ -194,6 +194,7 @@ struct RetryOptions {
     bool countdown_tick = false;
   };
   std::function<ava::core::VoidResult(const Event&)> on_retry = nullptr;
+  Transport::CancelCallback cancel_requested = nullptr;
 };
 
 class RetryTransport final : public Transport {

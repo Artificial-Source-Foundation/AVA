@@ -12,6 +12,7 @@
 #include "ava/agent/provider_output_validation.h"
 #include "ava/agent/stream_bridge.h"
 #include "ava/agent/tool_dispatcher.h"
+#include "ava/agent/tool_result.h"
 #include "ava/agent/tool_summaries.h"
 #include "ava/agent/usage_accounting.h"
 #include "ava/core/ids.h"
@@ -28,8 +29,8 @@ std::string dispatch_error_result_json(const ProviderToolCall& call, const ava::
 }
 
 ToolDispatchResult synthetic_failed_dispatch_result(const ProviderToolCall& call, const ava::core::Error& error) {
-  return ToolDispatchResult{
-      .call_id = call.id, .name = call.name, .success = false, .result_text = dispatch_error_result_json(call, error)};
+  return with_tool_result_payload(ToolDispatchResult{
+      .call_id = call.id, .name = call.name, .success = false, .result_text = dispatch_error_result_json(call, error)});
 }
 
 void publish_tool_event(const AgentLoopOptions& options, const ToolTimelineEntry& event) {
@@ -114,7 +115,9 @@ ava::core::VoidResult append_tool_result(ava::session::SessionStore& store, cons
                       "{\"call_id\":\"" + ava::core::json::escape(result.call_id) + "\",\"name\":\"" +
                           ava::core::json::escape(result.name) +
                           "\",\"success\":" + (result.success ? std::string("true") : std::string("false")) +
-                          ",\"result\":\"" + ava::core::json::escape(result.result_text) + "\"}");
+                          ",\"status\":\"" + ava::core::json::escape(to_string(result.payload.status)) +
+                          "\",\"result\":\"" + ava::core::json::escape(result.result_text) +
+                          "\",\"structured_result\":" + serialize_tool_result_payload_json(result) + "}");
 }
 
 ava::core::VoidResult append_permission_decision(ava::session::SessionStore& store,
@@ -135,58 +138,27 @@ ava::core::VoidResult append_cancel(ava::session::SessionStore& store, std::stri
                       "{\"reason\":\"cancel_requested\",\"boundary\":\"" + ava::core::json::escape(boundary) + "\"}");
 }
 
-bool bool_field_is_true(std::string_view object, std::string_view key) {
-  const auto start = ava::core::json::field_value_start(object, key);
-  return start && object.substr(*start, 4) == "true";
-}
-
-std::optional<std::size_t> optional_size_field(std::string_view object, std::string_view key) {
-  const auto value = ava::core::json::integer_field(object, key);
-  if (!value || *value < 0) return std::nullopt;
-  return static_cast<std::size_t>(*value);
-}
-
-void add_changed_path(ToolTimelineEntry& entry, std::string path) {
-  if (path.empty()) return;
-  if (std::ranges::find(entry.changed_paths, path) == entry.changed_paths.end()) {
-    entry.changed_paths.push_back(std::move(path));
-  }
-}
-
-void assign_size_field(std::optional<std::size_t>& target, std::string_view object, std::string_view key) {
-  if (auto value = optional_size_field(object, key)) target = *value;
-}
-
 void populate_tool_timeline_metadata(ToolTimelineEntry& entry, const ToolDispatchResult& result) {
-  const auto payload = std::string_view(result.result_text);
+  const auto& payload = result.payload;
   entry.result_json = result.result_text;
-  entry.diff = ava::core::json::string_field(payload, "diff").value_or("");
-  entry.diff_truncated = bool_field_is_true(payload, "diff_truncated");
-  entry.truncated = bool_field_is_true(payload, "truncated");
-  entry.spill_truncated = bool_field_is_true(payload, "spill_truncated");
-  entry.spill_path = ava::core::json::string_field(payload, "spill_path")
-                         .value_or(ava::core::json::string_field(payload, "spill_file").value_or(""));
-  assign_size_field(entry.output_bytes, payload, "output_bytes");
-  assign_size_field(entry.total_bytes, payload, "total_bytes");
-  assign_size_field(entry.omitted_bytes, payload, "omitted_bytes");
-  assign_size_field(entry.omitted_bytes, payload, "omitted_output_bytes");
-  assign_size_field(entry.omitted_lines, payload, "omitted_lines");
-  assign_size_field(entry.omitted_lines, payload, "omitted_line_count");
-  assign_size_field(entry.visible_matches, payload, "visible_matches");
-  assign_size_field(entry.visible_matches, payload, "output_matches");
-  assign_size_field(entry.visible_matches, payload, "returned_matches");
-  assign_size_field(entry.total_matches, payload, "total_matches");
-
-  add_changed_path(entry, ava::core::json::string_field(payload, "path").value_or(""));
-  for (const auto& path : ava::core::json::strings_in_array_field(payload, "changed_paths")) {
-    add_changed_path(entry, path);
-  }
-  for (const auto& path : ava::core::json::strings_in_array_field(payload, "changed_files")) {
-    add_changed_path(entry, path);
-  }
-  for (const auto& edit : ava::core::json::objects_in_array_field(payload, "edits")) {
-    add_changed_path(entry, ava::core::json::string_field(edit, "path").value_or(""));
-  }
+  entry.structured_result_json = serialize_tool_result_payload_json(result);
+  entry.content_type = payload.content_type;
+  entry.error_category = payload.error_category;
+  entry.error_code = payload.error_code;
+  entry.error_message = payload.error_message;
+  entry.error_details = payload.error_details;
+  entry.diff = payload.diff;
+  entry.diff_truncated = payload.diff_truncated;
+  entry.truncated = payload.truncated;
+  entry.spill_truncated = payload.spill_truncated;
+  entry.spill_path = payload.spill_path;
+  entry.output_bytes = payload.output_bytes;
+  entry.total_bytes = payload.total_bytes;
+  entry.omitted_bytes = payload.omitted_bytes;
+  entry.omitted_lines = payload.omitted_lines;
+  entry.visible_matches = payload.visible_matches;
+  entry.total_matches = payload.total_matches;
+  entry.changed_paths = payload.changed_paths;
 }
 
 bool is_canceled(const AgentLoopOptions& options) { return options.cancel_requested && options.cancel_requested(); }
@@ -389,6 +361,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
             ToolProgressEntry{
                 .call_id = event.call_id, .name = event.tool_name, .text = event.text, .status = event.status});
       },
+      .cancel_requested = options_.cancel_requested,
       .question_resolver = options_.question_resolver};
   const ToolDispatcher dispatcher(tool_context);
 
@@ -712,6 +685,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
       }
       auto dispatch = dispatcher.dispatch(call);
       auto dispatch_result = dispatch ? *dispatch : synthetic_failed_dispatch_result(call, dispatch.error());
+      dispatch_result.payload.summary = summarize_tool_result(dispatch_result);
       if (auto appended = append_tool_result_locked(dispatch_result); !appended) {
         return std::unexpected(appended.error());
       }
@@ -720,7 +694,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
       } else {
         timeline_entry.status = dispatch_result.success ? ToolTimelineStatus::Success : ToolTimelineStatus::Error;
       }
-      timeline_entry.result_summary = summarize_tool_result(dispatch_result);
+      timeline_entry.result_summary = dispatch_result.payload.summary;
       populate_tool_timeline_metadata(timeline_entry, dispatch_result);
       result.tool_timeline.push_back(timeline_entry);
       publish_tool_event(options_, timeline_entry);

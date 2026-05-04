@@ -45,10 +45,13 @@ struct RuntimeEvent {
   std::string tool_name;
   std::string tool_arguments_json;
   std::string tool_result_json;
+  std::string tool_structured_result_json;
   std::string status;
   std::string error_category;
+  std::string error_code;
   std::string error_message;
   std::string error_details;
+  std::string content_type;
   std::string stop_reason;
   std::string trigger;
   std::string reason;

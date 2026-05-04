@@ -112,12 +112,17 @@ std::string summarize_tool_arguments(const ProviderToolCall& call) {
 }
 
 std::string summarize_tool_result(const ToolDispatchResult& result) {
+  if (!result.payload.summary.empty()) return result.payload.summary;
+  const auto& payload = result.payload;
+  if (!result.success && !payload.error_message.empty()) return "error: " + safe_summary_text(payload.error_message);
   if (!result.success) return summarize_tool_error(result.result_text);
   if (result.name == "read_file") {
-    const auto output_bytes = ava::core::json::integer_field(result.result_text, "output_bytes").value_or(0);
-    const auto total_bytes = ava::core::json::integer_field(result.result_text, "total_bytes").value_or(output_bytes);
+    const auto output_bytes =
+        payload.output_bytes.value_or(ava::core::json::integer_field(result.result_text, "output_bytes").value_or(0));
+    const auto total_bytes = payload.total_bytes.value_or(
+        ava::core::json::integer_field(result.result_text, "total_bytes").value_or(output_bytes));
     std::string summary = "read " + std::to_string(output_bytes) + "/" + std::to_string(total_bytes) + " bytes";
-    if (bool_field_is_true(result.result_text, "truncated")) summary += " (truncated)";
+    if (payload.truncated || bool_field_is_true(result.result_text, "truncated")) summary += " (truncated)";
     return summary;
   }
   if (result.name == "write_file" || result.name == "edit_file") {
@@ -125,21 +130,24 @@ std::string summarize_tool_result(const ToolDispatchResult& result) {
     return "wrote " + std::to_string(bytes) + " bytes";
   }
   if (result.name == "glob") {
-    const auto total = ava::core::json::integer_field(result.result_text, "total_matches").value_or(0);
+    const auto total =
+        payload.total_matches.value_or(ava::core::json::integer_field(result.result_text, "total_matches").value_or(0));
     std::string summary = std::to_string(total) + " matches";
-    if (bool_field_is_true(result.result_text, "truncated")) summary += " (truncated)";
+    if (payload.truncated || bool_field_is_true(result.result_text, "truncated")) summary += " (truncated)";
     return summary;
   }
   if (result.name == "grep") {
-    const auto total = ava::core::json::integer_field(result.result_text, "total_matches").value_or(0);
+    const auto total =
+        payload.total_matches.value_or(ava::core::json::integer_field(result.result_text, "total_matches").value_or(0));
     std::string summary = std::to_string(total) + " matches";
-    if (bool_field_is_true(result.result_text, "truncated")) summary += " (truncated)";
+    if (payload.truncated || bool_field_is_true(result.result_text, "truncated")) summary += " (truncated)";
     return summary;
   }
   if (result.name == "bash") {
     const auto exit_code = ava::core::json::integer_field(result.result_text, "exit_code").value_or(0);
     std::string summary = "exit " + std::to_string(exit_code);
     if (bool_field_is_true(result.result_text, "timed_out")) summary += " (timed out)";
+    if (bool_field_is_true(result.result_text, "canceled")) summary += " (canceled)";
     if (bool_field_is_true(result.result_text, "truncated")) summary += " (output truncated)";
     return summary;
   }

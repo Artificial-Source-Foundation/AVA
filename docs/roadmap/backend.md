@@ -3,6 +3,7 @@
 This roadmap defines the backend work needed for AVA 1.0 to feel as capable as PI while keeping AVA's product constraints: native C++23, one binary, terminal first, explicit safety boundaries, and inspectable local files.
 
 The companion frontend/TUI sequencing lives in `docs/roadmap/frontend-tui.md`.
+The measurable PI-baseline acceptance criteria and staged hardening gates live in `docs/roadmap/backend-pi-baseline.md`.
 
 PI is a reference target for backend power, not an architecture to copy directly. AVA should borrow the capability shape, then implement it with narrow C++ modules and clear permission boundaries.
 

@@ -17,7 +17,7 @@ namespace ava::app {
 [[nodiscard]] ava::core::VoidResult record_tool_result(const RuntimeSession& session, const RuntimeEventSink& sink,
                                                        CommandResult& result, const std::string& call_id,
                                                        std::string name, ava::agent::ToolTimelineStatus status,
-                                                       std::string result_summary);
+                                                       std::string result_summary, std::string result_content = {});
 
 [[nodiscard]] ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, CommandRequest& request);
 

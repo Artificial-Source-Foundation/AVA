@@ -158,7 +158,12 @@ void test_tool_runtime_event_serializes_semantic_frontend_payloads() {
   event.tool_name = "edit_file";
   event.tool_arguments_json = "{\"path\":\"src/main.cpp\"}";
   event.tool_result_json = "{\"ok\":true,\"path\":\"src/main.cpp\"}";
+  event.tool_structured_result_json =
+      "{\"schema_version\":1,\"call_id\":\"call_edit\",\"tool\":\"edit_file\",\"status\":\"success\","
+      "\"ok\":true,\"content_type\":\"application/json\",\"content\":{\"ok\":true,\"path\":\"src/main.cpp\"},"
+      "\"changed_paths\":[\"src/main.cpp\"]}";
   event.status = "success";
+  event.content_type = "application/json";
   event.diff = "--- src/main.cpp\n+++ src/main.cpp\n-old\n+new";
   event.changed_paths = {"src/main.cpp", "include/ava/app/events.h"};
   event.diff_truncated = true;
@@ -173,6 +178,8 @@ void test_tool_runtime_event_serializes_semantic_frontend_payloads() {
   const auto json = ava::app::serialize_event_json(event);
   expect(json.find("\"args\":{\"path\":\"src/main.cpp\"}") != std::string::npos &&
              json.find("\"result\":{\"ok\":true,\"path\":\"src/main.cpp\"}") != std::string::npos &&
+             json.find("\"structured_result\":{\"schema_version\":1") != std::string::npos &&
+             json.find("\"content_type\":\"application/json\"") != std::string::npos &&
              json.find("\"changed_paths\":[\"src/main.cpp\",\"include/ava/app/events.h\"]") != std::string::npos &&
              json.find("\"diff_truncated\":true") != std::string::npos &&
              json.find("\"omitted_lines\":7") != std::string::npos,
@@ -183,9 +190,11 @@ void test_tool_runtime_event_serializes_semantic_frontend_payloads() {
   const auto envelope = ava::app::to_event_envelope(event, context);
   const auto args = ava::core::json::object_field(envelope.payload_json, "args");
   const auto result = ava::core::json::object_field(envelope.payload_json, "result");
+  const auto structured_result = ava::core::json::object_field(envelope.payload_json, "structured_result");
   const auto paths = ava::core::json::strings_in_array_field(envelope.payload_json, "changed_paths");
   expect(envelope.name == "tool_result" && args && *args == "{\"path\":\"src/main.cpp\"}" && result &&
-             *result == "{\"ok\":true,\"path\":\"src/main.cpp\"}" && paths.size() == 2 &&
+             *result == "{\"ok\":true,\"path\":\"src/main.cpp\"}" && structured_result &&
+             structured_result->find("\"status\":\"success\"") != std::string::npos && paths.size() == 2 &&
              paths[1] == "include/ava/app/events.h" &&
              envelope.payload_json.find("\"spill_path\":\"/tmp/ava-spill/tool.txt\"") != std::string::npos,
          "tool event envelopes preserve semantic payloads for frontend replay");

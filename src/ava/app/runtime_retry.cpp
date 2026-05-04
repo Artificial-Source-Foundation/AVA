@@ -28,6 +28,7 @@ RuntimeEvent base_retry_event(const RuntimeSession& session, const RuntimeRunOpt
 
 ava::provider::RetryOptions runtime_retry_options(const RuntimeSession& session, const RuntimeRunOptions& options) {
   ava::provider::RetryOptions retry_options;
+  retry_options.cancel_requested = options.cancel_requested;
   retry_options.on_retry = [&session, &options](const ava::provider::RetryOptions::Event& retry) {
     auto event = base_retry_event(session, options);
     event.type = retry.countdown_tick ? RuntimeEventType::RetryTick : RuntimeEventType::Retry;

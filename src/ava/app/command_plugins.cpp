@@ -573,7 +573,7 @@ ava::core::Result<CommandResult> run_plugin_command(RuntimeSession& session, con
   if (auto recorded = record_tool_result(
           session, request.event_sink, result, call_id, "plugin_command",
           command_result->ok ? ava::agent::ToolTimelineStatus::Success : ava::agent::ToolTimelineStatus::Error,
-          command_result->ok ? "ok" : "plugin command returned error");
+          command_result->ok ? "ok" : "plugin command returned error", command_result->content);
       !recorded) {
     return std::unexpected(std::move(recorded.error()));
   }

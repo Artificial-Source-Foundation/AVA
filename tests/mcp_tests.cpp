@@ -26,11 +26,10 @@ void write_text(const std::filesystem::path& path, const std::string& text) {
   file << text;
 }
 
-std::string mcp_config_json(std::string id, std::string command, bool enabled = true,
-                            std::string args_json = "[]") {
+std::string mcp_config_json(std::string id, std::string command, bool enabled = true, std::string args_json = "[]") {
   return std::string("{\"servers\":[{\"id\":\"") + ava::core::json::escape(id) +
-         "\",\"name\":\"Demo MCP\",\"command\":\"" + ava::core::json::escape(command) +
-         "\",\"args\":" + args_json + ",\"enabled\":" + (enabled ? "true" : "false") + "}]}";
+         "\",\"name\":\"Demo MCP\",\"command\":\"" + ava::core::json::escape(command) + "\",\"args\":" + args_json +
+         ",\"enabled\":" + (enabled ? "true" : "false") + "}]}";
 }
 
 ava::mcp::McpServerConfig fake_server_config(const std::filesystem::path& root) {
@@ -52,17 +51,16 @@ ava::mcp::McpStdioClientOptions fake_client_options(const std::filesystem::path&
 }
 
 void test_mcp_config_parsing() {
-  auto global = ava::mcp::parse_mcp_config(
-      "{\"servers\":[{\"id\":\"demo\",\"command\":\"/bin/demo\",\"args\":[\"--stdio\"]}]}",
-      "/tmp/global-mcp.json", ava::mcp::McpServerScope::Global);
-  expect(global && global->servers.size() == 1 && global->servers[0].enabled &&
-             global->servers[0].args.size() == 1 && global->servers[0].scope == ava::mcp::McpServerScope::Global,
+  auto global =
+      ava::mcp::parse_mcp_config("{\"servers\":[{\"id\":\"demo\",\"command\":\"/bin/demo\",\"args\":[\"--stdio\"]}]}",
+                                 "/tmp/global-mcp.json", ava::mcp::McpServerScope::Global);
+  expect(global && global->servers.size() == 1 && global->servers[0].enabled && global->servers[0].args.size() == 1 &&
+             global->servers[0].scope == ava::mcp::McpServerScope::Global,
          global ? "MCP config parses global server defaults"
                 : "MCP config parses global server defaults: " + global.error().format());
 
-  auto project = ava::mcp::parse_mcp_config(
-      "{\"servers\":[{\"id\":\"demo-project\",\"command\":\"/bin/demo\"}]}",
-      "/tmp/project-mcp.json", ava::mcp::McpServerScope::Project);
+  auto project = ava::mcp::parse_mcp_config("{\"servers\":[{\"id\":\"demo-project\",\"command\":\"/bin/demo\"}]}",
+                                            "/tmp/project-mcp.json", ava::mcp::McpServerScope::Project);
   expect(project && project->servers.size() == 1 && !project->servers[0].enabled,
          project ? "MCP project config servers default to disabled"
                  : "MCP project config servers default to disabled: " + project.error().format());
@@ -149,6 +147,11 @@ void test_mcp_tool_dispatcher() {
   expect(dispatched && dispatched->success && dispatched->result_text.find("MCP call ok") != std::string::npos,
          dispatched ? "dispatcher calls enabled MCP tool through broker"
                     : "dispatcher calls enabled MCP tool through broker: " + dispatched.error().format());
+  expect(dispatched && dispatched->payload.status == ava::agent::ToolResultStatus::Success &&
+             dispatched->payload.content_type == "application/json" &&
+             dispatched->payload.content.find("\"server\":\"demo\"") != std::string::npos &&
+             dispatched->payload.content.find("MCP call ok") != std::string::npos,
+         "MCP tool dispatcher attaches structured semantic result payloads");
 
   const auto has_launch = std::any_of(prompts.begin(), prompts.end(), [](const auto& prompt) {
     return prompt.operation == ava::permissions::Operation::McpServerLaunch;
@@ -171,6 +174,9 @@ void test_mcp_tool_dispatcher() {
       ava::agent::ProviderToolCall{.id = "call_bad_args", .name = model_tool_name, .arguments_json = "[]"});
   expect(invalid_args && !invalid_args->success && invalid_args->result_text.find("JSON object") != std::string::npos,
          "MCP tool dispatcher rejects non-object arguments before execution");
+  expect(invalid_args && invalid_args->payload.status == ava::agent::ToolResultStatus::Error &&
+             invalid_args->payload.error_category == "invalid_argument",
+         "MCP tool dispatcher attaches structured semantic error payloads");
 }
 
 }  // namespace

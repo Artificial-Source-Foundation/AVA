@@ -21,6 +21,7 @@
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
+#include "ava/agent/tool_result.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
@@ -235,6 +236,13 @@ void test_tool_dispatcher() {
   expect(
       malformed_args && !malformed_args->success && malformed_args->result_text.find("required") != std::string::npos,
       "tool dispatcher returns structured errors for malformed tool arguments");
+  const auto malformed_structured =
+      malformed_args ? ava::agent::serialize_tool_result_payload_json(*malformed_args) : std::string{};
+  expect(malformed_args && malformed_args->payload.status == ava::agent::ToolResultStatus::Error &&
+             malformed_args->payload.error_category == "invalid_argument" &&
+             malformed_args->payload.error_message.find("required") != std::string::npos &&
+             malformed_structured.find("\"error\"") != std::string::npos,
+         "tool dispatcher semantic payload carries error category and message");
 
   auto patch = dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "call_patch",
@@ -248,6 +256,15 @@ void test_tool_dispatcher() {
              patch_diff->find("+hello patch") != std::string::npos && patch_diff->size() <= 32 * 1024 &&
              patch->result_text.find("\"diff_truncated\":false") != std::string::npos,
          "tool dispatcher applies exact patch edits and returns a bounded unified diff");
+  const auto patch_structured = patch ? ava::agent::serialize_tool_result_payload_json(*patch) : std::string{};
+  expect(patch && patch_diff && patch->payload.status == ava::agent::ToolResultStatus::Success &&
+             patch->payload.content_type == "application/json" && patch->payload.diff == *patch_diff &&
+             patch->payload.changed_paths.size() == 1 &&
+             patch->payload.changed_paths[0].find("note.txt") != std::string::npos &&
+             patch_structured.find("\"status\":\"success\"") != std::string::npos &&
+             patch_structured.find("\"content_type\":\"application/json\"") != std::string::npos &&
+             patch_structured.find("\"changed_paths\"") != std::string::npos,
+         "tool dispatcher attaches a structured semantic payload alongside legacy tool result JSON");
   auto patched_read = dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "call_patched_read", .name = "read_file", .arguments_json = "{\"path\":\"note.txt\"}"});
   expect(patched_read && patched_read->result_text.find("hello patch") != std::string::npos,
@@ -1110,8 +1127,10 @@ void test_agent_loop_tool_turn_and_continuation() {
              result->tool_timeline.front().argument_summary.find("path=note.txt") != std::string::npos &&
              result->tool_timeline.front().argument_summary.find('{') == std::string::npos &&
              result->tool_timeline.front().result_summary.find("tool content") == std::string::npos &&
-             result->tool_timeline.front().result_summary.find("bytes") != std::string::npos,
-         "agent loop returns safe compact tool timeline summaries");
+             result->tool_timeline.front().result_summary.find("bytes") != std::string::npos &&
+             result->tool_timeline.front().structured_result_json.find("\"status\":\"success\"") != std::string::npos &&
+             result->tool_timeline.front().content_type == "application/json",
+         "agent loop returns safe compact tool timeline summaries and structured result metadata");
   expect(tool_events.size() == 2 && tool_events.front().status == ava::agent::ToolTimelineStatus::Running &&
              tool_events.back().status == ava::agent::ToolTimelineStatus::Success,
          "agent loop publishes running and completed tool timeline events");
@@ -1125,15 +1144,21 @@ void test_agent_loop_tool_turn_and_continuation() {
   if (!entries) return;
   bool saw_tool_call = false;
   bool saw_tool_result = false;
+  bool saw_structured_tool_result = false;
   bool saw_final_assistant = false;
   for (const auto& entry : *entries) {
     saw_tool_call = saw_tool_call || entry.type == ava::session::EntryType::ToolCall;
     saw_tool_result = saw_tool_result || entry.type == ava::session::EntryType::ToolResult;
+    saw_structured_tool_result =
+        saw_structured_tool_result ||
+        (entry.type == ava::session::EntryType::ToolResult &&
+         entry.data_json.find("\"structured_result\":{\"schema_version\":1") != std::string::npos &&
+         entry.data_json.find("\"content_type\":\"application/json\"") != std::string::npos);
     saw_final_assistant = saw_final_assistant || (entry.type == ava::session::EntryType::AssistantMessage &&
                                                   entry.data_json.find("read it") != std::string::npos);
   }
-  expect(saw_tool_call && saw_tool_result && saw_final_assistant,
-         "agent loop persists assistant, tool call, and tool result entries");
+  expect(saw_tool_call && saw_tool_result && saw_structured_tool_result && saw_final_assistant,
+         "agent loop persists assistant, tool call, and semantic structured tool result entries");
 }
 
 void test_agent_loop_permission_resolver_threads_to_tools() {
@@ -1654,6 +1679,59 @@ void test_agent_loop_cancellation_boundaries() {
     expect(!result && result.error().message() == "agent loop canceled" && transport.requests().size() == 1 &&
                entries && saw_cancel && !saw_tool_entry,
            "agent loop cancellation before tool dispatch avoids tool call/result entries");
+  }
+
+  {
+    const auto root = temp_root() / "agent-cancel-during-bash-tool";
+    std::error_code remove_error;
+    std::filesystem::remove_all(root, remove_error);
+    const auto workspace = root / "workspace";
+    std::filesystem::create_directories(workspace);
+    ava::session::SessionStore store(ava::session::SessionStoreOptions{
+        .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "cancel-during-bash-tool"});
+    ava::tests::FakeTransport transport({sse_response(
+        "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_bash\",\"name\":\"bash\"}\n\n"
+        "data: "
+        "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_bash\",\"delta\":\"{\\\"command\\\":"
+        "\\\"sleep 2\\\",\\\"timeout_ms\\\":5000}\"}\n\n"
+        "data: [DONE]\n\n")});
+    bool bash_started = false;
+    int bash_cancel_checks = 0;
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .provider_id = "openai",
+        .model_id = "gpt-5.5",
+        .system_prompt = "system prompt",
+        .access_token = "token",
+        .on_tool_event =
+            [&bash_started](const auto& entry) {
+              if (entry.status == ava::agent::ToolTimelineStatus::Running && entry.name == "bash") {
+                bash_started = true;
+              }
+            },
+        .cancel_requested =
+            [&bash_started, &bash_cancel_checks] {
+              if (!bash_started) return false;
+              ++bash_cancel_checks;
+              return bash_cancel_checks >= 3;
+            }});
+    auto result = loop.run_turn("sleep then cancel", store, provider, transport);
+    auto entries = store.load();
+    const bool saw_canceled_tool_result =
+        entries && std::ranges::any_of(*entries, [](const ava::session::SessionEntry& entry) {
+          return entry.type == ava::session::EntryType::ToolResult &&
+                 entry.data_json.find("\"status\":\"canceled\"") != std::string::npos &&
+                 entry.data_json.find("\"canceled\":true") != std::string::npos;
+        });
+    const bool saw_after_tool_cancel =
+        entries && std::ranges::any_of(*entries, [](const ava::session::SessionEntry& entry) {
+          return entry.type == ava::session::EntryType::Cancel &&
+                 entry.data_json.find("after_tool_dispatch") != std::string::npos;
+        });
+    expect(!result && result.error().message() == "agent loop canceled" && transport.requests().size() == 1 &&
+               saw_canceled_tool_result && saw_after_tool_cancel,
+           "agent loop propagates cancellation into bash tools and persists a canceled tool result");
   }
 }
 

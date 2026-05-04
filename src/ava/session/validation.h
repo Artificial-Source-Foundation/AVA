@@ -31,6 +31,8 @@ enum class SessionReplayIssueKind {
   InvalidCompactionEntry,
   CompactionWithUnresolvedToolCall,
   CompactionWithUnresolvedPermissionPrompt,
+  InvalidModelEntry,
+  InvalidReasoningEntry,
 };
 
 struct SessionReplayIssue {
@@ -47,6 +49,7 @@ struct SessionReplayValidationOptions {
   bool require_tool_result_pairing = true;
   bool require_permission_decision_integrity = true;
   bool require_compaction_integrity = true;
+  bool require_model_reasoning_integrity = true;
   bool require_structured_tool_results = false;
 };
 

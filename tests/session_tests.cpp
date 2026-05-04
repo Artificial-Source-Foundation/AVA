@@ -462,7 +462,9 @@ void test_session_replay_validation() {
                                  .parent_id = "",
                                  .type = ava::session::EntryType::SessionStart,
                                  .timestamp = "2026-04-29T00:00:00Z",
-                                 .data_json = "{\"mode\":\"build\"}"},
+                                 .data_json = "{\"mode\":\"build\",\"provider\":\"openai\","
+                                              "\"model\":\"gpt-5.5\",\"prompt_override\":false,"
+                                              "\"context_sources\":0}"},
       ava::session::SessionEntry{.id = "user",
                                  .parent_id = "start",
                                  .type = ava::session::EntryType::UserMessage,
@@ -719,9 +721,93 @@ void test_session_replay_validation() {
                               ava::session::SessionReplayIssueKind::CompactionWithUnresolvedPermissionPrompt),
          "session replay validator flags compaction before unresolved permission decisions");
 
+  const std::vector<ava::session::SessionEntry> valid_model_reasoning_entries = {
+      ava::session::SessionEntry{.id = "model_start",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::SessionStart,
+                                 .timestamp = "2026-04-29T00:00:00Z",
+                                 .data_json = "{\"mode\":\"build\",\"provider\":\"openai\","
+                                              "\"model\":\"gpt-5.5\",\"prompt_override\":false,"
+                                              "\"context_sources\":0,\"supports_reasoning\":true}"},
+      ava::session::SessionEntry{.id = "model_change",
+                                 .parent_id = "model_start",
+                                 .type = ava::session::EntryType::ModelChange,
+                                 .timestamp = "2026-04-29T00:00:01Z",
+                                 .data_json = "{\"previous_provider\":\"openai\","
+                                              "\"previous_model\":\"gpt-5.5\","
+                                              "\"provider\":\"kimi\",\"model\":\"kimi-k2-thinking\","
+                                              "\"supports_reasoning\":true,\"max_output_tokens\":8192}"},
+      ava::session::SessionEntry{.id = "reasoning_change",
+                                 .parent_id = "model_change",
+                                 .type = ava::session::EntryType::ReasoningChange,
+                                 .timestamp = "2026-04-29T00:00:02Z",
+                                 .data_json = "{\"provider\":\"kimi\",\"model\":\"kimi-k2-thinking\","
+                                              "\"format\":\"reasoning_content\",\"enabled\":true,"
+                                              "\"level\":\"enabled\"}"},
+      ava::session::SessionEntry{.id = "reasoning_block",
+                                 .parent_id = "reasoning_change",
+                                 .type = ava::session::EntryType::ReasoningBlock,
+                                 .timestamp = "2026-04-29T00:00:03Z",
+                                 .data_json = "{\"provider\":\"kimi\",\"model\":\"kimi-k2-thinking\","
+                                              "\"format\":\"reasoning_content\",\"text\":\"reasoned\","
+                                              "\"redacted\":false}"},
+  };
+  const auto valid_model_reasoning = ava::session::validate_session_replay(valid_model_reasoning_entries);
+  expect(valid_model_reasoning.ok() && valid_model_reasoning.issues.empty(),
+         "session replay validator accepts durable model and reasoning metadata");
+
+  const std::vector<ava::session::SessionEntry> invalid_model_start_entries = {
+      ava::session::SessionEntry{.id = "bad_start",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::SessionStart,
+                                 .timestamp = "2026-04-29T00:00:00Z",
+                                 .data_json = "{\"mode\":\"build\",\"model\":\"gpt-5.5\"}"},
+  };
+  const auto invalid_model_start = ava::session::validate_session_replay(invalid_model_start_entries);
+  expect(!invalid_model_start.ok() &&
+             has_replay_issue(invalid_model_start, ava::session::SessionReplayIssueKind::InvalidModelEntry),
+         "session replay validator flags session_start entries without provider/model metadata");
+
+  auto invalid_model_change_entries = valid_model_reasoning_entries;
+  invalid_model_change_entries[1].data_json =
+      "{\"previous_provider\":\"anthropic\",\"previous_model\":\"claude\","
+      "\"provider\":\"kimi\",\"model\":\"kimi-k2-thinking\"}";
+  const auto invalid_model_change = ava::session::validate_session_replay(invalid_model_change_entries);
+  expect(!invalid_model_change.ok() &&
+             has_replay_issue(invalid_model_change, ava::session::SessionReplayIssueKind::InvalidModelEntry),
+         "session replay validator flags model_change entries whose previous model does not match active state");
+
+  auto invalid_reasoning_change_entries = valid_model_reasoning_entries;
+  invalid_reasoning_change_entries[2].data_json =
+      "{\"provider\":\"kimi\",\"model\":\"kimi-k2-thinking\",\"enabled\":true}";
+  const auto invalid_reasoning_change = ava::session::validate_session_replay(invalid_reasoning_change_entries);
+  expect(!invalid_reasoning_change.ok() &&
+             has_replay_issue(invalid_reasoning_change, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+         "session replay validator flags enabled reasoning_change entries without a level");
+
+  auto mismatched_reasoning_change_entries = valid_model_reasoning_entries;
+  mismatched_reasoning_change_entries[2].data_json =
+      "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"enabled\":true,\"level\":\"low\"}";
+  const auto mismatched_reasoning_change = ava::session::validate_session_replay(mismatched_reasoning_change_entries);
+  expect(!mismatched_reasoning_change.ok() &&
+             has_replay_issue(mismatched_reasoning_change, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+         "session replay validator flags reasoning_change entries for the wrong active model");
+
+  auto invalid_reasoning_block_entries = valid_model_reasoning_entries;
+  invalid_reasoning_block_entries[3].data_json =
+      "{\"provider\":\"kimi\",\"model\":\"kimi-k2-thinking\",\"format\":\"reasoning_content\","
+      "\"redacted\":false}";
+  const auto invalid_reasoning_block = ava::session::validate_session_replay(invalid_reasoning_block_entries);
+  expect(!invalid_reasoning_block.ok() &&
+             has_replay_issue(invalid_reasoning_block, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+         "session replay validator flags reasoning_block entries without replayable content");
+
   expect(ava::session::to_string(ava::session::SessionReplayIssueKind::InvalidCompactionEntry) ==
              "invalid_compaction_entry",
          "session replay issue kind names include compaction validation failures");
+  expect(
+      ava::session::to_string(ava::session::SessionReplayIssueKind::InvalidReasoningEntry) == "invalid_reasoning_entry",
+      "session replay issue kind names include reasoning validation failures");
 }
 
 void test_session_resume_and_listing() {

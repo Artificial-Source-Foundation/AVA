@@ -206,7 +206,7 @@ Session validation:
 {"id":"3b2","type":"validate_session"}
 ```
 
-Runs the backend replay validator over the active session and returns `{session_id,session_path,ok,error_count,warning_count,issues}`. Issues include stable `kind` strings, severity, entry index, entry id when available, tool call id when relevant, and a short diagnostic message. The validator currently checks entry ids, parent links, tool call/result pairing, permission prompt/resolution pairing, structured tool results when required by callers, and compaction integrity. Compaction validation requires a durable summary and reports compaction boundaries that occur while tool calls or permission prompts are unresolved.
+Runs the backend replay validator over the active session and returns `{session_id,session_path,ok,error_count,warning_count,issues}`. Issues include stable `kind` strings, severity, entry index, entry id when available, tool call id when relevant, and a short diagnostic message. The validator currently checks entry ids, parent links, tool call/result pairing, permission prompt/resolution pairing, structured tool results when required by callers, compaction integrity, and durable model/reasoning entry shape. Compaction validation requires a durable summary and reports compaction boundaries that occur while tool calls or permission prompts are unresolved.
 
 Model catalog and switching:
 

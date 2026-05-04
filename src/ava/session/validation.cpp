@@ -23,6 +23,11 @@ struct PendingPermissionPrompt {
   std::size_t entry_index = 0;
 };
 
+struct ActiveModelState {
+  std::string provider_id;
+  std::string model_id;
+};
+
 std::string permission_key(const SessionEntry& entry) {
   std::string key = ava::core::json::string_field(entry.data_json, "operation").value_or("");
   key += '\x1F';
@@ -78,6 +83,18 @@ bool present_non_empty_string(std::string_view object, std::string_view key) {
   if (!start) return true;
   const auto value = ava::core::json::string_field(object, key);
   return value && !value->empty();
+}
+
+bool present_boolean(std::string_view object, std::string_view key) {
+  const auto start = ava::core::json::field_value_start(object, key);
+  if (!start) return true;
+  return bool_field_is_true(object, key) || bool_field_is_false(object, key);
+}
+
+bool required_boolean(std::string_view object, std::string_view key) {
+  const auto start = ava::core::json::field_value_start(object, key);
+  if (!start) return false;
+  return bool_field_is_true(object, key) || bool_field_is_false(object, key);
 }
 
 bool is_json_value_delimiter(char ch) {
@@ -298,6 +315,114 @@ void validate_compaction_boundaries(
   }
 }
 
+void validate_session_start_entry(SessionReplayValidation& validation, ActiveModelState& active_model,
+                                  std::size_t index, const SessionEntry& entry) {
+  if (!ava::core::json::is_valid_object(entry.data_json)) {
+    add_error(validation, SessionReplayIssueKind::InvalidModelEntry, index, entry, "",
+              "session_start entry data is not valid JSON");
+    return;
+  }
+
+  const auto mode = ava::core::json::string_field(entry.data_json, "mode").value_or("");
+  const auto provider = ava::core::json::string_field(entry.data_json, "provider").value_or("");
+  const auto model = ava::core::json::string_field(entry.data_json, "model").value_or("");
+  if (!valid_mode(mode) || provider.empty() || model.empty() ||
+      !present_integer_matching(entry.data_json, "context_sources", false) ||
+      !present_integer_matching(entry.data_json, "context_window_tokens", true) ||
+      !present_integer_matching(entry.data_json, "max_output_tokens", true) ||
+      !present_boolean(entry.data_json, "prompt_override") || !present_boolean(entry.data_json, "supports_tools") ||
+      !present_boolean(entry.data_json, "supports_streaming") ||
+      !present_boolean(entry.data_json, "supports_reasoning") || !present_boolean(entry.data_json, "reports_usage")) {
+    add_error(validation, SessionReplayIssueKind::InvalidModelEntry, index, entry, "",
+              "session_start entry is missing required model/session metadata");
+    return;
+  }
+
+  active_model.provider_id = provider;
+  active_model.model_id = model;
+}
+
+void validate_model_change_entry(SessionReplayValidation& validation, ActiveModelState& active_model, std::size_t index,
+                                 const SessionEntry& entry) {
+  if (!ava::core::json::is_valid_object(entry.data_json)) {
+    add_error(validation, SessionReplayIssueKind::InvalidModelEntry, index, entry, "",
+              "model_change entry data is not valid JSON");
+    return;
+  }
+
+  const auto previous_provider = ava::core::json::string_field(entry.data_json, "previous_provider").value_or("");
+  const auto previous_model = ava::core::json::string_field(entry.data_json, "previous_model").value_or("");
+  const auto provider = ava::core::json::string_field(entry.data_json, "provider").value_or("");
+  const auto model = ava::core::json::string_field(entry.data_json, "model").value_or("");
+  if (previous_provider.empty() || previous_model.empty() || provider.empty() || model.empty() ||
+      (previous_provider == provider && previous_model == model) ||
+      (!active_model.provider_id.empty() &&
+       (previous_provider != active_model.provider_id || previous_model != active_model.model_id)) ||
+      !present_integer_matching(entry.data_json, "context_window_tokens", true) ||
+      !present_integer_matching(entry.data_json, "max_output_tokens", true) ||
+      !present_boolean(entry.data_json, "supports_tools") || !present_boolean(entry.data_json, "supports_streaming") ||
+      !present_boolean(entry.data_json, "supports_reasoning") || !present_boolean(entry.data_json, "reports_usage")) {
+    add_error(validation, SessionReplayIssueKind::InvalidModelEntry, index, entry, "",
+              "model_change entry is missing required provider/model transition metadata");
+    return;
+  }
+
+  active_model.provider_id = provider;
+  active_model.model_id = model;
+}
+
+void validate_reasoning_change_entry(SessionReplayValidation& validation, const ActiveModelState& active_model,
+                                     std::size_t index, const SessionEntry& entry) {
+  if (!ava::core::json::is_valid_object(entry.data_json)) {
+    add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "",
+              "reasoning_change entry data is not valid JSON");
+    return;
+  }
+
+  const auto provider = ava::core::json::string_field(entry.data_json, "provider").value_or("");
+  const auto model = ava::core::json::string_field(entry.data_json, "model").value_or("");
+  if (provider.empty() || model.empty() || !required_boolean(entry.data_json, "enabled") ||
+      !present_non_empty_string(entry.data_json, "format") ||
+      !present_integer_matching(entry.data_json, "budget_tokens", true) ||
+      !present_non_empty_string(entry.data_json, "display")) {
+    add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "",
+              "reasoning_change entry is missing required semantic fields");
+    return;
+  }
+
+  if (!active_model.provider_id.empty() && (provider != active_model.provider_id || model != active_model.model_id)) {
+    add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "",
+              "reasoning_change provider/model does not match active session model");
+    return;
+  }
+
+  const auto enabled = bool_field_is_true(entry.data_json, "enabled");
+  const auto level = ava::core::json::string_field(entry.data_json, "level").value_or("");
+  if (enabled && level.empty()) {
+    add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "",
+              "enabled reasoning_change entry is missing level");
+  }
+}
+
+void validate_reasoning_block_entry(SessionReplayValidation& validation, std::size_t index, const SessionEntry& entry) {
+  if (!ava::core::json::is_valid_object(entry.data_json)) {
+    add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "",
+              "reasoning_block entry data is not valid JSON");
+    return;
+  }
+
+  const auto provider = ava::core::json::string_field(entry.data_json, "provider").value_or("");
+  const auto model = ava::core::json::string_field(entry.data_json, "model").value_or("");
+  const auto text = ava::core::json::string_field(entry.data_json, "text").value_or("");
+  const auto signature = ava::core::json::string_field(entry.data_json, "signature").value_or("");
+  const auto redacted_data = ava::core::json::string_field(entry.data_json, "redacted_data").value_or("");
+  if (provider.empty() || model.empty() || !present_non_empty_string(entry.data_json, "format") ||
+      !present_boolean(entry.data_json, "redacted") || (text.empty() && signature.empty() && redacted_data.empty())) {
+    add_error(validation, SessionReplayIssueKind::InvalidReasoningEntry, index, entry, "",
+              "reasoning_block entry is missing provider/model/content metadata");
+  }
+}
+
 }  // namespace
 
 std::string_view to_string(SessionReplayIssueSeverity severity) noexcept {
@@ -346,6 +471,10 @@ std::string_view to_string(SessionReplayIssueKind kind) noexcept {
       return "compaction_with_unresolved_tool_call";
     case SessionReplayIssueKind::CompactionWithUnresolvedPermissionPrompt:
       return "compaction_with_unresolved_permission_prompt";
+    case SessionReplayIssueKind::InvalidModelEntry:
+      return "invalid_model_entry";
+    case SessionReplayIssueKind::InvalidReasoningEntry:
+      return "invalid_reasoning_entry";
   }
   return "invalid_structured_tool_result";
 }
@@ -356,6 +485,7 @@ SessionReplayValidation validate_session_replay(const std::vector<SessionEntry>&
   std::unordered_set<std::string> seen_entry_ids;
   std::unordered_map<std::string, ToolCallState> tool_calls;
   std::unordered_map<std::string, std::vector<PendingPermissionPrompt>> pending_permissions;
+  ActiveModelState active_model;
 
   for (std::size_t index = 0; index < entries.size(); ++index) {
     const auto& entry = entries[index];
@@ -366,6 +496,25 @@ SessionReplayValidation validate_session_replay(const std::vector<SessionEntry>&
     }
     if (!seen_entry_ids.insert(entry.id).second) {
       add_error(validation, SessionReplayIssueKind::DuplicateEntryId, index, entry, "", "duplicate session entry id");
+    }
+
+    if (options.require_model_reasoning_integrity) {
+      if (entry.type == EntryType::SessionStart) {
+        validate_session_start_entry(validation, active_model, index, entry);
+        continue;
+      }
+      if (entry.type == EntryType::ModelChange) {
+        validate_model_change_entry(validation, active_model, index, entry);
+        continue;
+      }
+      if (entry.type == EntryType::ReasoningChange) {
+        validate_reasoning_change_entry(validation, active_model, index, entry);
+        continue;
+      }
+      if (entry.type == EntryType::ReasoningBlock) {
+        validate_reasoning_block_entry(validation, index, entry);
+        continue;
+      }
     }
 
     if (entry.type == EntryType::PermissionDecision && options.require_permission_decision_integrity) {

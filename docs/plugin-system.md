@@ -301,6 +301,7 @@ MCP safety rules:
 - Launching a local MCP server is a permissioned process execution event.
 - Connecting to an MCP server session is permissioned; future remote transports also need explicit network permission.
 - MCP tool results are bounded before they enter the model context.
+- MCP server stderr is diagnostics only and is kept as a bounded tail.
 - MCP errors are surfaced as MCP/plugin failures, not as core AVA crashes.
 
 ## Commands And Diagnostics
@@ -336,7 +337,8 @@ Minimum regression coverage:
 - Permission denial for plugin execution and plugin tool calls.
 - Audit/session records for plugin execution and tool calls.
 - Fake MCP server initialize/list-tools/call-tool success.
-- Fake MCP server tool error, malformed response, timeout, cancellation, and process cleanup.
+- Fake MCP server tool error, malformed response, timeout, cancellation, stderr bounding, and process cleanup.
+- Direct `ava --rpc` headless smoke coverage for MCP list/inspect/restart commands and fail-closed `list_mcp_tools` behavior without a TUI resolver.
 - Tool name collision behavior between built-in, plugin, and MCP tools.
 
 ## Implemented 1.0 Foundation
@@ -345,7 +347,7 @@ Minimum regression coverage:
 - Plugin manifest parsing, diagnostics, discovery, local enable/disable state, and validation commands.
 - Out-of-process plugin runner with initialize, tool call, command call, event observation, cancellation, bounded stderr, timeouts, and shutdown.
 - Plugin tool contributions, plugin command contributions, static prompt/skill resources, and non-mutating event hooks.
-- Stdio MCP config loading, initialize, `tools/list`, `tools/call`, tool broker registration, slash/RPC diagnostics, and fake-server regression coverage.
+- Stdio MCP config loading, initialize, `tools/list`, `tools/call`, bounded stderr diagnostics, tool broker registration, slash/RPC diagnostics, direct headless command smokes, and fake-server regression coverage.
 
 ## 1.0 Decisions
 
@@ -355,7 +357,7 @@ Minimum regression coverage:
 - Built-in tool names are reserved. Plugin tool model names use `plugin_<sanitized_plugin_id>_<tool_name>` by default. MCP tool model names use `mcp_<sanitized_server_id>_<tool_name>` by default. Name collisions disable the later contribution and produce diagnostics instead of overriding a tool silently.
 - Stdio MCP transport is required for 1.0. Streamable HTTP MCP remains strongly desired, not required.
 - Plugin process launch uses a separate permission category from shell commands. If a plugin asks AVA to run a shell command through the core service proxy, that proxied command still goes through the normal shell policy.
-- Plugin stderr capture is bounded. The initial target is an in-memory tail of the last 64 KiB per plugin process, with larger log spill files deferred until diagnostics prove the need.
+- Plugin and MCP stderr capture is bounded. The initial target is an in-memory tail of the last 64 KiB per process, with larger log spill files deferred until diagnostics prove the need.
 - Plugin restart is manual for 1.0. Current plugin and MCP stdio processes are launched per call or discovery; `/mcp restart` reports that the next discovery or tool call will launch a fresh process.
 - Plugins do not get a plugin-to-plugin event bus in 1.0. Event hooks observe AVA runtime events only, and inter-plugin communication is deferred.
 

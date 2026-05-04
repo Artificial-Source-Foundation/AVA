@@ -115,6 +115,23 @@ void test_mcp_stdio_client_lists_and_calls_tools() {
   expect(shutdown.has_value(), shutdown ? "MCP stdio client shuts down cleanly"
                                         : "MCP stdio client shuts down cleanly: " + shutdown.error().format());
 
+  auto stderr_server = fake_server_config(root);
+  stderr_server.args = {"stderr-noise"};
+  auto stderr_options = fake_client_options(workspace);
+  stderr_options.max_stderr_bytes = 16;
+  auto stderr_client = ava::mcp::McpStdioClient::start(stderr_server, stderr_options);
+  expect(stderr_client.has_value(),
+         stderr_client ? "MCP stdio client initializes noisy fake server"
+                       : "MCP stdio client initializes noisy fake server: " + stderr_client.error().format());
+  if (stderr_client) {
+    auto stderr_tools = (*stderr_client)->list_tools();
+    expect(stderr_tools.has_value(), "MCP stdio client drains stderr while listing tools");
+    auto stderr_shutdown = (*stderr_client)->shutdown(std::chrono::milliseconds(500));
+    expect(stderr_shutdown.has_value(), "MCP stdio client shuts down noisy fake server");
+    expect((*stderr_client)->stderr_truncated(), "MCP stdio client bounds stderr diagnostics");
+    expect((*stderr_client)->stderr_tail() == "mcp-stderr-tail!", "MCP stdio client keeps stderr tail");
+  }
+
   auto slow_server = fake_server_config(root);
   slow_server.args = {"slow-tool"};
   auto slow_client = ava::mcp::McpStdioClient::start(slow_server, fake_client_options(workspace));

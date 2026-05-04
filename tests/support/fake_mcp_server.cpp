@@ -70,6 +70,10 @@ std::string error_response(std::string_view id, std::string_view message) {
 int main(int argc, char** argv) {
   std::string mode = "ok";
   if (argc > 1) mode = argv[1];
+  if (mode == "stderr-noise") {
+    std::cerr << std::string(96, 'x') << "mcp-stderr-tail!";
+    std::cerr.flush();
+  }
 
   while (auto message = read_message()) {
     const auto method = ava::core::json::string_field(*message, "method");

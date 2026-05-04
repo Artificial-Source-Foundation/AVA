@@ -280,7 +280,7 @@ void test_tui_composer_rendering_and_input() {
                                  .width = 80,
                                  .height = 14});
   expect(lines.size() == 14, "tui fills the viewport with transcript, spacer, and composer lines");
-  expect(!lines.empty() && strip_sgr(lines.front()).find("╭─ You") != std::string::npos,
+  expect(!lines.empty() && strip_sgr(lines.front()).find("hello") != std::string::npos,
          "tui starts short chats at the top of the transcript area");
   expect(!lines.empty() && lines.back().find("\x1b[48;2;26;31;46m") != std::string::npos &&
              std::ranges::none_of(lines,
@@ -301,15 +301,18 @@ void test_tui_composer_rendering_and_input() {
                                       line.find("\x1b[1m\x1b[38;2;77;158;246m❯") != std::string::npos;
                              }),
          "tui uses old AVA elevated composer surface, primary rail, and prompt color");
-  expect(std::ranges::any_of(
+  expect(std::ranges::none_of(
              lines, [](const std::string& line) { return strip_sgr(line).find("╭─ You") != std::string::npos; }) &&
-             std::ranges::any_of(
-                 lines, [](const std::string& line) { return strip_sgr(line).find("│ hello") != std::string::npos; }) &&
-             std::ranges::any_of(
+             std::ranges::none_of(
                  lines, [](const std::string& line) { return strip_sgr(line).find("╭─ AVA") != std::string::npos; }) &&
+             std::ranges::any_of(lines,
+                                 [](const std::string& line) {
+                                   return line.find("\x1b[48;2;26;31;46m") != std::string::npos &&
+                                          strip_sgr(line).find("hello") != std::string::npos;
+                                 }) &&
              std::ranges::any_of(
-                 lines, [](const std::string& line) { return strip_sgr(line).find("│ world") != std::string::npos; }),
-         "tui renders visually separated user and assistant message blocks");
+                 lines, [](const std::string& line) { return strip_sgr(line).find("world") != std::string::npos; }),
+         "tui renders user messages as highlighted input blocks and assistant messages without role headers");
 
   const auto processing_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                      .provider = "openai",
@@ -423,45 +426,45 @@ void test_tui_composer_rendering_and_input() {
               "**bold text**."}},
       .width = 72,
       .height = 24});
-  expect(
-      std::ranges::any_of(markdown_transcript,
-                          [](const std::string& line) {
-                            return strip_sgr(line).find("│ First paragraph wraps cleanly") != std::string::npos;
-                          }) &&
-          std::ranges::any_of(markdown_transcript,
-                              [](const std::string& line) {
-                                return strip_sgr(line).find("│ Second paragraph stays separate") != std::string::npos;
-                              }) &&
-          std::ranges::any_of(
-              markdown_transcript,
-              [](const std::string& line) { return strip_sgr(line).find("│ - bullet item") != std::string::npos; }) &&
-          std::ranges::any_of(
-              markdown_transcript,
-              [](const std::string& line) { return strip_sgr(line).find("│ * star item") != std::string::npos; }) &&
-          std::ranges::any_of(markdown_transcript,
-                              [](const std::string& line) {
-                                return strip_sgr(line).find("│ 1. numbered item") != std::string::npos;
-                              }) &&
-          std::ranges::any_of(
-              markdown_transcript,
-              [](const std::string& line) { return strip_sgr(line).find("│ > quoted text") != std::string::npos; }) &&
-          std::ranges::any_of(
-              markdown_transcript,
-              [](const std::string& line) { return strip_sgr(line).find("│ ``` cpp") != std::string::npos; }) &&
-          std::ranges::any_of(
-              markdown_transcript,
-              [](const std::string& line) { return strip_sgr(line).find("│   int main() {}") != std::string::npos; }) &&
-          std::ranges::any_of(markdown_transcript,
-                              [](const std::string& line) {
-                                return strip_sgr(line).find("Use ava build and bold text") != std::string::npos;
-                              }) &&
-          std::ranges::none_of(markdown_transcript,
-                               [](const std::string& line) {
-                                 const auto visible = strip_sgr(line);
-                                 return visible.find("`ava build`") != std::string::npos ||
-                                        visible.find("**bold text**") != std::string::npos;
-                               }),
-      "tui assistant renderer handles paragraphs, lists, quotes, fenced code, inline code, and bold");
+  expect(std::ranges::any_of(markdown_transcript,
+                             [](const std::string& line) {
+                               return strip_sgr(line).find("First paragraph wraps cleanly") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(markdown_transcript,
+                                 [](const std::string& line) {
+                                   return strip_sgr(line).find("Second paragraph stays separate") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(
+                 markdown_transcript,
+                 [](const std::string& line) { return strip_sgr(line).find("- bullet item") != std::string::npos; }) &&
+             std::ranges::any_of(
+                 markdown_transcript,
+                 [](const std::string& line) { return strip_sgr(line).find("* star item") != std::string::npos; }) &&
+             std::ranges::any_of(markdown_transcript,
+                                 [](const std::string& line) {
+                                   return strip_sgr(line).find("1. numbered item") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(
+                 markdown_transcript,
+                 [](const std::string& line) { return strip_sgr(line).find("> quoted text") != std::string::npos; }) &&
+             std::ranges::any_of(
+                 markdown_transcript,
+                 [](const std::string& line) { return strip_sgr(line).find("``` cpp") != std::string::npos; }) &&
+             std::ranges::any_of(markdown_transcript,
+                                 [](const std::string& line) {
+                                   return strip_sgr(line).find("  int main() {}") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(markdown_transcript,
+                                 [](const std::string& line) {
+                                   return strip_sgr(line).find("Use ava build and bold text") != std::string::npos;
+                                 }) &&
+             std::ranges::none_of(markdown_transcript,
+                                  [](const std::string& line) {
+                                    const auto visible = strip_sgr(line);
+                                    return visible.find("`ava build`") != std::string::npos ||
+                                           visible.find("**bold text**") != std::string::npos;
+                                  }),
+         "tui assistant renderer handles paragraphs, lists, quotes, fenced code, inline code, and bold");
 
   constexpr auto kBoldSgr = std::string_view{"\x1b[1m"};
   constexpr auto kMutedSgr = std::string_view{"\x1b[38;2;139;149;165m"};
@@ -479,10 +482,10 @@ void test_tui_composer_rendering_and_input() {
                                  .width = 28,
                                  .height = 16});
   const auto user_markup_line = std::ranges::find_if(role_markup_transcript, [](const std::string& line) {
-    return strip_sgr(line).find("You: Use `x` and **y**.") != std::string::npos;
+    return strip_sgr(line).find("Use `x` and **y**.") != std::string::npos;
   });
   const auto assistant_markup_line = std::ranges::find_if(role_markup_transcript, [](const std::string& line) {
-    return strip_sgr(line).find("AVA: Use x and y.") != std::string::npos;
+    return strip_sgr(line).find("Use x and y.") != std::string::npos;
   });
   expect(user_markup_line != role_markup_transcript.end() && assistant_markup_line != role_markup_transcript.end() &&
              !has_active_sgr_at_text(*user_markup_line, "x", kWarningSgr) &&
@@ -505,10 +508,10 @@ void test_tui_composer_rendering_and_input() {
       .width = 48,
       .height = 16});
   const auto bullet_continuation = std::ranges::find_if(wrapped_markdown_transcript, [](const std::string& line) {
-    return strip_sgr(line).find("│   theta iota") != std::string::npos;
+    return strip_sgr(line).find("  theta iota") != std::string::npos;
   });
   const auto quote_continuation = std::ranges::find_if(wrapped_markdown_transcript, [](const std::string& line) {
-    return strip_sgr(line).find("│   eta theta") != std::string::npos;
+    return strip_sgr(line).find("  eta theta") != std::string::npos;
   });
   const auto bullet_continuation_is_plain = bullet_continuation != wrapped_markdown_transcript.end() &&
                                             !has_active_sgr_at_text(*bullet_continuation, "theta iota", kMutedSgr);
@@ -531,9 +534,9 @@ void test_tui_composer_rendering_and_input() {
       .height = 16});
   const auto code_after_wrapped_ticks = std::ranges::find_if(
       wrapped_code_fence_transcript,
-      [](const std::string& line) { return strip_sgr(line).find("│   omega") != std::string::npos; });
+      [](const std::string& line) { return strip_sgr(line).find("  omega") != std::string::npos; });
   const auto text_after_code = std::ranges::find_if(wrapped_code_fence_transcript, [](const std::string& line) {
-    return strip_sgr(line).find("│ After bold") != std::string::npos;
+    return strip_sgr(line).find("After bold") != std::string::npos;
   });
   expect(code_after_wrapped_ticks != wrapped_code_fence_transcript.end() &&
              has_active_sgr_at_text(*code_after_wrapped_ticks, "omega", kMutedSgr) &&
@@ -558,10 +561,10 @@ void test_tui_composer_rendering_and_input() {
   });
   const auto code_after_indented_ticks = std::ranges::find_if(
       indented_fence_content_transcript,
-      [](const std::string& line) { return strip_sgr(line).find("│   omega") != std::string::npos; });
+      [](const std::string& line) { return strip_sgr(line).find("  omega") != std::string::npos; });
   const auto text_after_indented_code = std::ranges::find_if(
       indented_fence_content_transcript,
-      [](const std::string& line) { return strip_sgr(line).find("│ After bold") != std::string::npos; });
+      [](const std::string& line) { return strip_sgr(line).find("After bold") != std::string::npos; });
   expect(indented_ticks != indented_fence_content_transcript.end() &&
              strip_sgr(*indented_ticks).find("``` literal") == std::string::npos &&
              code_after_indented_ticks != indented_fence_content_transcript.end() &&
@@ -583,7 +586,7 @@ void test_tui_composer_rendering_and_input() {
       .width = 30,
       .height = 18});
   const auto narrow_inline = std::ranges::find_if(narrow_code_transcript, [](const std::string& line) {
-    return strip_sgr(line).find("AVA: Intro ok and bold.") != std::string::npos;
+    return strip_sgr(line).find("Intro ok and bold.") != std::string::npos;
   });
   const auto narrow_code = std::ranges::find_if(narrow_code_transcript, [](const std::string& line) {
     return strip_sgr(line).find("value `x` and **y**") != std::string::npos;
@@ -611,7 +614,7 @@ void test_tui_composer_rendering_and_input() {
       .height = 14});
   expect(
       std::ranges::any_of(narrow_transcript,
-                          [](const std::string& line) { return strip_sgr(line).find("AVA: ") != std::string::npos; }) &&
+                          [](const std::string& line) { return strip_sgr(line).find("xxx") != std::string::npos; }) &&
           std::ranges::all_of(narrow_transcript, [](const std::string& line) { return visible_columns(line) <= 20; }),
       "tui assistant renderer keeps long words readable at narrow widths");
 
@@ -1672,8 +1675,8 @@ void test_tui_composer_rendering_and_input() {
     mixed_visible += '\n';
   }
   expect(mixed_visible.find("lines hidden") == std::string::npos && mixed_visible.find("[+]") != std::string::npos &&
-             mixed_visible.find("2 matches") != std::string::npos && mixed_visible.find("AVA") != std::string::npos &&
-             mixed_visible.find("│ done") != std::string::npos && mixed_visible.find("old 0") == std::string::npos,
+             mixed_visible.find("2 matches") != std::string::npos && mixed_visible.find("done") != std::string::npos &&
+             mixed_visible.find("AVA") == std::string::npos && mixed_visible.find("old 0") == std::string::npos,
          "tui transcript viewport scrolls mixed text and tool-card lines together without hidden-line banners");
 
   const auto multiline = ava::tui::render_composer(
@@ -1689,12 +1692,12 @@ void test_tui_composer_rendering_and_input() {
   expect(std::ranges::any_of(multiline,
                              [](const std::string& line) {
                                auto visible = strip_sgr(line);
-                               return visible.find("│ one") != std::string::npos;
+                               return visible.find("one") != std::string::npos;
                              }) &&
              std::ranges::any_of(multiline,
                                  [](const std::string& line) {
                                    auto visible = strip_sgr(line);
-                                   return visible.find("│ two") != std::string::npos;
+                                   return visible.find("two") != std::string::npos;
                                  }),
          "tui renders multiline assistant transcript content inside the message block");
 
@@ -2118,16 +2121,30 @@ void test_tui_event_state_reduces_runtime_events() {
   ava::tui::apply_runtime_event(reasoning_state, reasoning_delta);
   auto reasoning_snapshot = ava::tui::event_state_transcript_snapshot(reasoning_state);
   expect(reasoning_state.pending_reasoning_text == "checking options" && reasoning_snapshot.size() == 1 &&
-             reasoning_snapshot[0].label == "thinking" && reasoning_snapshot[0].text == "checking options",
-         "tui event state exposes pending reasoning inline as thinking transcript content");
+             reasoning_snapshot[0].label == "ava" && reasoning_snapshot[0].thinking == "checking options" &&
+             reasoning_snapshot[0].text.empty(),
+         "tui event state exposes pending reasoning as part of the assistant turn");
   ava::app::RuntimeEvent reasoning_end;
   reasoning_end.type = ava::app::RuntimeEventType::ReasoningEnd;
   ava::tui::apply_runtime_event(reasoning_state, reasoning_end);
-  expect(reasoning_state.pending_reasoning_text.empty() && reasoning_state.transcript.size() == 1 &&
-             reasoning_state.transcript[0].label == "thinking" && reasoning_state.activity.size() == 1 &&
-             reasoning_state.activity[0].label == "reasoning" &&
+  expect(reasoning_state.pending_reasoning_text == "checking options" && reasoning_state.transcript.empty() &&
+             reasoning_state.activity.size() == 1 && reasoning_state.activity[0].label == "reasoning" &&
              reasoning_state.activity[0].status == ava::tui::ToolTimelineStatus::Success,
-         "tui event state commits reasoning content and completes reasoning sidebar activity");
+         "tui event state keeps completed reasoning attached to the pending assistant turn");
+
+  ava::app::RuntimeEvent reasoning_answer;
+  reasoning_answer.type = ava::app::RuntimeEventType::MessageUpdate;
+  reasoning_answer.model_id = "gpt-5.5";
+  reasoning_answer.text = "answer";
+  ava::tui::apply_runtime_event(reasoning_state, reasoning_answer);
+  ava::app::RuntimeEvent reasoning_answer_end;
+  reasoning_answer_end.type = ava::app::RuntimeEventType::MessageEnd;
+  reasoning_answer_end.model_id = "gpt-5.5";
+  ava::tui::apply_runtime_event(reasoning_state, reasoning_answer_end);
+  expect(reasoning_state.pending_reasoning_text.empty() && reasoning_state.transcript.size() == 1 &&
+             reasoning_state.transcript[0].label == "ava" && reasoning_state.transcript[0].text == "answer" &&
+             reasoning_state.transcript[0].thinking == "checking options",
+         "tui event state commits reasoning and answer as one assistant transcript item");
 
   const auto thinking_render =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -2144,6 +2161,21 @@ void test_tui_event_state_reduces_runtime_events() {
                                return strip_sgr(line).find("Thinking: checking options") != std::string::npos;
                              }),
          "tui renders reasoning content as an inline thinking transcript block with an OpenCode-style prefix");
+  expect(std::ranges::any_of(thinking_render,
+                             [](const std::string& line) {
+                               return strip_sgr(line).find("Thinking:") != std::string::npos &&
+                                      line.find("\x1b[38;2;88;96;112m") != std::string::npos;
+                             }),
+         "tui renders thinking text with dim grey styling");
+  expect(std::ranges::none_of(thinking_render,
+                              [](const std::string& line) {
+                                const auto visible = strip_sgr(line);
+                                return visible.find("╭─ AVA") != std::string::npos ||
+                                       visible.find("AVA:") != std::string::npos ||
+                                       visible.find("╭─ You") != std::string::npos ||
+                                       visible.find("You:") != std::string::npos;
+                              }),
+         "tui transcript role headers stay hidden for OpenCode-style chat rendering");
   expect(std::ranges::none_of(
              thinking_render,
              [](const std::string& line) { return strip_sgr(line).find("╭─ Thinking") != std::string::npos; }),

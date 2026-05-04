@@ -12,6 +12,8 @@ constexpr auto kTurnSpacingMinWidth = std::size_t{44};
 
 bool wide_blocks(std::size_t width) { return width >= kBlockMinWidth; }
 
+std::vector<std::string> render_thinking_block(const std::string& text, std::size_t width);
+
 std::string trim_left(std::string_view text) {
   std::size_t start = 0;
   while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start])) != 0) {
@@ -177,45 +179,16 @@ std::string render_inline_markup(std::string_view sanitized_text) {
   return rendered;
 }
 
-std::string render_wide_header(std::string_view border_sgr, std::string_view label_sgr, std::string_view label,
-                               std::size_t width) {
-  auto line = std::string("  ") + std::string(border_sgr) + "╭─" + std::string(kSgrReset) + " " +
-              std::string(label_sgr) + std::string(label) + std::string(kSgrReset);
-  return fit_line_preserving_sgr(std::move(line), width);
-}
-
 std::string render_wide_content(std::string_view border_sgr, std::string content, std::size_t width) {
   auto line = std::string("  ") + std::string(border_sgr) + "│" + std::string(kSgrReset) + " " + std::move(content);
   return fit_line_preserving_sgr(std::move(line), width);
 }
 
-std::vector<std::string> render_narrow_role_lines(std::string_view label, const std::vector<std::string>& content_lines,
-                                                  std::size_t width, bool format_inline_markup = true) {
-  std::vector<std::string> lines;
-  const auto first_prefix = std::string(label) + ": ";
-  const auto next_prefix = std::string(first_prefix.size(), ' ');
-  const auto content_width = width > first_prefix.size() ? width - first_prefix.size() : std::size_t{1};
-  bool first = true;
-  for (const auto& content : content_lines) {
-    auto wrapped = wrap_words_with_prefix(content, content_width);
-    for (auto& part : wrapped) {
-      auto rendered_part = format_inline_markup ? render_inline_markup(part) : part;
-      auto line = (first ? first_prefix : next_prefix) + std::move(rendered_part);
-      lines.push_back(fit_line_preserving_sgr(std::move(line), width));
-      first = false;
-    }
-  }
-  if (lines.empty()) lines.push_back(fit_line(std::string(first_prefix), width));
-  return lines;
-}
-
 std::vector<std::string> render_narrow_assistant_lines(const std::vector<std::string>& content_lines,
                                                        std::size_t width) {
   std::vector<std::string> lines;
-  const auto first_prefix = std::string("AVA: ");
-  const auto next_prefix = std::string(first_prefix.size(), ' ');
-  const auto content_width = width > first_prefix.size() ? width - first_prefix.size() : std::size_t{1};
-  bool first = true;
+  const auto prefix = std::string("  ");
+  const auto content_width = width > prefix.size() ? width - prefix.size() : std::size_t{1};
   bool in_code = false;
   for (const auto& content : content_lines) {
     const auto is_fence = content.rfind("```", 0) == 0;
@@ -223,13 +196,12 @@ std::vector<std::string> render_narrow_assistant_lines(const std::vector<std::st
     auto wrapped = wrap_words_with_prefix(content, content_width);
     for (auto& part : wrapped) {
       auto rendered_part = format_inline_markup ? render_inline_markup(part) : part;
-      auto line = (first ? first_prefix : next_prefix) + std::move(rendered_part);
+      auto line = prefix + std::move(rendered_part);
       lines.push_back(fit_line_preserving_sgr(std::move(line), width));
-      first = false;
     }
     if (is_fence) in_code = !in_code;
   }
-  if (lines.empty()) lines.push_back(fit_line(first_prefix, width));
+  if (lines.empty()) lines.push_back(fit_line(prefix, width));
   return lines;
 }
 
@@ -258,11 +230,21 @@ std::vector<std::string> render_user_block(const std::string& text, std::size_t 
       plain_lines.push_back(sanitized);
     }
   }
-  if (!wide_blocks(width)) return render_narrow_role_lines("You", plain_lines, width, false);
+  if (!wide_blocks(width)) {
+    for (const auto& part : plain_lines) {
+      lines.push_back(
+          fit_line_preserving_sgr(std::string(kSgrAccent) + "│" + std::string(kSgrReset) + " " + part, width));
+    }
+    return lines;
+  }
 
-  lines.push_back(render_wide_header(kSgrAccent, kSgrBold, "You", width));
   for (const auto& part : plain_lines) {
-    lines.push_back(render_wide_content(kSgrAccent, fit_line(part, width > 4 ? width - 4 : std::size_t{1}), width));
+    const auto content_width = width > 5 ? width - 5 : std::size_t{1};
+    auto content =
+        std::string(" ") + std::string(kSgrTextDimmed) + fit_line(part, content_width) + std::string(kSgrReset);
+    auto panel = surface_line(kSgrComposerBg, std::move(content), width > 3 ? width - 3 : std::size_t{1});
+    lines.push_back(fit_line_preserving_sgr(
+        std::string("  ") + std::string(kSgrAccent) + "│" + std::string(kSgrReset) + std::move(panel), width));
   }
   return lines;
 }
@@ -347,31 +329,48 @@ std::vector<std::string> assistant_content_lines(const std::string& text, std::s
   return output;
 }
 
-std::vector<std::string> render_assistant_block(const std::string& text, const std::string& meta, std::size_t width) {
-  const auto content_width =
-      wide_blocks(width) ? (width > 4 ? width - 4 : std::size_t{1}) : (width > 5 ? width - 5 : std::size_t{1});
-  const auto content = assistant_content_lines(text, content_width);
-  if (!wide_blocks(width)) {
-    auto lines = render_narrow_assistant_lines(content, width);
-    auto meta_lines = render_assistant_meta_lines(meta, width);
-    lines.insert(lines.end(), meta_lines.begin(), meta_lines.end());
-    return lines;
-  }
-
+std::vector<std::string> render_assistant_text_block(const std::vector<std::string>& content, std::size_t width) {
   std::vector<std::string> lines;
-  lines.push_back(render_wide_header(kSgrMuted, kSgrBold, "AVA", width));
   bool in_code = false;
   for (const auto& part : content) {
     const auto is_fence = part.rfind("```", 0) == 0;
+    std::string rendered;
     if (is_fence || in_code) {
-      lines.push_back(render_wide_content(kSgrMuted, std::string(kSgrDim) + part + std::string(kSgrReset), width));
+      rendered = std::string(kSgrDim) + part + std::string(kSgrReset);
     } else {
-      lines.push_back(render_wide_content(kSgrMuted, render_inline_markup(part), width));
+      rendered = render_inline_markup(part);
     }
+    lines.push_back(fit_line_preserving_sgr(std::string("  ") + std::move(rendered), width));
     if (is_fence) in_code = !in_code;
   }
-  auto meta_lines = render_assistant_meta_lines(meta, width);
-  lines.insert(lines.end(), meta_lines.begin(), meta_lines.end());
+  return lines;
+}
+
+std::vector<std::string> render_assistant_block(const std::string& text, const std::string& meta,
+                                                const std::string& thinking, std::size_t width) {
+  const auto content_width = width > 4 ? width - 4 : std::size_t{1};
+  const auto content = text.empty() ? std::vector<std::string>{} : assistant_content_lines(text, content_width);
+  std::vector<std::string> lines;
+
+  if (!thinking.empty()) {
+    auto meta_lines = render_assistant_meta_lines(meta, width);
+    lines.insert(lines.end(), meta_lines.begin(), meta_lines.end());
+    auto thinking_lines = render_thinking_block(thinking, width);
+    lines.insert(lines.end(), thinking_lines.begin(), thinking_lines.end());
+    if (!content.empty()) lines.emplace_back();
+  }
+
+  if (!content.empty()) {
+    auto text_lines = wide_blocks(width) ? render_assistant_text_block(content, width)
+                                         : render_narrow_assistant_lines(content, width);
+    lines.insert(lines.end(), text_lines.begin(), text_lines.end());
+  }
+
+  if (thinking.empty()) {
+    auto meta_lines = render_assistant_meta_lines(meta, width);
+    lines.insert(lines.end(), meta_lines.begin(), meta_lines.end());
+  }
+
   return lines;
 }
 
@@ -384,7 +383,7 @@ std::vector<std::string> render_thinking_block(const std::string& text, std::siz
   bool first_content_line = true;
   for (const auto& raw_line : split_lines(visible_text)) {
     if (is_blank(raw_line)) {
-      const auto blank = wide_blocks(width) ? render_wide_content(kSgrDim, {}, width) : std::string{};
+      const auto blank = wide_blocks(width) ? render_wide_content(kSgrThinking, {}, width) : std::string{};
       lines.push_back(fit_line_preserving_sgr(blank, width));
       continue;
     }
@@ -397,13 +396,13 @@ std::vector<std::string> render_thinking_block(const std::string& text, std::siz
     for (auto& part : wrapped) {
       std::string styled;
       if (first_content_line && first_wrapped_line && part.rfind("Thinking: ", 0) == 0) {
-        styled = std::string(kSgrWarning) + "Thinking:" + std::string(kSgrReset) + " " + std::string(kSgrDim) +
+        styled = std::string(kSgrThinking) + "Thinking:" + std::string(kSgrReset) + " " + std::string(kSgrThinking) +
                  part.substr(std::string_view("Thinking: ").size()) + std::string(kSgrReset);
       } else {
-        styled = std::string(kSgrDim) + std::move(part) + std::string(kSgrReset);
+        styled = std::string(kSgrThinking) + std::move(part) + std::string(kSgrReset);
       }
       if (wide_blocks(width)) {
-        lines.push_back(render_wide_content(kSgrDim, std::move(styled), width));
+        lines.push_back(render_wide_content(kSgrThinking, std::move(styled), width));
       } else {
         lines.push_back(fit_line_preserving_sgr(std::move(styled), width));
       }
@@ -526,7 +525,7 @@ std::vector<std::string> render_transcript_lines(const std::vector<TranscriptIte
       auto block = render_user_block(item.text, width);
       rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
     } else if (item.label == "ava") {
-      auto block = render_assistant_block(item.text, item.meta, width);
+      auto block = render_assistant_block(item.text, item.meta, item.thinking, width);
       rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
     } else if (item.label == "thinking") {
       auto block = render_thinking_block(item.text, width);

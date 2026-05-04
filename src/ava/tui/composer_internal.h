@@ -24,6 +24,7 @@ inline constexpr std::string_view kSgrBold = "\x1b[1m";
 inline constexpr std::string_view kSgrText = "\x1b[38;2;232;236;241m";
 inline constexpr std::string_view kSgrMuted = "\x1b[38;2;139;149;165m";
 inline constexpr std::string_view kSgrDim = kSgrMuted;
+inline constexpr std::string_view kSgrThinking = "\x1b[38;2;88;96;112m";
 inline constexpr std::string_view kSgrTextDimmed = "\x1b[38;2;145;157;178m";
 inline constexpr std::string_view kSgrSuccess = "\x1b[38;2;52;211;153m";
 inline constexpr std::string_view kSgrWarning = "\x1b[38;2;251;191;36m";

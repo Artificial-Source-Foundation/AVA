@@ -27,6 +27,7 @@ struct TranscriptItem {
   std::string label = {};
   std::string text = {};
   std::string meta = {};
+  std::string thinking = {};
   std::optional<ToolTimelineItem> tool = std::nullopt;
 };
 

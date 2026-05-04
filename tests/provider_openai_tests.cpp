@@ -325,6 +325,23 @@ void test_openai_provider_contract() {
              (*reasoning_summary)[3].text == "answer" &&
              (*reasoning_summary)[4].type == ava::provider::StreamEventType::Done,
          "OpenAI Responses SSE emits reasoning summary before answer text");
+  auto reasoning_duplicate_done = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\"}}\n\n"
+      "data: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"rs_1\",\"delta\":\"plan\"}\n\n"
+      "data: {\"type\":\"response.reasoning_summary_text.done\",\"item_id\":\"rs_1\",\"text\":\"plan\"}\n\n"
+      "data: {\"type\":\"response.reasoning_summary_part.done\",\"item_id\":\"rs_1\",\"text\":\"plan\"}\n\n"
+      "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\","
+      "\"summary\":[{\"type\":\"summary_text\",\"text\":\"plan\"}]}}\n\n"
+      "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\n"
+      "data: [DONE]\n\n");
+  expect(reasoning_duplicate_done && reasoning_duplicate_done->size() == 5 &&
+             (*reasoning_duplicate_done)[0].type == ava::provider::StreamEventType::ReasoningStart &&
+             (*reasoning_duplicate_done)[1].type == ava::provider::StreamEventType::ReasoningDelta &&
+             (*reasoning_duplicate_done)[1].text == "plan" &&
+             (*reasoning_duplicate_done)[2].type == ava::provider::StreamEventType::ReasoningEnd &&
+             (*reasoning_duplicate_done)[3].type == ava::provider::StreamEventType::TextDelta &&
+             (*reasoning_duplicate_done)[4].type == ava::provider::StreamEventType::Done,
+         "OpenAI Responses SSE ignores duplicate reasoning summary done events for one item");
   auto reasoning_done_only = ava::provider::parse_openai_sse(
       "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"rs_2\",\"type\":\"reasoning\"}}\n\n"
       "data: {\"type\":\"response.reasoning_summary_text.done\",\"text\":\"done-only plan\"}\n\n"

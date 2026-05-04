@@ -82,6 +82,19 @@ std::string search_permission_tool_name(const ToolContext& context) {
   return context.permission_tool_name.empty() ? std::string("search") : context.permission_tool_name;
 }
 
+bool is_canceled(const ToolContext& context) { return context.cancel_requested && context.cancel_requested(); }
+
+ava::core::Error search_canceled_error(std::string_view tool_name) {
+  auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled");
+  error.with_context("tool", std::string(tool_name));
+  return error;
+}
+
+ava::core::VoidResult check_canceled(const ToolContext& context, std::string_view tool_name) {
+  if (!is_canceled(context)) return {};
+  return std::unexpected(search_canceled_error(tool_name));
+}
+
 ava::core::Result<bool> can_read_search_match(const ToolContext& context, const std::filesystem::path& path) {
   const auto decision = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::ReadFile,
@@ -137,6 +150,7 @@ ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "glob pattern must not be empty");
     return std::unexpected(std::move(error));
   }
+  if (auto canceled = check_canceled(context, "glob"); !canceled) return std::unexpected(std::move(canceled.error()));
   const auto tool_name = context.permission_tool_name.empty() ? std::string("search") : context.permission_tool_name;
   if (auto permission = ensure_permission(context, ava::permissions::Operation::SearchFiles, context.workspace_dir, "",
                                           tool_name, "tool requires permission");
@@ -163,6 +177,7 @@ ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string
   std::error_code iter_error;
   for (std::filesystem::recursive_directory_iterator it(context.workspace_dir, iter_error), end; it != end;
        it.increment(iter_error)) {
+    if (auto canceled = check_canceled(context, "glob"); !canceled) return std::unexpected(std::move(canceled.error()));
     if (iter_error) {
       iter_error.clear();
       continue;
@@ -274,17 +289,20 @@ ava::core::Result<GrepResult> grep_files(const ToolContext& context, std::string
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "grep pattern must not be empty");
     return std::unexpected(std::move(error));
   }
+  if (auto canceled = check_canceled(context, "grep"); !canceled) return std::unexpected(std::move(canceled.error()));
 
   auto files = glob_files(context, include_glob, GlobOptions{.max_results = 100000, .no_ignore = options.no_ignore});
   if (!files) {
     return std::unexpected(files.error());
   }
+  if (auto canceled = check_canceled(context, "grep"); !canceled) return std::unexpected(std::move(canceled.error()));
 
   GrepResult result;
   result.truncated = files->truncated;
   SpillBuffer spill_buffer;
   std::size_t next_match_progress = kSearchMatchProgressInterval;
   for (const auto& path : files->paths) {
+    if (auto canceled = check_canceled(context, "grep"); !canceled) return std::unexpected(std::move(canceled.error()));
     std::ifstream file(path, std::ios::binary);
     if (!file) {
       continue;
@@ -298,6 +316,8 @@ ava::core::Result<GrepResult> grep_files(const ToolContext& context, std::string
     SpillBuffer file_spill_buffer;
     bool file_is_binary = false;
     while (true) {
+      if (auto canceled = check_canceled(context, "grep"); !canceled)
+        return std::unexpected(std::move(canceled.error()));
       bool line_truncated = false;
       bool line_binary = false;
       auto line_read = read_limited_line(file, line, path, options.max_line_length, line_truncated, line_binary);

@@ -231,6 +231,20 @@ void test_tool_dispatcher() {
   expect(bad_webfetch && !bad_webfetch->success && bad_webfetch->result_text.find("http") != std::string::npos,
          "tool dispatcher rejects unsupported webfetch URL schemes before network access");
 
+  const ava::agent::ToolDispatcher canceled_dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .cancel_requested = [] { return true; },
+  });
+  auto canceled_glob = canceled_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_canceled_glob", .name = "glob", .arguments_json = "{\"pattern\":\"**/*\"}"});
+  const auto canceled_structured =
+      canceled_glob ? ava::agent::serialize_tool_result_payload_json(*canceled_glob) : std::string{};
+  expect(canceled_glob && !canceled_glob->success &&
+             canceled_glob->payload.status == ava::agent::ToolResultStatus::Canceled &&
+             canceled_structured.find("\"status\":\"canceled\"") != std::string::npos,
+         "tool dispatcher maps tool cancellation errors to semantic canceled payloads");
+
   auto malformed_args = dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "call_bad_args", .name = "read_file", .arguments_json = "{not-json}"});
   expect(

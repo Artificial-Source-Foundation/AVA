@@ -674,6 +674,18 @@ void test_search_tools() {
   auto capped = ava::tools::glob_files(context, "**/*", ava::tools::GlobOptions{.max_results = 2000, .max_visited = 1});
   expect(capped && capped->truncated, "glob_files reports traversal cap truncation");
 
+  const ava::tools::ToolContext canceled_search_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .cancel_requested = [] { return true; },
+  };
+  auto canceled_glob = ava::tools::glob_files(canceled_search_context, "**/*");
+  expect(!canceled_glob && canceled_glob.error().message() == "tool canceled",
+         "glob_files observes cancellation before traversal");
+  auto canceled_grep = ava::tools::grep_files(canceled_search_context, "hello", "**/*");
+  expect(!canceled_grep && canceled_grep.error().message() == "tool canceled",
+         "grep_files observes cancellation before search");
+
   auto grep = ava::tools::grep_files(context, "hello", "**/*.md");
   expect(grep.has_value(), "grep_files succeeds");
   if (grep) {

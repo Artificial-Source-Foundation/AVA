@@ -65,8 +65,18 @@ std::string error_json(std::string_view tool, const ava::core::Error& error) {
 bool is_lsp_diagnostics_metadata(const ToolMetadata& tool) { return tool.name == std::string_view("lsp_diagnostics"); }
 
 ToolDispatchResult tool_error_result(const ProviderToolCall& call, const ava::core::Error& error) {
-  return ToolDispatchResult{
-      .call_id = call.id, .name = call.name, .success = false, .result_text = error_json(call.name, error)};
+  return ToolDispatchResult{.call_id = call.id,
+                            .name = call.name,
+                            .success = false,
+                            .result_text = error_json(call.name, error),
+                            .payload = [&] {
+                              ava::agent::ToolResultPayload payload;
+                              if (error.message().find("canceled") != std::string::npos ||
+                                  error.message().find("cancelled") != std::string::npos) {
+                                payload.status = ava::agent::ToolResultStatus::Canceled;
+                              }
+                              return payload;
+                            }()};
 }
 
 ToolDispatchResult lsp_error_result(const ProviderToolCall& call, const ava::core::Error& error) {

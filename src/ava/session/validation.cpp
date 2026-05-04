@@ -17,6 +17,24 @@ struct ToolCallState {
   bool result_seen = false;
 };
 
+struct PendingPermissionPrompt {
+  std::string entry_id;
+  std::size_t entry_index = 0;
+};
+
+std::string permission_key(const SessionEntry& entry) {
+  std::string key = ava::core::json::string_field(entry.data_json, "operation").value_or("");
+  key += '\x1F';
+  key += ava::core::json::string_field(entry.data_json, "tool_name").value_or("");
+  key += '\x1F';
+  key += ava::core::json::string_field(entry.data_json, "target_path").value_or("");
+  key += '\x1F';
+  key += ava::core::json::string_field(entry.data_json, "command").value_or("");
+  key += '\x1F';
+  key += ava::core::json::string_field(entry.data_json, "reason").value_or("");
+  return key;
+}
+
 bool bool_field_is_true(std::string_view object, std::string_view key) {
   const auto start = ava::core::json::field_value_start(object, key);
   if (!start) return false;
@@ -36,6 +54,23 @@ bool bool_field_is_false(std::string_view object, std::string_view key) {
 }
 
 bool valid_status(std::string_view status) { return status == "success" || status == "error" || status == "canceled"; }
+
+bool valid_operation(std::string_view operation) {
+  return operation == "read" || operation == "search" || operation == "edit" || operation == "bash" ||
+         operation == "network.fetch" || operation == "lsp.query" || operation == "plugin.execute" ||
+         operation == "plugin.tool.call" || operation == "plugin.command.run" || operation == "plugin.event.observe" ||
+         operation == "mcp.server.launch" || operation == "mcp.server.connect" || operation == "mcp.tool.call";
+}
+
+bool valid_mode(std::string_view mode) { return mode == "build" || mode == "plan"; }
+
+bool valid_action(std::string_view action) { return action == "allow" || action == "ask" || action == "deny"; }
+
+bool valid_resolution(std::string_view resolution) { return resolution == "allow" || resolution == "deny"; }
+
+bool valid_resolution_source(std::string_view source) {
+  return source == "policy" || source == "resolver" || source == "no_resolver" || source == "resolver_failed";
+}
 
 void add_issue(SessionReplayValidation& validation, SessionReplayIssue issue) {
   if (issue.severity == SessionReplayIssueSeverity::Warning) {
@@ -103,6 +138,68 @@ void validate_structured_tool_result(SessionReplayValidation& validation, std::s
   }
 }
 
+void validate_permission_decision(SessionReplayValidation& validation,
+                                  std::unordered_map<std::string, std::vector<PendingPermissionPrompt>>& pending,
+                                  std::size_t index, const SessionEntry& entry) {
+  const auto operation = ava::core::json::string_field(entry.data_json, "operation").value_or("");
+  const auto mode = ava::core::json::string_field(entry.data_json, "mode").value_or("");
+  const auto tool_name = ava::core::json::string_field(entry.data_json, "tool_name").value_or("");
+  const auto action = ava::core::json::string_field(entry.data_json, "action").value_or("");
+  const auto reason = ava::core::json::string_field(entry.data_json, "reason").value_or("");
+  const auto resolution = ava::core::json::string_field(entry.data_json, "resolution").value_or("");
+  const auto resolution_source = ava::core::json::string_field(entry.data_json, "resolution_source").value_or("");
+
+  if (!valid_operation(operation) || !valid_mode(mode) || tool_name.empty() || !valid_action(action) ||
+      reason.empty()) {
+    add_error(validation, SessionReplayIssueKind::InvalidPermissionDecision, index, entry, "",
+              "permission_decision entry is missing required semantic fields");
+    return;
+  }
+  if (!resolution.empty() && !valid_resolution(resolution)) {
+    add_error(validation, SessionReplayIssueKind::InvalidPermissionDecision, index, entry, "",
+              "permission_decision entry has an invalid resolution");
+    return;
+  }
+  if (!resolution_source.empty() && !valid_resolution_source(resolution_source)) {
+    add_error(validation, SessionReplayIssueKind::InvalidPermissionDecision, index, entry, "",
+              "permission_decision entry has an invalid resolution_source");
+    return;
+  }
+
+  if (action == "allow" || action == "deny") {
+    if (resolution != action || resolution_source != "policy") {
+      add_error(validation, SessionReplayIssueKind::InvalidPermissionDecision, index, entry, "",
+                "policy allow/deny permission_decision must resolve to its action from policy");
+    }
+    return;
+  }
+
+  if (resolution.empty()) {
+    if (resolution_source != "policy") {
+      add_error(validation, SessionReplayIssueKind::InvalidPermissionDecision, index, entry, "",
+                "ask permission_decision without resolution must come from policy");
+      return;
+    }
+    pending[permission_key(entry)].push_back(PendingPermissionPrompt{.entry_id = entry.id, .entry_index = index});
+    return;
+  }
+
+  if (resolution_source == "policy" || resolution_source.empty()) {
+    add_error(validation, SessionReplayIssueKind::InvalidPermissionDecision, index, entry, "",
+              "resolved ask permission_decision must include a resolver outcome source");
+    return;
+  }
+
+  auto pending_for_key = pending.find(permission_key(entry));
+  if (pending_for_key == pending.end() || pending_for_key->second.empty()) {
+    add_error(validation, SessionReplayIssueKind::PermissionResolutionWithoutAsk, index, entry, "",
+              "resolved ask permission_decision has no earlier matching ask prompt");
+    return;
+  }
+  pending_for_key->second.pop_back();
+  if (pending_for_key->second.empty()) pending.erase(pending_for_key);
+}
+
 }  // namespace
 
 std::string_view to_string(SessionReplayIssueSeverity severity) noexcept {
@@ -139,6 +236,12 @@ std::string_view to_string(SessionReplayIssueKind kind) noexcept {
       return "invalid_structured_tool_result";
     case SessionReplayIssueKind::StructuredToolResultMismatch:
       return "structured_tool_result_mismatch";
+    case SessionReplayIssueKind::InvalidPermissionDecision:
+      return "invalid_permission_decision";
+    case SessionReplayIssueKind::PermissionResolutionWithoutAsk:
+      return "permission_resolution_without_ask";
+    case SessionReplayIssueKind::UnresolvedPermissionPrompt:
+      return "unresolved_permission_prompt";
   }
   return "invalid_structured_tool_result";
 }
@@ -148,6 +251,7 @@ SessionReplayValidation validate_session_replay(const std::vector<SessionEntry>&
   SessionReplayValidation validation;
   std::unordered_set<std::string> seen_entry_ids;
   std::unordered_map<std::string, ToolCallState> tool_calls;
+  std::unordered_map<std::string, std::vector<PendingPermissionPrompt>> pending_permissions;
 
   for (std::size_t index = 0; index < entries.size(); ++index) {
     const auto& entry = entries[index];
@@ -158,6 +262,11 @@ SessionReplayValidation validate_session_replay(const std::vector<SessionEntry>&
     }
     if (!seen_entry_ids.insert(entry.id).second) {
       add_error(validation, SessionReplayIssueKind::DuplicateEntryId, index, entry, "", "duplicate session entry id");
+    }
+
+    if (entry.type == EntryType::PermissionDecision && options.require_permission_decision_integrity) {
+      validate_permission_decision(validation, pending_permissions, index, entry);
+      continue;
     }
 
     if (entry.type == EntryType::ToolCall) {
@@ -224,6 +333,20 @@ SessionReplayValidation validate_session_replay(const std::vector<SessionEntry>&
                                                .entry_id = state.entry_id,
                                                .call_id = call_id,
                                                .message = "tool_call has no matching tool_result"});
+    }
+  }
+
+  if (options.require_permission_decision_integrity) {
+    for (const auto& [unused_key, prompts] : pending_permissions) {
+      (void)unused_key;
+      for (const auto& prompt : prompts) {
+        add_issue(validation, SessionReplayIssue{.severity = SessionReplayIssueSeverity::Error,
+                                                 .kind = SessionReplayIssueKind::UnresolvedPermissionPrompt,
+                                                 .entry_index = entries.size(),
+                                                 .entry_id = prompt.entry_id,
+                                                 .call_id = "",
+                                                 .message = "ask permission_decision has no matching resolution"});
+      }
     }
   }
 

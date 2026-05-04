@@ -25,6 +25,9 @@ enum class SessionReplayIssueKind {
   MissingStructuredToolResult,
   InvalidStructuredToolResult,
   StructuredToolResultMismatch,
+  InvalidPermissionDecision,
+  PermissionResolutionWithoutAsk,
+  UnresolvedPermissionPrompt,
 };
 
 struct SessionReplayIssue {
@@ -39,6 +42,7 @@ struct SessionReplayIssue {
 struct SessionReplayValidationOptions {
   bool require_known_parent_ids = true;
   bool require_tool_result_pairing = true;
+  bool require_permission_decision_integrity = true;
   bool require_structured_tool_results = false;
 };
 

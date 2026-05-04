@@ -161,12 +161,24 @@ std::string write_tool_body(std::string_view path) {
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
 }
 
+std::string question_tool_body() {
+  const std::string arguments =
+      "{\"header\":\"Pick\",\"question\":\"Continue?\",\"options\":[{\"value\":\"yes\",\"label\":\"Yes\"}],"
+      "\"allow_custom\":true}";
+  return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_question\",\"type\":\"function\","
+         "\"function\":{\"name\":\"question\",\"arguments\":\"" +
+         json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+}
+
 std::string response_body(std::string_view scenario, int request_index, std::string_view target_path) {
   if (scenario == "read-tool") {
     return request_index == 0 ? read_tool_body(target_path) : text_body("after permission deny");
   }
   if (scenario == "write-tool") {
     return request_index == 0 ? write_tool_body(target_path) : text_body("after permission deny");
+  }
+  if (scenario == "question-tool") {
+    return request_index == 0 ? question_tool_body() : text_body("after question reply");
   }
   return text_body("headless active prompt complete");
 }
@@ -184,7 +196,7 @@ int main(int argc, char** argv) {
   const auto delay = std::chrono::milliseconds(std::stoi(argv[3]));
   const std::string scenario = argc == 6 ? argv[4] : "text";
   const std::string target_path = argc == 6 ? argv[5] : "";
-  const int request_count = scenario == "read-tool" || scenario == "write-tool" ? 2 : 1;
+  const int request_count = scenario == "read-tool" || scenario == "write-tool" || scenario == "question-tool" ? 2 : 1;
 
   Fd server(::socket(AF_INET, SOCK_STREAM, 0));
   if (server.get() < 0) {

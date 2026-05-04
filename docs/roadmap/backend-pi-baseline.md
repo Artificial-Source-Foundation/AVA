@@ -183,8 +183,8 @@ Deliverables:
 - Keep direct `ava --rpc` headless smokes for backend command surfaces that can run without live provider credentials.
   Current subprocess coverage includes protocol/state/model/session/stat validation, cancellation, recoverable malformed
   requests, active-run command rejection through a delayed fake provider, permission resolver replies through a fake
-  provider tool-call loop, MCP and plugin command surfaces, invalid MCP config containment, and context/export
-  materialization.
+  provider tool-call loop, question resolver replies through a fake provider tool-call loop, MCP and plugin command
+  surfaces, invalid MCP config containment, and context/export materialization.
 
 Exit gate:
 

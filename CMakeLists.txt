@@ -250,6 +250,13 @@ if(AVA_BUILD_TESTS)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_validate.cmake)
 
   add_test(
+    NAME ava_cli.headless_rpc_contract
+    COMMAND ${CMAKE_COMMAND}
+            -DAVA_EXE=$<TARGET_FILE:ava>
+            -DAVA_CLI_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cli-headless-rpc-contract
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_contract.cmake)
+
+  add_test(
     NAME ava_cli.headless_rpc_cancel
     COMMAND ${CMAKE_COMMAND}
             -DAVA_EXE=$<TARGET_FILE:ava>

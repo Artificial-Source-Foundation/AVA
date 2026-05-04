@@ -461,12 +461,15 @@ void test_plugin_runner_contained_failures() {
   const auto exited_dir = root / "plugins" / "com.example.exited";
   write_text(exited_dir / "plugin.sh",
              "read line\n"
+             "printf '%s\\n' 'plugin exited during initialize' >&2\n"
              "exit 7\n");
   auto exited_options = runner_options(workspace, std::chrono::milliseconds(500));
   auto exited =
       ava::plugin::PluginProcess::start(runner_manifest(exited_dir, "com.example.exited", "plugin.sh"), exited_options);
-  expect(!exited && exited.error().format().find("exit 7") != std::string::npos,
-         "plugin runner reports early process exit status");
+  const auto exited_format = exited ? std::string{} : exited.error().format();
+  expect(!exited && exited_format.find("exit 7") != std::string::npos &&
+             exited_format.find("plugin exited during initialize") != std::string::npos,
+         "plugin runner reports early process exit status and stderr diagnostics: " + exited_format);
 
   const auto oversized_dir = root / "plugins" / "com.example.oversized";
   write_text(oversized_dir / "plugin.sh", "read line\nprintf '%s\\n' '" + std::string(200, 'x') + "'\n");
@@ -587,14 +590,17 @@ void test_plugin_runner_tool_calls() {
              "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
              "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
              "read line\n"
+             "printf '%s\\n' 'plugin exited during tool call' >&2\n"
              "exit 9\n");
   auto crashed = ava::plugin::PluginProcess::start(runner_manifest(crashed_dir, "com.example.toolcrash", "plugin.sh"),
                                                    runner_options(workspace, std::chrono::milliseconds(500)));
   expect(crashed.has_value(), "plugin runner starts crash fake plugin");
   if (crashed) {
     auto result = (*crashed)->call_tool("todo_add", "{}", "crash");
-    expect(!result && result.error().format().find("exit 9") != std::string::npos,
-           "plugin runner reports tool-time process exits");
+    const auto result_format = result ? std::string{} : result.error().format();
+    expect(!result && result_format.find("exit 9") != std::string::npos &&
+               result_format.find("plugin exited during tool call") != std::string::npos,
+           "plugin runner reports tool-time process exits with stderr diagnostics: " + result_format);
   }
 }
 

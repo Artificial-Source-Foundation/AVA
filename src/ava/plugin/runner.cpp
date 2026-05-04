@@ -659,7 +659,12 @@ ava::core::Result<std::string> PluginProcess::read_record(std::chrono::steady_cl
       return std::unexpected(std::move(error));
     }
     if (stdout_fd_ < 0) {
-      if (auto reaped = reap_child(); !reaped) return std::unexpected(std::move(reaped.error()));
+      const auto reap_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
+      do {
+        if (auto reaped = reap_child(); !reaped) return std::unexpected(std::move(reaped.error()));
+        if (child_exited_) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      } while (std::chrono::steady_clock::now() < reap_deadline);
       auto error = protocol_error(
           stdout_buffer_.empty() ? std::string(closed_message) : "plugin protocol record ended without newline",
           manifest_);

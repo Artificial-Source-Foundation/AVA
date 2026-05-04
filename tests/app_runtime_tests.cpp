@@ -1,4 +1,5 @@
 #include <sys/stat.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -62,6 +63,32 @@
 #endif
 
 namespace {
+
+// ScopedStdinTerminalState snapshots the process stdin terminal attributes for
+// tests that deliberately exercise interactive code with synthetic streams
+// while still reporting `stdin_is_tty=true`.  It has no inputs beyond
+// STDIN_FILENO, produces no values, and restores the saved attributes with
+// TCSANOW when explicitly requested or when destroyed.  If the test is run
+// without a real terminal, tcgetattr fails and the guard becomes a no-op.
+class ScopedStdinTerminalState {
+ public:
+  ScopedStdinTerminalState() : active_(::tcgetattr(STDIN_FILENO, &original_) == 0) {}
+
+  ScopedStdinTerminalState(const ScopedStdinTerminalState&) = delete;
+  ScopedStdinTerminalState& operator=(const ScopedStdinTerminalState&) = delete;
+
+  ~ScopedStdinTerminalState() { restore(); }
+
+  void restore() noexcept {
+    if (!active_) return;
+    static_cast<void>(::tcsetattr(STDIN_FILENO, TCSANOW, &original_));
+    active_ = false;
+  }
+
+ private:
+  termios original_{};
+  bool active_ = false;
+};
 
 ava::config::XdgPaths app_test_paths(const std::filesystem::path& root) {
   const auto config_home = root / "config";
@@ -1183,6 +1210,7 @@ void test_app_print_mode_refreshes_expired_oauth_before_provider_request() {
 }
 
 void test_app_connect_provider_credentials_headlessly() {
+  ScopedStdinTerminalState terminal_state;
   const auto root = temp_root() / "app-connect-provider-credentials";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);

@@ -228,13 +228,14 @@ Missing or incomplete:
 - Plugin manifest schema with plugin id, display name, version, API version, entrypoint, contribution declarations, requested capabilities, and default enabled/disabled state.
 - Plugin discovery under explicit global/project config paths, with project plugins requiring explicit enablement before executable code runs.
 - Versioned plugin handshake and capability negotiation so old cores and new plugins fail clearly.
-- Out-of-process plugin runner with startup timeout, per-request timeout, cancellation, stderr capture, bounded stdout, malformed-record handling, restart/disable behavior, and terminal error events.
+- Out-of-process plugin runner with startup timeout, per-request timeout, cooperative cancellation, stderr capture, bounded stdout, malformed-record handling, restart/disable behavior, and terminal error events. Startup plus tool/command/event requests now accept the active run cancellation callback and terminate the plugin process when canceled.
 - JSON-schema-like contracts for plugin tool and command inputs/results, with core-side validation before and after plugin calls.
 - Plugin permission categories for file, shell, network, external-directory, session, and event access.
 - Core service proxy for plugin-requested file/search/shell/network operations so those operations go through AVA policy instead of ad hoc plugin behavior.
 - Plugin audit records that include plugin id, plugin version, contribution id, requested capability, decision, and executed core operation.
 - Plugin diagnostics and developer UX: list/enable/disable/inspect commands, manifest validation, a minimal sample plugin, protocol golden tests, and AI-friendly authoring docs.
 - MCP host support for configured stdio servers, with server lifecycle, tool/resource/prompt adaptation, permission checks, audit entries, and fake-server tests.
+- MCP stdio startup, tool discovery, and tool calls now share the active run cancellation callback; broader MCP resources, prompts, subscriptions, and reconnect/restart policy remain later work.
 - Subagent/task execution as isolated AVA worker processes.
 
 1.0 target:

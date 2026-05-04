@@ -33,10 +33,28 @@ std::string error_json(std::string_view tool, const ava::core::Error& error) {
          "\"}}";
 }
 
+bool is_canceled_error(const ava::core::Error& error) {
+  return error.message().find("canceled") != std::string::npos ||
+         error.message().find("cancelled") != std::string::npos;
+}
+
+bool is_canceled(const ava::tools::ToolContext& context) {
+  return context.cancel_requested && context.cancel_requested();
+}
+
 ava::agent::ToolDispatchResult tool_error_result(const ava::agent::ProviderToolCall& call,
                                                  const ava::core::Error& error) {
-  return ava::agent::ToolDispatchResult{
-      .call_id = call.id, .name = call.name, .success = false, .result_text = error_json(call.name, error)};
+  return ava::agent::ToolDispatchResult{.call_id = call.id,
+                                        .name = call.name,
+                                        .success = false,
+                                        .result_text = error_json(call.name, error),
+                                        .payload = [&] {
+                                          ava::agent::ToolResultPayload payload;
+                                          if (is_canceled_error(error)) {
+                                            payload.status = ava::agent::ToolResultStatus::Canceled;
+                                          }
+                                          return payload;
+                                        }()};
 }
 
 std::string result_json(const ava::agent::ProviderToolCall& call, const PluginToolBinding& binding,
@@ -63,6 +81,10 @@ ava::core::Error plugin_tool_error(ava::core::ErrorCategory category, std::strin
 ava::agent::ToolDispatchResult dispatch_plugin_tool(const ava::tools::ToolContext& context,
                                                     const ava::agent::ProviderToolCall& call,
                                                     const PluginToolBinding& binding) {
+  if (is_canceled(context)) {
+    return tool_error_result(
+        call, plugin_tool_error(ava::core::ErrorCategory::Unknown, "plugin tool call canceled", binding));
+  }
   if (!ava::core::json::is_valid_object(call.arguments_json)) {
     auto error = plugin_tool_error(ava::core::ErrorCategory::InvalidArgument,
                                    "plugin tool arguments must be a JSON object", binding);
@@ -74,11 +96,15 @@ ava::agent::ToolDispatchResult dispatch_plugin_tool(const ava::tools::ToolContex
   tool_context.current_tool_name = call.name;
   tool_context.current_call_id = call.id;
   const auto command = binding.manifest.id + ":" + binding.contribution.name;
-  if (auto permission = ava::tools::ensure_permission(tool_context, ava::permissions::Operation::PluginExecute,
-                                                      binding.manifest.path, binding.manifest.id, call.name,
-                                                      "plugin process launch requires permission");
+  if (auto permission =
+          ava::tools::ensure_permission(tool_context, ava::permissions::Operation::PluginExecute, binding.manifest.path,
+                                        binding.manifest.id, call.name, "plugin process launch requires permission");
       !permission) {
     return tool_error_result(call, permission.error());
+  }
+  if (is_canceled(tool_context)) {
+    return tool_error_result(
+        call, plugin_tool_error(ava::core::ErrorCategory::Unknown, "plugin tool call canceled", binding));
   }
   if (auto permission = ava::tools::ensure_permission(tool_context, ava::permissions::Operation::PluginToolCall,
                                                       binding.manifest.path, command, call.name,
@@ -86,13 +112,18 @@ ava::agent::ToolDispatchResult dispatch_plugin_tool(const ava::tools::ToolContex
       !permission) {
     return tool_error_result(call, permission.error());
   }
+  if (is_canceled(tool_context)) {
+    return tool_error_result(
+        call, plugin_tool_error(ava::core::ErrorCategory::Unknown, "plugin tool call canceled", binding));
+  }
 
   PluginRunnerOptions options;
   options.workspace_dir = context.workspace_dir;
-  auto process = PluginProcess::start(binding.manifest, options);
+  auto process = PluginProcess::start(binding.manifest, options, context.cancel_requested);
   if (!process) return tool_error_result(call, process.error());
 
-  auto result = (*process)->call_tool(binding.contribution.name, call.arguments_json, call.id);
+  auto result =
+      (*process)->call_tool(binding.contribution.name, call.arguments_json, call.id, context.cancel_requested);
   auto shutdown = (*process)->shutdown();
   if (!result) return tool_error_result(call, result.error());
   if (!shutdown) return tool_error_result(call, shutdown.error());

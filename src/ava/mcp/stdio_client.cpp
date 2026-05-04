@@ -97,6 +97,14 @@ ava::core::Error protocol_error(std::string message, const McpServerConfig& serv
   return mcp_error(ava::core::ErrorCategory::Tool, std::move(message), server);
 }
 
+bool is_canceled(const CancelCallback& cancel_requested) { return cancel_requested && cancel_requested(); }
+
+ava::core::Error canceled_error(std::string message, const McpServerConfig& server) {
+  auto error = mcp_error(ava::core::ErrorCategory::Unknown, std::move(message), server);
+  error.with_context("canceled", "true");
+  return error;
+}
+
 ava::core::Result<std::array<int, 2>> make_pipe(const McpServerConfig& server) {
   std::array<int, 2> fds{-1, -1};
   if (pipe(fds.data()) != 0) return std::unexpected(errno_error("failed to create MCP process pipe", server));
@@ -373,7 +381,8 @@ McpStdioClient::~McpStdioClient() {
 }
 
 ava::core::Result<std::unique_ptr<McpStdioClient>> McpStdioClient::start(McpServerConfig server,
-                                                                         McpStdioClientOptions options) {
+                                                                         McpStdioClientOptions options,
+                                                                         CancelCallback cancel_requested) {
   if (server.command.empty()) {
     return std::unexpected(
         mcp_error(ava::core::ErrorCategory::InvalidArgument, "MCP server command must not be empty", server));
@@ -395,10 +404,15 @@ ava::core::Result<std::unique_ptr<McpStdioClient>> McpStdioClient::start(McpServ
     return std::unexpected(
         mcp_error(ava::core::ErrorCategory::InvalidArgument, "MCP client byte limits must be non-zero", server));
   }
+  if (is_canceled(cancel_requested)) {
+    return std::unexpected(canceled_error("MCP startup canceled", server));
+  }
 
   auto client = std::make_unique<McpStdioClient>(std::move(server), std::move(options));
   if (auto launched = client->launch(); !launched) return std::unexpected(std::move(launched.error()));
-  if (auto initialized = client->initialize(); !initialized) return std::unexpected(std::move(initialized.error()));
+  if (auto initialized = client->initialize(cancel_requested); !initialized) {
+    return std::unexpected(std::move(initialized.error()));
+  }
   return client;
 }
 
@@ -481,12 +495,13 @@ ava::core::VoidResult McpStdioClient::launch() {
   return {};
 }
 
-ava::core::VoidResult McpStdioClient::initialize() {
+ava::core::VoidResult McpStdioClient::initialize(CancelCallback cancel_requested) {
   const std::string params =
       "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"ava\","
       "\"version\":\"" +
       std::string(ava::core::version::kFullVersion) + "\"}}";
-  auto response = request("initialize", params, options_.startup_timeout, "timed out waiting for MCP initialization");
+  auto response = request("initialize", params, options_.startup_timeout, "timed out waiting for MCP initialization",
+                          cancel_requested);
   if (!response) return std::unexpected(std::move(response.error()));
   const auto server_info = ava::core::json::object_field(response->result_json, "serverInfo");
   const auto capabilities = ava::core::json::object_field(response->result_json, "capabilities").value_or("{}");
@@ -504,11 +519,15 @@ ava::core::VoidResult McpStdioClient::initialize() {
   const std::string notification = "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}";
   const auto deadline = std::chrono::steady_clock::now() + options_.request_timeout;
   return write_message(notification, deadline, options_.request_timeout,
-                       "timed out writing MCP initialized notification");
+                       "timed out writing MCP initialized notification", cancel_requested);
 }
 
-ava::core::Result<std::vector<McpToolDescription>> McpStdioClient::list_tools() {
-  auto response = request("tools/list", "{}", options_.request_timeout, "timed out waiting for MCP tools/list");
+ava::core::Result<std::vector<McpToolDescription>> McpStdioClient::list_tools(CancelCallback cancel_requested) {
+  if (is_canceled(cancel_requested)) {
+    return std::unexpected(canceled_error("MCP tools/list canceled", server_));
+  }
+  auto response =
+      request("tools/list", "{}", options_.request_timeout, "timed out waiting for MCP tools/list", cancel_requested);
   if (!response) return std::unexpected(std::move(response.error()));
   const auto tools_start = ava::core::json::field_value_start(response->result_json, "tools");
   if (tools_start && (*tools_start >= response->result_json.size() || response->result_json[*tools_start] != '[')) {
@@ -540,7 +559,8 @@ ava::core::Result<std::vector<McpToolDescription>> McpStdioClient::list_tools() 
 }
 
 ava::core::Result<McpToolCallResult> McpStdioClient::call_tool(std::string_view tool_name,
-                                                               std::string_view arguments_json) {
+                                                               std::string_view arguments_json,
+                                                               CancelCallback cancel_requested) {
   if (!is_valid_mcp_tool_name(tool_name)) {
     return std::unexpected(mcp_error(ava::core::ErrorCategory::InvalidArgument, "MCP tool name is invalid", server_));
   }
@@ -550,9 +570,15 @@ ava::core::Result<McpToolCallResult> McpStdioClient::call_tool(std::string_view 
     error.with_context("tool", std::string(tool_name));
     return std::unexpected(std::move(error));
   }
+  if (is_canceled(cancel_requested)) {
+    auto error = canceled_error("MCP tools/call canceled", server_);
+    error.with_context("tool", std::string(tool_name));
+    return std::unexpected(std::move(error));
+  }
   const std::string params =
       "{\"name\":" + json_string(tool_name) + ",\"arguments\":" + std::string(arguments_json) + "}";
-  auto response = request("tools/call", params, options_.request_timeout, "timed out waiting for MCP tools/call");
+  auto response =
+      request("tools/call", params, options_.request_timeout, "timed out waiting for MCP tools/call", cancel_requested);
   if (!response) return std::unexpected(std::move(response.error()));
   return McpToolCallResult{.is_error = bool_field(response->result_json, "isError").value_or(false),
                            .content = text_content_from_result(response->result_json),
@@ -562,18 +588,21 @@ ava::core::Result<McpToolCallResult> McpStdioClient::call_tool(std::string_view 
 ava::core::Result<McpStdioClient::JsonRpcResponse> McpStdioClient::request(std::string_view method,
                                                                            std::string_view params_json,
                                                                            std::chrono::milliseconds timeout,
-                                                                           std::string_view timeout_message) {
+                                                                           std::string_view timeout_message,
+                                                                           CancelCallback cancel_requested) {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   const auto request_id = "ava_mcp_" + std::to_string(next_request_id_++);
   const std::string request_json = "{\"jsonrpc\":\"2.0\",\"id\":" + json_string(request_id) +
                                    ",\"method\":" + json_string(method) + ",\"params\":" + std::string(params_json) +
                                    "}";
-  if (auto written = write_message(request_json, deadline, timeout, "timed out writing MCP request"); !written) {
+  if (auto written = write_message(request_json, deadline, timeout, "timed out writing MCP request", cancel_requested);
+      !written) {
     return std::unexpected(std::move(written.error()));
   }
 
   while (true) {
-    auto message = read_message(deadline, timeout, timeout_message, "MCP server closed stdout before response");
+    auto message =
+        read_message(deadline, timeout, timeout_message, "MCP server closed stdout before response", cancel_requested);
     if (!message) return std::unexpected(std::move(message.error()));
     if (!json_depth_within_limit(*message, kMaxMcpJsonDepth) || !ava::core::json::is_valid_object(*message)) {
       auto error = protocol_error("MCP response is not a valid JSON object", server_);
@@ -607,13 +636,17 @@ ava::core::Result<McpStdioClient::JsonRpcResponse> McpStdioClient::request(std::
 
 ava::core::VoidResult McpStdioClient::write_message(std::string_view message,
                                                     std::chrono::steady_clock::time_point deadline,
-                                                    std::chrono::milliseconds timeout,
-                                                    std::string_view timeout_message) {
+                                                    std::chrono::milliseconds timeout, std::string_view timeout_message,
+                                                    CancelCallback cancel_requested) {
   if (stdin_fd_ < 0) return std::unexpected(protocol_error("MCP stdin is closed", server_));
   const std::string frame = "Content-Length: " + std::to_string(message.size()) + "\r\n\r\n" + std::string(message);
   std::size_t offset = 0;
   const ScopedSignalIgnore ignore_sigpipe(SIGPIPE);
   while (offset < frame.size()) {
+    if (is_canceled(cancel_requested)) {
+      terminate_child();
+      return std::unexpected(canceled_error("MCP request canceled", server_));
+    }
     const auto bytes = write_retry(stdin_fd_, frame.data() + offset, frame.size() - offset);
     if (bytes > 0) {
       offset += static_cast<std::size_t>(bytes);
@@ -621,7 +654,7 @@ ava::core::VoidResult McpStdioClient::write_message(std::string_view message,
     }
     if (bytes == 0) return std::unexpected(errno_error("failed to write MCP request", server_));
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      if (auto writable = wait_for_writable(deadline, timeout, timeout_message); !writable) {
+      if (auto writable = wait_for_writable(deadline, timeout, timeout_message, cancel_requested); !writable) {
         return std::unexpected(std::move(writable.error()));
       }
       continue;
@@ -664,8 +697,13 @@ ava::core::Result<std::optional<std::string>> McpStdioClient::try_extract_messag
 ava::core::Result<std::string> McpStdioClient::read_message(std::chrono::steady_clock::time_point deadline,
                                                             std::chrono::milliseconds timeout,
                                                             std::string_view timeout_message,
-                                                            std::string_view closed_message) {
+                                                            std::string_view closed_message,
+                                                            CancelCallback cancel_requested) {
   while (true) {
+    if (is_canceled(cancel_requested)) {
+      terminate_child();
+      return std::unexpected(canceled_error("MCP request canceled", server_));
+    }
     auto extracted = try_extract_message();
     if (!extracted) return std::unexpected(std::move(extracted.error()));
     if (*extracted) return std::move(**extracted);
@@ -708,8 +746,13 @@ ava::core::Result<std::string> McpStdioClient::read_message(std::chrono::steady_
 
 ava::core::VoidResult McpStdioClient::wait_for_writable(std::chrono::steady_clock::time_point deadline,
                                                         std::chrono::milliseconds timeout,
-                                                        std::string_view timeout_message) {
+                                                        std::string_view timeout_message,
+                                                        CancelCallback cancel_requested) {
   while (true) {
+    if (is_canceled(cancel_requested)) {
+      terminate_child();
+      return std::unexpected(canceled_error("MCP request canceled", server_));
+    }
     if (auto reaped = reap_child(); !reaped) return std::unexpected(std::move(reaped.error()));
     if (std::chrono::steady_clock::now() >= deadline) {
       auto error = protocol_error(std::string(timeout_message), server_);

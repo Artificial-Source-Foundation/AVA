@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -11,6 +12,8 @@
 #include "ava/plugin/manifest.h"
 
 namespace ava::plugin {
+
+using CancelCallback = std::function<bool()>;
 
 struct PluginRunnerOptions {
   std::filesystem::path workspace_dir;
@@ -58,8 +61,8 @@ class PluginProcess final {
   PluginProcess(PluginProcess&&) = delete;
   PluginProcess& operator=(PluginProcess&&) = delete;
 
-  [[nodiscard]] static ava::core::Result<std::unique_ptr<PluginProcess>> start(PluginManifest manifest,
-                                                                               PluginRunnerOptions options);
+  [[nodiscard]] static ava::core::Result<std::unique_ptr<PluginProcess>> start(
+      PluginManifest manifest, PluginRunnerOptions options, CancelCallback cancel_requested = nullptr);
 
   [[nodiscard]] const PluginManifest& manifest() const noexcept;
   [[nodiscard]] const PluginInitialization& initialization() const noexcept;
@@ -68,28 +71,34 @@ class PluginProcess final {
 
   [[nodiscard]] ava::core::Result<PluginToolCallResult> call_tool(std::string_view tool_name,
                                                                   std::string_view arguments_json,
-                                                                  std::string_view call_id = {});
+                                                                  std::string_view call_id = {},
+                                                                  CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<PluginCommandCallResult> call_command(std::string_view command_name,
                                                                         std::string_view arguments_json,
-                                                                        std::string_view call_id = {});
+                                                                        std::string_view call_id = {},
+                                                                        CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<PluginEventObserveResult> observe_event(std::string_view event_name,
                                                                           std::string_view payload_json,
-                                                                          std::string_view call_id = {});
+                                                                          std::string_view call_id = {},
+                                                                          CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult shutdown(std::chrono::milliseconds grace = std::chrono::milliseconds(250));
 
  private:
   [[nodiscard]] ava::core::VoidResult launch();
-  [[nodiscard]] ava::core::VoidResult initialize();
+  [[nodiscard]] ava::core::VoidResult initialize(CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult write_record(std::string_view record,
                                                    std::chrono::steady_clock::time_point deadline,
-                                                   std::chrono::milliseconds timeout, std::string_view timeout_message);
+                                                   std::chrono::milliseconds timeout, std::string_view timeout_message,
+                                                   CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<std::string> read_record(std::chrono::steady_clock::time_point deadline,
                                                            std::chrono::milliseconds timeout,
                                                            std::string_view timeout_message,
-                                                           std::string_view closed_message);
+                                                           std::string_view closed_message,
+                                                           CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult wait_for_writable(std::chrono::steady_clock::time_point deadline,
                                                         std::chrono::milliseconds timeout,
-                                                        std::string_view timeout_message);
+                                                        std::string_view timeout_message,
+                                                        CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult drain_stdout();
   [[nodiscard]] ava::core::VoidResult drain_stderr();
   [[nodiscard]] ava::core::VoidResult reap_child();

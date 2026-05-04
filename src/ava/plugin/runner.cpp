@@ -98,6 +98,14 @@ ava::core::Error protocol_error(std::string message, const PluginManifest& manif
   return plugin_error(ava::core::ErrorCategory::Tool, std::move(message), manifest);
 }
 
+bool is_canceled(const CancelCallback& cancel_requested) { return cancel_requested && cancel_requested(); }
+
+ava::core::Error canceled_error(std::string message, const PluginManifest& manifest) {
+  auto error = plugin_error(ava::core::ErrorCategory::Unknown, std::move(message), manifest);
+  error.with_context("canceled", "true");
+  return error;
+}
+
 ava::core::Result<std::array<int, 2>> make_pipe(const PluginManifest& manifest) {
   std::array<int, 2> fds{-1, -1};
   if (pipe(fds.data()) != 0) return std::unexpected(errno_error("failed to create plugin process pipe", manifest));
@@ -271,7 +279,7 @@ std::optional<PluginToolCallResult> parse_tool_result_response(std::string_view 
 }
 
 std::optional<PluginCommandCallResult> parse_command_result_response(std::string_view record,
-                                                                      std::string_view request_id) {
+                                                                     std::string_view request_id) {
   if (!json_depth_within_limit(record, kMaxPluginJsonDepth)) return std::nullopt;
   if (!ava::core::json::is_valid_object(record)) return std::nullopt;
   auto id = ava::core::json::string_field(record, "id");
@@ -283,7 +291,7 @@ std::optional<PluginCommandCallResult> parse_command_result_response(std::string
   return PluginCommandCallResult{.ok = *ok,
                                  .content = std::move(*content),
                                  .metadata_json = metadata.value_or(std::string{}),
-                                  .raw_json = std::string(record)};
+                                 .raw_json = std::string(record)};
 }
 
 std::optional<PluginEventObserveResult> parse_event_observed_response(std::string_view record,
@@ -313,7 +321,8 @@ PluginProcess::~PluginProcess() {
 }
 
 ava::core::Result<std::unique_ptr<PluginProcess>> PluginProcess::start(PluginManifest manifest,
-                                                                       PluginRunnerOptions options) {
+                                                                       PluginRunnerOptions options,
+                                                                       CancelCallback cancel_requested) {
   if (manifest.entrypoint.command.empty()) {
     return std::unexpected(plugin_error(ava::core::ErrorCategory::InvalidArgument,
                                         "plugin entrypoint command must not be empty", manifest));
@@ -337,10 +346,15 @@ ava::core::Result<std::unique_ptr<PluginProcess>> PluginProcess::start(PluginMan
     return std::unexpected(plugin_error(ava::core::ErrorCategory::InvalidArgument,
                                         "plugin runner byte limits must be non-zero", manifest));
   }
+  if (is_canceled(cancel_requested)) {
+    return std::unexpected(canceled_error("plugin startup canceled", manifest));
+  }
 
   auto process = std::unique_ptr<PluginProcess>(new PluginProcess(std::move(manifest), std::move(options)));
   if (auto launched = process->launch(); !launched) return std::unexpected(std::move(launched.error()));
-  if (auto initialized = process->initialize(); !initialized) return std::unexpected(std::move(initialized.error()));
+  if (auto initialized = process->initialize(cancel_requested); !initialized) {
+    return std::unexpected(std::move(initialized.error()));
+  }
   return process;
 }
 
@@ -423,20 +437,20 @@ ava::core::VoidResult PluginProcess::launch() {
   return {};
 }
 
-ava::core::VoidResult PluginProcess::initialize() {
+ava::core::VoidResult PluginProcess::initialize(CancelCallback cancel_requested) {
   const auto deadline = std::chrono::steady_clock::now() + options_.startup_timeout;
   const std::string request =
       "{\"id\":\"ava_1\",\"type\":\"initialize\",\"api_version\":" + json_string(kPluginApiVersion) +
       ",\"plugin_id\":" + json_string(manifest_.id) + ",\"workspace\":" + json_string(options_.workspace_dir.string()) +
       "}";
-  if (auto written =
-          write_record(request, deadline, options_.startup_timeout, "timed out writing plugin initialization");
+  if (auto written = write_record(request, deadline, options_.startup_timeout,
+                                  "timed out writing plugin initialization", cancel_requested);
       !written) {
     return std::unexpected(std::move(written.error()));
   }
 
   auto record = read_record(deadline, options_.startup_timeout, "timed out waiting for plugin initialization",
-                            "plugin process closed stdout before initialization");
+                            "plugin process closed stdout before initialization", cancel_requested);
   if (!record) return std::unexpected(std::move(record.error()));
   auto initialized = parse_initialized_response(*record);
   if (!initialized) {
@@ -450,7 +464,8 @@ ava::core::VoidResult PluginProcess::initialize() {
 
 ava::core::Result<PluginToolCallResult> PluginProcess::call_tool(std::string_view tool_name,
                                                                  std::string_view arguments_json,
-                                                                 std::string_view call_id) {
+                                                                 std::string_view call_id,
+                                                                 CancelCallback cancel_requested) {
   if (tool_name.empty()) {
     return std::unexpected(
         plugin_error(ava::core::ErrorCategory::InvalidArgument, "plugin tool name must not be empty", manifest_));
@@ -458,6 +473,11 @@ ava::core::Result<PluginToolCallResult> PluginProcess::call_tool(std::string_vie
   if (!ava::core::json::is_valid_object(arguments_json)) {
     auto error = plugin_error(ava::core::ErrorCategory::InvalidArgument, "plugin tool arguments must be a JSON object",
                               manifest_);
+    error.with_context("tool", std::string(tool_name));
+    return std::unexpected(std::move(error));
+  }
+  if (is_canceled(cancel_requested)) {
+    auto error = canceled_error("plugin tool call canceled", manifest_);
     error.with_context("tool", std::string(tool_name));
     return std::unexpected(std::move(error));
   }
@@ -469,13 +489,14 @@ ava::core::Result<PluginToolCallResult> PluginProcess::call_tool(std::string_vie
       "{\"id\":" + json_string(request_id) + ",\"type\":\"tool.call\",\"tool\":" + json_string(tool_name) +
       ",\"arguments\":" + std::string(arguments_json) + ",\"context\":{\"call_id\":" + json_string(call_id) +
       ",\"workspace\":" + json_string(options_.workspace_dir.string()) + "}}";
-  if (auto written = write_record(request, deadline, options_.request_timeout, "timed out writing plugin tool request");
+  if (auto written = write_record(request, deadline, options_.request_timeout, "timed out writing plugin tool request",
+                                  cancel_requested);
       !written) {
     return std::unexpected(std::move(written.error()));
   }
 
   auto record = read_record(deadline, options_.request_timeout, "timed out waiting for plugin tool result",
-                            "plugin process closed stdout before plugin tool result");
+                            "plugin process closed stdout before plugin tool result", cancel_requested);
   if (!record) return std::unexpected(std::move(record.error()));
   auto result = parse_tool_result_response(*record, request_id);
   if (!result) {
@@ -488,8 +509,9 @@ ava::core::Result<PluginToolCallResult> PluginProcess::call_tool(std::string_vie
 }
 
 ava::core::Result<PluginCommandCallResult> PluginProcess::call_command(std::string_view command_name,
-                                                                        std::string_view arguments_json,
-                                                                        std::string_view call_id) {
+                                                                       std::string_view arguments_json,
+                                                                       std::string_view call_id,
+                                                                       CancelCallback cancel_requested) {
   if (command_name.empty()) {
     return std::unexpected(
         plugin_error(ava::core::ErrorCategory::InvalidArgument, "plugin command name must not be empty", manifest_));
@@ -500,22 +522,27 @@ ava::core::Result<PluginCommandCallResult> PluginProcess::call_command(std::stri
     error.with_context("command", std::string(command_name));
     return std::unexpected(std::move(error));
   }
+  if (is_canceled(cancel_requested)) {
+    auto error = canceled_error("plugin command call canceled", manifest_);
+    error.with_context("command", std::string(command_name));
+    return std::unexpected(std::move(error));
+  }
 
   const auto deadline = std::chrono::steady_clock::now() + options_.request_timeout;
   const std::string request_id =
       call_id.empty() ? "ava_" + std::to_string(next_request_id_++) : "ava_command_" + std::string(call_id);
-  std::string request = "{\"id\":" + json_string(request_id) + ",\"type\":\"command.call\",\"command\":" +
-                        json_string(command_name) + ",\"arguments\":" + std::string(arguments_json) +
-                        ",\"context\":{\"call_id\":" + json_string(call_id) + ",\"workspace\":" +
-                        json_string(options_.workspace_dir.string()) + "}}";
-  if (auto written =
-          write_record(request, deadline, options_.request_timeout, "timed out writing plugin command request");
+  std::string request =
+      "{\"id\":" + json_string(request_id) + ",\"type\":\"command.call\",\"command\":" + json_string(command_name) +
+      ",\"arguments\":" + std::string(arguments_json) + ",\"context\":{\"call_id\":" + json_string(call_id) +
+      ",\"workspace\":" + json_string(options_.workspace_dir.string()) + "}}";
+  if (auto written = write_record(request, deadline, options_.request_timeout,
+                                  "timed out writing plugin command request", cancel_requested);
       !written) {
     return std::unexpected(std::move(written.error()));
   }
 
   auto record = read_record(deadline, options_.request_timeout, "timed out waiting for plugin command result",
-                            "plugin process closed stdout before plugin command result");
+                            "plugin process closed stdout before plugin command result", cancel_requested);
   if (!record) return std::unexpected(std::move(record.error()));
   auto result = parse_command_result_response(*record, request_id);
   if (!result) {
@@ -529,14 +556,20 @@ ava::core::Result<PluginCommandCallResult> PluginProcess::call_command(std::stri
 
 ava::core::Result<PluginEventObserveResult> PluginProcess::observe_event(std::string_view event_name,
                                                                          std::string_view payload_json,
-                                                                         std::string_view call_id) {
+                                                                         std::string_view call_id,
+                                                                         CancelCallback cancel_requested) {
   if (event_name.empty()) {
     return std::unexpected(
         plugin_error(ava::core::ErrorCategory::InvalidArgument, "plugin event name must not be empty", manifest_));
   }
   if (!ava::core::json::is_valid_object(payload_json)) {
-    auto error = plugin_error(ava::core::ErrorCategory::InvalidArgument,
-                              "plugin event payload must be a JSON object", manifest_);
+    auto error = plugin_error(ava::core::ErrorCategory::InvalidArgument, "plugin event payload must be a JSON object",
+                              manifest_);
+    error.with_context("event", std::string(event_name));
+    return std::unexpected(std::move(error));
+  }
+  if (is_canceled(cancel_requested)) {
+    auto error = canceled_error("plugin event observation canceled", manifest_);
     error.with_context("event", std::string(event_name));
     return std::unexpected(std::move(error));
   }
@@ -544,18 +577,18 @@ ava::core::Result<PluginEventObserveResult> PluginProcess::observe_event(std::st
   const auto deadline = std::chrono::steady_clock::now() + options_.request_timeout;
   const std::string request_id =
       call_id.empty() ? "ava_" + std::to_string(next_request_id_++) : "ava_event_" + std::string(call_id);
-  std::string request = "{\"id\":" + json_string(request_id) + ",\"type\":\"event.observe\",\"event\":" +
-                        json_string(event_name) + ",\"payload\":" + std::string(payload_json) +
-                        ",\"context\":{\"call_id\":" + json_string(call_id) + ",\"workspace\":" +
-                        json_string(options_.workspace_dir.string()) + "}}";
-  if (auto written =
-          write_record(request, deadline, options_.request_timeout, "timed out writing plugin event request");
+  std::string request =
+      "{\"id\":" + json_string(request_id) + ",\"type\":\"event.observe\",\"event\":" + json_string(event_name) +
+      ",\"payload\":" + std::string(payload_json) + ",\"context\":{\"call_id\":" + json_string(call_id) +
+      ",\"workspace\":" + json_string(options_.workspace_dir.string()) + "}}";
+  if (auto written = write_record(request, deadline, options_.request_timeout, "timed out writing plugin event request",
+                                  cancel_requested);
       !written) {
     return std::unexpected(std::move(written.error()));
   }
 
   auto record = read_record(deadline, options_.request_timeout, "timed out waiting for plugin event response",
-                            "plugin process closed stdout before plugin event response");
+                            "plugin process closed stdout before plugin event response", cancel_requested);
   if (!record) return std::unexpected(std::move(record.error()));
   auto result = parse_event_observed_response(*record, request_id);
   if (!result) {
@@ -569,12 +602,17 @@ ava::core::Result<PluginEventObserveResult> PluginProcess::observe_event(std::st
 
 ava::core::VoidResult PluginProcess::write_record(std::string_view record,
                                                   std::chrono::steady_clock::time_point deadline,
-                                                  std::chrono::milliseconds timeout, std::string_view timeout_message) {
+                                                  std::chrono::milliseconds timeout, std::string_view timeout_message,
+                                                  CancelCallback cancel_requested) {
   if (stdin_fd_ < 0) return std::unexpected(protocol_error("plugin stdin is closed", manifest_));
   const std::string frame = std::string(record) + '\n';
   std::size_t offset = 0;
   const ScopedSignalIgnore ignore_sigpipe(SIGPIPE);
   while (offset < frame.size()) {
+    if (is_canceled(cancel_requested)) {
+      terminate_child();
+      return std::unexpected(canceled_error("plugin request canceled", manifest_));
+    }
     const auto bytes = write_retry(stdin_fd_, frame.data() + offset, frame.size() - offset);
     if (bytes > 0) {
       offset += static_cast<std::size_t>(bytes);
@@ -582,7 +620,7 @@ ava::core::VoidResult PluginProcess::write_record(std::string_view record,
     }
     if (bytes == 0) return std::unexpected(errno_error("failed to write plugin request", manifest_));
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      if (auto writable = wait_for_writable(deadline, timeout, timeout_message); !writable) {
+      if (auto writable = wait_for_writable(deadline, timeout, timeout_message, cancel_requested); !writable) {
         return std::unexpected(std::move(writable.error()));
       }
       continue;
@@ -595,8 +633,13 @@ ava::core::VoidResult PluginProcess::write_record(std::string_view record,
 ava::core::Result<std::string> PluginProcess::read_record(std::chrono::steady_clock::time_point deadline,
                                                           std::chrono::milliseconds timeout,
                                                           std::string_view timeout_message,
-                                                          std::string_view closed_message) {
+                                                          std::string_view closed_message,
+                                                          CancelCallback cancel_requested) {
   while (true) {
+    if (is_canceled(cancel_requested)) {
+      terminate_child();
+      return std::unexpected(canceled_error("plugin request canceled", manifest_));
+    }
     if (const auto newline = stdout_buffer_.find('\n'); newline != std::string::npos) {
       auto record = stdout_buffer_.substr(0, newline);
       stdout_buffer_.erase(0, newline + 1);
@@ -653,8 +696,13 @@ ava::core::Result<std::string> PluginProcess::read_record(std::chrono::steady_cl
 
 ava::core::VoidResult PluginProcess::wait_for_writable(std::chrono::steady_clock::time_point deadline,
                                                        std::chrono::milliseconds timeout,
-                                                       std::string_view timeout_message) {
+                                                       std::string_view timeout_message,
+                                                       CancelCallback cancel_requested) {
   while (true) {
+    if (is_canceled(cancel_requested)) {
+      terminate_child();
+      return std::unexpected(canceled_error("plugin request canceled", manifest_));
+    }
     if (auto reaped = reap_child(); !reaped) return std::unexpected(std::move(reaped.error()));
     if (std::chrono::steady_clock::now() >= deadline) {
       auto error = protocol_error(std::string(timeout_message), manifest_);

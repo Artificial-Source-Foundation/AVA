@@ -448,6 +448,16 @@ void test_plugin_runner_contained_failures() {
   expect(!timed_out && timed_out.error().message().find("timed out") != std::string::npos,
          "plugin runner times out hung startup");
 
+  const auto startup_cancel_dir = root / "plugins" / "com.example.startupcancel";
+  write_text(startup_cancel_dir / "plugin.sh", "sleep 2\n");
+  auto startup_cancel_options = runner_options(workspace, std::chrono::milliseconds(1000));
+  int startup_cancel_checks = 0;
+  auto startup_canceled =
+      ava::plugin::PluginProcess::start(runner_manifest(startup_cancel_dir, "com.example.startupcancel", "plugin.sh"),
+                                        startup_cancel_options, [&] { return ++startup_cancel_checks > 2; });
+  expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos,
+         "plugin runner cancels hung startup before timeout");
+
   const auto exited_dir = root / "plugins" / "com.example.exited";
   write_text(exited_dir / "plugin.sh",
              "read line\n"
@@ -550,6 +560,25 @@ void test_plugin_runner_tool_calls() {
     auto result = (*timeout)->call_tool("todo_add", "{}", "slow");
     expect(!result && result.error().message().find("timed out") != std::string::npos,
            "plugin runner times out hung tool calls independently from startup");
+  }
+
+  const auto cancel_dir = root / "plugins" / "com.example.toolcancel";
+  write_text(cancel_dir / "plugin.sh",
+             "read line\n"
+             "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
+             "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
+             "read line\n"
+             "sleep 2\n");
+  auto cancel_options = runner_options(workspace, std::chrono::milliseconds(500));
+  cancel_options.request_timeout = std::chrono::milliseconds(1000);
+  auto cancel = ava::plugin::PluginProcess::start(runner_manifest(cancel_dir, "com.example.toolcancel", "plugin.sh"),
+                                                  cancel_options);
+  expect(cancel.has_value(), "plugin runner starts cancellation fake plugin");
+  if (cancel) {
+    int cancel_checks = 0;
+    auto result = (*cancel)->call_tool("todo_add", "{}", "cancel", [&] { return ++cancel_checks > 2; });
+    expect(!result && result.error().message().find("canceled") != std::string::npos,
+           "plugin runner cancels hung tool calls before timeout");
   }
 
   const auto crashed_dir = root / "plugins" / "com.example.toolcrash";
@@ -816,6 +845,7 @@ void test_plugin_tool_dispatcher() {
   const auto model_tool_name = ava::plugin::plugin_model_tool_name("com.example.todo", "todo_add");
   std::vector<ava::permissions::PermissionPrompt> prompts;
   std::vector<ava::tools::PermissionAuditEvent> audits;
+  bool cancel_requested = false;
   ava::tools::ToolContext context;
   context.workspace_dir = workspace;
   context.plugin_global_plugins_dir = root / "global-plugins";
@@ -830,6 +860,7 @@ void test_plugin_tool_dispatcher() {
     audits.push_back(event);
     return {};
   };
+  context.cancel_requested = [&] { return cancel_requested; };
 
   const auto schemas = ava::agent::ToolDispatcher::tool_schemas_json(context);
   const bool has_plugin_schema = std::any_of(schemas.begin(), schemas.end(), [&](const std::string& schema) {
@@ -883,6 +914,14 @@ void test_plugin_tool_dispatcher() {
              denied->result_text.find("plugin process launch requires permission") != std::string::npos &&
              denied_prompts.size() == 1,
          "plugin tool dispatcher respects permission denial before process execution");
+
+  const auto prompts_before_cancel = prompts.size();
+  cancel_requested = true;
+  auto canceled = dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_canceled", .name = model_tool_name, .arguments_json = "{}"});
+  expect(canceled && !canceled->success && canceled->payload.status == ava::agent::ToolResultStatus::Canceled &&
+             canceled->result_text.find("canceled") != std::string::npos && prompts.size() == prompts_before_cancel,
+         "plugin tool dispatcher reports semantic cancellation before permission or process execution");
 }
 
 void test_plugin_tool_dispatcher_rejects_invalid_result() {

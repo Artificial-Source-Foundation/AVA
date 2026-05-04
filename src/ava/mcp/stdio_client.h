@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -13,6 +14,8 @@
 #include "ava/mcp/config.h"
 
 namespace ava::mcp {
+
+using CancelCallback = std::function<bool()>;
 
 struct McpStdioClientOptions {
   std::filesystem::path workspace_dir;
@@ -51,17 +54,19 @@ class McpStdioClient final {
   McpStdioClient(McpStdioClient&&) = delete;
   McpStdioClient& operator=(McpStdioClient&&) = delete;
 
-  [[nodiscard]] static ava::core::Result<std::unique_ptr<McpStdioClient>> start(McpServerConfig server,
-                                                                                McpStdioClientOptions options);
+  [[nodiscard]] static ava::core::Result<std::unique_ptr<McpStdioClient>> start(
+      McpServerConfig server, McpStdioClientOptions options, CancelCallback cancel_requested = nullptr);
 
   [[nodiscard]] const McpServerConfig& server() const noexcept;
   [[nodiscard]] const McpInitialization& initialization() const noexcept;
   [[nodiscard]] const std::string& stderr_tail() const noexcept;
   [[nodiscard]] bool stderr_truncated() const noexcept;
 
-  [[nodiscard]] ava::core::Result<std::vector<McpToolDescription>> list_tools();
+  [[nodiscard]] ava::core::Result<std::vector<McpToolDescription>> list_tools(
+      CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<McpToolCallResult> call_tool(std::string_view tool_name,
-                                                               std::string_view arguments_json);
+                                                               std::string_view arguments_json,
+                                                               CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult shutdown(std::chrono::milliseconds grace = std::chrono::milliseconds(250));
 
  private:
@@ -71,22 +76,25 @@ class McpStdioClient final {
   };
 
   [[nodiscard]] ava::core::VoidResult launch();
-  [[nodiscard]] ava::core::VoidResult initialize();
+  [[nodiscard]] ava::core::VoidResult initialize(CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<JsonRpcResponse> request(std::string_view method, std::string_view params_json,
                                                            std::chrono::milliseconds timeout,
-                                                           std::string_view timeout_message);
+                                                           std::string_view timeout_message,
+                                                           CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult write_message(std::string_view message,
                                                     std::chrono::steady_clock::time_point deadline,
-                                                    std::chrono::milliseconds timeout,
-                                                    std::string_view timeout_message);
+                                                    std::chrono::milliseconds timeout, std::string_view timeout_message,
+                                                    CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<std::string> read_message(std::chrono::steady_clock::time_point deadline,
                                                             std::chrono::milliseconds timeout,
                                                             std::string_view timeout_message,
-                                                            std::string_view closed_message);
+                                                            std::string_view closed_message,
+                                                            CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<std::optional<std::string>> try_extract_message();
   [[nodiscard]] ava::core::VoidResult wait_for_writable(std::chrono::steady_clock::time_point deadline,
                                                         std::chrono::milliseconds timeout,
-                                                        std::string_view timeout_message);
+                                                        std::string_view timeout_message,
+                                                        CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult drain_stdout();
   [[nodiscard]] ava::core::VoidResult drain_stderr();
   [[nodiscard]] ava::core::VoidResult reap_child();

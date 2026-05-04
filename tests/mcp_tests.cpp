@@ -90,6 +90,14 @@ void test_mcp_stdio_client_lists_and_calls_tools() {
   const auto workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
+  auto startup_cancel_server = fake_server_config(root);
+  startup_cancel_server.args = {"timeout-initialize"};
+  int startup_cancel_checks = 0;
+  auto startup_canceled = ava::mcp::McpStdioClient::start(startup_cancel_server, fake_client_options(workspace),
+                                                          [&] { return ++startup_cancel_checks > 2; });
+  expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos,
+         "MCP stdio client cancels hung startup before timeout");
+
   auto client = ava::mcp::McpStdioClient::start(fake_server_config(root), fake_client_options(workspace));
   expect(client.has_value(), client ? "MCP stdio client initializes fake server"
                                     : "MCP stdio client initializes fake server: " + client.error().format());
@@ -106,6 +114,21 @@ void test_mcp_stdio_client_lists_and_calls_tools() {
   auto shutdown = (*client)->shutdown(std::chrono::milliseconds(500));
   expect(shutdown.has_value(), shutdown ? "MCP stdio client shuts down cleanly"
                                         : "MCP stdio client shuts down cleanly: " + shutdown.error().format());
+
+  auto slow_server = fake_server_config(root);
+  slow_server.args = {"slow-tool"};
+  auto slow_client = ava::mcp::McpStdioClient::start(slow_server, fake_client_options(workspace));
+  expect(slow_client.has_value(),
+         slow_client ? "MCP stdio client initializes slow fake server"
+                     : "MCP stdio client initializes slow fake server: " + slow_client.error().format());
+  if (slow_client) {
+    int cancel_checks = 0;
+    auto canceled = (*slow_client)->call_tool("echo", "{\"text\":\"hello\"}", [&] { return ++cancel_checks > 2; });
+    expect(!canceled && canceled.error().message().find("canceled") != std::string::npos,
+           "MCP stdio client cancels hung tool calls before timeout");
+    auto slow_shutdown = (*slow_client)->shutdown(std::chrono::milliseconds(500));
+    expect(slow_shutdown.has_value(), "MCP stdio client shuts down after canceled tool call");
+  }
 }
 
 void test_mcp_tool_dispatcher() {
@@ -119,6 +142,7 @@ void test_mcp_tool_dispatcher() {
 
   std::vector<ava::permissions::PermissionPrompt> prompts;
   std::vector<ava::tools::PermissionAuditEvent> audits;
+  bool cancel_requested = false;
   ava::tools::ToolContext context;
   context.workspace_dir = workspace;
   context.mcp_global_config_file = root / "missing-global-mcp.json";
@@ -132,6 +156,7 @@ void test_mcp_tool_dispatcher() {
     audits.push_back(event);
     return {};
   };
+  context.cancel_requested = [&] { return cancel_requested; };
 
   const auto model_tool_name = ava::mcp::mcp_model_tool_name("demo", "echo");
   const auto schemas = ava::agent::ToolDispatcher::tool_schemas_json(context);
@@ -177,6 +202,14 @@ void test_mcp_tool_dispatcher() {
   expect(invalid_args && invalid_args->payload.status == ava::agent::ToolResultStatus::Error &&
              invalid_args->payload.error_category == "invalid_argument",
          "MCP tool dispatcher attaches structured semantic error payloads");
+
+  const auto prompts_before_cancel = prompts.size();
+  cancel_requested = true;
+  auto canceled = dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_canceled", .name = model_tool_name, .arguments_json = "{}"});
+  expect(canceled && !canceled->success && canceled->payload.status == ava::agent::ToolResultStatus::Canceled &&
+             canceled->result_text.find("canceled") != std::string::npos && prompts.size() == prompts_before_cancel,
+         "MCP tool dispatcher reports semantic cancellation before permission or process execution");
 }
 
 }  // namespace

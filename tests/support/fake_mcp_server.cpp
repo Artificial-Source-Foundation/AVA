@@ -1,6 +1,6 @@
 #include <algorithm>
-#include <chrono>
 #include <cctype>
+#include <chrono>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -99,6 +99,11 @@ int main(int argc, char** argv) {
         write_message(response(*id,
                                "{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"MCP tool "
                                "failed\"}]}"));
+      } else if (mode == "slow-tool") {
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        write_message(response(*id,
+                               "{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"MCP slow "
+                               "call ok\"}]}"));
       } else {
         write_message(response(*id,
                                "{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"MCP call "

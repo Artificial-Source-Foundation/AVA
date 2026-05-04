@@ -216,5 +216,26 @@ if(AVA_BUILD_TESTS)
   target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_FILE:ava_fake_mcp_server>")
   ava_apply_warnings(ava_tests)
   ava_apply_sanitizers(ava_tests)
-  add_test(NAME ava_tests COMMAND ava_tests)
+
+  set(AVA_TEST_SUITES
+    core_mode
+    session
+    core_json_permission
+    app_command_classification
+    tools
+    config_context_auth_oauth
+    app_event_serialization
+    app_event_bus
+    app_runtime
+    provider_openai
+    provider_anthropic
+    agent_tool_dispatcher
+    lsp
+    plugin
+    mcp
+    tui_composer
+  )
+  foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
+    add_test(NAME ava_tests.${AVA_TEST_SUITE} COMMAND ava_tests ${AVA_TEST_SUITE})
+  endforeach()
 endif()

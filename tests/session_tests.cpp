@@ -618,6 +618,33 @@ void test_session_replay_validation()
   expect(valid_permission.ok() && valid_permission.issues.empty(),
          "session replay validator accepts complete permission audit decisions");
 
+  std::vector<ava::session::SessionEntry> const valid_session_grant_entries = {
+      ava::session::SessionEntry{.id = "permission_ask",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::PermissionDecision,
+                                 .timestamp = "2026-04-29T00:00:01Z",
+                                 .data_json = "{\"permission_request_id\":\"permreq_granted\","
+                                              "\"operation\":\"read\",\"mode\":\"build\","
+                                              "\"tool_name\":\"read_file\",\"action\":\"ask\","
+                                              "\"reason\":\"target is outside the workspace\","
+                                              "\"risk\":\"high\",\"target_path\":\"/tmp/outside.txt\","
+                                              "\"resolution_source\":\"policy\"}"},
+      ava::session::SessionEntry{.id = "permission_granted",
+                                 .parent_id = "permission_ask",
+                                 .type = ava::session::EntryType::PermissionDecision,
+                                 .timestamp = "2026-04-29T00:00:02Z",
+                                 .data_json = "{\"permission_request_id\":\"permreq_granted\","
+                                              "\"operation\":\"read\",\"mode\":\"build\","
+                                              "\"tool_name\":\"read_file\",\"action\":\"ask\","
+                                              "\"reason\":\"target is outside the workspace\","
+                                              "\"risk\":\"high\",\"target_path\":\"/tmp/outside.txt\","
+                                              "\"resolution\":\"allow\","
+                                              "\"resolution_source\":\"session_grant\"}"},
+  };
+  auto const valid_session_grant = ava::session::validate_session_replay(valid_session_grant_entries);
+  expect(valid_session_grant.ok() && valid_session_grant.issues.empty(),
+         "session replay validator accepts permission outcomes resolved by session grants");
+
   std::vector<ava::session::SessionEntry> const invalid_permission_entries = {
       ava::session::SessionEntry{.id = "permission_invalid",
                                  .parent_id = "",

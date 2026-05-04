@@ -446,6 +446,7 @@ std::string to_string(PermissionResolution resolution)
 {
   switch (resolution) {
     case PermissionResolution::Allow:
+    case PermissionResolution::AllowSessionGrant:
       return "allow";
     case PermissionResolution::Deny:
       return "deny";

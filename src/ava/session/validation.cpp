@@ -102,7 +102,8 @@ bool valid_resolution(std::string_view resolution)
 
 bool valid_resolution_source(std::string_view source)
 {
-  return source == "policy" || source == "resolver" || source == "no_resolver" || source == "resolver_failed";
+  return source == "policy" || source == "resolver" || source == "session_grant" || source == "no_resolver" ||
+         source == "resolver_failed";
 }
 
 bool valid_risk(std::string_view risk)

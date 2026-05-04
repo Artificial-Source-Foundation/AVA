@@ -4581,6 +4581,75 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
   }
 }
 
+void test_app_rpc_permission_reply_session_grant_flow()
+{
+  auto const root = temp_root() / "app-rpc-permission-session-grant";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  auto const outside_path = root / "outside.txt";
+  {
+    std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
+    file << "outside grant note";
+  }
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC permission session grant test opens runtime session");
+  if (!session) return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())),
+                                       sse_response(final_text_sse("first grant done")),
+                                       sse_response(read_file_call_sse(outside_path.generic_string())),
+                                       sse_response(final_text_sse("second grant done"))});
+  ava::app::RuntimeRunOptions runtime_options;
+  runtime_options.access_token = "token";
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult result;
+  std::jthread rpc_thread(
+      [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+
+  input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read outside once\"}\n");
+  bool const requested = output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
+  auto const resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
+  expect(requested && !resolver_request_id.empty(), "RPC permission session grant test observes resolver request id");
+  input_buffer.push("{\"id\":\"reply\",\"type\":\"permission_reply\",\"request_id\":\"" + resolver_request_id +
+                    "\",\"correlation_id\":\"p1\",\"decision\":\"allow_session\"}\n");
+  input_buffer.push("{\"id\":\"p2\",\"type\":\"follow_up\",\"message\":\"read outside again\"}\n");
+  bool const first_completed = output_buffer.wait_contains("first grant done", std::chrono::seconds(2));
+  input_buffer.push("{\"id\":\"grants\",\"type\":\"permission_grants\"}\n");
+  bool const grant_listed = output_buffer.wait_contains("\"grant_id\":\"permgrant_", std::chrono::seconds(2));
+  bool const second_completed = output_buffer.wait_contains("second grant done", std::chrono::seconds(2));
+  input_buffer.close();
+  rpc_thread.join();
+
+  auto const jsonl = output_buffer.str();
+  expect(result.has_value() && first_completed && grant_listed && second_completed,
+         "RPC permission session grant loop exits successfully");
+  expect(count_substrings(jsonl, "\"name\":\"permission_requested\"") == 1 &&
+             jsonl.find("\"decision\":\"allow_session\"") != std::string::npos &&
+             jsonl.find("\"id\":\"grants\"") != std::string::npos &&
+             jsonl.find("\"operation\":\"read\"") != std::string::npos &&
+             jsonl.find("\"target_path\":\"" + outside_path.string() + "\"") != std::string::npos,
+         "RPC session grant is inspectable and suppresses a repeated matching permission prompt");
+
+  auto entries = session->store.load();
+  auto audits = entries ? permission_entries(*entries) : std::vector<ava::session::SessionEntry>{};
+  expect(audits.size() == 4 &&
+             ava::core::json::string_field(audits[3].data_json, "resolution_source") == "session_grant" &&
+             ava::core::json::string_field(audits[3].data_json, "resolution") == "allow",
+         "session grant approvals are still audited as backend permission outcomes");
+}
+
 void test_app_rpc_permission_request_includes_mutation_diff_preview()
 {
   auto const root = temp_root() / "app-rpc-permission-diff";
@@ -4817,6 +4886,7 @@ void run_app_runtime_tests()
   test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch();
   test_app_rpc_permission_policy_auto_allows_before_resolver_event();
   test_app_rpc_permission_reply_allow_and_deny_flows();
+  test_app_rpc_permission_reply_session_grant_flow();
   test_app_rpc_permission_request_includes_mutation_diff_preview();
   test_app_rpc_question_reply_flow();
   test_app_rpc_question_reply_selected_option_flow();

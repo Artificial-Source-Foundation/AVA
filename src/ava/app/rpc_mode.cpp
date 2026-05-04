@@ -102,6 +102,15 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       continue;
     }
 
+    if (command->type == "permission_grants") {
+      if (auto written =
+              rpc::write_success(output, command->id, rpc::permission_session_grants_result_json(pending_state));
+          !written) {
+        return written;
+      }
+      continue;
+    }
+
     if (command->type == "list_sessions") {
       std::lock_guard lock(session_mutex);
       auto sessions_json = rpc::list_sessions_result_json(session);

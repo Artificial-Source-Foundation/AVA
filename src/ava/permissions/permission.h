@@ -56,6 +56,7 @@ struct PermissionDecision {
 enum class PermissionResolution {
   Allow,
   Deny,
+  AllowSessionGrant,
 };
 
 struct PermissionPrompt {

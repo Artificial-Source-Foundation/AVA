@@ -436,12 +436,16 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   });
 
   auto outcome_event = policy_event;
-  outcome_event.resolution_source = resolution ? "resolver" : "resolver_failed";
+  outcome_event.resolution_source =
+      resolution && *resolution == ava::permissions::PermissionResolution::AllowSessionGrant ? "session_grant"
+                                                                                             : "resolver";
+  if (!resolution) outcome_event.resolution_source = "resolver_failed";
   outcome_event.resolution = resolution ? ava::permissions::to_string(*resolution) : "deny";
   if (auto audited = record_permission_audit(context, outcome_event); !audited) {
     return std::unexpected(std::move(audited.error()));
   }
-  if (resolution && *resolution == ava::permissions::PermissionResolution::Allow) {
+  if (resolution && (*resolution == ava::permissions::PermissionResolution::Allow ||
+                     *resolution == ava::permissions::PermissionResolution::AllowSessionGrant)) {
     return {};
   }
 

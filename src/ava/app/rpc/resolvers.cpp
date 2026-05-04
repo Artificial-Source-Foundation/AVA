@@ -21,6 +21,55 @@ std::string next_resolver_request_id(std::string_view prefix)
   return ava::core::make_id(prefix);
 }
 
+bool grant_matches(PermissionSessionGrant const& grant, ava::permissions::PermissionPrompt const& prompt)
+{
+  return grant.operation == prompt.operation && grant.mode == prompt.mode && grant.tool_name == prompt.tool_name &&
+         grant.target_path == prompt.target_path && grant.command == prompt.command;
+}
+
+bool grant_matches(PermissionSessionGrant const& grant, PendingPermissionRequest const& request)
+{
+  return grant.operation == request.operation && grant.mode == request.mode && grant.tool_name == request.tool_name &&
+         grant.target_path == request.target_path && grant.command == request.command;
+}
+
+PermissionSessionGrant grant_from_request(PendingPermissionRequest const& request)
+{
+  return PermissionSessionGrant{.grant_id = ava::core::make_id("permgrant"),
+                                .permission_request_id = request.permission_request_id,
+                                .operation = request.operation,
+                                .mode = request.mode,
+                                .tool_name = request.tool_name,
+                                .target_path = request.target_path,
+                                .command = request.command,
+                                .reason = request.reason,
+                                .risk = request.risk};
+}
+
+std::string permission_session_grant_json(PermissionSessionGrant const& grant)
+{
+  std::string json = "{";
+  json += string_field_json("grant_id", grant.grant_id);
+  json += ',';
+  json += string_field_json("permission_request_id", grant.permission_request_id);
+  json += ',';
+  json += string_field_json("operation", ava::permissions::to_string(grant.operation));
+  json += ',';
+  json += string_field_json("mode", ava::agent::to_string(grant.mode));
+  json += ',';
+  json += string_field_json("tool_name", grant.tool_name);
+  json += ',';
+  json += string_field_json("target_path", grant.target_path.string());
+  json += ',';
+  json += string_field_json("command", grant.command);
+  json += ',';
+  json += string_field_json("reason", grant.reason);
+  json += ',';
+  json += string_field_json("risk", ava::permissions::to_string(grant.risk));
+  json += '}';
+  return json;
+}
+
 }  // namespace
 
 bool cancel_pending_resolvers(PendingResolverState& pending_state)
@@ -44,6 +93,23 @@ bool cancel_pending_resolvers(PendingResolverState& pending_state)
   return had_pending;
 }
 
+std::string permission_session_grants_result_json(PendingResolverState& pending_state)
+{
+  std::vector<PermissionSessionGrant> grants;
+  {
+    std::lock_guard lock(pending_state.mutex);
+    grants = pending_state.permission_session_grants;
+  }
+
+  std::string json = "{\"grants\":[";
+  for (std::size_t index = 0; index < grants.size(); ++index) {
+    if (index > 0) json += ',';
+    json += permission_session_grant_json(grants[index]);
+  }
+  json += "]}";
+  return json;
+}
+
 ava::permissions::PermissionResolver make_rpc_permission_resolver(
     PendingResolverState& pending_state, RpcOutput& output, RpcRunState& run_state, RuntimeSession const& session,
     std::mutex& session_mutex, ava::permissions::PermissionResolver policy_resolver, std::string prompt_request_id)
@@ -61,9 +127,23 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(
         return ava::permissions::PermissionResolution::Allow;
       }
     }
+    {
+      std::lock_guard lock(pending_state.mutex);
+      for (auto const& grant : pending_state.permission_session_grants) {
+        if (grant_matches(grant, prompt)) return ava::permissions::PermissionResolution::AllowSessionGrant;
+      }
+    }
 
     auto pending = std::make_shared<PendingPermissionRequest>();
     pending->correlation_id = prompt_request_id;
+    pending->permission_request_id = prompt.permission_request_id;
+    pending->operation = prompt.operation;
+    pending->mode = prompt.mode;
+    pending->tool_name = prompt.tool_name;
+    pending->target_path = prompt.target_path;
+    pending->command = prompt.command;
+    pending->reason = prompt.reason;
+    pending->risk = prompt.risk;
     std::string request_id;
     {
       std::lock_guard lock(pending_state.mutex);
@@ -145,12 +225,16 @@ ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_sta
                                                std::string_view correlation_id, std::string_view decision)
 {
   ava::permissions::PermissionResolution resolution = ava::permissions::PermissionResolution::Deny;
+  bool create_session_grant = false;
   if (decision == "allow") {
     resolution = ava::permissions::PermissionResolution::Allow;
+  } else if (decision == "allow_session") {
+    resolution = ava::permissions::PermissionResolution::Allow;
+    create_session_grant = true;
   } else if (decision == "deny") {
     resolution = ava::permissions::PermissionResolution::Deny;
   } else {
-    auto error = invalid_rpc("permission_reply decision must be allow or deny");
+    auto error = invalid_rpc("permission_reply decision must be allow, allow_session, or deny");
     error.with_context("decision", std::string(decision));
     return std::unexpected(std::move(error));
   }
@@ -169,6 +253,14 @@ ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_sta
       return std::unexpected(std::move(error));
     }
     pending_state.permission_requests.erase(found);
+    if (create_session_grant) {
+      auto grant = grant_from_request(*pending);
+      bool duplicate = false;
+      for (auto const& existing : pending_state.permission_session_grants) {
+        duplicate = duplicate || grant_matches(existing, *pending);
+      }
+      if (!duplicate) pending_state.permission_session_grants.push_back(std::move(grant));
+    }
     pending->resolved = true;
     pending->resolution = resolution;
   }

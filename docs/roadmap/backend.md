@@ -176,12 +176,14 @@ Missing or incomplete:
 
 ### Permissions And Audit
 
-AVA's permission model is a differentiator. Tool permission decisions are persisted as session audit entries, but persistent rules and broader UX semantics remain deferred.
+AVA's permission model is a differentiator. Tool permission decisions are persisted as session audit entries, and
+headless RPC has an initial exact-match session grant path for repeated prompts. Persistent rules and broader UX
+semantics remain deferred.
 
 Missing or incomplete:
 
 - Persistent allow/deny rules.
-- Session-wide grants.
+- Broader session-wide grants, revocation, and durable grant storage beyond the initial headless exact-match path.
 - Deny reasons surfaced consistently to users and headless clients.
 - Richer permission-prompt UX beyond the current TUI and RPC resolver flows.
 - Richer audit views that connect request, decision, actor, and executed operation.

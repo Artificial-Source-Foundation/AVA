@@ -1,6 +1,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -9,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "ava/agent/mode.h"
 #include "ava/agent/question.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/run_state.h"
@@ -21,8 +23,28 @@ namespace ava::app::rpc {
 struct PendingPermissionRequest {
   bool resolved = false;
   std::string correlation_id;
+  std::string permission_request_id;
+  ava::permissions::Operation operation = ava::permissions::Operation::ReadFile;
+  ava::agent::Mode mode = ava::agent::Mode::Build;
+  std::string tool_name;
+  std::filesystem::path target_path;
+  std::string command;
+  std::string reason;
+  ava::permissions::PermissionRisk risk = ava::permissions::PermissionRisk::Low;
   std::optional<ava::permissions::PermissionResolution> resolution;
   std::optional<ava::core::Error> error;
+};
+
+struct PermissionSessionGrant {
+  std::string grant_id;
+  std::string permission_request_id;
+  ava::permissions::Operation operation = ava::permissions::Operation::ReadFile;
+  ava::agent::Mode mode = ava::agent::Mode::Build;
+  std::string tool_name;
+  std::filesystem::path target_path;
+  std::string command;
+  std::string reason;
+  ava::permissions::PermissionRisk risk = ava::permissions::PermissionRisk::Low;
 };
 
 struct PendingQuestionRequest {
@@ -39,9 +61,11 @@ struct PendingResolverState {
   std::condition_variable cv;
   std::map<std::string, std::shared_ptr<PendingPermissionRequest>> permission_requests;
   std::map<std::string, std::shared_ptr<PendingQuestionRequest>> question_requests;
+  std::vector<PermissionSessionGrant> permission_session_grants;
 };
 
 [[nodiscard]] bool cancel_pending_resolvers(PendingResolverState& pending_state);
+[[nodiscard]] std::string permission_session_grants_result_json(PendingResolverState& pending_state);
 
 [[nodiscard]] ava::permissions::PermissionResolver make_rpc_permission_resolver(
     PendingResolverState& pending_state, RpcOutput& output, RpcRunState& run_state, RuntimeSession const& session,

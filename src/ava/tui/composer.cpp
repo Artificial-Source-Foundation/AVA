@@ -142,8 +142,9 @@ bool parse_sgr_codes(std::string_view sequence, std::vector<int>& codes) {
     if (token.empty()) {
       codes.push_back(0);
     } else {
+      const auto token_text = std::string(token);
       char* parsed_end = nullptr;
-      const auto value = std::strtol(std::string(token).c_str(), &parsed_end, 10);
+      const auto value = std::strtol(token_text.c_str(), &parsed_end, 10);
       if (parsed_end == nullptr || *parsed_end != '\0') return false;
       codes.push_back(static_cast<int>(value));
     }

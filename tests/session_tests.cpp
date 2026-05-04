@@ -39,6 +39,7 @@
 #include "ava/session/export.h"
 #include "ava/session/session_store.h"
 #include "ava/session/stats.h"
+#include "ava/session/validation.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/search_tools.h"
@@ -48,6 +49,12 @@
 #include "tests/support/test_harness.h"
 
 namespace {
+
+bool has_replay_issue(const ava::session::SessionReplayValidation& validation,
+                      ava::session::SessionReplayIssueKind kind) {
+  return std::ranges::any_of(validation.issues,
+                             [kind](const ava::session::SessionReplayIssue& issue) { return issue.kind == kind; });
+}
 
 void test_session_store_round_trip() {
   std::error_code remove_error;
@@ -447,6 +454,116 @@ void test_session_stats_flags_legacy_assistant_tokens_without_cost() {
          "legacy top-level assistant token stats do not masquerade as usage objects");
   expect(!stats.total_cost_usd && !stats.cost_complete && stats.unknown_cost_entries == 1,
          "legacy top-level assistant tokens without cost make cost stats incomplete");
+}
+
+void test_session_replay_validation() {
+  const std::vector<ava::session::SessionEntry> valid_entries = {
+      ava::session::SessionEntry{.id = "start",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::SessionStart,
+                                 .timestamp = "2026-04-29T00:00:00Z",
+                                 .data_json = "{\"mode\":\"build\"}"},
+      ava::session::SessionEntry{.id = "user",
+                                 .parent_id = "start",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-04-29T00:00:01Z",
+                                 .data_json = "{\"text\":\"read note\"}"},
+      ava::session::SessionEntry{.id = "assistant",
+                                 .parent_id = "user",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-04-29T00:00:02Z",
+                                 .data_json = "{\"text\":\"\",\"tool_calls\":1}"},
+      ava::session::SessionEntry{.id = "tool_call",
+                                 .parent_id = "assistant",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-29T00:00:03Z",
+                                 .data_json = "{\"call_id\":\"call_read\",\"name\":\"read_file\","
+                                              "\"arguments\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}"},
+      ava::session::SessionEntry{.id = "tool_result",
+                                 .parent_id = "tool_call",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-29T00:00:04Z",
+                                 .data_json = "{\"call_id\":\"call_read\",\"name\":\"read_file\",\"success\":true,"
+                                              "\"status\":\"success\",\"result\":\"note contents\","
+                                              "\"structured_result\":{\"schema_version\":1,\"call_id\":\"call_read\","
+                                              "\"tool\":\"read_file\",\"status\":\"success\",\"ok\":true,"
+                                              "\"content_type\":\"text/plain\",\"content\":\"note contents\"}}"},
+  };
+
+  const auto valid = ava::session::validate_session_replay(
+      valid_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
+  expect(valid.ok() && valid.issues.empty(), "session replay validator accepts paired structured tool history");
+
+  const std::vector<ava::session::SessionEntry> duplicate_entry_entries = {
+      valid_entries[0],
+      valid_entries[0],
+  };
+  const auto duplicate_entry = ava::session::validate_session_replay(duplicate_entry_entries);
+  expect(!duplicate_entry.ok() &&
+             has_replay_issue(duplicate_entry, ava::session::SessionReplayIssueKind::DuplicateEntryId),
+         "session replay validator flags duplicate entry ids");
+
+  const std::vector<ava::session::SessionEntry> unknown_parent_entries = {
+      ava::session::SessionEntry{.id = "child",
+                                 .parent_id = "missing_parent",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-04-29T00:00:00Z",
+                                 .data_json = "{\"text\":\"orphan\"}"},
+  };
+  const auto unknown_parent = ava::session::validate_session_replay(unknown_parent_entries);
+  expect(
+      !unknown_parent.ok() && has_replay_issue(unknown_parent, ava::session::SessionReplayIssueKind::UnknownParentId),
+      "session replay validator flags parent ids that do not reference earlier entries");
+
+  const std::vector<ava::session::SessionEntry> result_without_call_entries = {
+      ava::session::SessionEntry{.id = "tool_result",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-29T00:00:00Z",
+                                 .data_json = "{\"call_id\":\"call_missing\",\"name\":\"read_file\","
+                                              "\"success\":true,\"result\":\"orphan\"}"},
+  };
+  const auto result_without_call = ava::session::validate_session_replay(result_without_call_entries);
+  expect(!result_without_call.ok() &&
+             has_replay_issue(result_without_call, ava::session::SessionReplayIssueKind::ToolResultWithoutCall),
+         "session replay validator flags tool results without earlier tool calls");
+
+  auto mismatch_entries = valid_entries;
+  mismatch_entries.back().data_json =
+      "{\"call_id\":\"call_read\",\"name\":\"bash\",\"success\":true,\"result\":\"wrong tool\"}";
+  const auto mismatch = ava::session::validate_session_replay(mismatch_entries);
+  expect(!mismatch.ok() && has_replay_issue(mismatch, ava::session::SessionReplayIssueKind::ToolResultToolMismatch),
+         "session replay validator flags tool result name mismatches");
+
+  auto unresolved_entries = valid_entries;
+  unresolved_entries.pop_back();
+  const auto unresolved = ava::session::validate_session_replay(unresolved_entries);
+  expect(!unresolved.ok() && has_replay_issue(unresolved, ava::session::SessionReplayIssueKind::UnresolvedToolCall),
+         "session replay validator flags unresolved tool calls");
+
+  auto missing_structured_entries = valid_entries;
+  missing_structured_entries.back().data_json =
+      "{\"call_id\":\"call_read\",\"name\":\"read_file\",\"success\":true,\"status\":\"success\","
+      "\"result\":\"legacy result\"}";
+  const auto missing_structured = ava::session::validate_session_replay(
+      missing_structured_entries,
+      ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
+  expect(!missing_structured.ok() &&
+             has_replay_issue(missing_structured, ava::session::SessionReplayIssueKind::MissingStructuredToolResult),
+         "session replay validator can require structured tool result payloads");
+
+  auto structured_mismatch_entries = valid_entries;
+  structured_mismatch_entries.back().data_json =
+      "{\"call_id\":\"call_read\",\"name\":\"read_file\",\"success\":true,\"status\":\"success\","
+      "\"result\":\"note contents\",\"structured_result\":{\"schema_version\":1,"
+      "\"call_id\":\"call_other\",\"tool\":\"read_file\",\"status\":\"success\",\"ok\":true,"
+      "\"content_type\":\"text/plain\",\"content\":\"note contents\"}}";
+  const auto structured_mismatch = ava::session::validate_session_replay(
+      structured_mismatch_entries,
+      ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
+  expect(!structured_mismatch.ok() &&
+             has_replay_issue(structured_mismatch, ava::session::SessionReplayIssueKind::StructuredToolResultMismatch),
+         "session replay validator flags structured result call/tool/status mismatches");
 }
 
 void test_session_resume_and_listing() {
@@ -1226,6 +1343,7 @@ void run_session_tests() {
   test_session_stats_helper();
   test_session_stats_omits_incomplete_cost_total();
   test_session_stats_flags_legacy_assistant_tokens_without_cost();
+  test_session_replay_validation();
   test_session_resume_and_listing();
   test_session_compaction_entry_round_trip();
   test_session_markdown_export();

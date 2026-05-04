@@ -1,11 +1,23 @@
 #include "ava/provider/registry.h"
 
+#include <cstdlib>
 #include <utility>
 
+#include "ava/config/provider_profiles.h"
 #include "ava/provider/anthropic_provider.h"
+#include "ava/provider/openai_compatible_provider.h"
 #include "ava/provider/openai_provider.h"
 
 namespace ava::provider {
+namespace {
+
+std::string env_or_default(const char* name, std::string fallback) {
+  const char* value = std::getenv(name);
+  if (value == nullptr || std::string_view(value).empty()) return fallback;
+  return value;
+}
+
+}  // namespace
 
 ava::core::VoidResult ProviderRegistry::register_provider(std::string provider_id, Factory factory) {
   if (provider_id.empty()) {
@@ -50,8 +62,40 @@ std::vector<std::string> ProviderRegistry::provider_ids() const {
 
 ProviderRegistry builtin_provider_registry() {
   ProviderRegistry registry;
-  static_cast<void>(registry.register_provider("anthropic", [] { return std::make_unique<AnthropicProvider>(); }));
-  static_cast<void>(registry.register_provider("openai", [] { return std::make_unique<OpenAIProvider>(); }));
+  static_cast<void>(registry.register_provider(ava::config::anthropic_provider_profile().provider_id,
+                                               [] { return std::make_unique<AnthropicProvider>(); }));
+  static_cast<void>(registry.register_provider(ava::config::kimi_provider_profile().provider_id, [] {
+    const auto& profile = ava::config::kimi_provider_profile();
+    return std::make_unique<OpenAICompatibleProvider>(OpenAICompatibleProviderOptions{
+        .base_url = env_or_default(profile.default_base_url_env.c_str(), profile.default_base_url),
+        .chat_completions_path = profile.chat_completions_path,
+        .provider_name = profile.display_name,
+        .reasoning_format = profile.default_reasoning_format,
+        .user_agent = profile.user_agent,
+        .default_temperature = profile.default_temperature,
+        .preserve_reasoning_content = profile.preserve_reasoning_content,
+        .include_stream_usage = profile.include_stream_usage});
+  }));
+  static_cast<void>(registry.register_provider(ava::config::moonshot_provider_profile().provider_id, [] {
+    const auto& profile = ava::config::moonshot_provider_profile();
+    return std::make_unique<OpenAICompatibleProvider>(OpenAICompatibleProviderOptions{
+        .base_url = env_or_default(profile.default_base_url_env.c_str(), profile.default_base_url),
+        .chat_completions_path = profile.chat_completions_path,
+        .provider_name = profile.display_name,
+        .reasoning_format = profile.default_reasoning_format,
+        .include_stream_usage = profile.include_stream_usage});
+  }));
+  static_cast<void>(registry.register_provider(ava::config::openai_provider_profile().provider_id,
+                                               [] { return std::make_unique<OpenAIProvider>(); }));
+  static_cast<void>(registry.register_provider(ava::config::openrouter_provider_profile().provider_id, [] {
+    const auto& profile = ava::config::openrouter_provider_profile();
+    return std::make_unique<OpenAICompatibleProvider>(OpenAICompatibleProviderOptions{
+        .base_url = env_or_default(profile.default_base_url_env.c_str(), profile.default_base_url),
+        .chat_completions_path = profile.chat_completions_path,
+        .provider_name = profile.display_name,
+        .reasoning_format = profile.default_reasoning_format,
+        .include_stream_usage = profile.include_stream_usage});
+  }));
   return registry;
 }
 

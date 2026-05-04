@@ -55,6 +55,11 @@ struct ToolContext {
   std::string current_call_id = {};
   std::shared_ptr<MutationQueue> mutation_queue = nullptr;
   std::shared_ptr<ava::lsp::DiagnosticsProvider> lsp_diagnostics_provider = nullptr;
+  std::filesystem::path plugin_global_plugins_dir = {};
+  std::filesystem::path plugin_project_plugins_dir = {};
+  std::filesystem::path plugin_enablement_file = {};
+  std::filesystem::path mcp_global_config_file = {};
+  std::filesystem::path mcp_project_config_file = {};
 };
 
 struct TextOutput {

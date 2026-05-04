@@ -22,7 +22,8 @@ std::string lowercase(std::string_view value) {
 }
 
 bool contains_any(std::string_view value, const std::vector<std::string_view>& needles) {
-  return std::ranges::any_of(needles, [value](std::string_view needle) { return value.find(needle) != std::string_view::npos; });
+  return std::ranges::any_of(needles,
+                             [value](std::string_view needle) { return value.find(needle) != std::string_view::npos; });
 }
 
 bool equals_any(std::string_view value, const std::vector<std::string_view>& candidates) {
@@ -158,21 +159,18 @@ bool is_secret_path(const std::filesystem::path& path) {
   if (filename == ".env" || filename.starts_with(".env.")) {
     return filename != ".env.example";
   }
-  if (equals_any(filename, {".npmrc", ".netrc", ".pypirc", ".gem/credentials", ".dockerconfigjson",
-                            "credentials.json", "auth.json", "config.json"})) {
+  if (equals_any(filename, {".npmrc", ".netrc", ".pypirc", ".gem/credentials", ".dockerconfigjson", "credentials.json",
+                            "auth.json", "config.json"})) {
     const auto full = lowercase(path.lexically_normal().string());
     return filename != "config.json" || contains_any(full, {"/.docker/", "\\.docker\\"});
   }
 
   const auto full = lowercase(path.string());
-  return contains_any(full, {"id_rsa",     "id_ed25519", "id_ecdsa", "id_dsa", "/.ssh/", "\\.ssh\\",
-                             "/.aws/",    "\\.aws\\",  "/.gnupg/", "\\.gnupg\\", "credentials", "secret",
-                             "token"});
+  return contains_any(full, {"id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "/.ssh/", "\\.ssh\\", "/.aws/", "\\.aws\\",
+                             "/.gnupg/", "\\.gnupg\\", "credentials", "secret", "token"});
 }
 
-bool is_markdown_path(const std::filesystem::path& path) {
-  return lowercase(path.extension().string()) == ".md";
-}
+bool is_markdown_path(const std::filesystem::path& path) { return lowercase(path.extension().string()) == ".md"; }
 
 bool is_planning_markdown(const std::filesystem::path& path) {
   const auto normalized = lowercase(path.lexically_normal().string());
@@ -280,6 +278,34 @@ PermissionDecision decide(const PermissionRequest& request) {
     return {.action = PermissionAction::Ask, .reason = "network fetch requires explicit approval"};
   }
 
+  if (request.operation == Operation::PluginExecute) {
+    return {.action = PermissionAction::Ask, .reason = "plugin subprocess execution requires explicit approval"};
+  }
+
+  if (request.operation == Operation::PluginToolCall) {
+    return {.action = PermissionAction::Ask, .reason = "plugin tool calls require explicit approval"};
+  }
+
+  if (request.operation == Operation::PluginCommandRun) {
+    return {.action = PermissionAction::Ask, .reason = "plugin commands require explicit approval"};
+  }
+
+  if (request.operation == Operation::PluginEventObserve) {
+    return {.action = PermissionAction::Ask, .reason = "plugin event observation requires explicit approval"};
+  }
+
+  if (request.operation == Operation::McpServerLaunch) {
+    return {.action = PermissionAction::Ask, .reason = "MCP server launch requires explicit approval"};
+  }
+
+  if (request.operation == Operation::McpServerConnect) {
+    return {.action = PermissionAction::Ask, .reason = "MCP server connection requires explicit approval"};
+  }
+
+  if (request.operation == Operation::McpToolCall) {
+    return {.action = PermissionAction::Ask, .reason = "MCP tool calls require explicit approval"};
+  }
+
   return {.action = PermissionAction::Allow, .reason = "allowed by default workspace policy"};
 }
 
@@ -296,13 +322,13 @@ PermissionDecision classify_command(std::string_view command) {
     return {.action = PermissionAction::Deny, .reason = "command matches a destructive pattern"};
   }
 
-  if (equals_any(executable, {"bash", "sh", "zsh", "fish", "python", "python3", "node", "perl", "ruby", "php",
-                              "lua", "make", "ninja", "npm", "pnpm", "yarn", "bun", "cargo"})) {
+  if (equals_any(executable, {"bash", "sh", "zsh", "fish", "python", "python3", "node", "perl", "ruby", "php", "lua",
+                              "make", "ninja", "npm", "pnpm", "yarn", "bun", "cargo"})) {
     return {.action = PermissionAction::Deny, .reason = "command can execute arbitrary scripts"};
   }
 
   if (contains_any(value, {"git push", "git reset --hard", "git clean", "npm publish", "pnpm publish", "yarn publish",
-                          "deploy", "terraform apply", "kubectl delete", "sudo "})) {
+                           "deploy", "terraform apply", "kubectl delete", "sudo "})) {
     return {.action = PermissionAction::Ask, .reason = "command can change external or destructive state"};
   }
 
@@ -384,6 +410,20 @@ std::string to_string(Operation operation) {
       return "network.fetch";
     case Operation::LspQuery:
       return "lsp.query";
+    case Operation::PluginExecute:
+      return "plugin.execute";
+    case Operation::PluginToolCall:
+      return "plugin.tool.call";
+    case Operation::PluginCommandRun:
+      return "plugin.command.run";
+    case Operation::PluginEventObserve:
+      return "plugin.event.observe";
+    case Operation::McpServerLaunch:
+      return "mcp.server.launch";
+    case Operation::McpServerConnect:
+      return "mcp.server.connect";
+    case Operation::McpToolCall:
+      return "mcp.tool.call";
   }
   return "unknown";
 }

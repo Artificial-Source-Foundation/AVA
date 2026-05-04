@@ -21,7 +21,7 @@ namespace ava::session {
 namespace {
 
 constexpr std::size_t max_session_line_bytes = 1024 * 1024;
-constexpr long long current_session_entry_version = 1;
+constexpr long long current_session_entry_version = 2;
 
 int hex_value(char ch) {
   if (ch >= '0' && ch <= '9') return ch - '0';
@@ -176,7 +176,7 @@ ava::core::VoidResult validate_entry_version(std::string_view line, const std::f
     return std::unexpected(std::move(error));
   }
   if (!*version) return {};
-  if (**version == current_session_entry_version) return {};
+  if (**version >= 1 && **version <= current_session_entry_version) return {};
 
   auto error = ava::core::Error(ava::core::ErrorCategory::Session, "unsupported session entry version");
   error.with_context("path", path.string());
@@ -424,7 +424,7 @@ ava::core::VoidResult SessionStore::append(const SessionEntry& entry) {
     return std::unexpected(std::move(error));
   }
 
-  std::string line = "{\"version\":1,";
+  std::string line = "{\"version\":" + std::to_string(current_session_entry_version) + ",";
   line += "\"id\":\"" + json_escape(entry.id) + "\",";
   line += "\"parent_id\":\"" + json_escape(entry.parent_id) + "\",";
   line += "\"type\":\"" + std::string(to_string(entry.type)) + "\",";
@@ -661,6 +661,10 @@ std::string to_string(EntryType type) {
       return "mode_change";
     case EntryType::ModelChange:
       return "model_change";
+    case EntryType::ReasoningBlock:
+      return "reasoning_block";
+    case EntryType::ReasoningChange:
+      return "reasoning_change";
     case EntryType::Compaction:
       return "compaction";
     case EntryType::Error:
@@ -680,6 +684,8 @@ ava::core::Result<EntryType> parse_entry_type(std::string_view value) {
   if (value == "permission_decision") return EntryType::PermissionDecision;
   if (value == "mode_change") return EntryType::ModeChange;
   if (value == "model_change") return EntryType::ModelChange;
+  if (value == "reasoning_block") return EntryType::ReasoningBlock;
+  if (value == "reasoning_change") return EntryType::ReasoningChange;
   if (value == "compaction") return EntryType::Compaction;
   if (value == "error") return EntryType::Error;
   if (value == "cancel") return EntryType::Cancel;

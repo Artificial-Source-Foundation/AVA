@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <iomanip>
+#include <iterator>
 #include <map>
 #include <sstream>
 #include <string_view>
@@ -19,10 +20,20 @@ namespace {
 constexpr std::size_t kMaxSummaryValueBytes = 80;
 constexpr std::size_t kMaxToolSummaryBytes = 180;
 
+struct ParsedReasoningBlock {
+  std::string text;
+  std::string format;
+  std::string signature;
+  std::string redacted_data;
+  bool redacted = false;
+};
+
 struct ParsedAssistantTurn {
   std::string text;
+  std::vector<ParsedReasoningBlock> reasoning_blocks;
   std::vector<ProviderToolCall> tool_calls;
   std::optional<ava::provider::TokenUsage> usage;
+  std::string stop_reason;
 };
 
 struct ProviderOutputLimits {
@@ -165,12 +176,39 @@ std::vector<ava::provider::ContentPart> tool_result_content_parts(const ava::ses
   if (call_id.empty()) return {};
   if (!validate_provider_tool_call_id(call_id)) return {};
   auto result = ava::core::json::string_field(entry.data_json, "result").value_or("");
-  return {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolResult,
-                                      .text = truncate_native_tool_result(std::move(result), max_tool_result_context_bytes),
-                                      .tool_call_id = call_id,
-                                      .tool_name = ava::core::json::string_field(entry.data_json, "name").value_or(""),
-                                      .input_json = "",
-                                      .is_error = !bool_field(entry.data_json, "success").value_or(true)}};
+  return {
+      ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolResult,
+                                 .text = truncate_native_tool_result(std::move(result), max_tool_result_context_bytes),
+                                 .tool_call_id = call_id,
+                                 .tool_name = ava::core::json::string_field(entry.data_json, "name").value_or(""),
+                                 .input_json = "",
+                                 .is_error = !bool_field(entry.data_json, "success").value_or(true)}};
+}
+
+std::optional<ava::provider::ContentPart> reasoning_content_part(const ava::session::SessionEntry& entry) {
+  const auto text = ava::core::json::string_field(entry.data_json, "text").value_or("");
+  const auto signature = ava::core::json::string_field(entry.data_json, "signature").value_or("");
+  const auto redacted_data = ava::core::json::string_field(entry.data_json, "redacted_data").value_or("");
+  const bool redacted = bool_field(entry.data_json, "redacted").value_or(false);
+  if (text.empty() && signature.empty() && redacted_data.empty()) return std::nullopt;
+  return ava::provider::ContentPart{
+      .type = ava::provider::ContentPartType::Reasoning,
+      .text = redacted ? std::string{} : text,
+      .tool_call_id = "",
+      .tool_name = "",
+      .input_json = "",
+      .is_error = false,
+      .reasoning_format = ava::core::json::string_field(entry.data_json, "format").value_or(""),
+      .reasoning_signature = signature,
+      .reasoning_redacted_data = redacted_data,
+      .redacted = redacted};
+}
+
+void append_pending_reasoning_parts(std::vector<ava::provider::ContentPart>& target,
+                                    std::vector<ava::provider::ContentPart>& pending) {
+  if (pending.empty()) return;
+  target.insert(target.end(), std::make_move_iterator(pending.begin()), std::make_move_iterator(pending.end()));
+  pending.clear();
 }
 
 std::optional<std::size_t> matching_tool_result_index(const std::vector<ava::session::SessionEntry>& entries,
@@ -431,7 +469,12 @@ ava::core::VoidResult publish_tool_progress(const AgentLoopOptions& options, con
 
 ava::core::VoidResult publish_stream_event(const AgentLoopOptions& options, const ava::provider::StreamEvent& event) {
   if (!options.on_stream_event) return {};
-  return options.on_stream_event(event);
+  auto safe_event = event;
+  safe_event.reasoning_signature_present =
+      safe_event.reasoning_signature_present || !safe_event.reasoning_signature.empty();
+  safe_event.reasoning_signature.clear();
+  safe_event.reasoning_redacted_data.clear();
+  return options.on_stream_event(safe_event);
 }
 
 ava::core::Result<BuiltProviderMessages> build_messages(const ava::session::SessionStore& store,
@@ -535,6 +578,11 @@ ava::provider::TokenUsage with_total_tokens(ava::provider::TokenUsage usage) {
 
 std::size_t output_estimate_bytes(const ParsedAssistantTurn& turn) {
   std::size_t bytes = turn.text.size();
+  for (const auto& reasoning : turn.reasoning_blocks) {
+    bytes += reasoning.text.size();
+    bytes += reasoning.signature.size();
+    bytes += reasoning.redacted_data.size();
+  }
   for (const auto& call : turn.tool_calls) {
     bytes += call.id.size();
     bytes += call.name.size();
@@ -584,6 +632,29 @@ ava::core::VoidResult append_assistant_message(ava::session::SessionStore& store
   return append_entry(store, ava::session::EntryType::AssistantMessage,
                       "{\"text\":\"" + ava::core::json::escape(text) + "\",\"tool_calls\":" +
                           std::to_string(tool_call_count) + ",\"usage\":" + usage_json(usage, cost_usd) + "}");
+}
+
+std::string reasoning_block_data_json(const ParsedReasoningBlock& block, std::string_view provider_id,
+                                      std::string_view model_id) {
+  std::string json = "{\"provider\":\"" + ava::core::json::escape(provider_id) + "\",\"model\":\"" +
+                     ava::core::json::escape(model_id) + "\"";
+  if (!block.format.empty()) json += ",\"format\":\"" + ava::core::json::escape(block.format) + "\"";
+  if (!block.text.empty()) json += ",\"text\":\"" + ava::core::json::escape(block.text) + "\"";
+  if (!block.signature.empty()) json += ",\"signature\":\"" + ava::core::json::escape(block.signature) + "\"";
+  if (!block.redacted_data.empty()) {
+    json += ",\"redacted_data\":\"" + ava::core::json::escape(block.redacted_data) + "\"";
+  }
+  json += ",\"redacted\":";
+  json += block.redacted ? "true" : "false";
+  json += '}';
+  return json;
+}
+
+ava::core::VoidResult append_reasoning_block(ava::session::SessionStore& store, const ParsedReasoningBlock& block,
+                                             std::string_view provider_id, std::string_view model_id) {
+  if (block.text.empty() && block.signature.empty() && block.redacted_data.empty()) return {};
+  return append_entry(store, ava::session::EntryType::ReasoningBlock,
+                      reasoning_block_data_json(block, provider_id, model_id));
 }
 
 ava::core::VoidResult append_tool_call(ava::session::SessionStore& store, const ProviderToolCall& call) {
@@ -648,6 +719,10 @@ bool would_exceed(std::size_t current, std::size_t added, std::size_t limit) {
   return limit > 0 && (current > limit || added > limit - current);
 }
 
+std::size_t reasoning_block_bytes(const ParsedReasoningBlock& block) {
+  return block.text.size() + block.signature.size() + block.redacted_data.size();
+}
+
 bool has_control_byte(std::string_view value) {
   for (const char ch : value) {
     const auto byte = static_cast<unsigned char>(ch);
@@ -681,6 +756,15 @@ ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(const std::vector<av
         output_limit_error("provider output event limit exceeded", "max_provider_events", limits.max_events));
   }
   ParsedAssistantTurn turn;
+  std::optional<ParsedReasoningBlock> current_reasoning;
+  auto finish_reasoning = [&]() {
+    if (!current_reasoning) return;
+    if (!current_reasoning->text.empty() || !current_reasoning->signature.empty() ||
+        !current_reasoning->redacted_data.empty()) {
+      turn.reasoning_blocks.push_back(std::move(*current_reasoning));
+    }
+    current_reasoning = std::nullopt;
+  };
   bool done = false;
   for (const auto& event : events) {
     if (event.usage) turn.usage = with_total_tokens(*event.usage);
@@ -690,6 +774,61 @@ ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(const std::vector<av
                                                   limits.max_assistant_text_bytes));
       }
       turn.text += event.text;
+    } else if (event.type == ava::provider::StreamEventType::ReasoningStart) {
+      finish_reasoning();
+      current_reasoning = ParsedReasoningBlock{.text = "",
+                                               .format = event.reasoning_format,
+                                               .signature = event.reasoning_signature,
+                                               .redacted_data = event.reasoning_redacted_data,
+                                               .redacted = event.redacted};
+      const auto private_bytes = event.reasoning_signature.size() + event.reasoning_redacted_data.size();
+      if (would_exceed(std::size_t{0}, private_bytes, limits.max_assistant_text_bytes)) {
+        return std::unexpected(output_limit_error("reasoning byte limit exceeded", "max_assistant_text_bytes",
+                                                  limits.max_assistant_text_bytes));
+      }
+    } else if (event.type == ava::provider::StreamEventType::ReasoningDelta) {
+      if (!current_reasoning) {
+        current_reasoning = ParsedReasoningBlock{.text = "",
+                                                 .format = event.reasoning_format,
+                                                 .signature = "",
+                                                 .redacted_data = "",
+                                                 .redacted = event.redacted};
+      }
+      if (current_reasoning->format.empty()) current_reasoning->format = event.reasoning_format;
+      current_reasoning->redacted = current_reasoning->redacted || event.redacted;
+      if (would_exceed(current_reasoning->text.size(), event.text.size(), limits.max_assistant_text_bytes)) {
+        return std::unexpected(output_limit_error("reasoning text byte limit exceeded", "max_assistant_text_bytes",
+                                                  limits.max_assistant_text_bytes));
+      }
+      current_reasoning->text += event.text;
+      if (limits.max_assistant_text_bytes > 0 &&
+          reasoning_block_bytes(*current_reasoning) > limits.max_assistant_text_bytes) {
+        return std::unexpected(output_limit_error("reasoning byte limit exceeded", "max_assistant_text_bytes",
+                                                  limits.max_assistant_text_bytes));
+      }
+    } else if (event.type == ava::provider::StreamEventType::ReasoningEnd) {
+      if (!current_reasoning) {
+        current_reasoning = ParsedReasoningBlock{.text = "",
+                                                 .format = event.reasoning_format,
+                                                 .signature = "",
+                                                 .redacted_data = "",
+                                                 .redacted = event.redacted};
+      }
+      if (current_reasoning->format.empty()) current_reasoning->format = event.reasoning_format;
+      if (!event.reasoning_signature.empty()) current_reasoning->signature = event.reasoning_signature;
+      if (!event.reasoning_redacted_data.empty()) current_reasoning->redacted_data = event.reasoning_redacted_data;
+      current_reasoning->redacted = current_reasoning->redacted || event.redacted;
+      const auto private_bytes = event.reasoning_signature.size() + event.reasoning_redacted_data.size();
+      if (would_exceed(std::size_t{0}, private_bytes, limits.max_assistant_text_bytes)) {
+        return std::unexpected(output_limit_error("reasoning byte limit exceeded", "max_assistant_text_bytes",
+                                                  limits.max_assistant_text_bytes));
+      }
+      if (limits.max_assistant_text_bytes > 0 &&
+          reasoning_block_bytes(*current_reasoning) > limits.max_assistant_text_bytes) {
+        return std::unexpected(output_limit_error("reasoning byte limit exceeded", "max_assistant_text_bytes",
+                                                  limits.max_assistant_text_bytes));
+      }
+      finish_reasoning();
     } else if (event.type == ava::provider::StreamEventType::ToolCallStart) {
       if (auto valid_id = validate_provider_tool_call_id(event.tool_call_id); !valid_id) {
         return std::unexpected(std::move(valid_id.error()));
@@ -708,13 +847,15 @@ ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(const std::vector<av
       call.arguments_json += event.text;
     } else if (event.type == ava::provider::StreamEventType::Done) {
       done = true;
+      if (!event.stop_reason.empty()) turn.stop_reason = event.stop_reason;
     } else if (event.type == ava::provider::StreamEventType::Error) {
       auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "provider stream error");
       error.with_context("message", event.error_message);
       return std::unexpected(std::move(error));
     }
   }
-  if (!done && turn.text.empty() && turn.tool_calls.empty()) {
+  finish_reasoning();
+  if (!done && turn.text.empty() && turn.reasoning_blocks.empty() && turn.tool_calls.empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "provider response was empty"));
   }
   return turn;
@@ -753,18 +894,22 @@ ava::core::Result<std::vector<ava::provider::ChatMessage>> build_provider_messag
   std::vector<std::string> pending_native_tool_use_ids;
   std::vector<std::string> emitted_native_tool_use_ids;
   std::vector<std::string> suppressed_native_tool_use_ids;
+  std::vector<ava::provider::ContentPart> pending_reasoning_parts;
   for (std::size_t index = start_index; index < entries.size(); ++index) {
     const auto& entry = entries[index];
     if (entry.type == ava::session::EntryType::UserMessage) {
+      pending_reasoning_parts.clear();
       messages.push_back(ava::provider::ChatMessage{.role = "user", .content = entry_text(entry)});
+    } else if (entry.type == ava::session::EntryType::ReasoningBlock) {
+      if (auto part = reasoning_content_part(entry)) pending_reasoning_parts.push_back(std::move(*part));
     } else if (entry.type == ava::session::EntryType::AssistantMessage) {
       const auto tool_call_count = assistant_tool_call_count(entry);
-      if (const auto batch = collect_native_tool_replay_batch(entries, index, tool_call_count,
-                                                             emitted_native_tool_use_ids,
-                                                             options.max_tool_result_context_bytes)) {
+      if (const auto batch = collect_native_tool_replay_batch(
+              entries, index, tool_call_count, emitted_native_tool_use_ids, options.max_tool_result_context_bytes)) {
         std::string assistant_content;
         append_fallback_text(assistant_content, entry_text(entry));
         std::vector<ava::provider::ContentPart> assistant_parts;
+        append_pending_reasoning_parts(assistant_parts, pending_reasoning_parts);
         if (!entry_text(entry).empty()) {
           assistant_parts.push_back(ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text,
                                                                .text = entry_text(entry),
@@ -783,12 +928,10 @@ ava::core::Result<std::vector<ava::provider::ChatMessage>> build_provider_messag
           user_parts.push_back(pair.tool_result);
           emitted_native_tool_use_ids.push_back(pair.tool_use.tool_call_id);
         }
-        messages.push_back(ava::provider::ChatMessage{.role = "assistant",
-                                                      .content = std::move(assistant_content),
-                                                      .content_parts = std::move(assistant_parts)});
-        messages.push_back(ava::provider::ChatMessage{.role = "user",
-                                                      .content = std::move(user_content),
-                                                      .content_parts = std::move(user_parts)});
+        messages.push_back(ava::provider::ChatMessage{
+            .role = "assistant", .content = std::move(assistant_content), .content_parts = std::move(assistant_parts)});
+        messages.push_back(ava::provider::ChatMessage{
+            .role = "user", .content = std::move(user_content), .content_parts = std::move(user_parts)});
         index = batch->end_index - 1;
         continue;
       }
@@ -797,7 +940,22 @@ ava::core::Result<std::vector<ava::provider::ChatMessage>> build_provider_messag
           suppressed_native_tool_use_ids.push_back(std::move(id));
         }
       }
-      messages.push_back(ava::provider::ChatMessage{.role = "assistant", .content = entry_text(entry)});
+      if (!pending_reasoning_parts.empty()) {
+        std::vector<ava::provider::ContentPart> assistant_parts;
+        append_pending_reasoning_parts(assistant_parts, pending_reasoning_parts);
+        if (!entry_text(entry).empty()) {
+          assistant_parts.push_back(ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text,
+                                                               .text = entry_text(entry),
+                                                               .tool_call_id = "",
+                                                               .tool_name = "",
+                                                               .input_json = "",
+                                                               .is_error = false});
+        }
+        messages.push_back(ava::provider::ChatMessage{
+            .role = "assistant", .content = entry_text(entry), .content_parts = std::move(assistant_parts)});
+      } else {
+        messages.push_back(ava::provider::ChatMessage{.role = "assistant", .content = entry_text(entry)});
+      }
     } else if (entry.type == ava::session::EntryType::ToolCall) {
       const auto call_id = ava::core::json::string_field(entry.data_json, "call_id").value_or("");
       pending_native_tool_use_ids.erase(
@@ -809,7 +967,7 @@ ava::core::Result<std::vector<ava::provider::ChatMessage>> build_provider_messag
         static_cast<void>(erase_first_string(suppressed_native_tool_use_ids, call_id));
       }
       const auto duplicate_native_id = std::find(emitted_native_tool_use_ids.begin(), emitted_native_tool_use_ids.end(),
-                                                call_id) != emitted_native_tool_use_ids.end();
+                                                 call_id) != emitted_native_tool_use_ids.end();
       if (suppressed_native_id || duplicate_native_id || !next_entry_is_matching_tool_result(entries, index, call_id)) {
         content_parts.clear();
       }
@@ -817,9 +975,8 @@ ava::core::Result<std::vector<ava::provider::ChatMessage>> build_provider_messag
         pending_native_tool_use_ids.push_back(content_parts.front().tool_call_id);
         emitted_native_tool_use_ids.push_back(content_parts.front().tool_call_id);
       }
-      messages.push_back(ava::provider::ChatMessage{.role = "assistant",
-                                                    .content = tool_call_context_text(entry),
-                                                    .content_parts = std::move(content_parts)});
+      messages.push_back(ava::provider::ChatMessage{
+          .role = "assistant", .content = tool_call_context_text(entry), .content_parts = std::move(content_parts)});
     } else if (entry.type == ava::session::EntryType::ToolResult) {
       const auto call_id = ava::core::json::string_field(entry.data_json, "call_id").value_or("");
       const auto pending_native_tool_use =
@@ -829,8 +986,9 @@ ava::core::Result<std::vector<ava::provider::ChatMessage>> build_provider_messag
       messages.push_back(ava::provider::ChatMessage{
           .role = "user",
           .content = truncate_tool_context(tool_context_text(entry), options.max_tool_result_context_bytes),
-          .content_parts = matched_native_tool_use ? tool_result_content_parts(entry, options.max_tool_result_context_bytes)
-                                                   : std::vector<ava::provider::ContentPart>{}});
+          .content_parts = matched_native_tool_use
+                               ? tool_result_content_parts(entry, options.max_tool_result_context_bytes)
+                               : std::vector<ava::provider::ContentPart>{}});
     }
   }
 
@@ -870,6 +1028,21 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
       return append_assistant_message(store, text, tool_call_count, usage, cost_usd);
     }
     return append_assistant_message(store, text, tool_call_count, usage, cost_usd);
+  };
+  auto append_reasoning_blocks_locked = [&](const std::vector<ParsedReasoningBlock>& blocks) -> ava::core::VoidResult {
+    auto append_all = [&]() -> ava::core::VoidResult {
+      for (const auto& block : blocks) {
+        if (auto appended = append_reasoning_block(store, block, options_.provider_id, options_.model_id); !appended) {
+          return appended;
+        }
+      }
+      return {};
+    };
+    if (options_.session_mutex) {
+      std::lock_guard lock(*options_.session_mutex);
+      return append_all();
+    }
+    return append_all();
   };
   auto append_tool_call_locked = [&](const ProviderToolCall& call) -> ava::core::VoidResult {
     if (options_.session_mutex) {
@@ -1032,18 +1205,21 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
 
     auto messages = build_messages_locked();
     if (!messages) return std::unexpected(messages.error());
-    const auto tool_schemas = options_.model_supports_tools ? ToolDispatcher::tool_schemas_json(tool_context)
-                                                            : std::vector<std::string>{};
-    const ava::provider::ProviderRequest provider_request{.provider_id = options_.provider_id,
-                                                          .model_id = options_.model_id,
-                                                           .system_prompt = options_.system_prompt,
-                                                           .messages = messages->messages,
-                                                           .tools_json = tool_schemas,
-                                                           .stream = options_.stream && options_.model_supports_streaming,
-                                                           .max_output_tokens = options_.model_max_output_tokens};
+    const auto tool_schemas =
+        options_.model_supports_tools ? ToolDispatcher::tool_schemas_json(tool_context) : std::vector<std::string>{};
+    const ava::provider::ProviderRequest provider_request{
+        .provider_id = options_.provider_id,
+        .model_id = options_.model_id,
+        .system_prompt = options_.system_prompt,
+        .messages = messages->messages,
+        .tools_json = tool_schemas,
+        .stream = options_.stream && options_.model_supports_streaming,
+        .max_output_tokens = options_.model_max_output_tokens,
+        .reasoning = options_.reasoning};
     const ava::provider::ProviderAuthContext auth_context{
         .access_token = options_.access_token,
-        .credential_type = options_.openai_oauth && options_.credential_type == "bearer" ? "oauth" : options_.credential_type,
+        .credential_type =
+            options_.openai_oauth && options_.credential_type == "bearer" ? "oauth" : options_.credential_type,
         .account_id = options_.openai_account_id};
     auto request = provider.build_request(provider_request, auth_context);
     if (!request) {
@@ -1063,7 +1239,8 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
     std::size_t streamed_assistant_text_bytes = 0;
     std::map<std::string, std::size_t> streamed_tool_argument_bytes;
     bool processed_stream_chunks = false;
-    auto append_stream_events = [&](std::vector<ava::provider::StreamEvent> new_events) -> ava::core::VoidResult {
+    auto append_stream_events = [&](std::vector<ava::provider::StreamEvent> new_events,
+                                    bool publish_all_events = true) -> ava::core::VoidResult {
       for (auto& event : new_events) {
         if (options_.max_provider_events > 0 && provider_events.size() >= options_.max_provider_events) {
           return std::unexpected(output_limit_error("provider output event limit exceeded", "max_provider_events",
@@ -1075,6 +1252,18 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
                                                       options_.max_assistant_text_bytes));
           }
           streamed_assistant_text_bytes += event.text.size();
+        } else if (event.type == ava::provider::StreamEventType::ReasoningStart ||
+                   event.type == ava::provider::StreamEventType::ReasoningDelta ||
+                   event.type == ava::provider::StreamEventType::ReasoningEnd) {
+          const auto event_bytes =
+              event.type == ava::provider::StreamEventType::ReasoningEnd
+                  ? event.reasoning_signature.size() + event.reasoning_redacted_data.size()
+                  : event.text.size() + event.reasoning_signature.size() + event.reasoning_redacted_data.size();
+          if (would_exceed(streamed_assistant_text_bytes, event_bytes, options_.max_assistant_text_bytes)) {
+            return std::unexpected(output_limit_error("reasoning byte limit exceeded", "max_assistant_text_bytes",
+                                                      options_.max_assistant_text_bytes));
+          }
+          streamed_assistant_text_bytes += event_bytes;
         } else if (event.type == ava::provider::StreamEventType::ToolCallStart) {
           if (auto valid_id = validate_provider_tool_call_id(event.tool_call_id); !valid_id) {
             return std::unexpected(std::move(valid_id.error()));
@@ -1090,8 +1279,14 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
           }
           bytes += event.text.size();
         }
-        if (auto published = publish_stream_event(options_, event); !published) {
-          return std::unexpected(std::move(published.error()));
+        const bool should_publish = publish_all_events ||
+                                    event.type == ava::provider::StreamEventType::ReasoningStart ||
+                                    event.type == ava::provider::StreamEventType::ReasoningDelta ||
+                                    event.type == ava::provider::StreamEventType::ReasoningEnd;
+        if (should_publish) {
+          if (auto published = publish_stream_event(options_, event); !published) {
+            return std::unexpected(std::move(published.error()));
+          }
         }
         provider_events.push_back(std::move(event));
       }
@@ -1224,7 +1419,15 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
         static_cast<void>(append_error_locked(events.error()));
         return std::unexpected(events.error());
       }
-      provider_events = std::move(*events);
+      if (auto appended = append_stream_events(std::move(*events), false); !appended) {
+        if (auto retry = prepare_context_overflow_retry(appended.error()); !retry) {
+          return std::unexpected(std::move(retry.error()));
+        } else if (*retry) {
+          continue;
+        }
+        static_cast<void>(append_error_locked(appended.error()));
+        return std::unexpected(std::move(appended.error()));
+      }
     }
 
     auto turn = parse_assistant_turn(provider_events,
@@ -1256,6 +1459,9 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
       accumulated_cost_known = false;
       result.cost_usd = std::nullopt;
     }
+    if (auto appended = append_reasoning_blocks_locked(turn->reasoning_blocks); !appended) {
+      return std::unexpected(appended.error());
+    }
     if (auto appended = append_assistant_message_locked(turn->text, turn->tool_calls.size(), usage, cost_usd);
         !appended) {
       return std::unexpected(appended.error());
@@ -1264,7 +1470,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
     if (turn->tool_calls.empty()) {
       result.final_text = turn->text;
       result.tool_iterations = tool_iterations;
-      result.stop_reason = "completed";
+      result.stop_reason = turn->stop_reason.empty() ? "completed" : turn->stop_reason;
       return result;
     }
 

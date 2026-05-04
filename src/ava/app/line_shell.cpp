@@ -1,5 +1,6 @@
 #include "ava/app/line_shell.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -14,7 +15,10 @@
 
 #include "ava/app/command_catalog.h"
 #include "ava/app/commands.h"
+#include "ava/app/reasoning_controls.h"
 #include "ava/config/auth.h"
+#include "ava/config/model_profiles.h"
+#include "ava/core/version.h"
 #include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
 #include "ava/session/stats.h"
@@ -25,7 +29,7 @@
 
 namespace {
 
-constexpr std::string_view kAvaTuiVersion = "0.32";
+namespace version = ava::core::version;
 
 void print_shell_help() { std::cout << ava::app::command_help_text() << '\n'; }
 
@@ -133,7 +137,7 @@ std::optional<std::string> compact_token_status(const ava::session::SessionStats
   if (!tokens) return std::nullopt;
 
   std::ostringstream output;
-  output << "tokens " << format_compact_token_count(*tokens);
+  output << format_compact_token_count(*tokens);
   if (const auto percent = format_context_window_percent(*tokens, context_window_tokens)) {
     output << " (" << *percent << ')';
   }
@@ -269,7 +273,7 @@ LineResult handle_line(ShellState& state, const std::string& line,
 }
 
 int run_line_shell(ShellState state) {
-  std::cout << "AVA 0.32 terminal shell\n";
+  std::cout << "AVA " << version::kDisplayVersion << " terminal shell\n";
   std::cout << "mode: " << ava::agent::to_string(state.session.mode)
             << " | session: " << state.session.store.session_id() << "\n";
   std::cout << "provider: " << state.session.model.provider_id << " | model: " << state.session.model.model_id << "\n";
@@ -309,16 +313,19 @@ int run_tui(ShellState state) {
   auto result = ava::tui::run_interactive_composer(ava::tui::TuiRuntimeOptions{
       .mode = ava::agent::to_string(state.session.mode),
       .provider = state.session.model.provider_id,
-      .model = state.session.model.model_id,
+      .model = state.session.model.display_name.empty() ? ava::config::model_display_label(state.session.model.model_id)
+                                                        : state.session.model.display_name,
       .session_id = state.session.store.session_id(),
       .workspace =
           state.session.current_dir.empty() ? state.session.workspace_dir.string() : state.session.current_dir.string(),
       .git_branch = git_branch_for_sidebar(state.session.workspace_dir),
-      .app_version = std::string(kAvaTuiVersion),
+      .app_version = std::string(version::kDisplayVersion),
+      .context_source_count = state.session.context_sources.size(),
       .initial_status = keybind_status,
       .slash_commands = ava::app::command_catalog_slash_items(hotkeys),
       .key_bindings = key_bindings,
       .token_status_provider = [&state]() { return token_status_for_session(state.session); },
+      .reasoning_status_provider = [&state]() { return ava::app::reasoning_status_for_session(state.session); },
       .on_submit =
           [&state, hotkeys](const std::string& submitted,
                             const ava::permissions::PermissionResolver& permission_resolver,
@@ -334,6 +341,9 @@ int run_tui(ShellState state) {
         auto result = ava::app::run_command(state.session, ava::app::CommandRequest{.command = "/mode"});
         if (!result) return std::unexpected(std::move(result.error()));
         return ava::agent::to_string(state.session.mode);
+      },
+      .on_cycle_reasoning = [&state]() -> ava::core::Result<std::string> {
+        return ava::app::cycle_runtime_reasoning(state.session);
       }});
   std::cout << std::flush;
   return result;

@@ -6,6 +6,15 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(AVA_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(AVA_VERSION_DISPLAY "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+file(MAKE_DIRECTORY "${AVA_GENERATED_INCLUDE_DIR}/ava/core")
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/ava/core/version.h.in"
+  "${AVA_GENERATED_INCLUDE_DIR}/ava/core/version.h"
+  @ONLY
+)
+
 option(AVA_BUILD_TESTS "Build AVA tests" ON)
 option(AVA_ENABLE_SANITIZERS "Build AVA with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
@@ -36,19 +45,33 @@ add_library(ava_core
   src/ava/agent/mode.cpp
   src/ava/agent/question.cpp
   src/ava/agent/tool_dispatcher.cpp
+  src/ava/agent/tool_registry.cpp
   src/ava/config/auth.cpp
   src/ava/config/model_config.cpp
+  src/ava/config/model_profiles.cpp
   src/ava/config/openai_oauth.cpp
+  src/ava/config/provider_profiles.cpp
   src/ava/config/prompt_config.cpp
+  src/ava/config/reasoning_profiles.cpp
   src/ava/config/xdg_paths.cpp
   src/ava/context/context_loader.cpp
   src/ava/core/error.cpp
   src/ava/core/ids.cpp
   src/ava/core/json.cpp
   src/ava/lsp/lsp_client.cpp
+  src/ava/mcp/config.cpp
+  src/ava/mcp/stdio_client.cpp
+  src/ava/mcp/tool_broker.cpp
   src/ava/permissions/permission.cpp
+  src/ava/plugin/diagnostics.cpp
+  src/ava/plugin/discovery.cpp
+  src/ava/plugin/enablement.cpp
+  src/ava/plugin/manifest.cpp
+  src/ava/plugin/runner.cpp
+  src/ava/plugin/tool_broker.cpp
   src/ava/provider/curl_transport.cpp
   src/ava/provider/anthropic_provider.cpp
+  src/ava/provider/openai_compatible_provider.cpp
   src/ava/provider/openai_provider.cpp
   src/ava/provider/provider.cpp
   src/ava/provider/provider_utils.cpp
@@ -69,7 +92,7 @@ add_library(ava_core
   src/ava/tools/webfetch_tool.cpp
 )
 
-target_include_directories(ava_core PUBLIC src)
+target_include_directories(ava_core PUBLIC src "${AVA_GENERATED_INCLUDE_DIR}")
 ava_apply_warnings(ava_core)
 ava_apply_sanitizers(ava_core)
 
@@ -100,7 +123,9 @@ add_library(ava_app
   src/ava/app/events.cpp
   src/ava/app/headless_policy.cpp
   src/ava/app/line_shell.cpp
+  src/ava/app/plugin_event_hooks.cpp
   src/ava/app/print_mode.cpp
+  src/ava/app/reasoning_controls.cpp
   src/ava/app/rpc_mode.cpp
   src/ava/app/runtime.cpp
 )
@@ -131,6 +156,11 @@ if(AVA_BUILD_TESTS)
   ava_apply_warnings(ava_fake_lsp_server)
   ava_apply_sanitizers(ava_fake_lsp_server)
 
+  add_executable(ava_fake_mcp_server tests/support/fake_mcp_server.cpp)
+  target_link_libraries(ava_fake_mcp_server PRIVATE ava_core)
+  ava_apply_warnings(ava_fake_mcp_server)
+  ava_apply_sanitizers(ava_fake_mcp_server)
+
   add_executable(ava_tests
     tests/agent_tool_dispatcher_tests.cpp
     tests/app_runtime_tests.cpp
@@ -139,6 +169,8 @@ if(AVA_BUILD_TESTS)
     tests/core_mode_json_permissions_tests.cpp
     tests/events_tests.cpp
     tests/lsp_tests.cpp
+    tests/mcp_tests.cpp
+    tests/plugin_tests.cpp
     tests/provider_anthropic_tests.cpp
     tests/provider_openai_tests.cpp
     tests/session_tests.cpp
@@ -146,8 +178,9 @@ if(AVA_BUILD_TESTS)
     tests/tui_composer_tests.cpp
   )
   target_link_libraries(ava_tests PRIVATE ava_core ava_tui ava_app ava_test_support)
-  add_dependencies(ava_tests ava_fake_lsp_server)
+  add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server)
   target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")
+  target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_FILE:ava_fake_mcp_server>")
   ava_apply_warnings(ava_tests)
   ava_apply_sanitizers(ava_tests)
   add_test(NAME ava_tests COMMAND ava_tests)

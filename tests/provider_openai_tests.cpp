@@ -35,6 +35,7 @@
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 #include "ava/permissions/permission.h"
+#include "ava/provider/openai_compatible_provider.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/registry.h"
 #include "ava/session/compaction.h"
@@ -75,7 +76,8 @@ class StreamingFakeTransport final : public ava::provider::Transport {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
     }
     if (on_body_chunk && !response.body.empty()) {
-      if (auto delivered = on_body_chunk(response.body); !delivered) return std::unexpected(std::move(delivered.error()));
+      if (auto delivered = on_body_chunk(response.body); !delivered)
+        return std::unexpected(std::move(delivered.error()));
     }
     return response;
   }
@@ -141,6 +143,43 @@ void test_openai_provider_contract() {
                                                          "oauth-token");
   expect(non_stream_request && non_stream_request->body.find("\"stream\":false") != std::string::npos,
          "OpenAI request preserves stream=false body field");
+
+  const auto reasoning_request = provider.build_request(
+      ava::provider::ProviderRequest{.provider_id = "openai",
+                                     .model_id = "gpt-5.5",
+                                     .system_prompt = "system",
+                                     .messages = {},
+                                     .tools_json = {},
+                                     .reasoning = ava::provider::ProviderReasoningOptions{.type = "low"}},
+      "oauth-token");
+  expect(reasoning_request && reasoning_request->body.find("\"reasoning\":{\"effort\":\"low\"") != std::string::npos &&
+             reasoning_request->body.find("\"summary\":\"auto\"") != std::string::npos,
+         "OpenAI request serializes reasoning effort with visible summary request");
+
+  const auto invalid_reasoning_budget = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "openai",
+          .model_id = "gpt-5.5",
+          .system_prompt = "system",
+          .messages = {},
+          .tools_json = {},
+          .reasoning = ava::provider::ProviderReasoningOptions{.type = "low", .budget_tokens = 1024}},
+      "oauth-token");
+  expect(!invalid_reasoning_budget &&
+             invalid_reasoning_budget.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "OpenAI request rejects budgeted reasoning options");
+
+  const auto invalid_reasoning_level = provider.build_request(
+      ava::provider::ProviderRequest{.provider_id = "openai",
+                                     .model_id = "gpt-5.5",
+                                     .system_prompt = "system",
+                                     .messages = {},
+                                     .tools_json = {},
+                                     .reasoning = ava::provider::ProviderReasoningOptions{.type = "ultra"}},
+      "oauth-token");
+  expect(!invalid_reasoning_level &&
+             invalid_reasoning_level.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "OpenAI request rejects unsupported reasoning effort");
 
   const auto native_parts_request = provider.build_request(
       ava::provider::ProviderRequest{
@@ -263,21 +302,51 @@ void test_openai_provider_contract() {
       "data: [DONE]\n\n");
   expect(output_item_tool && output_item_tool->size() == 4 &&
              (*output_item_tool)[0].type == ava::provider::StreamEventType::ToolCallStart &&
-             (*output_item_tool)[0].tool_call_id == "call_live" &&
-             (*output_item_tool)[0].tool_name == "read_file" &&
+             (*output_item_tool)[0].tool_call_id == "call_live" && (*output_item_tool)[0].tool_name == "read_file" &&
              (*output_item_tool)[1].type == ava::provider::StreamEventType::ToolCallDelta &&
              (*output_item_tool)[1].tool_call_id == "call_live" &&
              (*output_item_tool)[1].text.find("smoke.txt") != std::string::npos,
          "OpenAI output_item.added function calls preserve tool names for argument deltas");
+
+  auto reasoning_summary = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\"}}\n\n"
+      "data: {\"type\":\"response.reasoning_summary_part.added\",\"item_id\":\"rs_1\"}\n\n"
+      "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"plan\"}\n\n"
+      "data: {\"type\":\"response.reasoning_summary_text.done\",\"text\":\"plan\"}\n\n"
+      "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\n"
+      "data: [DONE]\n\n");
+  expect(reasoning_summary && reasoning_summary->size() == 5 &&
+             (*reasoning_summary)[0].type == ava::provider::StreamEventType::ReasoningStart &&
+             (*reasoning_summary)[0].reasoning_format == "openai_responses" &&
+             (*reasoning_summary)[1].type == ava::provider::StreamEventType::ReasoningDelta &&
+             (*reasoning_summary)[1].text == "plan" &&
+             (*reasoning_summary)[2].type == ava::provider::StreamEventType::ReasoningEnd &&
+             (*reasoning_summary)[3].type == ava::provider::StreamEventType::TextDelta &&
+             (*reasoning_summary)[3].text == "answer" &&
+             (*reasoning_summary)[4].type == ava::provider::StreamEventType::Done,
+         "OpenAI Responses SSE emits reasoning summary before answer text");
+  auto reasoning_done_only = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"rs_2\",\"type\":\"reasoning\"}}\n\n"
+      "data: {\"type\":\"response.reasoning_summary_text.done\",\"text\":\"done-only plan\"}\n\n"
+      "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\n"
+      "data: [DONE]\n\n");
+  expect(reasoning_done_only && reasoning_done_only->size() == 5 &&
+             (*reasoning_done_only)[0].type == ava::provider::StreamEventType::ReasoningStart &&
+             (*reasoning_done_only)[1].type == ava::provider::StreamEventType::ReasoningDelta &&
+             (*reasoning_done_only)[1].text == "done-only plan" &&
+             (*reasoning_done_only)[2].type == ava::provider::StreamEventType::ReasoningEnd &&
+             (*reasoning_done_only)[3].type == ava::provider::StreamEventType::TextDelta &&
+             (*reasoning_done_only)[4].type == ava::provider::StreamEventType::Done,
+         "OpenAI Responses SSE preserves done-only reasoning summary text");
   auto http_error = ava::provider::parse_openai_sse_response(ava::provider::HttpResponse{
       .status_code = 401, .headers = {}, .body = "{\"error\":\"bad auth\",\"Authorization\":\"Bearer secret\"}"});
   expect(!http_error && http_error.error().category() == ava::core::ErrorCategory::Provider &&
-              http_error.error().message().find("401") != std::string::npos,
+             http_error.error().message().find("401") != std::string::npos,
          "OpenAI auth response is normalized as a provider error with status context");
   if (!http_error) {
     const auto formatted = http_error.error().format();
     expect(formatted.find("provider_error_kind: authentication") != std::string::npos &&
-                formatted.find("body_snippet") != std::string::npos && formatted.find("bad auth") != std::string::npos &&
+               formatted.find("body_snippet") != std::string::npos && formatted.find("bad auth") != std::string::npos &&
                formatted.find("Bearer secret") == std::string::npos,
            "OpenAI non-200 response includes normalized kind and sanitized body snippet context");
   }
@@ -290,15 +359,24 @@ void test_openai_provider_contract() {
       ava::provider::is_auth_status(401) && ava::provider::is_auth_status(403) && !ava::provider::is_auth_status(429),
       "OpenAI auth status helper classifies auth failures");
   expect(ava::provider::is_retryable_status(429) && ava::provider::is_retryable_status(500) &&
-              !ava::provider::is_retryable_status(401),
+             !ava::provider::is_retryable_status(401),
          "OpenAI retryable status helper classifies transient failures");
+  expect(ava::provider::classify_provider_error(
+             ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "Input token length too long"}) ==
+             ava::provider::ProviderErrorKind::ContextOverflow,
+         "provider error classifier recognizes Kimi input token overflow wording");
+  expect(ava::provider::classify_provider_error(ava::provider::HttpResponse{
+             .status_code = 400, .headers = {}, .body = "Your request exceeded model token limit : 131072"}) ==
+             ava::provider::ProviderErrorKind::ContextOverflow,
+         "provider error classifier recognizes Kimi combined model token overflow wording");
+  expect(ava::provider::classify_provider_error(
+             ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "exceeded model token limit"}) ==
+             ava::provider::ProviderErrorKind::ContextOverflow,
+         "provider error classifier recognizes short Kimi model token overflow wording");
 
-  ava::tests::FakeTransport retry_inner({ava::provider::HttpResponse{.status_code = 429,
-                                                                      .headers = {{"Retry-After", "0"}},
-                                                                      .body = "rate limited"},
-                                        ava::provider::HttpResponse{.status_code = 200,
-                                                                    .headers = {},
-                                                                    .body = "ok"}});
+  ava::tests::FakeTransport retry_inner(
+      {ava::provider::HttpResponse{.status_code = 429, .headers = {{"Retry-After", "0"}}, .body = "rate limited"},
+       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
   ava::provider::RetryTransport retry_transport(
       retry_inner, ava::provider::RetryOptions{.max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0});
   const auto retry_request = ava::provider::HttpRequest{.method = "POST",
@@ -320,18 +398,14 @@ void test_openai_provider_contract() {
   expect(retried_transport_error && retried_transport_error->status_code == 200 && failing_once.requests().size() == 2,
          "retry transport retries retryable transport errors");
 
-  StreamingFakeTransport streaming_inner({ava::provider::HttpResponse{.status_code = 429,
-                                                                       .headers = {{"Retry-After", "0"}},
-                                                                       .body = ""},
-                                         ava::provider::HttpResponse{.status_code = 200,
-                                                                     .headers = {},
-                                                                     .body = "data: [DONE]\n\n"}});
+  StreamingFakeTransport streaming_inner(
+      {ava::provider::HttpResponse{.status_code = 429, .headers = {{"Retry-After", "0"}}, .body = ""},
+       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "data: [DONE]\n\n"}});
   ava::provider::RetryTransport streaming_retry_transport(
       streaming_inner, ava::provider::RetryOptions{.max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0});
   std::string streamed_body;
   auto streaming_retry = streaming_retry_transport.send_streaming(
-      retry_request,
-      [&streamed_body](std::string_view chunk) -> ava::core::VoidResult {
+      retry_request, [&streamed_body](std::string_view chunk) -> ava::core::VoidResult {
         streamed_body.append(chunk);
         return {};
       });
@@ -339,9 +413,18 @@ void test_openai_provider_contract() {
              streamed_body == "data: [DONE]\n\n",
          "retry transport retries rate-limited streaming responses and only delivers final chunks");
 
-  auto completed = ava::provider::parse_openai_sse("data: {\"type\":\"response.completed\"}\n\n");
-  expect(completed && completed->size() == 1 && (*completed)[0].type == ava::provider::StreamEventType::Done,
+  auto completed = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n");
+  expect(completed && completed->size() == 1 && (*completed)[0].type == ava::provider::StreamEventType::Done &&
+             (*completed)[0].stop_reason == "completed",
          "OpenAI response.completed event produces done event");
+  auto completed_then_done = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
+      "data: [DONE]\n\n");
+  expect(completed_then_done && completed_then_done->size() == 1 &&
+             (*completed_then_done)[0].type == ava::provider::StreamEventType::Done &&
+             (*completed_then_done)[0].stop_reason == "completed",
+         "OpenAI SSE parser suppresses duplicate done marker after response.completed");
   auto completed_with_usage = ava::provider::parse_openai_sse(
       "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,"
       "\"output_tokens\":7,\"total_tokens\":18,\"input_tokens_details\":{\"cached_tokens\":3},"
@@ -353,6 +436,12 @@ void test_openai_provider_contract() {
              (*completed_with_usage)[0].usage->cache_read_tokens == 3 &&
              (*completed_with_usage)[0].usage->reasoning_tokens == 2,
          "OpenAI response.completed event preserves Responses API usage details");
+  auto incomplete = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\","
+      "\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n");
+  expect(incomplete && incomplete->size() == 1 && (*incomplete)[0].type == ava::provider::StreamEventType::Done &&
+             (*incomplete)[0].stop_reason == "max_tokens",
+         "OpenAI response.incomplete preserves normalized incomplete reason");
   auto lifecycle = ava::provider::parse_openai_sse(
       "data: {\"type\":\"response.created\"}\n\n"
       "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"
@@ -363,17 +452,25 @@ void test_openai_provider_contract() {
              (*lifecycle)[0].text == "hi" && (*lifecycle)[1].type == ava::provider::StreamEventType::Done,
          "OpenAI SSE parser ignores non-content lifecycle events");
   auto completed_tool = ava::provider::parse_openai_sse(
-      "data: {\"type\":\"response.function_call.completed\",\"call_id\":\"call_fallback\"}\n\n");
-  expect(completed_tool && completed_tool->size() == 1 &&
+      "data: {\"type\":\"response.function_call.completed\",\"call_id\":\"call_fallback\"}\n\n"
+      "data: {\"type\":\"response.completed\"}\n\n");
+  expect(completed_tool && completed_tool->size() == 2 &&
              (*completed_tool)[0].type == ava::provider::StreamEventType::ToolCallEnd &&
              (*completed_tool)[0].tool_call_id == "call_fallback",
          "OpenAI function_call.completed uses call_id fallback");
-  auto text_fallback =
-      ava::provider::parse_openai_sse("data: {\"type\":\"response.text.delta\",\"text\":\"fallback\"}\n\n");
-  expect(text_fallback && text_fallback->size() == 1 &&
+  auto text_fallback = ava::provider::parse_openai_sse(
+      "data: {\"type\":\"response.text.delta\",\"text\":\"fallback\"}\n\n"
+      "data: [DONE]\n\n");
+  expect(text_fallback && text_fallback->size() == 2 &&
              (*text_fallback)[0].type == ava::provider::StreamEventType::TextDelta &&
              (*text_fallback)[0].text == "fallback",
          "OpenAI response.text.delta uses text fallback");
+  auto truncated =
+      ava::provider::parse_openai_sse("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n");
+  expect(truncated && truncated->size() == 2 && (*truncated)[0].type == ava::provider::StreamEventType::TextDelta &&
+             (*truncated)[1].type == ava::provider::StreamEventType::Error &&
+             (*truncated)[1].error_message.find("done marker") != std::string::npos,
+         "OpenAI SSE parser reports truncated streams after content");
 
   auto unknown = ava::provider::parse_openai_sse("data: {\"type\":\"response.unexpected\"}\n\n");
   expect(unknown && unknown->empty(), "OpenAI unknown SSE event is ignored as forward-compatible lifecycle data");
@@ -405,6 +502,65 @@ void test_openai_provider_contract() {
          "OpenAI non-stream usage parser accepts prompt/completion aliases");
   auto missing_text = ava::provider::parse_openai_response_text("{\"id\":\"resp_1\"}");
   expect(!missing_text, "OpenAI non-stream response requires expected text field");
+
+  const ava::provider::OpenAIProvider non_stream_provider("https://api.example.test");
+  auto non_stream_tool = non_stream_provider.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"output_text\":\"Let me read that file.\","
+                                          "\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_1\","
+                                          "\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}],"
+                                          "\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}"},
+      false);
+  expect(non_stream_tool && non_stream_tool->size() == 5 &&
+             (*non_stream_tool)[0].type == ava::provider::StreamEventType::TextDelta &&
+             (*non_stream_tool)[0].text == "Let me read that file." &&
+             (*non_stream_tool)[1].type == ava::provider::StreamEventType::ToolCallStart &&
+             (*non_stream_tool)[1].tool_call_id == "call_1" && (*non_stream_tool)[1].tool_name == "read_file" &&
+             (*non_stream_tool)[2].type == ava::provider::StreamEventType::ToolCallDelta &&
+             (*non_stream_tool)[3].type == ava::provider::StreamEventType::ToolCallEnd &&
+             (*non_stream_tool)[4].type == ava::provider::StreamEventType::Done && (*non_stream_tool)[4].usage,
+         "OpenAI non-stream Responses API parses mixed text and tool calls");
+  auto non_stream_reasoning = non_stream_provider.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"output\":[{\"type\":\"reasoning\",\"summary\":[{\"type\":"
+                                          "\"summary_text\",\"text\":\"think\"}]},{\"type\":\"message\","
+                                          "\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}],"
+                                          "\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}"},
+      false);
+  expect(non_stream_reasoning && non_stream_reasoning->size() == 5 &&
+             (*non_stream_reasoning)[0].type == ava::provider::StreamEventType::ReasoningStart &&
+             (*non_stream_reasoning)[1].type == ava::provider::StreamEventType::ReasoningDelta &&
+             (*non_stream_reasoning)[1].text == "think" &&
+             (*non_stream_reasoning)[2].type == ava::provider::StreamEventType::ReasoningEnd &&
+             (*non_stream_reasoning)[3].type == ava::provider::StreamEventType::TextDelta &&
+             (*non_stream_reasoning)[3].text == "done" &&
+             (*non_stream_reasoning)[4].type == ava::provider::StreamEventType::Done,
+         "OpenAI non-stream Responses API parses reasoning summary before answer text");
+  auto nested_text = ava::provider::parse_openai_response_text(
+      "{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"nested\"}]}]}");
+  expect(nested_text && *nested_text == "nested", "OpenAI non-stream response text parses nested message content");
+  auto non_stream_incomplete = non_stream_provider.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"output_text\":\"partial\",\"status\":\"incomplete\","
+                                          "\"incomplete_details\":{\"reason\":\"content_filter\"}}"},
+      false);
+  expect(non_stream_incomplete && non_stream_incomplete->size() == 2 &&
+             (*non_stream_incomplete)[1].type == ava::provider::StreamEventType::Done &&
+             (*non_stream_incomplete)[1].stop_reason == "content_filter",
+         "OpenAI non-stream Responses API preserves incomplete stop reason");
+  auto non_stream_empty_incomplete = non_stream_provider.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"status\":\"incomplete\","
+                                          "\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}"},
+      false);
+  expect(non_stream_empty_incomplete && non_stream_empty_incomplete->size() == 1 &&
+             (*non_stream_empty_incomplete)[0].type == ava::provider::StreamEventType::Done &&
+             (*non_stream_empty_incomplete)[0].stop_reason == "max_tokens",
+         "OpenAI non-stream Responses API accepts empty incomplete terminal response");
 
   if (request) {
     ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
@@ -455,11 +611,323 @@ void test_openai_incremental_sse_parser() {
   }
 }
 
+void test_openai_compatible_provider_contract() {
+  const ava::provider::OpenAICompatibleProvider provider(
+      ava::provider::OpenAICompatibleProviderOptions{.base_url = "https://compat.example.test/api",
+                                                     .chat_completions_path = "/v1/chat/completions",
+                                                     .provider_name = "Compat",
+                                                     .reasoning_format = "reasoning_content",
+                                                     .user_agent = "CompatAgent/1.0",
+                                                     .default_temperature = 1.0,
+                                                     .preserve_reasoning_content = true,
+                                                     .include_stream_usage = true});
+  const auto request = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "kimi",
+          .model_id = "kimi-k2-thinking",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello"},
+                       ava::provider::ChatMessage{
+                           .role = "assistant",
+                           .content = "fallback answer",
+                           .content_parts = {ava::provider::ContentPart{
+                                                 .type = ava::provider::ContentPartType::Reasoning,
+                                                 .text = "prior reasoning",
+                                                 .reasoning_format = "reasoning_content"},
+                                             ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text,
+                                                                        .text = "answer text"},
+                                             ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
+                                                                        .text = "",
+                                                                        .tool_call_id = "call_1",
+                                                                        .tool_name = "read_file",
+                                                                        .input_json = "{\"path\":\"README.md\"}"}}},
+                       ava::provider::ChatMessage{.role = "user",
+                                                  .content = "fallback tool output",
+                                                  .content_parts = {ava::provider::ContentPart{
+                                                      .type = ava::provider::ContentPartType::ToolResult,
+                                                      .text = "tool output",
+                                                      .tool_call_id = "call_1"}}}},
+          .tools_json = {"{\"type\":\"function\",\"name\":\"read_file\",\"description\":\"Read\","
+                         "\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},"
+                         "\"required\":[\"path\"]}}"},
+          .stream = true,
+          .max_output_tokens = 16000,
+          .reasoning = ava::provider::ProviderReasoningOptions{.type = "enabled",
+                                                               .budget_tokens = 4096,
+                                                               .display = "summarized"}},
+      "compat-token");
+  expect(request.has_value(), "OpenAI-compatible request builds");
+  if (request) {
+    expect(request->url == "https://compat.example.test/api/v1/chat/completions",
+           "OpenAI-compatible request targets chat completions endpoint");
+    expect(request->headers.at("Authorization") == "Bearer compat-token" &&
+               request->headers.at("User-Agent") == "CompatAgent/1.0",
+           "OpenAI-compatible request includes bearer auth and provider user agent");
+    expect(request->body.find("\"model\":\"kimi-k2-thinking\"") != std::string::npos &&
+               request->body.find("\"temperature\":1") != std::string::npos &&
+               request->body.find("\"stream_options\":{\"include_usage\":true}") != std::string::npos &&
+               request->body.find("\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":4096") != std::string::npos &&
+               request->body.find("\"display\":\"summarized\"") != std::string::npos &&
+               request->body.find("\"keep\":\"all\"") != std::string::npos,
+           "OpenAI-compatible request includes model, fixed temperature, stream usage, and Kimi thinking option");
+    expect(request->body.find("\"reasoning_content\":\"prior reasoning\"") != std::string::npos,
+           "OpenAI-compatible request preserves visible reasoning_content for compatible replay");
+    expect(request->body.find("\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\"") != std::string::npos &&
+               request->body.find("\"role\":\"tool\",\"tool_call_id\":\"call_1\",\"content\":\"tool output\"") !=
+                   std::string::npos,
+           "OpenAI-compatible request serializes native tool_use/tool_result history");
+    expect(request->body.find("fallback tool output") == std::string::npos,
+           "OpenAI-compatible request does not insert fallback user text before native tool results");
+    expect(request->body.find("\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"read_file\"") !=
+               std::string::npos,
+           "OpenAI-compatible request converts Responses-style tool schemas to chat-completions tools");
+  }
+
+  const auto invalid_tool =
+      provider.build_request(ava::provider::ProviderRequest{.provider_id = "moonshot",
+                                                            .model_id = "kimi-k2.6",
+                                                            .system_prompt = "",
+                                                            .messages = {},
+                                                            .tools_json = {"{\"type\":\"function\"}"}},
+                             "compat-token");
+  expect(!invalid_tool && invalid_tool.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "OpenAI-compatible request rejects function tools without names");
+
+  const auto invalid_wrapped_tool =
+      provider.build_request(ava::provider::ProviderRequest{.provider_id = "moonshot",
+                                                            .model_id = "kimi-k2.6",
+                                                            .system_prompt = "",
+                                                            .messages = {},
+                                                            .tools_json = {"{\"type\":\"function\",\"function\":{}}"}},
+                             "compat-token");
+  expect(!invalid_wrapped_tool && invalid_wrapped_tool.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "OpenAI-compatible request rejects wrapped tools without function names");
+
+  const auto strict_tool = provider.build_request(
+      ava::provider::ProviderRequest{.provider_id = "moonshot",
+                                     .model_id = "kimi-k2.6",
+                                     .system_prompt = "",
+                                     .messages = {},
+                                     .tools_json = {"{\"type\":\"function\",\"name\":\"strict_tool\","
+                                                    "\"description\":\"uses strict mode\",\"strict\":true,"
+                                                    "\"parameters\":{\"type\":\"object\"}}"}},
+      "compat-token");
+  expect(strict_tool && strict_tool->body.find("\"strict\":true") != std::string::npos,
+         "OpenAI-compatible request preserves strict tool schemas");
+
+  const auto invalid_parameters = provider.build_request(
+      ava::provider::ProviderRequest{.provider_id = "moonshot",
+                                     .model_id = "kimi-k2.6",
+                                     .system_prompt = "",
+                                     .messages = {},
+                                     .tools_json = {"{\"type\":\"function\",\"name\":\"bad_params\","
+                                                    "\"parameters\":{\"type\":\"object\""}},
+      "compat-token");
+  expect(!invalid_parameters && invalid_parameters.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "OpenAI-compatible request rejects malformed tool parameter JSON");
+
+  const ava::provider::OpenAICompatibleProvider kimi_default_reasoning_provider(
+      ava::provider::OpenAICompatibleProviderOptions{.base_url = "https://compat.example.test",
+                                                     .provider_name = "Kimi",
+                                                     .reasoning_format = "reasoning_content",
+                                                     .preserve_reasoning_content = true});
+  const auto default_reasoning_request = kimi_default_reasoning_provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "kimi",
+          .model_id = "kimi-k2-thinking",
+          .system_prompt = "",
+          .messages = {ava::provider::ChatMessage{
+              .role = "assistant",
+              .content = "answer",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Reasoning,
+                                                           .text = "preserved thinking",
+                                                           .reasoning_format = "reasoning_content"}}}},
+          .tools_json = {}},
+      "compat-token");
+  expect(
+      default_reasoning_request &&
+          default_reasoning_request->body.find("\"reasoning_content\":\"preserved thinking\"") != std::string::npos &&
+          default_reasoning_request->body.find("\"thinking\"") == std::string::npos,
+      "OpenAI-compatible preserved reasoning replay does not request reasoning after clear/default state");
+
+  const ava::provider::OpenAICompatibleProvider no_preserve_provider(ava::provider::OpenAICompatibleProviderOptions{
+      .base_url = "https://compat.example.test", .provider_name = "Compat", .reasoning_format = "reasoning_content"});
+  const auto no_preserve_request = no_preserve_provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "moonshot",
+          .model_id = "kimi-k2.6",
+          .system_prompt = "",
+          .messages = {ava::provider::ChatMessage{
+              .role = "assistant",
+              .content = "answer",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Reasoning,
+                                                           .text = "private compatible reasoning",
+                                                           .reasoning_format = "reasoning_content"}}}},
+          .tools_json = {}},
+      "compat-token");
+  expect(no_preserve_request && no_preserve_request->body.find("private compatible reasoning") == std::string::npos,
+         "OpenAI-compatible request only replays reasoning_content when explicitly enabled");
+}
+
+void test_openai_compatible_parsing() {
+  auto stream = ava::provider::parse_openai_compatible_sse(
+      "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"plan\"}}]}\n\n"
+      "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\n"
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\","
+      "\"function\":{\"name\":\"read_file\",\"arguments\":\"{}\"}}]}}]}\n\n"
+      "data: {\"choices\":[{\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":11,"
+      "\"completion_tokens\":7,\"total_tokens\":18,\"prompt_tokens_details\":{\"cached_tokens\":3},"
+      "\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\n"
+      "data: [DONE]\n\n");
+  expect(stream.has_value(), "OpenAI-compatible SSE parses");
+  if (stream) {
+    expect(stream->size() == 8, "OpenAI-compatible SSE emits reasoning, text, tool, and done events");
+    expect((*stream)[0].type == ava::provider::StreamEventType::ReasoningStart &&
+               (*stream)[0].reasoning_format == "reasoning_content",
+           "OpenAI-compatible SSE starts reasoning_content block");
+    expect((*stream)[1].type == ava::provider::StreamEventType::ReasoningDelta && (*stream)[1].text == "plan",
+           "OpenAI-compatible SSE emits reasoning_content delta");
+    expect((*stream)[2].type == ava::provider::StreamEventType::ReasoningEnd,
+           "OpenAI-compatible SSE closes reasoning before answer text");
+    expect((*stream)[3].type == ava::provider::StreamEventType::TextDelta && (*stream)[3].text == "answer",
+           "OpenAI-compatible SSE emits answer text");
+    expect((*stream)[4].type == ava::provider::StreamEventType::ToolCallStart &&
+               (*stream)[4].tool_call_id == "call_1" && (*stream)[4].tool_name == "read_file",
+           "OpenAI-compatible SSE emits tool call start");
+    expect((*stream)[7].type == ava::provider::StreamEventType::Done && (*stream)[7].usage &&
+               (*stream)[7].usage->input_tokens == 11 && (*stream)[7].usage->output_tokens == 7 &&
+               (*stream)[7].usage->reasoning_tokens == 2 && (*stream)[7].usage->cache_read_tokens == 3 &&
+               (*stream)[7].stop_reason == "tool_calls",
+           "OpenAI-compatible SSE done carries usage and normalized tool stop reason");
+  }
+
+  const ava::provider::OpenAICompatibleProvider moonshot(ava::provider::OpenAICompatibleProviderOptions{
+      .base_url = "https://moonshot.example.test", .provider_name = "Moonshot"});
+  const auto non_stream = moonshot.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"choices\":[{\"message\":{\"reasoning_content\":\"think\","
+                                          "\"content\":\"done\"},\"finish_reason\":\"stop\"}],"
+                                          "\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":6,"
+                                          "\"total_tokens\":11,\"cached_tokens\":1}}"},
+      false);
+  expect(non_stream && non_stream->size() == 5 &&
+             (*non_stream)[0].type == ava::provider::StreamEventType::ReasoningStart &&
+             (*non_stream)[1].type == ava::provider::StreamEventType::ReasoningDelta &&
+             (*non_stream)[1].text == "think" && (*non_stream)[3].type == ava::provider::StreamEventType::TextDelta &&
+             (*non_stream)[3].text == "done" && (*non_stream)[4].type == ava::provider::StreamEventType::Done &&
+             (*non_stream)[4].usage && (*non_stream)[4].usage->cache_read_tokens == 1 &&
+             (*non_stream)[4].stop_reason == "completed",
+         "OpenAI-compatible non-stream response parses reasoning_content, text, usage, and stop reason");
+
+  const auto filtered = moonshot.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"choices\":[{\"finish_reason\":\"content_filter\"}],"
+                                          "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":0}}"},
+      false);
+  expect(filtered && filtered->size() == 1 && (*filtered)[0].type == ava::provider::StreamEventType::Done &&
+             (*filtered)[0].stop_reason == "content_filter",
+         "OpenAI-compatible non-stream parser treats filtered empty responses as completed provider turns");
+  const auto unknown_finish =
+      moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200,
+                                                          .headers = {},
+                                                          .body = "{\"choices\":[{\"message\":{\"content\":\"done\"},"
+                                                                  "\"finish_reason\":\"provider_custom\"}]}"},
+                              false);
+  expect(unknown_finish && unknown_finish->size() == 2 &&
+             (*unknown_finish)[1].type == ava::provider::StreamEventType::Done &&
+             (*unknown_finish)[1].stop_reason == "provider_custom",
+         "OpenAI-compatible non-stream parser preserves unknown finish reasons");
+
+  const auto non_stream_tool = moonshot.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"choices\":[{\"message\":{\"tool_calls\":[{"
+                                          "\"id\":\"call_9\",\"function\":{\"name\":\"read_file\","
+                                          "\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}"},
+      false);
+  expect(non_stream_tool && non_stream_tool->size() == 4 &&
+             (*non_stream_tool)[0].type == ava::provider::StreamEventType::ToolCallStart &&
+             (*non_stream_tool)[0].tool_call_id == "call_9" && (*non_stream_tool)[0].tool_name == "read_file" &&
+             (*non_stream_tool)[1].type == ava::provider::StreamEventType::ToolCallDelta &&
+             (*non_stream_tool)[2].type == ava::provider::StreamEventType::ToolCallEnd &&
+             (*non_stream_tool)[3].type == ava::provider::StreamEventType::Done &&
+             (*non_stream_tool)[3].stop_reason == "tool_calls",
+         "OpenAI-compatible non-stream parser emits tool call events");
+
+  const auto malformed = moonshot.parse_response(
+      ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"choices\":[]}"}, false);
+  expect(!malformed && malformed.error().category() == ava::core::ErrorCategory::Provider,
+         "OpenAI-compatible non-stream parser rejects missing messages");
+
+  const auto http_error = moonshot.parse_response(
+      ava::provider::HttpResponse{.status_code = 500,
+                                  .headers = {},
+                                  .body = "{\"error\":{\"message\":\"bad\",\"reasoning_content\":"
+                                          "\"secret reasoning\",\"thinking\":\"secret thinking\","
+                                          "\"api_key\":\"secret-key\"}}"},
+      false);
+  expect(!http_error && http_error.error().format().find("[redacted]") != std::string::npos &&
+             http_error.error().format().find("secret reasoning") == std::string::npos &&
+             http_error.error().format().find("secret thinking") == std::string::npos &&
+             http_error.error().format().find("secret-key") == std::string::npos,
+         "OpenAI-compatible HTTP errors redact reasoning and credential fields");
+
+  auto sse_error = ava::provider::parse_openai_compatible_sse(
+      "data: {\"error\":{\"message\":\"{\\\"reasoning_content\\\":\\\"secret stream reasoning\\\","
+      "\\\"api_key\\\":\\\"secret-stream-key\\\"}\"}}\n\n");
+  expect(sse_error && sse_error->size() == 1 && (*sse_error)[0].type == ava::provider::StreamEventType::Error &&
+             (*sse_error)[0].error_message.find("[redacted]") != std::string::npos &&
+             (*sse_error)[0].error_message.find("secret stream reasoning") == std::string::npos &&
+             (*sse_error)[0].error_message.find("secret-stream-key") == std::string::npos,
+         "OpenAI-compatible SSE errors redact reasoning and credential fields");
+  auto malformed_compatible = ava::provider::parse_openai_compatible_sse("data: {not-json}\n\n");
+  expect(malformed_compatible && malformed_compatible->size() == 1 &&
+             (*malformed_compatible)[0].type == ava::provider::StreamEventType::Error,
+         "OpenAI-compatible parser does not add truncation error after malformed SSE data");
+
+  const ava::provider::OpenAICompatibleProvider parser_provider(ava::provider::OpenAICompatibleProviderOptions{
+      .base_url = "https://compat.example.test", .reasoning_format = "custom_reasoning"});
+  auto parser = parser_provider.create_stream_parser();
+  auto part_one = parser->append("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"pl");
+  expect(part_one && part_one->empty(), "OpenAI-compatible parser buffers partial SSE lines");
+  auto part_two = parser->append(
+      "an\"}}]}\n\n"
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,"
+      "\"id\":\"call_2\",\"function\":{\"name\":\"grep\","
+      "\"arguments\":\"{}\"}}]}}]}\n\n");
+  expect(part_two && part_two->size() == 4 && (*part_two)[0].type == ava::provider::StreamEventType::ReasoningStart &&
+             (*part_two)[0].reasoning_format == "custom_reasoning" &&
+             (*part_two)[1].type == ava::provider::StreamEventType::ReasoningDelta &&
+             (*part_two)[2].type == ava::provider::StreamEventType::ToolCallStart &&
+             (*part_two)[2].tool_call_id == "call_2" &&
+             (*part_two)[3].type == ava::provider::StreamEventType::ToolCallDelta,
+         "OpenAI-compatible incremental parser preserves reasoning and tool state across chunks");
+  auto flushed = parser->finish();
+  expect(flushed && flushed->size() == 3 && (*flushed)[0].type == ava::provider::StreamEventType::ToolCallEnd &&
+             (*flushed)[1].type == ava::provider::StreamEventType::ReasoningEnd &&
+             (*flushed)[2].type == ava::provider::StreamEventType::Error,
+         "OpenAI-compatible parser flushes open tool calls and reasoning before reporting truncated streams");
+  auto second_finish = parser->finish();
+  expect(second_finish && second_finish->empty(), "OpenAI-compatible parser finish resets terminal state");
+
+  const auto error = moonshot.parse_response(
+      ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "Your request exceeded model token limit"},
+      true);
+  expect(!error && error.error().format().find("provider_error_kind: context_overflow") != std::string::npos,
+         "OpenAI-compatible HTTP errors reuse normalized context-overflow classification");
+}
+
 void test_builtin_provider_registry() {
   auto registry = ava::provider::builtin_provider_registry();
   expect(registry.contains("openai"), "builtin provider registry contains OpenAI");
+  expect(registry.contains("kimi") && registry.contains("moonshot") && registry.contains("openrouter"),
+         "builtin provider registry contains OpenAI-compatible provider shims");
   auto provider = registry.create("openai");
   expect(provider.has_value() && *provider, "builtin provider registry creates OpenAI provider");
+  auto kimi = registry.create("kimi");
+  expect(kimi.has_value() && *kimi, "builtin provider registry creates Kimi provider shim");
 
   auto missing = registry.create("missing-provider");
   expect(!missing && missing.error().category() == ava::core::ErrorCategory::NotFound,
@@ -471,5 +939,7 @@ void test_builtin_provider_registry() {
 void run_provider_openai_tests() {
   test_openai_provider_contract();
   test_openai_incremental_sse_parser();
+  test_openai_compatible_provider_contract();
+  test_openai_compatible_parsing();
   test_builtin_provider_registry();
 }

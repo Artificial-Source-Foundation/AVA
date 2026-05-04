@@ -1,8 +1,8 @@
-# AVA Plugin And MCP Plan
+# AVA Plugin And MCP Foundation
 
-This document defines the intended 1.0 plugin foundation for AVA. It is grounded in PI's extension model, but adapted for AVA's constraints: native C++23, one binary, explicit permission boundaries, inspectable local files, and a core that must keep working when plugins fail.
+This document defines AVA's current 1.0 plugin and MCP foundation. It is grounded in PI's extension model, but adapted for AVA's constraints: native C++23, one binary, explicit permission boundaries, inspectable local files, and a core that keeps working when plugins fail.
 
-Phase 6 plugin/MCP foundation is required for the 1.0 backend MVP. Advanced extension features remain 1.1+ roadmap work.
+Advanced extension features remain 1.1+ roadmap work.
 
 ## PI Reference Lessons
 
@@ -35,11 +35,11 @@ PI's limits that AVA should not copy directly:
 
 ## AVA Direction
 
-AVA should ship a small, stable, local plugin foundation for 1.0.
+AVA ships a small, stable, local plugin foundation for 1.0.
 
 The default plugin shape is an out-of-process executable that speaks a versioned JSONL protocol over stdin/stdout. AVA owns discovery, enablement, validation, permission checks, event emission, audit/session records, cancellation, timeouts, output bounds, diagnostics, and lifecycle cleanup.
 
-AVA should not load third-party native shared libraries in-process for 1.0. A native plugin ABI would make crashes, memory corruption, and C++ ABI compatibility part of the public support burden.
+AVA does not load third-party native shared libraries in-process for 1.0. A native plugin ABI would make crashes, memory corruption, and C++ ABI compatibility part of the public support burden.
 
 ## Goals
 
@@ -63,13 +63,13 @@ These are non-goals for the 1.0 plugin/MCP foundation, not discarded product ide
 
 ## Plugin Discovery
 
-Supported locations should be explicit and inspectable:
+Supported locations are explicit and inspectable:
 
 - Global plugins: `$XDG_CONFIG_HOME/ava/plugins/<plugin-id>/plugin.json`, falling back to `~/.config/ava/plugins/<plugin-id>/plugin.json`.
 - Project plugins: `.ava/plugins/<plugin-id>/plugin.json`.
 - Explicit CLI/config paths can be added later for development, but should not be the primary stable interface.
 
-Project-local executable plugins are disabled by default. AVA may discover their manifests for inspection, but must not run their entrypoints until the user enables them.
+Discovered executable plugins are disabled by default. AVA can inspect their manifests without starting a process, but it does not run entrypoints until the user enables the plugin. Enablement is machine-local state stored under `$XDG_STATE_HOME/ava/plugin-enablement.json`, falling back to `~/.local/state/ava/plugin-enablement.json`, keyed by canonical workspace path, plugin id, and scope.
 
 ## Plugin Manifest
 
@@ -117,7 +117,17 @@ Example:
         "description": "Show or update the session todo list."
       }
     ],
-    "prompts": []
+    "prompts": [
+      {
+        "name": "todo-review",
+        "description": "Review todo state for follow-up work.",
+        "path": "prompts/todo-review.md"
+      }
+    ],
+    "skills": [],
+    "event_hooks": [
+      { "event": "tool.result" }
+    ]
   }
 }
 ```
@@ -146,8 +156,22 @@ Minimum handshake:
 Tool call:
 
 ```json
-{"id":"ava_2","type":"tool.call","tool":"todo_add","arguments":{"text":"write tests"},"context":{"session_id":"session_..."}}
-{"id":"ava_2","type":"tool.result","ok":true,"content":"Added todo: write tests","metadata":{"count":1}}
+{"id":"ava_tool_call_...","type":"tool.call","tool":"todo_add","arguments":{"text":"write tests"},"context":{"call_id":"call_...","workspace":"/repo"}}
+{"id":"ava_tool_call_...","type":"tool.result","ok":true,"content":"Added todo: write tests","metadata":{"count":1}}
+```
+
+Command call:
+
+```json
+{"id":"ava_command_cmd_...","type":"command.call","command":"todo","arguments":{"show_completed":false},"context":{"call_id":"cmd_...","workspace":"/repo"}}
+{"id":"ava_command_cmd_...","type":"command.result","ok":true,"content":"2 open todos","metadata":{"count":2}}
+```
+
+Event observation:
+
+```json
+{"id":"ava_event_event_...","type":"event.observe","event":"tool_result","payload":{"tool":"read_file","status":"success"},"context":{"call_id":"event_...","workspace":"/repo"}}
+{"id":"ava_event_event_...","type":"event.observed","ok":true,"content":"optional diagnostic","metadata":{"count":1}}
 ```
 
 Cancellation:
@@ -164,16 +188,18 @@ Protocol rules:
 - Malformed records, unknown response ids, oversized records, or invalid result schemas are plugin errors.
 - Plugin logs use explicit protocol records or bounded stderr; they are never mixed into tool results unless requested.
 - AVA records plugin errors as runtime events and session audit entries.
+- Event hook manifests may declare dotted names such as `tool.result`; AVA normalizes dots to underscores and sends canonical runtime event names such as `tool_result` in `event.observe` requests.
+- Event hook failures are best-effort diagnostics. A failed hook does not fail the user turn, slash command, or MCP command that emitted the observed runtime event.
 
 ## Contribution Types
 
-1.0 should support these contribution types:
+1.0 supports these contribution types:
 
 - Tools: model-callable operations with JSON-schema-like input and structured bounded results.
 - Slash/backend commands: user-invoked commands routed through the backend command dispatcher.
 - Prompt templates and skills: static markdown resources discovered from plugin directories.
 - Non-mutating event hooks: observe lifecycle events and optionally add diagnostics, but not rewrite provider requests in 1.0.
-- MCP servers: manifest/configured MCP endpoints that AVA can launch or connect to and adapt into AVA tools/resources/prompts.
+- MCP servers: configured endpoints that AVA can launch and adapt into AVA tools. MCP server declarations in plugin manifests are deferred.
 
 Provider plugins, custom UI renderers, and prompt/provider interception can come later after the core event and audit model proves safe.
 
@@ -199,11 +225,11 @@ Audit records should include:
 - Requested capability and requested operation.
 - Permission decision and resolver actor.
 - Core operation performed, if any.
-- MCP server id and MCP tool/resource/prompt name when applicable.
+- MCP server id and MCP tool name when applicable.
 
-## Core Service Proxy
+## Deferred Core Service Proxy
 
-AVA should expose safe operations to plugins through protocol requests instead of encouraging plugins to perform side effects directly.
+AVA should eventually expose safe operations to plugins through protocol requests instead of encouraging plugins to perform side effects directly. The 1.0 foundation keeps plugin execution permissioned and audited, but does not yet provide this proxy surface.
 
 Initial proxy operations:
 
@@ -217,31 +243,51 @@ This does not sandbox arbitrary plugin code. It makes well-behaved plugins easy 
 
 ## MCP Integration
 
-MCP should be a first-class plugin contribution type, not an afterthought.
+MCP is a first-class extension surface that shares AVA's tool registry, permission, runtime event, and audit paths. Current 1.0 support uses explicit global/project MCP config files rather than plugin manifest contributions.
 
-1.0 required MCP scope:
+Config locations:
+
+- Global: `$XDG_CONFIG_HOME/ava/mcp.json`, falling back to `~/.config/ava/mcp.json`.
+- Project: `.ava/mcp.json` under the active workspace.
+
+Config shape:
+
+```json
+{
+  "servers": [
+    {
+      "id": "demo",
+      "name": "Demo MCP",
+      "command": "demo-mcp-server",
+      "args": ["--stdio"],
+      "enabled": true
+    }
+  ]
+}
+```
+
+Global servers default to enabled when `enabled` is omitted. Project servers default to disabled when `enabled` is omitted, so repositories cannot silently opt users into running project-local MCP server commands.
+
+Current 1.0 MCP scope:
 
 - Stdio MCP server transport.
-- Server definitions from global config, project config, or plugin manifests.
-- Explicit enablement for project MCP servers before command execution.
+- Server definitions from global and project config.
+- Explicit `enabled:true` for project MCP servers before command execution.
 - MCP `initialize` lifecycle with server capability capture.
 - `tools/list` and `tools/call`, adapted into AVA's tool registry.
-- `resources/list` and `resources/read`, exposed as explicit read-style commands or tools, not silently injected into context.
-- `prompts/list` and `prompts/get`, exposed as prompt templates.
 - Per-server startup timeout, initialize timeout, request timeout, cancellation, and process-tree cleanup.
 - Health status and diagnostics visible through plugin/MCP inspect commands.
 - Schema conversion from MCP tool input schemas to AVA/provider-compatible tool schemas, with unsupported schemas disabled and explained.
 - Tool naming that avoids collisions, such as `mcp_<server_id>_<tool_name>` or another deterministic sanitized prefix.
-- Session audit entries for server launch, tool calls, resource reads, prompt reads, errors, and permission decisions.
-
-Strongly desired MCP scope:
-
-- Streamable HTTP transport for remote MCP servers.
-- Progress/log notifications surfaced as runtime events.
-- Resource subscriptions if they can be made bounded and cancellable.
+- Session audit entries for server launch, tool calls, errors, and permission decisions.
 
 Deferred MCP scope:
 
+- `resources/list` and `resources/read`, exposed as explicit read-style commands or tools, not silently injected into context.
+- `prompts/list` and `prompts/get`, exposed as prompt templates.
+- Streamable HTTP transport for remote MCP servers.
+- Progress/log notifications surfaced as runtime events.
+- Resource subscriptions if they can be made bounded and cancellable.
 - MCP marketplace/discovery beyond explicit configured servers.
 - Automatic trust of server-declared side-effect safety.
 - Complex OAuth flows for remote MCP servers.
@@ -250,16 +296,16 @@ Deferred MCP scope:
 
 MCP safety rules:
 
-- MCP servers are local or remote programs chosen by the user. Treat them as untrusted at the AVA boundary, but do not claim they are OS-sandboxed unless a real sandbox exists.
+- MCP servers are programs chosen by the user. Treat them as untrusted at the AVA boundary, but do not claim they are OS-sandboxed unless a real sandbox exists.
 - Calling an MCP tool is a permissioned operation even if its schema looks read-only.
 - Launching a local MCP server is a permissioned process execution event.
-- Connecting to remote MCP is a permissioned network event.
+- Connecting to an MCP server session is permissioned; future remote transports also need explicit network permission.
 - MCP tool results are bounded before they enter the model context.
 - MCP errors are surfaced as MCP/plugin failures, not as core AVA crashes.
 
 ## Commands And Diagnostics
 
-AVA should provide backend commands that work in TUI, print/RPC where applicable, and tests:
+AVA provides backend commands that work in TUI, print/RPC where applicable, and tests:
 
 - `/plugins list`
 - `/plugins inspect <id>`
@@ -267,12 +313,17 @@ AVA should provide backend commands that work in TUI, print/RPC where applicable
 - `/plugins disable <id>`
 - `/plugins validate <path>`
 - `/plugins failures`
+- `/plugins prompts <id>`
+- `/plugins prompt <id> <name>`
+- `/plugins skills <id>`
+- `/plugins skill <id> <name>`
+- `/plugin run <id> <command> [arguments_json]`
 - `/mcp list`
 - `/mcp inspect <server>`
 - `/mcp tools <server>`
 - `/mcp restart <server>`
 
-The same operations should have RPC commands before external editor integrations depend on them.
+The same operations have RPC command forms for external editor integrations. `/mcp tools` launches a fresh stdio process for discovery, emits tool start/result events, and requires `mcp.server.launch` and `mcp.server.connect` permission approval. `/mcp restart` is informational because current MCP stdio servers are per-discovery/per-tool-call processes rather than resident daemons.
 
 ## Testing Requirements
 
@@ -286,20 +337,15 @@ Minimum regression coverage:
 - Audit/session records for plugin execution and tool calls.
 - Fake MCP server initialize/list-tools/call-tool success.
 - Fake MCP server tool error, malformed response, timeout, cancellation, and process cleanup.
-- MCP resource and prompt listing/reading through bounded outputs.
 - Tool name collision behavior between built-in, plugin, and MCP tools.
 
-## Implementation Order
+## Implemented 1.0 Foundation
 
-1. Build the internal tool registry and move built-in tools behind it.
-2. Add contribution metadata and diagnostics without loading external plugins.
-3. Add manifest parsing, discovery, enable/disable state, and validation commands.
-4. Add the out-of-process plugin runner and fake-plugin tests.
-5. Add plugin tool contributions through the registry.
-6. Add plugin commands and static prompt/skill resources.
-7. Add the MCP host with a fake stdio MCP server test harness.
-8. Add real MCP server configuration docs and inspect/restart commands.
-9. Add optional event hooks after tool/command/MCP paths are stable.
+- Internal tool registry with built-in, plugin, and MCP tool registration.
+- Plugin manifest parsing, diagnostics, discovery, local enable/disable state, and validation commands.
+- Out-of-process plugin runner with initialize, tool call, command call, event observation, cancellation, bounded stderr, timeouts, and shutdown.
+- Plugin tool contributions, plugin command contributions, static prompt/skill resources, and non-mutating event hooks.
+- Stdio MCP config loading, initialize, `tools/list`, `tools/call`, tool broker registration, slash/RPC diagnostics, and fake-server regression coverage.
 
 ## 1.0 Decisions
 
@@ -310,7 +356,7 @@ Minimum regression coverage:
 - Stdio MCP transport is required for 1.0. Streamable HTTP MCP remains strongly desired, not required.
 - Plugin process launch uses a separate permission category from shell commands. If a plugin asks AVA to run a shell command through the core service proxy, that proxied command still goes through the normal shell policy.
 - Plugin stderr capture is bounded. The initial target is an in-memory tail of the last 64 KiB per plugin process, with larger log spill files deferred until diagnostics prove the need.
-- Plugin restart is manual for 1.0. AVA may restart a plugin during `/plugins restart` or `/mcp restart`, but repeated automatic crash loops should disable the contribution and require user action.
+- Plugin restart is manual for 1.0. Current plugin and MCP stdio processes are launched per call or discovery; `/mcp restart` reports that the next discovery or tool call will launch a fresh process.
 - Plugins do not get a plugin-to-plugin event bus in 1.0. Event hooks observe AVA runtime events only, and inter-plugin communication is deferred.
 
 ## Remaining Implementation Choices
@@ -318,3 +364,5 @@ Minimum regression coverage:
 - Exact JSON schema subset accepted for plugin and MCP tool inputs.
 - Exact timeout defaults for plugin startup, per-request calls, MCP initialize, and MCP tool/resource/prompt calls.
 - Whether plugin enablement should support a separate machine-local project nickname for moved worktrees.
+- Plugin-manifest MCP server contributions.
+- MCP resources, prompts, Streamable HTTP, and progress/log notification surfacing.

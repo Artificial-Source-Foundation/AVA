@@ -142,6 +142,34 @@ CursesInput mouse_key_input(Key key, const MEVENT& mouse) {
 
 CursesInput unknown_input() { return key_input(Key::Unknown); }
 
+std::string title_case_ascii(std::string_view text) {
+  std::string output;
+  output.reserve(text.size());
+  bool at_word_start = true;
+  for (char ch : text) {
+    const auto byte = static_cast<unsigned char>(ch);
+    if (byte == '_' || byte == '-') {
+      output.push_back(' ');
+      at_word_start = true;
+      continue;
+    }
+    if (at_word_start && byte >= 'a' && byte <= 'z') {
+      output.push_back(static_cast<char>(byte - ('a' - 'A')));
+    } else {
+      output.push_back(ch);
+    }
+    at_word_start = byte == ' ';
+  }
+  return output;
+}
+
+std::string assistant_meta_for_snapshot(const ComposerSnapshot& snapshot) {
+  if (snapshot.model.empty()) return {};
+  auto mode = title_case_ascii(snapshot.mode);
+  if (mode.empty()) mode = "AVA";
+  return mode + " - " + snapshot.model;
+}
+
 std::size_t transcript_height_for_snapshot(const ComposerSnapshot& snapshot, std::size_t width, std::size_t height) {
   const auto normal_composer_lines = detail::composer_block_line_count(snapshot, height);
   const auto modal_question = snapshot.question_prompt && snapshot.question_prompt->modal;
@@ -170,7 +198,8 @@ std::size_t max_transcript_scroll_offset_for_snapshot(const ComposerSnapshot& sn
                                                       std::size_t height) {
   const auto transcript_height = transcript_height_for_snapshot(snapshot, width, height);
   if (transcript_height == 0) return 0;
-  const auto rendered_transcript = detail::render_transcript_lines(snapshot.transcript, width);
+  const auto rendered_transcript =
+      detail::render_transcript_lines(snapshot.transcript, width, snapshot.tool_details_visible);
   return rendered_transcript.size() > transcript_height ? rendered_transcript.size() - transcript_height : 0;
 }
 
@@ -489,11 +518,17 @@ int run_interactive_composer(TuiRuntimeOptions options) {
                           .model = options.model,
                           .workspace = options.workspace,
                           .git_branch = options.git_branch,
-                          .version = options.app_version};
+                          .version = options.app_version,
+                          .context_source_count = options.context_source_count};
   auto refresh_token_status = [&]() {
     snapshot.token_status = options.token_status_provider ? options.token_status_provider() : std::nullopt;
+    sidebar.token_status = snapshot.token_status;
+  };
+  auto refresh_reasoning_status = [&]() {
+    snapshot.reasoning_status = options.reasoning_status_provider ? options.reasoning_status_provider() : std::nullopt;
   };
   refresh_token_status();
+  refresh_reasoning_status();
 
   bool terminal_write_failed = false;
   std::vector<std::string> input_history;
@@ -510,6 +545,22 @@ int run_interactive_composer(TuiRuntimeOptions options) {
   std::deque<std::shared_ptr<PendingPermissionRequest>> pending_permission_requests;
   std::deque<std::shared_ptr<PendingQuestionRequest>> pending_question_requests;
   std::atomic_bool accept_prompt_requests{true};
+  std::mutex prompt_audit_mutex;
+  ava::app::RuntimeEventSink prompt_audit_sink;
+
+  auto emit_prompt_audit = [&](std::string status, std::string text) {
+    ava::app::RuntimeEventSink sink;
+    {
+      std::lock_guard<std::mutex> lock(prompt_audit_mutex);
+      sink = prompt_audit_sink;
+    }
+    if (!sink) return;
+    ava::app::RuntimeEvent event;
+    event.type = ava::app::RuntimeEventType::ProviderEvent;
+    event.status = std::move(status);
+    event.text = std::move(text);
+    static_cast<void>(sink(event));
+  };
 
   auto max_draft_scroll_offset = [&](std::size_t height) {
     auto draft_snapshot = snapshot;
@@ -566,6 +617,11 @@ int run_interactive_composer(TuiRuntimeOptions options) {
   auto resolve_permission_prompt =
       [&](const ava::permissions::PermissionPrompt& prompt, const std::function<bool()>& stop_requested = {},
           const std::function<bool()>& request_stop = {}) -> ava::core::Result<ava::permissions::PermissionResolution> {
+    auto permission_label = std::string("permission requested");
+    if (!prompt.tool_name.empty()) permission_label += ": " + prompt.tool_name;
+    if (!prompt.command.empty()) permission_label += " " + prompt.command;
+    if (prompt.target_path.has_filename()) permission_label += " " + prompt.target_path.generic_string();
+    emit_prompt_audit("tui:permission_request", std::move(permission_label));
     {
       std::lock_guard<std::recursive_mutex> lock(ui_mutex);
       snapshot.permission_prompt = permission_prompt_view(prompt);
@@ -580,6 +636,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
     auto resolve_choice =
         [&](PermissionPromptChoice selected) -> ava::core::Result<ava::permissions::PermissionResolution> {
       if (selected == PermissionPromptChoice::Allow) {
+        emit_prompt_audit("tui:permission_allow", "permission allowed: " + prompt.tool_name);
         {
           std::lock_guard<std::recursive_mutex> lock(ui_mutex);
           snapshot.permission_prompt.reset();
@@ -590,6 +647,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
         }
         return ava::permissions::PermissionResolution::Allow;
       }
+      emit_prompt_audit("tui:permission_deny", "permission denied: " + prompt.tool_name);
       {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
         snapshot.permission_prompt.reset();
@@ -607,6 +665,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
         return resolve_choice(PermissionPromptChoice::Deny);
       }
       if (terminal_signal_received()) {
+        emit_prompt_audit("tui:permission_deny", "permission denied: interrupted");
         {
           std::lock_guard<std::recursive_mutex> lock(ui_mutex);
           snapshot.permission_prompt.reset();
@@ -659,6 +718,8 @@ int run_interactive_composer(TuiRuntimeOptions options) {
   auto resolve_question_prompt =
       [&](const ava::agent::QuestionPrompt& prompt, const std::function<bool()>& stop_requested = {},
           const std::function<bool()>& request_stop = {}) -> ava::core::Result<ava::agent::QuestionAnswer> {
+    emit_prompt_audit("tui:question_request", prompt.question.empty() ? std::string("question requested")
+                                                                      : "question requested: " + prompt.question);
     {
       std::lock_guard<std::recursive_mutex> lock(ui_mutex);
       snapshot.question_prompt = question_prompt_view(prompt);
@@ -671,6 +732,8 @@ int run_interactive_composer(TuiRuntimeOptions options) {
     }
 
     auto cancel_question = [&]() -> ava::core::Result<ava::agent::QuestionAnswer> {
+      emit_prompt_audit("tui:question_cancel", prompt.question.empty() ? std::string("question canceled")
+                                                                       : "question canceled: " + prompt.question);
       {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
         snapshot.question_prompt.reset();
@@ -684,6 +747,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       const auto question_input = read_curses_input();
       if (stop_requested && stop_requested()) return cancel_question();
       if (terminal_signal_received()) {
+        emit_prompt_audit("tui:question_cancel", "question canceled: interrupted");
         {
           std::lock_guard<std::recursive_mutex> lock(ui_mutex);
           snapshot.question_prompt.reset();
@@ -730,6 +794,14 @@ int run_interactive_composer(TuiRuntimeOptions options) {
         }
         if (!render()) {
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to clear question prompt"));
+        }
+        if (answer) {
+          auto detail = std::string("question answered");
+          if (!answer->selected_options.empty()) detail += ": " + answer->selected_options.front();
+          if (!answer->custom_text.empty()) detail += answer->selected_options.empty() ? ": custom" : ", custom";
+          emit_prompt_audit("tui:question_answer", std::move(detail));
+        } else {
+          emit_prompt_audit("tui:question_cancel", "question canceled");
         }
         return answer;
       }
@@ -859,6 +931,20 @@ int run_interactive_composer(TuiRuntimeOptions options) {
     return apply_composer_draft_action(draft, TuiAction::ClearInput);
   };
 
+  auto cycle_reasoning = [&]() {
+    if (!options.on_cycle_reasoning) {
+      snapshot.status = "reasoning cycling unavailable";
+      return;
+    }
+    auto result = options.on_cycle_reasoning();
+    if (!result) {
+      snapshot.status = result.error().format();
+      return;
+    }
+    snapshot.status = *result;
+    refresh_reasoning_status();
+  };
+
   auto slash_palette_active = [&]() {
     return !slash_palette_suppressed && slash_palette_visible(draft.text, snapshot.slash_commands);
   };
@@ -923,6 +1009,22 @@ int run_interactive_composer(TuiRuntimeOptions options) {
     draft_input.clear();
     selected_slash_command_index = 0;
     if (!submitted.empty()) {
+      if (submitted == "/details") {
+        push_history(input_history, submitted);
+        snapshot.tool_details_visible = !snapshot.tool_details_visible;
+        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
+        push_transcript(snapshot, TranscriptItem{.label = "ava",
+                                                 .text = snapshot.tool_details_visible ? "tool details are now visible"
+                                                                                       : "tool details are now compact",
+                                                 .meta = assistant_meta_for_snapshot(snapshot)});
+        snapshot.status = snapshot.tool_details_visible ? "tool details visible" : "tool details compact";
+        transcript_scroll_offset = 0;
+        if (!render()) {
+          terminal_write_failed = true;
+          return InputLoopAction::BreakLoop;
+        }
+        return InputLoopAction::ContinueLoop;
+      }
       const auto is_slash_command = submitted.starts_with('/');
       const auto transcript_before_submit = snapshot.transcript;
       RuntimeEventQueue event_queue;
@@ -931,6 +1033,10 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       bool close_after_submit = false;
       auto cancel_requested = [&run_cancel_requested]() { return run_cancel_requested.load(); };
       auto event_sink = is_slash_command ? ava::app::RuntimeEventSink{} : event_queue.sink();
+      {
+        std::lock_guard<std::mutex> lock(prompt_audit_mutex);
+        prompt_audit_sink = event_sink;
+      }
       auto upsert_stopping_activity = [&]() {
         auto item = SidebarActivityItem{.id = "stopping",
                                         .label = "stopping",
@@ -943,6 +1049,23 @@ int run_interactive_composer(TuiRuntimeOptions options) {
         } else {
           *existing = std::move(item);
         }
+      };
+      auto settle_turn_activity = [&]() {
+        auto responding = std::ranges::find_if(
+            sidebar.activity, [](const SidebarActivityItem& activity) { return activity.id == "responding"; });
+        if (responding == sidebar.activity.end() || responding->status != ToolTimelineStatus::Running) return;
+        if (run_cancel_requested.load() || event_state.run_status == TuiEventRunStatus::Canceled) {
+          responding->status = ToolTimelineStatus::Error;
+          responding->detail = "assistant stopped";
+          return;
+        }
+        if (event_state.run_status == TuiEventRunStatus::Error) {
+          responding->status = ToolTimelineStatus::Error;
+          responding->detail = "assistant failed";
+          return;
+        }
+        responding->status = ToolTimelineStatus::Success;
+        responding->detail = "assistant responded";
       };
       auto request_stop = [&]() -> bool {
         const bool was_already_requested = run_cancel_requested.exchange(true);
@@ -1108,6 +1231,15 @@ int run_interactive_composer(TuiRuntimeOptions options) {
             scroll_down(3);
             return render();
           }
+          if (active_is_action(TuiAction::DetailsToggle)) {
+            snapshot.tool_details_visible = !snapshot.tool_details_visible;
+            snapshot.status = snapshot.tool_details_visible ? "tool details visible" : "tool details compact";
+            return render();
+          }
+          if (active_is_action(TuiAction::VariantCycle)) {
+            snapshot.status = "reasoning can be changed between turns";
+            return render();
+          }
           return true;
         };
         bool render_failed = false;
@@ -1158,22 +1290,38 @@ int run_interactive_composer(TuiRuntimeOptions options) {
           terminal_write_failed = true;
           render_failed = true;
         }
+        {
+          std::lock_guard<std::mutex> lock(prompt_audit_mutex);
+          prompt_audit_sink = nullptr;
+        }
         if (render_failed) return InputLoopAction::BreakLoop;
+      }
+      {
+        std::lock_guard<std::mutex> lock(prompt_audit_mutex);
+        prompt_audit_sink = nullptr;
       }
       if (terminal_signal_received()) return InputLoopAction::BreakLoop;
       const auto events_received = event_queue.received_any();
+      if (events_received) {
+        std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+        settle_turn_activity();
+      }
       if (!events_received) {
         if (!is_slash_command) {
           push_transcript(snapshot, TranscriptItem{.label = "you", .text = submitted});
         }
         if (run_cancel_requested.load()) {
-          push_transcript(snapshot, TranscriptItem{.label = "ava", .text = "stopped by user"});
+          push_transcript(
+              snapshot,
+              TranscriptItem{.label = "ava", .text = "stopped by user", .meta = assistant_meta_for_snapshot(snapshot)});
         } else {
           for (const auto& tool : result.tool_timeline) {
             push_transcript(snapshot, TranscriptItem{.tool = tool});
           }
           for (const auto& output : result.output) {
-            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = output});
+            push_transcript(
+                snapshot,
+                TranscriptItem{.label = "ava", .text = output, .meta = assistant_meta_for_snapshot(snapshot)});
           }
         }
       }
@@ -1320,7 +1468,7 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       break;
     } else if (is_action(TuiAction::VariantCycle)) {
       pending_escape_clear = false;
-      snapshot.status = "variant cycling is not available yet";
+      cycle_reasoning();
     } else if (is_action(TuiAction::PageUp)) {
       const auto [_, height] = terminal_size();
       scroll_up(std::max<std::size_t>(1, height / 2));
@@ -1368,19 +1516,9 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       }
     } else if (is_action(TuiAction::HistoryPrev)) {
       pending_escape_clear = false;
-      if (input_history.empty()) {
-        scroll_up(3);
-      } else {
-        if (!history_index) {
-          draft_input = draft.text;
-          history_index = input_history.size() - 1;
-        } else if (*history_index > 0) {
-          --(*history_index);
-        }
-        reset_composer_draft(draft, input_history[*history_index]);
-        draft_scroll_offset = 0;
-        snapshot.status = "history " + std::to_string(*history_index + 1) + "/" + std::to_string(input_history.size());
-      }
+      history_index.reset();
+      draft_input.clear();
+      scroll_up(3);
     } else if (is_action(TuiAction::PaletteNext) && slash_palette_active()) {
       pending_escape_clear = false;
       const auto matches = filter_slash_commands(draft.text, snapshot.slash_commands);
@@ -1394,20 +1532,9 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       }
     } else if (is_action(TuiAction::HistoryNext)) {
       pending_escape_clear = false;
-      if (!history_index) {
-        scroll_down(3);
-      } else if (*history_index + 1 < input_history.size()) {
-        ++(*history_index);
-        reset_composer_draft(draft, input_history[*history_index]);
-        draft_scroll_offset = 0;
-        snapshot.status = "history " + std::to_string(*history_index + 1) + "/" + std::to_string(input_history.size());
-      } else {
-        history_index.reset();
-        reset_composer_draft(draft, draft_input);
-        draft_scroll_offset = 0;
-        draft_input.clear();
-        snapshot.status = "restored current draft";
-      }
+      history_index.reset();
+      draft_input.clear();
+      scroll_down(3);
     } else if (is_action(TuiAction::Undo)) {
       pending_escape_clear = false;
       draft_scroll_offset = 0;
@@ -1418,7 +1545,8 @@ int run_interactive_composer(TuiRuntimeOptions options) {
       snapshot.status = apply_composer_draft_action(draft, TuiAction::Yank) ? "yanked text" : "nothing to yank";
     } else if (is_action(TuiAction::DetailsToggle)) {
       pending_escape_clear = false;
-      snapshot.status = "details toggle is not available yet";
+      snapshot.tool_details_visible = !snapshot.tool_details_visible;
+      snapshot.status = snapshot.tool_details_visible ? "tool details visible" : "tool details compact";
     } else if (is_action(TuiAction::PromptAllow) || is_action(TuiAction::PromptDeny)) {
       pending_escape_clear = false;
       snapshot.status = "prompt action is only available while a prompt is active";

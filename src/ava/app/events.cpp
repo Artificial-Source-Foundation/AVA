@@ -25,6 +25,13 @@ void append_number_field(std::string& out, std::string_view key, std::size_t val
   out += std::to_string(value);
 }
 
+void append_bool_field(std::string& out, std::string_view key, bool value) {
+  if (!value) return;
+  out += ",\"";
+  out += key;
+  out += "\":true";
+}
+
 void append_required_string_field(std::string& out, std::string_view key, std::string_view value) {
   out += ",\"";
   out += key;
@@ -59,6 +66,15 @@ void append_payload_number_field(std::string& out, bool& has_field, std::string_
   has_field = true;
 }
 
+void append_payload_bool_field(std::string& out, bool& has_field, std::string_view key, bool value) {
+  if (!value) return;
+  if (has_field) out += ',';
+  out += '"';
+  out += key;
+  out += "\":true";
+  has_field = true;
+}
+
 std::string payload_json_for_runtime_event(const RuntimeEvent& event) {
   std::string out = "{";
   bool has_field = false;
@@ -75,6 +91,9 @@ std::string payload_json_for_runtime_event(const RuntimeEvent& event) {
   append_payload_string_field(out, has_field, "message", event.error_message);
   append_payload_string_field(out, has_field, "details", event.error_details);
   append_payload_string_field(out, has_field, "stop_reason", event.stop_reason);
+  append_payload_string_field(out, has_field, "reasoning_format", event.reasoning_format);
+  append_payload_bool_field(out, has_field, "reasoning_redacted", event.reasoning_redacted);
+  append_payload_bool_field(out, has_field, "reasoning_signature_present", event.reasoning_signature_present);
   append_payload_number_field(out, has_field, "provider_iterations", event.provider_iterations);
   append_payload_number_field(out, has_field, "tool_calls", event.tool_calls);
   out += '}';
@@ -83,7 +102,7 @@ std::string payload_json_for_runtime_event(const RuntimeEvent& event) {
 
 void append_payload_aliases(std::string& out, std::string_view payload_json) {
   for (std::string_view key : {"mode", "provider", "model", "text", "call_id", "tool", "status", "category", "message",
-                               "details", "stop_reason"}) {
+                               "details", "stop_reason", "reasoning_format"}) {
     if (auto value = ava::core::json::string_field(payload_json, key); value && !value->empty()) {
       append_required_string_field(out, key, *value);
     }
@@ -112,6 +131,12 @@ std::string to_string(RuntimeEventType type) {
       return "message_update";
     case RuntimeEventType::MessageEnd:
       return "message_end";
+    case RuntimeEventType::ReasoningStart:
+      return "reasoning_start";
+    case RuntimeEventType::ReasoningDelta:
+      return "reasoning_delta";
+    case RuntimeEventType::ReasoningEnd:
+      return "reasoning_end";
     case RuntimeEventType::ProviderEvent:
       return "provider_event";
     case RuntimeEventType::ToolStart:
@@ -145,6 +170,9 @@ std::string serialize_event_json(const RuntimeEvent& event) {
   append_string_field(out, "message", event.error_message);
   append_string_field(out, "details", event.error_details);
   append_string_field(out, "stop_reason", event.stop_reason);
+  append_string_field(out, "reasoning_format", event.reasoning_format);
+  append_bool_field(out, "reasoning_redacted", event.reasoning_redacted);
+  append_bool_field(out, "reasoning_signature_present", event.reasoning_signature_present);
   append_number_field(out, "provider_iterations", event.provider_iterations);
   append_number_field(out, "tool_calls", event.tool_calls);
   out += '}';

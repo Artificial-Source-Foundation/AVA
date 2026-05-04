@@ -18,6 +18,8 @@ enum class EntryType {
   PermissionDecision,
   ModeChange,
   ModelChange,
+  ReasoningBlock,
+  ReasoningChange,
   Compaction,
   Error,
   Cancel,
@@ -55,16 +57,14 @@ class SessionStore {
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load() const;
 
   [[nodiscard]] static ava::core::Result<SessionStore> create(
-      const std::filesystem::path& workspace_dir,
-      const std::filesystem::path& root_dir = default_root_dir());
-  [[nodiscard]] static ava::core::Result<SessionStore> open(
-      const std::filesystem::path& workspace_dir,
-      std::string session_id,
-      const std::filesystem::path& root_dir = default_root_dir());
+      const std::filesystem::path& workspace_dir, const std::filesystem::path& root_dir = default_root_dir());
+  [[nodiscard]] static ava::core::Result<SessionStore> open(const std::filesystem::path& workspace_dir,
+                                                            std::string session_id,
+                                                            const std::filesystem::path& root_dir = default_root_dir());
   [[nodiscard]] static ava::core::Result<std::vector<SessionSummary>> list_sessions(
-      const std::filesystem::path& workspace_dir,
-      const std::filesystem::path& root_dir = default_root_dir());
+      const std::filesystem::path& workspace_dir, const std::filesystem::path& root_dir = default_root_dir());
   [[nodiscard]] static std::filesystem::path default_root_dir();
+
  private:
   SessionStoreOptions options_;
 };

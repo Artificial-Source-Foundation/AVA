@@ -1,7 +1,10 @@
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <string>
 
+#include "ava/config/model_profiles.h"
+#include "ava/config/provider_profiles.h"
 #include "ava/tui/composer_internal.h"
 
 namespace ava::tui::detail {
@@ -13,22 +16,41 @@ std::string composer_bar() {
 }
 
 std::string composer_mode_badge(std::string_view mode) {
-  const auto mode_text = sanitize_terminal_text(mode);
-  const auto color = mode == "build" || mode == "code" ? kSgrSuccess : kSgrAccent;
-  return std::string(color) + "[" + mode_text + "]" + std::string(kSgrReset) + std::string(kSgrComposerBg);
+  std::string mode_text = sanitize_terminal_text(mode);
+  if (!mode_text.empty())
+    mode_text.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(mode_text.front())));
+  const auto color = mode == "build" || mode == "code" ? kSgrWarning : kSgrAccent;
+  return std::string(color) + mode_text + std::string(kSgrReset) + std::string(kSgrComposerBg);
+}
+
+std::string provider_label(std::string_view provider) {
+  return sanitize_terminal_text(ava::config::provider_display_name(provider));
+}
+
+std::string model_label(std::string_view model) {
+  return sanitize_terminal_text(ava::config::model_display_label(model));
 }
 
 std::string render_status_line(const ComposerSnapshot& snapshot, std::size_t width) {
-  const auto provider = sanitize_terminal_text(snapshot.provider);
-  const auto model = sanitize_terminal_text(snapshot.model);
+  const auto provider = provider_label(snapshot.provider);
+  const auto model = model_label(snapshot.model);
 
   std::string line = composer_bar() + composer_mode_badge(snapshot.mode);
-  if (!provider.empty()) {
-    line += "  " + std::string(kSgrBold) + std::string(kSgrAccent) + provider + std::string(kSgrReset) +
-            std::string(kSgrComposerBg);
+  if (!model.empty() || !provider.empty()) {
+    line += " " + std::string(kSgrMuted) + "·" + std::string(kSgrReset) + std::string(kSgrComposerBg) + " ";
+    if (!model.empty()) {
+      line +=
+          std::string(kSgrBold) + std::string(kSgrText) + model + std::string(kSgrReset) + std::string(kSgrComposerBg);
+    }
+    if (!provider.empty()) {
+      if (!model.empty()) line += " ";
+      line += std::string(kSgrMuted) + provider + std::string(kSgrReset) + std::string(kSgrComposerBg);
+    }
   }
-  if (!model.empty()) {
-    line += "  " + std::string(kSgrMuted) + model + std::string(kSgrReset) + std::string(kSgrComposerBg);
+  if (snapshot.reasoning_status && !snapshot.reasoning_status->empty()) {
+    line += " " + std::string(kSgrMuted) + "·" + std::string(kSgrReset) + std::string(kSgrComposerBg) + " " +
+            std::string(kSgrWarning) + sanitize_terminal_text(*snapshot.reasoning_status) + std::string(kSgrReset) +
+            std::string(kSgrComposerBg);
   }
   std::string right;
   if (snapshot.token_status && !snapshot.token_status->empty()) {

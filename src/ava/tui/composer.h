@@ -26,6 +26,7 @@ struct ToolTimelineItem {
 struct TranscriptItem {
   std::string label = {};
   std::string text = {};
+  std::string meta = {};
   std::optional<ToolTimelineItem> tool = std::nullopt;
 };
 
@@ -52,6 +53,8 @@ struct SidebarSnapshot {
   std::string workspace = {};
   std::string git_branch = {};
   std::string version = {};
+  std::optional<std::string> token_status = std::nullopt;
+  std::optional<std::size_t> context_source_count = std::nullopt;
 };
 
 struct SlashCommandItem {
@@ -134,6 +137,7 @@ struct ComposerSnapshot {
   bool processing = false;
   std::size_t spinner_frame = 0;
   std::optional<std::string> token_status = std::nullopt;
+  std::optional<std::string> reasoning_status = std::nullopt;
   std::vector<TranscriptItem> transcript;
   std::vector<SlashCommandItem> slash_commands = {};
   std::optional<PermissionPromptView> permission_prompt = std::nullopt;
@@ -146,6 +150,7 @@ struct ComposerSnapshot {
   std::size_t input_cursor = std::string::npos;
   std::optional<SidebarSnapshot> sidebar = std::nullopt;
   std::size_t draft_scroll_offset = 0;
+  bool tool_details_visible = false;
 };
 
 [[nodiscard]] std::vector<SlashCommandItem> filter_slash_commands(std::string_view input,

@@ -1,0 +1,10 @@
+#pragma once
+
+#include <string_view>
+
+namespace ava::core::version {
+
+inline constexpr std::string_view kFullVersion = "@PROJECT_VERSION@";
+inline constexpr std::string_view kDisplayVersion = "@AVA_VERSION_DISPLAY@";
+
+}  // namespace ava::core::version

@@ -280,7 +280,7 @@ void test_session_store_round_trip() {
   std::filesystem::create_directories(future_version_store.session_path().parent_path());
   {
     std::ofstream file(future_version_store.session_path(), std::ios::binary | std::ios::trunc);
-    file << "{\"version\":2,\"id\":\"entry_future\",\"parent_id\":\"\",\"type\":\"user_message\","
+    file << "{\"version\":3,\"id\":\"entry_future\",\"parent_id\":\"\",\"type\":\"user_message\","
             "\"timestamp\":\"2026-04-27T00:00:00Z\",\"data\":{\"text\":\"hello\"}}\n";
   }
   auto future_version_loaded = future_version_store.load();
@@ -320,19 +320,19 @@ void test_session_stats_helper() {
                                  .timestamp = "2026-04-29T00:00:00Z",
                                  .data_json = "{}"},
       ava::session::SessionEntry{.id = "user_1",
-                                  .parent_id = "start_1",
-                                  .type = ava::session::EntryType::UserMessage,
-                                  .timestamp = "2026-04-29T00:00:01Z",
-                                  .data_json = "{\"usage\":{\"input_tokens\":3,\"output_tokens\":2,"
-                                               "\"reasoning_tokens\":1,\"cache_read_tokens\":2,"
-                                               "\"total_tokens\":5,\"cost_usd\":0.001,"
-                                               "\"source\":\"provider\"}}"},
+                                 .parent_id = "start_1",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-04-29T00:00:01Z",
+                                 .data_json = "{\"usage\":{\"input_tokens\":3,\"output_tokens\":2,"
+                                              "\"reasoning_tokens\":1,\"cache_read_tokens\":2,"
+                                              "\"total_tokens\":5,\"cost_usd\":0.001,"
+                                              "\"source\":\"provider\"}}"},
       ava::session::SessionEntry{.id = "user_1_replay",
-                                  .parent_id = "start_1",
-                                  .type = ava::session::EntryType::UserMessage,
-                                  .timestamp = "2026-04-29T00:00:01Z",
-                                  .data_json = "{\"text\":\"hidden replay\",\"internal_replay\":true,"
-                                               "\"replay_of\":\"user_1\",\"reason\":\"test\"}"},
+                                 .parent_id = "start_1",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-04-29T00:00:01Z",
+                                 .data_json = "{\"text\":\"hidden replay\",\"internal_replay\":true,"
+                                              "\"replay_of\":\"user_1\",\"reason\":\"test\"}"},
       ava::session::SessionEntry{.id = "assistant_1",
                                  .parent_id = "user_1",
                                  .type = ava::session::EntryType::AssistantMessage,
@@ -342,8 +342,20 @@ void test_session_stats_helper() {
                                               "\"estimated_input_bytes\":10,\"estimated_output_bytes\":20,"
                                               "\"estimated_total_bytes\":30,"
                                               "\"cost_usd\":0.0025,\"estimated\":true}}"},
-      ava::session::SessionEntry{.id = "mode_1",
+      ava::session::SessionEntry{.id = "reasoning_1",
                                  .parent_id = "assistant_1",
+                                 .type = ava::session::EntryType::ReasoningBlock,
+                                 .timestamp = "2026-04-29T00:00:02Z",
+                                 .data_json = "{\"provider\":\"anthropic\",\"model\":\"claude\","
+                                              "\"format\":\"anthropic_thinking\",\"text\":\"visible\","
+                                              "\"signature\":\"secret-signature\"}"},
+      ava::session::SessionEntry{.id = "reasoning_change_1",
+                                 .parent_id = "reasoning_1",
+                                 .type = ava::session::EntryType::ReasoningChange,
+                                 .timestamp = "2026-04-29T00:00:02Z",
+                                 .data_json = "{\"level\":\"high\"}"},
+      ava::session::SessionEntry{.id = "mode_1",
+                                 .parent_id = "reasoning_change_1",
                                  .type = ava::session::EntryType::ModeChange,
                                  .timestamp = "2026-04-29T00:00:03Z",
                                  .data_json = "{\"mode\":\"plan\"}"},
@@ -369,9 +381,9 @@ void test_session_stats_helper() {
              stats.last_timestamp == "2026-04-29T00:00:06Z",
          "session stats helper reports entry count and timestamps");
   expect(stats.counts.session_start == 1 && stats.counts.user_message == 1 && stats.counts.assistant_message == 1 &&
-              stats.counts.mode_change == 1 && stats.counts.compaction == 1 && stats.counts.cancel == 1 &&
-              stats.counts.error == 1,
-          "session stats helper reports current counts without durable internal replay user messages");
+             stats.counts.reasoning_block == 1 && stats.counts.reasoning_change == 1 && stats.counts.mode_change == 1 &&
+             stats.counts.compaction == 1 && stats.counts.cancel == 1 && stats.counts.error == 1,
+         "session stats helper reports current counts without durable internal replay user messages");
   expect(stats.input_tokens && *stats.input_tokens == 3 && stats.output_tokens && *stats.output_tokens == 2 &&
              stats.total_tokens && *stats.total_tokens == 5,
          "session stats helper aggregates exact token fields only from provider usage");
@@ -662,16 +674,16 @@ void test_session_markdown_export() {
                                  .timestamp = "2026-04-29T00:00:00Z",
                                  .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-5.5\"}"},
       ava::session::SessionEntry{.id = "user_1",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::UserMessage,
-                                  .timestamp = "2026-04-29T00:00:01Z",
-                                  .data_json = "{\"text\":\"Hello AVA\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-04-29T00:00:01Z",
+                                 .data_json = "{\"text\":\"Hello AVA\"}"},
       ava::session::SessionEntry{.id = "user_1_replay",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::UserMessage,
-                                  .timestamp = "2026-04-29T00:00:01Z",
-                                  .data_json = "{\"text\":\"Hello AVA\",\"internal_replay\":true,"
-                                               "\"replay_of\":\"user_1\",\"reason\":\"test\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-04-29T00:00:01Z",
+                                 .data_json = "{\"text\":\"Hello AVA\",\"internal_replay\":true,"
+                                              "\"replay_of\":\"user_1\",\"reason\":\"test\"}"},
       ava::session::SessionEntry{.id = "assistant_1",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::AssistantMessage,
@@ -679,6 +691,14 @@ void test_session_markdown_export() {
                                  .data_json = "{\"text\":\"Hello human\",\"tool_calls\":1,"
                                               "\"usage\":{\"input_tokens\":10,\"output_tokens\":5,"
                                               "\"total_tokens\":15,\"source\":\"provider\"}}"},
+      ava::session::SessionEntry{.id = "reasoning_1",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ReasoningBlock,
+                                 .timestamp = "2026-04-29T00:00:02Z",
+                                 .data_json = "{\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-5\","
+                                              "\"format\":\"anthropic_thinking\","
+                                              "\"text\":\"visible reasoning summary\","
+                                              "\"signature\":\"super-secret-signature\"}"},
       ava::session::SessionEntry{
           .id = "tool_call_1",
           .parent_id = "",
@@ -727,12 +747,16 @@ void test_session_markdown_export() {
   const auto basic = ava::session::format_session_markdown(entries);
   expect(basic.find("# AVA Session Export") != std::string::npos, "markdown export has deterministic title");
   expect(basic.find("## User") != std::string::npos && basic.find("Hello AVA") != std::string::npos,
-          "markdown export renders user messages");
-  expect(basic.find("internal_replay") == std::string::npos &&
-             basic.find("replay_of") == std::string::npos,
+         "markdown export renders user messages");
+  expect(basic.find("internal_replay") == std::string::npos && basic.find("replay_of") == std::string::npos,
          "markdown export hides internal replay user messages");
   expect(basic.find("## Assistant") != std::string::npos && basic.find("Hello human") != std::string::npos,
          "markdown export renders assistant messages");
+  expect(basic.find("## Reasoning") != std::string::npos &&
+             basic.find("visible reasoning summary") != std::string::npos &&
+             basic.find("Signature present") != std::string::npos &&
+             basic.find("super-secret-signature") == std::string::npos,
+         "markdown export renders reasoning blocks without leaking provider-private signatures");
   expect(basic.find("Usage:") != std::string::npos && basic.find("input_tokens") != std::string::npos,
          "markdown export renders assistant usage when present");
   expect(basic.find("## Tool Call") == std::string::npos && basic.find("README.md") == std::string::npos,
@@ -882,33 +906,33 @@ void test_compaction_context_reconstruction() {
                                  .timestamp = "2026-04-27T00:00:05Z",
                                  .data_json = "{\"summary\":\"latest summary\",\"instructions\":\"carry this\"}"},
       ava::session::SessionEntry{.id = "new_user",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::UserMessage,
-                                  .timestamp = "2026-04-27T00:00:06Z",
-                                  .data_json = "{\"text\":\"new user\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-04-27T00:00:06Z",
+                                 .data_json = "{\"text\":\"new user\"}"},
       ava::session::SessionEntry{.id = "new_user_replay",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::UserMessage,
-                                  .timestamp = "2026-04-27T00:00:06Z",
-                                  .data_json = "{\"text\":\"new user\",\"internal_replay\":true,"
-                                               "\"replay_of\":\"new_user\",\"reason\":\"test\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-04-27T00:00:06Z",
+                                 .data_json = "{\"text\":\"new user\",\"internal_replay\":true,"
+                                              "\"replay_of\":\"new_user\",\"reason\":\"test\"}"},
       ava::session::SessionEntry{.id = "new_assistant",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::AssistantMessage,
-                                  .timestamp = "2026-04-27T00:00:07Z",
-                                  .data_json = "{\"text\":\"new assistant\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-04-27T00:00:07Z",
+                                 .data_json = "{\"text\":\"new assistant\"}"},
       ava::session::SessionEntry{.id = "new_tool_call",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolCall,
-                                  .timestamp = "2026-04-27T00:00:08Z",
-                                  .data_json = "{\"call_id\":\"call_read\",\"name\":\"read_file\","
-                                               "\"arguments\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-27T00:00:08Z",
+                                 .data_json = "{\"call_id\":\"call_read\",\"name\":\"read_file\","
+                                              "\"arguments\":\"{\\\"path\\\":\\\"note.txt\\\"}\"}"},
       ava::session::SessionEntry{.id = "new_tool_result",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolResult,
-                                  .timestamp = "2026-04-27T00:00:09Z",
-                                  .data_json = "{\"call_id\":\"call_read\",\"name\":\"read_file\","
-                                               "\"result\":\"note contents\"}"}};
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-27T00:00:09Z",
+                                 .data_json = "{\"call_id\":\"call_read\",\"name\":\"read_file\","
+                                              "\"result\":\"note contents\"}"}};
 
   auto messages = ava::agent::build_provider_messages_from_entries(entries);
   expect(messages && messages->size() == 6, "compacted context reconstructs summary plus post-compaction turns");
@@ -922,44 +946,44 @@ void test_compaction_context_reconstruction() {
              joined.find("old raw tool") == std::string::npos && joined.find("middle raw user") == std::string::npos &&
              joined.find("first summary") == std::string::npos,
          "context reconstruction omits raw messages and tool results before latest compaction");
-  expect((*messages)[1].role == "user" && (*messages)[1].content == "new user" &&
-              (*messages)[2].role == "user" && (*messages)[2].content == "new user" &&
-              (*messages)[3].role == "assistant" && (*messages)[3].content == "new assistant",
-          "post-compaction entries include internal replays as normal provider messages");
-  expect((*messages)[4].role == "assistant" && (*messages)[4].content.find("Tool call requested by assistant") !=
-                                                  std::string::npos &&
-              (*messages)[4].content.find("read_file") != std::string::npos &&
-              (*messages)[5].role == "user" && (*messages)[5].content.find("note contents") != std::string::npos,
-          "post-compaction context includes tool-call metadata before tool result data");
+  expect((*messages)[1].role == "user" && (*messages)[1].content == "new user" && (*messages)[2].role == "user" &&
+             (*messages)[2].content == "new user" && (*messages)[3].role == "assistant" &&
+             (*messages)[3].content == "new assistant",
+         "post-compaction entries include internal replays as normal provider messages");
+  expect((*messages)[4].role == "assistant" &&
+             (*messages)[4].content.find("Tool call requested by assistant") != std::string::npos &&
+             (*messages)[4].content.find("read_file") != std::string::npos && (*messages)[5].role == "user" &&
+             (*messages)[5].content.find("note contents") != std::string::npos,
+         "post-compaction context includes tool-call metadata before tool result data");
   expect((*messages)[4].content_parts.size() == 1 &&
-              (*messages)[4].content_parts[0].type == ava::provider::ContentPartType::ToolUse &&
-              (*messages)[4].content_parts[0].tool_call_id == "call_read" &&
-              (*messages)[4].content_parts[0].tool_name == "read_file" &&
-              (*messages)[4].content_parts[0].input_json.find("note.txt") != std::string::npos &&
-              (*messages)[5].content_parts.size() == 1 &&
-              (*messages)[5].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
-              (*messages)[5].content_parts[0].tool_call_id == "call_read" &&
-              (*messages)[5].content_parts[0].tool_name == "read_file" &&
-              (*messages)[5].content_parts[0].text == "note contents" && !(*messages)[5].content_parts[0].is_error,
-          "tool-call and tool-result entries carry native provider content parts");
+             (*messages)[4].content_parts[0].type == ava::provider::ContentPartType::ToolUse &&
+             (*messages)[4].content_parts[0].tool_call_id == "call_read" &&
+             (*messages)[4].content_parts[0].tool_name == "read_file" &&
+             (*messages)[4].content_parts[0].input_json.find("note.txt") != std::string::npos &&
+             (*messages)[5].content_parts.size() == 1 &&
+             (*messages)[5].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
+             (*messages)[5].content_parts[0].tool_call_id == "call_read" &&
+             (*messages)[5].content_parts[0].tool_name == "read_file" &&
+             (*messages)[5].content_parts[0].text == "note contents" && !(*messages)[5].content_parts[0].is_error,
+         "tool-call and tool-result entries carry native provider content parts");
 }
 
 void test_tool_content_parts_reconstruction() {
   const std::string long_result(80, 'r');
   const std::vector<ava::session::SessionEntry> entries = {
       ava::session::SessionEntry{.id = "tool_call",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolCall,
-                                  .timestamp = "2026-04-27T00:00:00Z",
-                                  .data_json = "{\"call_id\":\"call_failed\",\"name\":\"bash\","
-                                               "\"arguments\":\"{\\\"cmd\\\":\\\"false\\\"}\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-27T00:00:00Z",
+                                 .data_json = "{\"call_id\":\"call_failed\",\"name\":\"bash\","
+                                              "\"arguments\":\"{\\\"cmd\\\":\\\"false\\\"}\"}"},
       ava::session::SessionEntry{.id = "tool_result",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolResult,
-                                  .timestamp = "2026-04-27T00:00:01Z",
-                                  .data_json = "{\"call_id\":\"call_failed\",\"name\":\"bash\","
-                                               "\"success\":false,\"result\":\"" +
-                                               long_result + "\"}"}};
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-27T00:00:01Z",
+                                 .data_json = "{\"call_id\":\"call_failed\",\"name\":\"bash\","
+                                              "\"success\":false,\"result\":\"" +
+                                              long_result + "\"}"}};
 
   auto messages = ava::agent::build_provider_messages_from_entries(
       entries, ava::agent::MessageBuildOptions{.max_tool_result_context_bytes = 48});
@@ -974,33 +998,32 @@ void test_tool_content_parts_reconstruction() {
              (*messages)[0].content_parts[0].tool_name == "bash" &&
              (*messages)[0].content_parts[0].input_json.find("false") != std::string::npos,
          "tool-call entry reconstructs an assistant tool-use content part with fallback text");
-  expect((*messages)[1].role == "user" && !(*messages)[1].content.empty() &&
-              (*messages)[1].content_parts.size() == 1 &&
-              (*messages)[1].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
-              (*messages)[1].content_parts[0].tool_call_id == "call_failed" &&
-              (*messages)[1].content_parts[0].tool_name == "bash" && (*messages)[1].content_parts[0].is_error &&
-              (*messages)[1].content_parts[0].text.size() == 48 &&
-              (*messages)[1].content_parts[0].text.find("[AVA: tool result content truncated]") != std::string::npos,
-          "failed tool-result entry reconstructs native error metadata and truncated result text");
+  expect((*messages)[1].role == "user" && !(*messages)[1].content.empty() && (*messages)[1].content_parts.size() == 1 &&
+             (*messages)[1].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
+             (*messages)[1].content_parts[0].tool_call_id == "call_failed" &&
+             (*messages)[1].content_parts[0].tool_name == "bash" && (*messages)[1].content_parts[0].is_error &&
+             (*messages)[1].content_parts[0].text.size() == 48 &&
+             (*messages)[1].content_parts[0].text.find("[AVA: tool result content truncated]") != std::string::npos,
+         "failed tool-result entry reconstructs native error metadata and truncated result text");
 
   const std::vector<ava::session::SessionEntry> permission_entries = {
       ava::session::SessionEntry{.id = "permission_tool_call",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolCall,
-                                  .timestamp = "2026-04-27T00:00:00Z",
-                                  .data_json = "{\"call_id\":\"call_permission\",\"name\":\"read_file\","
-                                               "\"arguments\":\"{}\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-27T00:00:00Z",
+                                 .data_json = "{\"call_id\":\"call_permission\",\"name\":\"read_file\","
+                                              "\"arguments\":\"{}\"}"},
       ava::session::SessionEntry{.id = "permission_decision",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::PermissionDecision,
-                                  .timestamp = "2026-04-27T00:00:01Z",
-                                  .data_json = "{\"resolution\":\"allow\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::PermissionDecision,
+                                 .timestamp = "2026-04-27T00:00:01Z",
+                                 .data_json = "{\"resolution\":\"allow\"}"},
       ava::session::SessionEntry{.id = "permission_tool_result",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolResult,
-                                  .timestamp = "2026-04-27T00:00:02Z",
-                                  .data_json = "{\"call_id\":\"call_permission\",\"name\":\"read_file\","
-                                               "\"success\":true,\"result\":\"permission result\"}"}};
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-27T00:00:02Z",
+                                 .data_json = "{\"call_id\":\"call_permission\",\"name\":\"read_file\","
+                                              "\"success\":true,\"result\":\"permission result\"}"}};
   auto permission_messages = ava::agent::build_provider_messages_from_entries(permission_entries);
   expect(permission_messages && permission_messages->size() == 2,
          "permission decisions are internal metadata during provider replay");
@@ -1013,18 +1036,18 @@ void test_tool_content_parts_reconstruction() {
   const std::string utf8_result = "abc" + euro + std::string(80, 'x');
   const std::vector<ava::session::SessionEntry> utf8_entries = {
       ava::session::SessionEntry{.id = "utf8_tool_call",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolCall,
-                                  .timestamp = "2026-04-27T00:00:00Z",
-                                  .data_json = "{\"call_id\":\"call_utf8\",\"name\":\"bash\","
-                                               "\"arguments\":\"{}\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-27T00:00:00Z",
+                                 .data_json = "{\"call_id\":\"call_utf8\",\"name\":\"bash\","
+                                              "\"arguments\":\"{}\"}"},
       ava::session::SessionEntry{.id = "utf8_tool_result",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolResult,
-                                  .timestamp = "2026-04-27T00:00:01Z",
-                                  .data_json = "{\"call_id\":\"call_utf8\",\"name\":\"bash\","
-                                               "\"success\":true,\"result\":\"" +
-                                               utf8_result + "\"}"}};
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-27T00:00:01Z",
+                                 .data_json = "{\"call_id\":\"call_utf8\",\"name\":\"bash\","
+                                              "\"success\":true,\"result\":\"" +
+                                              utf8_result + "\"}"}};
   auto utf8_messages = ava::agent::build_provider_messages_from_entries(
       utf8_entries, ava::agent::MessageBuildOptions{.max_tool_result_context_bytes = truncation_marker.size() + 4});
   expect(utf8_messages && utf8_messages->size() == 2, "utf8 tool entries reconstruct as provider messages");
@@ -1035,17 +1058,17 @@ void test_tool_content_parts_reconstruction() {
 
   const std::vector<ava::session::SessionEntry> malformed_success_entries = {
       ava::session::SessionEntry{.id = "malformed_success_call",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolCall,
-                                  .timestamp = "2026-04-27T00:00:00Z",
-                                  .data_json = "{\"call_id\":\"call_success_prefix\",\"name\":\"bash\","
-                                               "\"arguments\":\"{}\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-27T00:00:00Z",
+                                 .data_json = "{\"call_id\":\"call_success_prefix\",\"name\":\"bash\","
+                                              "\"arguments\":\"{}\"}"},
       ava::session::SessionEntry{.id = "malformed_success_result",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolResult,
-                                  .timestamp = "2026-04-27T00:00:01Z",
-                                  .data_json = "{\"call_id\":\"call_success_prefix\",\"name\":\"bash\","
-                                               "\"success\":falsefoo,\"result\":\"bool result\"}"}};
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-27T00:00:01Z",
+                                 .data_json = "{\"call_id\":\"call_success_prefix\",\"name\":\"bash\","
+                                              "\"success\":falsefoo,\"result\":\"bool result\"}"}};
   auto malformed_success_messages = ava::agent::build_provider_messages_from_entries(malformed_success_entries);
   expect(malformed_success_messages && malformed_success_messages->size() == 2,
          "malformed bool tool entries reconstruct as provider messages");
@@ -1056,40 +1079,40 @@ void test_tool_content_parts_reconstruction() {
 
   const std::vector<ava::session::SessionEntry> malformed_entries = {
       ava::session::SessionEntry{.id = "malformed_tool_call",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolCall,
-                                  .timestamp = "2026-04-27T00:00:00Z",
-                                  .data_json = "{\"call_id\":\"call_bad\",\"name\":\"bash\","
-                                               "\"arguments\":\"{\\\"cmd\\\":}\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-27T00:00:00Z",
+                                 .data_json = "{\"call_id\":\"call_bad\",\"name\":\"bash\","
+                                              "\"arguments\":\"{\\\"cmd\\\":}\"}"},
       ava::session::SessionEntry{.id = "malformed_tool_result",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolResult,
-                                  .timestamp = "2026-04-27T00:00:01Z",
-                                  .data_json = "{\"call_id\":\"call_bad\",\"name\":\"bash\","
-                                               "\"success\":true,\"result\":\"still visible\"}"}};
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-27T00:00:01Z",
+                                 .data_json = "{\"call_id\":\"call_bad\",\"name\":\"bash\","
+                                              "\"success\":true,\"result\":\"still visible\"}"}};
   auto malformed_messages = ava::agent::build_provider_messages_from_entries(malformed_entries);
   expect(malformed_messages && malformed_messages->size() == 2,
          "malformed tool entries still reconstruct as fallback provider messages");
   if (!malformed_messages || malformed_messages->size() != 2) return;
   expect((*malformed_messages)[0].content.find("cmd") != std::string::npos &&
-              (*malformed_messages)[0].content_parts.empty() &&
-              (*malformed_messages)[1].content.find("still visible") != std::string::npos &&
-              (*malformed_messages)[1].content_parts.empty(),
-          "malformed native tool-use replay falls back to text-only without dangling native tool-result");
+             (*malformed_messages)[0].content_parts.empty() &&
+             (*malformed_messages)[1].content.find("still visible") != std::string::npos &&
+             (*malformed_messages)[1].content_parts.empty(),
+         "malformed native tool-use replay falls back to text-only without dangling native tool-result");
 
   const std::vector<ava::session::SessionEntry> malformed_id_entries = {
       ava::session::SessionEntry{.id = "malformed_id_tool_call",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolCall,
-                                  .timestamp = "2026-04-27T00:00:00Z",
-                                  .data_json = "{\"call_id\":\"call\\nbad\",\"name\":\"bash\","
-                                               "\"arguments\":\"{}\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-27T00:00:00Z",
+                                 .data_json = "{\"call_id\":\"call\\nbad\",\"name\":\"bash\","
+                                              "\"arguments\":\"{}\"}"},
       ava::session::SessionEntry{.id = "malformed_id_tool_result",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolResult,
-                                  .timestamp = "2026-04-27T00:00:01Z",
-                                  .data_json = "{\"call_id\":\"call\\nbad\",\"name\":\"bash\","
-                                               "\"success\":true,\"result\":\"still visible\"}"}};
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-27T00:00:01Z",
+                                 .data_json = "{\"call_id\":\"call\\nbad\",\"name\":\"bash\","
+                                              "\"success\":true,\"result\":\"still visible\"}"}};
   auto malformed_id_messages = ava::agent::build_provider_messages_from_entries(malformed_id_entries);
   expect(malformed_id_messages && malformed_id_messages->size() == 2,
          "malformed tool id entries still reconstruct as fallback provider messages");
@@ -1099,34 +1122,34 @@ void test_tool_content_parts_reconstruction() {
 
   const std::vector<ava::session::SessionEntry> duplicate_batch_id_entries = {
       ava::session::SessionEntry{.id = "duplicate_batch_assistant",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::AssistantMessage,
-                                  .timestamp = "2026-04-27T00:00:00Z",
-                                  .data_json = "{\"text\":\"\",\"tool_calls\":2}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-04-27T00:00:00Z",
+                                 .data_json = "{\"text\":\"\",\"tool_calls\":2}"},
       ava::session::SessionEntry{.id = "duplicate_batch_tool_call_1",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolCall,
-                                  .timestamp = "2026-04-27T00:00:01Z",
-                                  .data_json = "{\"call_id\":\"call_duplicate_batch\",\"name\":\"bash\","
-                                               "\"arguments\":\"{}\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-27T00:00:01Z",
+                                 .data_json = "{\"call_id\":\"call_duplicate_batch\",\"name\":\"bash\","
+                                              "\"arguments\":\"{}\"}"},
       ava::session::SessionEntry{.id = "duplicate_batch_tool_result_1",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolResult,
-                                  .timestamp = "2026-04-27T00:00:02Z",
-                                  .data_json = "{\"call_id\":\"call_duplicate_batch\",\"name\":\"bash\","
-                                               "\"success\":true,\"result\":\"first result\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-27T00:00:02Z",
+                                 .data_json = "{\"call_id\":\"call_duplicate_batch\",\"name\":\"bash\","
+                                              "\"success\":true,\"result\":\"first result\"}"},
       ava::session::SessionEntry{.id = "duplicate_batch_tool_call_2",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolCall,
-                                  .timestamp = "2026-04-27T00:00:03Z",
-                                  .data_json = "{\"call_id\":\"call_duplicate_batch\",\"name\":\"bash\","
-                                               "\"arguments\":\"{}\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-27T00:00:03Z",
+                                 .data_json = "{\"call_id\":\"call_duplicate_batch\",\"name\":\"bash\","
+                                              "\"arguments\":\"{}\"}"},
       ava::session::SessionEntry{.id = "duplicate_batch_tool_result_2",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolResult,
-                                  .timestamp = "2026-04-27T00:00:04Z",
-                                  .data_json = "{\"call_id\":\"call_duplicate_batch\",\"name\":\"bash\","
-                                               "\"success\":true,\"result\":\"second result\"}"}};
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-27T00:00:04Z",
+                                 .data_json = "{\"call_id\":\"call_duplicate_batch\",\"name\":\"bash\","
+                                              "\"success\":true,\"result\":\"second result\"}"}};
   auto duplicate_batch_id_messages = ava::agent::build_provider_messages_from_entries(duplicate_batch_id_entries);
   expect(duplicate_batch_id_messages && duplicate_batch_id_messages->size() == 5,
          "duplicate same-turn tool ids reconstruct as fallback provider messages");
@@ -1139,57 +1162,55 @@ void test_tool_content_parts_reconstruction() {
 
   const std::vector<ava::session::SessionEntry> reused_id_entries = {
       ava::session::SessionEntry{.id = "valid_tool_call",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolCall,
-                                  .timestamp = "2026-04-27T00:00:00Z",
-                                  .data_json = "{\"call_id\":\"call_reused\",\"name\":\"bash\","
-                                               "\"arguments\":\"{}\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-27T00:00:00Z",
+                                 .data_json = "{\"call_id\":\"call_reused\",\"name\":\"bash\","
+                                              "\"arguments\":\"{}\"}"},
       ava::session::SessionEntry{.id = "valid_tool_result",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolResult,
-                                  .timestamp = "2026-04-27T00:00:01Z",
-                                  .data_json = "{\"call_id\":\"call_reused\",\"name\":\"bash\","
-                                               "\"success\":true,\"result\":\"first result\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-27T00:00:01Z",
+                                 .data_json = "{\"call_id\":\"call_reused\",\"name\":\"bash\","
+                                              "\"success\":true,\"result\":\"first result\"}"},
       ava::session::SessionEntry{.id = "valid_reused_tool_call",
-                                   .parent_id = "",
-                                   .type = ava::session::EntryType::ToolCall,
-                                   .timestamp = "2026-04-27T00:00:02Z",
-                                   .data_json = "{\"call_id\":\"call_reused\",\"name\":\"bash\","
-                                                "\"arguments\":\"{}\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-27T00:00:02Z",
+                                 .data_json = "{\"call_id\":\"call_reused\",\"name\":\"bash\","
+                                              "\"arguments\":\"{}\"}"},
       ava::session::SessionEntry{.id = "valid_reused_tool_result",
-                                   .parent_id = "",
-                                   .type = ava::session::EntryType::ToolResult,
-                                  .timestamp = "2026-04-27T00:00:03Z",
-                                  .data_json = "{\"call_id\":\"call_reused\",\"name\":\"bash\","
-                                               "\"success\":true,\"result\":\"second result\"}"}};
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-27T00:00:03Z",
+                                 .data_json = "{\"call_id\":\"call_reused\",\"name\":\"bash\","
+                                              "\"success\":true,\"result\":\"second result\"}"}};
   auto reused_id_messages = ava::agent::build_provider_messages_from_entries(reused_id_entries);
-  expect(reused_id_messages && reused_id_messages->size() == 4,
-         "reused tool ids reconstruct as provider messages");
+  expect(reused_id_messages && reused_id_messages->size() == 4, "reused tool ids reconstruct as provider messages");
   if (!reused_id_messages || reused_id_messages->size() != 4) return;
   expect((*reused_id_messages)[1].content_parts.size() == 1 &&
-              (*reused_id_messages)[1].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
-              (*reused_id_messages)[2].content_parts.empty() &&
-              (*reused_id_messages)[3].content_parts.empty(),
-          "native tool-result matching is one-shot and reused native ids fall back to text-only");
+             (*reused_id_messages)[1].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
+             (*reused_id_messages)[2].content_parts.empty() && (*reused_id_messages)[3].content_parts.empty(),
+         "native tool-result matching is one-shot and reused native ids fall back to text-only");
 
   const std::vector<ava::session::SessionEntry> interrupted_entries = {
       ava::session::SessionEntry{.id = "interrupted_tool_call",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolCall,
-                                  .timestamp = "2026-04-27T00:00:00Z",
-                                  .data_json = "{\"call_id\":\"call_late\",\"name\":\"bash\","
-                                               "\"arguments\":\"{}\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-27T00:00:00Z",
+                                 .data_json = "{\"call_id\":\"call_late\",\"name\":\"bash\","
+                                              "\"arguments\":\"{}\"}"},
       ava::session::SessionEntry{.id = "intervening_user",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::UserMessage,
-                                  .timestamp = "2026-04-27T00:00:01Z",
-                                  .data_json = "{\"text\":\"intervening user\"}"},
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-04-27T00:00:01Z",
+                                 .data_json = "{\"text\":\"intervening user\"}"},
       ava::session::SessionEntry{.id = "late_tool_result",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::ToolResult,
-                                  .timestamp = "2026-04-27T00:00:02Z",
-                                  .data_json = "{\"call_id\":\"call_late\",\"name\":\"bash\","
-                                               "\"success\":true,\"result\":\"late result\"}"}};
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-27T00:00:02Z",
+                                 .data_json = "{\"call_id\":\"call_late\",\"name\":\"bash\","
+                                              "\"success\":true,\"result\":\"late result\"}"}};
   auto interrupted_messages = ava::agent::build_provider_messages_from_entries(interrupted_entries);
   expect(interrupted_messages && interrupted_messages->size() == 3,
          "interrupted tool entries still reconstruct as provider messages");

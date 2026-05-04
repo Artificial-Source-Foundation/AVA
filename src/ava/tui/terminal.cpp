@@ -10,6 +10,8 @@
 #include <clocale>
 #include <csignal>
 #include <cstdio>
+#include <limits>
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -80,6 +82,48 @@ std::size_t utf8_sequence_length(unsigned char byte) {
   if ((byte & 0xF0U) == 0xE0U) return 3;
   if (byte >= 0xF0U && byte <= 0xF4U) return 4;
   return 0;
+}
+
+std::optional<int> parse_unsigned_int(std::string_view text, std::size_t& index) {
+  if (index >= text.size() || text[index] < '0' || text[index] > '9') return std::nullopt;
+  int value = 0;
+  while (index < text.size() && text[index] >= '0' && text[index] <= '9') {
+    const auto digit = text[index] - '0';
+    if (value > (std::numeric_limits<int>::max() - digit) / 10) return std::nullopt;
+    value = (value * 10) + digit;
+    ++index;
+  }
+  return value;
+}
+
+bool consume_char(std::string_view text, std::size_t& index, char expected) {
+  if (index >= text.size() || text[index] != expected) return false;
+  ++index;
+  return true;
+}
+
+bool is_shift_enter_csi_u(std::string_view sequence) {
+  if (!sequence.starts_with('[')) return false;
+  auto index = std::size_t{1};
+  const auto codepoint = parse_unsigned_int(sequence, index);
+  if (!codepoint || *codepoint != 13) return false;
+  if (!consume_char(sequence, index, ';')) return false;
+  const auto modifiers = parse_unsigned_int(sequence, index);
+  if (!modifiers || *modifiers != 2) return false;
+  return index + 1 == sequence.size() && (sequence[index] == 'u' || sequence[index] == '~');
+}
+
+bool is_legacy_shift_enter_sequence(std::string_view sequence) {
+  if (!sequence.starts_with('[')) return false;
+  auto index = std::size_t{1};
+  const auto escape_code = parse_unsigned_int(sequence, index);
+  if (!escape_code || *escape_code != 27) return false;
+  if (!consume_char(sequence, index, ';')) return false;
+  const auto modifiers = parse_unsigned_int(sequence, index);
+  if (!modifiers || *modifiers != 2) return false;
+  if (!consume_char(sequence, index, ';')) return false;
+  const auto key_code = parse_unsigned_int(sequence, index);
+  return key_code && *key_code == 13 && index + 1 == sequence.size() && sequence[index] == '~';
 }
 
 }  // namespace
@@ -192,7 +236,7 @@ void erase_last_utf8_codepoint(std::string& text) {
 }
 
 Key terminal_escape_sequence_key(std::string_view sequence) {
-  if (sequence == "[27;2;13~" || sequence == "[13;2u" || sequence == "[13;2~") return Key::ShiftEnter;
+  if (is_legacy_shift_enter_sequence(sequence) || is_shift_enter_csi_u(sequence)) return Key::ShiftEnter;
   return Key::Unknown;
 }
 

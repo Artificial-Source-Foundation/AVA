@@ -4,6 +4,8 @@
 #include <string_view>
 #include <utility>
 
+#include "ava/config/model_profiles.h"
+
 namespace ava::tui {
 namespace {
 
@@ -23,6 +25,39 @@ std::string_view trim_trailing_ascii_space(std::string_view text) {
 
 ToolTimelineStatus tool_status_from_event(const ava::app::RuntimeEvent& event) {
   return event.status == "error" ? ToolTimelineStatus::Error : ToolTimelineStatus::Success;
+}
+
+std::string title_case_ascii(std::string_view text) {
+  std::string output;
+  output.reserve(text.size());
+  bool at_word_start = true;
+  for (char ch : text) {
+    const auto byte = static_cast<unsigned char>(ch);
+    if (byte == '_' || byte == '-') {
+      output.push_back(' ');
+      at_word_start = true;
+      continue;
+    }
+    if (at_word_start && byte >= 'a' && byte <= 'z') {
+      output.push_back(static_cast<char>(byte - ('a' - 'A')));
+    } else {
+      output.push_back(ch);
+    }
+    at_word_start = byte == ' ';
+  }
+  return output;
+}
+
+std::string assistant_meta_for_event(const ava::app::RuntimeEvent& event) {
+  if (event.model_id.empty()) return {};
+  auto mode = title_case_ascii(ava::agent::to_string(event.mode));
+  if (mode.empty()) mode = "AVA";
+  return mode + " - " + ava::config::model_display_label(event.provider_id, event.model_id);
+}
+
+void update_pending_assistant_meta(TuiEventState& state, const ava::app::RuntimeEvent& event) {
+  auto meta = assistant_meta_for_event(event);
+  if (!meta.empty()) state.pending_assistant_meta = std::move(meta);
 }
 
 void upsert_activity(TuiEventState& state, const std::string& call_id, const ToolTimelineItem& item) {
@@ -60,6 +95,14 @@ void upsert_sidebar_activity(TuiEventState& state, SidebarActivityItem item) {
         state.activity.begin(),
         state.activity.begin() + static_cast<std::ptrdiff_t>(state.activity.size() - kMaxActivityItems));
   }
+}
+
+void settle_responding_activity(TuiEventState& state, ToolTimelineStatus status, std::string detail) {
+  auto existing = std::ranges::find_if(state.activity,
+                                       [](const SidebarActivityItem& activity) { return activity.id == "responding"; });
+  if (existing == state.activity.end()) return;
+  existing->status = status;
+  existing->detail = std::move(detail);
 }
 
 bool is_cancel_error(const ava::app::RuntimeEvent& event) {
@@ -100,43 +143,57 @@ void record_modified_file(TuiEventState& state, const ToolTimelineItem& item) {
   }
 }
 
-void append_assistant_text(TuiEventState& state, std::string text) {
+void append_assistant_text(TuiEventState& state, std::string text, std::string meta) {
   if (text.empty()) return;
-  state.transcript.push_back(TranscriptItem{.label = "ava", .text = std::move(text)});
+  state.transcript.push_back(TranscriptItem{.label = "ava", .text = std::move(text), .meta = std::move(meta)});
   state.stream_assistant_transcript_index = std::nullopt;
 }
 
-void commit_pending_assistant_text(TuiEventState& state) {
+void commit_pending_assistant_text(TuiEventState& state, std::string meta = {}) {
   if (state.pending_assistant_text.empty()) return;
-  state.transcript.push_back(TranscriptItem{.label = "ava", .text = std::move(state.pending_assistant_text)});
+  if (meta.empty()) meta = std::move(state.pending_assistant_meta);
+  state.transcript.push_back(
+      TranscriptItem{.label = "ava", .text = std::move(state.pending_assistant_text), .meta = std::move(meta)});
   state.pending_assistant_text.clear();
+  state.pending_assistant_meta.clear();
   state.stream_assistant_transcript_index = state.transcript.size() - 1;
+}
+
+void commit_pending_reasoning_text(TuiEventState& state) {
+  if (state.pending_reasoning_text.empty()) return;
+  state.transcript.push_back(TranscriptItem{.label = "thinking", .text = std::move(state.pending_reasoning_text)});
+  state.pending_reasoning_text.clear();
 }
 
 void apply_assistant_final(TuiEventState& state, const ava::app::RuntimeEvent& event) {
   auto final_text = event.text.empty() ? std::move(state.pending_assistant_text) : event.text;
+  auto final_meta = assistant_meta_for_event(event);
+  if (final_meta.empty()) final_meta = std::move(state.pending_assistant_meta);
   state.pending_assistant_text.clear();
+  state.pending_assistant_meta.clear();
   if (final_text.empty()) return;
 
   if (state.stream_assistant_transcript_index && *state.stream_assistant_transcript_index < state.transcript.size()) {
     auto& item = state.transcript[*state.stream_assistant_transcript_index];
     if (!item.tool && item.label == "ava") {
       item.text = std::move(final_text);
+      if (!final_meta.empty()) item.meta = std::move(final_meta);
       state.stream_assistant_transcript_index = std::nullopt;
       return;
     }
   }
 
   if (!state.transcript.empty()) {
-    const auto& last = state.transcript.back();
+    auto& last = state.transcript.back();
     if (!last.tool && last.label == "ava" &&
         trim_trailing_ascii_space(last.text) == trim_trailing_ascii_space(final_text)) {
+      if (!final_meta.empty()) last.meta = std::move(final_meta);
       state.stream_assistant_transcript_index = std::nullopt;
       return;
     }
   }
 
-  append_assistant_text(state, std::move(final_text));
+  append_assistant_text(state, std::move(final_text), std::move(final_meta));
 }
 
 ToolTimelineItem tool_item_from_event(const ava::app::RuntimeEvent& event, ToolTimelineStatus status) {
@@ -237,6 +294,22 @@ void apply_provider_event(TuiEventState& state, const ava::app::RuntimeEvent& ev
     return;
   }
 
+  if (event.status == "tui:permission_request" || event.status == "tui:permission_allow" ||
+      event.status == "tui:permission_deny" || event.status == "tui:question_request" ||
+      event.status == "tui:question_answer" || event.status == "tui:question_cancel") {
+    const auto text = event.text.empty() ? event.status : event.text;
+    const auto prompt_status = event.status.substr(std::string_view{"tui:"}.size());
+    state.transcript.push_back(TranscriptItem{.label = "audit", .text = text});
+    upsert_sidebar_activity(
+        state, SidebarActivityItem{.id = "prompt:" + event.status,
+                                   .label = prompt_status.starts_with("permission") ? "permission" : "question",
+                                   .detail = text,
+                                   .status = prompt_status.ends_with("deny") || prompt_status.ends_with("cancel")
+                                                 ? ToolTimelineStatus::Error
+                                                 : ToolTimelineStatus::Success});
+    return;
+  }
+
   if (event.status == "error") {
     auto detail = error_text_for_event(event);
     if (detail.empty()) return;
@@ -246,6 +319,7 @@ void apply_provider_event(TuiEventState& state, const ava::app::RuntimeEvent& ev
                                                        .label = std::move(label),
                                                        .detail = std::move(detail),
                                                        .status = ToolTimelineStatus::Error});
+    return;
   }
 }
 
@@ -258,16 +332,19 @@ void apply_runtime_event(TuiEventState& state, const ava::app::RuntimeEvent& eve
     case RuntimeEventType::SessionStart:
       state.run_status = TuiEventRunStatus::Running;
       state.stream_assistant_transcript_index = std::nullopt;
+      state.pending_assistant_meta.clear();
       state.stop_reason.clear();
       state.error_text.clear();
       state.error_details.clear();
       break;
     case RuntimeEventType::UserMessage:
       state.stream_assistant_transcript_index = std::nullopt;
+      state.pending_assistant_meta.clear();
       state.transcript.push_back(TranscriptItem{.label = "you", .text = event.text});
       state.run_status = TuiEventRunStatus::Running;
       break;
     case RuntimeEventType::MessageUpdate:
+      update_pending_assistant_meta(state, event);
       state.pending_assistant_text += event.text;
       if (state.activity.empty() || state.activity.back().label != "responding") {
         state.activity.push_back(
@@ -276,11 +353,37 @@ void apply_runtime_event(TuiEventState& state, const ava::app::RuntimeEvent& eve
       state.run_status = TuiEventRunStatus::Running;
       break;
     case RuntimeEventType::MessageEnd:
-      commit_pending_assistant_text(state);
+      commit_pending_reasoning_text(state);
+      commit_pending_assistant_text(state, assistant_meta_for_event(event));
+      settle_responding_activity(state, ToolTimelineStatus::Success, "assistant responded");
       state.run_status = TuiEventRunStatus::Completed;
       break;
+    case RuntimeEventType::ReasoningStart:
+      state.pending_reasoning_text.clear();
+      upsert_sidebar_activity(
+          state, SidebarActivityItem{.id = "reasoning", .label = "reasoning", .detail = "model reasoning started"});
+      state.run_status = TuiEventRunStatus::Running;
+      break;
+    case RuntimeEventType::ReasoningDelta:
+      state.pending_reasoning_text += event.text;
+      upsert_sidebar_activity(state,
+                              SidebarActivityItem{.id = "reasoning",
+                                                  .label = "reasoning",
+                                                  .detail = event.text.empty() ? "model is reasoning" : event.text});
+      state.run_status = TuiEventRunStatus::Running;
+      break;
+    case RuntimeEventType::ReasoningEnd:
+      commit_pending_reasoning_text(state);
+      upsert_sidebar_activity(state, SidebarActivityItem{.id = "reasoning",
+                                                         .label = "reasoning",
+                                                         .detail = "model reasoning completed",
+                                                         .status = ToolTimelineStatus::Success});
+      state.run_status = TuiEventRunStatus::Running;
+      break;
     case RuntimeEventType::AssistantMessage:
+      commit_pending_reasoning_text(state);
       apply_assistant_final(state, event);
+      settle_responding_activity(state, ToolTimelineStatus::Success, "assistant responded");
       state.run_status = TuiEventRunStatus::Completed;
       break;
     case RuntimeEventType::ToolStart:
@@ -300,6 +403,7 @@ void apply_runtime_event(TuiEventState& state, const ava::app::RuntimeEvent& eve
         state.error_text = "stopped by user";
         state.error_details.clear();
         state.transcript.push_back(TranscriptItem{.label = "ava", .text = "stopped by user"});
+        settle_responding_activity(state, ToolTimelineStatus::Error, "assistant stopped");
         upsert_sidebar_activity(state, SidebarActivityItem{.id = "stopped",
                                                            .label = "stopped",
                                                            .detail = "active work was stopped",
@@ -313,13 +417,16 @@ void apply_runtime_event(TuiEventState& state, const ava::app::RuntimeEvent& eve
         state.transcript.push_back(TranscriptItem{
             .label = "error", .text = state.error_details.empty() ? state.error_text : state.error_details});
       }
+      settle_responding_activity(state, ToolTimelineStatus::Error, "assistant failed");
       state.run_status = TuiEventRunStatus::Error;
       break;
     case RuntimeEventType::Done:
-      commit_pending_assistant_text(state);
+      commit_pending_reasoning_text(state);
+      commit_pending_assistant_text(state, assistant_meta_for_event(event));
       state.stop_reason = event.stop_reason;
       state.provider_iterations = event.provider_iterations;
       state.tool_calls = event.tool_calls;
+      settle_responding_activity(state, ToolTimelineStatus::Success, "assistant responded");
       state.run_status = TuiEventRunStatus::Done;
       break;
     case RuntimeEventType::ProviderEvent:
@@ -330,12 +437,17 @@ void apply_runtime_event(TuiEventState& state, const ava::app::RuntimeEvent& eve
 
 std::vector<TranscriptItem> event_state_transcript_snapshot(const TuiEventState& state) {
   auto snapshot = state.transcript;
-  snapshot.reserve(snapshot.size() + state.pending_tools.size() + (state.pending_assistant_text.empty() ? 0U : 1U));
+  snapshot.reserve(snapshot.size() + state.pending_tools.size() + (state.pending_assistant_text.empty() ? 0U : 1U) +
+                   (state.pending_reasoning_text.empty() ? 0U : 1U));
+  if (!state.pending_reasoning_text.empty()) {
+    snapshot.push_back(TranscriptItem{.label = "thinking", .text = state.pending_reasoning_text});
+  }
   for (const auto& tool : state.pending_tools) {
     snapshot.push_back(TranscriptItem{.tool = tool.item});
   }
   if (!state.pending_assistant_text.empty()) {
-    snapshot.push_back(TranscriptItem{.label = "ava", .text = state.pending_assistant_text});
+    snapshot.push_back(
+        TranscriptItem{.label = "ava", .text = state.pending_assistant_text, .meta = state.pending_assistant_meta});
   }
   return snapshot;
 }

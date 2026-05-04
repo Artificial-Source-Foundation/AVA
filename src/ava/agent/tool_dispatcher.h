@@ -1,27 +1,16 @@
 #pragma once
 
-#include <string>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "ava/agent/tool_metadata.h"
+#include "ava/agent/tool_registry.h"
+#include "ava/agent/tool_types.h"
 #include "ava/core/result.h"
 #include "ava/tools/file_tools.h"
 
 namespace ava::agent {
-
-struct ProviderToolCall {
-  std::string id;
-  std::string name;
-  std::string arguments_json;
-};
-
-struct ToolDispatchResult {
-  std::string call_id;
-  std::string name;
-  bool success = false;
-  std::string result_text;
-};
 
 class ToolDispatcher {
  public:
@@ -29,11 +18,13 @@ class ToolDispatcher {
 
   [[nodiscard]] ava::core::Result<ToolDispatchResult> dispatch(const ProviderToolCall& call) const;
   [[nodiscard]] static std::span<const ToolMetadata> tool_metadata();
+  [[nodiscard]] static std::vector<ToolMetadata> tool_metadata(const ava::tools::ToolContext& context);
   [[nodiscard]] static std::vector<std::string> tool_schemas_json();
   [[nodiscard]] static std::vector<std::string> tool_schemas_json(const ava::tools::ToolContext& context);
 
  private:
   ava::tools::ToolContext context_;
+  ToolRegistry registry_;
 };
 
 }  // namespace ava::agent

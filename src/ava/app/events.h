@@ -17,6 +17,9 @@ enum class RuntimeEventType {
   AssistantMessage,
   MessageUpdate,
   MessageEnd,
+  ReasoningStart,
+  ReasoningDelta,
+  ReasoningEnd,
   ProviderEvent,
   ToolStart,
   ToolProgress,
@@ -40,6 +43,9 @@ struct RuntimeEvent {
   std::string error_message;
   std::string error_details;
   std::string stop_reason;
+  std::string reasoning_format;
+  bool reasoning_redacted = false;
+  bool reasoning_signature_present = false;
   std::size_t provider_iterations = 0;
   std::size_t tool_calls = 0;
 };

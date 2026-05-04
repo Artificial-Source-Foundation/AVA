@@ -30,6 +30,7 @@ const std::vector<CommandCatalogEntry>& command_catalog() {
           .command = "/help", .description = "Show commands and effective hotkeys", .category = "General"},
       CommandCatalogEntry{.command = "/hotkeys", .description = "Show effective TUI hotkeys", .category = "General"},
       CommandCatalogEntry{.command = "/mode", .description = "Toggle build/plan mode", .category = "General"},
+      CommandCatalogEntry{.command = "/details", .description = "Toggle tool detail view", .category = "General"},
       CommandCatalogEntry{.command = "/connect",
                           .aliases = {"/login"},
                           .description = "Store provider API key or OAuth bearer token",
@@ -69,10 +70,20 @@ const std::vector<CommandCatalogEntry>& command_catalog() {
                           .category = "Shell"},
       CommandCatalogEntry{.command = "/models",
                           .aliases = {"/model"},
-                          .description = "Select or list configured models",
-                          .category = "Planned",
-                          .enabled = false,
-                          .disabled_reason = "model switching is planned but is not available in v1 yet"},
+                          .description = "List configured models and capabilities",
+                          .category = "Models"},
+      CommandCatalogEntry{.command = "/plugins",
+                            .description = "List, inspect, enable, disable, and validate plugins",
+                            .hint = "<list|inspect|enable|disable|validate|failures|prompts|prompt|skills|skill> ...",
+                            .category = "Plugins"},
+      CommandCatalogEntry{.command = "/mcp",
+                          .description = "List, inspect, discover, and restart MCP servers",
+                          .hint = "<list|inspect|tools|restart> ...",
+                          .category = "Plugins"},
+      CommandCatalogEntry{.command = "/plugin",
+                          .description = "Run an enabled plugin command",
+                          .hint = "run <plugin_id> <command> [arguments_json]",
+                          .category = "Plugins"},
       CommandCatalogEntry{.command = "/import",
                           .description = "Import a session archive",
                           .hint = "<path>",
@@ -126,6 +137,7 @@ std::vector<tui::SlashCommandItem> command_catalog_slash_items(const std::vector
   for (const auto& entry : command_catalog()) {
     std::string key_display;
     if (entry.command == "/mode") key_display = hotkeys_for_action(hotkeys, "mode_toggle");
+    if (entry.command == "/details") key_display = hotkeys_for_action(hotkeys, "details_toggle");
     if (entry.command == "/quit") key_display = hotkeys_for_action(hotkeys, "exit");
     items.push_back(tui::SlashCommandItem{.command = entry.command,
                                           .description = entry.description,

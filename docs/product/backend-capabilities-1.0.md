@@ -34,7 +34,7 @@ Status legend: `Done` means implemented with regression coverage, `Partial` mean
 | Reasoning/thinking controls | Planned | Phase 5/5.5 | Only for models whose metadata declares support, and only when provider request builders serialize the native fields. |
 | Anthropic OAuth refresh | Deferred | 1.1 candidate | OpenAI OAuth refresh is done; Anthropic bearer/OAuth tokens are currently treated as static credentials until provider-specific refresh support is designed and tested. |
 | Stable local plugin foundation | Planned | Phase 6 | Out-of-process JSONL plugins with manifest, explicit enablement, diagnostics, permissions, audit identity, fake plugin tests, and sample docs. |
-| MCP servers through plugin/runtime safety model | Planned | Phase 6 | Stdio MCP tools are required first; resources/prompts are included if they fit safely after tools are stable. |
+| MCP servers through plugin/runtime safety model | Planned | Phase 6 | Stdio MCP tools are required first; resources/prompts are strongly desired but may defer to 1.1 if tool-host stability requires focus. |
 | HTTP/server daemon mode | Deferred | 1.1 candidate | Keep on the roadmap after stdio RPC maturity. |
 | Persistent permission rules | Deferred | 1.1 candidate | Session audit exists; cross-session allow/deny persistence is post-MVP. |
 | Session tree UI, fork, clone, and branch summaries | Deferred | 1.1 candidate | Storage has foundations; user-facing tree workflows are post-MVP. |

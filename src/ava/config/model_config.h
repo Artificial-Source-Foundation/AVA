@@ -34,6 +34,8 @@ struct ModelInfo {
   std::optional<bool> reports_usage = std::nullopt;
   std::vector<std::string> reasoning_levels;
   std::vector<std::string> compatibility_quirks;
+  std::vector<std::string> output_modalities = {};
+  std::string reasoning_format = {};
 };
 
 struct ModelRegistry {

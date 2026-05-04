@@ -27,8 +27,11 @@
 #include "ava/app/runtime.h"
 #include "ava/config/auth.h"
 #include "ava/config/model_config.h"
+#include "ava/config/model_profiles.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/config/prompt_config.h"
+#include "ava/config/provider_profiles.h"
+#include "ava/config/reasoning_profiles.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/context/context_loader.h"
 #include "ava/core/ids.h"
@@ -780,22 +783,67 @@ void test_model_and_prompt_config() {
 
   const auto builtin = ava::config::builtin_model_registry();
   auto selected = ava::config::select_default_model(builtin);
+  const auto openai_profile = ava::config::find_provider_profile("openai");
+  expect(openai_profile && openai_profile->display_name == "OpenAI" &&
+             openai_profile->api_family == selected.api_family && openai_profile->supports_oauth,
+         "provider profile centralizes OpenAI display, API family, and OAuth capability");
+  expect(ava::config::model_display_label("gpt-5.5") == "GPT-5.5", "model profile centralizes GPT display labels");
+  const auto vercel_profile = ava::config::find_provider_profile("vercel");
+  expect(vercel_profile && vercel_profile->display_name == "Vercel AI Gateway" &&
+             vercel_profile->connect_detail == "API key",
+         "provider profile centralizes non-runtime gateway connect metadata");
   expect(selected.provider_id == "openai" && selected.model_id == "gpt-5.5", "default model is OpenAI GPT-5.5");
   expect(selected.context_window_tokens && *selected.context_window_tokens == 200'000,
          "default model carries context window metadata");
+  expect(selected.supports_reasoning.value_or(false) && selected.reasoning_format == "openai_responses" &&
+             std::find(selected.reasoning_levels.begin(), selected.reasoning_levels.end(), "xhigh") !=
+                 selected.reasoning_levels.end(),
+         "default GPT-5.5 model declares OpenAI reasoning effort levels including xhigh");
   bool saw_priced_builtin = false;
+  bool saw_anthropic_runtime_reasoning_disabled = false;
+  bool saw_kimi_builtin = false;
+  bool saw_moonshot_builtin = false;
   bool all_builtins_have_context_windows = !builtin.models.empty();
+  bool all_builtins_have_text_output = !builtin.models.empty();
   for (const auto& model : builtin.models) {
     all_builtins_have_context_windows = all_builtins_have_context_windows && model.context_window_tokens.has_value();
+    all_builtins_have_text_output = all_builtins_have_text_output &&
+                                    std::find(model.output_modalities.begin(), model.output_modalities.end(), "text") !=
+                                        model.output_modalities.end();
     saw_priced_builtin =
         saw_priced_builtin || (model.model_id == "gpt-4.1-mini" && model.context_window_tokens && model.pricing &&
                                *model.context_window_tokens == 1'048'576 && model.pricing->input_per_million &&
                                model.pricing->output_per_million && model.api_family == "openai_responses" &&
                                model.supports_tools.value_or(false) && model.supports_streaming.value_or(false) &&
                                model.reports_usage.value_or(false));
+    expect(ava::config::find_provider_profile(model.provider_id).has_value(),
+           "each builtin model references a centralized provider profile");
+    saw_anthropic_runtime_reasoning_disabled =
+        saw_anthropic_runtime_reasoning_disabled ||
+        (model.provider_id == "anthropic" && model.model_id == "claude-sonnet-4-5" &&
+         !model.supports_reasoning.value_or(false) && model.reasoning_format.empty() && model.reasoning_levels.empty());
+    saw_kimi_builtin =
+        saw_kimi_builtin ||
+        (model.provider_id == "kimi" && model.model_id == "kimi-k2-thinking" &&
+         model.api_family == "openai_chat_completions" && model.supports_tools.value_or(false) &&
+         model.supports_reasoning.value_or(false) && model.reasoning_format == "reasoning_content" && !model.pricing &&
+         std::find(model.compatibility_quirks.begin(), model.compatibility_quirks.end(), "kimi") !=
+             model.compatibility_quirks.end() &&
+         std::find(model.compatibility_quirks.begin(), model.compatibility_quirks.end(),
+                   "preserve_reasoning_content") != model.compatibility_quirks.end());
+    saw_moonshot_builtin = saw_moonshot_builtin || (model.provider_id == "moonshot" && model.model_id == "kimi-k2.6" &&
+                                                    model.api_family == "openai_chat_completions" &&
+                                                    model.reasoning_format == "reasoning_content");
   }
   expect(all_builtins_have_context_windows, "builtin model registry always provides context windows");
+  expect(all_builtins_have_text_output, "builtin model registry always declares text output support");
   expect(saw_priced_builtin, "builtin model registry carries static pricing, context, and capability metadata");
+  expect(saw_anthropic_runtime_reasoning_disabled,
+         "Anthropic builtin keeps reasoning disabled until runtime controls are wired");
+  expect(saw_kimi_builtin && saw_moonshot_builtin,
+         "builtin model registry includes Kimi and Moonshot OpenAI-compatible coding profiles");
+  expect(ava::config::reasoning_parameter_text(selected) == openai_profile->reasoning_request_parameters,
+         "model reasoning parameter text comes from centralized provider/reasoning profiles");
 
   std::filesystem::create_directories(paths.ava_config_dir);
   {
@@ -804,6 +852,7 @@ void test_model_and_prompt_config() {
             "\"models\":[{\"provider\":\"openai\",\"id\":\"gpt-5.5-mini\",\"name\":\"Mini\","
             "\"family\":\"gpt-5\",\"context_window_tokens\":12345,\"max_output_tokens\":678,"
             "\"api_family\":\"openai_responses\",\"input_modalities\":[\"text\",\"image\"],"
+            "\"output_modalities\":[\"text\"],\"reasoning_format\":\"reasoning_content\","
             "\"supports_tools\":false,\"supports_streaming\":true,\"supports_reasoning\":true,"
             "\"reports_usage\":true,\"reasoning_levels\":[\"low\",\"high\"],"
             "\"compatibility_quirks\":[\"requires_strict_tools\"],"
@@ -828,10 +877,11 @@ void test_model_and_prompt_config() {
     auto cost = selected.pricing ? ava::config::usage_cost_usd(*selected.pricing, usage) : std::nullopt;
     expect(selected.context_window_tokens == 12345 && selected.max_output_tokens == 678 &&
                selected.api_family == "openai_responses" && selected.input_modalities.size() == 2 &&
-               selected.supports_tools == false && selected.supports_streaming == true &&
-               selected.supports_reasoning == true && selected.reports_usage == true &&
-               selected.reasoning_levels.size() == 2 && selected.compatibility_quirks.size() == 1 && cost &&
-               *cost > 0.0064L && *cost < 0.0066L,
+               selected.output_modalities.size() == 1 && selected.output_modalities[0] == "text" &&
+               selected.reasoning_format == "reasoning_content" && selected.supports_tools == false &&
+               selected.supports_streaming == true && selected.supports_reasoning == true &&
+               selected.reports_usage == true && selected.reasoning_levels.size() == 2 &&
+               selected.compatibility_quirks.size() == 1 && cost && *cost > 0.0064L && *cost < 0.0066L,
            "model registry parses local capability and pricing metadata and calculates cost");
     expect(!ava::config::usage_cost_usd(ava::config::ModelPricing{}, usage),
            "usage cost remains unknown when pricing rates are absent");
@@ -860,7 +910,8 @@ void test_model_and_prompt_config() {
     selected = ava::config::select_default_model(*registry);
     expect(selected.display_name == "Custom GPT" && selected.context_window_tokens == 200'000 &&
                selected.supports_reasoning == true && selected.reports_usage == true &&
-               selected.reasoning_levels.size() == 3,
+               selected.reasoning_levels.size() == 4 && selected.output_modalities.size() == 1 &&
+               selected.output_modalities[0] == "text" && selected.reasoning_format == "openai_responses",
            "builtin model overrides preserve missing capability metadata");
   }
 

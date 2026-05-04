@@ -18,6 +18,8 @@ struct SessionEntryCounts {
   std::size_t permission_decision = 0;
   std::size_t mode_change = 0;
   std::size_t model_change = 0;
+  std::size_t reasoning_block = 0;
+  std::size_t reasoning_change = 0;
   std::size_t compaction = 0;
   std::size_t error = 0;
   std::size_t cancel = 0;

@@ -59,8 +59,8 @@ struct AgentLoopOptions {
   bool stream = true;
   bool model_supports_tools = true;
   bool model_supports_streaming = true;
-  bool model_supports_reasoning = false;
   std::optional<long long> model_max_output_tokens = std::nullopt;
+  std::optional<ava::provider::ProviderReasoningOptions> reasoning = std::nullopt;
   std::function<void(const ToolTimelineEntry&)> on_tool_event = nullptr;
   std::function<ava::core::VoidResult(const ToolProgressEntry&)> on_tool_progress = nullptr;
   std::function<ava::core::VoidResult(const ava::provider::StreamEvent&)> on_stream_event = nullptr;

@@ -20,6 +20,7 @@
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_dispatcher.h"
+#include "ava/agent/tool_registry.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
@@ -775,6 +776,38 @@ void test_tool_dispatcher() {
   const auto configured_schemas = ava::agent::ToolDispatcher::tool_schemas_json(lsp_schema_context);
   const auto& schemas = configured_schemas;
   const auto metadata = ava::agent::ToolDispatcher::tool_metadata();
+  const auto& registry = ava::agent::builtin_tool_registry();
+  const auto* registered_read_tool = registry.find("read_file");
+  expect(registry.entries().size() == metadata.size(), "built-in tool registry covers all static tool metadata");
+  expect(registered_read_tool != nullptr && registered_read_tool->source == ava::agent::ToolSource::Builtin,
+         "built-in tool registry can resolve read_file with source identity");
+  expect(registry.find("missing_tool") == nullptr, "built-in tool registry reports missing tools explicitly");
+  ava::agent::ToolRegistry scratch_registry;
+  if (registered_read_tool != nullptr) {
+    auto registered_read = scratch_registry.register_tool(*registered_read_tool);
+    expect(registered_read.has_value(), "tool registry accepts a valid tool registration");
+    auto duplicate_read = scratch_registry.register_tool(*registered_read_tool);
+    expect(!duplicate_read && duplicate_read.error().message().find("duplicate") != std::string::npos,
+           "tool registry rejects duplicate tool names");
+    auto mismatched_schema = *registered_read_tool;
+    mismatched_schema.metadata.name = "different_name";
+    auto mismatched = ava::agent::ToolRegistry{}.register_tool(std::move(mismatched_schema));
+    expect(!mismatched && mismatched.error().message().find("schema name") != std::string::npos,
+           "tool registry rejects schema names that do not match metadata names");
+    auto plugin_direct = *registered_read_tool;
+    plugin_direct.metadata.name = "plugin_read_file";
+    plugin_direct.metadata.schema_json =
+        R"({"type":"function","name":"plugin_read_file","description":"Plugin read","parameters":{"type":"object"}})";
+    plugin_direct.source = ava::agent::ToolSource::Plugin;
+    plugin_direct.source_id = "com.example.plugin";
+    auto plugin_brokered = plugin_direct;
+    plugin_brokered.brokered_external = true;
+    auto plugin_direct_result = ava::agent::ToolRegistry{}.register_tool(std::move(plugin_direct));
+    expect(!plugin_direct_result && plugin_direct_result.error().message().find("broker") != std::string::npos,
+           "tool registry rejects direct external executors without broker marking");
+    auto plugin_brokered_result = ava::agent::ToolRegistry{}.register_tool(std::move(plugin_brokered));
+    expect(plugin_brokered_result.has_value(), "tool registry accepts AVA-owned brokered external tools");
+  }
   bool has_apply_patch = false;
   bool has_question = false;
   bool has_webfetch = false;
@@ -788,7 +821,8 @@ void test_tool_dispatcher() {
   });
   expect(!default_has_lsp_schema && default_schemas.size() + 1 == configured_schemas.size(),
          "lsp_diagnostics schema is gated until a local diagnostics provider is configured");
-  expect(metadata.size() == schemas.size(), "tool metadata and configured schema exports cover the same built-in tools");
+  expect(metadata.size() == schemas.size(),
+         "tool metadata and configured schema exports cover the same built-in tools");
   for (std::size_t index = 0; index < metadata.size(); ++index) {
     const auto& tool = metadata[index];
     expect(!tool.name.empty() && !tool.description.empty() && !tool.schema_json.empty() &&
@@ -874,8 +908,8 @@ void test_agent_loop_text_only_turn() {
          "agent loop disables Codex response storage for OpenAI OAuth turns");
   auto entries = store.load();
   expect(entries && entries->size() == 2 && (*entries)[0].type == ava::session::EntryType::UserMessage &&
-              (*entries)[1].type == ava::session::EntryType::AssistantMessage,
-          "agent loop persists user and assistant entries for text-only turn");
+             (*entries)[1].type == ava::session::EntryType::AssistantMessage,
+         "agent loop persists user and assistant entries for text-only turn");
 }
 
 void test_agent_loop_model_capability_gating() {
@@ -887,10 +921,8 @@ void test_agent_loop_model_capability_gating() {
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "capabilities"});
   const ava::provider::OpenAIProvider provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
-      .status_code = 200,
-      .headers = {},
-      .body = "{\"output_text\":\"plain\"}"}});
+  ava::tests::FakeTransport transport(
+      {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"plain\"}"}});
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                           .mode = ava::agent::Mode::Build,
                                                           .provider_id = "openai",

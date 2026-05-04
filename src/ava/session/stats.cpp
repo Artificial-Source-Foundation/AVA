@@ -141,6 +141,12 @@ SessionStats compute_session_stats(const std::vector<SessionEntry>& entries) {
       case EntryType::ModelChange:
         ++stats.counts.model_change;
         break;
+      case EntryType::ReasoningBlock:
+        ++stats.counts.reasoning_block;
+        break;
+      case EntryType::ReasoningChange:
+        ++stats.counts.reasoning_change;
+        break;
       case EntryType::Compaction:
         ++stats.counts.compaction;
         break;

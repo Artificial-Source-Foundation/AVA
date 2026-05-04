@@ -69,7 +69,7 @@ struct ComposerInputLayout {
 
 [[nodiscard]] std::string render_generic_line(const std::string& text, std::size_t width);
 [[nodiscard]] std::vector<std::string> render_transcript_lines(const std::vector<TranscriptItem>& transcript,
-                                                               std::size_t width);
+                                                               std::size_t width, bool tool_details_visible = false);
 [[nodiscard]] std::vector<std::string> visible_transcript_lines(const std::vector<std::string>& rendered_transcript,
                                                                 std::size_t width, std::size_t transcript_height,
                                                                 std::size_t transcript_scroll_offset);

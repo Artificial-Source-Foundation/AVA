@@ -23,13 +23,13 @@ void test_event_envelope_serialization_is_deterministic() {
 
   const auto json = ava::app::serialize_event_envelope_json(envelope);
   expect(json ==
-              "{\"schema_version\":1,\"event_id\":\"event_1\","
-              "\"timestamp\":\"2026-04-30T00:00:00Z\",\"session_id\":\"session_1\","
-              "\"run_id\":\"run_1\",\"turn_id\":\"turn_1\",\"message_id\":\"message_1\","
-              "\"request_id\":\"request_1\",\"correlation_id\":\"correlation_1\","
-              "\"name\":\"user_message\",\"type\":\"user_message\","
-              "\"payload\":{\"text\":\"hello\\n\\\"ava\\\"\"},\"text\":\"hello\\n\\\"ava\\\"\"}",
-          "event envelope JSON serialization uses deterministic field ordering");
+             "{\"schema_version\":1,\"event_id\":\"event_1\","
+             "\"timestamp\":\"2026-04-30T00:00:00Z\",\"session_id\":\"session_1\","
+             "\"run_id\":\"run_1\",\"turn_id\":\"turn_1\",\"message_id\":\"message_1\","
+             "\"request_id\":\"request_1\",\"correlation_id\":\"correlation_1\","
+             "\"name\":\"user_message\",\"type\":\"user_message\","
+             "\"payload\":{\"text\":\"hello\\n\\\"ava\\\"\"},\"text\":\"hello\\n\\\"ava\\\"\"}",
+         "event envelope JSON serialization uses deterministic field ordering");
 
   const auto jsonl = ava::app::serialize_event_envelope_jsonl(envelope);
   expect(jsonl == json + '\n', "event envelope JSONL appends one newline");
@@ -87,8 +87,8 @@ void test_runtime_event_bus_adapter_publishes_and_forwards() {
   const auto emitted = sink(event);
   expect(emitted.has_value(), "runtime event bus adapter succeeds when bus and legacy sink succeed");
   expect(published.size() == 1 && published.front().name == "assistant_message" &&
-              published.front().correlation_id == "correlation_1",
-          "runtime event bus adapter publishes converted envelopes");
+             published.front().correlation_id == "correlation_1",
+         "runtime event bus adapter publishes converted envelopes");
   expect(forwarded.size() == 1 && forwarded.front().text == "done",
          "runtime event bus adapter forwards runtime events to legacy sink");
 }
@@ -146,6 +146,39 @@ void test_tool_progress_runtime_event_serialization_and_bus_adapter() {
          "tool progress envelope payload keeps existing tool event fields");
 }
 
+void test_reasoning_runtime_event_serialization_hides_provider_private_state() {
+  ava::app::RuntimeEvent event;
+  event.type = ava::app::RuntimeEventType::ReasoningDelta;
+  event.timestamp = "2026-04-30T00:00:05Z";
+  event.session_id = "session_1";
+  event.text = "visible reasoning summary";
+  event.reasoning_format = "anthropic_thinking";
+  event.reasoning_redacted = true;
+  event.reasoning_signature_present = true;
+
+  const auto json = ava::app::serialize_event_json(event);
+  expect(json ==
+             "{\"type\":\"reasoning_delta\",\"timestamp\":\"2026-04-30T00:00:05Z\","
+             "\"session_id\":\"session_1\",\"text\":\"visible reasoning summary\","
+             "\"reasoning_format\":\"anthropic_thinking\",\"reasoning_redacted\":true,"
+             "\"reasoning_signature_present\":true}",
+         "reasoning runtime event serializes visible text and format only");
+
+  ava::app::EventEnvelopeContext context;
+  context.event_id = "event_reasoning";
+  const auto envelope = ava::app::to_event_envelope(event, context);
+  expect(envelope.name == "reasoning_delta" &&
+             envelope.payload_json ==
+                 "{\"text\":\"visible reasoning summary\",\"reasoning_format\":\"anthropic_thinking\","
+                 "\"reasoning_redacted\":true,\"reasoning_signature_present\":true}",
+         "reasoning envelope carries frontend-visible reasoning payload");
+  const auto envelope_json = ava::app::serialize_event_envelope_json(envelope);
+  expect(envelope_json.find("super-secret-signature") == std::string::npos &&
+             envelope_json.find("reasoning_signature\":") == std::string::npos &&
+             envelope_json.find("\"signature\":") == std::string::npos,
+         "reasoning frontend event envelope never exposes provider-private signatures");
+}
+
 }  // namespace
 
 void run_app_event_bus_tests() {
@@ -154,4 +187,5 @@ void run_app_event_bus_tests() {
   test_runtime_event_bus_adapter_publishes_and_forwards();
   test_runtime_event_bus_adapter_allows_default_legacy_sink();
   test_tool_progress_runtime_event_serialization_and_bus_adapter();
+  test_reasoning_runtime_event_serialization_hides_provider_private_state();
 }

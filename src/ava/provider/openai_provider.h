@@ -17,6 +17,11 @@ class OpenAIStreamParser final : public StreamParser {
   std::string pending_line_;
   std::string data_;
   std::size_t scan_offset_ = 0;
+  bool saw_content_ = false;
+  bool reasoning_open_ = false;
+  bool reasoning_text_seen_ = false;
+  bool done_seen_ = false;
+  bool error_seen_ = false;
 };
 
 class OpenAIProvider final : public Provider {
@@ -25,15 +30,15 @@ class OpenAIProvider final : public Provider {
 
   explicit OpenAIProvider(std::string base_url = "https://api.openai.com");
   [[nodiscard]] ava::core::Result<HttpRequest> build_request(const ProviderRequest& request,
-                                                              std::string_view access_token) const override;
+                                                             std::string_view access_token) const override;
   [[nodiscard]] ava::core::VoidResult apply_auth_options(HttpRequest& request,
                                                          const ProviderAuthContext& auth) const override;
   [[nodiscard]] std::unique_ptr<StreamParser> create_stream_parser() const override;
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_response(const HttpResponse& response,
                                                                            bool stream) const override;
   [[nodiscard]] ava::core::Result<HttpRequest> build_request(const ProviderRequest& request,
-                                                              const ava::config::OpenAICredential& credential,
-                                                              long long now_seconds) const;
+                                                             const ava::config::OpenAICredential& credential,
+                                                             long long now_seconds) const;
   [[nodiscard]] ava::core::Result<HttpRequest> build_request(const ProviderRequest& request,
                                                              const ava::config::OpenAICredential& credential) const;
 

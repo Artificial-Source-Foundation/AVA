@@ -292,10 +292,14 @@ std::vector<std::string> render_sidebar(const SidebarSnapshot& sidebar, std::siz
   push_sidebar_line(lines, "", width);
 
   push_sidebar_line(lines, std::string(kSgrBold) + "Activity" + std::string(kSgrReset), width);
-  if (sidebar.activity.empty()) {
+  const auto has_running_activity = std::ranges::any_of(sidebar.activity, [](const SidebarActivityItem& activity) {
+    return activity.status == ToolTimelineStatus::Running;
+  });
+  if (!has_running_activity) {
     push_sidebar_line(lines, std::string(kSgrDim) + "idle" + std::string(kSgrReset), width);
   } else {
     for (const auto& activity : sidebar.activity) {
+      if (activity.status != ToolTimelineStatus::Running) continue;
       auto line = status_marker(activity.status) + " " + sanitize_terminal_text(activity.label);
       if (!activity.detail.empty()) {
         line += " " + std::string(kSgrDim) + sanitize_terminal_text(activity.detail) + std::string(kSgrReset);
@@ -334,6 +338,13 @@ std::vector<std::string> render_sidebar(const SidebarSnapshot& sidebar, std::siz
   if (!sidebar.workspace.empty()) push_sidebar_line(lines, "cwd " + sanitize_terminal_text(sidebar.workspace), width);
   if (!sidebar.git_branch.empty())
     push_sidebar_line(lines, "branch " + sanitize_terminal_text(sidebar.git_branch), width);
+  push_sidebar_line(lines, "usage " + sanitize_terminal_text(sidebar.token_status.value_or("tokens unknown")), width);
+  if (sidebar.context_source_count.has_value()) {
+    push_sidebar_line(lines, "context sources " + std::to_string(*sidebar.context_source_count), width);
+  } else {
+    push_sidebar_line(
+        lines, std::string("context sources ") + std::string(kSgrDim) + "unknown" + std::string(kSgrReset), width);
+  }
 
   while (lines.size() + 1 < height) lines.emplace_back();
   if (!sidebar.version.empty() && lines.size() < height) {
@@ -411,9 +422,9 @@ std::vector<std::string> render_composer(const ComposerSnapshot& snapshot) {
   std::vector<std::string> lines;
   lines.reserve(height);
 
-  const auto normal_composer_lines = detail::composer_block_line_count(snapshot, height);
   const auto prompt_active = snapshot.permission_prompt.has_value() || snapshot.question_prompt.has_value();
-  const auto fixed_lines = prompt_active ? std::size_t{0} : normal_composer_lines;
+  const auto normal_composer_lines = detail::composer_block_line_count(snapshot, height);
+  const auto fixed_lines = normal_composer_lines;
   const auto max_prompt_lines = height > fixed_lines ? height - fixed_lines : 0;
   const auto prompt_line_budget = prompt_active ? std::min<std::size_t>({7, max_prompt_lines}) : 0;
   auto permission_lines = snapshot.permission_prompt
@@ -432,7 +443,8 @@ std::vector<std::string> render_composer(const ComposerSnapshot& snapshot) {
   const auto non_transcript_lines =
       fixed_lines + palette_lines.size() + permission_lines.size() + question_lines.size();
   const auto transcript_height = height > non_transcript_lines ? height - non_transcript_lines : 0;
-  const auto rendered_transcript = detail::render_transcript_lines(snapshot.transcript, width);
+  const auto rendered_transcript =
+      detail::render_transcript_lines(snapshot.transcript, width, snapshot.tool_details_visible);
   const auto visible_transcript = detail::visible_transcript_lines(rendered_transcript, width, transcript_height,
                                                                    snapshot.transcript_scroll_offset);
 
@@ -450,10 +462,8 @@ std::vector<std::string> render_composer(const ComposerSnapshot& snapshot) {
   for (const auto& line : question_lines) {
     lines.push_back(line);
   }
-  if (!prompt_active) {
-    const auto composer_lines = detail::render_composer_block(snapshot, width, normal_composer_lines);
-    lines.insert(lines.end(), composer_lines.begin(), composer_lines.end());
-  }
+  const auto composer_lines = detail::render_composer_block(snapshot, width, normal_composer_lines);
+  lines.insert(lines.end(), composer_lines.begin(), composer_lines.end());
   return lines;
 }
 

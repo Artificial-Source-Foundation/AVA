@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "ava/config/model_profiles.h"
 #include "ava/core/json.h"
 
 namespace ava::config {
@@ -218,61 +219,7 @@ long double millionths(long long tokens, long double price_per_million) {
 
 }  // namespace
 
-ModelRegistry builtin_model_registry() {
-  return ModelRegistry{
-      .default_provider_id = "openai",
-      .default_model_id = "gpt-5.5",
-      .models = {ModelInfo{.provider_id = "openai",
-                           .model_id = "gpt-5.5",
-                           .display_name = "GPT-5.5",
-                           .family = "gpt-5",
-                           .context_window_tokens = 200'000,
-                           .max_output_tokens = std::nullopt,
-                           .pricing = std::nullopt,
-                           .api_family = "openai_responses",
-                           .input_modalities = {"text"},
-                           .supports_tools = true,
-                           .supports_streaming = true,
-                           .supports_reasoning = true,
-                           .reports_usage = true,
-                           .reasoning_levels = {"low", "medium", "high"},
-                           .compatibility_quirks = {}},
-                 ModelInfo{.provider_id = "openai",
-                           .model_id = "gpt-4.1-mini",
-                           .display_name = "GPT-4.1 mini",
-                           .family = "gpt-4.1",
-                           .context_window_tokens = 1'048'576,
-                           .max_output_tokens = 32'768,
-                           .pricing = ModelPricing{.input_per_million = 0.40L,
-                                                   .output_per_million = 1.60L,
-                                                   .cache_read_per_million = 0.10L,
-                                                   .cache_write_per_million = std::nullopt,
-                                                   .reasoning_per_million = std::nullopt},
-                           .api_family = "openai_responses",
-                           .input_modalities = {"text"},
-                           .supports_tools = true,
-                           .supports_streaming = true,
-                           .supports_reasoning = false,
-                           .reports_usage = true,
-                           .reasoning_levels = {},
-                           .compatibility_quirks = {}},
-                 ModelInfo{.provider_id = "anthropic",
-                           .model_id = "claude-sonnet-4-5",
-                           .display_name = "Claude Sonnet 4.5",
-                           .family = "claude-sonnet",
-                           .context_window_tokens = 200'000,
-                           .max_output_tokens = 64'000,
-                           .pricing = std::nullopt,
-                           .api_family = "anthropic_messages",
-                           .input_modalities = {"text"},
-                           .supports_tools = true,
-                           .supports_streaming = true,
-                           .supports_reasoning = false,
-                           .reports_usage = true,
-                           .reasoning_levels = {},
-                           .compatibility_quirks = {"anthropic_messages"}}},
-  };
-}
+ModelRegistry builtin_model_registry() { return builtin_model_profiles(); }
 
 ModelRegistry parse_model_registry(std::string_view content) {
   auto registry = builtin_model_registry();
@@ -294,12 +241,14 @@ ModelRegistry parse_model_registry(std::string_view content) {
                                          .pricing = std::nullopt,
                                          .api_family = "",
                                          .input_modalities = {},
-                                         .supports_tools = true,
-                                         .supports_streaming = true,
+                                         .supports_tools = std::nullopt,
+                                         .supports_streaming = std::nullopt,
                                          .supports_reasoning = std::nullopt,
                                          .reports_usage = std::nullopt,
                                          .reasoning_levels = {},
-                                         .compatibility_quirks = {}});
+                                         .compatibility_quirks = {},
+                                         .output_modalities = {},
+                                         .reasoning_format = {}});
     model.provider_id = *provider;
     model.model_id = *id;
     if (auto name = ava::core::json::string_field(item, "name")) model.display_name = *name;
@@ -312,6 +261,9 @@ ModelRegistry parse_model_registry(std::string_view content) {
     if (auto api_family = ava::core::json::string_field(item, "api_family")) model.api_family = *api_family;
     if (has_any_field(item, {"input_modalities", "input"})) {
       model.input_modalities = string_array_field(item, {"input_modalities", "input"});
+    }
+    if (has_any_field(item, {"output_modalities", "output"})) {
+      model.output_modalities = string_array_field(item, {"output_modalities", "output"});
     }
     if (auto supports_tools = bool_field(item, {"supports_tools", "tool_support", "tools"})) {
       model.supports_tools = supports_tools;
@@ -329,6 +281,9 @@ ModelRegistry parse_model_registry(std::string_view content) {
       model.reasoning_levels = string_array_field(item, {"reasoning_levels"});
     if (has_any_field(item, {"compatibility_quirks", "quirks"})) {
       model.compatibility_quirks = string_array_field(item, {"compatibility_quirks", "quirks"});
+    }
+    if (auto reasoning_format = ava::core::json::string_field(item, "reasoning_format")) {
+      model.reasoning_format = *reasoning_format;
     }
     registry.models.push_back(std::move(model));
   }
@@ -369,6 +324,8 @@ ModelInfo select_default_model(const ModelRegistry& registry) {
       .reports_usage = std::nullopt,
       .reasoning_levels = {},
       .compatibility_quirks = {},
+      .output_modalities = {},
+      .reasoning_format = {},
   };
 }
 

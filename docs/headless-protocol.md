@@ -87,7 +87,7 @@ Current event names:
 - `message_update`: live assistant text delta emitted while a streaming provider response is in progress; includes `text` and `status`.
 - `message_end`: live provider stream completion marker; includes `status`.
 - `provider_event`: live non-text provider stream event such as tool-call argument deltas or provider stream errors; includes `status`, and may include `call_id`, `tool`, `text`, or `message` depending on the provider event.
-- `reasoning_start`, `reasoning_delta`, `reasoning_end` (planned for the provider-native MVP): provider-neutral reasoning lifecycle events for models that expose visible thinking/reasoning. These events should let TUI, frontend, and RPC clients display reasoning without parsing provider-specific raw stream records. Payloads are additive and should include bounded text deltas, provider/model metadata when safe, and redaction/signature status without exposing hidden verification material.
+- `reasoning_start`, `reasoning_delta`, `reasoning_end`: provider-neutral reasoning lifecycle events for models that expose visible thinking/reasoning. Payloads may include bounded `text` deltas, `reasoning_format`, `reasoning_redacted`, and `reasoning_signature_present`; they never expose raw provider verification signatures or opaque redacted-thinking payloads.
 - `assistant_message`: final assistant text for a completed turn.
 - `tool_start`: tool call began; includes `call_id`, `tool`, and a safe argument summary when available.
 - `tool_result`: tool call completed; includes `call_id`, `tool`, `status`, and a safe result summary when available.
@@ -95,6 +95,8 @@ Current event names:
 - `done`: terminal event for a successful turn; includes `stop_reason` and small counters when available.
 - `steer_queued`, `steer_applied`, `steer_skipped`: RPC steering queue lifecycle events. Payloads include `message` and skipped events include `reason`.
 - `follow_up_queued`, `follow_up_started`, `follow_up_skipped`: RPC follow-up queue lifecycle events. Payloads include `message` and skipped events include `reason`.
+
+Enabled plugin event hooks observe the same runtime event envelopes internally using canonical event names such as `tool_result`. Hook execution is best-effort and does not add new RPC envelope fields or make the originating prompt/command fail when a hook fails.
 
 ## RPC JSONL MVP
 
@@ -158,7 +160,7 @@ Cancel:
 {"id":"2","type":"cancel"}
 ```
 
-Sets the RPC session cancel flag and returns `{"cancel_requested":true,"active_run":true|false,"cleared_steer":N,"cleared_follow_up":N}`. When a prompt is active, pending permission/question resolver waits are unblocked fail-closed, queued steering/follow-up messages are cleared, skipped queue events are emitted, the cancel command response is written, and then queued follow-up commands receive `success:false` canceled responses. RPC clients must correlate responses by `id`: active prompt terminal events or the active prompt response may interleave with the cancel response because cancellation is observed by the prompt worker at cooperative runtime boundaries. Provider transport calls are not interrupted mid-request yet, so cancellation may complete after the in-flight provider call returns. If RPC stdin reaches EOF while a prompt worker exists, AVA marks input closed, requests cancellation, clears queued steering/follow-up messages, cancels pending resolvers, and prevents queued follow-ups from starting after client disconnect.
+Sets the RPC session cancel flag and returns `{"cancel_requested":true,"active_run":true|false,"cleared_steer":N,"cleared_follow_up":N}`. When a prompt is active, pending permission/question resolver waits are unblocked fail-closed, queued steering/follow-up messages are cleared, skipped queue events are emitted, the cancel command response is written, and then queued follow-up commands receive `success:false` canceled responses. RPC clients must correlate responses by `id`: active prompt terminal events or the active prompt response may interleave with the cancel response because cancellation is observed by the prompt worker at cooperative runtime boundaries. Provider transport calls are not interrupted mid-request yet, so cancellation may complete after the in-flight provider call returns; this is the 1.0 cooperative provider boundary, while direct provider transport interruption remains hardening work. If RPC stdin reaches EOF while a prompt worker exists, AVA marks input closed, requests cancellation, clears queued steering/follow-up messages, cancels pending resolvers, and prevents queued follow-ups from starting after client disconnect.
 
 State:
 
@@ -166,9 +168,9 @@ State:
 {"id":"3","type":"get_state"}
 ```
 
-Returns the active protocol version, session id/path, mode, provider/model, workspace/current directory, cancel flag, and loaded context source summary.
+Returns the active protocol version, session id/path, mode, provider/model, workspace/current directory, cancel flag, current reasoning selection, and loaded context source summary. Reasoning fields are `reasoning_enabled` plus optional `reasoning_level`, `reasoning_budget_tokens`, and `reasoning_display` when enabled.
 
-`get_state`, `list_models`, and `list_sessions` remain available while a prompt is active. `get_messages`, `get_session_stats`, `set_model`, `cycle_model`, `compact`, `export`, and `context` materialize or mutate session history and are rejected while a prompt is active. RPC `/compact` also marks the session busy while it generates and records the provider summary, so a prompt cannot start midway through compaction.
+`get_state`, `list_models`, and `list_sessions` remain available while a prompt is active. `get_messages`, `get_session_stats`, `set_model`, `cycle_model`, `set_reasoning`, `clear_reasoning`, `compact`, `export`, and `context` materialize or mutate session history and are rejected while a prompt is active. RPC `/compact` also marks the session busy while it generates and records the provider summary, so a prompt cannot start midway through compaction.
 
 Messages:
 
@@ -176,7 +178,7 @@ Messages:
 {"id":"3a","type":"get_messages"}
 ```
 
-Returns durable message-like session entries for the active session in append order. The current response is `{session_id,messages,truncated,message_count}` where each message includes `id`, `parent_id`, `type`, `timestamp`, and raw object-shaped `data` unless the individual entry is too large, in which case the entry is marked `truncated`. Responses are capped to protect headless clients and the AVA process. This intentionally excludes non-message bookkeeping entries such as `session_start`, `model_change`, `compaction`, and permission audit rows. Internal replay user messages inserted after context compaction are also hidden because they are provider-context repair entries, not user-visible transcript turns.
+Returns durable message-like session entries for the active session in append order. The current response is `{session_id,messages,truncated,message_count}` where each message includes `id`, `parent_id`, `type`, `timestamp`, and object-shaped `data` unless the individual entry is too large, in which case the entry is marked `truncated`. Responses are capped to protect headless clients and the AVA process. Reasoning entries are sanitized: visible non-redacted text may be returned, but raw provider signatures and opaque redacted-thinking payloads are replaced by safe status fields such as `signature_present` and `redacted`. This intentionally excludes non-message bookkeeping entries such as `session_start`, `model_change`, `compaction`, and permission audit rows. Internal replay user messages inserted after context compaction are also hidden because they are provider-context repair entries, not user-visible transcript turns.
 
 Session stats:
 
@@ -184,7 +186,7 @@ Session stats:
 {"id":"3b","type":"get_session_stats"}
 ```
 
-Returns `session_id`, `session_path`, `entry_count`, first/last timestamps, usage/cost totals when known, and counts for session entry types. User-message counts exclude internal replay entries. Session JSONL entry types are additive; clients that inspect session files directly should ignore unknown non-message bookkeeping entries and prefer RPC `get_messages`/`get_session_stats` for stable automation data.
+Returns `session_id`, `session_path`, `entry_count`, first/last timestamps, usage/cost totals when known, and counts for session entry types. User-message counts exclude internal replay entries. Session JSONL entry types are additive; clients that inspect session files directly should ignore unknown non-message bookkeeping entries and prefer RPC `get_messages`/`get_session_stats` for stable automation data. AVA writes session entry version `2` for all new entries and continues to read legacy version `1` and missing-version entries.
 
 Usage fields are additive and appear only when present in saved assistant entries: `input_tokens`, `output_tokens`, `reasoning_tokens`, `cache_read_tokens`, `cache_write_tokens`, and `total_tokens`. Exact provider token totals are kept separate from byte-count fallback estimates: `estimated_input_bytes`, `estimated_output_bytes`, and `estimated_total_bytes` report fallback byte estimates when provider usage was unavailable. `exact_usage_entries` and `estimated_usage_entries` show how many assistant entries contributed to each category.
 
@@ -196,11 +198,15 @@ Model catalog and switching:
 {"id":"3c","type":"list_models"}
 {"id":"3d","type":"set_model","provider":"anthropic","model":"claude-sonnet-4-5"}
 {"id":"3e","type":"cycle_model"}
+{"id":"3f","type":"set_reasoning","reasoning_level":"low"}
+{"id":"3g","type":"clear_reasoning"}
 ```
 
 `list_models` returns the configured effective model catalog with local `models.json` overrides taking precedence over built-ins. The response includes `default_provider`, `default_model`, `current_provider`, `current_model`, and `models`, where each model includes `provider`, `model`, `display_name`, `family`, `api_family`, `registered`, `selectable`, capability metadata, modality arrays, and `selected` for the active model. `current_provider`/`current_model` are authoritative; when a session restores a removed model, AVA includes a synthetic selected model entry with `selectable:false`. `set_model` switches to a configured selectable model, appends a durable `model_change` session entry only when the provider/model actually changes, reloads provider/model-specific prompt context, and returns the same state shape as `get_state`. If `provider` is omitted, AVA first tries the current provider and then accepts the model id only when it is unique across registered providers. `cycle_model` advances to the next configured selectable model, appends `model_change` when the selection changes, reloads prompt context, and returns the state shape. Model switching commands are rejected while a prompt or RPC compaction is active.
 
-The provider-native MVP adds two compatibility rules to model switching: clients should only offer reasoning controls for models that declare support, and AVA should reject provider switches that cannot safely replay the existing conversation history instead of silently dropping tool or reasoning context.
+`set_reasoning` validates a reasoning selection against the active model metadata, appends a durable `reasoning_change` entry when it changes, and returns the same state shape as `get_state`. `reasoning_level` is required and must appear in the selected model's `reasoning_levels`. `reasoning_budget_tokens` and `reasoning_display` are accepted only where the selected model's `api_family` permits them: `openai_responses` accepts level/effort only; `openai_chat_completions` accepts level only and uses `clear_reasoning` rather than a `disabled` level; `anthropic_messages` accepts `enabled` with `budget_tokens >= 1024` and below `max_output_tokens` (or AVA's 4096-token provider default when no model limit is declared), accepts `display` values `summarized` or `omitted`, and accepts `adaptive` only without a budget. `clear_reasoning` appends a disabled `reasoning_change` entry when reasoning was enabled and returns the updated state; it omits explicit provider reasoning controls on future requests so the provider/model default applies. Model switches clear the active in-memory reasoning selection; restored sessions recover only the latest valid `reasoning_change` for the restored provider/model after the most recent session-start/model-change boundary.
+
+The provider-native MVP adds two compatibility rules to model switching: clients should only offer reasoning controls for models that declare support, and AVA rejects provider switches that cannot safely replay the existing conversation history instead of silently dropping tool or reasoning context. A switch is rejected before any `model_change` entry is appended when replayed tool-call history would target a model without explicit tool support, or when provider-native reasoning blocks use a format the target provider/model cannot replay. Compatibility is checked only for the active replay window after the latest compaction entry. Anthropic `anthropic_thinking` blocks require an Anthropic Messages model. OpenAI-compatible `reasoning_content` replay requires matching model metadata plus the `preserve_reasoning_content` compatibility quirk.
 
 List sessions:
 
@@ -233,11 +239,28 @@ Backend slash-command equivalents:
 {"id":"6","type":"compact","instructions":"optional notes"}
 {"id":"7","type":"export"}
 {"id":"8","type":"context"}
+{"id":"9","type":"list_plugins"}
+{"id":"10","type":"plugin_failures"}
+{"id":"11","type":"inspect_plugin","plugin_id":"com.example.tool"}
+{"id":"12","type":"enable_plugin","plugin_id":"com.example.tool"}
+{"id":"13","type":"disable_plugin","plugin_id":"com.example.tool"}
+{"id":"14","type":"validate_plugin","path":".ava/plugins/com.example.tool/plugin.json"}
+{"id":"15","type":"list_plugin_prompts","plugin_id":"com.example.tool"}
+{"id":"16","type":"get_plugin_prompt","plugin_id":"com.example.tool","name":"review"}
+{"id":"17","type":"list_plugin_skills","plugin_id":"com.example.tool"}
+{"id":"18","type":"get_plugin_skill","plugin_id":"com.example.tool","name":"triage"}
+{"id":"19","type":"run_plugin_command","plugin_id":"com.example.tool","name":"status","arguments":"{}"}
+{"id":"20","type":"list_mcp_servers"}
+{"id":"21","type":"inspect_mcp_server","server_id":"demo"}
+{"id":"22","type":"list_mcp_tools","server_id":"demo"}
+{"id":"23","type":"restart_mcp_server","server_id":"demo"}
 ```
 
-These dispatch `/compact`, `/export`, and `/context` through the shared backend command dispatcher. Responses include `handled`, `quit`, `output` (array of strings), and `text` (joined output).
+These dispatch `/compact`, `/export`, `/context`, `/plugins`, `/plugin run`, and `/mcp` through the shared backend command dispatcher. Plugin commands require `plugin_id` for plugin-specific operations, `path` for validate, and `name` for prompt/skill retrieval or command execution. MCP server commands require `server_id` except `list_mcp_servers`. Responses include `handled`, `quit`, `output` (array of strings), and `text` (joined output).
 
 `compact` requires credentials for the active session provider and asks that provider to generate the compaction summary before appending a compaction boundary. It returns `success:false` for missing auth, provider summary failure, empty or oversized summaries, stale-session append failures, or active-run conflicts. On success, the recorded compaction entry contains summary metadata such as trigger, estimated tokens, threshold, retained recent context, and keep-recent settings.
+
+Most plugin RPC commands only discover, inspect, validate, read static prompt/skill files, or record enablement state. `run_plugin_command` starts the enabled plugin entrypoint, emits command tool events, and requires `plugin.execute` plus `plugin.command.run` permission approval. `list_mcp_tools` starts a fresh stdio MCP process for discovery, emits `mcp_tools` tool events, and requires `mcp.server.launch` plus `mcp.server.connect` permission approval. `restart_mcp_server` is informational because current stdio MCP servers are launched per discovery or tool call, not kept resident.
 
 Unknown command types return an error response and do not terminate the RPC loop.
 
@@ -249,7 +272,7 @@ When an active prompt reaches a backend permission prompt, RPC emits a resolver 
 {"schema_version":1,"name":"permission_requested","type":"permission_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","operation":"read","mode":"build","target_path":"/workspace/file","command":"","tool_name":"read_file","reason":"..."}}
 ```
 
-Permission `operation` values are backend policy categories: `read`, `search`, `edit`, `bash`, `network.fetch`, and `lsp.query`. Network fetch prompts use an empty `target_path` and carry the URL in `command`:
+Permission `operation` values are backend policy categories such as `read`, `search`, `edit`, `bash`, `network.fetch`, `lsp.query`, `plugin.execute`, `plugin.tool.call`, `plugin.command.run`, `plugin.event.observe`, `mcp.server.launch`, `mcp.server.connect`, and `mcp.tool.call`. Network fetch prompts use an empty `target_path` and carry the URL in `command`:
 
 ```json
 {"schema_version":1,"name":"permission_requested","type":"permission_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","operation":"network.fetch","mode":"build","target_path":"","command":"https://example.com/page","tool_name":"webfetch","reason":"network fetch requires explicit approval"}}

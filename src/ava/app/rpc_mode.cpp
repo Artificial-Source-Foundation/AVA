@@ -188,13 +188,19 @@ std::string model_info_json(const ava::config::ModelInfo& model, const RuntimeSe
   append_optional_bool(json, "reports_usage", model.reports_usage);
   json += ",\"input_modalities\":";
   json += string_array_json(model.input_modalities);
+  json += ",\"output_modalities\":";
+  json += string_array_json(model.output_modalities);
   json += ",\"reasoning_levels\":";
   json += string_array_json(model.reasoning_levels);
+  if (!model.reasoning_format.empty()) {
+    json += ',';
+    json += string_field_json("reasoning_format", model.reasoning_format);
+  }
   json += ",\"compatibility_quirks\":";
   json += string_array_json(model.compatibility_quirks);
   json += ',';
-  json += bool_field_json("selected", session.model.provider_id == model.provider_id &&
-                                          session.model.model_id == model.model_id);
+  json += bool_field_json("selected",
+                          session.model.provider_id == model.provider_id && session.model.model_id == model.model_id);
   json += '}';
   return json;
 }
@@ -249,6 +255,20 @@ std::string state_result_json(const RuntimeSession& session, bool cancel_request
   json += bool_field_json("created", session.created);
   json += ',';
   json += bool_field_json("cancel_requested", cancel_requested);
+  json += ',';
+  json += bool_field_json("reasoning_enabled", session.reasoning.has_value());
+  if (session.reasoning) {
+    json += ',';
+    json += string_field_json("reasoning_level", session.reasoning->level);
+    if (session.reasoning->budget_tokens) {
+      json += ',';
+      json += integer_field_json("reasoning_budget_tokens", *session.reasoning->budget_tokens);
+    }
+    if (!session.reasoning->display.empty()) {
+      json += ',';
+      json += string_field_json("reasoning_display", session.reasoning->display);
+    }
+  }
   json += ',';
   json += number_field_json("context_source_count", session.context_sources.size());
   json += ",\"context_sources\":";
@@ -352,8 +372,56 @@ std::string session_entry_json(const ava::session::SessionEntry& entry) {
   return json;
 }
 
+bool json_bool_field(std::string_view object, std::string_view key) {
+  const auto start = ava::core::json::field_value_start(object, key);
+  if (!start) return false;
+  const auto value = trim(object.substr(*start));
+  if (!value.starts_with("true")) return false;
+  const auto rest = trim(value.substr(4));
+  return rest.empty() || rest.front() == ',' || rest.front() == '}';
+}
+
+std::string sanitized_reasoning_entry_json(const ava::session::SessionEntry& entry) {
+  std::string data = "{";
+  bool first = true;
+  auto append_string = [&](std::string_view key, const std::optional<std::string>& value) {
+    if (!value || value->empty()) return;
+    if (!first) data += ',';
+    first = false;
+    data += string_field_json(key, *value);
+  };
+  auto append_bool = [&](std::string_view key, bool value) {
+    if (!first) data += ',';
+    first = false;
+    data += bool_field_json(key, value);
+  };
+
+  append_string("provider", ava::core::json::string_field(entry.data_json, "provider"));
+  append_string("model", ava::core::json::string_field(entry.data_json, "model"));
+  append_string("format", ava::core::json::string_field(entry.data_json, "format"));
+  const auto redacted = json_bool_field(entry.data_json, "redacted");
+  if (!redacted) append_string("text", ava::core::json::string_field(entry.data_json, "text"));
+  append_bool("redacted", redacted);
+  append_bool("signature_present", ava::core::json::string_field(entry.data_json, "signature").has_value());
+  data += '}';
+
+  std::string json = "{";
+  json += string_field_json("id", entry.id);
+  json += ',';
+  json += string_field_json("parent_id", entry.parent_id);
+  json += ',';
+  json += string_field_json("type", ava::session::to_string(entry.type));
+  json += ',';
+  json += string_field_json("timestamp", entry.timestamp);
+  json += ",\"data\":";
+  json += data;
+  json += '}';
+  return json;
+}
+
 std::string capped_session_entry_json(const ava::session::SessionEntry& entry) {
-  auto json = session_entry_json(entry);
+  auto json = entry.type == ava::session::EntryType::ReasoningBlock ? sanitized_reasoning_entry_json(entry)
+                                                                    : session_entry_json(entry);
   if (json.size() <= 8192) return json;
   std::string capped = "{";
   capped += string_field_json("id", entry.id);
@@ -384,7 +452,8 @@ ava::core::Result<std::string> messages_result_json(const RuntimeSession& sessio
   for (const auto& entry : *entries) {
     if (ava::session::is_internal_replay_user_message(entry)) continue;
     if (entry.type != ava::session::EntryType::UserMessage && entry.type != ava::session::EntryType::AssistantMessage &&
-        entry.type != ava::session::EntryType::ToolCall && entry.type != ava::session::EntryType::ToolResult) {
+        entry.type != ava::session::EntryType::ReasoningBlock && entry.type != ava::session::EntryType::ToolCall &&
+        entry.type != ava::session::EntryType::ToolResult) {
       continue;
     }
     if (included >= kMaxRpcMessagesEntries) {
@@ -493,6 +562,10 @@ ava::core::Result<std::string> session_stats_result_json(const RuntimeSession& s
   json += number_field_json("mode_change", stats.counts.mode_change);
   json += ',';
   json += number_field_json("model_change", stats.counts.model_change);
+  json += ',';
+  json += number_field_json("reasoning_block", stats.counts.reasoning_block);
+  json += ',';
+  json += number_field_json("reasoning_change", stats.counts.reasoning_change);
   json += ',';
   json += number_field_json("compaction", stats.counts.compaction);
   json += ',';
@@ -761,33 +834,70 @@ ava::core::Result<std::optional<long long>> exact_optional_integer_field(std::st
                                                                          std::string_view key) {
   const auto start = ava::core::json::field_value_start(object, key);
   if (!start) return std::optional<long long>{};
+  const auto field_name = std::string(key);
   std::size_t end = *start;
   if (end < object.size() && object[end] == '-') ++end;
   const auto digits_start = end;
   while (end < object.size() && std::isdigit(static_cast<unsigned char>(object[end])) != 0) ++end;
-  if (end == digits_start) return std::unexpected(invalid_rpc("RPC protocol_version must be an integer"));
+  if (end == digits_start) return std::unexpected(invalid_rpc("RPC " + field_name + " must be an integer"));
   const bool negative = object[*start] == '-';
   const auto unsigned_start = negative ? *start + 1 : *start;
   if (end - unsigned_start > 1 && object[unsigned_start] == '0') {
-    return std::unexpected(invalid_rpc("RPC protocol_version must be an integer"));
+    return std::unexpected(invalid_rpc("RPC " + field_name + " must be an integer"));
   }
   while (end < object.size() && std::isspace(static_cast<unsigned char>(object[end])) != 0) ++end;
   if (end < object.size() && object[end] != ',' && object[end] != '}') {
-    return std::unexpected(invalid_rpc("RPC protocol_version must be an integer"));
+    return std::unexpected(invalid_rpc("RPC " + field_name + " must be an integer"));
   }
   try {
     return std::optional<long long>{std::stoll(std::string(object.substr(*start, end - *start)))};
   } catch (...) {
-    return std::unexpected(invalid_rpc("RPC protocol_version is out of range"));
+    return std::unexpected(invalid_rpc("RPC " + field_name + " is out of range"));
+  }
+}
+
+bool is_rpc_identifier_metacharacter(char ch) {
+  switch (ch) {
+    case '"':
+    case '\'':
+    case '\\':
+    case '`':
+    case '$':
+    case '&':
+    case '|':
+    case ';':
+    case '<':
+    case '>':
+    case '(':
+    case ')':
+    case '[':
+    case ']':
+    case '{':
+    case '}':
+      return true;
+    default:
+      return false;
   }
 }
 
 ava::core::VoidResult validate_rpc_identifier(std::string_view value, std::string_view field_name) {
-  if (value.size() <= kMaxRpcIdentifierBytes) return {};
-  auto error = invalid_rpc("RPC identifier is too long");
-  error.with_context("field", std::string(field_name));
-  error.with_context("max_bytes", std::to_string(kMaxRpcIdentifierBytes));
-  return std::unexpected(std::move(error));
+  if (value.size() > kMaxRpcIdentifierBytes) {
+    auto error = invalid_rpc("RPC identifier is too long");
+    error.with_context("field", std::string(field_name));
+    error.with_context("max_bytes", std::to_string(kMaxRpcIdentifierBytes));
+    return std::unexpected(std::move(error));
+  }
+
+  for (const char ch : value) {
+    const auto byte = static_cast<unsigned char>(ch);
+    if (byte < 0x20 || byte == 0x7F || ch == ' ' || is_rpc_identifier_metacharacter(ch)) {
+      auto error = invalid_rpc("RPC identifier contains invalid character");
+      error.with_context("field", std::string(field_name));
+      return std::unexpected(std::move(error));
+    }
+  }
+
+  return {};
 }
 
 ava::core::VoidResult validate_optional_rpc_identifier(const std::optional<std::string>& value,
@@ -799,7 +909,8 @@ ava::core::VoidResult validate_optional_rpc_identifier(const std::optional<std::
 std::string parse_error_response_id(std::string_view line) {
   if (!is_json_object_line(line)) return "";
   auto id = ava::core::json::string_field(line, "id");
-  if (!id || id->empty() || id->size() > kMaxRpcIdentifierBytes) return "";
+  if (!id || id->empty()) return "";
+  if (auto valid = validate_rpc_identifier(*id, "id"); !valid) return "";
   return *id;
 }
 
@@ -1001,18 +1112,18 @@ ava::core::VoidResult write_error(RpcOutput& output, std::string_view id, const 
 }
 
 ava::core::Result<RuntimeRunOptions> ensure_prompt_runtime_options(const ava::config::XdgPaths& paths,
-                                                                    std::string_view provider_id,
-                                                                    RuntimeRunOptions options,
-                                                                    ava::provider::Transport& auth_transport,
-                                                                    std::string_view purpose) {
+                                                                   std::string_view provider_id,
+                                                                   RuntimeRunOptions options,
+                                                                   ava::provider::Transport& auth_transport,
+                                                                   std::string_view purpose) {
   if (!options.access_token.empty()) return options;
 
   auto credential = ava::config::provider_credential_for_request(paths, provider_id, auth_transport);
   if (!credential) return std::unexpected(credential.error());
   if (!*credential) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                  "RPC " + std::string(purpose) + " requires auth for provider `" +
-                                      std::string(provider_id) + "`");
+    auto error = ava::core::Error(
+        ava::core::ErrorCategory::InvalidArgument,
+        "RPC " + std::string(purpose) + " requires auth for provider `" + std::string(provider_id) + "`");
     error.with_context("auth_file", paths.auth_file.string());
     return std::unexpected(std::move(error));
   }
@@ -1021,7 +1132,8 @@ ava::core::Result<RuntimeRunOptions> ensure_prompt_runtime_options(const ava::co
   options.openai_oauth = (*credential)->provider_id == "openai" && (*credential)->credential_type == "oauth";
   options.openai_account_id = (*credential)->account_id;
   if (options.openai_oauth && options.openai_account_id.empty()) {
-    options.openai_account_id = ava::config::openai_oauth_account_id_from_token((*credential)->access_token).value_or("");
+    options.openai_account_id =
+        ava::config::openai_oauth_account_id_from_token((*credential)->access_token).value_or("");
   }
   return options;
 }
@@ -1081,8 +1193,9 @@ ava::core::Result<ava::config::ModelInfo> next_runtime_model(const RuntimeSessio
   for (const auto& model : effective_models(*registry)) {
     if (providers.contains(model.provider_id)) models.push_back(model);
   }
-  if (models.empty()) return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound,
-                                                              "no registered provider models are configured"));
+  if (models.empty())
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::NotFound, "no registered provider models are configured"));
 
   std::size_t next_index = 0;
   for (std::size_t index = 0; index < models.size(); ++index) {
@@ -1292,6 +1405,57 @@ ava::core::Error active_run_reject_error(std::string_view command_type) {
   return error;
 }
 
+bool is_plugin_rpc_command(std::string_view type) {
+  return type == "list_plugins" || type == "plugin_failures" || type == "inspect_plugin" || type == "enable_plugin" ||
+         type == "disable_plugin" || type == "validate_plugin" || type == "list_plugin_prompts" ||
+         type == "get_plugin_prompt" || type == "list_plugin_skills" || type == "get_plugin_skill" ||
+         type == "run_plugin_command";
+}
+
+bool is_mcp_rpc_command(std::string_view type) {
+  return type == "list_mcp_servers" || type == "inspect_mcp_server" || type == "list_mcp_tools" ||
+         type == "restart_mcp_server";
+}
+
+ava::core::Result<std::string> plugin_rpc_slash_command(const RpcCommand& command) {
+  if (command.type == "list_plugins") return std::string("/plugins list");
+  if (command.type == "plugin_failures") return std::string("/plugins failures");
+  if (command.type == "validate_plugin") {
+    if (!command.path || command.path->empty()) return std::unexpected(invalid_rpc("validate_plugin requires path"));
+    return "/plugins validate " + *command.path;
+  }
+
+  if (!command.plugin_id || command.plugin_id->empty()) {
+    return std::unexpected(invalid_rpc(command.type + " requires plugin_id"));
+  }
+  if (command.type == "inspect_plugin") return "/plugins inspect " + *command.plugin_id;
+  if (command.type == "enable_plugin") return "/plugins enable " + *command.plugin_id;
+  if (command.type == "disable_plugin") return "/plugins disable " + *command.plugin_id;
+  if (command.type == "list_plugin_prompts") return "/plugins prompts " + *command.plugin_id;
+  if (command.type == "list_plugin_skills") return "/plugins skills " + *command.plugin_id;
+  if (command.type == "get_plugin_prompt" || command.type == "get_plugin_skill" ||
+      command.type == "run_plugin_command") {
+    if (!command.name || command.name->empty()) return std::unexpected(invalid_rpc(command.type + " requires name"));
+  }
+  if (command.type == "get_plugin_prompt") return "/plugins prompt " + *command.plugin_id + " " + *command.name;
+  if (command.type == "get_plugin_skill") return "/plugins skill " + *command.plugin_id + " " + *command.name;
+  if (command.type == "run_plugin_command") {
+    return "/plugin run " + *command.plugin_id + " " + *command.name + " " + command.arguments.value_or("{}");
+  }
+  return std::unexpected(invalid_rpc("unsupported plugin RPC command"));
+}
+
+ava::core::Result<std::string> mcp_rpc_slash_command(const RpcCommand& command) {
+  if (command.type == "list_mcp_servers") return std::string("/mcp list");
+  if (!command.server_id || command.server_id->empty()) {
+    return std::unexpected(invalid_rpc(command.type + " requires server_id"));
+  }
+  if (command.type == "inspect_mcp_server") return "/mcp inspect " + *command.server_id;
+  if (command.type == "list_mcp_tools") return "/mcp tools " + *command.server_id;
+  if (command.type == "restart_mcp_server") return "/mcp restart " + *command.server_id;
+  return std::unexpected(invalid_rpc("unsupported MCP RPC command"));
+}
+
 std::string prompt_result_json(const RuntimeSession& session, std::mutex& session_mutex,
                                const ava::agent::AgentLoopResult& result) {
   std::string json = "{";
@@ -1338,6 +1502,20 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line) {
   if (auto valid = validate_optional_rpc_identifier(model, "model"); !valid) {
     return std::unexpected(std::move(valid.error()));
   }
+  auto plugin_id = ava::core::json::string_field(line, "plugin_id");
+  if (auto valid = validate_optional_rpc_identifier(plugin_id, "plugin_id"); !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
+  auto name = ava::core::json::string_field(line, "name");
+  if (auto valid = validate_optional_rpc_identifier(name, "name"); !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
+  auto server_id = ava::core::json::string_field(line, "server_id");
+  if (auto valid = validate_optional_rpc_identifier(server_id, "server_id"); !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
+  auto reasoning_budget_tokens = exact_optional_integer_field(line, "reasoning_budget_tokens");
+  if (!reasoning_budget_tokens) return std::unexpected(std::move(reasoning_budget_tokens.error()));
 
   return RpcCommand{.id = std::move(*id),
                     .type = std::move(*type),
@@ -1347,11 +1525,19 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line) {
                     .provider = std::move(provider),
                     .model = std::move(model),
                     .instructions = ava::core::json::string_field(line, "instructions"),
+                    .reasoning_level = ava::core::json::string_field(line, "reasoning_level"),
+                    .reasoning_budget_tokens = std::move(*reasoning_budget_tokens),
+                    .reasoning_display = ava::core::json::string_field(line, "reasoning_display"),
                     .request_id = std::move(request_id),
                     .correlation_id = std::move(correlation_id),
                     .decision = ava::core::json::string_field(line, "decision"),
-                    .answer = ava::core::json::string_field(line, "answer"),
-                    .selected = ava::core::json::string_field(line, "selected")};
+                     .answer = ava::core::json::string_field(line, "answer"),
+                     .selected = ava::core::json::string_field(line, "selected"),
+                     .plugin_id = std::move(plugin_id),
+                     .name = std::move(name),
+                     .arguments = ava::core::json::object_field(line, "arguments"),
+                     .server_id = std::move(server_id),
+                     .path = ava::core::json::string_field(line, "path")};
 }
 
 std::string serialize_rpc_success_jsonl(std::string_view id, std::string_view result_json) {
@@ -1377,9 +1563,9 @@ std::string serialize_rpc_error_jsonl(std::string_view id, const ava::core::Erro
 }
 
 ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOptions& open_options,
-                                    const ava::provider::Provider& provider, ava::provider::Transport& transport,
-                                    ava::provider::Transport& auth_transport, RuntimeRunOptions runtime_options,
-                                    std::istream& in, std::ostream& out) {
+                                   const ava::provider::Provider& provider, ava::provider::Transport& transport,
+                                   ava::provider::Transport& auth_transport, RuntimeRunOptions runtime_options,
+                                   std::istream& in, std::ostream& out) {
   RpcOutput output(out);
   RpcRunState run_state;
   PendingResolverState pending_state;
@@ -1540,6 +1726,40 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
       auto switched = switch_runtime_model(session, std::move(*selected));
       if (!switched) {
         if (auto written = write_error(output, command->id, switched.error()); !written) return written;
+        continue;
+      }
+      if (auto written = write_success(output, command->id, state_result_json(session, cancel_requested(run_state)));
+          !written) {
+        return written;
+      }
+      continue;
+    }
+
+    if (command->type == "set_reasoning" || command->type == "clear_reasoning") {
+      if (active_run(run_state)) {
+        if (auto written = write_error(output, command->id, active_run_reject_error(command->type)); !written) {
+          return written;
+        }
+        continue;
+      }
+      std::optional<RuntimeReasoningSelection> selection = std::nullopt;
+      if (command->type == "set_reasoning") {
+        if (!command->reasoning_level || command->reasoning_level->empty()) {
+          if (auto written = write_error(output, command->id, invalid_rpc("set_reasoning requires reasoning_level"));
+              !written) {
+            return written;
+          }
+          continue;
+        }
+        selection = RuntimeReasoningSelection{.level = *command->reasoning_level,
+                                              .budget_tokens = command->reasoning_budget_tokens,
+                                              .display = command->reasoning_display.value_or("")};
+      }
+
+      std::lock_guard lock(session_mutex);
+      auto changed = set_runtime_reasoning(session, std::move(selection));
+      if (!changed) {
+        if (auto written = write_error(output, command->id, changed.error()); !written) return written;
         continue;
       }
       if (auto written = write_success(output, command->id, state_result_json(session, cancel_requested(run_state)));
@@ -1741,7 +1961,8 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
       continue;
     }
 
-    if (command->type == "context" || command->type == "export" || command->type == "compact") {
+    if (command->type == "context" || command->type == "export" || command->type == "compact" ||
+        is_plugin_rpc_command(command->type) || is_mcp_rpc_command(command->type)) {
       bool compact_active_run = false;
       {
         std::lock_guard lock(run_state.mutex);
@@ -1777,9 +1998,23 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
         slash_command = "/context";
       } else if (command->type == "export") {
         slash_command = "/export";
-      } else {
+      } else if (command->type == "compact") {
         slash_command = "/compact";
         if (command->instructions) slash_command += " " + *command->instructions;
+      } else if (is_plugin_rpc_command(command->type)) {
+        auto plugin_command = plugin_rpc_slash_command(*command);
+        if (!plugin_command) {
+          if (auto written = write_command_error(plugin_command.error()); !written) return written;
+          continue;
+        }
+        slash_command = std::move(*plugin_command);
+      } else {
+        auto mcp_command = mcp_rpc_slash_command(*command);
+        if (!mcp_command) {
+          if (auto written = write_command_error(mcp_command.error()); !written) return written;
+          continue;
+        }
+        slash_command = std::move(*mcp_command);
       }
       std::optional<RuntimeRunOptions> compact_runtime_options;
       std::optional<ProviderHandle> compact_provider;
@@ -1820,10 +2055,10 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
       auto result = run_command(session, CommandRequest{.command = std::move(slash_command),
                                                         .event_sink = make_runtime_event_bus_adapter(
                                                             event_bus, rpc_event_context(command->id)),
-                                                         .permission_resolver = runtime_options.permission_resolver,
-                                                         .compaction_summary_generator = std::move(summary_generator),
-                                                         .session_mutex = &session_mutex,
-                                                          .propagate_compaction_errors = command->type == "compact"});
+                                                        .permission_resolver = runtime_options.permission_resolver,
+                                                        .compaction_summary_generator = std::move(summary_generator),
+                                                        .session_mutex = &session_mutex,
+                                                        .propagate_compaction_errors = command->type == "compact"});
       if (!result) {
         if (auto written = write_command_error(result.error()); !written) return written;
         continue;
@@ -1875,7 +2110,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
           prompt_provider_id = session.model.provider_id;
         }
         auto prompt_options = ensure_prompt_runtime_options(paths, prompt_provider_id, std::move(prompt_base_options),
-                                                           auth_transport, "prompt");
+                                                            auth_transport, "prompt");
         if (!prompt_options) {
           if (auto written = write_error(output, prompt_id, prompt_options.error()); !written) {
             record_async_error(run_state, std::move(written.error()));

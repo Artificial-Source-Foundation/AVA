@@ -23,6 +23,13 @@ enum class Operation {
   RunCommand,
   NetworkFetch,
   LspQuery,
+  PluginExecute,
+  PluginToolCall,
+  PluginCommandRun,
+  PluginEventObserve,
+  McpServerLaunch,
+  McpServerConnect,
+  McpToolCall,
 };
 
 struct PermissionRequest {

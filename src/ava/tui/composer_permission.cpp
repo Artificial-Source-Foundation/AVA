@@ -8,10 +8,9 @@ namespace ava::tui {
 namespace detail {
 namespace {
 
-std::string render_permission_choice(std::string_view label, bool selected, bool announce_selected = false) {
+std::string render_permission_choice(std::string_view label, bool selected) {
   std::string text = selected ? "> " : "  ";
   text += label;
-  if (selected && announce_selected) text += " (selected)";
   if (!selected) return text;
   return std::string(kReverseVideo) + text + std::string(kSgrReset);
 }
@@ -19,7 +18,6 @@ std::string render_permission_choice(std::string_view label, bool selected, bool
 std::string render_compact_permission_choice(std::string_view label, bool selected) {
   std::string text = selected ? "> " : "  ";
   text += label;
-  if (selected) text += " sel";
   if (!selected) return text;
   return std::string(kReverseVideo) + text + std::string(kSgrReset);
 }
@@ -84,8 +82,6 @@ std::string key_pill(std::string_view key) { return std::string(kSgrBold) + std:
 
 std::string permission_dock_actions(PermissionPromptChoice selected, std::size_t width) {
   const std::array candidates = {
-      std::string("  ") + render_permission_choice("[Deny]", selected == PermissionPromptChoice::Deny, true) + "  " +
-          render_permission_choice("[Allow once]", selected == PermissionPromptChoice::Allow, true),
       std::string("  ") + render_permission_choice("[Deny]", selected == PermissionPromptChoice::Deny) + "  " +
           render_permission_choice("[Allow once]", selected == PermissionPromptChoice::Allow),
       std::string("  ") + render_compact_permission_choice("[D]", selected == PermissionPromptChoice::Deny) + " " +
@@ -182,7 +178,8 @@ std::string modal_line(std::string content, std::size_t width) {
 }
 
 std::string modal_title_line(const QuestionPromptView& prompt, std::size_t width) {
-  const auto title = prompt.header.empty() ? sanitize_terminal_text(prompt.question) : sanitize_terminal_text(prompt.header);
+  const auto title =
+      prompt.header.empty() ? sanitize_terminal_text(prompt.question) : sanitize_terminal_text(prompt.header);
   std::string line = std::string(kSgrBold) + title + std::string(kSgrReset) + std::string(kSgrComposerBg);
   const std::string esc = std::string(kSgrMuted) + "esc" + std::string(kSgrReset) + std::string(kSgrComposerBg);
   const auto line_cols = terminal_text_columns(line);
@@ -209,9 +206,8 @@ std::string modal_option_line(const QuestionPromptView& prompt, std::size_t inde
 
 std::string modal_keys_line(const QuestionPromptView& prompt, std::size_t width) {
   const auto search = prompt.searchable ? std::string("  Type to search  ") : std::string("  ");
-  return modal_line(std::string(kSgrMuted) + "↑/↓ select  Enter confirm" + search + "Esc cancel" +
-                        std::string(kSgrReset),
-                    width);
+  return modal_line(
+      std::string(kSgrMuted) + "↑/↓ select  Enter confirm" + search + "Esc cancel" + std::string(kSgrReset), width);
 }
 
 std::string question_dock_keys(const QuestionPromptView& prompt, std::size_t width) {
@@ -328,9 +324,9 @@ std::vector<std::string> render_question_modal(const QuestionPromptView& prompt,
       ++rendered_options;
     }
     if (rendered_options == 0 && lines.size() < max_lines) {
-      lines.push_back(modal_line(std::string(kSgrMuted) + "No matches. Press Enter to use custom provider id." +
-                                     std::string(kSgrReset),
-                                 width));
+      lines.push_back(modal_line(
+          std::string(kSgrMuted) + "No matches. Press Enter to use custom provider id." + std::string(kSgrReset),
+          width));
     } else if (rendered_options < matches.size() && lines.size() < max_lines) {
       lines.push_back(modal_line(std::string(kSgrMuted) + "..." + std::string(kSgrReset), width));
     }

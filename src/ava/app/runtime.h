@@ -36,6 +36,12 @@ struct RuntimeOpenOptions {
   ava::config::XdgPaths paths = ava::config::xdg_paths();
 };
 
+struct RuntimeReasoningSelection {
+  std::string level;
+  std::optional<long long> budget_tokens = std::nullopt;
+  std::string display;
+};
+
 struct RuntimeSession {
   ava::session::SessionStore store;
   ava::agent::Mode mode = ava::agent::Mode::Build;
@@ -46,6 +52,7 @@ struct RuntimeSession {
   std::filesystem::path current_dir;
   std::vector<ContextSourceMetadata> context_sources;
   std::string system_prompt;
+  std::optional<RuntimeReasoningSelection> reasoning = std::nullopt;
   bool created = false;
 };
 
@@ -77,7 +84,7 @@ using CompactionSummaryGenerator = std::function<ava::core::Result<std::string>(
 [[nodiscard]] ava::core::Result<RuntimeSession> open_runtime_session(const RuntimeOpenOptions& options);
 
 [[nodiscard]] ava::core::Result<RuntimePromptState> select_runtime_prompt_state(const RuntimeSession& session,
-                                                                                 ava::agent::Mode mode);
+                                                                                ava::agent::Mode mode);
 
 void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prompt_state);
 
@@ -86,6 +93,9 @@ void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prom
                                                                               std::string_view model_id);
 
 [[nodiscard]] ava::core::Result<bool> switch_runtime_model(RuntimeSession& session, ava::config::ModelInfo model);
+
+[[nodiscard]] ava::core::Result<bool> set_runtime_reasoning(RuntimeSession& session,
+                                                            std::optional<RuntimeReasoningSelection> selection);
 
 [[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& session,
                                                                         const std::string& user_message,
@@ -96,8 +106,7 @@ void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prom
 [[nodiscard]] bool same_session_snapshot(const std::vector<ava::session::SessionEntry>& expected,
                                          const std::vector<ava::session::SessionEntry>& actual);
 
-[[nodiscard]] ava::core::Error stale_compaction_snapshot_error(std::string_view trigger,
-                                                               std::size_t snapshot_entries,
+[[nodiscard]] ava::core::Error stale_compaction_snapshot_error(std::string_view trigger, std::size_t snapshot_entries,
                                                                std::size_t current_entries);
 
 [[nodiscard]] std::string build_compaction_summary_prompt(const std::vector<ava::session::SessionEntry>& entries,

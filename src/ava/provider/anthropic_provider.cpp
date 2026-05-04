@@ -16,6 +16,7 @@ namespace {
 constexpr std::string_view kDefaultAnthropicBaseUrl = "https://api.anthropic.com";
 constexpr std::string_view kAnthropicVersion = "2023-06-01";
 constexpr int kDefaultMaxTokens = 4096;
+constexpr std::size_t kMaxReasoningOpaqueBytes = 64 * 1024;
 
 struct PendingToolUse {
   std::string id;
@@ -46,14 +47,28 @@ std::vector<ContentPart> message_content_parts(const ChatMessage& message) {
                       .is_error = false}};
 }
 
+ContentPart text_separator_part() {
+  return ContentPart{.type = ContentPartType::Text,
+                     .text = "\n\n",
+                     .tool_call_id = "",
+                     .tool_name = "",
+                     .input_json = "",
+                     .is_error = false};
+}
+
 void append_content_parts(std::vector<ContentPart>& target, const std::vector<ContentPart>& source,
-                           bool separate_text) {
+                          bool separate_text) {
   for (const auto& part : source) {
     if (part.type == ContentPartType::Text && part.text.empty()) continue;
     if (separate_text && part.type == ContentPartType::Text && !target.empty() &&
         target.back().type == ContentPartType::Text) {
-      target.back().text += "\n\n";
-      target.back().text += part.text;
+      if (!target.back().cache_control_ttl.empty() || !part.cache_control_ttl.empty()) {
+        target.push_back(text_separator_part());
+        target.push_back(part);
+      } else {
+        target.back().text += "\n\n";
+        target.back().text += part.text;
+      }
       separate_text = false;
       continue;
     }
@@ -77,6 +92,29 @@ bool contains_tool_use_id(const std::vector<std::string>& ids, std::string_view 
   return false;
 }
 
+bool valid_cache_control_ttl(std::string_view ttl) { return ttl == "5m" || ttl == "1h"; }
+
+std::string cache_control_json(std::string_view ttl) {
+  return ",\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"" + std::string(ttl) + "\"}";
+}
+
+std::string cache_control_suffix(std::string_view ttl) { return ttl.empty() ? std::string{} : cache_control_json(ttl); }
+
+bool valid_reasoning_type(std::string_view type) { return type == "enabled" || type == "adaptive"; }
+
+bool valid_reasoning_display(std::string_view display) { return display == "summarized" || display == "omitted"; }
+
+std::string normalized_anthropic_stop_reason(std::string_view reason) {
+  if (reason == "end_turn") return "completed";
+  if (reason == "tool_use") return "tool_calls";
+  if (reason == "max_tokens") return "max_tokens";
+  if (reason == "stop_sequence") return "stop_sequence";
+  if (reason == "content_filter") return "content_filter";
+  if (reason == "pause_turn") return "pause_turn";
+  if (reason == "refusal") return "refusal";
+  return std::string(reason);
+}
+
 ava::core::VoidResult validate_anthropic_content_parts(const std::vector<ChatMessage>& messages) {
   std::vector<PendingToolUse> pending_tool_uses;
   std::vector<std::string> seen_tool_use_ids;
@@ -91,7 +129,17 @@ ava::core::VoidResult validate_anthropic_content_parts(const std::vector<ChatMes
     }
     for (std::size_t part_index = 0; part_index < message.content_parts.size(); ++part_index) {
       const auto& part = message.content_parts[part_index];
-      if (part.type == ContentPartType::Text && part.text.empty()) continue;
+      if (!part.cache_control_ttl.empty() && !valid_cache_control_ttl(part.cache_control_ttl)) {
+        return std::unexpected(
+            invalid_content_part_error("Anthropic cache_control ttl must be 5m or 1h", message_index, part_index));
+      }
+      if (part.type == ContentPartType::Text && part.text.empty()) {
+        if (!part.cache_control_ttl.empty()) {
+          return std::unexpected(invalid_content_part_error("Anthropic cache_control requires non-empty text content",
+                                                            message_index, part_index));
+        }
+        continue;
+      }
       if (role == "user" && !pending_tool_uses.empty() && part.type != ContentPartType::ToolResult) {
         return std::unexpected(invalid_content_part_error(
             "Anthropic tool_result content must precede ordinary user content after tool_use", message_index,
@@ -100,22 +148,40 @@ ava::core::VoidResult validate_anthropic_content_parts(const std::vector<ChatMes
       switch (part.type) {
         case ContentPartType::Text:
           break;
+        case ContentPartType::Reasoning:
+          if (role != "assistant") {
+            return std::unexpected(invalid_content_part_error("Anthropic reasoning content requires assistant role",
+                                                              message_index, part_index));
+          }
+          if (!part.cache_control_ttl.empty()) {
+            return std::unexpected(invalid_content_part_error(
+                "Anthropic cache_control is not supported on reasoning content", message_index, part_index));
+          }
+          if (!part.reasoning_format.empty() && part.reasoning_format != "anthropic_thinking") {
+            return std::unexpected(invalid_content_part_error(
+                "Anthropic reasoning content requires anthropic_thinking format", message_index, part_index));
+          }
+          if (part.redacted && part.reasoning_redacted_data.empty()) {
+            return std::unexpected(invalid_content_part_error(
+                "Anthropic redacted reasoning content requires provider redacted data", message_index, part_index));
+          }
+          break;
         case ContentPartType::ToolUse:
           if (role != "assistant") {
             return std::unexpected(invalid_content_part_error("Anthropic tool_use content requires assistant role",
-                                                             message_index, part_index));
+                                                              message_index, part_index));
           }
           if (part.tool_call_id.empty() || part.tool_name.empty()) {
             return std::unexpected(invalid_content_part_error("Anthropic tool_use content requires id and name",
-                                                             message_index, part_index));
+                                                              message_index, part_index));
           }
           if (!is_valid_json_object(part.input_json)) {
             return std::unexpected(invalid_content_part_error("Anthropic tool_use input must be a valid JSON object",
-                                                             message_index, part_index));
+                                                              message_index, part_index));
           }
           if (contains_tool_use_id(seen_tool_use_ids, part.tool_call_id)) {
-            return std::unexpected(invalid_content_part_error("Anthropic tool_use id must be unique", message_index,
-                                                             part_index));
+            return std::unexpected(
+                invalid_content_part_error("Anthropic tool_use id must be unique", message_index, part_index));
           }
           pending_tool_uses.push_back(
               PendingToolUse{.id = part.tool_call_id, .message_index = message_index, .part_index = part_index});
@@ -124,11 +190,11 @@ ava::core::VoidResult validate_anthropic_content_parts(const std::vector<ChatMes
         case ContentPartType::ToolResult:
           if (role != "user") {
             return std::unexpected(invalid_content_part_error("Anthropic tool_result content requires user role",
-                                                             message_index, part_index));
+                                                              message_index, part_index));
           }
           if (part.tool_call_id.empty()) {
             return std::unexpected(invalid_content_part_error("Anthropic tool_result content requires tool_use_id",
-                                                             message_index, part_index));
+                                                              message_index, part_index));
           }
           if (pending_tool_uses.empty() || pending_tool_uses.front().id != part.tool_call_id) {
             return std::unexpected(invalid_content_part_error(
@@ -148,7 +214,7 @@ ava::core::VoidResult validate_anthropic_content_parts(const std::vector<ChatMes
   if (!pending_tool_uses.empty()) {
     const auto& pending = pending_tool_uses.front();
     return std::unexpected(invalid_content_part_error("Anthropic tool_use content requires matching tool_result",
-                                                     pending.message_index, pending.part_index));
+                                                      pending.message_index, pending.part_index));
   }
   return {};
 }
@@ -156,17 +222,31 @@ ava::core::VoidResult validate_anthropic_content_parts(const std::vector<ChatMes
 std::string anthropic_content_part_json(const ContentPart& part) {
   switch (part.type) {
     case ContentPartType::Text:
-      return "{\"type\":\"text\",\"text\":\"" + ava::core::json::escape(part.text) + "\"}";
+      return "{\"type\":\"text\",\"text\":\"" + ava::core::json::escape(part.text) + "\"" +
+             cache_control_suffix(part.cache_control_ttl) + "}";
+    case ContentPartType::Reasoning: {
+      if (part.redacted) {
+        return "{\"type\":\"redacted_thinking\",\"data\":\"" + ava::core::json::escape(part.reasoning_redacted_data) +
+               "\"}";
+      }
+      std::string json = "{\"type\":\"thinking\",\"thinking\":\"" + ava::core::json::escape(part.text) + "\"";
+      if (!part.reasoning_signature.empty()) {
+        json += ",\"signature\":\"" + ava::core::json::escape(part.reasoning_signature) + "\"";
+      }
+      json += '}';
+      return json;
+    }
     case ContentPartType::ToolUse: {
       const auto input = is_valid_json_object(part.input_json) ? part.input_json : std::string("{}");
-      return "{\"type\":\"tool_use\",\"id\":\"" + ava::core::json::escape(part.tool_call_id) +
-             "\",\"name\":\"" + ava::core::json::escape(part.tool_name) + "\",\"input\":" + input + "}";
+      return "{\"type\":\"tool_use\",\"id\":\"" + ava::core::json::escape(part.tool_call_id) + "\",\"name\":\"" +
+             ava::core::json::escape(part.tool_name) + "\",\"input\":" + input +
+             cache_control_suffix(part.cache_control_ttl) + "}";
     }
     case ContentPartType::ToolResult: {
-      std::string json = "{\"type\":\"tool_result\",\"tool_use_id\":\"" +
-                         ava::core::json::escape(part.tool_call_id) + "\",\"content\":\"" +
-                         ava::core::json::escape(part.text) + "\"";
+      std::string json = "{\"type\":\"tool_result\",\"tool_use_id\":\"" + ava::core::json::escape(part.tool_call_id) +
+                         "\",\"content\":\"" + ava::core::json::escape(part.text) + "\"";
       if (part.is_error) json += ",\"is_error\":true";
+      json += cache_control_suffix(part.cache_control_ttl);
       json += '}';
       return json;
     }
@@ -222,8 +302,114 @@ long long max_tokens_for_request(const ProviderRequest& request) {
   return value > 0 ? value : kDefaultMaxTokens;
 }
 
+ava::core::VoidResult validate_anthropic_request_options(const ProviderRequest& request) {
+  if (!request.system_prompt_cache_ttl.empty() && !valid_cache_control_ttl(request.system_prompt_cache_ttl)) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "Anthropic system cache ttl must be 5m or 1h"));
+  }
+  if (!request.system_prompt_cache_ttl.empty() && request.system_prompt.empty()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                            "Anthropic system cache ttl requires a non-empty system prompt"));
+  }
+  if (!request.reasoning) return {};
+  const auto& reasoning = *request.reasoning;
+  if (!valid_reasoning_type(reasoning.type)) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                            "Anthropic reasoning type must be enabled or adaptive"));
+  }
+  if (!reasoning.display.empty() && !valid_reasoning_display(reasoning.display)) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                            "Anthropic reasoning display must be summarized or omitted"));
+  }
+  if (reasoning.budget_tokens && *reasoning.budget_tokens <= 0) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "Anthropic reasoning budget must be positive"));
+  }
+  if (reasoning.type == "enabled" && !reasoning.budget_tokens) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "Anthropic enabled reasoning requires a budget"));
+  }
+  if (reasoning.type == "enabled" && reasoning.budget_tokens && *reasoning.budget_tokens < 1024) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                            "Anthropic reasoning budget must be at least 1024 tokens"));
+  }
+  if (reasoning.type == "adaptive" && reasoning.budget_tokens) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                            "Anthropic adaptive reasoning does not accept a fixed budget"));
+  }
+  if (reasoning.type == "adaptive" && request.model_id == "claude-sonnet-4-5") {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                            "Anthropic adaptive reasoning is not supported by this model"));
+  }
+  if (reasoning.budget_tokens && *reasoning.budget_tokens >= max_tokens_for_request(request)) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                            "Anthropic reasoning budget must be below max output tokens"));
+  }
+  return {};
+}
+
+ava::core::VoidResult validate_cache_control_order(const ProviderRequest& request,
+                                                   const std::vector<ChatMessage>& messages) {
+  bool saw_short_ttl = false;
+  std::size_t breakpoints = 0;
+  auto observe = [&](std::string_view ttl) -> ava::core::VoidResult {
+    if (ttl.empty()) return {};
+    ++breakpoints;
+    if (breakpoints > 4) {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                              "Anthropic supports at most four cache breakpoints"));
+    }
+    if (saw_short_ttl && ttl == "1h") {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                              "Anthropic 1h cache ttl cannot follow a 5m cache ttl"));
+    }
+    if (ttl == "5m") saw_short_ttl = true;
+    return {};
+  };
+
+  if (auto observed = observe(request.system_prompt_cache_ttl); !observed) return observed;
+  for (const auto& message : messages) {
+    for (const auto& part : message_content_parts(message)) {
+      if (auto observed = observe(part.cache_control_ttl); !observed) return observed;
+    }
+  }
+  return {};
+}
+
+std::string system_prompt_json(const ProviderRequest& request) {
+  if (request.system_prompt.empty() && request.system_prompt_cache_ttl.empty()) return {};
+  if (request.system_prompt_cache_ttl.empty()) {
+    return "\"system\":\"" + ava::core::json::escape(request.system_prompt) + "\"";
+  }
+  return "\"system\":[{\"type\":\"text\",\"text\":\"" + ava::core::json::escape(request.system_prompt) + "\"" +
+         cache_control_json(request.system_prompt_cache_ttl) + "}]";
+}
+
+std::string reasoning_options_json(const ProviderReasoningOptions& reasoning) {
+  std::string json = ",\"thinking\":{\"type\":\"" + ava::core::json::escape(reasoning.type) + "\"";
+  if (reasoning.budget_tokens) json += ",\"budget_tokens\":" + std::to_string(*reasoning.budget_tokens);
+  if (!reasoning.display.empty()) json += ",\"display\":\"" + ava::core::json::escape(reasoning.display) + "\"";
+  json += '}';
+  return json;
+}
+
 std::string stream_error_message(std::string_view message) {
   return message.empty() ? "unrecognized Anthropic stream event" : std::string(message);
+}
+
+std::string sanitized_anthropic_body_snippet(std::string_view body) {
+  return sanitized_body_snippet(body, {"access_token", "refresh_token", "api_key", "x-api-key", "Authorization",
+                                       "signature", "redacted_data", "data", "thinking"});
+}
+
+std::string stop_details_explanation(std::string_view object) {
+  const auto stop_details = ava::core::json::object_field(object, "stop_details");
+  if (!stop_details) return {};
+  return ava::core::json::string_field(*stop_details, "explanation").value_or("");
+}
+
+bool has_stop_details(std::string_view object) {
+  return ava::core::json::object_field(object, "stop_details").has_value();
 }
 
 void append_stream_error(std::vector<StreamEvent>& events, std::string_view message) {
@@ -246,8 +432,9 @@ std::string anthropic_tool_json(std::string_view tool_json) {
 std::string request_body_json(const ProviderRequest& request, const std::vector<ChatMessage>& messages) {
   std::string body = "{\"model\":\"" + ava::core::json::escape(request.model_id) +
                      "\",\"max_tokens\":" + std::to_string(max_tokens_for_request(request)) +
-                     ",\"stream\":" + (request.stream ? "true" : "false") + ",\"system\":\"" +
-                     ava::core::json::escape(request.system_prompt) + "\",\"messages\":[";
+                     ",\"stream\":" + (request.stream ? "true" : "false");
+  if (const auto system = system_prompt_json(request); !system.empty()) body += "," + system;
+  body += ",\"messages\":[";
   for (std::size_t index = 0; index < messages.size(); ++index) {
     if (index > 0) body += ',';
     body += message_json(messages[index]);
@@ -261,6 +448,7 @@ std::string request_body_json(const ProviderRequest& request, const std::vector<
     }
     body += ']';
   }
+  if (request.reasoning) body += reasoning_options_json(*request.reasoning);
   body += '}';
   return body;
 }
@@ -281,13 +469,21 @@ void merge_usage(TokenUsage& target, const TokenUsage& source) {
 
 void append_event_for_data(std::vector<StreamEvent>& events,
                            std::map<long long, AnthropicStreamParser::ToolBlock>& tools,
-                           std::optional<TokenUsage>& usage, std::string_view data) {
+                           std::map<long long, AnthropicStreamParser::ReasoningBlock>& reasoning_blocks,
+                           std::optional<TokenUsage>& usage, std::string& stop_reason, bool& saw_data,
+                           bool& message_stop_seen, bool& error_seen, std::string_view data) {
+  auto append_terminal_error = [&](std::string_view message) {
+    error_seen = true;
+    append_stream_error(events, message);
+  };
   if (!is_json_object_shape(data)) {
-    append_stream_error(events, "malformed Anthropic stream event");
+    append_terminal_error("malformed Anthropic stream event");
     return;
   }
   const auto type = ava::core::json::string_field(data, "type").value_or("");
-  if (type == "ping" || type == "message_start") {
+  if (type == "ping") return;
+  saw_data = true;
+  if (type == "message_start") {
     if (const auto message = ava::core::json::object_field(data, "message")) {
       if (const auto parsed = parse_anthropic_usage(*message)) {
         if (!usage) usage = TokenUsage{};
@@ -299,7 +495,9 @@ void append_event_for_data(std::vector<StreamEvent>& events,
   if (type == "content_block_start") {
     const auto block = ava::core::json::object_field(data, "content_block");
     const auto index = non_negative_integer_field(data, "index");
-    if (block && index && ava::core::json::string_field(*block, "type").value_or("") == "tool_use") {
+    if (!block || !index) return;
+    const auto block_type = ava::core::json::string_field(*block, "type").value_or("");
+    if (block_type == "tool_use") {
       const auto id = ava::core::json::string_field(*block, "id").value_or("");
       const auto name = ava::core::json::string_field(*block, "name").value_or("");
       tools[*index] = AnthropicStreamParser::ToolBlock{.id = id, .name = name};
@@ -309,13 +507,44 @@ void append_event_for_data(std::vector<StreamEvent>& events,
                                    .tool_name = name,
                                    .error_message = "",
                                    .usage = std::nullopt});
+    } else if (block_type == "thinking") {
+      const auto signature = ava::core::json::string_field(*block, "signature").value_or("");
+      if (signature.size() > kMaxReasoningOpaqueBytes) {
+        append_terminal_error("Anthropic thinking signature exceeded byte limit");
+        return;
+      }
+      reasoning_blocks[*index] =
+          AnthropicStreamParser::ReasoningBlock{.signature = signature, .redacted_data = "", .redacted = false};
+      events.push_back(StreamEvent{.type = StreamEventType::ReasoningStart,
+                                   .text = "",
+                                   .tool_call_id = "",
+                                   .tool_name = "",
+                                   .error_message = "",
+                                   .usage = std::nullopt,
+                                   .reasoning_format = "anthropic_thinking"});
+    } else if (block_type == "redacted_thinking") {
+      const auto redacted_data = ava::core::json::string_field(*block, "data").value_or("");
+      if (redacted_data.size() > kMaxReasoningOpaqueBytes) {
+        append_terminal_error("Anthropic redacted thinking payload exceeded byte limit");
+        return;
+      }
+      reasoning_blocks[*index] =
+          AnthropicStreamParser::ReasoningBlock{.signature = "", .redacted_data = redacted_data, .redacted = true};
+      events.push_back(StreamEvent{.type = StreamEventType::ReasoningStart,
+                                   .text = "",
+                                   .tool_call_id = "",
+                                   .tool_name = "",
+                                   .error_message = "",
+                                   .usage = std::nullopt,
+                                   .reasoning_format = "anthropic_thinking",
+                                   .redacted = true});
     }
     return;
   }
   if (type == "content_block_delta") {
     const auto delta = ava::core::json::object_field(data, "delta");
     if (!delta) {
-      append_stream_error(events, "Anthropic content_block_delta is missing delta");
+      append_terminal_error("Anthropic content_block_delta is missing delta");
       return;
     }
     const auto delta_type = ava::core::json::string_field(*delta, "type").value_or("");
@@ -339,13 +568,52 @@ void append_event_for_data(std::vector<StreamEvent>& events,
                                    .usage = std::nullopt});
       return;
     }
-    append_stream_error(events, "unrecognized Anthropic content_block_delta");
+    if (delta_type == "thinking_delta") {
+      events.push_back(StreamEvent{.type = StreamEventType::ReasoningDelta,
+                                   .text = ava::core::json::string_field(*delta, "thinking").value_or(""),
+                                   .tool_call_id = "",
+                                   .tool_name = "",
+                                   .error_message = "",
+                                   .usage = std::nullopt,
+                                   .reasoning_format = "anthropic_thinking"});
+      return;
+    }
+    if (delta_type == "signature_delta") {
+      const auto index = non_negative_integer_field(data, "index");
+      const auto reasoning = index ? reasoning_blocks.find(*index) : reasoning_blocks.end();
+      if (reasoning != reasoning_blocks.end()) {
+        const auto signature_delta = ava::core::json::string_field(*delta, "signature").value_or("");
+        if (reasoning->second.signature.size() + signature_delta.size() > kMaxReasoningOpaqueBytes) {
+          reasoning_blocks.erase(reasoning);
+          append_terminal_error("Anthropic thinking signature exceeded byte limit");
+          return;
+        }
+        reasoning->second.signature += signature_delta;
+      }
+      return;
+    }
+    append_terminal_error("unrecognized Anthropic content_block_delta");
     return;
   }
   if (type == "content_block_stop") {
     const auto index = non_negative_integer_field(data, "index");
     if (!index) return;
     const auto tool = tools.find(*index);
+    const auto reasoning = reasoning_blocks.find(*index);
+    if (reasoning != reasoning_blocks.end()) {
+      events.push_back(StreamEvent{.type = StreamEventType::ReasoningEnd,
+                                   .text = "",
+                                   .tool_call_id = "",
+                                   .tool_name = "",
+                                   .error_message = "",
+                                   .usage = std::nullopt,
+                                   .reasoning_format = "anthropic_thinking",
+                                   .reasoning_signature = reasoning->second.signature,
+                                   .reasoning_redacted_data = reasoning->second.redacted_data,
+                                   .redacted = reasoning->second.redacted});
+      reasoning_blocks.erase(reasoning);
+      return;
+    }
     if (tool == tools.end()) return;
     events.push_back(StreamEvent{.type = StreamEventType::ToolCallEnd,
                                  .text = "",
@@ -360,19 +628,39 @@ void append_event_for_data(std::vector<StreamEvent>& events,
       if (!usage) usage = TokenUsage{};
       merge_usage(*usage, *parsed);
     }
+    if (const auto delta = ava::core::json::object_field(data, "delta")) {
+      if (const auto raw_stop_reason = ava::core::json::string_field(*delta, "stop_reason"); raw_stop_reason) {
+        stop_reason = normalized_anthropic_stop_reason(*raw_stop_reason);
+        if (stop_reason == "refusal") {
+          if (auto explanation = stop_details_explanation(*delta); !explanation.empty()) {
+            events.push_back(StreamEvent{.type = StreamEventType::TextDelta,
+                                         .text = std::move(explanation),
+                                         .tool_call_id = "",
+                                         .tool_name = "",
+                                         .error_message = "",
+                                         .usage = std::nullopt});
+          }
+        }
+      }
+    }
     return;
   }
   if (type == "message_stop") {
+    message_stop_seen = true;
     events.push_back(StreamEvent{.type = StreamEventType::Done,
                                  .text = "",
                                  .tool_call_id = "",
                                  .tool_name = "",
                                  .error_message = "",
-                                 .usage = std::move(usage)});
+                                 .usage = std::move(usage),
+                                 .stop_reason = stop_reason});
     usage = std::nullopt;
+    stop_reason.clear();
     return;
   }
   if (type == "error") {
+    error_seen = true;
+    message_stop_seen = true;
     const auto error = ava::core::json::object_field(data, "error");
     events.push_back(StreamEvent{.type = StreamEventType::Error,
                                  .text = "",
@@ -383,16 +671,19 @@ void append_event_for_data(std::vector<StreamEvent>& events,
                                  .usage = std::nullopt});
     return;
   }
-  append_stream_error(events, "unrecognized Anthropic stream event");
+  append_terminal_error("unrecognized Anthropic stream event");
 }
 
 void append_events_for_sse_line(std::vector<StreamEvent>& events,
                                 std::map<long long, AnthropicStreamParser::ToolBlock>& tools,
-                                std::optional<TokenUsage>& usage, std::string& data, std::string line) {
+                                std::map<long long, AnthropicStreamParser::ReasoningBlock>& reasoning_blocks,
+                                std::optional<TokenUsage>& usage, std::string& stop_reason, std::string& data,
+                                bool& saw_data, bool& message_stop_seen, bool& error_seen, std::string line) {
   if (!line.empty() && line.back() == '\r') line.pop_back();
   if (line.empty()) {
     if (!data.empty()) {
-      append_event_for_data(events, tools, usage, data);
+      append_event_for_data(events, tools, reasoning_blocks, usage, stop_reason, saw_data, message_stop_seen,
+                            error_seen, data);
       data.clear();
     }
     return;
@@ -420,14 +711,18 @@ ava::core::Result<HttpRequest> AnthropicProvider::build_request(const ProviderRe
         ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Anthropic API key is required"));
   }
   const auto messages = collapse_consecutive_roles(request.messages);
+  if (auto valid = validate_anthropic_request_options(request); !valid)
+    return std::unexpected(std::move(valid.error()));
   if (auto valid = validate_anthropic_content_parts(messages); !valid) return std::unexpected(std::move(valid.error()));
+  if (auto valid = validate_cache_control_order(request, messages); !valid)
+    return std::unexpected(std::move(valid.error()));
   return HttpRequest{.method = "POST",
-                      .url = base_url_ + "/v1/messages",
+                     .url = base_url_ + "/v1/messages",
                      .headers = {{"x-api-key", std::string(access_token)},
                                  {"anthropic-version", std::string(kAnthropicVersion)},
                                  {"Content-Type", "application/json"},
                                  {"Accept", request.stream ? "text/event-stream" : "application/json"}},
-                      .body = request_body_json(request, messages),
+                     .body = request_body_json(request, messages),
                      .timeout_ms = 60000,
                      .follow_redirects = false,
                      .include_response_headers = false,
@@ -461,8 +756,8 @@ ava::core::Result<std::vector<StreamEvent>> AnthropicStreamParser::append(std::s
   while (true) {
     const auto newline = pending_line_.find('\n', search_from);
     if (newline == std::string::npos) break;
-    append_events_for_sse_line(events, tool_blocks_, usage_, data_,
-                               pending_line_.substr(line_start, newline - line_start));
+    append_events_for_sse_line(events, tool_blocks_, reasoning_blocks_, usage_, stop_reason_, data_, saw_data_,
+                               message_stop_seen_, error_seen_, pending_line_.substr(line_start, newline - line_start));
     line_start = newline + 1;
     search_from = line_start;
   }
@@ -474,16 +769,26 @@ ava::core::Result<std::vector<StreamEvent>> AnthropicStreamParser::append(std::s
 ava::core::Result<std::vector<StreamEvent>> AnthropicStreamParser::finish() {
   std::vector<StreamEvent> events;
   if (!pending_line_.empty()) {
-    append_events_for_sse_line(events, tool_blocks_, usage_, data_, std::move(pending_line_));
+    append_events_for_sse_line(events, tool_blocks_, reasoning_blocks_, usage_, stop_reason_, data_, saw_data_,
+                               message_stop_seen_, error_seen_, std::move(pending_line_));
     pending_line_.clear();
   }
   scan_offset_ = 0;
   if (!data_.empty()) {
-    append_event_for_data(events, tool_blocks_, usage_, data_);
+    append_event_for_data(events, tool_blocks_, reasoning_blocks_, usage_, stop_reason_, saw_data_, message_stop_seen_,
+                          error_seen_, data_);
     data_.clear();
   }
+  if (saw_data_ && !message_stop_seen_ && !error_seen_) {
+    append_stream_error(events, "Anthropic SSE stream ended before message_stop");
+  }
   tool_blocks_.clear();
+  reasoning_blocks_.clear();
   usage_ = std::nullopt;
+  stop_reason_.clear();
+  saw_data_ = false;
+  message_stop_seen_ = false;
+  error_seen_ = false;
   return events;
 }
 
@@ -505,9 +810,7 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse_response(const H
     error.with_context("provider_error_kind", to_string(classify_provider_error(response)));
     if (const auto retry_after = retry_after_header(response)) error.with_context("retry_after", *retry_after);
     if (!response.body.empty()) {
-      error.with_context("body_snippet",
-                         sanitized_body_snippet(response.body, {"access_token", "refresh_token", "api_key", "x-api-key",
-                                                                "Authorization"}));
+      error.with_context("body_snippet", sanitized_anthropic_body_snippet(response.body));
     }
     return std::unexpected(std::move(error));
   }
@@ -518,6 +821,8 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(const HttpR
   if (response.status_code < 200 || response.status_code >= 300) return parse_anthropic_sse_response(response);
   std::vector<StreamEvent> events;
   bool parsed_content = false;
+  const std::string stop_reason =
+      normalized_anthropic_stop_reason(ava::core::json::string_field(response.body, "stop_reason").value_or(""));
   for (const auto& block : ava::core::json::objects_in_array_field(response.body, "content")) {
     const auto type = ava::core::json::string_field(block, "type").value_or("");
     if (type == "text") {
@@ -528,6 +833,70 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(const HttpR
                                    .tool_name = "",
                                    .error_message = "",
                                    .usage = std::nullopt});
+    } else if (type == "refusal") {
+      parsed_content = true;
+      events.push_back(StreamEvent{.type = StreamEventType::TextDelta,
+                                   .text = ava::core::json::string_field(block, "refusal").value_or(""),
+                                   .tool_call_id = "",
+                                   .tool_name = "",
+                                   .error_message = "",
+                                   .usage = std::nullopt});
+    } else if (type == "thinking") {
+      parsed_content = true;
+      const auto thinking = ava::core::json::string_field(block, "thinking").value_or("");
+      const auto signature = ava::core::json::string_field(block, "signature").value_or("");
+      if (signature.size() > kMaxReasoningOpaqueBytes) {
+        return std::unexpected(
+            ava::core::Error(ava::core::ErrorCategory::Provider, "Anthropic thinking signature exceeded byte limit"));
+      }
+      events.push_back(StreamEvent{.type = StreamEventType::ReasoningStart,
+                                   .text = "",
+                                   .tool_call_id = "",
+                                   .tool_name = "",
+                                   .error_message = "",
+                                   .usage = std::nullopt,
+                                   .reasoning_format = "anthropic_thinking"});
+      if (!thinking.empty()) {
+        events.push_back(StreamEvent{.type = StreamEventType::ReasoningDelta,
+                                     .text = thinking,
+                                     .tool_call_id = "",
+                                     .tool_name = "",
+                                     .error_message = "",
+                                     .usage = std::nullopt,
+                                     .reasoning_format = "anthropic_thinking"});
+      }
+      events.push_back(StreamEvent{.type = StreamEventType::ReasoningEnd,
+                                   .text = "",
+                                   .tool_call_id = "",
+                                   .tool_name = "",
+                                   .error_message = "",
+                                   .usage = std::nullopt,
+                                   .reasoning_format = "anthropic_thinking",
+                                   .reasoning_signature = signature});
+    } else if (type == "redacted_thinking") {
+      parsed_content = true;
+      const auto redacted_data = ava::core::json::string_field(block, "data").value_or("");
+      if (redacted_data.size() > kMaxReasoningOpaqueBytes) {
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider,
+                                                "Anthropic redacted thinking payload exceeded byte limit"));
+      }
+      events.push_back(StreamEvent{.type = StreamEventType::ReasoningStart,
+                                   .text = "",
+                                   .tool_call_id = "",
+                                   .tool_name = "",
+                                   .error_message = "",
+                                   .usage = std::nullopt,
+                                   .reasoning_format = "anthropic_thinking",
+                                   .redacted = true});
+      events.push_back(StreamEvent{.type = StreamEventType::ReasoningEnd,
+                                   .text = "",
+                                   .tool_call_id = "",
+                                   .tool_name = "",
+                                   .error_message = "",
+                                   .usage = std::nullopt,
+                                   .reasoning_format = "anthropic_thinking",
+                                   .reasoning_redacted_data = redacted_data,
+                                   .redacted = true});
     } else if (type == "tool_use") {
       parsed_content = true;
       const auto id = ava::core::json::string_field(block, "id").value_or("");
@@ -553,12 +922,23 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(const HttpR
                                    .usage = std::nullopt});
     }
   }
+  if (!parsed_content && stop_reason == "refusal") {
+    if (has_stop_details(response.body)) {
+      parsed_content = true;
+      if (auto explanation = stop_details_explanation(response.body); !explanation.empty()) {
+        events.push_back(StreamEvent{.type = StreamEventType::TextDelta,
+                                     .text = std::move(explanation),
+                                     .tool_call_id = "",
+                                     .tool_name = "",
+                                     .error_message = "",
+                                     .usage = std::nullopt});
+      }
+    }
+  }
   if (!parsed_content) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "Anthropic response content is missing");
     if (!response.body.empty()) {
-      error.with_context("body_snippet",
-                         sanitized_body_snippet(response.body, {"access_token", "refresh_token", "api_key", "x-api-key",
-                                                                "Authorization"}));
+      error.with_context("body_snippet", sanitized_anthropic_body_snippet(response.body));
     }
     return std::unexpected(std::move(error));
   }
@@ -567,7 +947,8 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(const HttpR
                                .tool_call_id = "",
                                .tool_name = "",
                                .error_message = "",
-                               .usage = parse_anthropic_usage(response.body)});
+                               .usage = parse_anthropic_usage(response.body),
+                               .stop_reason = stop_reason});
   return events;
 }
 

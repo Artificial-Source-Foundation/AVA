@@ -27,6 +27,8 @@ struct PendingToolItem {
 struct TuiEventState {
   std::vector<TranscriptItem> transcript;
   std::string pending_assistant_text;
+  std::string pending_assistant_meta;
+  std::string pending_reasoning_text;
   std::vector<PendingToolItem> pending_tools;
   std::vector<SidebarActivityItem> activity;
   std::vector<SidebarModifiedFile> modified_files;

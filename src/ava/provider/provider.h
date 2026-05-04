@@ -14,6 +14,7 @@ namespace ava::provider {
 
 enum class ContentPartType {
   Text,
+  Reasoning,
   ToolUse,
   ToolResult,
 };
@@ -22,11 +23,18 @@ struct ContentPart {
   // Provider-neutral native content item. Providers that do not support native
   // parts can ignore these fields and serialize ChatMessage::content instead.
   ContentPartType type = ContentPartType::Text;
-  std::string text;
-  std::string tool_call_id;
-  std::string tool_name;
-  std::string input_json;
+  std::string text = {};
+  std::string tool_call_id = {};
+  std::string tool_name = {};
+  std::string input_json = {};
   bool is_error = false;
+  std::string cache_control_ttl = {};
+  // Provider-native reasoning/thinking metadata. `text` carries the visible or
+  // summarized reasoning content; signatures stay provider-private for replay.
+  std::string reasoning_format = {};
+  std::string reasoning_signature = {};
+  std::string reasoning_redacted_data = {};
+  bool redacted = false;
 };
 
 struct ChatMessage {
@@ -41,6 +49,12 @@ struct ChatMessage {
   std::vector<ContentPart> content_parts = {};
 };
 
+struct ProviderReasoningOptions {
+  std::string type = {};
+  std::optional<long long> budget_tokens = std::nullopt;
+  std::string display = {};
+};
+
 struct ProviderRequest {
   std::string provider_id;
   std::string model_id;
@@ -49,6 +63,8 @@ struct ProviderRequest {
   std::vector<std::string> tools_json;
   bool stream = true;
   std::optional<long long> max_output_tokens = std::nullopt;
+  std::optional<ProviderReasoningOptions> reasoning = std::nullopt;
+  std::string system_prompt_cache_ttl = {};
 };
 
 struct ProviderAuthContext {
@@ -90,6 +106,9 @@ struct HttpResponse {
 
 enum class StreamEventType {
   TextDelta,
+  ReasoningStart,
+  ReasoningDelta,
+  ReasoningEnd,
   ToolCallStart,
   ToolCallDelta,
   ToolCallEnd,
@@ -116,6 +135,12 @@ struct StreamEvent {
   std::string tool_name;
   std::string error_message;
   std::optional<TokenUsage> usage;
+  std::string stop_reason = {};
+  std::string reasoning_format = {};
+  std::string reasoning_signature = {};
+  std::string reasoning_redacted_data = {};
+  bool redacted = false;
+  bool reasoning_signature_present = false;
 };
 
 class StreamParser {
@@ -148,8 +173,8 @@ class Transport {
   [[nodiscard]] virtual ava::core::Result<HttpResponse> send(const HttpRequest& request) = 0;
   [[nodiscard]] virtual bool supports_streaming() const noexcept;
   [[nodiscard]] virtual ava::core::Result<HttpResponse> send_streaming(const HttpRequest& request,
-                                                                        BodyChunkSink on_body_chunk,
-                                                                        CancelCallback cancel_requested = nullptr);
+                                                                       BodyChunkSink on_body_chunk,
+                                                                       CancelCallback cancel_requested = nullptr);
 };
 
 struct RetryOptions {

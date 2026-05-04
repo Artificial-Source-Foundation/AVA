@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <span>
@@ -11,8 +13,11 @@
 #include <vector>
 
 #include "ava/agent/question.h"
+#include "ava/agent/tool_registry.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/mcp/tool_broker.h"
+#include "ava/plugin/tool_broker.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/diff_utils.h"
 #include "ava/tools/edit_match.h"
@@ -54,10 +59,6 @@ std::string error_json(std::string_view tool, const ava::core::Error& error) {
          ava::core::json::escape(ava::core::to_string(error.category())) + "\",\"message\":\"" +
          ava::core::json::escape(error.message()) + "\",\"details\":\"" + ava::core::json::escape(error.format()) +
          "\"}}";
-}
-
-bool lsp_diagnostics_available(const ava::tools::ToolContext& context) {
-  return context.lsp_diagnostics_provider != nullptr;
 }
 
 bool is_lsp_diagnostics_metadata(const ToolMetadata& tool) { return tool.name == std::string_view("lsp_diagnostics"); }
@@ -487,25 +488,23 @@ ToolDispatchResult webfetch_result(const ava::tools::ToolContext& context, const
   auto url = required_safe_string_arg(call.arguments_json, "url", call.name);
   if (!url) return tool_error_result(call, url.error());
   const auto tool_context = context_for_provider_tool(context, call);
-  auto result = ava::tools::webfetch(tool_context, *url,
-                                     ava::tools::WebFetchOptions{
-                                         .max_bytes = optional_size_arg(call.arguments_json, "max_bytes", 1024 * 1024,
-                                                                      5 * 1024 * 1024),
-                                         .timeout_ms = static_cast<int>(optional_size_arg(call.arguments_json,
-                                                                                         "timeout_ms", 30000, 120000)),
-                                     });
+  auto result = ava::tools::webfetch(
+      tool_context, *url,
+      ava::tools::WebFetchOptions{
+          .max_bytes = optional_size_arg(call.arguments_json, "max_bytes", 1024 * 1024, 5 * 1024 * 1024),
+          .timeout_ms = static_cast<int>(optional_size_arg(call.arguments_json, "timeout_ms", 30000, 120000)),
+      });
   if (!result) return tool_error_result(call, result.error());
-  return ToolDispatchResult{.call_id = call.id,
-                            .name = call.name,
-                            .success = true,
-                            .result_text = "{\"tool\":\"webfetch\",\"ok\":true,\"url\":\"" +
-                                           ava::core::json::escape(result->url) + "\",\"status_code\":" +
-                                           std::to_string(result->status_code) + ",\"content_type\":\"" +
-                                           ava::core::json::escape(result->content_type) + "\",\"content\":\"" +
-                                           ava::core::json::escape(result->content) + "\",\"truncated\":" +
-                                           json_bool(result->truncated) + ",\"total_bytes\":" +
-                                           std::to_string(result->total_bytes) + ",\"output_bytes\":" +
-                                           std::to_string(result->output_bytes) + "}"};
+  return ToolDispatchResult{
+      .call_id = call.id,
+      .name = call.name,
+      .success = true,
+      .result_text = "{\"tool\":\"webfetch\",\"ok\":true,\"url\":\"" + ava::core::json::escape(result->url) +
+                     "\",\"status_code\":" + std::to_string(result->status_code) + ",\"content_type\":\"" +
+                     ava::core::json::escape(result->content_type) + "\",\"content\":\"" +
+                     ava::core::json::escape(result->content) + "\",\"truncated\":" + json_bool(result->truncated) +
+                     ",\"total_bytes\":" + std::to_string(result->total_bytes) +
+                     ",\"output_bytes\":" + std::to_string(result->output_bytes) + "}"};
 }
 
 ToolDispatchResult lsp_diagnostics_result(const ava::tools::ToolContext& context, const ProviderToolCall& call) {
@@ -541,8 +540,8 @@ ToolDispatchResult lsp_diagnostics_result(const ava::tools::ToolContext& context
     if (index > 0) text += ',';
     text += std::move(entry);
   }
-  text += "],\"truncated\":" + json_bool(truncated) + ",\"total_diagnostics\":" +
-          std::to_string(total_diagnostics) + "}";
+  text +=
+      "],\"truncated\":" + json_bool(truncated) + ",\"total_diagnostics\":" + std::to_string(total_diagnostics) + "}";
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
 }
 
@@ -712,11 +711,60 @@ ToolDispatchResult question_result(const ava::tools::ToolContext& context, const
                             .result_text = serialize_question_answer_result(*prompt, *answer)};
 }
 
+ToolExecutor builtin_tool_executor(std::string_view name) {
+  if (name == "read_file") return read_file_result;
+  if (name == "write_file") return write_file_result;
+  if (name == "edit_file") return edit_file_result;
+  if (name == "glob") return glob_result;
+  if (name == "grep") return grep_result;
+  if (name == "bash") return bash_result;
+  if (name == "webfetch") return webfetch_result;
+  if (name == "lsp_diagnostics") return lsp_diagnostics_result;
+  if (name == "apply_patch") return apply_patch_result;
+  if (name == "question") return question_result;
+  return nullptr;
+}
+
+ToolRegistry build_tool_registry(const ava::tools::ToolContext& context) {
+  ToolRegistry registry;
+  for (const auto& entry : builtin_tool_registry().entries()) {
+    auto registered = registry.register_tool(entry);
+    if (!registered) {
+      std::cerr << "tool registry failed: " << registered.error().format() << '\n';
+      std::abort();
+    }
+  }
+  ava::plugin::register_enabled_plugin_tools(registry, context);
+  ava::mcp::register_enabled_mcp_tools(registry, context);
+  return registry;
+}
+
 }  // namespace
+
+const ToolRegistry& builtin_tool_registry() {
+  static const auto registry = [] {
+    ToolRegistry builtins;
+    for (const auto& metadata : builtin_tool_metadata()) {
+      auto registered =
+          builtins.register_tool(RegisteredTool{.metadata = own_tool_metadata(metadata),
+                                                .executor = builtin_tool_executor(metadata.name),
+                                                .source = ToolSource::Builtin,
+                                                .source_id = "builtin",
+                                                .requires_lsp_diagnostics = is_lsp_diagnostics_metadata(metadata)});
+      if (!registered) {
+        std::cerr << "builtin tool registry failed: " << registered.error().format() << '\n';
+        std::abort();
+      }
+    }
+    return builtins;
+  }();
+  return registry;
+}
 
 ToolDispatcher::ToolDispatcher(ava::tools::ToolContext context) {
   if (!context.mutation_queue) context.mutation_queue = std::make_shared<ava::tools::MutationQueue>();
   context_ = std::move(context);
+  registry_ = build_tool_registry(context_);
 }
 
 ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(const ProviderToolCall& call) const {
@@ -738,34 +786,21 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(const ProviderToo
     safe_id.error().with_context("tool", normalized.name);
     return std::unexpected(std::move(safe_id.error()));
   }
-  if (normalized.name == "read_file") return read_file_result(context_, normalized);
-  if (normalized.name == "write_file") return write_file_result(context_, normalized);
-  if (normalized.name == "edit_file") return edit_file_result(context_, normalized);
-  if (normalized.name == "glob") return glob_result(context_, normalized);
-  if (normalized.name == "grep") return grep_result(context_, normalized);
-  if (normalized.name == "bash") return bash_result(context_, normalized);
-  if (normalized.name == "webfetch") return webfetch_result(context_, normalized);
-  if (normalized.name == "lsp_diagnostics") return lsp_diagnostics_result(context_, normalized);
-  if (normalized.name == "apply_patch") return apply_patch_result(context_, normalized);
-  if (normalized.name == "question") return question_result(context_, normalized);
+  const auto* tool = registry_.find(normalized.name);
+  if (tool != nullptr) return tool->executor(context_, normalized);
   return simple_error_result(normalized, ava::core::ErrorCategory::Tool, "unknown tool");
 }
 
 std::span<const ToolMetadata> ToolDispatcher::tool_metadata() { return builtin_tool_metadata(); }
 
-std::vector<std::string> ToolDispatcher::tool_schemas_json() {
-  return tool_schemas_json(ava::tools::ToolContext{});
+std::vector<ToolMetadata> ToolDispatcher::tool_metadata(const ava::tools::ToolContext& context) {
+  return build_tool_registry(context).metadata();
 }
 
+std::vector<std::string> ToolDispatcher::tool_schemas_json() { return tool_schemas_json(ava::tools::ToolContext{}); }
+
 std::vector<std::string> ToolDispatcher::tool_schemas_json(const ava::tools::ToolContext& context) {
-  const auto metadata = tool_metadata();
-  std::vector<std::string> schemas;
-  schemas.reserve(metadata.size());
-  for (const auto& tool : metadata) {
-    if (is_lsp_diagnostics_metadata(tool) && !lsp_diagnostics_available(context)) continue;
-    schemas.emplace_back(tool.schema_json);
-  }
-  return schemas;
+  return build_tool_registry(context).tool_schemas_json(context);
 }
 
 }  // namespace ava::agent

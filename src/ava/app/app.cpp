@@ -18,15 +18,15 @@
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/config/xdg_paths.h"
+#include "ava/core/version.h"
 #include "ava/tui/composer.h"
 
 namespace {
 
-constexpr std::string_view kAvaVersion = "0.32.0";
-constexpr std::string_view kAvaDisplayVersion = "0.32";
+namespace version = ava::core::version;
 
 void print_help() {
-  std::cout << "AVA " << kAvaDisplayVersion << "\n\n";
+  std::cout << "AVA " << version::kDisplayVersion << "\n\n";
   std::cout << "Usage:\n";
   std::cout << "  ava [--help]\n";
   std::cout << "  ava login [provider] [--api-key|--oauth-token]\n";
@@ -43,7 +43,7 @@ void print_help() {
   std::cout << "  ava -p [prompt] [--json|--output json] [--allow read-only] [--allow-tool list]\n";
   std::cout << "  ava --rpc [--allow read-only] [--allow-tool list]\n";
   std::cout << "  ava --output rpc [--allow read-only] [--allow-tool list]\n\n";
-  std::cout << "0.32 status: ncursesw TUI replacement on the hardened 0.2 backend.\n";
+  std::cout << version::kDisplayVersion << " status: ncursesw TUI replacement on the hardened 0.2 backend.\n";
 }
 
 bool stdin_is_tty() { return isatty(STDIN_FILENO) == 1; }
@@ -70,6 +70,7 @@ void print_exit_card(const ava::app::RuntimeSession& session, int status) {
   const auto reset = use_color ? std::string_view("\x1b[0m") : std::string_view("");
   auto art = [&](std::string_view text) { std::cout << blue << text << reset << '\n'; };
 
+  if (stdout_is_tty()) std::cout << "\x1b(B\x1b[0m";
   std::cout << '\n';
   art("  █████████   █████   █████   █████████");
   art("  ███░░░░░███ ░░███   ░░███   ███░░░░░███");
@@ -104,8 +105,7 @@ int run(int argc, char** argv) {
 
   const auto paths = ava::config::xdg_paths();
 
-  auto parse_connect_like_command = [&](int& index,
-                                        std::optional<std::string> provider,
+  auto parse_connect_like_command = [&](int& index, std::optional<std::string> provider,
                                         bool preserve_openai_browser_default) -> int {
     enum class CredentialSource {
       None,
@@ -148,7 +148,7 @@ int run(int argc, char** argv) {
       if (option == "--api-key-env" || option == "--oauth-token-env") {
         if (!set_source(option == "--oauth-token-env" ? CredentialSource::Env : CredentialSource::Env,
                         option == "--oauth-token-env" ? ava::app::ConnectCredentialType::OAuthToken
-                                                       : ava::app::ConnectCredentialType::ApiKey)) {
+                                                      : ava::app::ConnectCredentialType::ApiKey)) {
           return 2;
         }
         if (index + 1 >= argc) {
@@ -170,25 +170,23 @@ int run(int argc, char** argv) {
       }
       return run_connect_provider_credential(
           paths,
-          ava::app::ConnectProviderCredentialOptions{.provider_id = *provider,
-                                                     .credential_type = credential_type.value(),
-                                                     .env_var = env_var},
+          ava::app::ConnectProviderCredentialOptions{
+              .provider_id = *provider, .credential_type = credential_type.value(), .env_var = env_var},
           std::cin, std::cout, std::cerr);
     }
 
     if (source == CredentialSource::Prompt) {
       return run_connect_provider_wizard(
           paths,
-          ava::app::ConnectProviderWizardOptions{.provider_id = provider,
-                                                 .credential_type = credential_type,
-                                                 .stdin_is_tty = stdin_is_tty()},
+          ava::app::ConnectProviderWizardOptions{
+              .provider_id = provider, .credential_type = credential_type, .stdin_is_tty = stdin_is_tty()},
           std::cin, std::cout, std::cerr);
     }
 
     if (preserve_openai_browser_default && provider && *provider == "openai") return run_connect_openai(paths);
     return run_connect_provider_wizard(
-        paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .stdin_is_tty = stdin_is_tty()}, std::cin,
-        std::cout, std::cerr);
+        paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .stdin_is_tty = stdin_is_tty()},
+        std::cin, std::cout, std::cerr);
   };
 
   for (int index = 1; index < argc; ++index) {
@@ -217,7 +215,7 @@ int run(int argc, char** argv) {
       return 0;
     }
     if (arg == "--version") {
-      std::cout << "ava " << kAvaVersion << '\n';
+      std::cout << "ava " << version::kFullVersion << '\n';
       return 0;
     }
     if (arg == "--mode") {

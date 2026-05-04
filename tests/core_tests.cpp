@@ -15,6 +15,8 @@ void run_provider_openai_tests();
 void run_provider_anthropic_tests();
 void run_agent_tool_dispatcher_tests();
 void run_lsp_tests();
+void run_plugin_tests();
+void run_mcp_tests();
 void run_tui_composer_tests();
 
 int main() {
@@ -31,6 +33,8 @@ int main() {
   run_provider_anthropic_tests();
   run_agent_tool_dispatcher_tests();
   run_lsp_tests();
+  run_plugin_tests();
+  run_mcp_tests();
   run_tui_composer_tests();
 
   const int failures = ava::test::failures();

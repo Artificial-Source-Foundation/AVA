@@ -153,6 +153,28 @@ void append_model_change(std::string& out, const SessionEntry& entry, const Expo
   append_optional_fenced_block(out, "Display name", string_field(entry, "display_name"));
 }
 
+void append_reasoning_block(std::string& out, const SessionEntry& entry, const ExportOptions& options) {
+  append_heading(out, "Reasoning");
+  append_metadata(out, entry, options);
+  append_optional_fenced_block(out, "Provider", string_field(entry, "provider"));
+  append_optional_fenced_block(out, "Model", string_field(entry, "model"));
+  append_optional_fenced_block(out, "Format", string_field(entry, "format"));
+  const bool redacted = bool_field_is_true(entry, "redacted");
+  append_fenced_block(out, "Redacted", redacted ? "true" : "false");
+  append_fenced_block(out, "Signature present", string_field(entry, "signature").has_value() ? "true" : "false");
+  if (!redacted) append_optional_fenced_block(out, "Text", string_field(entry, "text"));
+}
+
+void append_reasoning_change(std::string& out, const SessionEntry& entry, const ExportOptions& options) {
+  append_heading(out, "Reasoning Change");
+  append_metadata(out, entry, options);
+  append_optional_fenced_block(out, "Provider", string_field(entry, "provider"));
+  append_optional_fenced_block(out, "Model", string_field(entry, "model"));
+  append_optional_fenced_block(out, "Format", string_field(entry, "format"));
+  append_optional_fenced_block(out, "Level", string_field(entry, "level"));
+  append_optional_fenced_block(out, "Display", string_field(entry, "display"));
+}
+
 void append_session_start(std::string& out, const SessionEntry& entry, const ExportOptions& options) {
   append_heading(out, "Session Start");
   append_metadata(out, entry, options);
@@ -237,6 +259,12 @@ std::string format_session_markdown(const std::vector<SessionEntry>& entries, co
         break;
       case EntryType::ModelChange:
         append_model_change(out, entry, options);
+        break;
+      case EntryType::ReasoningBlock:
+        append_reasoning_block(out, entry, options);
+        break;
+      case EntryType::ReasoningChange:
+        append_reasoning_change(out, entry, options);
         break;
       case EntryType::Compaction:
         if (options.include_compactions) append_compaction(out, entry, options);

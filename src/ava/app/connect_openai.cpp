@@ -9,9 +9,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
-#include <cctype>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
@@ -25,6 +25,7 @@
 
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
+#include "ava/config/provider_profiles.h"
 #include "ava/core/result.h"
 #include "ava/provider/curl_transport.h"
 #include "ava/tui/composer.h"
@@ -421,12 +422,14 @@ std::string lower_ascii(std::string_view text) {
 }
 
 std::vector<ConnectProviderMenuItem> connect_provider_menu_items() {
-  return {ConnectProviderMenuItem{.id = "openai", .label = "OpenAI", .detail = "API key or ChatGPT OAuth token"},
-          ConnectProviderMenuItem{.id = "anthropic", .label = "Anthropic", .detail = "Claude API key or OAuth token"},
-          ConnectProviderMenuItem{.id = "moonshot", .label = "Moonshot", .detail = "Kimi API key"},
-          ConnectProviderMenuItem{.id = "kimi", .label = "Kimi", .detail = "Moonshot-compatible API key"},
-          ConnectProviderMenuItem{.id = "openrouter", .label = "OpenRouter", .detail = "API key"},
-          ConnectProviderMenuItem{.id = "vercel", .label = "Vercel AI Gateway", .detail = "API key"}};
+  std::vector<ConnectProviderMenuItem> items;
+  for (const auto& profile : ava::config::builtin_provider_profiles()) {
+    items.push_back(
+        ConnectProviderMenuItem{.id = profile.provider_id,
+                                .label = profile.display_name,
+                                .detail = profile.connect_detail.empty() ? "API key" : profile.connect_detail});
+  }
+  return items;
 }
 
 bool provider_menu_item_matches(const ConnectProviderMenuItem& item, std::string_view query) {
@@ -564,8 +567,7 @@ std::optional<ConnectCredentialType> parse_connect_credential_type(std::string_v
   if (value == "api" || value == "api-key" || value == "apikey" || value == "key" || value == "api_key") {
     return ConnectCredentialType::ApiKey;
   }
-  if (value == "oauth" || value == "oauth-token" || value == "oauth_token" || value == "bearer" ||
-      value == "token") {
+  if (value == "oauth" || value == "oauth-token" || value == "oauth_token" || value == "bearer" || value == "token") {
     return ConnectCredentialType::OAuthToken;
   }
   return std::nullopt;
@@ -599,11 +601,8 @@ bool is_valid_connect_provider_id(std::string_view provider_id) {
   });
 }
 
-ava::core::Result<std::string> read_prompt_line(std::istream& in,
-                                                std::ostream& out,
-                                                std::string_view prompt,
-                                                bool secret,
-                                                bool stdin_is_tty) {
+ava::core::Result<std::string> read_prompt_line(std::istream& in, std::ostream& out, std::string_view prompt,
+                                                bool secret, bool stdin_is_tty) {
   out << prompt << std::flush;
   std::string line;
   {
@@ -622,13 +621,11 @@ ava::core::Result<std::string> read_prompt_line(std::istream& in,
   return line;
 }
 
-ava::core::VoidResult store_connect_secret(const ava::config::XdgPaths& paths,
-                                           std::string_view provider_id,
-                                           ConnectCredentialType credential_type,
-                                           std::string secret) {
+ava::core::VoidResult store_connect_secret(const ava::config::XdgPaths& paths, std::string_view provider_id,
+                                           ConnectCredentialType credential_type, std::string secret) {
   if (!is_valid_connect_provider_id(provider_id)) {
-    return std::unexpected(
-        connect_error(ava::core::ErrorCategory::InvalidArgument, "provider id must contain only letters, numbers, '-' or '_'"));
+    return std::unexpected(connect_error(ava::core::ErrorCategory::InvalidArgument,
+                                         "provider id must contain only letters, numbers, '-' or '_'"));
   }
   if (secret.empty()) {
     return std::unexpected(connect_error(ava::core::ErrorCategory::InvalidArgument, "credential was empty"));
@@ -649,7 +646,8 @@ ava::core::Result<std::string> read_connect_secret(const ConnectProviderCredenti
     }
     const char* value = std::getenv(options.env_var->c_str());
     if (value == nullptr || std::string_view(value).empty()) {
-      return std::unexpected(connect_error(ava::core::ErrorCategory::PermissionDenied, "credential env var is not set"));
+      return std::unexpected(
+          connect_error(ava::core::ErrorCategory::PermissionDenied, "credential env var is not set"));
     }
     if (std::string_view(value).size() > max_connect_secret_bytes) {
       auto error = connect_error(ava::core::ErrorCategory::InvalidArgument, "credential env var value is too large");
@@ -708,17 +706,16 @@ int run_connect_openai(const ava::config::XdgPaths& paths) {
     std::cerr << ava::tui::sanitize_terminal_text(stored.error().format()) << '\n';
     return 1;
   }
-  std::cout << "OpenAI OAuth credential stored at " << ava::tui::sanitize_terminal_text(paths.auth_file.string()) << '\n';
+  std::cout << "OpenAI OAuth credential stored at " << ava::tui::sanitize_terminal_text(paths.auth_file.string())
+            << '\n';
   return 0;
 }
 
-int run_connect_provider_wizard(const ava::config::XdgPaths& paths,
-                                const ConnectProviderWizardOptions& options,
-                                std::istream& in,
-                                std::ostream& out,
-                                std::ostream& err) {
+int run_connect_provider_wizard(const ava::config::XdgPaths& paths, const ConnectProviderWizardOptions& options,
+                                std::istream& in, std::ostream& out, std::ostream& err) {
   if (!options.stdin_is_tty) {
-    err << "interactive provider login requires a terminal; use --api-key-stdin, --api-key-env, --oauth-token-stdin, or --oauth-token-env\n";
+    err << "interactive provider login requires a terminal; use --api-key-stdin, --api-key-env, --oauth-token-stdin, "
+           "or --oauth-token-env\n";
     return 2;
   }
 
@@ -775,11 +772,8 @@ int run_connect_provider_wizard(const ava::config::XdgPaths& paths,
   return 0;
 }
 
-int run_connect_provider_credential(const ava::config::XdgPaths& paths,
-                                    const ConnectProviderCredentialOptions& options,
-                                    std::istream& in,
-                                    std::ostream& out,
-                                    std::ostream& err) {
+int run_connect_provider_credential(const ava::config::XdgPaths& paths, const ConnectProviderCredentialOptions& options,
+                                    std::istream& in, std::ostream& out, std::ostream& err) {
   auto secret = read_connect_secret(options, in);
   if (!secret) {
     err << ava::tui::sanitize_terminal_text(secret.error().format()) << '\n';

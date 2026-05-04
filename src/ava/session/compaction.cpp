@@ -145,7 +145,8 @@ std::size_t estimate_session_tokens(const std::vector<SessionEntry>& entries) no
   std::size_t tokens = 0;
   for (const auto& entry : entries) {
     if (entry.type == EntryType::UserMessage || entry.type == EntryType::AssistantMessage ||
-        entry.type == EntryType::ToolCall || entry.type == EntryType::ToolResult) {
+        entry.type == EntryType::ReasoningBlock || entry.type == EntryType::ToolCall ||
+        entry.type == EntryType::ToolResult) {
       tokens += estimate_tokens(entry.data_json);
     }
   }
@@ -167,7 +168,8 @@ std::size_t estimate_active_context_tokens(const std::vector<SessionEntry>& entr
     if (entry.type == EntryType::Compaction) {
       tokens = estimate_tokens(entry.data_json);
     } else if (entry.type == EntryType::UserMessage || entry.type == EntryType::AssistantMessage ||
-               entry.type == EntryType::ToolCall || entry.type == EntryType::ToolResult) {
+               entry.type == EntryType::ReasoningBlock || entry.type == EntryType::ToolCall ||
+               entry.type == EntryType::ToolResult) {
       tokens += estimate_tokens(entry.data_json);
     }
   }

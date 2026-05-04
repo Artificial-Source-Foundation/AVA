@@ -24,6 +24,26 @@ bool is_blank(std::string_view text) {
   return std::ranges::all_of(text, [](char ch) { return std::isspace(static_cast<unsigned char>(ch)) != 0; });
 }
 
+std::string trim_ascii(std::string text) {
+  auto begin = text.begin();
+  while (begin != text.end() && std::isspace(static_cast<unsigned char>(*begin)) != 0) {
+    ++begin;
+  }
+  auto end = text.end();
+  while (end != begin && std::isspace(static_cast<unsigned char>(*(end - 1))) != 0) {
+    --end;
+  }
+  return std::string(begin, end);
+}
+
+std::string remove_redacted_markers(std::string text) {
+  constexpr std::string_view marker = "[REDACTED]";
+  for (auto found = text.find(marker); found != std::string::npos; found = text.find(marker, found)) {
+    text.erase(found, marker.size());
+  }
+  return text;
+}
+
 std::vector<std::string> hard_wrap_sanitized(std::string_view text, std::size_t width) {
   const auto content_width = std::max<std::size_t>(1, width);
   std::vector<std::string> wrapped;
@@ -213,6 +233,18 @@ std::vector<std::string> render_narrow_assistant_lines(const std::vector<std::st
   return lines;
 }
 
+std::vector<std::string> render_assistant_meta_lines(const std::string& meta, std::size_t width) {
+  if (meta.empty()) return {};
+  const auto sanitized = sanitize_terminal_text(meta);
+  if (!wide_blocks(width)) {
+    auto line = std::string("     ") + std::string(kSgrAccent) + "* " + std::string(kSgrDim) + sanitized +
+                std::string(kSgrReset);
+    return {fit_line_preserving_sgr(std::move(line), width)};
+  }
+  auto line = std::string(kSgrAccent) + "* " + std::string(kSgrDim) + sanitized + std::string(kSgrReset);
+  return {render_wide_content(kSgrMuted, std::move(line), width)};
+}
+
 std::vector<std::string> render_user_block(const std::string& text, std::size_t width) {
   std::vector<std::string> lines;
   std::vector<std::string> plain_lines;
@@ -315,11 +347,16 @@ std::vector<std::string> assistant_content_lines(const std::string& text, std::s
   return output;
 }
 
-std::vector<std::string> render_assistant_block(const std::string& text, std::size_t width) {
+std::vector<std::string> render_assistant_block(const std::string& text, const std::string& meta, std::size_t width) {
   const auto content_width =
       wide_blocks(width) ? (width > 4 ? width - 4 : std::size_t{1}) : (width > 5 ? width - 5 : std::size_t{1});
   const auto content = assistant_content_lines(text, content_width);
-  if (!wide_blocks(width)) return render_narrow_assistant_lines(content, width);
+  if (!wide_blocks(width)) {
+    auto lines = render_narrow_assistant_lines(content, width);
+    auto meta_lines = render_assistant_meta_lines(meta, width);
+    lines.insert(lines.end(), meta_lines.begin(), meta_lines.end());
+    return lines;
+  }
 
   std::vector<std::string> lines;
   lines.push_back(render_wide_header(kSgrMuted, kSgrBold, "AVA", width));
@@ -333,6 +370,47 @@ std::vector<std::string> render_assistant_block(const std::string& text, std::si
     }
     if (is_fence) in_code = !in_code;
   }
+  auto meta_lines = render_assistant_meta_lines(meta, width);
+  lines.insert(lines.end(), meta_lines.begin(), meta_lines.end());
+  return lines;
+}
+
+std::vector<std::string> render_thinking_block(const std::string& text, std::size_t width) {
+  const auto visible_text = trim_ascii(remove_redacted_markers(text));
+  if (visible_text.empty()) return {};
+
+  const auto content_width = width > 4 ? width - 4 : std::size_t{1};
+  std::vector<std::string> lines;
+  bool first_content_line = true;
+  for (const auto& raw_line : split_lines(visible_text)) {
+    if (is_blank(raw_line)) {
+      const auto blank = wide_blocks(width) ? render_wide_content(kSgrDim, {}, width) : std::string{};
+      lines.push_back(fit_line_preserving_sgr(blank, width));
+      continue;
+    }
+
+    const auto sanitized = sanitize_terminal_text(raw_line);
+    const auto first_prefix = first_content_line ? std::string("Thinking: ") : std::string{};
+    const auto next_prefix = first_content_line ? std::string(first_prefix.size(), ' ') : std::string{};
+    auto wrapped = wrap_words_with_prefix(sanitized, content_width, first_prefix, next_prefix);
+    bool first_wrapped_line = true;
+    for (auto& part : wrapped) {
+      std::string styled;
+      if (first_content_line && first_wrapped_line && part.rfind("Thinking: ", 0) == 0) {
+        styled = std::string(kSgrWarning) + "Thinking:" + std::string(kSgrReset) + " " + std::string(kSgrDim) +
+                 part.substr(std::string_view("Thinking: ").size()) + std::string(kSgrReset);
+      } else {
+        styled = std::string(kSgrDim) + std::move(part) + std::string(kSgrReset);
+      }
+      if (wide_blocks(width)) {
+        lines.push_back(render_wide_content(kSgrDim, std::move(styled), width));
+      } else {
+        lines.push_back(fit_line_preserving_sgr(std::move(styled), width));
+      }
+      first_wrapped_line = false;
+    }
+    first_content_line = false;
+  }
   return lines;
 }
 
@@ -344,7 +422,20 @@ std::string render_error_line(const std::string& text, std::size_t width) {
   return prefix + content;
 }
 
-std::vector<std::string> render_tool_card(const ToolTimelineItem& item, std::size_t width) {
+void append_tool_detail_lines(std::vector<std::string>& lines, std::string_view label, const std::string& text,
+                              std::size_t width) {
+  if (text.empty()) return;
+  const auto sanitized = sanitize_terminal_text(text);
+  const auto prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
+  const auto label_prefix = prefix + std::string(kSgrDim) + std::string(label) + ": " + std::string(kSgrReset);
+  const auto continuation = std::string(terminal_text_columns(label_prefix), ' ');
+  const auto wrapped = wrap_words_with_prefix(sanitized, width, label_prefix, continuation);
+  for (const auto& line : wrapped) {
+    lines.push_back(fit_line_preserving_sgr(line, width));
+  }
+}
+
+std::vector<std::string> render_tool_card(const ToolTimelineItem& item, std::size_t width, bool details_visible) {
   std::vector<std::string> lines;
 
   const char* status_marker = "[?]";
@@ -396,7 +487,10 @@ std::vector<std::string> render_tool_card(const ToolTimelineItem& item, std::siz
   }
   lines.push_back(fit_line_preserving_sgr(line1, width));
 
-  if (!item.result_summary.empty()) {
+  if (details_visible) {
+    append_tool_detail_lines(lines, "args", item.argument_summary, width);
+    append_tool_detail_lines(lines, "result", item.result_summary, width);
+  } else if (!item.result_summary.empty()) {
     auto result_raw = sanitize_terminal_text(item.result_summary);
     std::string line2 = (wide_blocks(width) ? std::string("  │     ") : std::string("      ")) +
                         std::string(kSgrMuted) + result_raw + std::string(kSgrReset);
@@ -416,14 +510,15 @@ std::string render_generic_line(const std::string& text, std::size_t width) {
   return prefix + content;
 }
 
-std::vector<std::string> render_transcript_lines(const std::vector<TranscriptItem>& transcript, std::size_t width) {
+std::vector<std::string> render_transcript_lines(const std::vector<TranscriptItem>& transcript, std::size_t width,
+                                                 bool tool_details_visible) {
   std::vector<std::string> rendered_transcript;
   for (const auto& item : transcript) {
     const auto should_space = width >= kTurnSpacingMinWidth && !rendered_transcript.empty() &&
                               (item.label == "you" || item.label == "ava" || item.tool);
     if (should_space) rendered_transcript.emplace_back();
     if (item.tool) {
-      auto card = render_tool_card(*item.tool, width);
+      auto card = render_tool_card(*item.tool, width, tool_details_visible);
       rendered_transcript.insert(rendered_transcript.end(), card.begin(), card.end());
       continue;
     }
@@ -431,7 +526,10 @@ std::vector<std::string> render_transcript_lines(const std::vector<TranscriptIte
       auto block = render_user_block(item.text, width);
       rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
     } else if (item.label == "ava") {
-      auto block = render_assistant_block(item.text, width);
+      auto block = render_assistant_block(item.text, item.meta, width);
+      rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
+    } else if (item.label == "thinking") {
+      auto block = render_thinking_block(item.text, width);
       rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
     } else {
       const auto text_lines = split_lines(item.text);

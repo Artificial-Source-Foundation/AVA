@@ -28,6 +28,7 @@
 #include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/print_mode.h"
+#include "ava/app/reasoning_controls.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/config/auth.h"
@@ -52,6 +53,10 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 
+#ifndef AVA_FAKE_MCP_SERVER_PATH
+#define AVA_FAKE_MCP_SERVER_PATH ""
+#endif
+
 namespace {
 
 ava::config::XdgPaths app_test_paths(const std::filesystem::path& root) {
@@ -71,6 +76,40 @@ ava::config::XdgPaths app_test_paths(const std::filesystem::path& root) {
                                .models_file = ava_config / "models.json",
                                .prompts_dir = ava_config / "prompts",
                                .sessions_dir = ava_state / "sessions"};
+}
+
+std::string app_test_plugin_manifest_json(std::string_view id, std::string_view name = "Test Plugin") {
+  return std::string("{\n") +
+         "  \"schema_version\": 1,\n"
+         "  \"id\": \"" +
+         ava::core::json::escape(id) +
+         "\",\n"
+         "  \"name\": \"" +
+         ava::core::json::escape(name) +
+         "\",\n"
+         "  \"version\": \"0.1.0\",\n"
+         "  \"api_version\": \"ava.plugin.v1\",\n"
+         "  \"description\": \"test plugin\",\n"
+         "  \"entrypoint\": {\"command\": \"node\", \"args\": [\"plugin.js\", \"--safe\"]},\n"
+         "  \"capabilities\": [\"tools\", \"commands\"],\n"
+         "  \"contributes\": {\n"
+         "    \"tools\": [{\"name\": \"todo_add\", \"description\": \"Add todo\", \"input_schema\": {\"type\": "
+         "\"object\", \"additionalProperties\": false}}],\n"
+         "    \"commands\": [{\"name\": \"todo\", \"description\": \"Show todos\"}]\n"
+         "  }\n"
+         "}";
+}
+
+std::string app_test_mcp_config_json(std::string_view id, std::string_view name, std::string_view command) {
+  return std::string("{\"servers\":[{\"id\":\"") + ava::core::json::escape(id) + "\",\"name\":\"" +
+         ava::core::json::escape(name) + "\",\"command\":\"" + ava::core::json::escape(command) +
+         "\",\"enabled\":true}]}";
+}
+
+void write_app_test_file(const std::filesystem::path& path, const std::string& text) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  file << text;
 }
 
 class BlockingInputBuf final : public std::streambuf {
@@ -1171,9 +1210,9 @@ void test_app_connect_provider_credentials_headlessly() {
   expect(ignored_escape_wizard_out.str().find("Search: anthropic") != std::string::npos,
          "interactive provider wizard keeps typed search text after unsupported escape sequence");
   wizard_anthropic = ava::config::provider_credential_for_request(wizard_paths, "anthropic", transport);
-  expect(wizard_anthropic && wizard_anthropic->has_value() &&
-             (*wizard_anthropic)->access_token == "right-arrow-api-key",
-         "interactive provider wizard stores typed provider after ignoring unsupported escape sequence");
+  expect(
+      wizard_anthropic && wizard_anthropic->has_value() && (*wizard_anthropic)->access_token == "right-arrow-api-key",
+      "interactive provider wizard stores typed provider after ignoring unsupported escape sequence");
 
   std::istringstream non_tty_wizard_input;
   std::ostringstream non_tty_wizard_out;
@@ -1308,6 +1347,11 @@ void test_app_command_dispatcher() {
     std::ofstream file(workspace / "src" / "main.cpp", std::ios::binary | std::ios::trunc);
     file << "int main() { return 0; }\n";
   }
+  write_app_test_file(paths.ava_config_dir / "plugins" / "com.example.global" / "plugin.json",
+                      app_test_plugin_manifest_json("com.example.global", "Global Plugin"));
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.project" / "plugin.json",
+                      app_test_plugin_manifest_json("com.example.project", "Project Plugin"));
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.bad" / "plugin.json", "{not-json");
 
   ava::app::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
@@ -1320,7 +1364,8 @@ void test_app_command_dispatcher() {
   const auto plan_system_prompt = session->system_prompt;
 
   expect(ava::app::is_backend_command("/model") && ava::app::is_backend_command("/models") &&
-             ava::app::is_backend_command("/hotkeys"),
+             ava::app::is_backend_command("/hotkeys") && ava::app::is_backend_command("/details") &&
+             ava::app::is_backend_command("/plugins"),
          "command catalog classifies disabled aliases and hotkeys as backend commands");
 
   const std::vector<ava::app::CommandHotkey> custom_hotkeys = {
@@ -1332,17 +1377,72 @@ void test_app_command_dispatcher() {
              hotkeys->output[0].find("Ctrl+M") != std::string::npos &&
              hotkeys->output[0].find("variant_cycle") != std::string::npos,
          "command dispatcher /hotkeys reports effective keybind metadata");
+  auto details = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/details"});
+  expect(details && details->handled && !details->output.empty() &&
+             details->output[0].find("TUI display toggle") != std::string::npos,
+         "command dispatcher recognizes /details without inventing backend tool metadata");
   auto help = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/help", .hotkeys = custom_hotkeys});
   expect(help && help->handled && !help->output.empty() && help->output[0].find("/hotkeys") != std::string::npos &&
              help->output[0].find("/connect") != std::string::npos &&
+             help->output[0].find("/plugins") != std::string::npos &&
              help->output[0].find("Unavailable commands") != std::string::npos &&
              help->output[0].find("Ctrl+M") != std::string::npos,
          "command dispatcher /help includes catalog commands and effective hotkeys");
-  auto disabled = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/model"});
-  expect(disabled && disabled->handled && !disabled->output.empty() &&
-             disabled->output[0].find("disabled") != std::string::npos &&
-             disabled->output[0].find("model switching") != std::string::npos,
-         "command dispatcher handles disabled command aliases instead of sending prompts");
+
+  auto plugins_usage = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins"});
+  expect(plugins_usage && plugins_usage->handled && !plugins_usage->output.empty() &&
+             plugins_usage->output[0].find("usage: /plugins") != std::string::npos,
+         "command dispatcher /plugins without a subcommand reports usage");
+  auto plugins = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins list"});
+  expect(plugins && plugins->handled && !plugins->output.empty() &&
+             plugins->output[0].find("com.example.global") != std::string::npos &&
+             plugins->output[0].find("com.example.project") != std::string::npos &&
+             plugins->output[0].find("Failures: 1") != std::string::npos,
+         "command dispatcher /plugins list reports discovered plugins and diagnostics failures");
+  auto inspect_plugin =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins inspect com.example.project"});
+  expect(inspect_plugin && inspect_plugin->handled && !inspect_plugin->output.empty() &&
+             inspect_plugin->output[0].find("entrypoint: node plugin.js --safe (not executed)") != std::string::npos &&
+             inspect_plugin->output[0].find("no plugin process is started yet") != std::string::npos,
+         "command dispatcher /plugins inspect shows manifest details without executing entrypoints");
+  auto enable_plugin =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins enable com.example.project"});
+  expect(enable_plugin && enable_plugin->handled && !enable_plugin->output.empty() &&
+             enable_plugin->output[0].find("Enabled project plugin com.example.project") != std::string::npos &&
+             enable_plugin->output[0].find("No plugin process was started") != std::string::npos,
+         "command dispatcher /plugins enable records state without starting plugin processes");
+  auto plugins_after_enable = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins list"});
+  expect(plugins_after_enable && plugins_after_enable->handled && !plugins_after_enable->output.empty() &&
+             plugins_after_enable->output[0].find("com.example.project  enabled") != std::string::npos,
+         "command dispatcher /plugins list reflects enablement state");
+  auto disable_plugin =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins disable com.example.project"});
+  expect(disable_plugin && disable_plugin->handled && !disable_plugin->output.empty() &&
+             disable_plugin->output[0].find("Disabled project plugin com.example.project") != std::string::npos &&
+             disable_plugin->output[0].find("No plugin process was stopped") != std::string::npos,
+         "command dispatcher /plugins disable records state without stopping plugin processes");
+  auto validate_plugin = ava::app::run_command(
+      *session, ava::app::CommandRequest{.command = "/plugins validate .ava/plugins/com.example.project/plugin.json"});
+  expect(validate_plugin && validate_plugin->handled && !validate_plugin->output.empty() &&
+             validate_plugin->output[0].find("Valid plugin manifest") != std::string::npos &&
+             validate_plugin->output[0].find("no entrypoint was executed") != std::string::npos,
+         "command dispatcher /plugins validate parses manifests without executing entrypoints");
+  auto plugin_failures = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins failures"});
+  expect(plugin_failures && plugin_failures->handled && !plugin_failures->output.empty() &&
+             plugin_failures->output[0].find("com.example.bad") != std::string::npos,
+         "command dispatcher /plugins failures reports invalid discovered manifests");
+  auto models = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/model"});
+  expect(models && models->handled && !models->output.empty() &&
+             models->output[0].find("Models:") != std::string::npos &&
+             models->output[0].find("current ") != std::string::npos &&
+             models->output[0].find("reasoning current") != std::string::npos &&
+             models->output[0].find("reasoning levels: low, medium, high, xhigh") != std::string::npos &&
+             models->output[0].find("reasoning params") != std::string::npos &&
+             models->output[0].find("reasoning.effort=<level>") != std::string::npos &&
+             models->output[0].find("reasoning.summary=auto") != std::string::npos &&
+             models->output[0].find("reasoning format") != std::string::npos &&
+             models->output[0].find("Ctrl+T cycles") != std::string::npos,
+         "command dispatcher lists provider/model reasoning metadata and documents TUI reasoning cycling");
 
   auto context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context"});
   expect(context && context->handled && !context->output.empty() &&
@@ -1552,6 +1652,22 @@ void test_app_compact_provider_summary_success() {
                                                        .timestamp = "2026-05-01T00:00:00Z",
                                                        .data_json = "{\"text\":\"Goal: refactor compaction\"}"});
   expect(seeded.has_value(), "provider-backed /compact test seeds source entry");
+  auto seeded_reasoning = session->store.append(ava::session::SessionEntry{
+      .id = "entry_reasoning_compact_source",
+      .parent_id = "",
+      .type = ava::session::EntryType::ReasoningBlock,
+      .timestamp = "2026-05-01T00:00:01Z",
+      .data_json =
+          R"({"provider":"anthropic","model":"claude","format":"anthropic_thinking","text":"visible compact reasoning","signature":"compact-secret-signature","redacted_data":"opaque-compaction-redacted","redacted":false})"});
+  expect(seeded_reasoning.has_value(), "provider-backed /compact test seeds reasoning source entry");
+  auto seeded_redacted_reasoning = session->store.append(ava::session::SessionEntry{
+      .id = "entry_redacted_reasoning_compact_source",
+      .parent_id = "",
+      .type = ava::session::EntryType::ReasoningBlock,
+      .timestamp = "2026-05-01T00:00:02Z",
+      .data_json =
+          R"({"provider":"anthropic","model":"claude","format":"anthropic_thinking","text":"hidden redacted compact reasoning","signature":"redacted-compact-secret","redacted_data":"opaque-hidden-compaction-redacted","redacted": true })"});
+  expect(seeded_redacted_reasoning.has_value(), "provider-backed /compact test seeds redacted reasoning source entry");
 
   const std::string summary =
       "# Goal\nShip compact\n# Constraints / Preferences\nKeep provider backed\n# Decisions\nUse callback\n"
@@ -1576,9 +1692,16 @@ void test_app_compact_provider_summary_success() {
          "/compact records a provider-generated summary");
   expect(transport.requests().size() == 1 &&
              transport.requests()[0].body.find("Goal: refactor compaction") != std::string::npos &&
+             transport.requests()[0].body.find("visible compact reasoning") != std::string::npos &&
+             transport.requests()[0].body.find("hidden redacted compact reasoning") == std::string::npos &&
+             transport.requests()[0].body.find("signature_present") != std::string::npos &&
+             transport.requests()[0].body.find("compact-secret-signature") == std::string::npos &&
+             transport.requests()[0].body.find("redacted-compact-secret") == std::string::npos &&
+             transport.requests()[0].body.find("opaque-compaction-redacted") == std::string::npos &&
+             transport.requests()[0].body.find("opaque-hidden-compaction-redacted") == std::string::npos &&
              transport.requests()[0].body.find("# Files Read or Modified") != std::string::npos &&
              transport.requests()[0].body.find("Keep decisions") != std::string::npos,
-         "provider-backed /compact sends deterministic prompt with source data and required sections");
+         "provider-backed /compact sends deterministic prompt with sanitized source data and required sections");
 
   auto entries = session->store.load();
   expect(entries && std::ranges::any_of(*entries,
@@ -2270,6 +2393,41 @@ void test_app_rpc_parsing_and_response_serialization() {
          "RPC error response serializes JSONL error details");
 }
 
+void test_app_rpc_identifier_validation() {
+  auto allowed = ava::app::parse_rpc_command_line(
+      R"JSON({"id":"rpc.1","type":"set_model","request_id":"req_1","correlation_id":"corr-1",)JSON"
+      R"JSON("provider":"openai","model":"openai/gpt-5.5","plugin_id":"com.example.rpc",)JSON"
+      R"JSON("name":"demo-server_1","server_id":"demo-server_1"})JSON");
+  expect(allowed && allowed->model && *allowed->model == "openai/gpt-5.5" && allowed->plugin_id &&
+             *allowed->plugin_id == "com.example.rpc" && allowed->server_id && *allowed->server_id == "demo-server_1",
+         "RPC parser allows practical dotted, dashed, underscored, and slash-delimited identifiers");
+
+  auto control = ava::app::parse_rpc_command_line(R"JSON({"id":"bad\u001f","type":"prompt"})JSON");
+  expect(!control && control.error().message() == "RPC identifier contains invalid character",
+         "RPC parser rejects escaped control bytes in identifiers");
+
+  std::string del_line = R"JSON({"id":"bad)JSON";
+  del_line.push_back(static_cast<char>(0x7F));
+  del_line += R"JSON(","type":"prompt"})JSON";
+  auto del = ava::app::parse_rpc_command_line(del_line);
+  expect(!del && del.error().message() == "RPC identifier contains invalid character",
+         "RPC parser rejects DEL bytes in identifiers");
+
+  auto whitespace = ava::app::parse_rpc_command_line(R"JSON({"id":"bad id","type":"prompt"})JSON");
+  expect(!whitespace && whitespace.error().message() == "RPC identifier contains invalid character",
+         "RPC parser rejects ASCII whitespace in identifiers");
+
+  auto metachar =
+      ava::app::parse_rpc_command_line(R"JSON({"id":"ok","type":"inspect_plugin","plugin_id":"bad;id"})JSON");
+  expect(!metachar && metachar.error().message() == "RPC identifier contains invalid character",
+         "RPC parser rejects command-ambiguous metacharacters in slash-command identifiers");
+
+  auto path = ava::app::parse_rpc_command_line(
+      R"JSON({"id":"path-ok","type":"validate_plugin","path":"./plugins/bad; path.json"})JSON");
+  expect(path && path->path && *path->path == "./plugins/bad; path.json",
+         "RPC parser leaves validate_plugin path validation to the plugin path handler");
+}
+
 void test_app_rpc_prompt_with_fake_transport_streams_events() {
   const auto root = temp_root() / "app-rpc-prompt";
   std::error_code remove_error;
@@ -2414,7 +2572,7 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request() {
         ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
   });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello refreshed rpc\"}\n");
-  const bool completed = output_buffer.wait_contains("rpc refreshed answer", std::chrono::seconds(2));
+  const bool completed = output_buffer.wait_contains("\"success\":true", std::chrono::seconds(2));
   input_buffer.close();
   rpc_thread.join();
   const auto jsonl = output_buffer.str();
@@ -2523,9 +2681,15 @@ void test_app_runtime_model_switch_persists_and_reopens() {
         "name":"Claude Test",
         "family":"claude-test",
         "api_family":"anthropic_messages",
+        "context_window_tokens":999,
+        "max_output_tokens":123,
         "supports_tools":false,
         "supports_streaming":true,
-        "supports_reasoning":false
+        "supports_reasoning":false,
+        "reports_usage":true,
+        "input_modalities":["text"],
+        "output_modalities":["text"],
+        "compatibility_quirks":["test_quirk"]
       }]
     })JSON";
   }
@@ -2560,6 +2724,15 @@ void test_app_runtime_model_switch_persists_and_reopens() {
   }
   expect(saw_model_change, "runtime model switch appends model_change entry");
 
+  auto appended_escaped_model_change = session->store.append(ava::session::SessionEntry{
+      .id = ava::core::make_id("entry"),
+      .parent_id = "",
+      .type = ava::session::EntryType::ModelChange,
+      .timestamp = ava::session::now_timestamp(),
+      .data_json =
+          R"JSON({"previous_provider":"anthropic","previous_model":"claude-test","provider":"anthropic","model":"claude-test","display_name":"Claude Test","family":"claude-test","api_family":"anthropic_messages","input_modalities":["text"],"output_modalities":["text"],"reasoning_levels":[],"compatibility_quirks":["test_quirk","\uD83D\uDE00"],"context_window_tokens":999,"max_output_tokens":123,"supports_tools":false,"supports_streaming":true,"supports_reasoning":false,"reports_usage":true})JSON"});
+  expect(appended_escaped_model_change.has_value(), "runtime model switch test seeds escaped unicode metadata");
+
   ava::app::RuntimeOpenOptions reopen_options = open_options;
   reopen_options.requested_session_id = session_id;
   std::filesystem::remove(paths.models_file, remove_error);
@@ -2567,6 +2740,13 @@ void test_app_runtime_model_switch_persists_and_reopens() {
   expect(reopened.has_value(), "runtime model switch reopens persisted session");
   expect(reopened && reopened->model.provider_id == "anthropic" && reopened->model.model_id == "claude-test",
          "runtime reopen restores latest persisted model_change");
+  bool restored_emoji_quirk = false;
+  if (reopened) {
+    const auto emoji_quirk = std::string("\xF0\x9F\x98\x80");
+    restored_emoji_quirk = std::ranges::find(reopened->model.compatibility_quirks, emoji_quirk) !=
+                           reopened->model.compatibility_quirks.end();
+  }
+  expect(restored_emoji_quirk, "runtime reopen decodes escaped supplementary-plane metadata");
   if (reopened) {
     const ava::provider::OpenAIProvider provider("https://api.example.test");
     ava::tests::FakeTransport transport({});
@@ -2581,6 +2761,349 @@ void test_app_runtime_model_switch_persists_and_reopens() {
     expect(restored_position != std::string::npos &&
                jsonl.find("\"selectable\":false", restored_position) != std::string::npos,
            "RPC list_models marks restored removed current model as not selectable");
+    expect(restored_position != std::string::npos &&
+               jsonl.find("\"context_window_tokens\":999", restored_position) != std::string::npos &&
+               jsonl.find("\"max_output_tokens\":123", restored_position) != std::string::npos &&
+               jsonl.find("\"supports_streaming\":true", restored_position) != std::string::npos &&
+               jsonl.find("\"supports_tools\":false", restored_position) != std::string::npos &&
+               jsonl.find("\"reports_usage\":true", restored_position) != std::string::npos &&
+               jsonl.find("test_quirk", restored_position) != std::string::npos,
+           "RPC list_models preserves capability metadata for restored removed models");
+  }
+}
+
+void test_app_runtime_model_switch_rejects_incompatible_history() {
+  const auto root = temp_root() / "app-runtime-model-switch-compatibility";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  const auto paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(paths.ava_config_dir);
+  {
+    std::ofstream file(paths.models_file, std::ios::binary | std::ios::trunc);
+    file << R"JSON({
+      "default_provider":"openai",
+      "default_model":"gpt-5.5",
+      "models":[{
+        "provider":"openai",
+        "id":"no-tools",
+        "name":"No Tools",
+        "family":"test",
+        "api_family":"openai_responses",
+        "supports_streaming":true,
+        "input_modalities":["text"],
+        "output_modalities":["text"]
+      },{
+        "provider":"anthropic",
+        "id":"claude-replay",
+        "name":"Claude Replay",
+        "family":"claude-test",
+        "api_family":"anthropic_messages",
+        "supports_tools":true,
+        "supports_streaming":true,
+        "input_modalities":["text"],
+        "output_modalities":["text"]
+      }]
+    })JSON";
+  }
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime model switch compatibility test opens runtime session");
+  if (!session) return;
+
+  auto appended_tool_call = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                                             .parent_id = "",
+                                                                             .type = ava::session::EntryType::ToolCall,
+                                                                             .timestamp = ava::session::now_timestamp(),
+                                                                             .data_json = "{\"call_id\":\"call_1\","
+                                                                                          "\"name\":\"read_file\","
+                                                                                          "\"arguments\":{}}"});
+  auto appended_tool_result =
+      session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::ToolResult,
+                                                       .timestamp = ava::session::now_timestamp(),
+                                                       .data_json = "{\"call_id\":\"call_1\",\"content\":\"ok\"}"});
+  expect(appended_tool_call.has_value() && appended_tool_result.has_value(),
+         "model switch compatibility test seeds tool history");
+
+  auto no_tools_model = ava::app::resolve_runtime_model(paths, "openai", "no-tools");
+  expect(no_tools_model.has_value(), "runtime resolves no-tools model");
+  if (!no_tools_model) return;
+  auto rejected_tools = ava::app::switch_runtime_model(*session, *no_tools_model);
+  expect(!rejected_tools.has_value(), "runtime rejects switch to model without tool support after tool history");
+  expect(!rejected_tools && rejected_tools.error().format().find("tool support") != std::string::npos,
+         "runtime tool-history switch error explains missing tool support");
+  expect(session->model.provider_id == "openai" && session->model.model_id == "gpt-5.5",
+         "rejected tool-history switch leaves active model unchanged");
+
+  auto appended_reasoning =
+      session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::ReasoningBlock,
+                                                       .timestamp = ava::session::now_timestamp(),
+                                                       .data_json = "{\"provider\":\"anthropic\","
+                                                                    "\"model\":\"claude-sonnet-4-5\","
+                                                                    "\"format\":\"anthropic_thinking\","
+                                                                    "\"text\":\"visible reasoning\","
+                                                                    "\"signature\":\"sig-1\"}"});
+  expect(appended_reasoning.has_value(), "model switch compatibility test seeds reasoning history");
+
+  auto anthropic_replay = ava::app::resolve_runtime_model(paths, "anthropic", "claude-replay");
+  expect(anthropic_replay.has_value(), "runtime resolves Anthropic replay model");
+  if (!anthropic_replay) return;
+  auto switched_anthropic = ava::app::switch_runtime_model(*session, *anthropic_replay);
+  expect(switched_anthropic.has_value() && *switched_anthropic,
+         "runtime allows switch to Anthropic model that can replay Anthropic reasoning");
+  expect(session->model.provider_id == "anthropic" && session->model.model_id == "claude-replay",
+         "compatible reasoning switch updates active model");
+
+  auto kimi_model = ava::app::resolve_runtime_model(paths, "kimi", "kimi-k2-thinking");
+  expect(kimi_model.has_value(), "runtime resolves Kimi model");
+  if (!kimi_model) return;
+  auto rejected_reasoning = ava::app::switch_runtime_model(*session, *kimi_model);
+  expect(!rejected_reasoning.has_value(), "runtime rejects incompatible reasoning provider switch");
+  expect(!rejected_reasoning && rejected_reasoning.error().format().find("anthropic_thinking") != std::string::npos,
+         "runtime reasoning switch error includes incompatible reasoning format");
+  expect(session->model.provider_id == "anthropic" && session->model.model_id == "claude-replay",
+         "rejected reasoning switch leaves active model unchanged");
+
+  auto appended_compaction =
+      session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::Compaction,
+                                                       .timestamp = ava::session::now_timestamp(),
+                                                       .data_json = "{\"summary\":\"old history\"}"});
+  expect(appended_compaction.has_value(), "model switch compatibility test seeds compaction boundary");
+  auto switched_no_tools_after_compaction = ava::app::switch_runtime_model(*session, *no_tools_model);
+  expect(switched_no_tools_after_compaction.has_value() && *switched_no_tools_after_compaction,
+         "runtime ignores pre-compaction native history for switch compatibility");
+  expect(session->model.provider_id == "openai" && session->model.model_id == "no-tools",
+         "post-compaction switch updates active model");
+
+  auto appended_kimi_reasoning =
+      session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::ReasoningBlock,
+                                                       .timestamp = ava::session::now_timestamp(),
+                                                       .data_json = "{\"provider\":\"kimi\","
+                                                                    "\"model\":\"kimi-k2-thinking\","
+                                                                    "\"format\":\"reasoning_content\","
+                                                                    "\"text\":\"compatible kimi reasoning\"}"});
+  expect(appended_kimi_reasoning.has_value(), "model switch compatibility test seeds Kimi reasoning history");
+
+  auto switched_kimi = ava::app::switch_runtime_model(*session, *kimi_model);
+  expect(switched_kimi.has_value() && *switched_kimi,
+         "runtime allows switch to Kimi model with explicit reasoning preservation support");
+  expect(session->model.provider_id == "kimi" && session->model.model_id == "kimi-k2-thinking",
+         "Kimi reasoning-compatible switch updates active model");
+
+  auto moonshot_model = ava::app::resolve_runtime_model(paths, "moonshot", "kimi-k2.6");
+  expect(moonshot_model.has_value(), "runtime resolves Moonshot model");
+  if (!moonshot_model) return;
+  auto rejected_moonshot = ava::app::switch_runtime_model(*session, *moonshot_model);
+  expect(!rejected_moonshot.has_value(), "runtime rejects reasoning_content switch without preservation quirk");
+  expect(session->model.provider_id == "kimi" && session->model.model_id == "kimi-k2-thinking",
+         "rejected Moonshot reasoning switch leaves active model unchanged");
+
+  auto entries = session->store.load();
+  expect(entries.has_value(), "model switch compatibility test reloads entries");
+  if (entries) {
+    const auto model_changes = std::ranges::count_if(
+        *entries, [](const auto& entry) { return entry.type == ava::session::EntryType::ModelChange; });
+    expect(model_changes == 3, "rejected model switches do not append model_change entries");
+  }
+}
+
+void test_app_runtime_reasoning_selection_persists_and_requests() {
+  const auto root = temp_root() / "app-runtime-reasoning-selection";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  const auto paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(paths.ava_config_dir);
+  {
+    std::ofstream file(paths.models_file, std::ios::binary | std::ios::trunc);
+    file << R"JSON({
+      "default_provider":"openai",
+      "default_model":"gpt-5.5",
+      "models":[{
+        "provider":"openai",
+        "id":"no-reasoning-levels",
+        "name":"No Reasoning Levels",
+        "family":"test",
+        "api_family":"openai_responses",
+        "supports_tools":true,
+        "supports_streaming":true,
+        "supports_reasoning":true,
+        "input_modalities":["text"],
+        "output_modalities":["text"]
+      },{
+        "provider":"anthropic",
+        "id":"claude-default-max",
+        "name":"Claude Default Max",
+        "family":"claude",
+        "api_family":"anthropic_messages",
+        "supports_tools":true,
+        "supports_streaming":true,
+        "supports_reasoning":true,
+        "reasoning_levels":["enabled"],
+        "input_modalities":["text"],
+        "output_modalities":["text"]
+      },{
+        "provider":"anthropic-proxy",
+        "id":"claude-proxy",
+        "name":"Claude Proxy",
+        "family":"claude",
+        "api_family":"anthropic_messages",
+        "max_output_tokens":8192,
+        "supports_tools":true,
+        "supports_streaming":true,
+        "supports_reasoning":true,
+        "reasoning_levels":["enabled"],
+        "input_modalities":["text"],
+        "output_modalities":["text"]
+      }]
+    })JSON";
+  }
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime reasoning test opens runtime session");
+  if (!session) return;
+  const auto session_id = session->store.session_id();
+
+  auto selected = ava::app::set_runtime_reasoning(
+      *session, ava::app::RuntimeReasoningSelection{.level = " low ", .budget_tokens = std::nullopt, .display = ""});
+  expect(selected.has_value() && *selected && session->reasoning && session->reasoning->level == "low",
+         "runtime reasoning selection validates, normalizes, and updates state");
+
+  auto duplicate = ava::app::set_runtime_reasoning(
+      *session, ava::app::RuntimeReasoningSelection{.level = "low", .budget_tokens = std::nullopt, .display = ""});
+  expect(duplicate.has_value() && !*duplicate, "runtime reasoning selection is idempotent when unchanged");
+
+  auto invalid = ava::app::set_runtime_reasoning(
+      *session, ava::app::RuntimeReasoningSelection{.level = "ultra", .budget_tokens = std::nullopt, .display = ""});
+  expect(!invalid.has_value(), "runtime reasoning selection rejects unsupported model levels");
+
+  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"reasoned answer\"}\n\n"
+              "data: [DONE]\n\n",
+  }});
+  ava::app::RuntimeRunOptions run_options;
+  run_options.access_token = "token";
+  auto result = ava::app::run_prompt(*session, "use reasoning", provider, transport, run_options);
+  expect(result && result->final_text == "reasoned answer", "runtime reasoning prompt completes");
+  expect(transport.requests().size() == 1, "runtime reasoning test sends one provider request");
+  if (!transport.requests().empty()) {
+    expect(transport.requests()[0].body.find("\"reasoning\"") != std::string::npos &&
+               transport.requests()[0].body.find("\"effort\":\"low\"") != std::string::npos &&
+               transport.requests()[0].body.find("\"summary\":\"auto\"") != std::string::npos,
+           "runtime reasoning selection is sent to the provider request with visible summary request");
+  }
+
+  auto entries = session->store.load();
+  expect(entries.has_value(), "runtime reasoning test reloads session entries");
+  if (entries) {
+    const auto reasoning_changes = std::ranges::count_if(
+        *entries, [](const auto& entry) { return entry.type == ava::session::EntryType::ReasoningChange; });
+    expect(reasoning_changes == 1, "runtime reasoning selection appends one durable reasoning_change entry");
+  }
+
+  ava::app::RuntimeOpenOptions reopen_options = open_options;
+  reopen_options.requested_session_id = session_id;
+  auto reopened = ava::app::open_runtime_session(reopen_options);
+  expect(reopened.has_value() && reopened->reasoning && reopened->reasoning->level == "low",
+         "runtime reopen restores latest reasoning selection");
+
+  auto cleared = ava::app::set_runtime_reasoning(*session, std::nullopt);
+  expect(cleared.has_value() && *cleared && !session->reasoning, "runtime reasoning selection can be cleared");
+
+  auto reselected = ava::app::set_runtime_reasoning(
+      *session, ava::app::RuntimeReasoningSelection{.level = "low", .budget_tokens = std::nullopt, .display = ""});
+  expect(reselected.has_value() && *reselected, "runtime reasoning test re-enables reasoning before switch boundary");
+  auto kimi_model = ava::app::resolve_runtime_model(paths, "kimi", "kimi-k2-thinking");
+  auto openai_model = ava::app::resolve_runtime_model(paths, "openai", "gpt-5.5");
+  expect(kimi_model.has_value() && openai_model.has_value(), "runtime reasoning test resolves switch boundary models");
+  if (kimi_model && openai_model) {
+    auto switched_away = ava::app::switch_runtime_model(*session, *kimi_model);
+    expect(switched_away.has_value() && *switched_away, "runtime reasoning test switches to Kimi model");
+    auto kimi_budget = ava::app::set_runtime_reasoning(
+        *session,
+        ava::app::RuntimeReasoningSelection{.level = "enabled", .budget_tokens = 1024, .display = "summarized"});
+    expect(!kimi_budget.has_value() &&
+               kimi_budget.error().format().find("Kimi reasoning supports level only") != std::string::npos,
+           "runtime reasoning selection rejects unsupported OpenAI-compatible budget/display controls");
+    auto switched_back = ava::app::switch_runtime_model(*session, *openai_model);
+    expect(switched_back.has_value() && *switched_back && !session->reasoning,
+           "runtime model switches clear active reasoning selection");
+    auto reopened_after_switch = ava::app::open_runtime_session(reopen_options);
+    expect(reopened_after_switch.has_value() && !reopened_after_switch->reasoning,
+           "runtime reopen does not resurrect reasoning across model_change boundaries");
+  }
+
+  auto no_levels_model = ava::app::resolve_runtime_model(paths, "openai", "no-reasoning-levels");
+  expect(no_levels_model.has_value(), "runtime reasoning test resolves no-level custom model");
+  if (no_levels_model) {
+    auto switched = ava::app::switch_runtime_model(*session, *no_levels_model);
+    expect(switched.has_value() && *switched, "runtime reasoning test switches to no-level custom model");
+    auto no_level_selection = ava::app::set_runtime_reasoning(
+        *session, ava::app::RuntimeReasoningSelection{.level = "low", .budget_tokens = std::nullopt, .display = ""});
+    expect(!no_level_selection.has_value() &&
+               no_level_selection.error().format().find("supported reasoning levels") != std::string::npos,
+           "runtime reasoning selection rejects models without declared reasoning levels");
+  }
+
+  auto anthropic_default_max = ava::app::resolve_runtime_model(paths, "anthropic", "claude-default-max");
+  expect(anthropic_default_max.has_value(), "runtime reasoning test resolves Anthropic default max model");
+  if (anthropic_default_max) {
+    auto switched = ava::app::switch_runtime_model(*session, *anthropic_default_max);
+    expect(switched.has_value() && *switched, "runtime reasoning test switches to Anthropic default max model");
+    auto over_budget = ava::app::set_runtime_reasoning(
+        *session,
+        ava::app::RuntimeReasoningSelection{.level = "enabled", .budget_tokens = 4096, .display = "summarized"});
+    expect(!over_budget.has_value() && over_budget.error().format().find(
+                                           "reasoning budget must be below max output tokens") != std::string::npos,
+           "runtime reasoning selection validates Anthropic budget against provider default max tokens");
+  }
+
+  auto proxy_registry = ava::config::load_model_registry(paths);
+  expect(proxy_registry.has_value(), "runtime reasoning test loads registry for custom Anthropic-compatible model");
+  auto anthropic_proxy = proxy_registry ? ava::config::find_model(*proxy_registry, "anthropic-proxy", "claude-proxy")
+                                        : std::optional<ava::config::ModelInfo>{};
+  expect(anthropic_proxy.has_value(), "runtime reasoning test finds custom Anthropic-compatible model");
+  if (anthropic_proxy) {
+    session->model = *anthropic_proxy;
+    session->reasoning.reset();
+    auto cycled = ava::app::cycle_runtime_reasoning(*session);
+    expect(cycled.has_value() && session->reasoning && session->reasoning->level == "enabled" &&
+               session->reasoning->budget_tokens && *session->reasoning->budget_tokens == 4096,
+           "runtime reasoning cycling uses API-family fallback profile for custom Anthropic-compatible models");
+    auto missing_budget = ava::app::set_runtime_reasoning(
+        *session,
+        ava::app::RuntimeReasoningSelection{.level = "enabled", .budget_tokens = std::nullopt, .display = ""});
+    expect(!missing_budget.has_value() &&
+               missing_budget.error().format().find("Anthropic-proxy enabled reasoning requires budget_tokens") !=
+                   std::string::npos,
+           "runtime reasoning validation labels missing-budget errors with the custom provider id");
+    auto too_large_budget = ava::app::set_runtime_reasoning(
+        *session, ava::app::RuntimeReasoningSelection{.level = "enabled", .budget_tokens = 8192, .display = ""});
+    expect(!too_large_budget.has_value() &&
+               too_large_budget.error().format().find("reasoning budget must be below max output tokens") !=
+                   std::string::npos,
+           "runtime reasoning validation applies fallback budget limits to custom providers");
   }
 }
 
@@ -2627,9 +3150,61 @@ void test_app_rpc_model_commands() {
   expect(jsonl.find("\"id\":\"stats\"") != std::string::npos && jsonl.find("\"model_change\":1") != std::string::npos,
          "RPC get_session_stats reports model_change count");
   expect(
-      jsonl.find("\"id\":\"cycle\"") != std::string::npos && jsonl.find("\"provider\":\"openai\"") != std::string::npos,
+      jsonl.find("\"id\":\"cycle\"") != std::string::npos && jsonl.find("\"provider\":\"kimi\"") != std::string::npos,
       "RPC cycle_model advances to the next configured provider model");
-  expect(session->model.provider_id == "openai", "RPC cycle_model updates active session model");
+  expect(session->model.provider_id == "kimi", "RPC cycle_model updates active session model");
+}
+
+void test_app_rpc_reasoning_commands() {
+  const auto root = temp_root() / "app-rpc-reasoning-commands";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  const auto paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC reasoning command test opens runtime session");
+  if (!session) return;
+
+  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  std::istringstream in(
+      "{\"id\":\"set\",\"type\":\"set_reasoning\",\"reasoning_level\":\"medium\"}\n"
+      "{\"id\":\"state\",\"type\":\"get_state\"}\n"
+      "{\"id\":\"invalid\",\"type\":\"set_reasoning\",\"reasoning_level\":\"ultra\"}\n"
+      "{\"id\":\"clear\",\"type\":\"clear_reasoning\"}\n");
+  std::ostringstream out;
+  auto result =
+      ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
+  const auto jsonl = out.str();
+  expect(result.has_value(), "RPC reasoning command loop completes successfully");
+  expect(jsonl.find("\"id\":\"set\"") != std::string::npos &&
+             jsonl.find("\"reasoning_enabled\":true") != std::string::npos &&
+             jsonl.find("\"reasoning_level\":\"medium\"") != std::string::npos,
+         "RPC set_reasoning returns enabled reasoning state");
+  expect(jsonl.find("\"id\":\"state\"") != std::string::npos &&
+             jsonl.find("\"reasoning_level\":\"medium\"") != std::string::npos,
+         "RPC get_state reflects selected reasoning");
+  expect(jsonl.find("\"id\":\"invalid\"") != std::string::npos &&
+             jsonl.find("reasoning level is not supported") != std::string::npos,
+         "RPC set_reasoning reports invalid reasoning levels");
+  expect(jsonl.find("\"id\":\"clear\"") != std::string::npos &&
+             jsonl.rfind("\"reasoning_enabled\":false") != std::string::npos,
+         "RPC clear_reasoning disables reasoning state");
+  expect(!session->reasoning, "RPC clear_reasoning updates active session state");
+
+  auto entries = session->store.load();
+  expect(entries.has_value(), "RPC reasoning command test reloads entries");
+  if (entries) {
+    const auto reasoning_changes = std::ranges::count_if(
+        *entries, [](const auto& entry) { return entry.type == ava::session::EntryType::ReasoningChange; });
+    expect(reasoning_changes == 2, "RPC reasoning commands persist set and clear reasoning_change entries");
+  }
 }
 
 void test_app_rpc_protocol_version_and_session_commands() {
@@ -2681,6 +3256,27 @@ void test_app_rpc_protocol_version_and_session_commands() {
                                                                     "\"input_tokens\":1,\"cache_read_tokens\":1,"
                                                                     "\"total_tokens\":1,"
                                                                     "\"source\":\"provider\"}}"});
+  auto appended_reasoning =
+      session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::ReasoningBlock,
+                                                       .timestamp = ava::session::now_timestamp(),
+                                                       .data_json = "{\"provider\":\"anthropic\","
+                                                                    "\"model\":\"claude-sonnet-4-5\","
+                                                                    "\"format\":\"anthropic_thinking\","
+                                                                    "\"text\":\"visible reasoning\","
+                                                                    "\"signature\":\"rpc-secret-signature\"}"});
+  auto appended_redacted_reasoning =
+      session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::ReasoningBlock,
+                                                       .timestamp = ava::session::now_timestamp(),
+                                                       .data_json = "{\"provider\":\"anthropic\","
+                                                                    "\"model\":\"claude-sonnet-4-5\","
+                                                                    "\"format\":\"anthropic_thinking\","
+                                                                    "\"text\":\"hidden redacted rpc reasoning\","
+                                                                    "\"signature\":\"rpc-redacted-secret-signature\","
+                                                                    "\"redacted\": true }"});
   auto appended_mode = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                         .parent_id = "",
                                                                         .type = ava::session::EntryType::ModeChange,
@@ -2698,7 +3294,8 @@ void test_app_rpc_protocol_version_and_session_commands() {
                                                                           .timestamp = ava::session::now_timestamp(),
                                                                           .data_json = "{}"});
   expect(appended_user.has_value() && appended_internal_replay.has_value() && appended_assistant.has_value() &&
-             appended_unpriced_assistant.has_value() && appended_mode.has_value() && appended_compaction.has_value() &&
+             appended_unpriced_assistant.has_value() && appended_reasoning.has_value() &&
+             appended_redacted_reasoning.has_value() && appended_mode.has_value() && appended_compaction.has_value() &&
              appended_cancel.has_value(),
          "RPC protocol/session test appends messages and stats foundation entries");
 
@@ -2723,11 +3320,17 @@ void test_app_rpc_protocol_version_and_session_commands() {
          "RPC get_protocol reports supported protocol version");
   expect(jsonl.find("\"id\":\"messages\"") != std::string::npos && jsonl.find("\"messages\"") != std::string::npos &&
              jsonl.find("hello") != std::string::npos && jsonl.find("answer") != std::string::npos &&
-             jsonl.find("hidden rpc replay") == std::string::npos,
-         "RPC get_messages returns consumer-visible durable message entries");
-  expect(jsonl.find("\"id\":\"stats\"") != std::string::npos && jsonl.find("\"entry_count\":8") != std::string::npos &&
+             jsonl.find("visible reasoning") != std::string::npos &&
+             jsonl.find("hidden redacted rpc reasoning") == std::string::npos &&
+             jsonl.find("\"signature_present\":true") != std::string::npos &&
+             jsonl.find("hidden rpc replay") == std::string::npos &&
+             jsonl.find("rpc-secret-signature") == std::string::npos &&
+             jsonl.find("rpc-redacted-secret-signature") == std::string::npos,
+         "RPC get_messages returns consumer-visible durable message entries without reasoning signatures");
+  expect(jsonl.find("\"id\":\"stats\"") != std::string::npos && jsonl.find("\"entry_count\":10") != std::string::npos &&
              jsonl.find("\"user_message\":1") != std::string::npos &&
              jsonl.find("\"assistant_message\":2") != std::string::npos &&
+             jsonl.find("\"reasoning_block\":2") != std::string::npos &&
              jsonl.find("\"mode_change\":1") != std::string::npos &&
              jsonl.find("\"compaction\":1") != std::string::npos && jsonl.find("\"cancel\":1") != std::string::npos,
          "RPC get_session_stats returns session counters");
@@ -2786,6 +3389,70 @@ void test_app_rpc_protocol_version_and_resolver_reply_errors() {
          "RPC version and resolver reply errors are in-band and recoverable");
 }
 
+void test_app_rpc_mcp_command_responses() {
+  expect(!std::string_view(AVA_FAKE_MCP_SERVER_PATH).empty(), "RPC MCP command test has fake server path");
+  if (std::string_view(AVA_FAKE_MCP_SERVER_PATH).empty()) return;
+
+  const auto root = temp_root() / "app-rpc-mcp-commands";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  const auto workspace = root / "workspace";
+  const auto paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  write_app_test_file(workspace / ".ava" / "mcp.json",
+                      app_test_mcp_config_json("demo", "Demo MCP", AVA_FAKE_MCP_SERVER_PATH));
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC MCP command test opens runtime session");
+  if (!session) return;
+
+  std::vector<ava::permissions::PermissionPrompt> prompts;
+  ava::app::RuntimeRunOptions runtime_options;
+  runtime_options.permission_resolver = [&prompts](const ava::permissions::PermissionPrompt& prompt)
+      -> ava::core::Result<ava::permissions::PermissionResolution> {
+    prompts.push_back(prompt);
+    return ava::permissions::PermissionResolution::Allow;
+  };
+
+  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  std::istringstream in(
+      "{\"id\":\"mcp-list\",\"type\":\"list_mcp_servers\"}\n"
+      "{\"id\":\"mcp-inspect\",\"type\":\"inspect_mcp_server\",\"server_id\":\"demo\"}\n"
+      "{\"id\":\"mcp-tools\",\"type\":\"list_mcp_tools\",\"server_id\":\"demo\"}\n"
+      "{\"id\":\"mcp-restart\",\"type\":\"restart_mcp_server\",\"server_id\":\"demo\"}\n");
+  std::ostringstream out;
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
+  const auto jsonl = out.str();
+
+  const auto has_id = [&jsonl](std::string_view id) {
+    return jsonl.find("\"id\":\"" + std::string(id) + "\"") != std::string::npos;
+  };
+  expect(result.has_value(), "RPC MCP command loop completes successfully");
+  expect(has_id("mcp-list") && has_id("mcp-inspect") && has_id("mcp-tools") && has_id("mcp-restart"),
+         "RPC MCP command responses include all request ids");
+  expect(jsonl.find("MCP servers:") != std::string::npos && jsonl.find("Demo MCP") != std::string::npos &&
+             jsonl.find("MCP server demo") != std::string::npos &&
+             jsonl.find("MCP tools for demo") != std::string::npos && jsonl.find("fake-mcp") != std::string::npos &&
+             jsonl.find("echo") != std::string::npos && jsonl.find("mcp_demo_echo") != std::string::npos &&
+             jsonl.find("next discovery or tool call will launch a fresh process") != std::string::npos,
+         "RPC MCP command responses expose list, inspect, tools, and restart output");
+
+  const auto has_launch_prompt = std::ranges::any_of(prompts, [](const auto& prompt) {
+    return prompt.operation == ava::permissions::Operation::McpServerLaunch && prompt.tool_name == "mcp_tools";
+  });
+  const auto has_connect_prompt = std::ranges::any_of(prompts, [](const auto& prompt) {
+    return prompt.operation == ava::permissions::Operation::McpServerConnect && prompt.tool_name == "mcp_tools" &&
+           prompt.command == "demo";
+  });
+  expect(has_launch_prompt && has_connect_prompt,
+         "RPC list_mcp_tools requests MCP launch and connect permissions before allowing discovery");
+}
+
 void test_app_rpc_command_responses_for_context_compact_export() {
   const auto root = temp_root() / "app-rpc-commands";
   std::error_code remove_error;
@@ -2797,6 +3464,9 @@ void test_app_rpc_command_responses_for_context_compact_export() {
     std::ofstream file(workspace / "AGENTS.md", std::ios::binary | std::ios::trunc);
     file << "rpc command context\n";
   }
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.rpc" / "plugin.json",
+                      app_test_plugin_manifest_json("com.example.rpc", "RPC Plugin"));
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.rpcbad" / "plugin.json", "{not-json");
 
   ava::app::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
@@ -2815,6 +3485,12 @@ void test_app_rpc_command_responses_for_context_compact_export() {
                                    .headers = {},
                                    .body = "{\"output_text\":\"" + ava::core::json::escape(rpc_summary) + "\"}"}});
   std::istringstream in(
+      "{\"id\":\"plugins\",\"type\":\"list_plugins\"}\n"
+      "{\"id\":\"plugin-enable\",\"type\":\"enable_plugin\",\"plugin_id\":\"com.example.rpc\"}\n"
+      "{\"id\":\"plugin-inspect\",\"type\":\"inspect_plugin\",\"plugin_id\":\"com.example.rpc\"}\n"
+      "{\"id\":\"plugin-validate\",\"type\":\"validate_plugin\",\"path\":\".ava/plugins/com.example.rpc/"
+      "plugin.json\"}\n"
+      "{\"id\":\"plugin-failures\",\"type\":\"plugin_failures\"}\n"
       "{\"id\":\"ctx\",\"type\":\"context\"}\n"
       "{\"id\":\"cmp\",\"type\":\"compact\",\"instructions\":\"remember rpc facts\"}\n"
       "{\"id\":\"exp\",\"type\":\"export\"}\n");
@@ -2824,7 +3500,16 @@ void test_app_rpc_command_responses_for_context_compact_export() {
   auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
   const auto jsonl = out.str();
   expect(result.has_value(), "RPC context/compact/export loop completes successfully");
-  expect(jsonl.find("\"id\":\"ctx\"") != std::string::npos && jsonl.find("AGENTS.md") != std::string::npos &&
+  expect(jsonl.find("\"id\":\"plugins\"") != std::string::npos && jsonl.find("com.example.rpc") != std::string::npos &&
+             jsonl.find("\"id\":\"plugin-enable\"") != std::string::npos &&
+             jsonl.find("No plugin process was started") != std::string::npos &&
+             jsonl.find("\"id\":\"plugin-inspect\"") != std::string::npos &&
+             jsonl.find("status: enabled") != std::string::npos &&
+             jsonl.find("\"id\":\"plugin-validate\"") != std::string::npos &&
+             jsonl.find("Valid plugin manifest") != std::string::npos &&
+             jsonl.find("\"id\":\"plugin-failures\"") != std::string::npos &&
+             jsonl.find("com.example.rpcbad") != std::string::npos &&
+             jsonl.find("\"id\":\"ctx\"") != std::string::npos && jsonl.find("AGENTS.md") != std::string::npos &&
              jsonl.find("\"id\":\"cmp\"") != std::string::npos &&
              jsonl.find("compaction summary recorded") != std::string::npos &&
              jsonl.find("\"id\":\"exp\"") != std::string::npos &&
@@ -3672,15 +4357,20 @@ void run_app_runtime_tests() {
   test_app_non_overflow_provider_error_does_not_compact_or_retry();
   test_app_context_overflow_retry_is_bounded();
   test_app_rpc_parsing_and_response_serialization();
+  test_app_rpc_identifier_validation();
   test_app_rpc_prompt_with_fake_transport_streams_events();
   test_app_rpc_prompt_streams_provider_deltas_before_final_response();
   test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request();
   test_app_rpc_malformed_line_recovery_and_unknown_command();
   test_app_rpc_state_list_sessions_and_open_session();
   test_app_runtime_model_switch_persists_and_reopens();
+  test_app_runtime_model_switch_rejects_incompatible_history();
+  test_app_runtime_reasoning_selection_persists_and_requests();
   test_app_rpc_model_commands();
+  test_app_rpc_reasoning_commands();
   test_app_rpc_protocol_version_and_session_commands();
   test_app_rpc_protocol_version_and_resolver_reply_errors();
+  test_app_rpc_mcp_command_responses();
   test_app_rpc_command_responses_for_context_compact_export();
   test_app_rpc_compact_provider_failure_is_error_response();
   test_app_rpc_cancel_affects_subsequent_prompt();

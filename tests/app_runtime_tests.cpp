@@ -534,7 +534,8 @@ void test_app_event_serialization()
 void test_app_rpc_prompt_payload_serialization()
 {
   auto const permission_json = ava::app::rpc::permission_request_payload_json(
-      "permission_1", ava::permissions::PermissionPrompt{.operation = ava::permissions::Operation::EditFile,
+      "permission_1", ava::permissions::PermissionPrompt{.permission_request_id = "permreq_1",
+                                                         .operation = ava::permissions::Operation::EditFile,
                                                          .mode = ava::agent::Mode::Build,
                                                          .workspace_dir = "/workspace",
                                                          .target_path = "/workspace/src/main.cpp",
@@ -545,6 +546,7 @@ void test_app_rpc_prompt_payload_serialization()
                                                          .diff_preview = "--- a\n+++ b\n-old\n+new",
                                                          .diff_truncated = true});
   expect(permission_json.find("\"operation\":\"edit\"") != std::string::npos &&
+             permission_json.find("\"permission_request_id\":\"permreq_1\"") != std::string::npos &&
              permission_json.find("\"target_path\":\"/workspace/src/main.cpp\"") != std::string::npos &&
              permission_json.find("\"risk\":\"high\"") != std::string::npos &&
              permission_json.find("\"diff_preview\":\"--- a\\n+++ b\\n-old\\n+new\"") != std::string::npos &&
@@ -4613,7 +4615,9 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview()
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"write outside\"}\n");
   bool const requested = output_buffer.wait_contains("\"diff_preview\"", std::chrono::seconds(2));
   auto const resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
-  expect(requested && !resolver_request_id.empty(), "RPC permission diff test observes mutation diff preview");
+  auto const permission_request_id = extract_json_string_field(output_buffer.str(), "permission_request_id");
+  expect(requested && !resolver_request_id.empty() && permission_request_id.starts_with("permreq_"),
+         "RPC permission diff test observes mutation diff preview with stable permission request id");
   input_buffer.push("{\"id\":\"reply\",\"type\":\"permission_reply\",\"request_id\":\"" + resolver_request_id +
                     "\",\"correlation_id\":\"p1\",\"decision\":\"deny\"}\n");
   bool const completed = output_buffer.wait_contains("after diff deny", std::chrono::seconds(2));
@@ -4624,6 +4628,7 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview()
   expect(result.has_value() && completed && !std::filesystem::exists(outside_path),
          "RPC permission diff test completes after denied mutation without writing");
   expect(jsonl.find("\"name\":\"permission_requested\"") != std::string::npos &&
+             jsonl.find("\"permission_request_id\":\"" + permission_request_id + "\"") != std::string::npos &&
              jsonl.find("\"diff_preview\"") != std::string::npos && jsonl.find("+rpc new") != std::string::npos &&
              jsonl.find("\"diff_truncated\":false") != std::string::npos &&
              jsonl.find("\"name\":\"permission_replied\"") != std::string::npos &&

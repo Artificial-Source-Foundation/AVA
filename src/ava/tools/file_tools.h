@@ -20,6 +20,7 @@ namespace ava::tools {
 class MutationQueue;
 
 struct PermissionAuditEvent {
+  std::string permission_request_id = {};
   ava::permissions::Operation operation;
   ava::agent::Mode mode = ava::agent::Mode::Build;
   std::string tool_name;

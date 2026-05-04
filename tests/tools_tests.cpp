@@ -616,6 +616,9 @@ void test_permission_audit_persistence()
   expect(audits.size() == 1, "allowed policy decision appends one audit entry");
   if (!audits.empty()) {
     expect(ava::core::json::string_field(audits[0].data_json, "operation") == "read" &&
+               ava::core::json::string_field(audits[0].data_json, "permission_request_id")
+                   .value_or("")
+                   .starts_with("permreq_") &&
                ava::core::json::string_field(audits[0].data_json, "action") == "allow" &&
                ava::core::json::string_field(audits[0].data_json, "resolution") == "allow" &&
                ava::core::json::string_field(audits[0].data_json, "resolution_source") == "policy" &&
@@ -631,6 +634,9 @@ void test_permission_audit_persistence()
   expect(audits.size() == 2, "denied policy decision appends an audit entry");
   if (audits.size() >= 2) {
     expect(ava::core::json::string_field(audits[1].data_json, "action") == "deny" &&
+               ava::core::json::string_field(audits[1].data_json, "permission_request_id")
+                   .value_or("")
+                   .starts_with("permreq_") &&
                ava::core::json::string_field(audits[1].data_json, "resolution") == "deny" &&
                ava::core::json::string_field(audits[1].data_json, "resolution_source") == "policy" &&
                ava::core::json::string_field(audits[1].data_json, "risk") == "critical",
@@ -638,32 +644,41 @@ void test_permission_audit_persistence()
   }
 
   int prompts = 0;
+  std::string prompt_permission_request_id;
   ava::tools::ToolContext const resolving_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const&)
+      .permission_resolver = [&prompts, &prompt_permission_request_id](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++prompts;
+        prompt_permission_request_id = prompt.permission_request_id;
         return ava::permissions::PermissionResolution::Allow;
       },
       .permission_audit_sink = sink};
   auto outside = ava::tools::read_file(resolving_context, outside_path);
-  expect(outside && outside->content == "outside" && prompts == 1,
-         "permission audit preserves resolver-approved read behavior");
+  expect(
+      outside && outside->content == "outside" && prompts == 1 && prompt_permission_request_id.starts_with("permreq_"),
+      "permission audit preserves resolver-approved read behavior and stable request id");
   loaded = store.load();
   audits = loaded ? permission_entries(*loaded) : std::vector<ava::session::SessionEntry>{};
   expect(audits.size() == 4, "ask policy and resolver outcome append separate audit entries");
   if (audits.size() >= 4) {
+    auto const ask_permission_request_id =
+        ava::core::json::string_field(audits[2].data_json, "permission_request_id").value_or("");
     expect(ava::core::json::string_field(audits[2].data_json, "action") == "ask" &&
+               ask_permission_request_id.starts_with("permreq_") &&
+               ask_permission_request_id == prompt_permission_request_id &&
                !ava::core::json::string_field(audits[2].data_json, "resolution") &&
                ava::core::json::string_field(audits[2].data_json, "resolution_source") == "policy" &&
                ava::core::json::string_field(audits[2].data_json, "risk") == "high",
            "ask audit records policy request and high risk before resolver outcome");
-    expect(ava::core::json::string_field(audits[3].data_json, "action") == "ask" &&
-               ava::core::json::string_field(audits[3].data_json, "resolution") == "allow" &&
-               ava::core::json::string_field(audits[3].data_json, "resolution_source") == "resolver" &&
-               ava::core::json::string_field(audits[3].data_json, "risk") == "high",
-           "ask audit records resolver allow outcome and original risk");
+    expect(
+        ava::core::json::string_field(audits[3].data_json, "action") == "ask" &&
+            ava::core::json::string_field(audits[3].data_json, "permission_request_id") == ask_permission_request_id &&
+            ava::core::json::string_field(audits[3].data_json, "resolution") == "allow" &&
+            ava::core::json::string_field(audits[3].data_json, "resolution_source") == "resolver" &&
+            ava::core::json::string_field(audits[3].data_json, "risk") == "high",
+        "ask audit records resolver allow outcome and original risk");
   }
 
   auto bash_denied = ava::tools::run_bash(context, "rm -rf important");

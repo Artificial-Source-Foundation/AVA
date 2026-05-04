@@ -40,11 +40,13 @@ ava::core::VoidResult record_permission_audit(ToolContext const& context, Permis
   return context.permission_audit_sink(event);
 }
 
-PermissionAuditEvent audit_event(ToolContext const& context, ava::permissions::Operation operation,
-                                 std::string tool_name, ava::permissions::PermissionDecision const& decision,
+PermissionAuditEvent audit_event(ToolContext const& context, std::string permission_request_id,
+                                 ava::permissions::Operation operation, std::string tool_name,
+                                 ava::permissions::PermissionDecision const& decision,
                                  std::filesystem::path const& target_path, std::string_view command)
 {
-  return PermissionAuditEvent{.operation = operation,
+  return PermissionAuditEvent{.permission_request_id = std::move(permission_request_id),
+                              .operation = operation,
                               .mode = context.mode,
                               .tool_name = std::move(tool_name),
                               .action = decision.action,
@@ -384,6 +386,7 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
                                         std::string_view diff_preview, bool diff_truncated)
 {
   auto const request_tool_name = effective_tool_name(context, operation, tool_name);
+  auto const permission_request_id = ava::core::make_id("permreq");
   auto const decision = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = operation,
       .mode = context.mode,
@@ -392,7 +395,8 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
       .command = std::string(command),
   });
 
-  auto policy_event = audit_event(context, operation, request_tool_name, decision, target_path, command);
+  auto policy_event =
+      audit_event(context, permission_request_id, operation, request_tool_name, decision, target_path, command);
   if (decision.action == ava::permissions::PermissionAction::Allow ||
       decision.action == ava::permissions::PermissionAction::Deny) {
     policy_event.resolution = ava::permissions::to_string(decision.action);
@@ -418,6 +422,7 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   }
 
   auto resolution = context.permission_resolver(ava::permissions::PermissionPrompt{
+      .permission_request_id = permission_request_id,
       .operation = operation,
       .mode = context.mode,
       .workspace_dir = context.workspace_dir,
@@ -447,12 +452,16 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
 
 std::string permission_audit_data_json(PermissionAuditEvent const& event)
 {
-  std::string data = "{\"operation\":\"" + ava::core::json::escape(ava::permissions::to_string(event.operation)) +
-                     "\",\"mode\":\"" + ava::core::json::escape(ava::agent::to_string(event.mode)) +
-                     "\",\"tool_name\":\"" + ava::core::json::escape(event.tool_name) + "\",\"action\":\"" +
-                     ava::core::json::escape(ava::permissions::to_string(event.action)) + "\",\"reason\":\"" +
-                     ava::core::json::escape(event.reason) + "\",\"risk\":\"" +
-                     ava::core::json::escape(ava::permissions::to_string(event.risk)) + "\"";
+  std::string data = "{";
+  if (!event.permission_request_id.empty()) {
+    data += "\"permission_request_id\":\"" + ava::core::json::escape(event.permission_request_id) + "\",";
+  }
+  data += "\"operation\":\"" + ava::core::json::escape(ava::permissions::to_string(event.operation)) +
+          "\",\"mode\":\"" + ava::core::json::escape(ava::agent::to_string(event.mode)) + "\",\"tool_name\":\"" +
+          ava::core::json::escape(event.tool_name) + "\",\"action\":\"" +
+          ava::core::json::escape(ava::permissions::to_string(event.action)) + "\",\"reason\":\"" +
+          ava::core::json::escape(event.reason) + "\",\"risk\":\"" +
+          ava::core::json::escape(ava::permissions::to_string(event.risk)) + "\"";
   if (event.operation != ava::permissions::Operation::RunCommand &&
       event.operation != ava::permissions::Operation::NetworkFetch && !event.target_path.empty()) {
     data += ",\"target_path\":\"" + ava::core::json::escape(event.target_path.string()) + "\"";

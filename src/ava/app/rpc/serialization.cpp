@@ -632,6 +632,10 @@ std::string permission_request_payload_json(std::string_view resolver_request_id
 {
   std::string json = "{";
   json += string_field_json("resolver_request_id", resolver_request_id);
+  if (!prompt.permission_request_id.empty()) {
+    json += ',';
+    json += string_field_json("permission_request_id", prompt.permission_request_id);
+  }
   json += ',';
   json += string_field_json("operation", ava::permissions::to_string(prompt.operation));
   json += ',';

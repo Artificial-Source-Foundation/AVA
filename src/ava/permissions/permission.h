@@ -59,6 +59,7 @@ enum class PermissionResolution {
 };
 
 struct PermissionPrompt {
+  std::string permission_request_id = {};
   Operation operation;
   ava::agent::Mode mode;
   std::filesystem::path workspace_dir;

@@ -30,6 +30,11 @@ struct ActiveModelState {
 
 std::string permission_key(SessionEntry const& entry)
 {
+  auto const permission_request_id = ava::core::json::string_field(entry.data_json, "permission_request_id");
+  if (permission_request_id && !permission_request_id->empty()) {
+    return "id:" + *permission_request_id;
+  }
+
   std::string key = ava::core::json::string_field(entry.data_json, "operation").value_or("");
   key += '\x1F';
   key += ava::core::json::string_field(entry.data_json, "tool_name").value_or("");
@@ -98,6 +103,11 @@ bool valid_resolution(std::string_view resolution)
 bool valid_resolution_source(std::string_view source)
 {
   return source == "policy" || source == "resolver" || source == "no_resolver" || source == "resolver_failed";
+}
+
+bool valid_risk(std::string_view risk)
+{
+  return risk == "low" || risk == "medium" || risk == "high" || risk == "critical";
 }
 
 bool present_non_empty_string(std::string_view object, std::string_view key)
@@ -221,13 +231,19 @@ void validate_permission_decision(SessionReplayValidation& validation,
   auto const tool_name = ava::core::json::string_field(entry.data_json, "tool_name").value_or("");
   auto const action = ava::core::json::string_field(entry.data_json, "action").value_or("");
   auto const reason = ava::core::json::string_field(entry.data_json, "reason").value_or("");
+  auto const risk = ava::core::json::string_field(entry.data_json, "risk");
   auto const resolution = ava::core::json::string_field(entry.data_json, "resolution").value_or("");
   auto const resolution_source = ava::core::json::string_field(entry.data_json, "resolution_source").value_or("");
 
   if (!valid_operation(operation) || !valid_mode(mode) || tool_name.empty() || !valid_action(action) ||
-      reason.empty()) {
+      reason.empty() || !present_non_empty_string(entry.data_json, "permission_request_id")) {
     add_error(validation, SessionReplayIssueKind::InvalidPermissionDecision, index, entry, "",
               "permission_decision entry is missing required semantic fields");
+    return;
+  }
+  if (risk && !valid_risk(*risk)) {
+    add_error(validation, SessionReplayIssueKind::InvalidPermissionDecision, index, entry, "",
+              "permission_decision entry has an invalid risk");
     return;
   }
   if (!resolution.empty() && !valid_resolution(resolution)) {

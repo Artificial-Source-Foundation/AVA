@@ -75,11 +75,11 @@ void test_session_store_round_trip()
   });
   expect(append.has_value(), "session entry appends");
 
-  struct stat session_stat{};
+  struct stat session_stat {};
   if (stat(store->session_path().c_str(), &session_stat) == 0) {
     expect((session_stat.st_mode & 0777) == 0600, "session file is owner read/write only");
   }
-  struct stat session_dir_stat{};
+  struct stat session_dir_stat {};
   auto const session_dir = store->session_path().parent_path();
   if (stat(session_dir.c_str(), &session_dir_stat) == 0) {
     expect((session_dir_stat.st_mode & 0777) == 0700, "session directory is owner-only");
@@ -587,28 +587,31 @@ void test_session_replay_validation()
                                  .parent_id = "",
                                  .type = ava::session::EntryType::PermissionDecision,
                                  .timestamp = "2026-04-29T00:00:00Z",
-                                 .data_json = "{\"operation\":\"read\",\"mode\":\"build\","
+                                 .data_json = "{\"permission_request_id\":\"permreq_read\","
+                                              "\"operation\":\"read\",\"mode\":\"build\","
                                               "\"tool_name\":\"read_file\",\"action\":\"allow\","
                                               "\"reason\":\"allowed by default workspace policy\","
-                                              "\"target_path\":\"note.txt\",\"resolution\":\"allow\","
+                                              "\"risk\":\"low\",\"target_path\":\"note.txt\",\"resolution\":\"allow\","
                                               "\"resolution_source\":\"policy\"}"},
       ava::session::SessionEntry{.id = "permission_ask",
                                  .parent_id = "permission_policy_allow",
                                  .type = ava::session::EntryType::PermissionDecision,
                                  .timestamp = "2026-04-29T00:00:01Z",
-                                 .data_json = "{\"operation\":\"edit\",\"mode\":\"build\","
+                                 .data_json = "{\"permission_request_id\":\"permreq_edit\","
+                                              "\"operation\":\"edit\",\"mode\":\"build\","
                                               "\"tool_name\":\"write_file\",\"action\":\"ask\","
                                               "\"reason\":\"target is outside the workspace\","
-                                              "\"target_path\":\"/tmp/outside.txt\","
+                                              "\"risk\":\"high\",\"target_path\":\"/tmp/outside.txt\","
                                               "\"resolution_source\":\"policy\"}"},
       ava::session::SessionEntry{.id = "permission_resolution",
                                  .parent_id = "permission_ask",
                                  .type = ava::session::EntryType::PermissionDecision,
                                  .timestamp = "2026-04-29T00:00:02Z",
-                                 .data_json = "{\"operation\":\"edit\",\"mode\":\"build\","
+                                 .data_json = "{\"permission_request_id\":\"permreq_edit\","
+                                              "\"operation\":\"edit\",\"mode\":\"build\","
                                               "\"tool_name\":\"write_file\",\"action\":\"ask\","
                                               "\"reason\":\"target is outside the workspace\","
-                                              "\"target_path\":\"/tmp/outside.txt\","
+                                              "\"risk\":\"high\",\"target_path\":\"/tmp/outside.txt\","
                                               "\"resolution\":\"deny\",\"resolution_source\":\"resolver\"}"},
   };
   auto const valid_permission = ava::session::validate_session_replay(valid_permission_entries);
@@ -630,6 +633,22 @@ void test_session_replay_validation()
              has_replay_issue(invalid_permission, ava::session::SessionReplayIssueKind::InvalidPermissionDecision),
          "session replay validator flags malformed permission audit decisions");
 
+  std::vector<ava::session::SessionEntry> const invalid_risk_entries = {
+      ava::session::SessionEntry{.id = "permission_invalid_risk",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::PermissionDecision,
+                                 .timestamp = "2026-04-29T00:00:00Z",
+                                 .data_json = "{\"permission_request_id\":\"permreq_bad\","
+                                              "\"operation\":\"read\",\"mode\":\"build\","
+                                              "\"tool_name\":\"read_file\",\"action\":\"allow\","
+                                              "\"reason\":\"bad\",\"risk\":\"extreme\","
+                                              "\"resolution\":\"allow\",\"resolution_source\":\"policy\"}"},
+  };
+  auto const invalid_risk = ava::session::validate_session_replay(invalid_risk_entries);
+  expect(!invalid_risk.ok() &&
+             has_replay_issue(invalid_risk, ava::session::SessionReplayIssueKind::InvalidPermissionDecision),
+         "session replay validator flags malformed permission risk values");
+
   std::vector<ava::session::SessionEntry> const resolution_without_ask_entries = {
       ava::session::SessionEntry{.id = "permission_resolution_without_ask",
                                  .parent_id = "",
@@ -646,6 +665,19 @@ void test_session_replay_validation()
              has_replay_issue(resolution_without_ask,
                               ava::session::SessionReplayIssueKind::PermissionResolutionWithoutAsk),
          "session replay validator flags resolver outcomes without earlier ask prompts");
+
+  auto mismatched_permission_id_entries = valid_permission_entries;
+  mismatched_permission_id_entries.back().data_json =
+      "{\"permission_request_id\":\"permreq_other\",\"operation\":\"edit\",\"mode\":\"build\","
+      "\"tool_name\":\"write_file\",\"action\":\"ask\","
+      "\"reason\":\"target is outside the workspace\","
+      "\"risk\":\"high\",\"target_path\":\"/tmp/outside.txt\","
+      "\"resolution\":\"deny\",\"resolution_source\":\"resolver\"}";
+  auto const mismatched_permission_id = ava::session::validate_session_replay(mismatched_permission_id_entries);
+  expect(!mismatched_permission_id.ok() &&
+             has_replay_issue(mismatched_permission_id,
+                              ava::session::SessionReplayIssueKind::PermissionResolutionWithoutAsk),
+         "session replay validator pairs permission resolver outcomes by stable request id when present");
 
   std::vector<ava::session::SessionEntry> const unresolved_permission_entries = {
       ava::session::SessionEntry{.id = "permission_unresolved",

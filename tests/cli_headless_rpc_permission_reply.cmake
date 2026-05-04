@@ -163,6 +163,7 @@ endforeach()
 foreach(NEEDLE
         "\"name\":\"permission_requested\""
         "\"resolver_request_id\":\"permission_"
+        "\"permission_request_id\":\"permreq_"
         "\"operation\":\"edit\""
         "\"target_path\":\"${TARGET_FILE}\""
         "\"tool_name\":\"write_file\""

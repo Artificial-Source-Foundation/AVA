@@ -1308,12 +1308,18 @@ void test_agent_loop_permission_resolver_threads_to_tools()
   auto resolver_entries = store.load();
   auto resolver_audits =
       resolver_entries ? permission_entries(*resolver_entries) : std::vector<ava::session::SessionEntry>{};
-  expect(resolver_audits.size() == 2 &&
+  auto const resolver_permission_request_id =
+      resolver_audits.size() >= 2
+          ? ava::core::json::string_field(resolver_audits[0].data_json, "permission_request_id").value_or("")
+          : "";
+  expect(resolver_audits.size() == 2 && resolver_permission_request_id.starts_with("permreq_") &&
              ava::core::json::string_field(resolver_audits[0].data_json, "action") == "ask" &&
              ava::core::json::string_field(resolver_audits[0].data_json, "resolution_source") == "policy" &&
+             ava::core::json::string_field(resolver_audits[1].data_json, "permission_request_id") ==
+                 resolver_permission_request_id &&
              ava::core::json::string_field(resolver_audits[1].data_json, "resolution") == "allow" &&
              ava::core::json::string_field(resolver_audits[1].data_json, "resolution_source") == "resolver",
-         "agent loop persists ask and resolver permission audit entries");
+         "agent loop persists linked ask and resolver permission audit entries");
 
   {
     auto const bash_root = temp_root() / "agent-bash-ask-allow";

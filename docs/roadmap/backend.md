@@ -153,7 +153,7 @@ Missing or incomplete:
 
 ### Tools And Operations
 
-AVA has a strong small tool set with permissioned atomic file writes where practical, cooperative cancellation for read/write/edit file operations, Phase 4 search/edit/web/LSP improvements, and remaining maturity work around deeper abstractions and expanded code intelligence.
+AVA has a strong small tool set with permissioned atomic file writes where practical, cooperative cancellation for read/write/edit file operations, tested shell process-group cleanup on timeout, Phase 4 search/edit/web/LSP improvements, and remaining maturity work around deeper abstractions and expanded code intelligence.
 
 Missing or incomplete:
 
@@ -161,7 +161,7 @@ Missing or incomplete:
 - Broader Unicode normalization awareness and fuzzy edit fallback beyond current exact matching with CRLF/BOM diagnostics.
 - UI-mediated patch preview/approval flow beyond provider-visible bounded unified diffs.
 - Search parity for unsupported `.gitignore` edge syntax such as bracket character classes; current native matcher documents its subset.
-- Process-tree cleanup on cancellation and timeout.
+- Broader process-tree cleanup proofs beyond the current bash timeout, plugin, MCP, and LSP process-group coverage.
 - Image/file attachment reads if AVA wants multimodal model support.
 - LSP diagnostics now share the active run cancellation callback for startup and request waits; symbols, definitions, references, document sync, and configured production server discovery remain beyond the current diagnostics first slice.
 - Delete/move tools, only after audit and permissions are stronger.

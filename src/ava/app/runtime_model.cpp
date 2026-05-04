@@ -42,12 +42,12 @@ ava::config::ModelInfo fallback_persisted_model(
                                 .reasoning_format = std::move(reasoning_format)};
 }
 
-bool model_accepts_reasoning_format(const ava::config::ModelInfo& model, std::string_view format) {
+bool model_accepts_reasoning_format(ava::config::ModelInfo const& model, std::string_view format) {
   return ava::config::provider_accepts_reasoning_format(model, format);
 }
 
-ava::core::Error incompatible_model_switch_error(const ava::config::ModelInfo& model, std::string_view reason,
-                                                 const ava::session::SessionEntry& entry) {
+ava::core::Error incompatible_model_switch_error(ava::config::ModelInfo const& model, std::string_view reason,
+                                                 ava::session::SessionEntry const& entry) {
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                 "model switch cannot safely replay current session history");
   error.with_context("provider", model.provider_id);
@@ -58,8 +58,8 @@ ava::core::Error incompatible_model_switch_error(const ava::config::ModelInfo& m
   return error;
 }
 
-ava::core::VoidResult validate_model_switch_history(const RuntimeSession& session,
-                                                    const ava::config::ModelInfo& target) {
+ava::core::VoidResult validate_model_switch_history(RuntimeSession const& session,
+                                                    ava::config::ModelInfo const& target) {
   auto entries = session.store.load();
   if (!entries) return std::unexpected(std::move(entries.error()));
 
@@ -69,7 +69,7 @@ ava::core::VoidResult validate_model_switch_history(const RuntimeSession& sessio
   }
 
   for (auto it = replay_start; it != entries->end(); ++it) {
-    const auto& entry = *it;
+    auto const& entry = *it;
     if ((entry.type == ava::session::EntryType::ToolCall || entry.type == ava::session::EntryType::ToolResult) &&
         !target.supports_tools.value_or(false)) {
       return std::unexpected(incompatible_model_switch_error(
@@ -77,7 +77,7 @@ ava::core::VoidResult validate_model_switch_history(const RuntimeSession& sessio
     }
 
     if (entry.type != ava::session::EntryType::ReasoningBlock) continue;
-    const auto format = ava::core::json::string_field(entry.data_json, "format").value_or("");
+    auto const format = ava::core::json::string_field(entry.data_json, "format").value_or("");
     if (model_accepts_reasoning_format(target, format)) continue;
 
     auto error = incompatible_model_switch_error(
@@ -94,8 +94,8 @@ ava::core::VoidResult validate_model_switch_history(const RuntimeSession& sessio
 
 }  // namespace
 
-std::optional<ava::config::ModelInfo> latest_persisted_model(const ava::config::ModelRegistry& registry,
-                                                             const std::vector<ava::session::SessionEntry>& entries) {
+std::optional<ava::config::ModelInfo> latest_persisted_model(ava::config::ModelRegistry const& registry,
+                                                             std::vector<ava::session::SessionEntry> const& entries) {
   std::optional<std::string> provider_id;
   std::optional<std::string> model_id;
   std::string display_name;
@@ -112,7 +112,7 @@ std::optional<ava::config::ModelInfo> latest_persisted_model(const ava::config::
   std::vector<std::string> reasoning_levels;
   std::vector<std::string> compatibility_quirks;
   std::string reasoning_format;
-  for (const auto& entry : entries) {
+  for (auto const& entry : entries) {
     if (entry.type != ava::session::EntryType::SessionStart && entry.type != ava::session::EntryType::ModelChange) {
       continue;
     }
@@ -149,17 +149,17 @@ std::optional<ava::config::ModelInfo> latest_persisted_model(const ava::config::
 
 namespace ava::app {
 
-ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(const ava::config::XdgPaths& paths,
+ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths,
                                                                 std::string_view provider_id,
                                                                 std::string_view model_id) {
-  const auto trimmed_provider_id = runtime::trimmed_copy(provider_id);
-  const auto trimmed_model_id = runtime::trimmed_copy(model_id);
+  auto const trimmed_provider_id = runtime::trimmed_copy(provider_id);
+  auto const trimmed_model_id = runtime::trimmed_copy(model_id);
   if (trimmed_provider_id.empty() || trimmed_model_id.empty()) {
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider and model are required"));
   }
 
-  const auto providers = ava::provider::builtin_provider_registry();
+  auto const providers = ava::provider::builtin_provider_registry();
   if (!providers.contains(trimmed_provider_id)) {
     auto error = ava::core::Error(ava::core::ErrorCategory::NotFound, "provider is not registered");
     error.with_context("provider", trimmed_provider_id);
@@ -188,7 +188,7 @@ ava::core::Result<bool> switch_runtime_model(RuntimeSession& session, ava::confi
                                                          session.current_dir);
   if (!prompt_state) return std::unexpected(std::move(prompt_state.error()));
 
-  const auto previous = session.model;
+  auto const previous = session.model;
   auto appended = runtime::append_model_change(session.store, previous, model);
   if (!appended) return std::unexpected(std::move(appended.error()));
 

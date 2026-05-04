@@ -52,17 +52,17 @@ bool contains_ascii_case_insensitive(std::string_view text, std::string_view que
   return lower_ascii(text).find(lower_ascii(query)) != std::string::npos;
 }
 
-bool session_matches_query(const ava::session::SessionSummary& summary, std::string_view query) {
+bool session_matches_query(ava::session::SessionSummary const& summary, std::string_view query) {
   return contains_ascii_case_insensitive(summary.session_id, query) ||
          contains_ascii_case_insensitive(summary.last_updated, query);
 }
 
-bool context_source_matches_query(const ContextSourceMetadata& source, std::string_view query) {
+bool context_source_matches_query(ContextSourceMetadata const& source, std::string_view query) {
   return contains_ascii_case_insensitive(source.path.generic_string(), query) ||
          contains_ascii_case_insensitive(ava::context::to_string(source.source_type), query);
 }
 
-RuntimeEvent base_command_event(const RuntimeSession& session, RuntimeEventType type) {
+RuntimeEvent base_command_event(RuntimeSession const& session, RuntimeEventType type) {
   RuntimeEvent event;
   event.type = type;
   event.timestamp = ava::session::now_timestamp();
@@ -73,14 +73,14 @@ RuntimeEvent base_command_event(const RuntimeSession& session, RuntimeEventType 
   return event;
 }
 
-ava::core::VoidResult emit_command_event(const CommandRequest& request, RuntimeEvent event) {
+ava::core::VoidResult emit_command_event(CommandRequest const& request, RuntimeEvent event) {
   if (!request.event_sink) return {};
   return emit_event(request.event_sink, event);
 }
 
 template <typename Value>
 void append_known_value(std::ostringstream& output, bool& wrote_any, std::string_view label,
-                        const std::optional<Value>& value) {
+                        std::optional<Value> const& value) {
   if (!value) return;
   if (wrote_any) output << ' ';
   output << label << '=' << *value;
@@ -89,24 +89,24 @@ void append_known_value(std::ostringstream& output, bool& wrote_any, std::string
 
 std::string shorten_middle(std::string text, std::size_t max_columns) {
   if (text.size() <= max_columns || max_columns < 8) return text;
-  const auto front = (max_columns - 3) / 2;
-  const auto back = max_columns - 3 - front;
+  auto const front = (max_columns - 3) / 2;
+  auto const back = max_columns - 3 - front;
   return text.substr(0, front) + "..." + text.substr(text.size() - back);
 }
 
-std::string compact_workspace_label(const std::filesystem::path& workspace) {
-  const auto filename = workspace.filename().generic_string();
+std::string compact_workspace_label(std::filesystem::path const& workspace) {
+  auto const filename = workspace.filename().generic_string();
   if (!filename.empty()) return shorten_middle(filename, 32);
   return shorten_middle(workspace.generic_string(), 48);
 }
 
-std::string compact_cwd_label(const std::filesystem::path& cwd, const std::filesystem::path& workspace) {
+std::string compact_cwd_label(std::filesystem::path const& cwd, std::filesystem::path const& workspace) {
   auto text = display_path(cwd, workspace);
   if (text.empty()) text = ".";
   return shorten_middle(std::move(text), 48);
 }
 
-std::string known_values_text(const ava::session::SessionStats& stats) {
+std::string known_values_text(ava::session::SessionStats const& stats) {
   std::ostringstream output;
   bool wrote_any = false;
   append_known_value(output, wrote_any, "input", stats.input_tokens);
@@ -118,7 +118,7 @@ std::string known_values_text(const ava::session::SessionStats& stats) {
   return wrote_any ? output.str() : std::string("unavailable");
 }
 
-std::string estimated_bytes_text(const ava::session::SessionStats& stats) {
+std::string estimated_bytes_text(ava::session::SessionStats const& stats) {
   std::ostringstream output;
   bool wrote_any = false;
   append_known_value(output, wrote_any, "input", stats.estimated_input_bytes);
@@ -127,7 +127,7 @@ std::string estimated_bytes_text(const ava::session::SessionStats& stats) {
   return wrote_any ? output.str() : std::string("unavailable");
 }
 
-std::string cost_text(const ava::session::SessionStats& stats) {
+std::string cost_text(ava::session::SessionStats const& stats) {
   if (stats.cost_complete) return stats.total_cost_usd ? format_cost_usd(*stats.total_cost_usd) : "unavailable";
   if (stats.known_cost_usd) {
     return "at least " + format_cost_usd(*stats.known_cost_usd) + " (" + std::to_string(stats.unknown_cost_entries) +
@@ -136,7 +136,7 @@ std::string cost_text(const ava::session::SessionStats& stats) {
   return "incomplete (" + std::to_string(stats.unknown_cost_entries) + " unknown)";
 }
 
-std::string format_session_stats_text(const RuntimeSession& session, const ava::session::SessionStats& stats) {
+std::string format_session_stats_text(RuntimeSession const& session, ava::session::SessionStats const& stats) {
   std::ostringstream output;
   output << "Session stats\n";
   output << "  session: " << shorten_middle(session.store.session_id(), 32) << "   entries: " << stats.entry_count
@@ -174,7 +174,7 @@ std::string format_session_stats_text(const RuntimeSession& session, const ava::
 ava::core::Result<CommandResult> run_sessions_command(RuntimeSession& session, std::string_view query) {
   CommandResult result;
   result.handled = true;
-  const auto trimmed_query = trim_ascii(query);
+  auto const trimmed_query = trim_ascii(query);
   auto sessions = ava::session::SessionStore::list_sessions(session.workspace_dir, session.paths.sessions_dir);
   if (!sessions) {
     add_output(result, sessions.error().format());
@@ -185,7 +185,7 @@ ava::core::Result<CommandResult> run_sessions_command(RuntimeSession& session, s
     return result;
   }
   std::string output;
-  for (const auto& summary : *sessions) {
+  for (auto const& summary : *sessions) {
     if (!session_matches_query(summary, trimmed_query)) continue;
     output += summary.session_id + "  entries=" + std::to_string(summary.entry_count);
     if (!summary.last_updated.empty()) output += "  updated=" + summary.last_updated;
@@ -202,7 +202,7 @@ ava::core::Result<CommandResult> run_sessions_command(RuntimeSession& session, s
 ava::core::Result<CommandResult> run_mode_command(RuntimeSession& session) {
   CommandResult result;
   result.handled = true;
-  const auto new_mode = ava::agent::toggle_mode(session.mode);
+  auto const new_mode = ava::agent::toggle_mode(session.mode);
   auto prompt_state = select_runtime_prompt_state(session, new_mode);
   if (!prompt_state) return std::unexpected(std::move(prompt_state.error()));
   if (auto appended = append_mode_change(session.store, new_mode); !appended) {
@@ -216,13 +216,13 @@ ava::core::Result<CommandResult> run_mode_command(RuntimeSession& session) {
 ava::core::Result<CommandResult> run_context_command(RuntimeSession& session, std::string_view query) {
   CommandResult result;
   result.handled = true;
-  const auto trimmed_query = trim_ascii(query);
+  auto const trimmed_query = trim_ascii(query);
   if (session.context_sources.empty()) {
     add_output(result, "No context sources loaded.");
     return result;
   }
   std::string output;
-  for (const auto& source : session.context_sources) {
+  for (auto const& source : session.context_sources) {
     if (!context_source_matches_query(source, trimmed_query)) continue;
     output += ava::context::to_string(source.source_type) + "  " + source.path.string() +
               "  bytes=" + std::to_string(source.byte_count) + '\n';
@@ -247,7 +247,7 @@ ava::core::Result<CommandResult> run_stats_command(RuntimeSession& session) {
   return result;
 }
 
-ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, const CommandRequest& request) {
+ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, CommandRequest const& request) {
   CommandResult result;
   result.handled = true;
   auto fail_compaction = [&](ava::core::Error error) -> ava::core::Result<CommandResult> {
@@ -255,7 +255,7 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, co
     add_output(result, error.format());
     return result;
   };
-  const auto instructions = command_argument(request.command, "/compact");
+  auto const instructions = command_argument(request.command, "/compact");
   if (!request.compaction_summary_generator) {
     return fail_compaction(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                             "/compact requires provider-backed summary generation"));
@@ -280,7 +280,7 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, co
     if (!entries) {
       return fail_compaction(std::move(entries.error()));
     }
-    const auto estimated_tokens = ava::session::estimate_session_tokens(*entries);
+    auto const estimated_tokens = ava::session::estimate_session_tokens(*entries);
     auto start_event = base_command_event(session, RuntimeEventType::CompactionStart);
     start_event.trigger = "manual";
     start_event.status = "started";

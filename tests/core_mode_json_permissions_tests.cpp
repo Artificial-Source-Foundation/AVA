@@ -49,9 +49,9 @@
 namespace {
 
 void test_mode_parsing() {
-  const auto build = ava::agent::parse_mode("build");
-  const auto plan = ava::agent::parse_mode("plan");
-  const auto bad = ava::agent::parse_mode("other");
+  auto const build = ava::agent::parse_mode("build");
+  auto const plan = ava::agent::parse_mode("plan");
+  auto const bad = ava::agent::parse_mode("other");
 
   expect(build && *build == ava::agent::Mode::Build, "build mode parses");
   expect(plan && *plan == ava::agent::Mode::Plan, "plan mode parses");
@@ -60,39 +60,39 @@ void test_mode_parsing() {
 }
 
 void test_json_escape_control_characters() {
-  const auto escaped = ava::session::json_escape(std::string("a\x01\b\f", 4));
+  auto const escaped = ava::session::json_escape(std::string("a\x01\b\f", 4));
   expect(escaped == "a\\u0001\\b\\f", "json_escape escapes all JSON control characters");
 }
 
 void test_core_json_top_level_lookup() {
-  const std::string document =
+  std::string const document =
       "{\"data\":{\"type\":\"bad\"},\"items\":[{\"type\":\"array_bad\"}],"
       "\"text\":\"contains \\\"type\\\":\\\"string_bad\\\"\",\"type\":\"good\"}";
-  const auto type = ava::core::json::string_field(document, "type");
+  auto const type = ava::core::json::string_field(document, "type");
   expect(type && *type == "good", "JSON string_field reads only top-level object keys");
   expect(!ava::core::json::string_field(document, "items.type"), "JSON lookup does not invent nested paths");
 
-  const std::string arrays_first = "{\"items\":[{\"models\":[{\"id\":\"bad\"}]}],\"models\":[{\"id\":\"ok\"}]}";
-  const auto models = ava::core::json::objects_in_array_field(arrays_first, "models");
-  const auto model_id = models.empty() ? std::optional<std::string>{} : ava::core::json::string_field(models[0], "id");
+  std::string const arrays_first = "{\"items\":[{\"models\":[{\"id\":\"bad\"}]}],\"models\":[{\"id\":\"ok\"}]}";
+  auto const models = ava::core::json::objects_in_array_field(arrays_first, "models");
+  auto const model_id = models.empty() ? std::optional<std::string>{} : ava::core::json::string_field(models[0], "id");
   expect(models.size() == 1 && model_id && *model_id == "ok",
          "JSON array lookup ignores nested arrays before top-level field");
-  const auto paths = ava::core::json::strings_in_array_field(
+  auto const paths = ava::core::json::strings_in_array_field(
       "{\"items\":[\"bad\"],\"changed_paths\":[\"src/main.cpp\",\"a\\\\b\",{\"skip\":\"nested\"},[\"also skip\"]]}",
       "changed_paths");
   expect(paths.size() == 2 && paths[0] == "src/main.cpp" && paths[1] == "a\\b",
          "JSON string array lookup reads only top-level string array elements");
 
-  const auto surrogate_pair = ava::core::json::string_field("{\"text\":\"\\uD834\\uDD1E\"}", "text");
+  auto const surrogate_pair = ava::core::json::string_field("{\"text\":\"\\uD834\\uDD1E\"}", "text");
   expect(surrogate_pair && *surrogate_pair == std::string("\xF0\x9D\x84\x9E"),
          "JSON string_field decodes UTF-16 surrogate pairs");
-  const auto lone_high_surrogate = ava::core::json::string_field("{\"text\":\"\\uD834x\"}", "text");
+  auto const lone_high_surrogate = ava::core::json::string_field("{\"text\":\"\\uD834x\"}", "text");
   expect(lone_high_surrogate && *lone_high_surrogate == std::string("\xEF\xBF\xBDx"),
          "JSON string_field replaces lone high surrogates");
-  const auto lone_low_surrogate = ava::core::json::string_field("{\"text\":\"\\uDD1E\"}", "text");
+  auto const lone_low_surrogate = ava::core::json::string_field("{\"text\":\"\\uDD1E\"}", "text");
   expect(lone_low_surrogate && *lone_low_surrogate == std::string("\xEF\xBF\xBD"),
          "JSON string_field replaces lone low surrogates");
-  const auto high_then_non_low = ava::core::json::string_field("{\"text\":\"\\uD834\\u0061\"}", "text");
+  auto const high_then_non_low = ava::core::json::string_field("{\"text\":\"\\uD834\\u0061\"}", "text");
   expect(high_then_non_low && *high_then_non_low == std::string("\xEF\xBF\xBD") + "a",
          "JSON string_field leaves non-low escape after replacing high surrogate");
   expect(!ava::core::json::string_field("{\"text\":\"\\u12xz\"}", "text"),
@@ -101,9 +101,9 @@ void test_core_json_top_level_lookup() {
 }
 
 void test_permission_defaults() {
-  const auto workspace = std::filesystem::current_path();
+  auto const workspace = std::filesystem::current_path();
 
-  const auto normal_edit = ava::permissions::decide(ava::permissions::PermissionRequest{
+  auto const normal_edit = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::EditFile,
       .mode = ava::agent::Mode::Build,
       .workspace_dir = workspace,
@@ -112,7 +112,7 @@ void test_permission_defaults() {
   });
   expect(normal_edit.action == ava::permissions::PermissionAction::Allow, "build mode allows workspace edits");
 
-  const auto plan_source_edit = ava::permissions::decide(ava::permissions::PermissionRequest{
+  auto const plan_source_edit = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::EditFile,
       .mode = ava::agent::Mode::Plan,
       .workspace_dir = workspace,
@@ -121,7 +121,7 @@ void test_permission_defaults() {
   });
   expect(plan_source_edit.action == ava::permissions::PermissionAction::Deny, "plan mode denies source edits");
 
-  const auto plan_doc_edit = ava::permissions::decide(ava::permissions::PermissionRequest{
+  auto const plan_doc_edit = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::EditFile,
       .mode = ava::agent::Mode::Plan,
       .workspace_dir = workspace,
@@ -130,7 +130,7 @@ void test_permission_defaults() {
   });
   expect(plan_doc_edit.action == ava::permissions::PermissionAction::Allow, "plan mode allows planning markdown");
 
-  const auto secret_read = ava::permissions::decide(ava::permissions::PermissionRequest{
+  auto const secret_read = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::ReadFile,
       .mode = ava::agent::Mode::Build,
       .workspace_dir = workspace,
@@ -139,7 +139,7 @@ void test_permission_defaults() {
   });
   expect(secret_read.action == ava::permissions::PermissionAction::Deny, "secret files are denied");
 
-  const auto npmrc_read = ava::permissions::decide(ava::permissions::PermissionRequest{
+  auto const npmrc_read = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::ReadFile,
       .mode = ava::agent::Mode::Build,
       .workspace_dir = workspace,
@@ -148,7 +148,7 @@ void test_permission_defaults() {
   });
   expect(npmrc_read.action == ava::permissions::PermissionAction::Deny, "common credential files are denied");
 
-  const auto ssh_read = ava::permissions::decide(ava::permissions::PermissionRequest{
+  auto const ssh_read = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::ReadFile,
       .mode = ava::agent::Mode::Build,
       .workspace_dir = workspace,
@@ -157,7 +157,7 @@ void test_permission_defaults() {
   });
   expect(ssh_read.action == ava::permissions::PermissionAction::Deny, "credential directories are denied");
 
-  const auto external_read = ava::permissions::decide(ava::permissions::PermissionRequest{
+  auto const external_read = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::ReadFile,
       .mode = ava::agent::Mode::Build,
       .workspace_dir = workspace,
@@ -166,7 +166,7 @@ void test_permission_defaults() {
   });
   expect(external_read.action == ava::permissions::PermissionAction::Ask, "external paths ask");
 
-  const auto workspace_lsp = ava::permissions::decide(ava::permissions::PermissionRequest{
+  auto const workspace_lsp = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::LspQuery,
       .mode = ava::agent::Mode::Build,
       .workspace_dir = workspace,
@@ -177,7 +177,7 @@ void test_permission_defaults() {
   expect(ava::permissions::to_string(ava::permissions::Operation::LspQuery) == "lsp.query",
          "LSP query operation string is stable");
 
-  const auto secret_lsp = ava::permissions::decide(ava::permissions::PermissionRequest{
+  auto const secret_lsp = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::LspQuery,
       .mode = ava::agent::Mode::Build,
       .workspace_dir = workspace,
@@ -186,7 +186,7 @@ void test_permission_defaults() {
   });
   expect(secret_lsp.action == ava::permissions::PermissionAction::Deny, "LSP diagnostics deny secret paths");
 
-  const auto external_lsp = ava::permissions::decide(ava::permissions::PermissionRequest{
+  auto const external_lsp = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::LspQuery,
       .mode = ava::agent::Mode::Build,
       .workspace_dir = workspace,
@@ -195,16 +195,16 @@ void test_permission_defaults() {
   });
   expect(external_lsp.action == ava::permissions::PermissionAction::Ask, "external LSP diagnostic paths ask");
 
-  const auto symlink_workspace = temp_root() / "symlink-workspace";
-  const auto outside = temp_root() / "outside";
+  auto const symlink_workspace = temp_root() / "symlink-workspace";
+  auto const outside = temp_root() / "outside";
   std::filesystem::create_directories(symlink_workspace);
   std::filesystem::create_directories(outside);
   std::error_code symlink_error;
-  const auto link = symlink_workspace / "link-outside";
+  auto const link = symlink_workspace / "link-outside";
   std::filesystem::remove(link, symlink_error);
   std::filesystem::create_directory_symlink(outside, link, symlink_error);
   if (!symlink_error) {
-    const auto symlink_escape = ava::permissions::decide(ava::permissions::PermissionRequest{
+    auto const symlink_escape = ava::permissions::decide(ava::permissions::PermissionRequest{
         .operation = ava::permissions::Operation::ReadFile,
         .mode = ava::agent::Mode::Build,
         .workspace_dir = symlink_workspace,

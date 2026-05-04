@@ -13,21 +13,21 @@ namespace ava::app::rpc {
 
 [[nodiscard]] ava::core::VoidResult write_record(RpcOutput& output, std::string_view record);
 [[nodiscard]] ava::core::VoidResult write_success(RpcOutput& output, std::string_view id, std::string_view result_json);
-[[nodiscard]] ava::core::VoidResult write_error(RpcOutput& output, std::string_view id, const ava::core::Error& error);
+[[nodiscard]] ava::core::VoidResult write_error(RpcOutput& output, std::string_view id, ava::core::Error const& error);
 
 void subscribe_event_envelope_writer(EventBus& bus, RpcOutput& output);
 [[nodiscard]] EventEnvelopeContext rpc_event_context(std::string_view request_id);
-[[nodiscard]] std::string session_id_snapshot(const RuntimeSession& session, std::mutex& session_mutex);
+[[nodiscard]] std::string session_id_snapshot(RuntimeSession const& session, std::mutex& session_mutex);
 [[nodiscard]] EventEnvelope resolver_event_envelope(std::string name, std::string request_id,
                                                     std::string correlation_id, std::string session_id,
                                                     std::string payload_json);
 
-[[nodiscard]] ava::core::VoidResult write_queue_event(RpcOutput& output, const RuntimeSession& session,
+[[nodiscard]] ava::core::VoidResult write_queue_event(RpcOutput& output, RuntimeSession const& session,
                                                       std::mutex& session_mutex, std::string_view name,
-                                                      const QueuedRpcMessage& queued, std::string_view reason = {});
-[[nodiscard]] ava::core::VoidResult write_skipped_queue_events(RpcOutput& output, const RuntimeSession& session,
+                                                      QueuedRpcMessage const& queued, std::string_view reason = {});
+[[nodiscard]] ava::core::VoidResult write_skipped_queue_events(RpcOutput& output, RuntimeSession const& session,
                                                                std::mutex& session_mutex,
-                                                               const ClearedRpcQueues& cleared,
+                                                               ClearedRpcQueues const& cleared,
                                                                std::string_view reason);
 
 }  // namespace ava::app::rpc

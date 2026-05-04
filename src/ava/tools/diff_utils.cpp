@@ -38,7 +38,7 @@ void append_bounded(DiffPreview& preview, std::string_view text, std::size_t max
     preview.truncated = true;
     return;
   }
-  const auto remaining = max_bytes - preview.text.size();
+  auto const remaining = max_bytes - preview.text.size();
   if (text.size() <= remaining) {
     preview.text.append(text);
     return;
@@ -54,11 +54,11 @@ void append_diff_line(DiffPreview& preview, char prefix, std::string_view line, 
   append_bounded(preview, "\n", max_bytes);
 }
 
-Alignment next_alignment(const std::vector<LogicalLine>& old_lines, const std::vector<LogicalLine>& new_lines,
+Alignment next_alignment(std::vector<LogicalLine> const& old_lines, std::vector<LogicalLine> const& new_lines,
                          std::size_t old_start, std::size_t old_end, std::size_t new_start, std::size_t new_end) {
   constexpr std::size_t kAlignmentLookahead = 64;
-  const auto old_limit = std::min(old_end, old_start + kAlignmentLookahead);
-  const auto new_limit = std::min(new_end, new_start + kAlignmentLookahead);
+  auto const old_limit = std::min(old_end, old_start + kAlignmentLookahead);
+  auto const new_limit = std::min(new_end, new_start + kAlignmentLookahead);
   for (std::size_t old_index = old_start; old_index < old_limit; ++old_index) {
     for (std::size_t new_index = new_start; new_index < new_limit; ++new_index) {
       if (old_lines[old_index].text == new_lines[new_index].text) {
@@ -69,8 +69,8 @@ Alignment next_alignment(const std::vector<LogicalLine>& old_lines, const std::v
   return {};
 }
 
-void append_changed_region(DiffPreview& preview, const std::vector<LogicalLine>& old_lines,
-                           const std::vector<LogicalLine>& new_lines, std::size_t old_start, std::size_t old_end,
+void append_changed_region(DiffPreview& preview, std::vector<LogicalLine> const& old_lines,
+                           std::vector<LogicalLine> const& new_lines, std::size_t old_start, std::size_t old_end,
                            std::size_t new_start, std::size_t new_end, std::size_t max_bytes) {
   auto old_index = old_start;
   auto new_index = new_start;
@@ -82,9 +82,9 @@ void append_changed_region(DiffPreview& preview, const std::vector<LogicalLine>&
       continue;
     }
 
-    const auto alignment = next_alignment(old_lines, new_lines, old_index, old_end, new_index, new_end);
-    const auto old_stop = alignment.found ? alignment.old_index : old_end;
-    const auto new_stop = alignment.found ? alignment.new_index : new_end;
+    auto const alignment = next_alignment(old_lines, new_lines, old_index, old_end, new_index, new_end);
+    auto const old_stop = alignment.found ? alignment.old_index : old_end;
+    auto const new_stop = alignment.found ? alignment.new_index : new_end;
     for (; old_index < old_stop; ++old_index) append_diff_line(preview, '-', old_lines[old_index].text, max_bytes);
     for (; new_index < new_stop; ++new_index) append_diff_line(preview, '+', new_lines[new_index].text, max_bytes);
   }
@@ -98,13 +98,13 @@ std::string hunk_header(std::size_t old_start, std::size_t old_count, std::size_
 }  // namespace
 
 DiffPreview unified_diff(std::string_view old_content, std::string_view new_content,
-                         const std::filesystem::path& old_path, const std::filesystem::path& new_path,
+                         std::filesystem::path const& old_path, std::filesystem::path const& new_path,
                          std::size_t max_bytes) {
   DiffPreview preview;
   if (old_content == new_content || max_bytes == 0) return preview;
 
-  const auto old_lines = split_lines(old_content);
-  const auto new_lines = split_lines(new_content);
+  auto const old_lines = split_lines(old_content);
+  auto const new_lines = split_lines(new_content);
 
   std::size_t prefix = 0;
   while (prefix < old_lines.size() && prefix < new_lines.size() && old_lines[prefix].text == new_lines[prefix].text) {
@@ -118,11 +118,11 @@ DiffPreview unified_diff(std::string_view old_content, std::string_view new_cont
   }
 
   constexpr std::size_t kContextLines = 3;
-  const auto old_change_end = old_lines.size() - suffix;
-  const auto new_change_end = new_lines.size() - suffix;
-  const auto hunk_start = prefix > kContextLines ? prefix - kContextLines : 0;
-  const auto old_hunk_end = std::min(old_lines.size(), old_change_end + kContextLines);
-  const auto new_hunk_end = std::min(new_lines.size(), new_change_end + kContextLines);
+  auto const old_change_end = old_lines.size() - suffix;
+  auto const new_change_end = new_lines.size() - suffix;
+  auto const hunk_start = prefix > kContextLines ? prefix - kContextLines : 0;
+  auto const old_hunk_end = std::min(old_lines.size(), old_change_end + kContextLines);
+  auto const new_hunk_end = std::min(new_lines.size(), new_change_end + kContextLines);
 
   append_bounded(preview, "--- " + old_path.generic_string() + "\n", max_bytes);
   append_bounded(preview, "+++ " + new_path.generic_string() + "\n", max_bytes);

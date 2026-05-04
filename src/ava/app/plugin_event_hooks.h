@@ -16,7 +16,7 @@ namespace ava::app {
 struct RuntimeSession;
 
 using PluginEventHookFailureSink =
-    std::function<void(std::string_view plugin_id, std::string_view event_name, const ava::core::Error& error)>;
+    std::function<void(std::string_view plugin_id, std::string_view event_name, ava::core::Error const& error)>;
 
 struct PluginEventObserverOptions {
   std::filesystem::path workspace_dir;

@@ -12,9 +12,9 @@ namespace {
 std::string safe_filename_component(std::string_view value, std::string_view fallback) {
   std::string out;
   out.reserve(value.size());
-  for (const char ch : value) {
-    const auto byte = static_cast<unsigned char>(ch);
-    const bool safe = (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9') ||
+  for (char const ch : value) {
+    auto const byte = static_cast<unsigned char>(ch);
+    bool const safe = (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9') ||
                       ch == '-' || ch == '_' || ch == '.';
     out.push_back(safe ? ch : '_');
     if (out.size() >= 80) break;
@@ -26,9 +26,9 @@ std::string safe_filename_component(std::string_view value, std::string_view fal
 
 std::string normalized_extension(std::string_view extension) {
   std::string out;
-  for (const char ch : extension) {
-    const auto byte = static_cast<unsigned char>(ch);
-    const bool safe = (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9');
+  for (char const ch : extension) {
+    auto const byte = static_cast<unsigned char>(ch);
+    bool const safe = (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9');
     if (safe) out.push_back(ch);
     if (out.size() >= 12) break;
   }
@@ -49,7 +49,7 @@ void SpillBuffer::append(std::string_view text) {
     truncated_ = true;
     return;
   }
-  const auto available = max_bytes_ - content_.size();
+  auto const available = max_bytes_ - content_.size();
   if (text.size() <= available) {
     content_.append(text);
     return;
@@ -58,14 +58,14 @@ void SpillBuffer::append(std::string_view text) {
   truncated_ = true;
 }
 
-const std::string& SpillBuffer::content() const noexcept { return content_; }
+std::string const& SpillBuffer::content() const noexcept { return content_; }
 
 std::size_t SpillBuffer::total_bytes() const noexcept { return total_bytes_; }
 
 bool SpillBuffer::truncated() const noexcept { return truncated_; }
 
-ava::core::Result<SpillFileResult> write_spill_file(const ToolContext& context, std::string_view tool_name,
-                                                    std::string_view extension, const SpillBuffer& buffer) {
+ava::core::Result<SpillFileResult> write_spill_file(ToolContext const& context, std::string_view tool_name,
+                                                    std::string_view extension, SpillBuffer const& buffer) {
   if (context.spill_dir.empty()) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "spill directory is not configured");
     return std::unexpected(std::move(error));
@@ -90,11 +90,11 @@ ava::core::Result<SpillFileResult> write_spill_file(const ToolContext& context, 
     return std::unexpected(std::move(error));
   }
 
-  const auto tool = safe_filename_component(tool_name.empty() ? context.current_tool_name : tool_name, "tool");
-  const auto call_id = safe_filename_component(context.current_call_id, "call");
-  const auto filename =
+  auto const tool = safe_filename_component(tool_name.empty() ? context.current_tool_name : tool_name, "tool");
+  auto const call_id = safe_filename_component(context.current_call_id, "call");
+  auto const filename =
       tool + "-" + call_id + "-" + ava::core::make_id("spill") + "." + normalized_extension(extension);
-  const auto path = context.spill_dir / filename;
+  auto const path = context.spill_dir / filename;
 
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   if (!file) {
@@ -128,7 +128,7 @@ ava::core::Result<SpillFileResult> write_spill_file(const ToolContext& context, 
   return SpillFileResult{.path = path, .truncated = buffer.truncated(), .bytes_written = buffer.content().size()};
 }
 
-ava::core::VoidResult emit_tool_progress(const ToolContext& context, std::string text, std::string status) {
+ava::core::VoidResult emit_tool_progress(ToolContext const& context, std::string text, std::string status) {
   if (!context.progress_sink) return {};
   return context.progress_sink(ToolProgressEvent{.text = std::move(text),
                                                  .call_id = context.current_call_id,

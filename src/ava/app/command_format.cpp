@@ -10,24 +10,24 @@ namespace ava::app {
 
 void add_output(CommandResult& result, std::string text) { result.output.push_back(std::move(text)); }
 
-std::string display_path(const std::filesystem::path& path, const std::filesystem::path& base) {
+std::string display_path(std::filesystem::path const& path, std::filesystem::path const& base) {
   std::error_code error;
-  const auto relative = std::filesystem::relative(path, base, error);
+  auto const relative = std::filesystem::relative(path, base, error);
   if (!error) return relative.generic_string();
   return path.generic_string();
 }
 
 std::string sanitize_inline_text(std::string text) {
   for (auto& ch : text) {
-    const auto byte = static_cast<unsigned char>(ch);
+    auto const byte = static_cast<unsigned char>(ch);
     if (byte < 0x20 || byte == 0x7F) ch = '?';
   }
   return text;
 }
 
-std::string joined_strings(const std::vector<std::string>& values, std::string_view separator) {
+std::string joined_strings(std::vector<std::string> const& values, std::string_view separator) {
   std::string output;
-  for (const auto& value : values) {
+  for (auto const& value : values) {
     if (!output.empty()) output += separator;
     output += value;
   }
@@ -46,7 +46,7 @@ std::vector<std::string> split_command_arguments(std::string_view text) {
   std::size_t index = 0;
   while (index < text.size()) {
     while (index < text.size() && std::isspace(static_cast<unsigned char>(text[index])) != 0) ++index;
-    const auto start = index;
+    auto const start = index;
     while (index < text.size() && std::isspace(static_cast<unsigned char>(text[index])) == 0) ++index;
     if (start < index) parts.emplace_back(text.substr(start, index - start));
   }

@@ -13,7 +13,7 @@ struct ExportOptions {
   bool include_compactions = true;
 };
 
-[[nodiscard]] std::string format_session_markdown(const std::vector<SessionEntry>& entries,
-                                                  const ExportOptions& options = {});
+[[nodiscard]] std::string format_session_markdown(std::vector<SessionEntry> const& entries,
+                                                  ExportOptions const& options = {});
 
 }  // namespace ava::session

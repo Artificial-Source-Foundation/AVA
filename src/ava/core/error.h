@@ -27,8 +27,8 @@ class Error {
   Error(ErrorCategory category, std::string message);
 
   [[nodiscard]] ErrorCategory category() const noexcept;
-  [[nodiscard]] const std::string& message() const noexcept;
-  [[nodiscard]] const std::vector<ErrorContext>& context() const noexcept;
+  [[nodiscard]] std::string const& message() const noexcept;
+  [[nodiscard]] std::vector<ErrorContext> const& context() const noexcept;
   [[nodiscard]] std::string format() const;
 
   Error& with_context(std::string key, std::string value);

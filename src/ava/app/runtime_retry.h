@@ -5,7 +5,7 @@
 
 namespace ava::app::runtime {
 
-[[nodiscard]] ava::provider::RetryOptions runtime_retry_options(const RuntimeSession& session,
-                                                                const RuntimeRunOptions& options);
+[[nodiscard]] ava::provider::RetryOptions runtime_retry_options(RuntimeSession const& session,
+                                                                RuntimeRunOptions const& options);
 
 }  // namespace ava::app::runtime

@@ -47,13 +47,13 @@ std::string valid_manifest_json(std::string id = "com.example.todo") {
          "}";
 }
 
-void write_text(const std::filesystem::path& path, const std::string& text) {
+void write_text(std::filesystem::path const& path, std::string const& text) {
   std::filesystem::create_directories(path.parent_path());
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file << text;
 }
 
-std::string read_text(const std::filesystem::path& path) {
+std::string read_text(std::filesystem::path const& path) {
   std::ifstream file(path, std::ios::binary);
   std::ostringstream buffer;
   buffer << file.rdbuf();
@@ -117,7 +117,7 @@ std::string event_hook_manifest_json(std::string id, std::string script_name, st
          "}";
 }
 
-ava::plugin::PluginManifest runner_manifest(const std::filesystem::path& plugin_dir, std::string id,
+ava::plugin::PluginManifest runner_manifest(std::filesystem::path const& plugin_dir, std::string id,
                                             std::string script_name) {
   auto parsed = ava::plugin::parse_plugin_manifest(runner_manifest_json(std::move(id), std::move(script_name)),
                                                    plugin_dir / "plugin.json");
@@ -126,7 +126,7 @@ ava::plugin::PluginManifest runner_manifest(const std::filesystem::path& plugin_
   return parsed.value_or(ava::plugin::PluginManifest{});
 }
 
-ava::plugin::PluginRunnerOptions runner_options(const std::filesystem::path& workspace,
+ava::plugin::PluginRunnerOptions runner_options(std::filesystem::path const& workspace,
                                                 std::chrono::milliseconds startup_timeout) {
   ava::plugin::PluginRunnerOptions options;
   options.workspace_dir = workspace;
@@ -197,11 +197,11 @@ void test_plugin_manifest_parsing() {
 }
 
 void test_plugin_discovery() {
-  const auto root = temp_root() / "plugins";
+  auto const root = temp_root() / "plugins";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto global_manifest = root / "config" / "ava" / "plugins" / "com.example.global" / "plugin.json";
-  const auto project_manifest = root / "workspace" / ".ava" / "plugins" / "com.example.project" / "plugin.json";
+  auto const global_manifest = root / "config" / "ava" / "plugins" / "com.example.global" / "plugin.json";
+  auto const project_manifest = root / "workspace" / ".ava" / "plugins" / "com.example.project" / "plugin.json";
   write_text(global_manifest, valid_manifest_json("com.example.global"));
   write_text(project_manifest, valid_manifest_json("com.example.project"));
   write_text(root / "workspace" / ".ava" / "plugins" / "com.example.project" / "should_not_run", "not executable");
@@ -215,18 +215,18 @@ void test_plugin_discovery() {
                     : "plugin discovery loads global and project manifests: " + discovered.error().format());
   if (discovered) {
     expect(discovered->size() == 2, "plugin discovery finds two manifests");
-    const bool has_global =
-        std::any_of(discovered->begin(), discovered->end(), [](const ava::plugin::DiscoveredPlugin& plugin) {
+    bool const has_global =
+        std::any_of(discovered->begin(), discovered->end(), [](ava::plugin::DiscoveredPlugin const& plugin) {
           return plugin.manifest.id == "com.example.global" && plugin.scope == ava::plugin::PluginScope::Global;
         });
-    const bool has_project =
-        std::any_of(discovered->begin(), discovered->end(), [](const ava::plugin::DiscoveredPlugin& plugin) {
+    bool const has_project =
+        std::any_of(discovered->begin(), discovered->end(), [](ava::plugin::DiscoveredPlugin const& plugin) {
           return plugin.manifest.id == "com.example.project" && plugin.scope == ava::plugin::PluginScope::Project;
         });
     expect(has_global && has_project, "plugin discovery preserves plugin scope");
   }
 
-  const auto duplicate_root = root / "duplicates";
+  auto const duplicate_root = root / "duplicates";
   write_text(duplicate_root / "global" / "com.example.same" / "plugin.json", valid_manifest_json("com.example.same"));
   write_text(duplicate_root / "project" / "com.example.same" / "plugin.json", valid_manifest_json("com.example.same"));
   auto duplicate = ava::plugin::discover_plugins(ava::plugin::PluginDiscoveryOptions{
@@ -236,8 +236,8 @@ void test_plugin_discovery() {
   expect(!duplicate && duplicate.error().message().find("duplicate") != std::string::npos,
          "plugin discovery rejects duplicate plugin ids across scopes");
 
-  const auto symlink_root = root / "symlink";
-  const auto outside = symlink_root / "outside";
+  auto const symlink_root = root / "symlink";
+  auto const outside = symlink_root / "outside";
   write_text(outside / "plugin.json", valid_manifest_json("com.example.symlinked"));
   std::filesystem::create_directories(symlink_root / "global");
   std::error_code symlink_error;
@@ -253,13 +253,13 @@ void test_plugin_discovery() {
     expect(skipped && skipped->empty(), "plugin discovery skips symlinked plugin directories");
   }
 
-  const auto oversized = root / "oversized" / "plugin.json";
+  auto const oversized = root / "oversized" / "plugin.json";
   write_text(oversized, std::string(300 * 1024, '{'));
   auto oversized_manifest = ava::plugin::load_plugin_manifest(oversized);
   expect(!oversized_manifest && oversized_manifest.error().message().find("maximum size") != std::string::npos,
          "plugin manifest load rejects oversized files before parsing");
 
-  const auto directory_manifest = root / "directory-manifest" / "plugin.json";
+  auto const directory_manifest = root / "directory-manifest" / "plugin.json";
   std::filesystem::create_directories(directory_manifest);
   auto non_regular_manifest = ava::plugin::load_plugin_manifest(directory_manifest);
   expect(!non_regular_manifest && non_regular_manifest.error().message().find("regular file") != std::string::npos,
@@ -267,11 +267,11 @@ void test_plugin_discovery() {
 }
 
 void test_plugin_enablement() {
-  const auto root = temp_root() / "plugin-enable";
+  auto const root = temp_root() / "plugin-enable";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto state_file = root / "state" / "ava" / "plugin-enablement.json";
-  const auto workspace = root / "workspace";
+  auto const state_file = root / "state" / "ava" / "plugin-enablement.json";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
   auto initially_enabled = ava::plugin::plugin_enabled(state_file, workspace, "com.example.todo");
@@ -309,14 +309,14 @@ void test_plugin_enablement() {
   expect(!invalid_id && invalid_id.error().message().find("plugin id") != std::string::npos,
          "plugin enablement rejects invalid plugin ids");
 
-  const auto malformed_state = root / "state" / "ava" / "malformed-plugin-enablement.json";
+  auto const malformed_state = root / "state" / "ava" / "malformed-plugin-enablement.json";
   write_text(malformed_state,
              "{\"workspaces\":{\"/tmp/work\":{\"project\":{\"com.example.todo\":{\"enabled\":truefalse}}}}}");
   auto malformed = ava::plugin::load_plugin_enablement(malformed_state);
   expect(!malformed && malformed.error().message().find("valid JSON") != std::string::npos,
          "plugin enablement rejects malformed JSON instead of partial parsing");
 
-  const auto escaped_state = root / "state" / "ava" / "escaped-plugin-enablement.json";
+  auto const escaped_state = root / "state" / "ava" / "escaped-plugin-enablement.json";
   write_text(escaped_state,
              "{\"workspaces\":{\"/tmp/work{\\\"q\\\"}\":{\"project\":{\"com.example.todo\":{\"enabled\":true}}}}}");
   auto escaped = ava::plugin::load_plugin_enablement(escaped_state);
@@ -326,11 +326,11 @@ void test_plugin_enablement() {
 }
 
 void test_plugin_runner_initializes_and_shuts_down() {
-  const auto root = temp_root() / "plugin-runner";
+  auto const root = temp_root() / "plugin-runner";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto plugin_dir = root / "plugins" / "com.example.runner";
+  auto const workspace = root / "workspace";
+  auto const plugin_dir = root / "plugins" / "com.example.runner";
   std::filesystem::create_directories(workspace);
 
   write_text(plugin_dir / "plugin.sh",
@@ -355,7 +355,7 @@ void test_plugin_runner_initializes_and_shuts_down() {
            "plugin runner records handshake contributions");
     expect((*process)->stderr_truncated(), "plugin runner bounds stderr diagnostics");
     expect((*process)->stderr_tail().size() == 16, "plugin runner keeps stderr tail");
-    const auto init = read_text(plugin_dir / "init.txt");
+    auto const init = read_text(plugin_dir / "init.txt");
     expect(init.find("\"type\":\"initialize\"") != std::string::npos &&
                init.find("\"plugin_id\":\"com.example.runner\"") != std::string::npos &&
                init.find(workspace.string()) != std::string::npos,
@@ -369,11 +369,11 @@ void test_plugin_runner_initializes_and_shuts_down() {
 }
 
 void test_plugin_runner_accepts_buffered_extra_records() {
-  const auto root = temp_root() / "plugin-runner-buffered";
+  auto const root = temp_root() / "plugin-runner-buffered";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto plugin_dir = root / "plugins" / "com.example.buffered";
+  auto const workspace = root / "workspace";
+  auto const plugin_dir = root / "plugins" / "com.example.buffered";
   std::filesystem::create_directories(workspace);
 
   write_text(plugin_dir / "plugin.sh",
@@ -399,13 +399,13 @@ void test_plugin_runner_accepts_buffered_extra_records() {
 }
 
 void test_plugin_runner_contained_failures() {
-  const auto root = temp_root() / "plugin-runner-failures";
+  auto const root = temp_root() / "plugin-runner-failures";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
-  const auto malformed_dir = root / "plugins" / "com.example.malformed";
+  auto const malformed_dir = root / "plugins" / "com.example.malformed";
   write_text(malformed_dir / "plugin.sh",
              "read line\n"
              "printf '%s\\n' 'not-json'\n");
@@ -415,7 +415,7 @@ void test_plugin_runner_contained_failures() {
   expect(!malformed && malformed.error().message().find("malformed") != std::string::npos,
          "plugin runner rejects malformed initialize records");
 
-  const auto unsupported_dir = root / "plugins" / "com.example.unsupported";
+  auto const unsupported_dir = root / "plugins" / "com.example.unsupported";
   write_text(unsupported_dir / "plugin.sh",
              "read line\n"
              "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"wrong\","
@@ -428,7 +428,7 @@ void test_plugin_runner_contained_failures() {
 
   std::string deep_contributions = "{}";
   for (int i = 0; i < 160; ++i) deep_contributions = "{\"x\":" + deep_contributions + "}";
-  const auto deep_dir = root / "plugins" / "com.example.deep";
+  auto const deep_dir = root / "plugins" / "com.example.deep";
   write_text(deep_dir / "plugin.sh",
              "read line\n"
              "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
@@ -440,7 +440,7 @@ void test_plugin_runner_contained_failures() {
   expect(!deep && deep.error().message().find("malformed") != std::string::npos,
          "plugin runner rejects deeply nested initialize JSON");
 
-  const auto timeout_dir = root / "plugins" / "com.example.timeout";
+  auto const timeout_dir = root / "plugins" / "com.example.timeout";
   write_text(timeout_dir / "plugin.sh", "sleep 2\n");
   auto timeout_options = runner_options(workspace, std::chrono::milliseconds(100));
   auto timed_out = ava::plugin::PluginProcess::start(runner_manifest(timeout_dir, "com.example.timeout", "plugin.sh"),
@@ -448,7 +448,7 @@ void test_plugin_runner_contained_failures() {
   expect(!timed_out && timed_out.error().message().find("timed out") != std::string::npos,
          "plugin runner times out hung startup");
 
-  const auto startup_cancel_dir = root / "plugins" / "com.example.startupcancel";
+  auto const startup_cancel_dir = root / "plugins" / "com.example.startupcancel";
   write_text(startup_cancel_dir / "plugin.sh", "sleep 2\n");
   auto startup_cancel_options = runner_options(workspace, std::chrono::milliseconds(1000));
   int startup_cancel_checks = 0;
@@ -458,7 +458,7 @@ void test_plugin_runner_contained_failures() {
   expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos,
          "plugin runner cancels hung startup before timeout");
 
-  const auto exited_dir = root / "plugins" / "com.example.exited";
+  auto const exited_dir = root / "plugins" / "com.example.exited";
   write_text(exited_dir / "plugin.sh",
              "read line\n"
              "printf '%s\\n' 'plugin exited during initialize' >&2\n"
@@ -466,12 +466,12 @@ void test_plugin_runner_contained_failures() {
   auto exited_options = runner_options(workspace, std::chrono::milliseconds(500));
   auto exited =
       ava::plugin::PluginProcess::start(runner_manifest(exited_dir, "com.example.exited", "plugin.sh"), exited_options);
-  const auto exited_format = exited ? std::string{} : exited.error().format();
+  auto const exited_format = exited ? std::string{} : exited.error().format();
   expect(!exited && exited_format.find("exit 7") != std::string::npos &&
              exited_format.find("plugin exited during initialize") != std::string::npos,
          "plugin runner reports early process exit status and stderr diagnostics: " + exited_format);
 
-  const auto oversized_dir = root / "plugins" / "com.example.oversized";
+  auto const oversized_dir = root / "plugins" / "com.example.oversized";
   write_text(oversized_dir / "plugin.sh", "read line\nprintf '%s\\n' '" + std::string(200, 'x') + "'\n");
   auto oversized_options = runner_options(workspace, std::chrono::milliseconds(500));
   oversized_options.max_record_bytes = 64;
@@ -480,7 +480,7 @@ void test_plugin_runner_contained_failures() {
   expect(!oversized && oversized.error().message().find("size cap") != std::string::npos,
          "plugin runner rejects oversized protocol records");
 
-  const auto flood_dir = root / "plugins" / "com.example.flood";
+  auto const flood_dir = root / "plugins" / "com.example.flood";
   write_text(flood_dir / "plugin.sh",
              "read line\n"
              "while :; do printf x; done\n");
@@ -493,11 +493,11 @@ void test_plugin_runner_contained_failures() {
 }
 
 void test_plugin_runner_tool_calls() {
-  const auto root = temp_root() / "plugin-runner-tools";
+  auto const root = temp_root() / "plugin-runner-tools";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto plugin_dir = root / "plugins" / "com.example.toolrunner";
+  auto const workspace = root / "workspace";
+  auto const plugin_dir = root / "plugins" / "com.example.toolrunner";
   std::filesystem::create_directories(workspace);
 
   write_text(plugin_dir / "plugin.sh",
@@ -520,7 +520,7 @@ void test_plugin_runner_tool_calls() {
                result->metadata_json.find("\"count\":1") != std::string::npos,
            result ? "plugin runner exchanges tool.call/tool.result records"
                   : "plugin runner exchanges tool.call/tool.result records: " + result.error().format());
-    const auto request = read_text(plugin_dir / "tool-request.txt");
+    auto const request = read_text(plugin_dir / "tool-request.txt");
     expect(request.find("\"type\":\"tool.call\"") != std::string::npos &&
                request.find("\"tool\":\"todo_add\"") != std::string::npos &&
                request.find("\"text\":\"write tests\"") != std::string::npos &&
@@ -530,7 +530,7 @@ void test_plugin_runner_tool_calls() {
     expect(shutdown.has_value(), "plugin runner shuts down after tool call");
   }
 
-  const auto malformed_dir = root / "plugins" / "com.example.toolmalformed";
+  auto const malformed_dir = root / "plugins" / "com.example.toolmalformed";
   write_text(malformed_dir / "plugin.sh",
              "read line\n"
              "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
@@ -547,7 +547,7 @@ void test_plugin_runner_tool_calls() {
            "plugin runner rejects malformed tool results");
   }
 
-  const auto timeout_dir = root / "plugins" / "com.example.tooltimeout";
+  auto const timeout_dir = root / "plugins" / "com.example.tooltimeout";
   write_text(timeout_dir / "plugin.sh",
              "read line\n"
              "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
@@ -565,7 +565,7 @@ void test_plugin_runner_tool_calls() {
            "plugin runner times out hung tool calls independently from startup");
   }
 
-  const auto cancel_dir = root / "plugins" / "com.example.toolcancel";
+  auto const cancel_dir = root / "plugins" / "com.example.toolcancel";
   write_text(cancel_dir / "plugin.sh",
              "read line\n"
              "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
@@ -584,7 +584,7 @@ void test_plugin_runner_tool_calls() {
            "plugin runner cancels hung tool calls before timeout");
   }
 
-  const auto crashed_dir = root / "plugins" / "com.example.toolcrash";
+  auto const crashed_dir = root / "plugins" / "com.example.toolcrash";
   write_text(crashed_dir / "plugin.sh",
              "read line\n"
              "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
@@ -597,7 +597,7 @@ void test_plugin_runner_tool_calls() {
   expect(crashed.has_value(), "plugin runner starts crash fake plugin");
   if (crashed) {
     auto result = (*crashed)->call_tool("todo_add", "{}", "crash");
-    const auto result_format = result ? std::string{} : result.error().format();
+    auto const result_format = result ? std::string{} : result.error().format();
     expect(!result && result_format.find("exit 9") != std::string::npos &&
                result_format.find("plugin exited during tool call") != std::string::npos,
            "plugin runner reports tool-time process exits with stderr diagnostics: " + result_format);
@@ -605,11 +605,11 @@ void test_plugin_runner_tool_calls() {
 }
 
 void test_plugin_runner_command_calls() {
-  const auto root = temp_root() / "plugin-runner-commands";
+  auto const root = temp_root() / "plugin-runner-commands";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto plugin_dir = root / "plugins" / "com.example.commandrunner";
+  auto const workspace = root / "workspace";
+  auto const plugin_dir = root / "plugins" / "com.example.commandrunner";
   std::filesystem::create_directories(workspace);
 
   write_text(plugin_dir / "plugin.sh",
@@ -633,7 +633,7 @@ void test_plugin_runner_command_calls() {
                result->metadata_json.find("\"count\":2") != std::string::npos,
            result ? "plugin runner exchanges command.call/command.result records"
                   : "plugin runner exchanges command.call/command.result records: " + result.error().format());
-    const auto request = read_text(plugin_dir / "command-request.txt");
+    auto const request = read_text(plugin_dir / "command-request.txt");
     expect(request.find("\"type\":\"command.call\"") != std::string::npos &&
                request.find("\"command\":\"todo\"") != std::string::npos &&
                request.find("\"filter\":\"open\"") != std::string::npos &&
@@ -645,11 +645,11 @@ void test_plugin_runner_command_calls() {
 }
 
 void test_plugin_runner_event_observation() {
-  const auto root = temp_root() / "plugin-runner-events";
+  auto const root = temp_root() / "plugin-runner-events";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto plugin_dir = root / "plugins" / "com.example.eventrunner";
+  auto const workspace = root / "workspace";
+  auto const plugin_dir = root / "plugins" / "com.example.eventrunner";
   std::filesystem::create_directories(workspace);
 
   write_text(plugin_dir / "plugin.sh",
@@ -672,7 +672,7 @@ void test_plugin_runner_event_observation() {
                result->metadata_json.find("\"count\":1") != std::string::npos,
            result ? "plugin runner exchanges event.observe/event.observed records"
                   : "plugin runner exchanges event.observe/event.observed records: " + result.error().format());
-    const auto request = read_text(plugin_dir / "event-request.txt");
+    auto const request = read_text(plugin_dir / "event-request.txt");
     expect(request.find("\"type\":\"event.observe\"") != std::string::npos &&
                request.find("\"event\":\"tool_result\"") != std::string::npos &&
                request.find("\"tool\":\"demo\"") != std::string::npos &&
@@ -684,13 +684,13 @@ void test_plugin_runner_event_observation() {
 }
 
 void test_enabled_plugin_event_hooks_observe_runtime_events() {
-  const auto root = temp_root() / "plugin-event-hooks";
+  auto const root = temp_root() / "plugin-event-hooks";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto project_plugins = workspace / ".ava" / "plugins";
-  const auto plugin_dir = project_plugins / "com.example.events";
-  const auto state_file = root / "state" / "plugin-enablement.json";
+  auto const workspace = root / "workspace";
+  auto const project_plugins = workspace / ".ava" / "plugins";
+  auto const plugin_dir = project_plugins / "com.example.events";
+  auto const state_file = root / "state" / "plugin-enablement.json";
   std::filesystem::create_directories(workspace);
 
   write_text(plugin_dir / "plugin.json", event_hook_manifest_json("com.example.events", "plugin.sh"));
@@ -715,12 +715,12 @@ void test_enabled_plugin_event_hooks_observe_runtime_events() {
           .plugin_project_plugins_dir = project_plugins,
           .plugin_enablement_file = state_file,
           .mode = ava::agent::Mode::Build,
-          .permission_resolver = [&prompts](const ava::permissions::PermissionPrompt& prompt)
+          .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
               -> ava::core::Result<ava::permissions::PermissionResolution> {
             prompts.push_back(prompt);
             return ava::permissions::PermissionResolution::Allow;
           }},
-      [&forwarded](const ava::app::RuntimeEvent&) -> ava::core::VoidResult {
+      [&forwarded](ava::app::RuntimeEvent const&) -> ava::core::VoidResult {
         forwarded = true;
         return {};
       });
@@ -738,7 +738,7 @@ void test_enabled_plugin_event_hooks_observe_runtime_events() {
              prompts[1].operation == ava::permissions::Operation::PluginEventObserve &&
              prompts[1].command == "com.example.events:tool.result",
          "plugin event hooks require plugin.execute and plugin.event.observe permission approval");
-  const auto request = read_text(plugin_dir / "event-request.txt");
+  auto const request = read_text(plugin_dir / "event-request.txt");
   expect(request.find("\"type\":\"event.observe\"") != std::string::npos &&
              request.find("\"event\":\"tool_result\"") != std::string::npos &&
              request.find("\"tool\":\"demo\"") != std::string::npos,
@@ -754,13 +754,13 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink() {
     std::string details;
   };
 
-  const auto root = temp_root() / "plugin-event-hook-failures";
+  auto const root = temp_root() / "plugin-event-hook-failures";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto project_plugins = workspace / ".ava" / "plugins";
-  const auto plugin_dir = project_plugins / "com.example.eventdiag";
-  const auto state_file = root / "state" / "plugin-enablement.json";
+  auto const workspace = root / "workspace";
+  auto const project_plugins = workspace / ".ava" / "plugins";
+  auto const plugin_dir = project_plugins / "com.example.eventdiag";
+  auto const state_file = root / "state" / "plugin-enablement.json";
   std::filesystem::create_directories(workspace);
 
   write_text(plugin_dir / "plugin.json", event_hook_manifest_json("com.example.eventdiag", "plugin.sh"));
@@ -786,19 +786,19 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink() {
           .plugin_project_plugins_dir = project_plugins,
           .plugin_enablement_file = state_file,
           .mode = ava::agent::Mode::Build,
-          .permission_resolver = [](const ava::permissions::PermissionPrompt&)
+          .permission_resolver = [](ava::permissions::PermissionPrompt const&)
               -> ava::core::Result<ava::permissions::PermissionResolution> {
             return ava::permissions::PermissionResolution::Allow;
           },
           .hook_failure_sink =
-              [&failures](std::string_view plugin_id, std::string_view event_name, const ava::core::Error& error) {
+              [&failures](std::string_view plugin_id, std::string_view event_name, ava::core::Error const& error) {
                 failures.push_back(CapturedFailure{.plugin_id = std::string(plugin_id),
                                                    .event_name = std::string(event_name),
                                                    .category = error.category(),
                                                    .message = error.message(),
                                                    .details = error.format()});
               }},
-      [&forwarded](const ava::app::RuntimeEvent&) -> ava::core::VoidResult {
+      [&forwarded](ava::app::RuntimeEvent const&) -> ava::core::VoidResult {
         forwarded = true;
         return {};
       });
@@ -825,13 +825,13 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink() {
 }
 
 void test_plugin_tool_dispatcher() {
-  const auto root = temp_root() / "plugin-tool-dispatcher";
+  auto const root = temp_root() / "plugin-tool-dispatcher";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto project_plugins = workspace / ".ava" / "plugins";
-  const auto plugin_dir = project_plugins / "com.example.todo";
-  const auto state_file = root / "state" / "plugin-enablement.json";
+  auto const workspace = root / "workspace";
+  auto const project_plugins = workspace / ".ava" / "plugins";
+  auto const plugin_dir = project_plugins / "com.example.todo";
+  auto const state_file = root / "state" / "plugin-enablement.json";
   std::filesystem::create_directories(workspace);
 
   write_text(plugin_dir / "plugin.json", tool_manifest_json("com.example.todo", "plugin.sh"));
@@ -848,7 +848,7 @@ void test_plugin_tool_dispatcher() {
                                                  ava::plugin::PluginScope::Project);
   expect(enabled.has_value(), "dispatcher plugin test enables project plugin");
 
-  const auto model_tool_name = ava::plugin::plugin_model_tool_name("com.example.todo", "todo_add");
+  auto const model_tool_name = ava::plugin::plugin_model_tool_name("com.example.todo", "todo_add");
   std::vector<ava::permissions::PermissionPrompt> prompts;
   std::vector<ava::tools::PermissionAuditEvent> audits;
   bool cancel_requested = false;
@@ -857,19 +857,19 @@ void test_plugin_tool_dispatcher() {
   context.plugin_global_plugins_dir = root / "global-plugins";
   context.plugin_project_plugins_dir = project_plugins;
   context.plugin_enablement_file = state_file;
-  context.permission_resolver = [&prompts](const ava::permissions::PermissionPrompt& prompt)
+  context.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
       -> ava::core::Result<ava::permissions::PermissionResolution> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
-  context.permission_audit_sink = [&audits](const ava::tools::PermissionAuditEvent& event) -> ava::core::VoidResult {
+  context.permission_audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
     audits.push_back(event);
     return {};
   };
   context.cancel_requested = [&] { return cancel_requested; };
 
-  const auto schemas = ava::agent::ToolDispatcher::tool_schemas_json(context);
-  const bool has_plugin_schema = std::any_of(schemas.begin(), schemas.end(), [&](const std::string& schema) {
+  auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(context);
+  bool const has_plugin_schema = std::any_of(schemas.begin(), schemas.end(), [&](std::string const& schema) {
     return schema.find("\"name\":\"" + model_tool_name + "\"") != std::string::npos &&
            schema.find("\"parameters\"") != std::string::npos;
   });
@@ -893,7 +893,7 @@ void test_plugin_tool_dispatcher() {
   expect(!audits.empty() && audits.back().operation == ava::permissions::Operation::PluginToolCall &&
              audits.back().resolution == "allow",
          "plugin tool permission decisions are audited");
-  const auto request = read_text(plugin_dir / "tool-request.txt");
+  auto const request = read_text(plugin_dir / "tool-request.txt");
   expect(request.find("\"type\":\"tool.call\"") != std::string::npos &&
              request.find("\"tool\":\"todo_add\"") != std::string::npos,
          "dispatcher broker sends plugin protocol tool call");
@@ -908,7 +908,7 @@ void test_plugin_tool_dispatcher() {
 
   std::vector<ava::permissions::PermissionPrompt> denied_prompts;
   auto denied_context = context;
-  denied_context.permission_resolver = [&denied_prompts](const ava::permissions::PermissionPrompt& prompt)
+  denied_context.permission_resolver = [&denied_prompts](ava::permissions::PermissionPrompt const& prompt)
       -> ava::core::Result<ava::permissions::PermissionResolution> {
     denied_prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Deny;
@@ -921,7 +921,7 @@ void test_plugin_tool_dispatcher() {
              denied_prompts.size() == 1,
          "plugin tool dispatcher respects permission denial before process execution");
 
-  const auto prompts_before_cancel = prompts.size();
+  auto const prompts_before_cancel = prompts.size();
   cancel_requested = true;
   auto canceled = dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "call_canceled", .name = model_tool_name, .arguments_json = "{}"});
@@ -931,13 +931,13 @@ void test_plugin_tool_dispatcher() {
 }
 
 void test_plugin_tool_dispatcher_rejects_invalid_result() {
-  const auto root = temp_root() / "plugin-tool-invalid-result";
+  auto const root = temp_root() / "plugin-tool-invalid-result";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto project_plugins = workspace / ".ava" / "plugins";
-  const auto plugin_dir = project_plugins / "com.example.invalid";
-  const auto state_file = root / "state" / "plugin-enablement.json";
+  auto const workspace = root / "workspace";
+  auto const project_plugins = workspace / ".ava" / "plugins";
+  auto const plugin_dir = project_plugins / "com.example.invalid";
+  auto const state_file = root / "state" / "plugin-enablement.json";
   std::filesystem::create_directories(workspace);
 
   write_text(plugin_dir / "plugin.json", tool_manifest_json("com.example.invalid", "plugin.sh"));
@@ -957,11 +957,11 @@ void test_plugin_tool_dispatcher_rejects_invalid_result() {
   context.plugin_project_plugins_dir = project_plugins;
   context.plugin_enablement_file = state_file;
   context.permission_resolver =
-      [](const ava::permissions::PermissionPrompt&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+      [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
     return ava::permissions::PermissionResolution::Allow;
   };
 
-  const auto model_tool_name = ava::plugin::plugin_model_tool_name("com.example.invalid", "todo_add");
+  auto const model_tool_name = ava::plugin::plugin_model_tool_name("com.example.invalid", "todo_add");
   ava::agent::ToolDispatcher dispatcher(context);
   auto dispatched = dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "call_bad", .name = model_tool_name, .arguments_json = "{}"});
@@ -970,12 +970,12 @@ void test_plugin_tool_dispatcher_rejects_invalid_result() {
 }
 
 void test_plugin_tool_registry_skips_name_collisions() {
-  const auto root = temp_root() / "plugin-tool-collisions";
+  auto const root = temp_root() / "plugin-tool-collisions";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto project_plugins = workspace / ".ava" / "plugins";
-  const auto state_file = root / "state" / "plugin-enablement.json";
+  auto const workspace = root / "workspace";
+  auto const project_plugins = workspace / ".ava" / "plugins";
+  auto const state_file = root / "state" / "plugin-enablement.json";
   std::filesystem::create_directories(workspace);
 
   write_text(project_plugins / "com.example.same" / "plugin.json", tool_manifest_json("com.example.same", "plugin.sh"));
@@ -992,9 +992,9 @@ void test_plugin_tool_registry_skips_name_collisions() {
   context.plugin_project_plugins_dir = project_plugins;
   context.plugin_enablement_file = state_file;
 
-  const auto colliding_name = ava::plugin::plugin_model_tool_name("com.example.same", "todo_add");
-  const auto schemas = ava::agent::ToolDispatcher::tool_schemas_json(context);
-  const auto count = std::count_if(schemas.begin(), schemas.end(), [&](const std::string& schema) {
+  auto const colliding_name = ava::plugin::plugin_model_tool_name("com.example.same", "todo_add");
+  auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(context);
+  auto const count = std::count_if(schemas.begin(), schemas.end(), [&](std::string const& schema) {
     return schema.find("\"name\":\"" + colliding_name + "\"") != std::string::npos;
   });
   expect(count == 1, "plugin registry exposes only one schema for colliding plugin tool names");

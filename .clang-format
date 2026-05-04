@@ -4,3 +4,4 @@ ColumnLimit: 120
 IndentWidth: 2
 DerivePointerAlignment: false
 PointerAlignment: Left
+QualifierAlignment: Right

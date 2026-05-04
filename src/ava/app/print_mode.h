@@ -33,17 +33,17 @@ struct PrintModeOptions {
   bool read_stdin = false;
   PrintOutputFormat output_format = PrintOutputFormat::Text;
   HeadlessPermissionPolicyOptions permission_policy;
-  std::optional<std::reference_wrapper<const ava::provider::Provider>> provider_override;
+  std::optional<std::reference_wrapper<ava::provider::Provider const>> provider_override;
   std::optional<std::reference_wrapper<ava::provider::Transport>> transport_override;
 };
 
-[[nodiscard]] ava::core::Result<std::string> merge_print_prompt(const PrintPromptInputs& inputs);
+[[nodiscard]] ava::core::Result<std::string> merge_print_prompt(PrintPromptInputs const& inputs);
 
 [[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(
-    RuntimeSession& session, const std::string& prompt, const ava::provider::Provider& provider,
-    ava::provider::Transport& transport, const PrintModeRunOptions& options, std::ostream& out, std::ostream& err);
+    RuntimeSession& session, std::string const& prompt, ava::provider::Provider const& provider,
+    ava::provider::Transport& transport, PrintModeRunOptions const& options, std::ostream& out, std::ostream& err);
 
-[[nodiscard]] int run_print_mode(const PrintModeOptions& options, std::istream& in, std::ostream& out,
+[[nodiscard]] int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostream& out,
                                  std::ostream& err);
 
 }  // namespace ava::app

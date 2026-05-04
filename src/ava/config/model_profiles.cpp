@@ -12,7 +12,7 @@ namespace {
 
 ModelInfo text_model(std::string provider_id, std::string model_id, std::string display_name, std::string family,
                      std::optional<long long> context_window_tokens, std::optional<long long> max_output_tokens,
-                     std::optional<ModelPricing> pricing, const ProviderProfile& provider,
+                     std::optional<ModelPricing> pricing, ProviderProfile const& provider,
                      std::optional<bool> supports_reasoning, std::vector<std::string> reasoning_levels = {},
                      std::string reasoning_format = {}, std::vector<std::string> compatibility_quirks = {}) {
   return ModelInfo{.provider_id = std::move(provider_id),
@@ -36,7 +36,7 @@ ModelInfo text_model(std::string provider_id, std::string model_id, std::string 
 
 ModelInfo reasoning_model(std::string model_id, std::string display_name, std::string family,
                           std::optional<long long> context_window_tokens, std::optional<long long> max_output_tokens,
-                          const ProviderProfile& provider, std::vector<std::string> compatibility_quirks = {}) {
+                          ProviderProfile const& provider, std::vector<std::string> compatibility_quirks = {}) {
   if (compatibility_quirks.empty()) compatibility_quirks = provider.default_compatibility_quirks;
   return text_model(provider.provider_id, std::move(model_id), std::move(display_name), std::move(family),
                     context_window_tokens, max_output_tokens, std::nullopt, provider, true,
@@ -47,11 +47,11 @@ ModelInfo reasoning_model(std::string model_id, std::string display_name, std::s
 }  // namespace
 
 ModelRegistry builtin_model_profiles() {
-  const auto& openai = openai_provider_profile();
-  const auto& anthropic = anthropic_provider_profile();
-  const auto& kimi = kimi_provider_profile();
-  const auto& moonshot = moonshot_provider_profile();
-  const auto& openrouter = openrouter_provider_profile();
+  auto const& openai = openai_provider_profile();
+  auto const& anthropic = anthropic_provider_profile();
+  auto const& kimi = kimi_provider_profile();
+  auto const& moonshot = moonshot_provider_profile();
+  auto const& openrouter = openrouter_provider_profile();
 
   return ModelRegistry{
       .default_provider_id = openai.provider_id,
@@ -74,7 +74,7 @@ ModelRegistry builtin_model_profiles() {
 }
 
 std::string model_display_label(std::string_view provider_id, std::string_view model_id) {
-  for (const auto& model : builtin_model_profiles().models) {
+  for (auto const& model : builtin_model_profiles().models) {
     if (model.provider_id == provider_id && model.model_id == model_id && !model.display_name.empty()) {
       return model.display_name;
     }
@@ -86,7 +86,7 @@ std::string model_display_label(std::string_view provider_id, std::string_view m
 }
 
 std::string model_display_label(std::string_view model_id) {
-  for (const auto& model : builtin_model_profiles().models) {
+  for (auto const& model : builtin_model_profiles().models) {
     if (model.model_id == model_id && !model.display_name.empty()) return model.display_name;
   }
   return model_display_label({}, model_id);

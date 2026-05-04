@@ -17,11 +17,11 @@ std::string model_key(std::string_view provider_id, std::string_view model_id) {
   return std::string(provider_id) + "\n" + std::string(model_id);
 }
 
-std::vector<ava::config::ModelInfo> effective_models(const ava::config::ModelRegistry& registry) {
+std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry) {
   std::vector<ava::config::ModelInfo> models;
   std::vector<std::string> seen;
   for (auto model = registry.models.rbegin(); model != registry.models.rend(); ++model) {
-    const auto key = model_key(model->provider_id, model->model_id);
+    auto const key = model_key(model->provider_id, model->model_id);
     if (std::ranges::find(seen, key) != seen.end()) continue;
     seen.push_back(key);
     models.push_back(*model);
@@ -48,7 +48,7 @@ bool contains_ascii_case_insensitive(std::string_view text, std::string_view que
   return lower_ascii(text).find(lower_ascii(query)) != std::string::npos;
 }
 
-bool model_matches_query(const ava::config::ModelInfo& model, std::string_view query) {
+bool model_matches_query(ava::config::ModelInfo const& model, std::string_view query) {
   if (query.empty()) return true;
   return contains_ascii_case_insensitive(model.provider_id + "/" + model.model_id, query) ||
          contains_ascii_case_insensitive(model.model_id, query) ||
@@ -56,14 +56,14 @@ bool model_matches_query(const ava::config::ModelInfo& model, std::string_view q
          contains_ascii_case_insensitive(model.family, query);
 }
 
-std::string optional_bool_text(const std::optional<bool>& value) {
+std::string optional_bool_text(std::optional<bool> const& value) {
   if (!value) return "unknown";
   return *value ? "yes" : "no";
 }
 
-std::string format_models_text(const RuntimeSession& session, const ava::config::ModelRegistry& registry,
+std::string format_models_text(RuntimeSession const& session, ava::config::ModelRegistry const& registry,
                                std::string_view query) {
-  const auto providers = ava::provider::builtin_provider_registry();
+  auto const providers = ava::provider::builtin_provider_registry();
   auto models = effective_models(registry);
   bool current_in_catalog = false;
 
@@ -73,12 +73,12 @@ std::string format_models_text(const RuntimeSession& session, const ava::config:
   output += "default " + registry.default_provider_id + "/" + registry.default_model_id + "\n";
   if (!query.empty()) output += "filter " + sanitize_inline_text(std::string(query)) + "\n";
   std::size_t shown = 0;
-  for (const auto& model : models) {
+  for (auto const& model : models) {
     current_in_catalog = current_in_catalog ||
                          (model.provider_id == session.model.provider_id && model.model_id == session.model.model_id);
     if (!model_matches_query(model, query)) continue;
     ++shown;
-    const bool registered = providers.contains(model.provider_id);
+    bool const registered = providers.contains(model.provider_id);
     output += model.provider_id == session.model.provider_id && model.model_id == session.model.model_id ? "* " : "  ";
     output += model.provider_id + "/" + model.model_id;
     if (!model.display_name.empty()) output += "  " + model.display_name;
@@ -115,7 +115,7 @@ std::string format_models_text(const RuntimeSession& session, const ava::config:
 ava::core::Result<CommandResult> run_models_command(RuntimeSession& session, std::string_view query) {
   CommandResult result;
   result.handled = true;
-  const auto trimmed_query = trim_ascii(query);
+  auto const trimmed_query = trim_ascii(query);
   auto registry = ava::config::load_model_registry(session.paths);
   if (!registry) return std::unexpected(std::move(registry.error()));
   add_output(result, format_models_text(session, *registry, trimmed_query));

@@ -26,21 +26,21 @@ struct PermissionDiffPreview {
   bool truncated = false;
 };
 
-std::string effective_tool_name(const ToolContext& context, ava::permissions::Operation operation,
+std::string effective_tool_name(ToolContext const& context, ava::permissions::Operation operation,
                                 std::string_view tool_name) {
   if (!tool_name.empty()) return std::string(tool_name);
   if (!context.permission_tool_name.empty()) return context.permission_tool_name;
   return ava::permissions::to_string(operation);
 }
 
-ava::core::VoidResult record_permission_audit(const ToolContext& context, const PermissionAuditEvent& event) {
+ava::core::VoidResult record_permission_audit(ToolContext const& context, PermissionAuditEvent const& event) {
   if (!context.permission_audit_sink) return {};
   return context.permission_audit_sink(event);
 }
 
-PermissionAuditEvent audit_event(const ToolContext& context, ava::permissions::Operation operation,
-                                 std::string tool_name, const ava::permissions::PermissionDecision& decision,
-                                 const std::filesystem::path& target_path, std::string_view command) {
+PermissionAuditEvent audit_event(ToolContext const& context, ava::permissions::Operation operation,
+                                 std::string tool_name, ava::permissions::PermissionDecision const& decision,
+                                 std::filesystem::path const& target_path, std::string_view command) {
   return PermissionAuditEvent{.operation = operation,
                               .mode = context.mode,
                               .tool_name = std::move(tool_name),
@@ -53,8 +53,8 @@ PermissionAuditEvent audit_event(const ToolContext& context, ava::permissions::O
 }
 
 ava::core::Error permission_denied_error(std::string_view error_message,
-                                         const ava::permissions::PermissionDecision& decision,
-                                         const std::filesystem::path& target_path, std::string_view command,
+                                         ava::permissions::PermissionDecision const& decision,
+                                         std::filesystem::path const& target_path, std::string_view command,
                                          std::string_view resolution_context) {
   auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, std::string(error_message));
   error.with_context("action", ava::permissions::to_string(decision.action));
@@ -70,24 +70,24 @@ ava::core::Error permission_denied_error(std::string_view error_message,
   return error;
 }
 
-bool is_canceled(const ToolContext& context) { return context.cancel_requested && context.cancel_requested(); }
+bool is_canceled(ToolContext const& context) { return context.cancel_requested && context.cancel_requested(); }
 
-ava::core::Error canceled_error(std::string_view operation, const std::filesystem::path& path) {
+ava::core::Error canceled_error(std::string_view operation, std::filesystem::path const& path) {
   auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled");
   error.with_context("operation", std::string(operation));
   if (!path.empty()) error.with_context("path", path.string());
   return error;
 }
 
-ava::core::VoidResult check_canceled(const ToolContext& context, std::string_view operation,
-                                     const std::filesystem::path& path = {}) {
+ava::core::VoidResult check_canceled(ToolContext const& context, std::string_view operation,
+                                     std::filesystem::path const& path = {}) {
   if (!is_canceled(context)) return {};
   return std::unexpected(canceled_error(operation, path));
 }
 
-bool is_canceled_error(const ava::core::Error& error) { return error.message().find("canceled") != std::string::npos; }
+bool is_canceled_error(ava::core::Error const& error) { return error.message().find("canceled") != std::string::npos; }
 
-ava::core::Result<std::string> read_all_text(const ToolContext& context, const std::filesystem::path& path,
+ava::core::Result<std::string> read_all_text(ToolContext const& context, std::filesystem::path const& path,
                                              std::string_view operation) {
   if (auto canceled = check_canceled(context, operation, path); !canceled) {
     return std::unexpected(std::move(canceled.error()));
@@ -107,7 +107,7 @@ ava::core::Result<std::string> read_all_text(const ToolContext& context, const s
       return std::unexpected(std::move(canceled.error()));
     }
     file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-    const auto count = file.gcount();
+    auto const count = file.gcount();
     if (count > 0) {
       if (content.size() + static_cast<std::size_t>(count) > max_edit_file_bytes) {
         auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "file is too large for exact edit");
@@ -129,7 +129,7 @@ ava::core::Result<std::string> read_all_text(const ToolContext& context, const s
   return content;
 }
 
-ava::core::Result<TextOutput> read_head_text(const ToolContext& context, const std::filesystem::path& path,
+ava::core::Result<TextOutput> read_head_text(ToolContext const& context, std::filesystem::path const& path,
                                              std::size_t max_bytes) {
   if (auto canceled = check_canceled(context, "read_file", path); !canceled) {
     return std::unexpected(std::move(canceled.error()));
@@ -148,13 +148,13 @@ ava::core::Result<TextOutput> read_head_text(const ToolContext& context, const s
       return std::unexpected(std::move(canceled.error()));
     }
     file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-    const auto count = static_cast<std::size_t>(file.gcount());
+    auto const count = static_cast<std::size_t>(file.gcount());
     if (count == 0) {
       continue;
     }
     output.total_bytes += count;
     if (output.content.size() < max_bytes) {
-      const auto remaining = max_bytes - output.content.size();
+      auto const remaining = max_bytes - output.content.size();
       output.content.append(buffer.data(), std::min(remaining, count));
     }
   }
@@ -171,16 +171,16 @@ ava::core::Result<TextOutput> read_head_text(const ToolContext& context, const s
   return output;
 }
 
-std::filesystem::path write_parent_path(const std::filesystem::path& path) {
-  const auto parent = path.parent_path();
+std::filesystem::path write_parent_path(std::filesystem::path const& path) {
+  auto const parent = path.parent_path();
   if (!parent.empty()) return parent;
   return ".";
 }
 
-std::filesystem::path unique_write_temp_path(const std::filesystem::path& target) {
-  const auto parent = write_parent_path(target);
-  const auto filename = target.filename().empty() ? std::string("file") : target.filename().string();
-  const auto stem = "." + filename + ".ava-write-";
+std::filesystem::path unique_write_temp_path(std::filesystem::path const& target) {
+  auto const parent = write_parent_path(target);
+  auto const filename = target.filename().empty() ? std::string("file") : target.filename().string();
+  auto const stem = "." + filename + ".ava-write-";
   for (int attempt = 0; attempt < 8; ++attempt) {
     auto candidate = parent / (stem + ava::core::make_id("tmp") + ".tmp");
     std::error_code exists_error;
@@ -189,15 +189,15 @@ std::filesystem::path unique_write_temp_path(const std::filesystem::path& target
   return parent / (stem + ava::core::make_id("tmp") + ".tmp");
 }
 
-ava::core::Error io_error(std::string message, const std::filesystem::path& path, std::string cause) {
+ava::core::Error io_error(std::string message, std::filesystem::path const& path, std::string cause) {
   auto error = ava::core::Error(ava::core::ErrorCategory::Io, std::move(message));
   error.with_context("path", path.string());
   if (!cause.empty()) error.with_context("cause", std::move(cause));
   return error;
 }
 
-ava::core::Error staged_io_error(std::string message, const std::filesystem::path& target_path,
-                                 const std::filesystem::path& temp_path, std::string cause) {
+ava::core::Error staged_io_error(std::string message, std::filesystem::path const& target_path,
+                                 std::filesystem::path const& temp_path, std::string cause) {
   auto error = ava::core::Error(ava::core::ErrorCategory::Io, std::move(message));
   error.with_context("path", target_path.string());
   error.with_context("temp_path", temp_path.string());
@@ -210,24 +210,24 @@ std::string errno_cause(int value) {
   return std::generic_category().message(value);
 }
 
-std::shared_ptr<MutationQueue> effective_mutation_queue(const ToolContext& context) {
+std::shared_ptr<MutationQueue> effective_mutation_queue(ToolContext const& context) {
   if (context.mutation_queue) return context.mutation_queue;
   return default_mutation_queue();
 }
 
-ava::core::Result<std::optional<PermissionDiffPreview>> write_permission_diff_preview(const ToolContext& context,
-                                                                                      const std::filesystem::path& path,
+ava::core::Result<std::optional<PermissionDiffPreview>> write_permission_diff_preview(ToolContext const& context,
+                                                                                      std::filesystem::path const& path,
                                                                                       std::string_view content) {
   if (auto canceled = check_canceled(context, "write_file_permission_preview", path); !canceled) {
     return std::unexpected(std::move(canceled.error()));
   }
   std::error_code exists_error;
-  const bool exists = std::filesystem::exists(path, exists_error);
+  bool const exists = std::filesystem::exists(path, exists_error);
   if (exists_error) return std::optional<PermissionDiffPreview>{};
 
   std::string original;
   if (exists) {
-    const auto read_decision = ava::permissions::decide(ava::permissions::PermissionRequest{
+    auto const read_decision = ava::permissions::decide(ava::permissions::PermissionRequest{
         .operation = ava::permissions::Operation::ReadFile,
         .mode = context.mode,
         .workspace_dir = context.workspace_dir,
@@ -250,12 +250,12 @@ ava::core::Result<std::optional<PermissionDiffPreview>> write_permission_diff_pr
       PermissionDiffPreview{.text = std::move(diff.text), .truncated = diff.truncated}};
 }
 
-ava::core::Result<FileMutationResult> write_file_unlocked(const ToolContext& context, const std::filesystem::path& path,
+ava::core::Result<FileMutationResult> write_file_unlocked(ToolContext const& context, std::filesystem::path const& path,
                                                           std::string_view content) {
   if (auto canceled = check_canceled(context, "write_file", path); !canceled) {
     return std::unexpected(std::move(canceled.error()));
   }
-  const auto parent_path = path.parent_path();
+  auto const parent_path = path.parent_path();
   if (!parent_path.empty()) {
     std::error_code mkdir_error;
     std::filesystem::create_directories(parent_path, mkdir_error);
@@ -268,11 +268,11 @@ ava::core::Result<FileMutationResult> write_file_unlocked(const ToolContext& con
   }
 
   std::error_code status_error;
-  const auto existing_status = std::filesystem::status(path, status_error);
-  const bool preserve_permissions = !status_error && std::filesystem::exists(existing_status);
-  const auto existing_permissions = existing_status.permissions();
+  auto const existing_status = std::filesystem::status(path, status_error);
+  bool const preserve_permissions = !status_error && std::filesystem::exists(existing_status);
+  auto const existing_permissions = existing_status.permissions();
 
-  const auto temp_path = unique_write_temp_path(path);
+  auto const temp_path = unique_write_temp_path(path);
   if (auto canceled = check_canceled(context, "write_file", path); !canceled) {
     return std::unexpected(std::move(canceled.error()));
   }
@@ -291,7 +291,7 @@ ava::core::Result<FileMutationResult> write_file_unlocked(const ToolContext& con
       remove_staged_file_best_effort(temp_path);
       return std::unexpected(std::move(canceled.error()));
     }
-    const auto count = std::min(kWriteChunkBytes, content.size() - offset);
+    auto const count = std::min(kWriteChunkBytes, content.size() - offset);
     file.write(content.data() + offset, static_cast<std::streamsize>(count));
     if (!file) {
       file.close();
@@ -354,12 +354,12 @@ ava::core::Result<FileMutationResult> write_file_unlocked(const ToolContext& con
 
 }  // namespace
 
-ava::core::VoidResult ensure_permission(const ToolContext& context, ava::permissions::Operation operation,
-                                        const std::filesystem::path& target_path, std::string_view command,
+ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permissions::Operation operation,
+                                        std::filesystem::path const& target_path, std::string_view command,
                                         std::string_view tool_name, std::string_view error_message,
                                         std::string_view diff_preview, bool diff_truncated) {
-  const auto request_tool_name = effective_tool_name(context, operation, tool_name);
-  const auto decision = ava::permissions::decide(ava::permissions::PermissionRequest{
+  auto const request_tool_name = effective_tool_name(context, operation, tool_name);
+  auto const decision = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = operation,
       .mode = context.mode,
       .workspace_dir = context.workspace_dir,
@@ -414,12 +414,12 @@ ava::core::VoidResult ensure_permission(const ToolContext& context, ava::permiss
     return {};
   }
 
-  const auto resolution_context =
+  auto const resolution_context =
       resolution ? ava::permissions::to_string(*resolution) : std::string("resolver_failed");
   return std::unexpected(permission_denied_error(error_message, decision, target_path, command, resolution_context));
 }
 
-std::string permission_audit_data_json(const PermissionAuditEvent& event) {
+std::string permission_audit_data_json(PermissionAuditEvent const& event) {
   std::string data = "{\"operation\":\"" + ava::core::json::escape(ava::permissions::to_string(event.operation)) +
                      "\",\"mode\":\"" + ava::core::json::escape(ava::agent::to_string(event.mode)) +
                      "\",\"tool_name\":\"" + ava::core::json::escape(event.tool_name) + "\",\"action\":\"" +
@@ -442,7 +442,7 @@ std::string permission_audit_data_json(const PermissionAuditEvent& event) {
   return data;
 }
 
-ava::core::Result<TextOutput> read_file(const ToolContext& context, const std::filesystem::path& path,
+ava::core::Result<TextOutput> read_file(ToolContext const& context, std::filesystem::path const& path,
                                         ReadOptions options) {
   if (auto canceled = check_canceled(context, "read_file", path); !canceled) {
     return std::unexpected(std::move(canceled.error()));
@@ -461,7 +461,7 @@ ava::core::Result<TextOutput> read_file(const ToolContext& context, const std::f
   return read_head_text(context, path, options.max_bytes);
 }
 
-ava::core::Result<FileMutationResult> write_file(const ToolContext& context, const std::filesystem::path& path,
+ava::core::Result<FileMutationResult> write_file(ToolContext const& context, std::filesystem::path const& path,
                                                  std::string_view content, WriteOptions options) {
   if (auto canceled = check_canceled(context, "write_file", path); !canceled) {
     return std::unexpected(std::move(canceled.error()));
@@ -471,7 +471,7 @@ ava::core::Result<FileMutationResult> write_file(const ToolContext& context, con
     auto preview_result = write_permission_diff_preview(context, path, content);
     if (!preview_result) return std::unexpected(std::move(preview_result.error()));
     preview = std::move(*preview_result);
-    const auto diff_preview = preview ? std::string_view(preview->text) : std::string_view{};
+    auto const diff_preview = preview ? std::string_view(preview->text) : std::string_view{};
     if (auto permission =
             ensure_permission(context, ava::permissions::Operation::EditFile, path, "", "", "tool requires permission",
                               diff_preview, preview ? preview->truncated : false);
@@ -488,7 +488,7 @@ ava::core::Result<FileMutationResult> write_file(const ToolContext& context, con
   return write_file_unlocked(context, path, content);
 }
 
-ava::core::Result<FileMutationResult> edit_file(const ToolContext& context, const std::filesystem::path& path,
+ava::core::Result<FileMutationResult> edit_file(ToolContext const& context, std::filesystem::path const& path,
                                                 std::string_view old_text, std::string_view new_text) {
   if (old_text.empty()) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "old_text must not be empty");
@@ -498,7 +498,7 @@ ava::core::Result<FileMutationResult> edit_file(const ToolContext& context, cons
   if (auto canceled = check_canceled(context, "edit_file", path); !canceled) {
     return std::unexpected(std::move(canceled.error()));
   }
-  const auto read_decision = ava::permissions::decide(ava::permissions::PermissionRequest{
+  auto const read_decision = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::ReadFile,
       .mode = context.mode,
       .workspace_dir = context.workspace_dir,
@@ -512,7 +512,7 @@ ava::core::Result<FileMutationResult> edit_file(const ToolContext& context, cons
       return std::unexpected(permission.error());
     }
   }
-  const auto edit_decision = ava::permissions::decide(ava::permissions::PermissionRequest{
+  auto const edit_decision = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::EditFile,
       .mode = context.mode,
       .workspace_dir = context.workspace_dir,
@@ -547,7 +547,7 @@ ava::core::Result<FileMutationResult> edit_file(const ToolContext& context, cons
   auto match = find_unique_text_match(*content, old_text, path, "old_text was not found", "old_text is not unique");
   if (!match) return std::unexpected(match.error());
 
-  const auto original = *content;
+  auto const original = *content;
   content->replace(match->position, match->size, new_text);
   auto diff = unified_diff(original, *content, path, path, kMaxPermissionDiffBytes);
   if (auto permission = ensure_permission(context, ava::permissions::Operation::EditFile, path, "", "",
@@ -569,8 +569,8 @@ ava::core::Result<FileMutationResult> edit_file(const ToolContext& context, cons
   return written;
 }
 
-ava::core::VoidResult replace_file_with_staged_file(const std::filesystem::path& staged_path,
-                                                    const std::filesystem::path& target_path) {
+ava::core::VoidResult replace_file_with_staged_file(std::filesystem::path const& staged_path,
+                                                    std::filesystem::path const& target_path) {
   std::error_code rename_error;
   std::filesystem::rename(staged_path, target_path, rename_error);
   if (!rename_error) return {};
@@ -582,7 +582,7 @@ ava::core::VoidResult replace_file_with_staged_file(const std::filesystem::path&
   return std::unexpected(std::move(error));
 }
 
-void remove_staged_file_best_effort(const std::filesystem::path& staged_path) {
+void remove_staged_file_best_effort(std::filesystem::path const& staged_path) {
   std::error_code remove_error;
   std::filesystem::remove(staged_path, remove_error);
 }

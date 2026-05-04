@@ -24,7 +24,7 @@ struct OpenAIOAuthSession {
                                                                              std::string_view verifier,
                                                                              ava::provider::Transport& transport,
                                                                              long long now_seconds);
-[[nodiscard]] ava::core::Result<OpenAICredential> refresh_openai_oauth_credential(const OpenAICredential& credential,
+[[nodiscard]] ava::core::Result<OpenAICredential> refresh_openai_oauth_credential(OpenAICredential const& credential,
                                                                                   ava::provider::Transport& transport,
                                                                                   long long now_seconds);
 

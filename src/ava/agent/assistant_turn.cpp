@@ -18,13 +18,13 @@ ProviderToolCall& pending_call_for(std::vector<ProviderToolCall>& calls, std::st
   return calls.back();
 }
 
-std::size_t reasoning_block_bytes(const ParsedReasoningBlock& block) {
+std::size_t reasoning_block_bytes(ParsedReasoningBlock const& block) {
   return block.text.size() + block.signature.size() + block.redacted_data.size();
 }
 
 }  // namespace
 
-ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(const std::vector<ava::provider::StreamEvent>& events,
+ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(std::vector<ava::provider::StreamEvent> const& events,
                                                             ProviderOutputLimits limits) {
   if (limits.max_events > 0 && events.size() > limits.max_events) {
     return std::unexpected(
@@ -41,7 +41,7 @@ ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(const std::vector<av
     current_reasoning = std::nullopt;
   };
   bool done = false;
-  for (const auto& event : events) {
+  for (auto const& event : events) {
     if (event.usage) turn.usage = with_total_tokens(*event.usage);
     if (event.type == ava::provider::StreamEventType::TextDelta) {
       if (would_exceed(turn.text.size(), event.text.size(), limits.max_assistant_text_bytes)) {
@@ -56,7 +56,7 @@ ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(const std::vector<av
                                                .signature = event.reasoning_signature,
                                                .redacted_data = event.reasoning_redacted_data,
                                                .redacted = event.redacted};
-      const auto private_bytes = event.reasoning_signature.size() + event.reasoning_redacted_data.size();
+      auto const private_bytes = event.reasoning_signature.size() + event.reasoning_redacted_data.size();
       if (would_exceed(std::size_t{0}, private_bytes, limits.max_assistant_text_bytes)) {
         return std::unexpected(output_limit_error("reasoning byte limit exceeded", "max_assistant_text_bytes",
                                                   limits.max_assistant_text_bytes));
@@ -93,7 +93,7 @@ ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(const std::vector<av
       if (!event.reasoning_signature.empty()) current_reasoning->signature = event.reasoning_signature;
       if (!event.reasoning_redacted_data.empty()) current_reasoning->redacted_data = event.reasoning_redacted_data;
       current_reasoning->redacted = current_reasoning->redacted || event.redacted;
-      const auto private_bytes = event.reasoning_signature.size() + event.reasoning_redacted_data.size();
+      auto const private_bytes = event.reasoning_signature.size() + event.reasoning_redacted_data.size();
       if (would_exceed(std::size_t{0}, private_bytes, limits.max_assistant_text_bytes)) {
         return std::unexpected(output_limit_error("reasoning byte limit exceeded", "max_assistant_text_bytes",
                                                   limits.max_assistant_text_bytes));

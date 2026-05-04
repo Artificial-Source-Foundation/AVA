@@ -58,16 +58,16 @@ struct TuiKeyBindingHelpItem {
 [[nodiscard]] TuiKeyBindings default_key_bindings();
 // Returns the first configured action for a key. Runtime dispatch should prefer
 // key_matches_action() when shared keys need context-specific handling.
-[[nodiscard]] std::optional<TuiAction> action_for_key(const TuiKeyBindings& bindings, Key key);
-[[nodiscard]] bool key_matches_action(const TuiKeyBindings& bindings, TuiAction action, Key key);
+[[nodiscard]] std::optional<TuiAction> action_for_key(TuiKeyBindings const& bindings, Key key);
+[[nodiscard]] bool key_matches_action(TuiKeyBindings const& bindings, TuiAction action, Key key);
 [[nodiscard]] std::optional<Key> parse_key_name(std::string_view text);
 [[nodiscard]] std::string key_display(Key key);
 [[nodiscard]] std::string action_name(TuiAction action);
 [[nodiscard]] std::string action_description(TuiAction action);
-[[nodiscard]] std::string keys_display(const TuiKeyBindings& bindings, TuiAction action);
-[[nodiscard]] std::vector<TuiKeyBindingHelpItem> key_binding_help_items(const TuiKeyBindings& bindings);
+[[nodiscard]] std::string keys_display(TuiKeyBindings const& bindings, TuiAction action);
+[[nodiscard]] std::vector<TuiKeyBindingHelpItem> key_binding_help_items(TuiKeyBindings const& bindings);
 [[nodiscard]] ava::core::Result<TuiKeyBindings> parse_key_bindings_json(std::string_view json);
 [[nodiscard]] ava::core::Result<TuiKeyBindings> parse_key_bindings_json(std::string_view json, TuiKeyBindings base);
-[[nodiscard]] ava::core::Result<TuiKeyBindings> load_key_bindings(const std::filesystem::path& keybinds_file);
+[[nodiscard]] ava::core::Result<TuiKeyBindings> load_key_bindings(std::filesystem::path const& keybinds_file);
 
 }  // namespace ava::tui

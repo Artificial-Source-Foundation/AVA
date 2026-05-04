@@ -33,8 +33,8 @@ constexpr int kMaxDrainReadsPerPoll = 16;
 class UniqueFd {
  public:
   explicit UniqueFd(int fd = -1) : fd_(fd) {}
-  UniqueFd(const UniqueFd&) = delete;
-  UniqueFd& operator=(const UniqueFd&) = delete;
+  UniqueFd(UniqueFd const&) = delete;
+  UniqueFd& operator=(UniqueFd const&) = delete;
   UniqueFd(UniqueFd&& other) noexcept : fd_(other.release()) {}
   UniqueFd& operator=(UniqueFd&& other) noexcept {
     if (this != &other) reset(other.release());
@@ -44,7 +44,7 @@ class UniqueFd {
 
   [[nodiscard]] int get() const noexcept { return fd_; }
   [[nodiscard]] int release() noexcept {
-    const int fd = fd_;
+    int const fd = fd_;
     fd_ = -1;
     return fd;
   }
@@ -66,8 +66,8 @@ class ScopedSignalIgnore {
     if (sigaction(signal_, &action, &previous_) == 0) installed_ = true;
   }
 
-  ScopedSignalIgnore(const ScopedSignalIgnore&) = delete;
-  ScopedSignalIgnore& operator=(const ScopedSignalIgnore&) = delete;
+  ScopedSignalIgnore(ScopedSignalIgnore const&) = delete;
+  ScopedSignalIgnore& operator=(ScopedSignalIgnore const&) = delete;
   ScopedSignalIgnore(ScopedSignalIgnore&&) = delete;
   ScopedSignalIgnore& operator=(ScopedSignalIgnore&&) = delete;
 
@@ -81,41 +81,41 @@ class ScopedSignalIgnore {
   bool installed_ = false;
 };
 
-ava::core::Error plugin_error(ava::core::ErrorCategory category, std::string message, const PluginManifest& manifest) {
+ava::core::Error plugin_error(ava::core::ErrorCategory category, std::string message, PluginManifest const& manifest) {
   auto error = ava::core::Error(category, std::move(message));
   error.with_context("plugin", manifest.id);
   if (!manifest.path.empty()) error.with_context("manifest", manifest.path.string());
   return error;
 }
 
-ava::core::Error errno_error(std::string message, const PluginManifest& manifest) {
+ava::core::Error errno_error(std::string message, PluginManifest const& manifest) {
   auto error = plugin_error(ava::core::ErrorCategory::Io, std::move(message), manifest);
   error.with_context("cause", std::strerror(errno));
   return error;
 }
 
-ava::core::Error protocol_error(std::string message, const PluginManifest& manifest) {
+ava::core::Error protocol_error(std::string message, PluginManifest const& manifest) {
   return plugin_error(ava::core::ErrorCategory::Tool, std::move(message), manifest);
 }
 
-bool is_canceled(const CancelCallback& cancel_requested) { return cancel_requested && cancel_requested(); }
+bool is_canceled(CancelCallback const& cancel_requested) { return cancel_requested && cancel_requested(); }
 
-ava::core::Error canceled_error(std::string message, const PluginManifest& manifest) {
+ava::core::Error canceled_error(std::string message, PluginManifest const& manifest) {
   auto error = plugin_error(ava::core::ErrorCategory::Unknown, std::move(message), manifest);
   error.with_context("canceled", "true");
   return error;
 }
 
-ava::core::Result<std::array<int, 2>> make_pipe(const PluginManifest& manifest) {
+ava::core::Result<std::array<int, 2>> make_pipe(PluginManifest const& manifest) {
   std::array<int, 2> fds{-1, -1};
   if (pipe(fds.data()) != 0) return std::unexpected(errno_error("failed to create plugin process pipe", manifest));
   for (auto& fd : fds) {
     if (fd > STDERR_FILENO) continue;
-    const int moved = fcntl(fd, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
-    const int move_errno = errno;
+    int const moved = fcntl(fd, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+    int const move_errno = errno;
     close(fd);
     if (moved < 0) {
-      for (const int pipe_fd : fds) {
+      for (int const pipe_fd : fds) {
         if (pipe_fd >= 0 && pipe_fd != fd) close(pipe_fd);
       }
       errno = move_errno;
@@ -137,7 +137,7 @@ bool set_child_process_group(pid_t pid) {
 
 pid_t waitpid_retry(pid_t pid, int* status, int options) {
   while (true) {
-    const auto waited = waitpid(pid, status, options);
+    auto const waited = waitpid(pid, status, options);
     if (waited < 0 && errno == EINTR) continue;
     return waited;
   }
@@ -145,22 +145,22 @@ pid_t waitpid_retry(pid_t pid, int* status, int options) {
 
 ssize_t read_retry(int fd, char* data, std::size_t size) {
   while (true) {
-    const auto bytes = read(fd, data, size);
+    auto const bytes = read(fd, data, size);
     if (bytes < 0 && errno == EINTR) continue;
     return bytes;
   }
 }
 
-ssize_t write_retry(int fd, const char* data, std::size_t size) {
+ssize_t write_retry(int fd, char const* data, std::size_t size) {
   while (true) {
-    const auto bytes = write(fd, data, size);
+    auto const bytes = write(fd, data, size);
     if (bytes < 0 && errno == EINTR) continue;
     return bytes;
   }
 }
 
 std::size_t remaining_ms(std::chrono::steady_clock::time_point deadline) {
-  const auto now = std::chrono::steady_clock::now();
+  auto const now = std::chrono::steady_clock::now();
   if (now >= deadline) return 0;
   return static_cast<std::size_t>(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count());
 }
@@ -176,17 +176,17 @@ void close_nonstandard_fds() {
 #if defined(__linux__) && defined(SYS_close_range)
   if (syscall(SYS_close_range, static_cast<unsigned int>(STDERR_FILENO + 1), ~0U, 0U) == 0) return;
 #endif
-  const long open_max = sysconf(_SC_OPEN_MAX);
-  const int max_fd = open_max > 0 ? static_cast<int>(open_max) : 1024;
+  long const open_max = sysconf(_SC_OPEN_MAX);
+  int const max_fd = open_max > 0 ? static_cast<int>(open_max) : 1024;
   for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd) close(fd);
 }
 
 std::string json_string(std::string_view value) { return "\"" + ava::core::json::escape(value) + "\""; }
 
 std::optional<bool> bool_field(std::string_view object, std::string_view key) {
-  const auto start = ava::core::json::field_value_start(object, key);
+  auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return std::nullopt;
-  const auto valid_terminator = [](std::string_view value, std::size_t offset) {
+  auto const valid_terminator = [](std::string_view value, std::size_t offset) {
     while (offset < value.size() && std::isspace(static_cast<unsigned char>(value[offset])) != 0) ++offset;
     return offset >= value.size() || value[offset] == ',' || value[offset] == '}';
   };
@@ -201,7 +201,7 @@ std::string exit_detail(int status) {
   return "unknown status " + std::to_string(status);
 }
 
-std::vector<std::string> plugin_argv(const PluginManifest& manifest) {
+std::vector<std::string> plugin_argv(PluginManifest const& manifest) {
   std::vector<std::string> argv;
   argv.reserve(manifest.entrypoint.args.size() + 1);
   argv.push_back(manifest.entrypoint.command);
@@ -209,7 +209,7 @@ std::vector<std::string> plugin_argv(const PluginManifest& manifest) {
   return argv;
 }
 
-std::filesystem::path child_working_dir(const PluginManifest& manifest, const PluginRunnerOptions& options) {
+std::filesystem::path child_working_dir(PluginManifest const& manifest, PluginRunnerOptions const& options) {
   if (!manifest.directory.empty()) return manifest.directory;
   if (!options.workspace_dir.empty()) return options.workspace_dir;
   return std::filesystem::current_path();
@@ -219,7 +219,7 @@ bool json_depth_within_limit(std::string_view value, int max_depth) {
   bool in_string = false;
   bool escaped = false;
   int depth = 0;
-  for (const char ch : value) {
+  for (char const ch : value) {
     if (escaped) {
       escaped = false;
       continue;
@@ -358,11 +358,11 @@ ava::core::Result<std::unique_ptr<PluginProcess>> PluginProcess::start(PluginMan
   return process;
 }
 
-const PluginManifest& PluginProcess::manifest() const noexcept { return manifest_; }
+PluginManifest const& PluginProcess::manifest() const noexcept { return manifest_; }
 
-const PluginInitialization& PluginProcess::initialization() const noexcept { return initialization_; }
+PluginInitialization const& PluginProcess::initialization() const noexcept { return initialization_; }
 
-const std::string& PluginProcess::stderr_tail() const noexcept { return stderr_tail_; }
+std::string const& PluginProcess::stderr_tail() const noexcept { return stderr_tail_; }
 
 bool PluginProcess::stderr_truncated() const noexcept { return stderr_truncated_; }
 
@@ -388,8 +388,8 @@ ava::core::VoidResult PluginProcess::launch() {
   for (auto& arg : argv_strings) argv.push_back(arg.data());
   argv.push_back(nullptr);
 
-  const auto cwd = child_working_dir(manifest_, options_).string();
-  const pid_t pid = fork();
+  auto const cwd = child_working_dir(manifest_, options_).string();
+  pid_t const pid = fork();
   if (pid < 0) return std::unexpected(errno_error("failed to fork plugin process", manifest_));
 
   if (pid == 0) {
@@ -438,8 +438,8 @@ ava::core::VoidResult PluginProcess::launch() {
 }
 
 ava::core::VoidResult PluginProcess::initialize(CancelCallback cancel_requested) {
-  const auto deadline = std::chrono::steady_clock::now() + options_.startup_timeout;
-  const std::string request =
+  auto const deadline = std::chrono::steady_clock::now() + options_.startup_timeout;
+  std::string const request =
       "{\"id\":\"ava_1\",\"type\":\"initialize\",\"api_version\":" + json_string(kPluginApiVersion) +
       ",\"plugin_id\":" + json_string(manifest_.id) + ",\"workspace\":" + json_string(options_.workspace_dir.string()) +
       "}";
@@ -482,8 +482,8 @@ ava::core::Result<PluginToolCallResult> PluginProcess::call_tool(std::string_vie
     return std::unexpected(std::move(error));
   }
 
-  const auto deadline = std::chrono::steady_clock::now() + options_.request_timeout;
-  const std::string request_id =
+  auto const deadline = std::chrono::steady_clock::now() + options_.request_timeout;
+  std::string const request_id =
       call_id.empty() ? "ava_" + std::to_string(next_request_id_++) : "ava_tool_" + std::string(call_id);
   std::string request =
       "{\"id\":" + json_string(request_id) + ",\"type\":\"tool.call\",\"tool\":" + json_string(tool_name) +
@@ -528,8 +528,8 @@ ava::core::Result<PluginCommandCallResult> PluginProcess::call_command(std::stri
     return std::unexpected(std::move(error));
   }
 
-  const auto deadline = std::chrono::steady_clock::now() + options_.request_timeout;
-  const std::string request_id =
+  auto const deadline = std::chrono::steady_clock::now() + options_.request_timeout;
+  std::string const request_id =
       call_id.empty() ? "ava_" + std::to_string(next_request_id_++) : "ava_command_" + std::string(call_id);
   std::string request =
       "{\"id\":" + json_string(request_id) + ",\"type\":\"command.call\",\"command\":" + json_string(command_name) +
@@ -574,8 +574,8 @@ ava::core::Result<PluginEventObserveResult> PluginProcess::observe_event(std::st
     return std::unexpected(std::move(error));
   }
 
-  const auto deadline = std::chrono::steady_clock::now() + options_.request_timeout;
-  const std::string request_id =
+  auto const deadline = std::chrono::steady_clock::now() + options_.request_timeout;
+  std::string const request_id =
       call_id.empty() ? "ava_" + std::to_string(next_request_id_++) : "ava_event_" + std::string(call_id);
   std::string request =
       "{\"id\":" + json_string(request_id) + ",\"type\":\"event.observe\",\"event\":" + json_string(event_name) +
@@ -605,15 +605,15 @@ ava::core::VoidResult PluginProcess::write_record(std::string_view record,
                                                   std::chrono::milliseconds timeout, std::string_view timeout_message,
                                                   CancelCallback cancel_requested) {
   if (stdin_fd_ < 0) return std::unexpected(protocol_error("plugin stdin is closed", manifest_));
-  const std::string frame = std::string(record) + '\n';
+  std::string const frame = std::string(record) + '\n';
   std::size_t offset = 0;
-  const ScopedSignalIgnore ignore_sigpipe(SIGPIPE);
+  ScopedSignalIgnore const ignore_sigpipe(SIGPIPE);
   while (offset < frame.size()) {
     if (is_canceled(cancel_requested)) {
       terminate_child();
       return std::unexpected(canceled_error("plugin request canceled", manifest_));
     }
-    const auto bytes = write_retry(stdin_fd_, frame.data() + offset, frame.size() - offset);
+    auto const bytes = write_retry(stdin_fd_, frame.data() + offset, frame.size() - offset);
     if (bytes > 0) {
       offset += static_cast<std::size_t>(bytes);
       continue;
@@ -640,7 +640,7 @@ ava::core::Result<std::string> PluginProcess::read_record(std::chrono::steady_cl
       terminate_child();
       return std::unexpected(canceled_error("plugin request canceled", manifest_));
     }
-    if (const auto newline = stdout_buffer_.find('\n'); newline != std::string::npos) {
+    if (auto const newline = stdout_buffer_.find('\n'); newline != std::string::npos) {
       auto record = stdout_buffer_.substr(0, newline);
       stdout_buffer_.erase(0, newline + 1);
       if (!record.empty() && record.back() == '\r') record.pop_back();
@@ -659,7 +659,7 @@ ava::core::Result<std::string> PluginProcess::read_record(std::chrono::steady_cl
       return std::unexpected(std::move(error));
     }
     if (stdout_fd_ < 0) {
-      const auto reap_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
+      auto const reap_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
       do {
         if (auto reaped = reap_child(); !reaped) return std::unexpected(std::move(reaped.error()));
         if (child_exited_) break;
@@ -683,8 +683,8 @@ ava::core::Result<std::string> PluginProcess::read_record(std::chrono::steady_cl
 
     std::array<pollfd, 2> fds{pollfd{.fd = stdout_fd_, .events = POLLIN, .revents = 0},
                               pollfd{.fd = stderr_fd_, .events = POLLIN, .revents = 0}};
-    const int timeout = static_cast<int>(std::min<std::size_t>(remaining_ms(deadline), 100));
-    const int polled = poll(fds.data(), fds.size(), timeout);
+    int const timeout = static_cast<int>(std::min<std::size_t>(remaining_ms(deadline), 100));
+    int const polled = poll(fds.data(), fds.size(), timeout);
     if (polled < 0) {
       if (errno == EINTR) continue;
       return std::unexpected(errno_error("failed to poll plugin process pipes", manifest_));
@@ -717,8 +717,8 @@ ava::core::VoidResult PluginProcess::wait_for_writable(std::chrono::steady_clock
     }
     std::array<pollfd, 2> fds{pollfd{.fd = stdin_fd_, .events = POLLOUT, .revents = 0},
                               pollfd{.fd = stderr_fd_, .events = POLLIN, .revents = 0}};
-    const int timeout = static_cast<int>(std::min<std::size_t>(remaining_ms(deadline), 100));
-    const int polled = poll(fds.data(), fds.size(), timeout);
+    int const timeout = static_cast<int>(std::min<std::size_t>(remaining_ms(deadline), 100));
+    int const polled = poll(fds.data(), fds.size(), timeout);
     if (polled < 0) {
       if (errno == EINTR) continue;
       return std::unexpected(errno_error("failed to poll plugin request pipe", manifest_));
@@ -741,10 +741,10 @@ ava::core::VoidResult PluginProcess::drain_stdout() {
   std::array<char, 4096> buffer{};
   int reads = 0;
   while (true) {
-    const auto bytes = read_retry(stdout_fd_, buffer.data(), buffer.size());
+    auto const bytes = read_retry(stdout_fd_, buffer.data(), buffer.size());
     if (bytes > 0) {
       stdout_buffer_.append(buffer.data(), static_cast<std::size_t>(bytes));
-      const auto newline = stdout_buffer_.find('\n');
+      auto const newline = stdout_buffer_.find('\n');
       if ((newline == std::string::npos && stdout_buffer_.size() > options_.max_record_bytes) ||
           (newline != std::string::npos && newline > options_.max_record_bytes)) {
         auto error = protocol_error("plugin protocol record exceeds size cap", manifest_);
@@ -770,7 +770,7 @@ ava::core::VoidResult PluginProcess::drain_stderr() {
   std::array<char, 4096> buffer{};
   int reads = 0;
   while (true) {
-    const auto bytes = read_retry(stderr_fd_, buffer.data(), buffer.size());
+    auto const bytes = read_retry(stderr_fd_, buffer.data(), buffer.size());
     if (bytes > 0) {
       append_stderr(std::string_view(buffer.data(), static_cast<std::size_t>(bytes)));
       ++reads;
@@ -789,7 +789,7 @@ ava::core::VoidResult PluginProcess::drain_stderr() {
 ava::core::VoidResult PluginProcess::reap_child() {
   if (pid_ < 0) return {};
   int status = 0;
-  const pid_t waited = waitpid_retry(pid_, &status, WNOHANG);
+  pid_t const waited = waitpid_retry(pid_, &status, WNOHANG);
   if (waited == 0) return {};
   if (waited == pid_) {
     child_status_ = status;
@@ -805,7 +805,7 @@ ava::core::VoidResult PluginProcess::reap_child() {
 }
 
 ava::core::VoidResult PluginProcess::set_pipe_nonblocking(int fd, std::string_view pipe_name) {
-  const int flags = fcntl(fd, F_GETFL, 0);
+  int const flags = fcntl(fd, F_GETFL, 0);
   if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
     auto error = errno_error("failed to configure plugin process pipe", manifest_);
     error.with_context("pipe", std::string(pipe_name));
@@ -816,13 +816,13 @@ ava::core::VoidResult PluginProcess::set_pipe_nonblocking(int fd, std::string_vi
 
 void PluginProcess::append_stderr(std::string_view chunk) {
   if (chunk.empty()) return;
-  const auto max_bytes = options_.max_stderr_bytes;
+  auto const max_bytes = options_.max_stderr_bytes;
   if (chunk.size() >= max_bytes) {
     stderr_tail_.assign(chunk.substr(chunk.size() - max_bytes));
     stderr_truncated_ = true;
     return;
   }
-  const auto next_size = stderr_tail_.size() + chunk.size();
+  auto const next_size = stderr_tail_.size() + chunk.size();
   if (next_size > max_bytes) {
     stderr_tail_.erase(0, next_size - max_bytes);
     stderr_truncated_ = true;
@@ -832,7 +832,7 @@ void PluginProcess::append_stderr(std::string_view chunk) {
 
 ava::core::VoidResult PluginProcess::shutdown(std::chrono::milliseconds grace) {
   close_fd(stdin_fd_);
-  const auto deadline = std::chrono::steady_clock::now() + grace;
+  auto const deadline = std::chrono::steady_clock::now() + grace;
   while (pid_ >= 0 && std::chrono::steady_clock::now() < deadline) {
     if (auto reaped = reap_child(); !reaped) return std::unexpected(std::move(reaped.error()));
     if (pid_ < 0) break;
@@ -853,12 +853,12 @@ void PluginProcess::close_fds() noexcept {
 
 void PluginProcess::terminate_child() noexcept {
   if (pid_ < 0) return;
-  const pid_t pid = static_cast<pid_t>(pid_);
-  const pid_t target = can_signal_group_ ? -pid : pid;
+  pid_t const pid = static_cast<pid_t>(pid_);
+  pid_t const target = can_signal_group_ ? -pid : pid;
   kill(target, SIGTERM);
   for (int attempt = 0; attempt < 5; ++attempt) {
     int status = 0;
-    const pid_t waited = waitpid_retry(pid, &status, WNOHANG);
+    pid_t const waited = waitpid_retry(pid, &status, WNOHANG);
     if (waited == pid || waited < 0) {
       if (waited == pid) {
         child_status_ = status;
@@ -873,7 +873,7 @@ void PluginProcess::terminate_child() noexcept {
   kill(target, SIGKILL);
   for (int attempt = 0; attempt < 25; ++attempt) {
     int status = 0;
-    const pid_t waited = waitpid_retry(pid, &status, WNOHANG);
+    pid_t const waited = waitpid_retry(pid, &status, WNOHANG);
     if (waited == pid || waited < 0) {
       if (waited == pid) {
         child_status_ = status;
@@ -893,7 +893,7 @@ void PluginProcess::drain_available_noexcept() noexcept {
     if (stdout_fd_ >= 0) {
       std::array<char, 4096> buffer{};
       for (int reads = 0; reads < kMaxDrainReadsPerPoll; ++reads) {
-        const auto bytes = read_retry(stdout_fd_, buffer.data(), buffer.size());
+        auto const bytes = read_retry(stdout_fd_, buffer.data(), buffer.size());
         if (bytes > 0) {
           stdout_buffer_.append(buffer.data(), static_cast<std::size_t>(bytes));
           if (stdout_buffer_.size() > options_.max_record_bytes) {
@@ -908,7 +908,7 @@ void PluginProcess::drain_available_noexcept() noexcept {
     if (stderr_fd_ >= 0) {
       std::array<char, 4096> buffer{};
       for (int reads = 0; reads < kMaxDrainReadsPerPoll; ++reads) {
-        const auto bytes = read_retry(stderr_fd_, buffer.data(), buffer.size());
+        auto const bytes = read_retry(stderr_fd_, buffer.data(), buffer.size());
         if (bytes > 0) {
           append_stderr(std::string_view(buffer.data(), static_cast<std::size_t>(bytes)));
           continue;

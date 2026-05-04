@@ -32,14 +32,14 @@ struct ServerConfig {
 class DiagnosticsProvider {
  public:
   DiagnosticsProvider() = default;
-  DiagnosticsProvider(const DiagnosticsProvider&) = delete;
-  DiagnosticsProvider& operator=(const DiagnosticsProvider&) = delete;
+  DiagnosticsProvider(DiagnosticsProvider const&) = delete;
+  DiagnosticsProvider& operator=(DiagnosticsProvider const&) = delete;
   DiagnosticsProvider(DiagnosticsProvider&&) = delete;
   DiagnosticsProvider& operator=(DiagnosticsProvider&&) = delete;
   virtual ~DiagnosticsProvider() = default;
 
   [[nodiscard]] virtual ava::core::Result<std::vector<Diagnostic>> diagnostics(
-      const std::filesystem::path& path, CancelCallback cancel_requested = nullptr) = 0;
+      std::filesystem::path const& path, CancelCallback cancel_requested = nullptr) = 0;
 };
 
 class SubprocessLspClient final : public DiagnosticsProvider {
@@ -47,15 +47,15 @@ class SubprocessLspClient final : public DiagnosticsProvider {
   explicit SubprocessLspClient(ServerConfig config);
   ~SubprocessLspClient() override;
 
-  SubprocessLspClient(const SubprocessLspClient&) = delete;
-  SubprocessLspClient& operator=(const SubprocessLspClient&) = delete;
+  SubprocessLspClient(SubprocessLspClient const&) = delete;
+  SubprocessLspClient& operator=(SubprocessLspClient const&) = delete;
   SubprocessLspClient(SubprocessLspClient&&) = delete;
   SubprocessLspClient& operator=(SubprocessLspClient&&) = delete;
 
   [[nodiscard]] static ava::core::Result<std::shared_ptr<SubprocessLspClient>> start(
       ServerConfig config, CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<std::vector<Diagnostic>> diagnostics(
-      const std::filesystem::path& path, CancelCallback cancel_requested = nullptr) override;
+      std::filesystem::path const& path, CancelCallback cancel_requested = nullptr) override;
 
  private:
   [[nodiscard]] ava::core::VoidResult launch();

@@ -4,8 +4,8 @@
 
 namespace ava::config {
 
-const ReasoningProfile& openai_responses_reasoning_profile() {
-  static const ReasoningProfile profile{.api_family = "openai_responses",
+ReasoningProfile const& openai_responses_reasoning_profile() {
+  static ReasoningProfile const profile{.api_family = "openai_responses",
                                         .format = "openai_responses",
                                         .levels = {"low", "medium", "high", "xhigh"},
                                         .request_parameters =
@@ -14,16 +14,16 @@ const ReasoningProfile& openai_responses_reasoning_profile() {
   return profile;
 }
 
-const ReasoningProfile& openai_compatible_reasoning_content_profile() {
-  static const ReasoningProfile profile{.api_family = "openai_chat_completions",
+ReasoningProfile const& openai_compatible_reasoning_content_profile() {
+  static ReasoningProfile const profile{.api_family = "openai_chat_completions",
                                         .format = "reasoning_content",
                                         .levels = {"enabled"},
                                         .request_parameters = "request.thinking.type=<level>"};
   return profile;
 }
 
-const ReasoningProfile& anthropic_thinking_reasoning_profile() {
-  static const ReasoningProfile profile{
+ReasoningProfile const& anthropic_thinking_reasoning_profile() {
+  static ReasoningProfile const profile{
       .api_family = "anthropic_messages",
       .format = "anthropic_thinking",
       .levels = {"enabled", "adaptive"},
@@ -31,7 +31,7 @@ const ReasoningProfile& anthropic_thinking_reasoning_profile() {
   return profile;
 }
 
-std::string reasoning_parameter_text(const ModelInfo& model) {
+std::string reasoning_parameter_text(ModelInfo const& model) {
   if (!model.supports_reasoning.value_or(false)) return {};
 
   if (auto provider = reasoning_provider_profile_for_model(model);

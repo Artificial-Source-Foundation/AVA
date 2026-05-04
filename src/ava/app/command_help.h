@@ -7,7 +7,7 @@
 
 namespace ava::app {
 
-[[nodiscard]] std::string command_help_text(const std::vector<CommandHotkey>& hotkeys);
-[[nodiscard]] std::string command_hotkeys_text(const std::vector<CommandHotkey>& hotkeys);
+[[nodiscard]] std::string command_help_text(std::vector<CommandHotkey> const& hotkeys);
+[[nodiscard]] std::string command_hotkeys_text(std::vector<CommandHotkey> const& hotkeys);
 
 }  // namespace ava::app

@@ -37,8 +37,8 @@ class ScopedSignalIgnore {
     active_ = sigaction(signal_number_, &ignored, &previous_) == 0;
   }
 
-  ScopedSignalIgnore(const ScopedSignalIgnore&) = delete;
-  ScopedSignalIgnore& operator=(const ScopedSignalIgnore&) = delete;
+  ScopedSignalIgnore(ScopedSignalIgnore const&) = delete;
+  ScopedSignalIgnore& operator=(ScopedSignalIgnore const&) = delete;
 
   ~ScopedSignalIgnore() {
     if (active_) sigaction(signal_number_, &previous_, nullptr);
@@ -50,7 +50,7 @@ class ScopedSignalIgnore {
   struct sigaction previous_{};
 };
 
-std::string command_label(const std::vector<std::string>& argv) {
+std::string command_label(std::vector<std::string> const& argv) {
   std::string label;
   for (std::size_t index = 0; index < argv.size(); ++index) {
     if (index > 0) label += ' ';
@@ -59,22 +59,22 @@ std::string command_label(const std::vector<std::string>& argv) {
   return label;
 }
 
-ava::core::Error lsp_error(ava::core::ErrorCategory category, std::string message, const ServerConfig& config) {
+ava::core::Error lsp_error(ava::core::ErrorCategory category, std::string message, ServerConfig const& config) {
   auto error = ava::core::Error(category, std::move(message));
   error.with_context("command", command_label(config.argv));
   error.with_context("workspace", config.workspace_root.string());
   return error;
 }
 
-ava::core::Error errno_error(std::string message, const ServerConfig& config) {
+ava::core::Error errno_error(std::string message, ServerConfig const& config) {
   auto error = lsp_error(ava::core::ErrorCategory::Io, std::move(message), config);
   error.with_context("cause", std::strerror(errno));
   return error;
 }
 
-bool is_canceled(const CancelCallback& cancel_requested) { return cancel_requested && cancel_requested(); }
+bool is_canceled(CancelCallback const& cancel_requested) { return cancel_requested && cancel_requested(); }
 
-ava::core::Error canceled_error(std::string message, const ServerConfig& config) {
+ava::core::Error canceled_error(std::string message, ServerConfig const& config) {
   auto error = lsp_error(ava::core::ErrorCategory::Unknown, std::move(message), config);
   error.with_context("canceled", "true");
   return error;
@@ -82,7 +82,7 @@ ava::core::Error canceled_error(std::string message, const ServerConfig& config)
 
 pid_t waitpid_retry(pid_t pid, int* status, int options) {
   while (true) {
-    const auto waited = waitpid(pid, status, options);
+    auto const waited = waitpid(pid, status, options);
     if (waited < 0 && errno == EINTR) continue;
     return waited;
   }
@@ -90,15 +90,15 @@ pid_t waitpid_retry(pid_t pid, int* status, int options) {
 
 ssize_t read_retry(int fd, char* data, std::size_t size) {
   while (true) {
-    const auto bytes = read(fd, data, size);
+    auto const bytes = read(fd, data, size);
     if (bytes < 0 && errno == EINTR) continue;
     return bytes;
   }
 }
 
-ssize_t write_retry(int fd, const char* data, std::size_t size) {
+ssize_t write_retry(int fd, char const* data, std::size_t size) {
   while (true) {
-    const auto bytes = write(fd, data, size);
+    auto const bytes = write(fd, data, size);
     if (bytes < 0 && errno == EINTR) continue;
     return bytes;
   }
@@ -111,25 +111,25 @@ void close_fd(int& fd) noexcept {
   }
 }
 
-ava::core::Result<std::array<int, 2>> make_pipe(const ServerConfig& config) {
+ava::core::Result<std::array<int, 2>> make_pipe(ServerConfig const& config) {
   std::array<int, 2> fds{-1, -1};
   if (pipe(fds.data()) != 0) return std::unexpected(errno_error("failed to create LSP process pipe", config));
   return fds;
 }
 
 void close_nonstandard_fds() {
-  const long open_max = sysconf(_SC_OPEN_MAX);
-  const int max_fd = open_max > 0 ? static_cast<int>(open_max) : 1024;
+  long const open_max = sysconf(_SC_OPEN_MAX);
+  int const max_fd = open_max > 0 ? static_cast<int>(open_max) : 1024;
   for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd) close(fd);
 }
 
-std::string percent_encoded_file_path(const std::filesystem::path& path) {
-  const auto value = std::filesystem::absolute(path).lexically_normal().generic_string();
+std::string percent_encoded_file_path(std::filesystem::path const& path) {
+  auto const value = std::filesystem::absolute(path).lexically_normal().generic_string();
   constexpr char hex[] = "0123456789ABCDEF";
   std::string encoded;
   encoded.reserve(value.size());
-  for (const unsigned char byte : value) {
-    const bool unreserved = (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
+  for (unsigned char const byte : value) {
+    bool const unreserved = (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
                             (byte >= '0' && byte <= '9') || byte == '-' || byte == '_' || byte == '.' || byte == '~';
     if (byte == '/') {
       encoded.push_back('/');
@@ -144,19 +144,19 @@ std::string percent_encoded_file_path(const std::filesystem::path& path) {
   return encoded;
 }
 
-std::string file_uri(const std::filesystem::path& path) { return "file://" + percent_encoded_file_path(path); }
+std::string file_uri(std::filesystem::path const& path) { return "file://" + percent_encoded_file_path(path); }
 
 std::string json_string(std::string_view value) { return "\"" + ava::core::json::escape(value) + "\""; }
 
 std::size_t remaining_ms(std::chrono::steady_clock::time_point deadline) {
-  const auto now = std::chrono::steady_clock::now();
+  auto const now = std::chrono::steady_clock::now();
   if (now >= deadline) return 0;
   return static_cast<std::size_t>(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count());
 }
 
-ava::core::Result<std::size_t> parse_content_length(std::string_view header, const ServerConfig& config) {
+ava::core::Result<std::size_t> parse_content_length(std::string_view header, ServerConfig const& config) {
   constexpr std::string_view key = "Content-Length:";
-  const auto position = header.find(key);
+  auto const position = header.find(key);
   if (position == std::string_view::npos) {
     return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP response is missing Content-Length", config));
   }
@@ -169,7 +169,7 @@ ava::core::Result<std::size_t> parse_content_length(std::string_view header, con
         lsp_error(ava::core::ErrorCategory::Tool, "LSP response has invalid Content-Length", config));
   }
   try {
-    const auto parsed = static_cast<std::size_t>(std::stoull(std::string(header.substr(index, end - index))));
+    auto const parsed = static_cast<std::size_t>(std::stoull(std::string(header.substr(index, end - index))));
     if (parsed > kMaxLspMessageBytes) {
       auto error = lsp_error(ava::core::ErrorCategory::Tool, "LSP response Content-Length exceeds message cap", config);
       error.with_context("max_bytes", std::to_string(kMaxLspMessageBytes));
@@ -195,9 +195,9 @@ std::string diagnostic_code(std::string_view object) {
 }
 
 ava::core::Result<std::vector<Diagnostic>> parse_diagnostics_response(std::string_view response,
-                                                                      const ServerConfig& config,
-                                                                      const std::filesystem::path& path) {
-  const auto result = ava::core::json::object_field(response, "result");
+                                                                      ServerConfig const& config,
+                                                                      std::filesystem::path const& path) {
+  auto const result = ava::core::json::object_field(response, "result");
   if (!result) {
     auto error = lsp_error(ava::core::ErrorCategory::Tool, "LSP diagnostics response is missing result", config);
     error.with_context("path", path.string());
@@ -210,7 +210,7 @@ ava::core::Result<std::vector<Diagnostic>> parse_diagnostics_response(std::strin
   }
 
   std::vector<Diagnostic> diagnostics;
-  for (const auto& object : ava::core::json::objects_in_array_field(*result, "items")) {
+  for (auto const& object : ava::core::json::objects_in_array_field(*result, "items")) {
     auto message = ava::core::json::string_field(object, "message");
     auto range = ava::core::json::object_field(object, "range");
     auto start = range ? ava::core::json::object_field(*range, "start") : std::optional<std::string>{};
@@ -220,9 +220,9 @@ ava::core::Result<std::vector<Diagnostic>> parse_diagnostics_response(std::strin
       return std::unexpected(std::move(error));
     }
 
-    const auto severity = ava::core::json::integer_field(object, "severity").value_or(0);
-    const auto line = ava::core::json::integer_field(*start, "line").value_or(0);
-    const auto character = ava::core::json::integer_field(*start, "character").value_or(0);
+    auto const severity = ava::core::json::integer_field(object, "severity").value_or(0);
+    auto const line = ava::core::json::integer_field(*start, "line").value_or(0);
+    auto const character = ava::core::json::integer_field(*start, "character").value_or(0);
     diagnostics.push_back(Diagnostic{.severity = static_cast<int>(severity),
                                      .message = std::move(*message),
                                      .line = static_cast<int>(line),
@@ -276,9 +276,9 @@ ava::core::VoidResult SubprocessLspClient::launch() {
     return std::unexpected(std::move(stdout_pipe.error()));
   }
 
-  const pid_t pid = fork();
+  pid_t const pid = fork();
   if (pid < 0) {
-    const auto saved_errno = errno;
+    auto const saved_errno = errno;
     close((*stdin_pipe)[0]);
     close((*stdin_pipe)[1]);
     close((*stdout_pipe)[0]);
@@ -293,7 +293,7 @@ ava::core::VoidResult SubprocessLspClient::launch() {
     close((*stdout_pipe)[0]);
     if (dup2((*stdin_pipe)[0], STDIN_FILENO) < 0) _exit(127);
     if (dup2((*stdout_pipe)[1], STDOUT_FILENO) < 0) _exit(127);
-    const int dev_null = open("/dev/null", O_WRONLY);
+    int const dev_null = open("/dev/null", O_WRONLY);
     if (dev_null >= 0) {
       dup2(dev_null, STDERR_FILENO);
       close(dev_null);
@@ -319,8 +319,8 @@ ava::core::VoidResult SubprocessLspClient::launch() {
   stdin_fd_ = (*stdin_pipe)[1];
   stdout_fd_ = (*stdout_pipe)[0];
 
-  const int stdout_flags = fcntl(stdout_fd_, F_GETFL, 0);
-  const int stdin_flags = fcntl(stdin_fd_, F_GETFL, 0);
+  int const stdout_flags = fcntl(stdout_fd_, F_GETFL, 0);
+  int const stdin_flags = fcntl(stdin_fd_, F_GETFL, 0);
   if (stdout_flags < 0 || stdin_flags < 0 || fcntl(stdout_fd_, F_SETFL, stdout_flags | O_NONBLOCK) < 0 ||
       fcntl(stdin_fd_, F_SETFL, stdin_flags | O_NONBLOCK) < 0) {
     auto error = errno_error("failed to configure LSP stdio pipes", config_);
@@ -332,22 +332,22 @@ ava::core::VoidResult SubprocessLspClient::launch() {
 }
 
 ava::core::VoidResult SubprocessLspClient::initialize(CancelCallback cancel_requested) {
-  const auto root_uri = file_uri(config_.workspace_root);
-  const std::string params = "{\"processId\":null,\"rootUri\":" + json_string(root_uri) + ",\"capabilities\":{}}";
+  auto const root_uri = file_uri(config_.workspace_root);
+  std::string const params = "{\"processId\":null,\"rootUri\":" + json_string(root_uri) + ",\"capabilities\":{}}";
   auto response = request_response("initialize", params, cancel_requested);
   if (!response) return std::unexpected(std::move(response.error()));
   return send_notification("initialized", "{}", cancel_requested);
 }
 
-ava::core::Result<std::vector<Diagnostic>> SubprocessLspClient::diagnostics(const std::filesystem::path& path,
+ava::core::Result<std::vector<Diagnostic>> SubprocessLspClient::diagnostics(std::filesystem::path const& path,
                                                                             CancelCallback cancel_requested) {
   if (is_canceled(cancel_requested)) {
     auto error = canceled_error("LSP diagnostics canceled", config_);
     error.with_context("path", path.string());
     return std::unexpected(std::move(error));
   }
-  const auto uri = file_uri(path);
-  const std::string params = "{\"textDocument\":{\"uri\":" + json_string(uri) + "}}";
+  auto const uri = file_uri(path);
+  std::string const params = "{\"textDocument\":{\"uri\":" + json_string(uri) + "}}";
   auto response = request_response("textDocument/diagnostic", params, cancel_requested);
   if (!response) return std::unexpected(std::move(response.error()));
   return parse_diagnostics_response(*response, config_, path);
@@ -355,7 +355,7 @@ ava::core::Result<std::vector<Diagnostic>> SubprocessLspClient::diagnostics(cons
 
 ava::core::VoidResult SubprocessLspClient::send_notification(std::string_view method, std::string_view params_json,
                                                              CancelCallback cancel_requested) {
-  const std::string body =
+  std::string const body =
       "{\"jsonrpc\":\"2.0\",\"method\":" + json_string(method) + ",\"params\":" + std::string(params_json) + "}";
   return write_message(body, cancel_requested);
 }
@@ -363,9 +363,9 @@ ava::core::VoidResult SubprocessLspClient::send_notification(std::string_view me
 ava::core::Result<std::string> SubprocessLspClient::request_response(std::string_view method,
                                                                      std::string_view params_json,
                                                                      CancelCallback cancel_requested) {
-  const int id = next_id_++;
-  const auto deadline = std::chrono::steady_clock::now() + config_.request_timeout;
-  const std::string body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) + ",\"method\":" + json_string(method) +
+  int const id = next_id_++;
+  auto const deadline = std::chrono::steady_clock::now() + config_.request_timeout;
+  std::string const body = "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) + ",\"method\":" + json_string(method) +
                            ",\"params\":" + std::string(params_json) + "}";
   if (auto written = write_message(body, cancel_requested); !written) {
     return std::unexpected(std::move(written.error()));
@@ -374,7 +374,7 @@ ava::core::Result<std::string> SubprocessLspClient::request_response(std::string
   while (true) {
     auto message = read_message(deadline, cancel_requested);
     if (!message) return std::unexpected(std::move(message.error()));
-    const auto response_id = ava::core::json::integer_field(*message, "id");
+    auto const response_id = ava::core::json::integer_field(*message, "id");
     if (!response_id) {
       if (ava::core::json::string_field(*message, "method")) continue;
       auto error = lsp_error(ava::core::ErrorCategory::Tool, "LSP response is malformed", config_);
@@ -393,16 +393,16 @@ ava::core::Result<std::string> SubprocessLspClient::request_response(std::string
 
 ava::core::VoidResult SubprocessLspClient::write_message(std::string_view body, CancelCallback cancel_requested) {
   if (auto running = check_child_running(); !running) return std::unexpected(std::move(running.error()));
-  const std::string frame = "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + std::string(body);
+  std::string const frame = "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + std::string(body);
   std::size_t offset = 0;
-  const auto deadline = std::chrono::steady_clock::now() + config_.request_timeout;
-  const ScopedSignalIgnore ignore_sigpipe(SIGPIPE);
+  auto const deadline = std::chrono::steady_clock::now() + config_.request_timeout;
+  ScopedSignalIgnore const ignore_sigpipe(SIGPIPE);
   while (offset < frame.size()) {
     if (is_canceled(cancel_requested)) {
       terminate_child();
       return std::unexpected(canceled_error("LSP request canceled", config_));
     }
-    const auto bytes = write_retry(stdin_fd_, frame.data() + offset, frame.size() - offset);
+    auto const bytes = write_retry(stdin_fd_, frame.data() + offset, frame.size() - offset);
     if (bytes < 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
         if (auto writable = wait_for_writable(deadline, cancel_requested); !writable) {
@@ -427,11 +427,11 @@ ava::core::Result<std::string> SubprocessLspClient::read_message(std::chrono::st
       terminate_child();
       return std::unexpected(canceled_error("LSP request canceled", config_));
     }
-    const auto header_end = read_buffer_.find("\r\n\r\n");
+    auto const header_end = read_buffer_.find("\r\n\r\n");
     if (header_end != std::string::npos) {
       auto length = parse_content_length(std::string_view(read_buffer_).substr(0, header_end), config_);
       if (!length) return std::unexpected(std::move(length.error()));
-      const auto body_start = header_end + 4;
+      auto const body_start = header_end + 4;
       if (read_buffer_.size() >= body_start + *length) {
         auto body = read_buffer_.substr(body_start, *length);
         read_buffer_.erase(0, body_start + *length);
@@ -452,7 +452,7 @@ ava::core::Result<std::string> SubprocessLspClient::read_message(std::chrono::st
       return std::unexpected(std::move(readable.error()));
     }
     std::array<char, 4096> buffer{};
-    const auto bytes = read_retry(stdout_fd_, buffer.data(), buffer.size());
+    auto const bytes = read_retry(stdout_fd_, buffer.data(), buffer.size());
     if (bytes > 0) {
       read_buffer_.append(buffer.data(), static_cast<std::size_t>(bytes));
       continue;
@@ -474,7 +474,7 @@ ava::core::VoidResult SubprocessLspClient::wait_for_readable(std::chrono::steady
     return std::unexpected(canceled_error("LSP request canceled", config_));
   }
   if (auto running = check_child_running(); !running) return std::unexpected(std::move(running.error()));
-  const auto timeout_ms = remaining_ms(deadline);
+  auto const timeout_ms = remaining_ms(deadline);
   if (timeout_ms == 0) {
     auto error = lsp_error(ava::core::ErrorCategory::Tool, "timed out waiting for LSP response", config_);
     error.with_context("timeout_ms", std::to_string(config_.request_timeout.count()));
@@ -483,8 +483,8 @@ ava::core::VoidResult SubprocessLspClient::wait_for_readable(std::chrono::steady
   }
 
   pollfd fd{.fd = stdout_fd_, .events = POLLIN, .revents = 0};
-  const int timeout = static_cast<int>(std::min<std::size_t>(timeout_ms, 100));
-  const int polled = poll(&fd, 1, timeout);
+  int const timeout = static_cast<int>(std::min<std::size_t>(timeout_ms, 100));
+  int const polled = poll(&fd, 1, timeout);
   if (polled < 0) {
     if (errno == EINTR) return {};
     return std::unexpected(errno_error("failed to poll LSP response", config_));
@@ -504,7 +504,7 @@ ava::core::VoidResult SubprocessLspClient::wait_for_writable(std::chrono::steady
     return std::unexpected(canceled_error("LSP request canceled", config_));
   }
   if (auto running = check_child_running(); !running) return std::unexpected(std::move(running.error()));
-  const auto timeout_ms = remaining_ms(deadline);
+  auto const timeout_ms = remaining_ms(deadline);
   if (timeout_ms == 0) {
     auto error = lsp_error(ava::core::ErrorCategory::Tool, "timed out writing LSP request", config_);
     error.with_context("timeout_ms", std::to_string(config_.request_timeout.count()));
@@ -513,8 +513,8 @@ ava::core::VoidResult SubprocessLspClient::wait_for_writable(std::chrono::steady
   }
 
   pollfd fd{.fd = stdin_fd_, .events = POLLOUT, .revents = 0};
-  const int timeout = static_cast<int>(std::min<std::size_t>(timeout_ms, 100));
-  const int polled = poll(&fd, 1, timeout);
+  int const timeout = static_cast<int>(std::min<std::size_t>(timeout_ms, 100));
+  int const polled = poll(&fd, 1, timeout);
   if (polled < 0) {
     if (errno == EINTR) return {};
     return std::unexpected(errno_error("failed to poll LSP request pipe", config_));
@@ -531,7 +531,7 @@ ava::core::VoidResult SubprocessLspClient::check_child_running() {
     return std::unexpected(lsp_error(ava::core::ErrorCategory::Io, "LSP server is not running", config_));
   }
   int status = 0;
-  const pid_t waited = waitpid_retry(pid_, &status, WNOHANG);
+  pid_t const waited = waitpid_retry(pid_, &status, WNOHANG);
   if (waited == 0) return {};
   if (waited == pid_) {
     pid_ = -1;
@@ -553,11 +553,11 @@ void SubprocessLspClient::close_fds() noexcept {
 
 void SubprocessLspClient::terminate_child() noexcept {
   if (pid_ < 0) return;
-  const pid_t target = can_signal_group_ ? -pid_ : pid_;
+  pid_t const target = can_signal_group_ ? -pid_ : pid_;
   kill(target, SIGTERM);
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
   int status = 0;
-  const pid_t terminated = waitpid_retry(pid_, &status, WNOHANG);
+  pid_t const terminated = waitpid_retry(pid_, &status, WNOHANG);
   if (terminated == 0) {
     kill(target, SIGKILL);
     waitpid_retry(pid_, &status, 0);

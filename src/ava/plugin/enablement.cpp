@@ -19,9 +19,9 @@ namespace ava::plugin {
 namespace {
 
 std::optional<bool> bool_field(std::string_view object, std::string_view key) {
-  const auto start = ava::core::json::field_value_start(object, key);
+  auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return std::nullopt;
-  const auto valid_terminator = [](std::string_view value, std::size_t offset) {
+  auto const valid_terminator = [](std::string_view value, std::size_t offset) {
     while (offset < value.size() && std::isspace(static_cast<unsigned char>(value[offset])) != 0) ++offset;
     return offset >= value.size() || value[offset] == ',' || value[offset] == '}';
   };
@@ -33,8 +33,8 @@ std::optional<bool> bool_field(std::string_view object, std::string_view key) {
 bool is_valid_plugin_id(std::string_view id) {
   if (id.empty() || id.size() > 128) return false;
   bool last_was_separator = false;
-  for (const char ch : id) {
-    const bool allowed = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-';
+  for (char const ch : id) {
+    bool const allowed = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-';
     if (!allowed) return false;
     if ((ch == '.' || ch == '_' || ch == '-') && last_was_separator) return false;
     last_was_separator = ch == '.' || ch == '_' || ch == '-';
@@ -59,7 +59,7 @@ std::vector<std::pair<std::string, std::string>> object_entries_with_object_valu
   int object_depth = 0;
   int array_depth = 0;
   for (std::size_t index = 0; index < object.size(); ++index) {
-    const char ch = object[index];
+    char const ch = object[index];
     if (escaped) {
       escaped = false;
       continue;
@@ -73,7 +73,7 @@ std::vector<std::pair<std::string, std::string>> object_entries_with_object_valu
         auto key_end = index + 1;
         bool key_escaped = false;
         while (key_end < object.size()) {
-          const char key_ch = object[key_end];
+          char const key_ch = object[key_end];
           if (key_escaped) {
             key_escaped = false;
           } else if (key_ch == '\\') {
@@ -121,7 +121,7 @@ std::vector<std::pair<std::string, std::string>> object_entries_with_object_valu
   return entries;
 }
 
-ava::core::Result<std::string> read_file_text(const std::filesystem::path& path) {
+ava::core::Result<std::string> read_file_text(std::filesystem::path const& path) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read plugin enablement file")
@@ -132,7 +132,7 @@ ava::core::Result<std::string> read_file_text(const std::filesystem::path& path)
   return out.str();
 }
 
-ava::core::VoidResult write_file_atomic(const std::filesystem::path& path, std::string_view content) {
+ava::core::VoidResult write_file_atomic(std::filesystem::path const& path, std::string_view content) {
   std::error_code create_error;
   std::filesystem::create_directories(path.parent_path(), create_error);
   if (create_error) {
@@ -140,9 +140,9 @@ ava::core::VoidResult write_file_atomic(const std::filesystem::path& path, std::
                                .with_context("path", path.parent_path().string())
                                .with_context("cause", create_error.message()));
   }
-  const auto unique =
+  auto const unique =
       std::to_string(::getpid()) + "." + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
-  const auto temp = path.parent_path() / (path.filename().string() + ".tmp." + unique);
+  auto const temp = path.parent_path() / (path.filename().string() + ".tmp." + unique);
   {
     std::ofstream file(temp, std::ios::binary | std::ios::trunc);
     if (!file) {
@@ -163,22 +163,22 @@ ava::core::VoidResult write_file_atomic(const std::filesystem::path& path, std::
   return {};
 }
 
-std::string enablement_json(const std::vector<PluginEnablementRecord>& records) {
+std::string enablement_json(std::vector<PluginEnablementRecord> const& records) {
   std::string json = "{\"workspaces\":{";
   bool first_workspace = true;
   std::vector<std::filesystem::path> workspaces;
-  for (const auto& record : records) {
+  for (auto const& record : records) {
     if (std::ranges::find(workspaces, record.workspace) == workspaces.end()) workspaces.push_back(record.workspace);
   }
   std::ranges::sort(workspaces);
-  for (const auto& workspace : workspaces) {
+  for (auto const& workspace : workspaces) {
     if (!first_workspace) json += ',';
     first_workspace = false;
     json += "\"" + ava::core::json::escape(workspace.string()) + "\":{";
     bool first_scope = true;
-    for (const auto scope : {PluginScope::Global, PluginScope::Project}) {
+    for (auto const scope : {PluginScope::Global, PluginScope::Project}) {
       bool has_scope = false;
-      for (const auto& record : records) {
+      for (auto const& record : records) {
         if (record.workspace == workspace && record.scope == scope) has_scope = true;
       }
       if (!has_scope) continue;
@@ -186,7 +186,7 @@ std::string enablement_json(const std::vector<PluginEnablementRecord>& records) 
       first_scope = false;
       json += "\"" + ava::core::json::escape(std::string(to_string(scope))) + "\":{";
       bool first_plugin = true;
-      for (const auto& record : records) {
+      for (auto const& record : records) {
         if (record.workspace != workspace || record.scope != scope) continue;
         if (!first_plugin) json += ',';
         first_plugin = false;
@@ -209,7 +209,7 @@ std::filesystem::path default_plugin_enablement_file() {
   return ava::config::xdg_paths().ava_state_dir / "plugin-enablement.json";
 }
 
-std::filesystem::path canonical_workspace_key(const std::filesystem::path& workspace_root) {
+std::filesystem::path canonical_workspace_key(std::filesystem::path const& workspace_root) {
   std::error_code canonical_error;
   auto canonical = std::filesystem::weakly_canonical(workspace_root, canonical_error);
   if (!canonical_error && canonical.is_absolute()) return canonical.lexically_normal();
@@ -218,7 +218,7 @@ std::filesystem::path canonical_workspace_key(const std::filesystem::path& works
   return workspace_root.lexically_normal();
 }
 
-ava::core::Result<std::vector<PluginEnablementRecord>> load_plugin_enablement(const std::filesystem::path& state_file) {
+ava::core::Result<std::vector<PluginEnablementRecord>> load_plugin_enablement(std::filesystem::path const& state_file) {
   std::vector<PluginEnablementRecord> records;
   if (state_file.empty() || !std::filesystem::exists(state_file)) return records;
   auto json = read_file_text(state_file);
@@ -228,14 +228,14 @@ ava::core::Result<std::vector<PluginEnablementRecord>> load_plugin_enablement(co
         ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin enablement state must be valid JSON")
             .with_context("path", state_file.string()));
   }
-  const auto workspaces = ava::core::json::object_field(*json, "workspaces");
+  auto const workspaces = ava::core::json::object_field(*json, "workspaces");
   if (!workspaces) return records;
 
-  for (const auto& [workspace, workspace_object] : object_entries_with_object_values(*workspaces)) {
-    for (const auto& [scope_name, scope_object] : object_entries_with_object_values(workspace_object)) {
-      const auto scope = parse_scope(scope_name);
+  for (auto const& [workspace, workspace_object] : object_entries_with_object_values(*workspaces)) {
+    for (auto const& [scope_name, scope_object] : object_entries_with_object_values(workspace_object)) {
+      auto const scope = parse_scope(scope_name);
       if (!scope) continue;
-      for (const auto& [plugin_id, plugin_object] : object_entries_with_object_values(scope_object)) {
+      for (auto const& [plugin_id, plugin_object] : object_entries_with_object_values(scope_object)) {
         if (!is_valid_plugin_id(plugin_id)) continue;
         records.push_back(PluginEnablementRecord{.workspace = std::filesystem::path(workspace),
                                                  .plugin_id = plugin_id,
@@ -247,20 +247,20 @@ ava::core::Result<std::vector<PluginEnablementRecord>> load_plugin_enablement(co
   return records;
 }
 
-ava::core::Result<bool> plugin_enabled(const std::filesystem::path& state_file,
-                                       const std::filesystem::path& workspace_root, std::string_view plugin_id,
+ava::core::Result<bool> plugin_enabled(std::filesystem::path const& state_file,
+                                       std::filesystem::path const& workspace_root, std::string_view plugin_id,
                                        PluginScope scope) {
   auto records = load_plugin_enablement(state_file);
   if (!records) return std::unexpected(records.error());
-  const auto workspace = canonical_workspace_key(workspace_root);
-  for (const auto& record : *records) {
+  auto const workspace = canonical_workspace_key(workspace_root);
+  for (auto const& record : *records) {
     if (record.workspace == workspace && record.plugin_id == plugin_id && record.scope == scope) return record.enabled;
   }
   return false;
 }
 
-ava::core::VoidResult set_plugin_enabled(const std::filesystem::path& state_file,
-                                         const std::filesystem::path& workspace_root, std::string_view plugin_id,
+ava::core::VoidResult set_plugin_enabled(std::filesystem::path const& state_file,
+                                         std::filesystem::path const& workspace_root, std::string_view plugin_id,
                                          bool enabled, PluginScope scope) {
   if (!is_valid_plugin_id(plugin_id)) {
     return std::unexpected(
@@ -268,7 +268,7 @@ ava::core::VoidResult set_plugin_enabled(const std::filesystem::path& state_file
   }
   auto records = load_plugin_enablement(state_file);
   if (!records) return std::unexpected(records.error());
-  const auto workspace = canonical_workspace_key(workspace_root);
+  auto const workspace = canonical_workspace_key(workspace_root);
   bool updated = false;
   for (auto& record : *records) {
     if (record.workspace == workspace && record.plugin_id == plugin_id && record.scope == scope) {
@@ -281,7 +281,7 @@ ava::core::VoidResult set_plugin_enabled(const std::filesystem::path& state_file
     records->push_back(PluginEnablementRecord{
         .workspace = workspace, .plugin_id = std::string(plugin_id), .scope = scope, .enabled = enabled});
   }
-  std::ranges::sort(*records, [](const PluginEnablementRecord& left, const PluginEnablementRecord& right) {
+  std::ranges::sort(*records, [](PluginEnablementRecord const& left, PluginEnablementRecord const& right) {
     if (left.workspace != right.workspace) return left.workspace < right.workspace;
     if (left.scope != right.scope) return static_cast<int>(left.scope) < static_cast<int>(right.scope);
     return left.plugin_id < right.plugin_id;

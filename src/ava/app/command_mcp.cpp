@@ -13,7 +13,7 @@
 namespace ava::app {
 namespace {
 
-ava::mcp::McpConfigLoadOptions mcp_config_options(const RuntimeSession& session) {
+ava::mcp::McpConfigLoadOptions mcp_config_options(RuntimeSession const& session) {
   auto options = ava::mcp::default_mcp_config_options(session.workspace_dir);
   options.global_config_file = session.paths.ava_config_dir / "mcp.json";
   options.project_config_file = session.workspace_dir / ".ava" / "mcp.json";
@@ -24,38 +24,38 @@ std::string mcp_scope_text(ava::mcp::McpServerScope scope) { return std::string(
 
 std::string mcp_status_text(bool enabled) { return enabled ? "enabled" : "disabled"; }
 
-const ava::mcp::McpServerConfig* find_mcp_server(const ava::mcp::McpConfig& config, std::string_view server_id) {
-  for (const auto& server : config.servers) {
+ava::mcp::McpServerConfig const* find_mcp_server(ava::mcp::McpConfig const& config, std::string_view server_id) {
+  for (auto const& server : config.servers) {
     if (server.id == server_id) return &server;
   }
   return nullptr;
 }
 
-std::string mcp_command_text(const ava::mcp::McpServerConfig& server) {
+std::string mcp_command_text(ava::mcp::McpServerConfig const& server) {
   std::string text = sanitize_inline_text(server.command);
-  for (const auto& arg : server.args) text += " " + sanitize_inline_text(arg);
+  for (auto const& arg : server.args) text += " " + sanitize_inline_text(arg);
   return text;
 }
 
-std::string mcp_display_path(const std::filesystem::path& path, const RuntimeSession& session) {
+std::string mcp_display_path(std::filesystem::path const& path, RuntimeSession const& session) {
   return sanitize_inline_text(display_path(path, session.current_dir));
 }
 
-std::string mcp_config_path_text(const std::filesystem::path& path, const RuntimeSession& session) {
+std::string mcp_config_path_text(std::filesystem::path const& path, RuntimeSession const& session) {
   if (path.empty()) return "none";
   return mcp_display_path(path, session);
 }
 
-std::string format_mcp_server_not_found_text(const ava::mcp::McpConfig& config, std::string_view server_id) {
+std::string format_mcp_server_not_found_text(ava::mcp::McpConfig const& config, std::string_view server_id) {
   std::string output = "MCP server not found: " + sanitize_inline_text(std::string(server_id));
   if (!config.servers.empty()) {
     output += "\nConfigured MCP servers:";
-    for (const auto& server : config.servers) output += "\n  " + sanitize_inline_text(server.id);
+    for (auto const& server : config.servers) output += "\n  " + sanitize_inline_text(server.id);
   }
   return output;
 }
 
-std::string format_mcp_list_text(const ava::mcp::McpConfig& config, const RuntimeSession& session) {
+std::string format_mcp_list_text(ava::mcp::McpConfig const& config, RuntimeSession const& session) {
   std::ostringstream output;
   output << "MCP servers:\n";
   output << "  global config: " << mcp_config_path_text(config.global_config_file, session) << "\n";
@@ -64,7 +64,7 @@ std::string format_mcp_list_text(const ava::mcp::McpConfig& config, const Runtim
     output << "  none";
     return output.str();
   }
-  for (const auto& server : config.servers) {
+  for (auto const& server : config.servers) {
     output << "  " << sanitize_inline_text(server.id) << "  " << mcp_status_text(server.enabled) << "  "
            << mcp_scope_text(server.scope) << "  " << sanitize_inline_text(server.name) << "\n";
   }
@@ -73,7 +73,7 @@ std::string format_mcp_list_text(const ava::mcp::McpConfig& config, const Runtim
   return text;
 }
 
-std::string format_mcp_inspect_text(const ava::mcp::McpServerConfig& server, const RuntimeSession& session) {
+std::string format_mcp_inspect_text(ava::mcp::McpServerConfig const& server, RuntimeSession const& session) {
   std::ostringstream output;
   output << "MCP server " << sanitize_inline_text(server.id) << "\n";
   output << "  name: " << sanitize_inline_text(server.name) << "\n";
@@ -85,9 +85,9 @@ std::string format_mcp_inspect_text(const ava::mcp::McpServerConfig& server, con
   return output.str();
 }
 
-std::string format_mcp_tools_text(const ava::mcp::McpServerConfig& server,
-                                  const ava::mcp::McpInitialization& initialization,
-                                  const std::vector<ava::mcp::McpToolDescription>& tools) {
+std::string format_mcp_tools_text(ava::mcp::McpServerConfig const& server,
+                                  ava::mcp::McpInitialization const& initialization,
+                                  std::vector<ava::mcp::McpToolDescription> const& tools) {
   std::ostringstream output;
   output << "MCP tools for " << sanitize_inline_text(server.id) << "\n";
   output << "  server: " << sanitize_inline_text(initialization.server_name);
@@ -97,7 +97,7 @@ std::string format_mcp_tools_text(const ava::mcp::McpServerConfig& server,
     output << "  none";
     return output.str();
   }
-  for (const auto& tool : tools) {
+  for (auto const& tool : tools) {
     output << "  " << sanitize_inline_text(tool.name) << "  "
            << sanitize_inline_text(ava::mcp::mcp_model_tool_name(server.id, tool.name));
     if (!tool.description.empty()) output << "  " << sanitize_inline_text(tool.description);
@@ -110,16 +110,16 @@ std::string format_mcp_tools_text(const ava::mcp::McpServerConfig& server,
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_mcp_command(RuntimeSession& session, const CommandRequest& request) {
+ava::core::Result<CommandResult> run_mcp_command(RuntimeSession& session, CommandRequest const& request) {
   CommandResult result;
   result.handled = true;
-  const auto usage = [&]() {
+  auto const usage = [&]() {
     add_output(result, missing_argument("/mcp <list|inspect|tools|restart> [server_id]"));
     return result;
   };
 
-  const auto argument = command_argument(request.command, "/mcp");
-  const auto args = split_command_arguments(argument);
+  auto const argument = command_argument(request.command, "/mcp");
+  auto const args = split_command_arguments(argument);
   if (args.empty()) return usage();
 
   auto config = ava::mcp::load_mcp_config(mcp_config_options(session));
@@ -128,7 +128,7 @@ ava::core::Result<CommandResult> run_mcp_command(RuntimeSession& session, const 
     return result;
   }
 
-  const auto& subcommand = args[0];
+  auto const& subcommand = args[0];
   if (subcommand == "list") {
     if (args.size() != 1) return usage();
     add_output(result, format_mcp_list_text(*config, session));
@@ -140,7 +140,7 @@ ava::core::Result<CommandResult> run_mcp_command(RuntimeSession& session, const 
   }
 
   if (subcommand == "inspect") {
-    const auto* server = find_mcp_server(*config, args[1]);
+    auto const* server = find_mcp_server(*config, args[1]);
     if (!server) {
       add_output(result, format_mcp_server_not_found_text(*config, args[1]));
       return result;
@@ -150,7 +150,7 @@ ava::core::Result<CommandResult> run_mcp_command(RuntimeSession& session, const 
   }
 
   if (subcommand == "restart") {
-    const auto* server = find_mcp_server(*config, args[1]);
+    auto const* server = find_mcp_server(*config, args[1]);
     if (!server) {
       add_output(result, format_mcp_server_not_found_text(*config, args[1]));
       return result;
@@ -162,7 +162,7 @@ ava::core::Result<CommandResult> run_mcp_command(RuntimeSession& session, const 
   }
 
   if (subcommand == "tools") {
-    const auto* server = find_mcp_server(*config, args[1]);
+    auto const* server = find_mcp_server(*config, args[1]);
     if (!server) {
       add_output(result, format_mcp_server_not_found_text(*config, args[1]));
       return result;
@@ -174,14 +174,14 @@ ava::core::Result<CommandResult> run_mcp_command(RuntimeSession& session, const 
 
     auto context = make_tool_context(session, request.permission_resolver);
     context.permission_tool_name = "mcp_tools";
-    const auto call_id = ava::core::make_id("cmd");
+    auto const call_id = ava::core::make_id("cmd");
     if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "mcp_tools", server->id);
         !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }
 
-    auto fail = [&](const ava::core::Error& error) -> ava::core::Result<CommandResult> {
-      const auto text = error.format();
+    auto fail = [&](ava::core::Error const& error) -> ava::core::Result<CommandResult> {
+      auto const text = error.format();
       if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "mcp_tools",
                                              ava::agent::ToolTimelineStatus::Error, text);
           !recorded) {
@@ -209,7 +209,7 @@ ava::core::Result<CommandResult> run_mcp_command(RuntimeSession& session, const 
     auto client = ava::mcp::McpStdioClient::start(*server, options);
     if (!client) return fail(client.error());
     auto tools = (*client)->list_tools();
-    const auto initialization = (*client)->initialization();
+    auto const initialization = (*client)->initialization();
     auto shutdown = (*client)->shutdown();
     if (!tools) return fail(tools.error());
     if (!shutdown) return fail(shutdown.error());

@@ -27,8 +27,8 @@ struct PluginDiagnostics {
   std::vector<PluginFailure> failures;
 };
 
-[[nodiscard]] PluginDiagnostics collect_plugin_diagnostics(const PluginDiscoveryOptions& options,
-                                                           const std::filesystem::path& enablement_file,
-                                                           const std::filesystem::path& workspace_root);
+[[nodiscard]] PluginDiagnostics collect_plugin_diagnostics(PluginDiscoveryOptions const& options,
+                                                           std::filesystem::path const& enablement_file,
+                                                           std::filesystem::path const& workspace_root);
 
 }  // namespace ava::plugin

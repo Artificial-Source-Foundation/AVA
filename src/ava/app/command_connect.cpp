@@ -13,7 +13,7 @@ namespace {
 bool is_valid_connect_provider_id(std::string_view provider_id) {
   if (provider_id.empty() || provider_id.size() > 128) return false;
   return std::ranges::all_of(provider_id, [](char ch) {
-    const auto uch = static_cast<unsigned char>(ch);
+    auto const uch = static_cast<unsigned char>(ch);
     return std::isalnum(uch) != 0 || ch == '-' || ch == '_';
   });
 }
@@ -41,13 +41,13 @@ std::string credential_type_label(std::string_view credential_type) {
   return credential_type == "oauth" ? "OAuth bearer token" : "API key";
 }
 
-std::string selected_or_custom_answer(const ava::agent::QuestionAnswer& answer) {
+std::string selected_or_custom_answer(ava::agent::QuestionAnswer const& answer) {
   if (!answer.custom_text.empty()) return answer.custom_text;
   if (!answer.selected_options.empty()) return answer.selected_options.front();
   return {};
 }
 
-ava::core::Result<ava::agent::QuestionAnswer> ask_connect_question(const CommandRequest& request,
+ava::core::Result<ava::agent::QuestionAnswer> ask_connect_question(CommandRequest const& request,
                                                                    ava::agent::QuestionPrompt prompt) {
   if (!request.question_resolver) {
     return std::unexpected(
@@ -58,16 +58,16 @@ ava::core::Result<ava::agent::QuestionAnswer> ask_connect_question(const Command
   return request.question_resolver(prompt);
 }
 
-std::vector<ava::agent::QuestionOption> provider_options(const RuntimeSession& session) {
+std::vector<ava::agent::QuestionOption> provider_options(RuntimeSession const& session) {
   std::vector<ava::agent::QuestionOption> options;
   auto add = [&](std::string value, std::string label) {
-    if (std::ranges::any_of(options, [&](const auto& option) { return option.value == value; })) return;
+    if (std::ranges::any_of(options, [&](auto const& option) { return option.value == value; })) return;
     options.push_back(ava::agent::QuestionOption{.value = std::move(value), .label = std::move(label)});
   };
   if (!session.model.provider_id.empty()) {
     add(session.model.provider_id, ava::config::provider_display_name(session.model.provider_id) + " (current)");
   }
-  for (const auto& profile : ava::config::builtin_provider_profiles()) {
+  for (auto const& profile : ava::config::builtin_provider_profiles()) {
     auto label = profile.display_name;
     if (!profile.connect_detail.empty()) label += " - " + profile.connect_detail;
     add(profile.provider_id, std::move(label));
@@ -75,8 +75,8 @@ std::vector<ava::agent::QuestionOption> provider_options(const RuntimeSession& s
   return options;
 }
 
-ava::core::Result<std::string> resolve_connect_provider(RuntimeSession& session, const CommandRequest& request,
-                                                        const std::vector<std::string>& args) {
+ava::core::Result<std::string> resolve_connect_provider(RuntimeSession& session, CommandRequest const& request,
+                                                        std::vector<std::string> const& args) {
   if (!args.empty()) return args[0];
   auto answer = ask_connect_question(request, ava::agent::QuestionPrompt{.header = "Connect a provider",
                                                                          .question = "Select provider",
@@ -90,10 +90,10 @@ ava::core::Result<std::string> resolve_connect_provider(RuntimeSession& session,
   return selected_or_custom_answer(*answer);
 }
 
-ava::core::Result<std::string> resolve_connect_credential_type(const CommandRequest& request,
-                                                               const std::vector<std::string>& args) {
+ava::core::Result<std::string> resolve_connect_credential_type(CommandRequest const& request,
+                                                               std::vector<std::string> const& args) {
   if (args.size() >= 2) {
-    const auto credential_type = credential_type_value(args[1]);
+    auto const credential_type = credential_type_value(args[1]);
     if (!credential_type.empty()) return credential_type;
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                   "/connect credential type must be api-key or oauth");
@@ -115,7 +115,7 @@ ava::core::Result<std::string> resolve_connect_credential_type(const CommandRequ
   return selected_or_custom_answer(*answer);
 }
 
-ava::core::Result<std::string> prompt_connect_secret(const CommandRequest& request, std::string_view provider_id,
+ava::core::Result<std::string> prompt_connect_secret(CommandRequest const& request, std::string_view provider_id,
                                                      std::string_view credential_type) {
   auto answer = ask_connect_question(
       request, ava::agent::QuestionPrompt{
@@ -136,10 +136,10 @@ ava::core::Result<std::string> prompt_connect_secret(const CommandRequest& reque
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_connect_command(RuntimeSession& session, const CommandRequest& request) {
+ava::core::Result<CommandResult> run_connect_command(RuntimeSession& session, CommandRequest const& request) {
   CommandResult result;
   result.handled = true;
-  const auto args = split_command_arguments(command_argument(request.command, "/connect"));
+  auto const args = split_command_arguments(command_argument(request.command, "/connect"));
   if (args.size() > 2) {
     add_output(result, missing_argument("/connect [provider] [api-key|oauth]"));
     return result;

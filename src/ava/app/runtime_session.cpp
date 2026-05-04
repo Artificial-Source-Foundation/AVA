@@ -20,14 +20,14 @@ ava::core::Result<std::filesystem::path> current_path_result() {
   return std::unexpected(std::move(result_error));
 }
 
-ava::core::Result<std::string> resolve_session_id(const std::filesystem::path& workspace_dir,
-                                                  const std::filesystem::path& root_dir,
+ava::core::Result<std::string> resolve_session_id(std::filesystem::path const& workspace_dir,
+                                                  std::filesystem::path const& root_dir,
                                                   std::string_view requested_id) {
   auto sessions = ava::session::SessionStore::list_sessions(workspace_dir, root_dir);
   if (!sessions) return std::unexpected(sessions.error());
 
   std::vector<std::string> matches;
-  for (const auto& session : *sessions) {
+  for (auto const& session : *sessions) {
     if (session.session_id == requested_id || session.session_id.starts_with(requested_id)) {
       matches.push_back(session.session_id);
     }
@@ -48,7 +48,7 @@ ava::core::Result<std::string> resolve_session_id(const std::filesystem::path& w
 
 }  // namespace
 
-ava::core::Result<RuntimeSession> open_runtime_session(const RuntimeOpenOptions& options) {
+ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const& options) {
   if (options.requested_session_id && options.continue_last_session) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                             "use either requested session id or continue, not both"));
@@ -56,8 +56,8 @@ ava::core::Result<RuntimeSession> open_runtime_session(const RuntimeOpenOptions&
 
   auto cwd = current_path_result();
   if (!cwd) return std::unexpected(std::move(cwd.error()));
-  const auto workspace_dir = options.workspace_dir.empty() ? *cwd : options.workspace_dir;
-  const auto current_dir = options.current_dir.empty() ? workspace_dir : options.current_dir;
+  auto const workspace_dir = options.workspace_dir.empty() ? *cwd : options.workspace_dir;
+  auto const current_dir = options.current_dir.empty() ? workspace_dir : options.current_dir;
 
   auto registry = ava::config::load_model_registry(options.paths);
   if (!registry) return std::unexpected(registry.error());

@@ -11,26 +11,26 @@ namespace ava::tui {
 namespace {
 
 std::string first_non_empty(std::initializer_list<std::string_view> values) {
-  for (const auto value : values) {
+  for (auto const value : values) {
     if (!value.empty()) return std::string(value);
   }
   return {};
 }
 
-auto find_pending_tool(TuiEventState& state, const std::string& call_id, const std::string& request_id = {},
-                       const std::string& correlation_id = {}) {
-  return std::ranges::find_if(state.pending_tools, [&](const PendingToolItem& tool) {
+auto find_pending_tool(TuiEventState& state, std::string const& call_id, std::string const& request_id = {},
+                       std::string const& correlation_id = {}) {
+  return std::ranges::find_if(state.pending_tools, [&](PendingToolItem const& tool) {
     return (!call_id.empty() && tool.call_id == call_id) || (!request_id.empty() && tool.request_id == request_id) ||
            (!correlation_id.empty() && tool.correlation_id == correlation_id);
   });
 }
 
 bool bool_field(std::string_view object, std::string_view key) {
-  const auto start = ava::core::json::field_value_start(object, key);
+  auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return false;
   auto value = object.substr(*start);
   while (!value.empty()) {
-    const auto byte = static_cast<unsigned char>(value.front());
+    auto const byte = static_cast<unsigned char>(value.front());
     if (byte != ' ' && byte != '\n' && byte != '\r' && byte != '\t') break;
     value.remove_prefix(1);
   }
@@ -38,11 +38,11 @@ bool bool_field(std::string_view object, std::string_view key) {
 }
 
 std::optional<bool> optional_bool_field(std::string_view object, std::string_view key) {
-  const auto start = ava::core::json::field_value_start(object, key);
+  auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return std::nullopt;
   auto value = object.substr(*start);
   while (!value.empty()) {
-    const auto byte = static_cast<unsigned char>(value.front());
+    auto const byte = static_cast<unsigned char>(value.front());
     if (byte != ' ' && byte != '\n' && byte != '\r' && byte != '\t') break;
     value.remove_prefix(1);
   }
@@ -52,12 +52,12 @@ std::optional<bool> optional_bool_field(std::string_view object, std::string_vie
 }
 
 std::size_t size_field(std::string_view object, std::string_view key) {
-  const auto value = ava::core::json::integer_field(object, key);
+  auto const value = ava::core::json::integer_field(object, key);
   return value && *value > 0 ? static_cast<std::size_t>(*value) : std::size_t{0};
 }
 
 std::optional<std::size_t> optional_size_field(std::string_view object, std::string_view key) {
-  const auto value = ava::core::json::integer_field(object, key);
+  auto const value = ava::core::json::integer_field(object, key);
   if (!value || *value < 0) return std::nullopt;
   return static_cast<std::size_t>(*value);
 }
@@ -105,28 +105,28 @@ std::optional<ava::app::RuntimeEventType> runtime_event_type_from_name(std::stri
   return std::nullopt;
 }
 
-std::string prompt_request_text(const ava::app::EventEnvelope& envelope) {
-  const auto& payload = envelope.payload_json;
+std::string prompt_request_text(ava::app::EventEnvelope const& envelope) {
+  auto const& payload = envelope.payload_json;
   if (envelope.name == "permission_requested") {
-    const auto tool = ava::core::json::string_field(payload, "tool_name").value_or("");
-    const auto operation = ava::core::json::string_field(payload, "operation").value_or("");
-    const auto target = ava::core::json::string_field(payload, "target_path").value_or("");
-    const auto command = ava::core::json::string_field(payload, "command").value_or("");
+    auto const tool = ava::core::json::string_field(payload, "tool_name").value_or("");
+    auto const operation = ava::core::json::string_field(payload, "operation").value_or("");
+    auto const target = ava::core::json::string_field(payload, "target_path").value_or("");
+    auto const command = ava::core::json::string_field(payload, "command").value_or("");
     auto text = std::string("permission requested");
     if (!tool.empty()) text += ": " + tool;
-    const auto detail = first_non_empty({target, command, operation});
+    auto const detail = first_non_empty({target, command, operation});
     if (!detail.empty()) text += " " + detail;
     return text;
   }
   if (envelope.name == "question_requested") {
-    const auto question = ava::core::json::string_field(payload, "question").value_or("");
+    auto const question = ava::core::json::string_field(payload, "question").value_or("");
     return question.empty() ? std::string("question requested") : "question requested: " + question;
   }
   return {};
 }
 
-std::optional<ava::app::RuntimeEvent> runtime_event_from_envelope(const ava::app::EventEnvelope& envelope) {
-  const auto type = runtime_event_type_from_name(envelope.name);
+std::optional<ava::app::RuntimeEvent> runtime_event_from_envelope(ava::app::EventEnvelope const& envelope) {
+  auto const type = runtime_event_type_from_name(envelope.name);
   if (!type) return std::nullopt;
   ava::app::RuntimeEvent event;
   event.type = *type;
@@ -192,8 +192,8 @@ std::optional<ava::app::RuntimeEvent> runtime_event_from_envelope(const ava::app
   return event;
 }
 
-void annotate_pending_tool_ids(TuiEventState& state, const ava::app::RuntimeEvent& event,
-                               const ava::app::EventEnvelope& envelope) {
+void annotate_pending_tool_ids(TuiEventState& state, ava::app::RuntimeEvent const& event,
+                               ava::app::EventEnvelope const& envelope) {
   if (event.type != ava::app::RuntimeEventType::ToolStart && event.type != ava::app::RuntimeEventType::ToolProgress &&
       event.type != ava::app::RuntimeEventType::ToolResult) {
     return;
@@ -211,7 +211,7 @@ void annotate_pending_tool_ids(TuiEventState& state, const ava::app::RuntimeEven
   }
 }
 
-void remember_envelope_ids(TuiEventState& state, const ava::app::EventEnvelope& envelope) {
+void remember_envelope_ids(TuiEventState& state, ava::app::EventEnvelope const& envelope) {
   if (envelope.run_id) state.active_run_id = envelope.run_id;
   if (envelope.turn_id) state.active_turn_id = envelope.turn_id;
   if (envelope.message_id) state.active_message_id = envelope.message_id;
@@ -219,10 +219,10 @@ void remember_envelope_ids(TuiEventState& state, const ava::app::EventEnvelope& 
   if (envelope.correlation_id) state.active_correlation_id = envelope.correlation_id;
 }
 
-void apply_prompt_request_envelope(TuiEventState& state, const ava::app::EventEnvelope& envelope) {
-  const auto text = prompt_request_text(envelope);
+void apply_prompt_request_envelope(TuiEventState& state, ava::app::EventEnvelope const& envelope) {
+  auto const text = prompt_request_text(envelope);
   if (text.empty()) return;
-  const auto permission = envelope.name == "permission_requested";
+  auto const permission = envelope.name == "permission_requested";
   state.transcript.push_back(transcript_text_item("audit", text));
   upsert_sidebar_activity(state, SidebarActivityItem{.id = first_non_empty({envelope.request_id.value_or(""),
                                                                             envelope.correlation_id.value_or(""),
@@ -248,32 +248,32 @@ ToolTimelineStatus queue_event_status(std::string_view name) {
   return ToolTimelineStatus::Running;
 }
 
-std::string queue_event_detail(const ava::app::EventEnvelope& envelope) {
-  const auto message = ava::core::json::string_field(envelope.payload_json, "message").value_or("");
-  const auto reason = ava::core::json::string_field(envelope.payload_json, "reason").value_or("");
+std::string queue_event_detail(ava::app::EventEnvelope const& envelope) {
+  auto const message = ava::core::json::string_field(envelope.payload_json, "message").value_or("");
+  auto const reason = ava::core::json::string_field(envelope.payload_json, "reason").value_or("");
   auto detail = queue_event_label(envelope.name);
   if (!reason.empty()) detail += ": " + reason;
   if (!message.empty()) detail += " - " + message;
   if (bool_field(envelope.payload_json, "message_truncated")) {
     detail += " [message truncated";
-    const auto bytes = size_field(envelope.payload_json, "message_bytes");
+    auto const bytes = size_field(envelope.payload_json, "message_bytes");
     if (bytes > 0) detail += " from " + std::to_string(bytes) + " bytes";
     detail += "]";
   }
   return detail;
 }
 
-std::string queue_event_id(const ava::app::EventEnvelope& envelope) {
+std::string queue_event_id(ava::app::EventEnvelope const& envelope) {
   return first_non_empty({envelope.request_id.value_or(""), envelope.correlation_id.value_or(""), envelope.name});
 }
 
-void upsert_queued_message(TuiEventState& state, const ava::app::EventEnvelope& envelope) {
-  const auto id = queue_event_id(envelope);
-  const auto message = ava::core::json::string_field(envelope.payload_json, "message").value_or("");
+void upsert_queued_message(TuiEventState& state, ava::app::EventEnvelope const& envelope) {
+  auto const id = queue_event_id(envelope);
+  auto const message = ava::core::json::string_field(envelope.payload_json, "message").value_or("");
   if (id.empty() || message.empty()) return;
-  const auto kind = envelope.name.starts_with("steer") ? std::string("steer") : std::string("follow-up");
+  auto const kind = envelope.name.starts_with("steer") ? std::string("steer") : std::string("follow-up");
   auto existing =
-      std::ranges::find_if(state.queued_messages, [&](const QueuedMessageItem& item) { return item.id == id; });
+      std::ranges::find_if(state.queued_messages, [&](QueuedMessageItem const& item) { return item.id == id; });
   auto item = QueuedMessageItem{.id = id, .kind = kind, .text = message};
   if (existing == state.queued_messages.end()) {
     state.queued_messages.push_back(std::move(item));
@@ -282,22 +282,22 @@ void upsert_queued_message(TuiEventState& state, const ava::app::EventEnvelope& 
   }
 }
 
-void remove_queued_message(TuiEventState& state, const ava::app::EventEnvelope& envelope) {
-  const auto id = queue_event_id(envelope);
+void remove_queued_message(TuiEventState& state, ava::app::EventEnvelope const& envelope) {
+  auto const id = queue_event_id(envelope);
   if (id.empty()) return;
-  std::erase_if(state.queued_messages, [&](const QueuedMessageItem& item) { return item.id == id; });
+  std::erase_if(state.queued_messages, [&](QueuedMessageItem const& item) { return item.id == id; });
 }
 
 std::string_view trim_trailing_ascii_space(std::string_view text) {
   while (!text.empty()) {
-    const auto byte = static_cast<unsigned char>(text.back());
+    auto const byte = static_cast<unsigned char>(text.back());
     if (byte != ' ' && byte != '\n' && byte != '\r' && byte != '\t' && byte != '\f' && byte != '\v') break;
     text.remove_suffix(1);
   }
   return text;
 }
 
-ToolTimelineStatus tool_status_from_event(const ava::app::RuntimeEvent& event) {
+ToolTimelineStatus tool_status_from_event(ava::app::RuntimeEvent const& event) {
   return event.status == "error" ? ToolTimelineStatus::Error : ToolTimelineStatus::Success;
 }
 
@@ -306,7 +306,7 @@ std::string title_case_ascii(std::string_view text) {
   output.reserve(text.size());
   bool at_word_start = true;
   for (char ch : text) {
-    const auto byte = static_cast<unsigned char>(ch);
+    auto const byte = static_cast<unsigned char>(ch);
     if (byte == '_' || byte == '-') {
       output.push_back(' ');
       at_word_start = true;
@@ -322,24 +322,24 @@ std::string title_case_ascii(std::string_view text) {
   return output;
 }
 
-std::string assistant_meta_for_event(const ava::app::RuntimeEvent& event) {
+std::string assistant_meta_for_event(ava::app::RuntimeEvent const& event) {
   if (event.model_id.empty()) return {};
   auto mode = title_case_ascii(ava::agent::to_string(event.mode));
   if (mode.empty()) mode = "AVA";
   return mode + " - " + ava::config::model_display_label(event.provider_id, event.model_id);
 }
 
-void update_pending_assistant_meta(TuiEventState& state, const ava::app::RuntimeEvent& event) {
+void update_pending_assistant_meta(TuiEventState& state, ava::app::RuntimeEvent const& event) {
   auto meta = assistant_meta_for_event(event);
   if (!meta.empty()) state.pending_assistant_meta = std::move(meta);
 }
 
-void upsert_activity(TuiEventState& state, const std::string& call_id, const ToolTimelineItem& item) {
-  const auto id = call_id.empty() ? item.name + ":" + item.argument_summary : call_id;
-  const auto label = item.name.empty() ? std::string("tool") : item.name;
-  const auto detail = item.result_summary.empty() ? item.argument_summary : item.result_summary;
+void upsert_activity(TuiEventState& state, std::string const& call_id, ToolTimelineItem const& item) {
+  auto const id = call_id.empty() ? item.name + ":" + item.argument_summary : call_id;
+  auto const label = item.name.empty() ? std::string("tool") : item.name;
+  auto const detail = item.result_summary.empty() ? item.argument_summary : item.result_summary;
   auto existing =
-      std::ranges::find_if(state.activity, [&](const SidebarActivityItem& activity) { return activity.id == id; });
+      std::ranges::find_if(state.activity, [&](SidebarActivityItem const& activity) { return activity.id == id; });
   if (existing != state.activity.end()) {
     existing->label = label;
     existing->detail = detail;
@@ -357,7 +357,7 @@ void upsert_activity(TuiEventState& state, const std::string& call_id, const Too
 
 void upsert_sidebar_activity(TuiEventState& state, SidebarActivityItem item) {
   auto existing =
-      std::ranges::find_if(state.activity, [&](const SidebarActivityItem& activity) { return activity.id == item.id; });
+      std::ranges::find_if(state.activity, [&](SidebarActivityItem const& activity) { return activity.id == item.id; });
   if (existing != state.activity.end()) {
     *existing = std::move(item);
     return;
@@ -373,18 +373,18 @@ void upsert_sidebar_activity(TuiEventState& state, SidebarActivityItem item) {
 
 void settle_responding_activity(TuiEventState& state, ToolTimelineStatus status, std::string detail) {
   auto existing = std::ranges::find_if(state.activity,
-                                       [](const SidebarActivityItem& activity) { return activity.id == "responding"; });
+                                       [](SidebarActivityItem const& activity) { return activity.id == "responding"; });
   if (existing == state.activity.end()) return;
   existing->status = status;
   existing->detail = std::move(detail);
 }
 
-bool is_cancel_error(const ava::app::RuntimeEvent& event) {
+bool is_cancel_error(ava::app::RuntimeEvent const& event) {
   return event.error_message == "agent loop canceled" || event.text == "agent loop canceled" ||
          event.error_details.find("agent loop canceled") != std::string::npos;
 }
 
-std::string compact_lifecycle_detail(std::string_view label, const ava::app::RuntimeEvent& event) {
+std::string compact_lifecycle_detail(std::string_view label, ava::app::RuntimeEvent const& event) {
   std::string detail(label);
   if (!event.trigger.empty()) detail += " (" + event.trigger + ")";
   if (event.attempt > 0) {
@@ -401,11 +401,11 @@ std::string compact_lifecycle_detail(std::string_view label, const ava::app::Run
   return detail;
 }
 
-std::string retry_activity_id(const ava::app::RuntimeEvent& event) {
+std::string retry_activity_id(ava::app::RuntimeEvent const& event) {
   return "retry:" + first_non_empty({event.reason, event.trigger, "retry"});
 }
 
-void apply_canceled_event(TuiEventState& state, const ava::app::RuntimeEvent& event) {
+void apply_canceled_event(TuiEventState& state, ava::app::RuntimeEvent const& event) {
   state.error_text = "stopped by user";
   state.error_details.clear();
   auto text = event.text.empty() ? std::string("stopped by user") : event.text;
@@ -423,10 +423,10 @@ std::optional<std::string> path_from_argument_summary(std::string_view summary) 
   // Tool argument summaries are the only stable TUI-side source for file names today. Keep this conservative: if the
   // summary no longer exposes a top-level path= field, the sidebar omits the file instead of guessing.
   constexpr std::string_view marker = "path=";
-  const auto start = summary.find(marker);
+  auto const start = summary.find(marker);
   if (start == std::string_view::npos) return std::nullopt;
   auto value = summary.substr(start + marker.size());
-  const auto comma = value.find(',');
+  auto const comma = value.find(',');
   if (comma != std::string_view::npos) value = value.substr(0, comma);
   while (!value.empty() && value.front() == ' ') value.remove_prefix(1);
   while (!value.empty() && value.back() == ' ') value.remove_suffix(1);
@@ -434,7 +434,7 @@ std::optional<std::string> path_from_argument_summary(std::string_view summary) 
   return std::string(value);
 }
 
-void record_modified_file(TuiEventState& state, const ToolTimelineItem& item) {
+void record_modified_file(TuiEventState& state, ToolTimelineItem const& item) {
   if (item.status != ToolTimelineStatus::Success) return;
   if (item.name != "write_file" && item.name != "edit_file" && item.name != "apply_patch") return;
   auto paths = item.changed_paths;
@@ -445,7 +445,7 @@ void record_modified_file(TuiEventState& state, const ToolTimelineItem& item) {
   for (auto& path : paths) {
     if (path.empty()) continue;
     auto existing =
-        std::ranges::find_if(state.modified_files, [&](const SidebarModifiedFile& file) { return file.path == path; });
+        std::ranges::find_if(state.modified_files, [&](SidebarModifiedFile const& file) { return file.path == path; });
     if (existing == state.modified_files.end()) {
       state.modified_files.push_back(SidebarModifiedFile{.path = std::move(path)});
     }
@@ -489,7 +489,7 @@ void commit_pending_reasoning_turn(TuiEventState& state, std::string meta = {}) 
   state.pending_assistant_meta.clear();
 }
 
-void apply_assistant_final(TuiEventState& state, const ava::app::RuntimeEvent& event) {
+void apply_assistant_final(TuiEventState& state, ava::app::RuntimeEvent const& event) {
   auto final_text = event.text.empty() ? std::move(state.pending_assistant_text) : event.text;
   auto final_meta = assistant_meta_for_event(event);
   if (final_meta.empty()) final_meta = std::move(state.pending_assistant_meta);
@@ -525,7 +525,7 @@ void apply_assistant_final(TuiEventState& state, const ava::app::RuntimeEvent& e
   append_assistant_text(state, std::move(final_text), std::move(final_meta), take_pending_reasoning_text(state));
 }
 
-ToolTimelineItem tool_item_from_event(const ava::app::RuntimeEvent& event, ToolTimelineStatus status) {
+ToolTimelineItem tool_item_from_event(ava::app::RuntimeEvent const& event, ToolTimelineStatus status) {
   ToolTimelineItem item{.status = status,
                         .name = event.tool_name,
                         .argument_summary = event.text,
@@ -550,7 +550,7 @@ ToolTimelineItem tool_item_from_event(const ava::app::RuntimeEvent& event, ToolT
   return item;
 }
 
-void apply_tool_start(TuiEventState& state, const ava::app::RuntimeEvent& event) {
+void apply_tool_start(TuiEventState& state, ava::app::RuntimeEvent const& event) {
   auto item = tool_item_from_event(event, ToolTimelineStatus::Running);
   auto existing = find_pending_tool(state, event.call_id);
   if (existing != state.pending_tools.end()) {
@@ -568,7 +568,7 @@ void apply_tool_start(TuiEventState& state, const ava::app::RuntimeEvent& event)
   upsert_activity(state, event.call_id, state.pending_tools.back().item);
 }
 
-void apply_tool_progress(TuiEventState& state, const ava::app::RuntimeEvent& event) {
+void apply_tool_progress(TuiEventState& state, ava::app::RuntimeEvent const& event) {
   auto existing = find_pending_tool(state, event.call_id);
   if (existing == state.pending_tools.end()) {
     state.pending_tools.push_back(PendingToolItem{.call_id = event.call_id,
@@ -593,7 +593,7 @@ void apply_tool_progress(TuiEventState& state, const ava::app::RuntimeEvent& eve
   upsert_activity(state, event.call_id, existing->item);
 }
 
-void apply_tool_result(TuiEventState& state, const ava::app::RuntimeEvent& event) {
+void apply_tool_result(TuiEventState& state, ava::app::RuntimeEvent const& event) {
   auto status = tool_status_from_event(event);
   auto item = ToolTimelineItem{
       .status = status,
@@ -631,7 +631,7 @@ void apply_tool_result(TuiEventState& state, const ava::app::RuntimeEvent& event
   state.transcript.push_back(TranscriptItem{.tool = std::move(item)});
 }
 
-std::string error_text_for_event(const ava::app::RuntimeEvent& event) {
+std::string error_text_for_event(ava::app::RuntimeEvent const& event) {
   if (!event.error_message.empty()) return event.error_message;
   if (!event.error_details.empty()) return event.error_details;
   return event.text;
@@ -659,19 +659,19 @@ ToolLifecycleState provider_tool_call_lifecycle(std::string_view status) {
   return ToolLifecycleState::ProviderAnnounced;
 }
 
-std::string provider_tool_call_activity_id(const ava::app::RuntimeEvent& event) {
+std::string provider_tool_call_activity_id(ava::app::RuntimeEvent const& event) {
   if (!event.call_id.empty()) return event.call_id;
-  const auto tool_key = event.tool_name.empty() ? std::string("tool_call") : event.tool_name;
+  auto const tool_key = event.tool_name.empty() ? std::string("tool_call") : event.tool_name;
   return "provider:tool_call:" + tool_key;
 }
 
-void upsert_provider_tool_call_activity(TuiEventState& state, const ava::app::RuntimeEvent& event) {
+void upsert_provider_tool_call_activity(TuiEventState& state, ava::app::RuntimeEvent const& event) {
   auto item = SidebarActivityItem{.id = provider_tool_call_activity_id(event),
                                   .label = event.tool_name.empty() ? std::string("tool call") : event.tool_name,
                                   .detail = provider_tool_call_detail(event.status),
                                   .status = provider_tool_call_activity_status(event.status)};
   auto existing =
-      std::ranges::find_if(state.activity, [&](const SidebarActivityItem& activity) { return activity.id == item.id; });
+      std::ranges::find_if(state.activity, [&](SidebarActivityItem const& activity) { return activity.id == item.id; });
   if (existing != state.activity.end()) {
     if (event.tool_name.empty() && !existing->label.empty()) item.label = existing->label;
     *existing = std::move(item);
@@ -686,8 +686,8 @@ void upsert_provider_tool_call_activity(TuiEventState& state, const ava::app::Ru
   }
 }
 
-void upsert_provider_tool_call(TuiEventState& state, const ava::app::RuntimeEvent& event) {
-  const auto tool_id = provider_tool_call_activity_id(event);
+void upsert_provider_tool_call(TuiEventState& state, ava::app::RuntimeEvent const& event) {
+  auto const tool_id = provider_tool_call_activity_id(event);
   auto existing = find_pending_tool(state, tool_id);
   if (existing == state.pending_tools.end()) {
     state.pending_tools.push_back(PendingToolItem{
@@ -711,7 +711,7 @@ void upsert_provider_tool_call(TuiEventState& state, const ava::app::RuntimeEven
   upsert_activity(state, tool_id, existing->item);
 }
 
-void apply_provider_event(TuiEventState& state, const ava::app::RuntimeEvent& event) {
+void apply_provider_event(TuiEventState& state, ava::app::RuntimeEvent const& event) {
   if (is_provider_tool_call_status(event.status)) {
     upsert_provider_tool_call(state, event);
     upsert_provider_tool_call_activity(state, event);
@@ -721,8 +721,8 @@ void apply_provider_event(TuiEventState& state, const ava::app::RuntimeEvent& ev
   if (event.status == "tui:permission_request" || event.status == "tui:permission_allow" ||
       event.status == "tui:permission_deny" || event.status == "tui:question_request" ||
       event.status == "tui:question_answer" || event.status == "tui:question_cancel") {
-    const auto text = event.text.empty() ? event.status : event.text;
-    const auto prompt_status = event.status.substr(std::string_view{"tui:"}.size());
+    auto const text = event.text.empty() ? event.status : event.text;
+    auto const prompt_status = event.status.substr(std::string_view{"tui:"}.size());
     state.transcript.push_back(transcript_text_item("audit", text));
     upsert_sidebar_activity(
         state, SidebarActivityItem{.id = "prompt:" + event.status,
@@ -748,7 +748,7 @@ void apply_provider_event(TuiEventState& state, const ava::app::RuntimeEvent& ev
 }
 
 std::optional<ToolLifecycleState> lifecycle_from_payload(std::string_view payload_json) {
-  const auto value = ava::core::json::string_field(payload_json, "lifecycle");
+  auto const value = ava::core::json::string_field(payload_json, "lifecycle");
   if (!value) return std::nullopt;
   if (*value == "announced" || *value == "provider_announced") return ToolLifecycleState::ProviderAnnounced;
   if (*value == "arguments_streaming") return ToolLifecycleState::ArgumentsStreaming;
@@ -796,8 +796,8 @@ void apply_tool_payload_metadata(ToolTimelineItem& item, std::string_view payloa
   if (auto value = optional_size_field(payload_json, "total_matches")) item.total_matches = *value;
 }
 
-void annotate_tool_payload_metadata(TuiEventState& state, const ava::app::RuntimeEvent& event,
-                                    const ava::app::EventEnvelope& envelope) {
+void annotate_tool_payload_metadata(TuiEventState& state, ava::app::RuntimeEvent const& event,
+                                    ava::app::EventEnvelope const& envelope) {
   if (event.type != ava::app::RuntimeEventType::ToolStart && event.type != ava::app::RuntimeEventType::ToolProgress &&
       event.type != ava::app::RuntimeEventType::ToolResult && event.type != ava::app::RuntimeEventType::ProviderEvent) {
     return;
@@ -814,7 +814,7 @@ void annotate_tool_payload_metadata(TuiEventState& state, const ava::app::Runtim
 
   for (auto item = state.transcript.rbegin(); item != state.transcript.rend(); ++item) {
     if (!item->tool) continue;
-    const bool id_matches = (!event.call_id.empty() && item->tool->call_id == event.call_id) ||
+    bool const id_matches = (!event.call_id.empty() && item->tool->call_id == event.call_id) ||
                             (envelope.request_id && item->tool->request_id == *envelope.request_id) ||
                             (envelope.correlation_id && item->tool->correlation_id == *envelope.correlation_id);
     if (!id_matches && !event.call_id.empty()) continue;
@@ -827,7 +827,7 @@ void annotate_tool_payload_metadata(TuiEventState& state, const ava::app::Runtim
 
 }  // namespace
 
-void apply_runtime_event(TuiEventState& state, const ava::app::RuntimeEvent& event) {
+void apply_runtime_event(TuiEventState& state, ava::app::RuntimeEvent const& event) {
   using ava::app::RuntimeEventType;
 
   state.current_mode = event.mode;
@@ -1009,7 +1009,7 @@ void apply_runtime_event(TuiEventState& state, const ava::app::RuntimeEvent& eve
   }
 }
 
-void apply_event_envelope(TuiEventState& state, const ava::app::EventEnvelope& envelope) {
+void apply_event_envelope(TuiEventState& state, ava::app::EventEnvelope const& envelope) {
   remember_envelope_ids(state, envelope);
 
   if (envelope.name == "permission_requested" || envelope.name == "question_requested") {
@@ -1018,7 +1018,7 @@ void apply_event_envelope(TuiEventState& state, const ava::app::EventEnvelope& e
   }
 
   if (envelope.name == "permission_replied" || envelope.name == "question_replied") {
-    const auto replied =
+    auto const replied =
         envelope.name == "permission_replied" ? std::string("permission replied") : std::string("question replied");
     state.transcript.push_back(transcript_text_item("audit", replied));
     upsert_sidebar_activity(
@@ -1033,8 +1033,8 @@ void apply_event_envelope(TuiEventState& state, const ava::app::EventEnvelope& e
   if (envelope.name == "cancel_requested") {
     auto detail = std::string("cancel requested");
     if (bool_field(envelope.payload_json, "active_run")) detail += " for active run";
-    const auto cleared_steer = size_field(envelope.payload_json, "cleared_steer");
-    const auto cleared_follow_up = size_field(envelope.payload_json, "cleared_follow_up");
+    auto const cleared_steer = size_field(envelope.payload_json, "cleared_steer");
+    auto const cleared_follow_up = size_field(envelope.payload_json, "cleared_follow_up");
     if (cleared_steer > 0 || cleared_follow_up > 0) {
       detail += " cleared steer=" + std::to_string(cleared_steer) + " follow-up=" + std::to_string(cleared_follow_up);
     }
@@ -1076,7 +1076,7 @@ void apply_event_envelope(TuiEventState& state, const ava::app::EventEnvelope& e
   annotate_tool_payload_metadata(state, *event, envelope);
 }
 
-std::vector<TranscriptItem> event_state_transcript_snapshot(const TuiEventState& state) {
+std::vector<TranscriptItem> event_state_transcript_snapshot(TuiEventState const& state) {
   auto snapshot = state.transcript;
   snapshot.reserve(snapshot.size() + state.pending_tools.size() + (state.pending_assistant_text.empty() ? 0U : 1U) +
                    (state.pending_reasoning_text.empty() ? 0U : 1U));
@@ -1088,7 +1088,7 @@ std::vector<TranscriptItem> event_state_transcript_snapshot(const TuiEventState&
                                       .thinking = state.pending_reasoning_text,
                                       .thinking_model = text_from_plain(state.pending_reasoning_text)});
   }
-  for (const auto& tool : state.pending_tools) {
+  for (auto const& tool : state.pending_tools) {
     snapshot.push_back(TranscriptItem{.tool = tool.item});
   }
   return snapshot;

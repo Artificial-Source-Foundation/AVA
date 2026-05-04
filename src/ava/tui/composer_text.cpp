@@ -10,7 +10,7 @@ std::string sanitize_terminal_text(std::string_view text) {
   std::string sanitized;
   sanitized.reserve(text.size());
   for (std::size_t index = 0; index < text.size();) {
-    const auto byte = static_cast<unsigned char>(text[index]);
+    auto const byte = static_cast<unsigned char>(text[index]);
     if (byte < 0x20 || byte == 0x7F) {
       if (byte == '\t') {
         sanitized += "  ";
@@ -21,7 +21,7 @@ std::string sanitize_terminal_text(std::string_view text) {
       continue;
     }
 
-    const auto length = detail::utf8_sequence_length(byte);
+    auto const length = detail::utf8_sequence_length(byte);
     char32_t codepoint = 0;
     if (!detail::decode_utf8_codepoint(text, index, length, codepoint)) {
       sanitized.push_back('?');
@@ -73,7 +73,7 @@ std::size_t utf8_sequence_length(unsigned char byte) {
 
 bool decode_utf8_codepoint(std::string_view text, std::size_t start, std::size_t length, char32_t& codepoint) {
   if (start + length > text.size() || length == 0) return false;
-  const auto first = static_cast<unsigned char>(text[start]);
+  auto const first = static_cast<unsigned char>(text[start]);
   if (utf8_sequence_length(first) != length) return false;
   if (length == 1) {
     codepoint = first;
@@ -81,7 +81,7 @@ bool decode_utf8_codepoint(std::string_view text, std::size_t start, std::size_t
   }
   codepoint = first & ((1U << (7 - length)) - 1U);
   for (std::size_t offset = 1; offset < length; ++offset) {
-    const auto byte = static_cast<unsigned char>(text[start + offset]);
+    auto const byte = static_cast<unsigned char>(text[start + offset]);
     if (!is_utf8_continuation(byte)) return false;
     codepoint = (codepoint << 6U) | (byte & 0x3FU);
   }
@@ -126,7 +126,7 @@ bool is_zero_width_codepoint(char32_t codepoint) {
 std::size_t codepoint_columns(char32_t codepoint) {
   if (is_zero_width_codepoint(codepoint)) return 0;
   if (codepoint == 0 || codepoint > static_cast<char32_t>(WCHAR_MAX)) return 1;
-  const auto width = ::wcwidth(static_cast<wchar_t>(codepoint));
+  auto const width = ::wcwidth(static_cast<wchar_t>(codepoint));
   if (width >= 0) return static_cast<std::size_t>(width);
   return is_wide_codepoint(codepoint) ? std::size_t{2} : std::size_t{1};
 }
@@ -152,7 +152,7 @@ std::size_t terminal_text_columns(std::string_view text) {
     if (skip_sgr_sequence(text, index)) {
       continue;
     }
-    const auto length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
+    auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
     char32_t codepoint = 0;
     if (decode_utf8_codepoint(text, index, length, codepoint)) {
       index += length;
@@ -173,10 +173,10 @@ std::string fit_line(std::string text, std::size_t width) {
     std::string output;
     std::size_t visible = 0;
     for (std::size_t index = 0; index < text.size() && visible < width;) {
-      const auto length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
+      auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
       char32_t cp = 0;
       if (decode_utf8_codepoint(text, index, length, cp)) {
-        const auto cp_width = codepoint_columns(cp);
+        auto const cp_width = codepoint_columns(cp);
         if (visible + cp_width > width) break;
         output.append(text.substr(index, length));
         index += length;
@@ -190,14 +190,14 @@ std::string fit_line(std::string text, std::size_t width) {
     return output;
   }
 
-  const auto visible_budget = width - 3;
+  auto const visible_budget = width - 3;
   std::string output;
   std::size_t visible = 0;
   for (std::size_t index = 0; index < text.size() && visible < visible_budget;) {
-    const auto length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
+    auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
     char32_t cp = 0;
     if (decode_utf8_codepoint(text, index, length, cp)) {
-      const auto cp_width = codepoint_columns(cp);
+      auto const cp_width = codepoint_columns(cp);
       if (visible + cp_width > visible_budget) break;
       output.append(text.substr(index, length));
       index += length;
@@ -214,28 +214,28 @@ std::string fit_line(std::string text, std::size_t width) {
 
 std::string fit_line_preserving_sgr(std::string text, std::size_t width) {
   if (width == 0) return {};
-  const auto cols = terminal_text_columns(text);
+  auto const cols = terminal_text_columns(text);
   if (cols <= width) return text;
   if (width <= 3) {
     return std::string(width, '.');
   }
 
-  const auto visible_budget = width - 3;
+  auto const visible_budget = width - 3;
   std::size_t visible = 0;
   bool emitted_sgr = false;
   std::string output;
   for (std::size_t index = 0; index < text.size() && visible < visible_budget;) {
-    const auto before_sgr = index;
+    auto const before_sgr = index;
     if (skip_sgr_sequence(text, index)) {
       output.append(text.substr(before_sgr, index - before_sgr));
       emitted_sgr = true;
       continue;
     }
 
-    const auto length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
+    auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
     char32_t cp = 0;
     if (decode_utf8_codepoint(text, index, length, cp)) {
-      const auto cp_width = codepoint_columns(cp);
+      auto const cp_width = codepoint_columns(cp);
       if (visible + cp_width > visible_budget) break;
       output.append(text.substr(index, length));
       index += length;
@@ -252,7 +252,7 @@ std::string fit_line_preserving_sgr(std::string text, std::size_t width) {
 }
 
 std::string surface_line(std::string_view background_sgr, std::string line, std::size_t width) {
-  const auto background = std::string(background_sgr);
+  auto const background = std::string(background_sgr);
   std::string painted;
   painted.reserve(background.size() + line.size());
   painted += background;
@@ -268,7 +268,7 @@ std::string surface_line(std::string_view background_sgr, std::string line, std:
   }
 
   line = fit_line_preserving_sgr(std::move(painted), width);
-  const auto cols = terminal_text_columns(line);
+  auto const cols = terminal_text_columns(line);
   if (cols < width) {
     line += background + std::string(width - cols, ' ');
   }
@@ -285,18 +285,18 @@ std::string composer_surface_line(std::string line, std::size_t width) {
 }
 
 std::vector<std::string> wrap_transcript_text(std::string_view text, std::size_t width) {
-  const auto sanitized = sanitize_terminal_text(text);
-  const auto content_width = std::max<std::size_t>(1, width > 4 ? width - 4 : width);
+  auto const sanitized = sanitize_terminal_text(text);
+  auto const content_width = std::max<std::size_t>(1, width > 4 ? width - 4 : width);
   std::vector<std::string> wrapped;
   std::string current;
   std::size_t columns = 0;
   for (std::size_t index = 0; index < sanitized.size();) {
-    const auto byte = static_cast<unsigned char>(sanitized[index]);
-    const auto length = utf8_sequence_length(byte);
+    auto const byte = static_cast<unsigned char>(sanitized[index]);
+    auto const length = utf8_sequence_length(byte);
     char32_t codepoint = 0;
-    const auto valid = decode_utf8_codepoint(sanitized, index, length, codepoint);
-    const auto chunk_length = valid ? length : std::size_t{1};
-    const auto chunk_columns = valid ? codepoint_columns(codepoint) : std::size_t{1};
+    auto const valid = decode_utf8_codepoint(sanitized, index, length, codepoint);
+    auto const chunk_length = valid ? length : std::size_t{1};
+    auto const chunk_columns = valid ? codepoint_columns(codepoint) : std::size_t{1};
     if (columns + chunk_columns > content_width && !current.empty()) {
       wrapped.push_back(std::move(current));
       current.clear();

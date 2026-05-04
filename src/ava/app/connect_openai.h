@@ -25,12 +25,12 @@ struct ConnectProviderWizardOptions {
   bool stdin_is_tty = false;
 };
 
-[[nodiscard]] int run_connect_openai(const ava::config::XdgPaths& paths);
-[[nodiscard]] int run_connect_provider_wizard(const ava::config::XdgPaths& paths,
-                                              const ConnectProviderWizardOptions& options, std::istream& in,
+[[nodiscard]] int run_connect_openai(ava::config::XdgPaths const& paths);
+[[nodiscard]] int run_connect_provider_wizard(ava::config::XdgPaths const& paths,
+                                              ConnectProviderWizardOptions const& options, std::istream& in,
                                               std::ostream& out, std::ostream& err);
-[[nodiscard]] int run_connect_provider_credential(const ava::config::XdgPaths& paths,
-                                                  const ConnectProviderCredentialOptions& options, std::istream& in,
+[[nodiscard]] int run_connect_provider_credential(ava::config::XdgPaths const& paths,
+                                                  ConnectProviderCredentialOptions const& options, std::istream& in,
                                                   std::ostream& out, std::ostream& err);
 
 }  // namespace ava::app

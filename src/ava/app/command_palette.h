@@ -10,8 +10,8 @@ namespace ava::app {
 struct RuntimeSession;
 
 [[nodiscard]] std::vector<tui::SlashCommandItem> command_catalog_slash_items(
-    const std::vector<CommandHotkey>& hotkeys = {});
+    std::vector<CommandHotkey> const& hotkeys = {});
 [[nodiscard]] std::vector<tui::SlashCommandItem> command_catalog_slash_items(
-    const RuntimeSession& session, const std::vector<CommandHotkey>& hotkeys = {});
+    RuntimeSession const& session, std::vector<CommandHotkey> const& hotkeys = {});
 
 }  // namespace ava::app

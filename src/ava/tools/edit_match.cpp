@@ -67,11 +67,11 @@ std::string to_string(LineEndingStyle style) {
 }
 
 ava::core::Result<TextMatch> find_unique_text_match(std::string_view content, std::string_view old_text,
-                                                    const std::filesystem::path& path, std::string_view missing_message,
+                                                    std::filesystem::path const& path, std::string_view missing_message,
                                                     std::string_view non_unique_message) {
-  const auto content_analysis = analyze_text(content);
-  const auto old_text_analysis = analyze_text(old_text);
-  const auto first = content.find(old_text);
+  auto const content_analysis = analyze_text(content);
+  auto const old_text_analysis = analyze_text(old_text);
+  auto const first = content.find(old_text);
   if (first == std::string::npos) {
     auto error = ava::core::Error(ava::core::ErrorCategory::NotFound, std::string(missing_message));
     error.with_context("path", path.string());

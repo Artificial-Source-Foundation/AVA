@@ -72,6 +72,6 @@ struct DiscoveredPlugin {
 
 [[nodiscard]] ava::core::Result<PluginManifest> parse_plugin_manifest(std::string_view json,
                                                                       std::filesystem::path manifest_path = {});
-[[nodiscard]] ava::core::Result<PluginManifest> load_plugin_manifest(const std::filesystem::path& manifest_path);
+[[nodiscard]] ava::core::Result<PluginManifest> load_plugin_manifest(std::filesystem::path const& manifest_path);
 
 }  // namespace ava::plugin

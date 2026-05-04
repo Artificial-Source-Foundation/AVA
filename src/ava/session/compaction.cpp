@@ -17,7 +17,7 @@ constexpr std::size_t fallback_auto_threshold_tokens = 80'000;
 constexpr std::string_view unavailable_summary =
     "Prior context was compacted manually; provider-generated summary unavailable.";
 
-ava::core::Result<std::string> read_text(const std::filesystem::path& path) {
+ava::core::Result<std::string> read_text(std::filesystem::path const& path) {
   std::error_code status_error;
   if (!std::filesystem::is_regular_file(path, status_error)) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "compaction config is not a regular file");
@@ -27,7 +27,7 @@ ava::core::Result<std::string> read_text(const std::filesystem::path& path) {
   }
 
   std::error_code size_error;
-  const auto size = std::filesystem::file_size(path, size_error);
+  auto const size = std::filesystem::file_size(path, size_error);
   if (size_error || size > max_compaction_config_bytes) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "compaction config is too large");
     error.with_context("path", path.string());
@@ -64,7 +64,7 @@ ava::core::Result<std::string> read_text(const std::filesystem::path& path) {
 }
 
 ava::core::VoidResult assign_size_field(std::string_view content, std::string_view field, std::size_t& target) {
-  const auto value = ava::core::json::integer_field(content, field);
+  auto const value = ava::core::json::integer_field(content, field);
   if (!value) return {};
   if (*value < 0) {
     auto error =
@@ -76,10 +76,10 @@ ava::core::VoidResult assign_size_field(std::string_view content, std::string_vi
   return {};
 }
 
-std::string compaction_data_json(const ManualCompactionRequest& request, std::string_view summary,
+std::string compaction_data_json(ManualCompactionRequest const& request, std::string_view summary,
                                  bool summary_unavailable) {
-  const auto trigger = request.trigger.empty() ? std::string("manual") : request.trigger;
-  const auto threshold = request.threshold_tokens > 0 ? request.threshold_tokens : request.config.auto_threshold_tokens;
+  auto const trigger = request.trigger.empty() ? std::string("manual") : request.trigger;
+  auto const threshold = request.threshold_tokens > 0 ? request.threshold_tokens : request.config.auto_threshold_tokens;
   return "{\"trigger\":\"" + ava::core::json::escape(trigger) + "\",\"status\":\"recorded\",\"summary_unavailable\":" +
          (summary_unavailable ? std::string("true") : std::string("false")) + ",\"summary\":\"" +
          ava::core::json::escape(summary) + "\",\"instructions\":\"" + ava::core::json::escape(request.instructions) +
@@ -129,7 +129,7 @@ ava::core::Result<CompactionConfig> parse_compaction_config(std::string_view con
   return config;
 }
 
-ava::core::Result<CompactionConfig> load_compaction_config(const ava::config::XdgPaths& paths) {
+ava::core::Result<CompactionConfig> load_compaction_config(ava::config::XdgPaths const& paths) {
   if (!std::filesystem::exists(paths.compaction_file)) return default_compaction_config();
   auto content = read_text(paths.compaction_file);
   if (!content) return std::unexpected(std::move(content.error()));
@@ -141,9 +141,9 @@ std::size_t estimate_tokens(std::string_view text) noexcept {
   return (text.size() + 3) / 4;
 }
 
-std::size_t estimate_session_tokens(const std::vector<SessionEntry>& entries) noexcept {
+std::size_t estimate_session_tokens(std::vector<SessionEntry> const& entries) noexcept {
   std::size_t tokens = 0;
-  for (const auto& entry : entries) {
+  for (auto const& entry : entries) {
     if (entry.type == EntryType::UserMessage || entry.type == EntryType::AssistantMessage ||
         entry.type == EntryType::ReasoningBlock || entry.type == EntryType::ToolCall ||
         entry.type == EntryType::ToolResult) {
@@ -153,18 +153,18 @@ std::size_t estimate_session_tokens(const std::vector<SessionEntry>& entries) no
   return tokens;
 }
 
-std::size_t effective_auto_threshold_tokens(const CompactionConfig& config,
+std::size_t effective_auto_threshold_tokens(CompactionConfig const& config,
                                             std::optional<long long> context_window_tokens) noexcept {
   if (config.auto_threshold_tokens > 0) return config.auto_threshold_tokens;
   if (config.auto_threshold_tokens_explicit) return 0;
   if (!context_window_tokens || *context_window_tokens <= 0) return fallback_auto_threshold_tokens;
-  const auto window = static_cast<std::size_t>(*context_window_tokens);
+  auto const window = static_cast<std::size_t>(*context_window_tokens);
   return std::max<std::size_t>(1, (window * 4) / 5);
 }
 
-std::size_t estimate_active_context_tokens(const std::vector<SessionEntry>& entries) noexcept {
+std::size_t estimate_active_context_tokens(std::vector<SessionEntry> const& entries) noexcept {
   std::size_t tokens = 0;
-  for (const auto& entry : entries) {
+  for (auto const& entry : entries) {
     if (entry.type == EntryType::Compaction) {
       tokens = estimate_tokens(entry.data_json);
     } else if (entry.type == EntryType::UserMessage || entry.type == EntryType::AssistantMessage ||
@@ -176,23 +176,23 @@ std::size_t estimate_active_context_tokens(const std::vector<SessionEntry>& entr
   return tokens;
 }
 
-CompactionDecision should_auto_compact(const std::vector<SessionEntry>& entries,
-                                       const CompactionConfig& config) noexcept {
+CompactionDecision should_auto_compact(std::vector<SessionEntry> const& entries,
+                                       CompactionConfig const& config) noexcept {
   return should_auto_compact(entries, config, std::nullopt);
 }
 
-CompactionDecision should_auto_compact(const std::vector<SessionEntry>& entries, const CompactionConfig& config,
+CompactionDecision should_auto_compact(std::vector<SessionEntry> const& entries, CompactionConfig const& config,
                                        std::optional<long long> context_window_tokens) noexcept {
-  const auto estimated = estimate_active_context_tokens(entries);
-  const auto threshold = effective_auto_threshold_tokens(config, context_window_tokens);
+  auto const estimated = estimate_active_context_tokens(entries);
+  auto const threshold = effective_auto_threshold_tokens(config, context_window_tokens);
   return CompactionDecision{.should_compact = threshold > 0 && estimated >= threshold,
                             .estimated_tokens = estimated,
                             .threshold_tokens = threshold};
 }
 
 ava::core::VoidResult append_manual_compaction(SessionStore& store, ManualCompactionRequest request) {
-  const bool summary_unavailable = request.summary.empty();
-  const std::string summary = summary_unavailable ? std::string(unavailable_summary) : request.summary;
+  bool const summary_unavailable = request.summary.empty();
+  std::string const summary = summary_unavailable ? std::string(unavailable_summary) : request.summary;
   if (!summary_unavailable && summary.size() > request.config.max_summary_bytes) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "compaction summary is too large");
     error.with_context("max_summary_bytes", std::to_string(request.config.max_summary_bytes));

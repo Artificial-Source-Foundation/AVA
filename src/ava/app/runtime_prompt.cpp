@@ -10,11 +10,11 @@
 
 namespace ava::app::runtime {
 
-ava::core::Result<RuntimePromptState> load_runtime_prompt_state(const ava::config::XdgPaths& paths,
-                                                                const ava::config::ModelInfo& model,
+ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::XdgPaths const& paths,
+                                                                ava::config::ModelInfo const& model,
                                                                 ava::agent::Mode mode,
-                                                                const std::filesystem::path& workspace_dir,
-                                                                const std::filesystem::path& current_dir) {
+                                                                std::filesystem::path const& workspace_dir,
+                                                                std::filesystem::path const& current_dir) {
   auto prompt = ava::config::select_prompt(paths, model, mode);
   if (!prompt) return std::unexpected(prompt.error());
 
@@ -27,7 +27,7 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(const ava::confi
 
   std::vector<ContextSourceMetadata> context_sources;
   context_sources.reserve(loaded_context->size());
-  for (const auto& file : *loaded_context) {
+  for (auto const& file : *loaded_context) {
     context_sources.push_back(
         ContextSourceMetadata{.path = file.path, .source_type = file.source_type, .byte_count = file.byte_count});
   }
@@ -44,7 +44,7 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(const ava::confi
 namespace ava::app {
 namespace {
 
-RuntimeEvent base_event(const RuntimeSession& session, RuntimeEventType type) {
+RuntimeEvent base_event(RuntimeSession const& session, RuntimeEventType type) {
   RuntimeEvent event;
   event.type = type;
   event.timestamp = ava::session::now_timestamp();
@@ -55,19 +55,19 @@ RuntimeEvent base_event(const RuntimeSession& session, RuntimeEventType type) {
   return event;
 }
 
-RuntimeEvent base_event_locked(const RuntimeSession& session, RuntimeEventType type, std::mutex* mutex) {
+RuntimeEvent base_event_locked(RuntimeSession const& session, RuntimeEventType type, std::mutex* mutex) {
   if (!mutex) return base_event(session, type);
   std::lock_guard lock(*mutex);
   return base_event(session, type);
 }
 
-bool is_agent_loop_canceled_error(const ava::core::Error& error) {
+bool is_agent_loop_canceled_error(ava::core::Error const& error) {
   return error.message() == "agent loop canceled" || error.format().find("agent loop canceled") != std::string::npos;
 }
 
 }  // namespace
 
-ava::core::Result<RuntimePromptState> select_runtime_prompt_state(const RuntimeSession& session,
+ava::core::Result<RuntimePromptState> select_runtime_prompt_state(RuntimeSession const& session,
                                                                   ava::agent::Mode mode) {
   return runtime::load_runtime_prompt_state(session.paths, session.model, mode, session.workspace_dir,
                                             session.current_dir);
@@ -80,10 +80,10 @@ void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prom
   session.system_prompt = std::move(prompt_state.system_prompt);
 }
 
-ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& session, const std::string& user_message,
-                                                          const ava::provider::Provider& provider,
+ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& session, std::string const& user_message,
+                                                          ava::provider::Provider const& provider,
                                                           ava::provider::Transport& transport,
-                                                          const RuntimeRunOptions& options) {
+                                                          RuntimeRunOptions const& options) {
   auto event_sink = make_plugin_event_observer_sink(
       plugin_event_observer_options(session, options.permission_resolver, options.session_mutex), options.event_sink);
   auto runtime_options = options;
@@ -125,7 +125,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
       .reasoning =
           session.reasoning ? std::optional(runtime::provider_reasoning_options(*session.reasoning)) : std::nullopt,
       .on_tool_event =
-          [&session, &options, &event_sink, &sink_error](const ava::agent::ToolTimelineEntry& entry) {
+          [&session, &options, &event_sink, &sink_error](ava::agent::ToolTimelineEntry const& entry) {
             if (sink_error) return;
             auto event = base_event_locked(session,
                                            entry.status == ava::agent::ToolTimelineStatus::Running
@@ -162,7 +162,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
             }
           },
       .on_tool_progress = [&session, &options, &event_sink,
-                           &sink_error](const ava::agent::ToolProgressEntry& entry) -> ava::core::VoidResult {
+                           &sink_error](ava::agent::ToolProgressEntry const& entry) -> ava::core::VoidResult {
         if (sink_error) return std::unexpected(*sink_error);
         auto event = base_event_locked(session, RuntimeEventType::ToolProgress, options.session_mutex);
         event.call_id = entry.call_id;
@@ -176,7 +176,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
         return {};
       },
       .on_stream_event = [&session, &options, &event_sink,
-                          &sink_error](const ava::provider::StreamEvent& stream_event) -> ava::core::VoidResult {
+                          &sink_error](ava::provider::StreamEvent const& stream_event) -> ava::core::VoidResult {
         if (sink_error) return std::unexpected(*sink_error);
         auto event = base_event_locked(
             session,
@@ -213,7 +213,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
       .compact_context = runtime_options.access_token.empty()
                              ? decltype(ava::agent::AgentLoopOptions{}.compact_context){}
                              : [&](ava::session::SessionStore& store, std::string_view trigger,
-                                   const std::vector<std::string>& replayed_user_messages) -> ava::core::Result<bool> {
+                                   std::vector<std::string> const& replayed_user_messages) -> ava::core::Result<bool> {
         return runtime::compact_runtime_context(session, store, trigger, provider, *runtime_transport, runtime_options,
                                                 replayed_user_messages);
       },

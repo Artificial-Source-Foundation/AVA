@@ -11,7 +11,7 @@
 namespace {
 
 void test_event_envelope_serialization_is_deterministic() {
-  const ava::app::EventEnvelope envelope{.schema_version = 1,
+  ava::app::EventEnvelope const envelope{.schema_version = 1,
                                          .event_id = "event_1",
                                          .timestamp = "2026-04-30T00:00:00Z",
                                          .session_id = "session_1",
@@ -23,7 +23,7 @@ void test_event_envelope_serialization_is_deterministic() {
                                          .name = "user_message",
                                          .payload_json = "{\"text\":\"hello\\n\\\"ava\\\"\"}"};
 
-  const auto json = ava::app::serialize_event_envelope_json(envelope);
+  auto const json = ava::app::serialize_event_envelope_json(envelope);
   expect(json ==
              "{\"schema_version\":1,\"event_id\":\"event_1\","
              "\"timestamp\":\"2026-04-30T00:00:00Z\",\"session_id\":\"session_1\","
@@ -33,7 +33,7 @@ void test_event_envelope_serialization_is_deterministic() {
              "\"payload\":{\"text\":\"hello\\n\\\"ava\\\"\"},\"text\":\"hello\\n\\\"ava\\\"\"}",
          "event envelope JSON serialization uses deterministic field ordering");
 
-  const auto jsonl = ava::app::serialize_event_envelope_jsonl(envelope);
+  auto const jsonl = ava::app::serialize_event_envelope_jsonl(envelope);
   expect(jsonl == json + '\n', "event envelope JSONL appends one newline");
 }
 
@@ -51,7 +51,7 @@ void test_runtime_event_conversion_preserves_legacy_payload_shape() {
   context.event_id = "event_2";
   context.run_id = "run_1";
   context.turn_id = "turn_2";
-  const auto envelope = ava::app::to_event_envelope(event, context);
+  auto const envelope = ava::app::to_event_envelope(event, context);
   expect(envelope.schema_version == 1, "runtime event conversion sets schema version");
   expect(envelope.event_id == "event_2", "runtime event conversion uses supplied event id");
   expect(envelope.timestamp == "2026-04-30T00:00:01Z", "runtime event conversion carries timestamp");
@@ -67,7 +67,7 @@ void test_runtime_event_bus_adapter_publishes_and_forwards() {
   ava::app::EventBus bus;
   std::vector<ava::app::EventEnvelope> published;
   std::vector<ava::app::RuntimeEvent> forwarded;
-  bus.subscribe([&published](const ava::app::EventEnvelope& envelope) {
+  bus.subscribe([&published](ava::app::EventEnvelope const& envelope) {
     published.push_back(envelope);
     return ava::core::VoidResult{};
   });
@@ -75,7 +75,7 @@ void test_runtime_event_bus_adapter_publishes_and_forwards() {
   ava::app::EventEnvelopeContext context;
   context.event_id = "event_3";
   context.correlation_id = "correlation_1";
-  auto sink = ava::app::make_runtime_event_bus_adapter(bus, context, [&forwarded](const ava::app::RuntimeEvent& event) {
+  auto sink = ava::app::make_runtime_event_bus_adapter(bus, context, [&forwarded](ava::app::RuntimeEvent const& event) {
     forwarded.push_back(event);
     return ava::core::VoidResult{};
   });
@@ -86,7 +86,7 @@ void test_runtime_event_bus_adapter_publishes_and_forwards() {
   event.session_id = "session_1";
   event.text = "done";
 
-  const auto emitted = sink(event);
+  auto const emitted = sink(event);
   expect(emitted.has_value(), "runtime event bus adapter succeeds when bus and legacy sink succeed");
   expect(published.size() == 1 && published.front().name == "assistant_message" &&
              published.front().correlation_id == "correlation_1",
@@ -98,7 +98,7 @@ void test_runtime_event_bus_adapter_publishes_and_forwards() {
 void test_runtime_event_bus_adapter_allows_default_legacy_sink() {
   ava::app::EventBus bus;
   std::vector<ava::app::EventEnvelope> published;
-  bus.subscribe([&published](const ava::app::EventEnvelope& envelope) {
+  bus.subscribe([&published](ava::app::EventEnvelope const& envelope) {
     published.push_back(envelope);
     return ava::core::VoidResult{};
   });
@@ -109,7 +109,7 @@ void test_runtime_event_bus_adapter_allows_default_legacy_sink() {
   event.timestamp = "2026-04-30T00:00:03Z";
   event.session_id = "session_1";
 
-  const auto emitted = sink(event);
+  auto const emitted = sink(event);
   expect(emitted.has_value() && published.size() == 1 && published.front().name == "done",
          "runtime event bus adapter supports a null legacy sink");
 }
@@ -124,7 +124,7 @@ void test_tool_progress_runtime_event_serialization_and_bus_adapter() {
   event.tool_name = "read_file";
   event.status = "running";
 
-  const auto json = ava::app::serialize_event_json(event);
+  auto const json = ava::app::serialize_event_json(event);
   expect(json ==
              "{\"type\":\"tool_progress\",\"timestamp\":\"2026-04-30T00:00:04Z\","
              "\"session_id\":\"session_1\",\"text\":\"reading\",\"call_id\":\"call_2\","
@@ -133,14 +133,14 @@ void test_tool_progress_runtime_event_serialization_and_bus_adapter() {
 
   ava::app::EventBus bus;
   std::vector<ava::app::EventEnvelope> published;
-  bus.subscribe([&published](const ava::app::EventEnvelope& envelope) {
+  bus.subscribe([&published](ava::app::EventEnvelope const& envelope) {
     published.push_back(envelope);
     return ava::core::VoidResult{};
   });
   ava::app::EventEnvelopeContext context;
   context.event_id = "event_progress";
   auto sink = ava::app::make_runtime_event_bus_adapter(bus, context);
-  const auto emitted = sink(event);
+  auto const emitted = sink(event);
   expect(emitted.has_value() && published.size() == 1 && published.front().name == "tool_progress",
          "event bus adapter publishes tool progress envelopes");
   expect(published.front().payload_json ==
@@ -175,7 +175,7 @@ void test_tool_runtime_event_serializes_semantic_frontend_payloads() {
   event.omitted_bytes = 384;
   event.omitted_lines = 7;
 
-  const auto json = ava::app::serialize_event_json(event);
+  auto const json = ava::app::serialize_event_json(event);
   expect(json.find("\"args\":{\"path\":\"src/main.cpp\"}") != std::string::npos &&
              json.find("\"result\":{\"ok\":true,\"path\":\"src/main.cpp\"}") != std::string::npos &&
              json.find("\"structured_result\":{\"schema_version\":1") != std::string::npos &&
@@ -187,11 +187,11 @@ void test_tool_runtime_event_serializes_semantic_frontend_payloads() {
 
   ava::app::EventEnvelopeContext context;
   context.event_id = "event_semantic_tool";
-  const auto envelope = ava::app::to_event_envelope(event, context);
-  const auto args = ava::core::json::object_field(envelope.payload_json, "args");
-  const auto result = ava::core::json::object_field(envelope.payload_json, "result");
-  const auto structured_result = ava::core::json::object_field(envelope.payload_json, "structured_result");
-  const auto paths = ava::core::json::strings_in_array_field(envelope.payload_json, "changed_paths");
+  auto const envelope = ava::app::to_event_envelope(event, context);
+  auto const args = ava::core::json::object_field(envelope.payload_json, "args");
+  auto const result = ava::core::json::object_field(envelope.payload_json, "result");
+  auto const structured_result = ava::core::json::object_field(envelope.payload_json, "structured_result");
+  auto const paths = ava::core::json::strings_in_array_field(envelope.payload_json, "changed_paths");
   expect(envelope.name == "tool_result" && args && *args == "{\"path\":\"src/main.cpp\"}" && result &&
              *result == "{\"ok\":true,\"path\":\"src/main.cpp\"}" && structured_result &&
              structured_result->find("\"status\":\"success\"") != std::string::npos && paths.size() == 2 &&
@@ -210,7 +210,7 @@ void test_reasoning_runtime_event_serialization_hides_provider_private_state() {
   event.reasoning_redacted = true;
   event.reasoning_signature_present = true;
 
-  const auto json = ava::app::serialize_event_json(event);
+  auto const json = ava::app::serialize_event_json(event);
   expect(json ==
              "{\"type\":\"reasoning_delta\",\"timestamp\":\"2026-04-30T00:00:05Z\","
              "\"session_id\":\"session_1\",\"text\":\"visible reasoning summary\","
@@ -220,13 +220,13 @@ void test_reasoning_runtime_event_serialization_hides_provider_private_state() {
 
   ava::app::EventEnvelopeContext context;
   context.event_id = "event_reasoning";
-  const auto envelope = ava::app::to_event_envelope(event, context);
+  auto const envelope = ava::app::to_event_envelope(event, context);
   expect(envelope.name == "reasoning_delta" &&
              envelope.payload_json ==
                  "{\"text\":\"visible reasoning summary\",\"reasoning_format\":\"anthropic_thinking\","
                  "\"reasoning_redacted\":true,\"reasoning_signature_present\":true}",
          "reasoning envelope carries frontend-visible reasoning payload");
-  const auto envelope_json = ava::app::serialize_event_envelope_json(envelope);
+  auto const envelope_json = ava::app::serialize_event_envelope_json(envelope);
   expect(envelope_json.find("super-secret-signature") == std::string::npos &&
              envelope_json.find("reasoning_signature\":") == std::string::npos &&
              envelope_json.find("\"signature\":") == std::string::npos,
@@ -246,7 +246,7 @@ void test_lifecycle_runtime_event_serialization_and_aliases() {
   event.threshold_tokens = 8000;
   event.summary_bytes = 512;
 
-  const auto json = ava::app::serialize_event_json(event);
+  auto const json = ava::app::serialize_event_json(event);
   expect(json ==
              "{\"type\":\"compaction_end\",\"timestamp\":\"2026-04-30T00:00:06Z\","
              "\"session_id\":\"session_1\",\"status\":\"completed\",\"trigger\":\"context_overflow\","
@@ -256,8 +256,8 @@ void test_lifecycle_runtime_event_serialization_and_aliases() {
 
   ava::app::EventEnvelopeContext context;
   context.event_id = "event_compaction";
-  const auto envelope = ava::app::to_event_envelope(event, context);
-  const auto envelope_json = ava::app::serialize_event_envelope_json(envelope);
+  auto const envelope = ava::app::to_event_envelope(event, context);
+  auto const envelope_json = ava::app::serialize_event_envelope_json(envelope);
   expect(envelope.name == "compaction_end" &&
              envelope.payload_json.find("\"trigger\":\"context_overflow\"") != std::string::npos &&
              envelope.payload_json.find("\"max_attempts\":2") != std::string::npos &&
@@ -288,7 +288,7 @@ void test_lifecycle_runtime_event_serialization_and_aliases() {
   event.summary_bytes = 0;
   event.snapshot_entries = 0;
   event.current_entries = 0;
-  const auto retry_tick_json = ava::app::serialize_event_json(event);
+  auto const retry_tick_json = ava::app::serialize_event_json(event);
   expect(retry_tick_json.find("\"type\":\"retry_tick\"") != std::string::npos &&
              retry_tick_json.find("\"remaining_ms\":500") != std::string::npos,
          "retry countdown tick runtime events serialize explicit backend timing data");
@@ -297,7 +297,7 @@ void test_lifecycle_runtime_event_serialization_and_aliases() {
 void test_interactive_run_queue_emits_steer_queued_and_applied_events() {
   std::vector<ava::app::EventEnvelope> events;
   ava::app::InteractiveRunQueue queue("session_queue", "request_active",
-                                      [&events](const ava::app::EventEnvelope& envelope) {
+                                      [&events](ava::app::EventEnvelope const& envelope) {
                                         events.push_back(envelope);
                                         return ava::core::VoidResult{};
                                       });
@@ -321,7 +321,7 @@ void test_interactive_run_queue_emits_steer_queued_and_applied_events() {
 void test_interactive_run_queue_runs_follow_up_lifecycle() {
   std::vector<ava::app::EventEnvelope> events;
   ava::app::InteractiveRunQueue queue("session_queue", "request_active",
-                                      [&events](const ava::app::EventEnvelope& envelope) {
+                                      [&events](ava::app::EventEnvelope const& envelope) {
                                         events.push_back(envelope);
                                         return ava::core::VoidResult{};
                                       });
@@ -343,7 +343,7 @@ void test_interactive_run_queue_runs_follow_up_lifecycle() {
 void test_interactive_run_queue_skips_pending_messages_on_finish() {
   std::vector<ava::app::EventEnvelope> events;
   ava::app::InteractiveRunQueue queue("session_queue", "request_active",
-                                      [&events](const ava::app::EventEnvelope& envelope) {
+                                      [&events](ava::app::EventEnvelope const& envelope) {
                                         events.push_back(envelope);
                                         return ava::core::VoidResult{};
                                       });
@@ -363,7 +363,7 @@ void test_interactive_run_queue_skips_pending_messages_on_finish() {
 void test_interactive_run_queue_restores_latest_pending_message() {
   std::vector<ava::app::EventEnvelope> events;
   ava::app::InteractiveRunQueue queue("session_queue", "request_active",
-                                      [&events](const ava::app::EventEnvelope& envelope) {
+                                      [&events](ava::app::EventEnvelope const& envelope) {
                                         events.push_back(envelope);
                                         return ava::core::VoidResult{};
                                       });
@@ -387,14 +387,14 @@ void test_interactive_run_queue_restores_latest_pending_message() {
 void test_interactive_run_queue_bounds_and_truncates_event_payloads() {
   std::vector<ava::app::EventEnvelope> events;
   ava::app::InteractiveRunQueue queue("session_queue", "request_active",
-                                      [&events](const ava::app::EventEnvelope& envelope) {
+                                      [&events](ava::app::EventEnvelope const& envelope) {
                                         events.push_back(envelope);
                                         return ava::core::VoidResult{};
                                       });
 
-  const std::string long_message(ava::app::kMaxInteractiveQueueEventMessageBytes + 16, 'x');
+  std::string const long_message(ava::app::kMaxInteractiveQueueEventMessageBytes + 16, 'x');
   auto queued = queue.queue_steering(long_message);
-  const std::string too_large(ava::app::kMaxInteractiveQueuedMessageBytes + 1, 'y');
+  std::string const too_large(ava::app::kMaxInteractiveQueuedMessageBytes + 1, 'y');
   auto rejected = queue.queue_steering(too_large);
 
   expect(queued.has_value(), "interactive run queue accepts messages within the aggregate byte limit");

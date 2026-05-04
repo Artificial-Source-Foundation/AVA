@@ -20,7 +20,7 @@
 namespace ava::tui {
 namespace {
 
-volatile sig_atomic_t g_terminal_signal = 0;
+sig_atomic_t volatile g_terminal_signal = 0;
 struct sigaction g_curses_previous_sigint{};
 struct sigaction g_curses_previous_sigterm{};
 
@@ -88,7 +88,7 @@ std::optional<int> parse_unsigned_int(std::string_view text, std::size_t& index)
   if (index >= text.size() || text[index] < '0' || text[index] > '9') return std::nullopt;
   int value = 0;
   while (index < text.size() && text[index] >= '0' && text[index] <= '9') {
-    const auto digit = text[index] - '0';
+    auto const digit = text[index] - '0';
     if (value > (std::numeric_limits<int>::max() - digit) / 10) return std::nullopt;
     value = (value * 10) + digit;
     ++index;
@@ -105,10 +105,10 @@ bool consume_char(std::string_view text, std::size_t& index, char expected) {
 bool is_shift_enter_csi_u(std::string_view sequence) {
   if (!sequence.starts_with('[')) return false;
   auto index = std::size_t{1};
-  const auto codepoint = parse_unsigned_int(sequence, index);
+  auto const codepoint = parse_unsigned_int(sequence, index);
   if (!codepoint || *codepoint != 13) return false;
   if (!consume_char(sequence, index, ';')) return false;
-  const auto modifiers = parse_unsigned_int(sequence, index);
+  auto const modifiers = parse_unsigned_int(sequence, index);
   if (!modifiers || *modifiers != 2) return false;
   return index + 1 == sequence.size() && (sequence[index] == 'u' || sequence[index] == '~');
 }
@@ -116,13 +116,13 @@ bool is_shift_enter_csi_u(std::string_view sequence) {
 bool is_legacy_shift_enter_sequence(std::string_view sequence) {
   if (!sequence.starts_with('[')) return false;
   auto index = std::size_t{1};
-  const auto escape_code = parse_unsigned_int(sequence, index);
+  auto const escape_code = parse_unsigned_int(sequence, index);
   if (!escape_code || *escape_code != 27) return false;
   if (!consume_char(sequence, index, ';')) return false;
-  const auto modifiers = parse_unsigned_int(sequence, index);
+  auto const modifiers = parse_unsigned_int(sequence, index);
   if (!modifiers || *modifiers != 2) return false;
   if (!consume_char(sequence, index, ';')) return false;
-  const auto key_code = parse_unsigned_int(sequence, index);
+  auto const key_code = parse_unsigned_int(sequence, index);
   return key_code && *key_code == 13 && index + 1 == sequence.size() && sequence[index] == '~';
 }
 
@@ -161,8 +161,8 @@ CursesSession& CursesSession::operator=(CursesSession&& other) noexcept {
 CursesSession::~CursesSession() { restore(); }
 
 ava::core::Result<CursesSession> CursesSession::enter() {
-  const char* current_locale = std::setlocale(LC_ALL, nullptr);
-  const std::string previous_locale = current_locale == nullptr ? "C" : current_locale;
+  char const* current_locale = std::setlocale(LC_ALL, nullptr);
+  std::string const previous_locale = current_locale == nullptr ? "C" : current_locale;
   if (std::setlocale(LC_ALL, "") == nullptr) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to configure terminal locale"));
   }
@@ -172,7 +172,7 @@ ava::core::Result<CursesSession> CursesSession::enter() {
   sigemptyset(&blocked_signals);
   sigaddset(&blocked_signals, SIGINT);
   sigaddset(&blocked_signals, SIGTERM);
-  const bool blocked = sigprocmask(SIG_BLOCK, &blocked_signals, &previous_mask) == 0;
+  bool const blocked = sigprocmask(SIG_BLOCK, &blocked_signals, &previous_mask) == 0;
   auto restore_signal_mask = [&]() {
     if (blocked) static_cast<void>(sigprocmask(SIG_SETMASK, &previous_mask, nullptr));
   };
@@ -240,8 +240,8 @@ void erase_last_utf8_codepoint(std::string& text) {
     return;
   }
 
-  const auto expected_length = utf8_sequence_length(static_cast<unsigned char>(text[start - 1]));
-  const auto actual_length = text.size() - (start - 1);
+  auto const expected_length = utf8_sequence_length(static_cast<unsigned char>(text[start - 1]));
+  auto const actual_length = text.size() - (start - 1);
   if (expected_length > 1 && expected_length == actual_length) {
     text.erase(start - 1);
   } else {
@@ -275,7 +275,7 @@ bool terminal_escape_sequence_complete(std::string_view sequence) {
   }
 
   if (sequence.size() == 1) {
-    const auto byte = static_cast<unsigned char>(sequence.front());
+    auto const byte = static_cast<unsigned char>(sequence.front());
     return byte >= 0x30U && byte <= 0x7EU;
   }
 

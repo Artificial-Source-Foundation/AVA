@@ -58,31 +58,31 @@ struct ComposerInputLayout {
 [[nodiscard]] std::vector<std::string> wrap_transcript_text(std::string_view text, std::size_t width);
 
 [[nodiscard]] std::string slash_command_prefix(std::string_view input);
-[[nodiscard]] std::vector<std::string> render_slash_palette(const ComposerSnapshot& snapshot, std::size_t width,
+[[nodiscard]] std::vector<std::string> render_slash_palette(ComposerSnapshot const& snapshot, std::size_t width,
                                                             std::size_t max_lines);
 
-[[nodiscard]] std::vector<std::string> render_permission_prompt(const PermissionPromptView& prompt, std::size_t width,
+[[nodiscard]] std::vector<std::string> render_permission_prompt(PermissionPromptView const& prompt, std::size_t width,
                                                                 std::size_t max_lines);
-[[nodiscard]] std::vector<std::string> render_question_prompt(const QuestionPromptView& prompt, std::size_t width,
+[[nodiscard]] std::vector<std::string> render_question_prompt(QuestionPromptView const& prompt, std::size_t width,
                                                               std::size_t max_lines);
-[[nodiscard]] std::vector<std::string> render_question_modal(const QuestionPromptView& prompt, std::size_t width,
+[[nodiscard]] std::vector<std::string> render_question_modal(QuestionPromptView const& prompt, std::size_t width,
                                                              std::size_t max_lines);
 
-[[nodiscard]] std::string render_generic_line(const std::string& text, std::size_t width);
-[[nodiscard]] std::vector<std::string> render_transcript_lines(const std::vector<TranscriptItem>& transcript,
+[[nodiscard]] std::string render_generic_line(std::string const& text, std::size_t width);
+[[nodiscard]] std::vector<std::string> render_transcript_lines(std::vector<TranscriptItem> const& transcript,
                                                                std::size_t width, bool tool_details_visible = false,
                                                                bool thinking_visible = true);
-[[nodiscard]] std::vector<std::string> visible_transcript_lines(const std::vector<std::string>& rendered_transcript,
+[[nodiscard]] std::vector<std::string> visible_transcript_lines(std::vector<std::string> const& rendered_transcript,
                                                                 std::size_t width, std::size_t transcript_height,
                                                                 std::size_t transcript_scroll_offset);
 
 [[nodiscard]] std::vector<std::string> input_render_lines(std::string_view input);
-[[nodiscard]] std::size_t composer_block_line_count(const ComposerSnapshot& snapshot, std::size_t height);
+[[nodiscard]] std::size_t composer_block_line_count(ComposerSnapshot const& snapshot, std::size_t height);
 [[nodiscard]] ComposerInputLayout composer_input_layout(std::size_t input_line_count, std::size_t max_lines,
                                                         std::size_t draft_scroll_offset);
-[[nodiscard]] std::vector<std::string> render_composer_block(const ComposerSnapshot& snapshot, std::size_t width,
+[[nodiscard]] std::vector<std::string> render_composer_block(ComposerSnapshot const& snapshot, std::size_t width,
                                                              std::size_t max_lines);
-[[nodiscard]] std::size_t input_cursor_column(const ComposerSnapshot& snapshot, std::size_t width);
-[[nodiscard]] std::size_t input_cursor_line(const ComposerSnapshot& snapshot);
+[[nodiscard]] std::size_t input_cursor_column(ComposerSnapshot const& snapshot, std::size_t width);
+[[nodiscard]] std::size_t input_cursor_line(ComposerSnapshot const& snapshot);
 
 }  // namespace ava::tui::detail

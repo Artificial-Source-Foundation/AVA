@@ -36,16 +36,16 @@ std::string lower_copy(std::string_view value) {
 }
 
 bool has_any(std::string_view haystack, std::initializer_list<std::string_view> needles) {
-  for (const auto needle : needles) {
+  for (auto const needle : needles) {
     if (haystack.find(needle) != std::string_view::npos) return true;
   }
   return false;
 }
 
 bool looks_like_context_overflow(std::string_view text) {
-  const auto lowered = lower_copy(text);
-  const bool mentions_context = has_any(lowered, {"context", "window", "token", "tokens", "prompt"});
-  const bool mentions_overflow = has_any(lowered, {"too many", "too much", "exceed", "exceeded", "exceeds", "maximum",
+  auto const lowered = lower_copy(text);
+  bool const mentions_context = has_any(lowered, {"context", "window", "token", "tokens", "prompt"});
+  bool const mentions_overflow = has_any(lowered, {"too many", "too much", "exceed", "exceeded", "exceeds", "maximum",
                                                    "max", "limit", "length", "larger than"});
   return mentions_context && mentions_overflow;
 }
@@ -66,11 +66,11 @@ bool is_retryable_kind(ProviderErrorKind kind) noexcept {
   return kind == ProviderErrorKind::RateLimited || kind == ProviderErrorKind::Transient;
 }
 
-bool is_retryable_transport_error(const ava::core::Error& error) noexcept {
+bool is_retryable_transport_error(ava::core::Error const& error) noexcept {
   return error.category() == ava::core::ErrorCategory::Io;
 }
 
-int exponential_delay_ms(const RetryOptions& options, int attempt) noexcept {
+int exponential_delay_ms(RetryOptions const& options, int attempt) noexcept {
   if (options.base_delay_ms <= 0) return 0;
   long long delay = options.base_delay_ms;
   for (int index = 1; index < attempt; ++index) {
@@ -80,7 +80,7 @@ int exponential_delay_ms(const RetryOptions& options, int attempt) noexcept {
   return static_cast<int>(delay);
 }
 
-ava::core::VoidResult publish_retry_event(const RetryOptions& options, std::size_t attempt, std::size_t max_attempts,
+ava::core::VoidResult publish_retry_event(RetryOptions const& options, std::size_t attempt, std::size_t max_attempts,
                                           int delay_ms, std::size_t remaining_ms, std::string_view reason,
                                           int status_code, bool streaming, bool countdown_tick = false) {
   if (!options.on_retry) return {};
@@ -94,7 +94,7 @@ ava::core::VoidResult publish_retry_event(const RetryOptions& options, std::size
                                               .countdown_tick = countdown_tick});
 }
 
-bool retry_cancel_requested(const RetryOptions& options, const Transport::CancelCallback& cancel_requested) {
+bool retry_cancel_requested(RetryOptions const& options, Transport::CancelCallback const& cancel_requested) {
   return (options.cancel_requested && options.cancel_requested()) || (cancel_requested && cancel_requested());
 }
 
@@ -102,15 +102,15 @@ ava::core::Error retry_canceled_error() {
   return ava::core::Error(ava::core::ErrorCategory::Unknown, "transport retry canceled");
 }
 
-ava::core::VoidResult sleep_before_retry(const RetryOptions& options, std::size_t attempt, std::size_t max_attempts,
+ava::core::VoidResult sleep_before_retry(RetryOptions const& options, std::size_t attempt, std::size_t max_attempts,
                                          int delay_ms, std::string_view reason, int status_code, bool streaming,
-                                         const Transport::CancelCallback& cancel_requested = nullptr) {
+                                         Transport::CancelCallback const& cancel_requested = nullptr) {
   if (delay_ms <= 0) return {};
-  const auto tick_ms = std::max(0, options.countdown_tick_ms);
+  auto const tick_ms = std::max(0, options.countdown_tick_ms);
   auto remaining_ms = delay_ms;
   while (remaining_ms > 0) {
     if (retry_cancel_requested(options, cancel_requested)) return std::unexpected(retry_canceled_error());
-    const auto chunk_ms = tick_ms > 0 ? std::min(tick_ms, remaining_ms) : remaining_ms;
+    auto const chunk_ms = tick_ms > 0 ? std::min(tick_ms, remaining_ms) : remaining_ms;
     std::this_thread::sleep_for(std::chrono::milliseconds(chunk_ms));
     remaining_ms -= chunk_ms;
     if (retry_cancel_requested(options, cancel_requested)) return std::unexpected(retry_canceled_error());
@@ -133,20 +133,20 @@ std::optional<std::string> default_text_from_json(std::string_view body) {
   return std::nullopt;
 }
 
-ava::core::Result<std::vector<StreamEvent>> default_parse_response(const HttpResponse& response, bool stream) {
+ava::core::Result<std::vector<StreamEvent>> default_parse_response(HttpResponse const& response, bool stream) {
   if (response.status_code < 200 || response.status_code >= 300) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider,
                                   "provider HTTP request failed with status " + std::to_string(response.status_code));
     error.with_context("status", std::to_string(response.status_code));
     error.with_context("provider_error_kind", to_string(classify_provider_error(response)));
-    if (const auto retry_after = retry_after_header(response)) error.with_context("retry_after", *retry_after);
+    if (auto const retry_after = retry_after_header(response)) error.with_context("retry_after", *retry_after);
     return std::unexpected(std::move(error));
   }
   if (stream) {
     std::vector<StreamEvent> events;
     std::size_t line_start = 0;
     while (line_start <= response.body.size()) {
-      const auto newline = response.body.find('\n', line_start);
+      auto const newline = response.body.find('\n', line_start);
       auto line = newline == std::string::npos
                       ? std::string_view(response.body).substr(line_start)
                       : std::string_view(response.body).substr(line_start, newline - line_start);
@@ -197,18 +197,18 @@ ava::core::Result<std::vector<StreamEvent>> DefaultStreamParser::finish() {
   return default_parse_response(HttpResponse{.status_code = 200, .headers = {}, .body = std::move(pending_)}, true);
 }
 
-std::optional<int> retry_after_ms(const HttpResponse& response, int max_retry_after_ms) {
-  const auto value = retry_after_header(response);
+std::optional<int> retry_after_ms(HttpResponse const& response, int max_retry_after_ms) {
+  auto const value = retry_after_header(response);
   if (!value) return std::nullopt;
   std::size_t index = 0;
   while (index < value->size() && std::isspace(static_cast<unsigned char>((*value)[index])) != 0) ++index;
-  const auto start = index;
+  auto const start = index;
   while (index < value->size() && std::isdigit(static_cast<unsigned char>((*value)[index])) != 0) ++index;
   if (index == start) return std::nullopt;
   try {
-    const auto seconds = std::stoi(value->substr(start, index - start));
+    auto const seconds = std::stoi(value->substr(start, index - start));
     if (seconds < 0) return std::nullopt;
-    const long long delay_ms = static_cast<long long>(seconds) * 1000LL;
+    long long const delay_ms = static_cast<long long>(seconds) * 1000LL;
     return static_cast<int>(std::min(delay_ms, static_cast<long long>(max_retry_after_ms)));
   } catch (...) {
     return std::nullopt;
@@ -217,8 +217,8 @@ std::optional<int> retry_after_ms(const HttpResponse& response, int max_retry_af
 
 }  // namespace
 
-ava::core::Result<HttpRequest> Provider::build_request(const ProviderRequest& request,
-                                                       const ProviderAuthContext& auth) const {
+ava::core::Result<HttpRequest> Provider::build_request(ProviderRequest const& request,
+                                                       ProviderAuthContext const& auth) const {
   auto http_request = build_request(request, auth.access_token);
   if (!http_request) return http_request;
   if (auto applied = apply_auth_options(*http_request, auth); !applied) {
@@ -227,17 +227,17 @@ ava::core::Result<HttpRequest> Provider::build_request(const ProviderRequest& re
   return http_request;
 }
 
-ava::core::VoidResult Provider::apply_auth_options(HttpRequest&, const ProviderAuthContext&) const { return {}; }
+ava::core::VoidResult Provider::apply_auth_options(HttpRequest&, ProviderAuthContext const&) const { return {}; }
 
 std::unique_ptr<StreamParser> Provider::create_stream_parser() const { return std::make_unique<DefaultStreamParser>(); }
 
-ava::core::Result<std::vector<StreamEvent>> Provider::parse_response(const HttpResponse& response, bool stream) const {
+ava::core::Result<std::vector<StreamEvent>> Provider::parse_response(HttpResponse const& response, bool stream) const {
   return default_parse_response(response, stream);
 }
 
 bool Transport::supports_streaming() const noexcept { return false; }
 
-ava::core::Result<HttpResponse> Transport::send(const HttpRequest& request, CancelCallback cancel_requested) {
+ava::core::Result<HttpResponse> Transport::send(HttpRequest const& request, CancelCallback cancel_requested) {
   if (cancel_requested && cancel_requested()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
   }
@@ -249,7 +249,7 @@ ava::core::Result<HttpResponse> Transport::send(const HttpRequest& request, Canc
   return response;
 }
 
-ava::core::Result<HttpResponse> Transport::send_streaming(const HttpRequest& request, BodyChunkSink on_body_chunk,
+ava::core::Result<HttpResponse> Transport::send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
                                                           CancelCallback cancel_requested) {
   if (cancel_requested && cancel_requested()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
@@ -271,18 +271,18 @@ ava::core::Result<HttpResponse> Transport::send_streaming(const HttpRequest& req
 
 RetryTransport::RetryTransport(Transport& inner, RetryOptions options) : inner_(inner), options_(options) {}
 
-ava::core::Result<HttpResponse> RetryTransport::send(const HttpRequest& request) { return send(request, nullptr); }
+ava::core::Result<HttpResponse> RetryTransport::send(HttpRequest const& request) { return send(request, nullptr); }
 
-ava::core::Result<HttpResponse> RetryTransport::send(const HttpRequest& request, CancelCallback cancel_requested) {
-  const int max_attempts = std::max(1, options_.max_attempts);
+ava::core::Result<HttpResponse> RetryTransport::send(HttpRequest const& request, CancelCallback cancel_requested) {
+  int const max_attempts = std::max(1, options_.max_attempts);
   if (retry_cancel_requested(options_, cancel_requested)) return std::unexpected(retry_canceled_error());
   ava::core::Result<HttpResponse> response = inner_.send(request, cancel_requested);
   for (int attempt = 1; attempt < max_attempts; ++attempt) {
     if (retry_cancel_requested(options_, cancel_requested)) return std::unexpected(retry_canceled_error());
     if (response) {
       if (!is_retryable_kind(classify_provider_error(*response))) break;
-      const auto reason = to_string(classify_provider_error(*response));
-      const int delay_ms =
+      auto const reason = to_string(classify_provider_error(*response));
+      int const delay_ms =
           retry_after_ms(*response, options_.max_retry_after_ms).value_or(exponential_delay_ms(options_, attempt));
       if (auto published = publish_retry_event(
               options_, static_cast<std::size_t>(attempt + 1), static_cast<std::size_t>(max_attempts), delay_ms,
@@ -298,7 +298,7 @@ ava::core::Result<HttpResponse> RetryTransport::send(const HttpRequest& request,
       }
     } else {
       if (!is_retryable_transport_error(response.error())) break;
-      const int delay_ms = exponential_delay_ms(options_, attempt);
+      int const delay_ms = exponential_delay_ms(options_, attempt);
       if (auto published = publish_retry_event(options_, static_cast<std::size_t>(attempt + 1),
                                                static_cast<std::size_t>(max_attempts), delay_ms,
                                                static_cast<std::size_t>(delay_ms), "transport_io", 0, false);
@@ -320,9 +320,9 @@ ava::core::Result<HttpResponse> RetryTransport::send(const HttpRequest& request,
 
 bool RetryTransport::supports_streaming() const noexcept { return inner_.supports_streaming(); }
 
-ava::core::Result<HttpResponse> RetryTransport::send_streaming(const HttpRequest& request, BodyChunkSink on_body_chunk,
+ava::core::Result<HttpResponse> RetryTransport::send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
                                                                CancelCallback cancel_requested) {
-  const int max_attempts = std::max(1, options_.max_attempts);
+  int const max_attempts = std::max(1, options_.max_attempts);
   ava::core::Result<HttpResponse> response =
       std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "streaming request was not attempted"));
   std::string final_body;
@@ -339,11 +339,11 @@ ava::core::Result<HttpResponse> RetryTransport::send_streaming(const HttpRequest
         },
         cancel_requested);
 
-    const bool last_attempt = attempt == max_attempts;
+    bool const last_attempt = attempt == max_attempts;
     if (response) {
       if (!last_attempt && !delivered_chunks && is_retryable_kind(classify_provider_error(*response))) {
-        const auto reason = to_string(classify_provider_error(*response));
-        const int delay_ms =
+        auto const reason = to_string(classify_provider_error(*response));
+        int const delay_ms =
             retry_after_ms(*response, options_.max_retry_after_ms).value_or(exponential_delay_ms(options_, attempt));
         if (auto published = publish_retry_event(
                 options_, static_cast<std::size_t>(attempt + 1), static_cast<std::size_t>(max_attempts), delay_ms,
@@ -364,7 +364,7 @@ ava::core::Result<HttpResponse> RetryTransport::send_streaming(const HttpRequest
     }
 
     if (last_attempt || delivered_chunks || !is_retryable_transport_error(response.error())) break;
-    const int delay_ms = exponential_delay_ms(options_, attempt);
+    int const delay_ms = exponential_delay_ms(options_, attempt);
     if (auto published =
             publish_retry_event(options_, static_cast<std::size_t>(attempt + 1), static_cast<std::size_t>(max_attempts),
                                 delay_ms, static_cast<std::size_t>(delay_ms), "transport_io", 0, true);
@@ -433,9 +433,9 @@ std::string to_string(ProviderErrorKind kind) {
   return "unknown";
 }
 
-ProviderErrorKind classify_provider_error(const HttpResponse& response) {
+ProviderErrorKind classify_provider_error(HttpResponse const& response) {
   if (response.status_code >= 200 && response.status_code < 300) return ProviderErrorKind::Unknown;
-  const auto body = lower_copy(response.body);
+  auto const body = lower_copy(response.body);
   if (response.status_code == 401 || response.status_code == 403) return ProviderErrorKind::Authentication;
   if (looks_like_context_overflow(body)) return ProviderErrorKind::ContextOverflow;
   if (looks_like_quota(body)) return ProviderErrorKind::Quota;
@@ -452,17 +452,17 @@ ProviderErrorKind classify_provider_error(const HttpResponse& response) {
   return ProviderErrorKind::Unknown;
 }
 
-std::optional<std::string> retry_after_header(const HttpResponse& response) {
-  for (const auto& [key, value] : response.headers) {
+std::optional<std::string> retry_after_header(HttpResponse const& response) {
+  for (auto const& [key, value] : response.headers) {
     if (lower_copy(key) == "retry-after") return value;
   }
   return std::nullopt;
 }
 
-bool is_context_overflow_error(const ava::core::Error& error) {
+bool is_context_overflow_error(ava::core::Error const& error) {
   if (error.category() != ava::core::ErrorCategory::Provider) return false;
   if (looks_like_context_overflow(error.message())) return true;
-  for (const auto& item : error.context()) {
+  for (auto const& item : error.context()) {
     if (looks_like_context_overflow(item.value)) return true;
   }
   return false;

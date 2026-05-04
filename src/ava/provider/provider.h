@@ -154,14 +154,14 @@ class StreamParser {
 class Provider {
  public:
   virtual ~Provider() = default;
-  [[nodiscard]] virtual ava::core::Result<HttpRequest> build_request(const ProviderRequest& request,
+  [[nodiscard]] virtual ava::core::Result<HttpRequest> build_request(ProviderRequest const& request,
                                                                      std::string_view access_token) const = 0;
-  [[nodiscard]] virtual ava::core::Result<HttpRequest> build_request(const ProviderRequest& request,
-                                                                     const ProviderAuthContext& auth) const;
+  [[nodiscard]] virtual ava::core::Result<HttpRequest> build_request(ProviderRequest const& request,
+                                                                     ProviderAuthContext const& auth) const;
   [[nodiscard]] virtual ava::core::VoidResult apply_auth_options(HttpRequest& request,
-                                                                 const ProviderAuthContext& auth) const;
+                                                                 ProviderAuthContext const& auth) const;
   [[nodiscard]] virtual std::unique_ptr<StreamParser> create_stream_parser() const;
-  [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> parse_response(const HttpResponse& response,
+  [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> parse_response(HttpResponse const& response,
                                                                                    bool stream) const;
 };
 
@@ -171,11 +171,11 @@ class Transport {
   using CancelCallback = std::function<bool()>;
 
   virtual ~Transport() = default;
-  [[nodiscard]] virtual ava::core::Result<HttpResponse> send(const HttpRequest& request) = 0;
-  [[nodiscard]] virtual ava::core::Result<HttpResponse> send(const HttpRequest& request,
+  [[nodiscard]] virtual ava::core::Result<HttpResponse> send(HttpRequest const& request) = 0;
+  [[nodiscard]] virtual ava::core::Result<HttpResponse> send(HttpRequest const& request,
                                                              CancelCallback cancel_requested);
   [[nodiscard]] virtual bool supports_streaming() const noexcept;
-  [[nodiscard]] virtual ava::core::Result<HttpResponse> send_streaming(const HttpRequest& request,
+  [[nodiscard]] virtual ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request,
                                                                        BodyChunkSink on_body_chunk,
                                                                        CancelCallback cancel_requested = nullptr);
 };
@@ -195,18 +195,18 @@ struct RetryOptions {
     bool streaming = false;
     bool countdown_tick = false;
   };
-  std::function<ava::core::VoidResult(const Event&)> on_retry = nullptr;
+  std::function<ava::core::VoidResult(Event const&)> on_retry = nullptr;
   Transport::CancelCallback cancel_requested = nullptr;
 };
 
 class RetryTransport final : public Transport {
  public:
   RetryTransport(Transport& inner, RetryOptions options = {});
-  [[nodiscard]] ava::core::Result<HttpResponse> send(const HttpRequest& request) override;
-  [[nodiscard]] ava::core::Result<HttpResponse> send(const HttpRequest& request,
+  [[nodiscard]] ava::core::Result<HttpResponse> send(HttpRequest const& request) override;
+  [[nodiscard]] ava::core::Result<HttpResponse> send(HttpRequest const& request,
                                                      CancelCallback cancel_requested) override;
   [[nodiscard]] bool supports_streaming() const noexcept override;
-  [[nodiscard]] ava::core::Result<HttpResponse> send_streaming(const HttpRequest& request, BodyChunkSink on_body_chunk,
+  [[nodiscard]] ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
                                                                CancelCallback cancel_requested = nullptr) override;
 
  private:
@@ -216,8 +216,8 @@ class RetryTransport final : public Transport {
 
 [[nodiscard]] std::string to_string(StreamEventType type);
 [[nodiscard]] std::string to_string(ProviderErrorKind kind);
-[[nodiscard]] ProviderErrorKind classify_provider_error(const HttpResponse& response);
-[[nodiscard]] std::optional<std::string> retry_after_header(const HttpResponse& response);
-[[nodiscard]] bool is_context_overflow_error(const ava::core::Error& error);
+[[nodiscard]] ProviderErrorKind classify_provider_error(HttpResponse const& response);
+[[nodiscard]] std::optional<std::string> retry_after_header(HttpResponse const& response);
+[[nodiscard]] bool is_context_overflow_error(ava::core::Error const& error);
 
 }  // namespace ava::provider

@@ -57,14 +57,14 @@ class StreamingFakeTransport final : public ava::provider::Transport {
       : responses_(responses.begin(), responses.end()) {}
 
   [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
-      const ava::provider::HttpRequest& request) override {
+      ava::provider::HttpRequest const& request) override {
     return send_streaming(request, nullptr);
   }
 
   [[nodiscard]] bool supports_streaming() const noexcept override { return true; }
 
   [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send_streaming(
-      const ava::provider::HttpRequest& request, BodyChunkSink on_body_chunk,
+      ava::provider::HttpRequest const& request, BodyChunkSink on_body_chunk,
       CancelCallback cancel_requested = nullptr) override {
     requests_.push_back(request);
     if (responses_.empty()) {
@@ -82,7 +82,7 @@ class StreamingFakeTransport final : public ava::provider::Transport {
     return response;
   }
 
-  [[nodiscard]] const std::vector<ava::provider::HttpRequest>& requests() const noexcept { return requests_; }
+  [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept { return requests_; }
 
  private:
   std::deque<ava::provider::HttpResponse> responses_;
@@ -92,7 +92,7 @@ class StreamingFakeTransport final : public ava::provider::Transport {
 class FailingOnceTransport final : public ava::provider::Transport {
  public:
   [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
-      const ava::provider::HttpRequest& request) override {
+      ava::provider::HttpRequest const& request) override {
     requests_.push_back(request);
     if (requests_.size() == 1) {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "temporary transport failure"));
@@ -100,15 +100,15 @@ class FailingOnceTransport final : public ava::provider::Transport {
     return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"};
   }
 
-  [[nodiscard]] const std::vector<ava::provider::HttpRequest>& requests() const noexcept { return requests_; }
+  [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept { return requests_; }
 
  private:
   std::vector<ava::provider::HttpRequest> requests_;
 };
 
 void test_openai_provider_contract() {
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
-  const auto request = provider.build_request(
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  auto const request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "openai",
           .model_id = "gpt-5.5",
@@ -134,7 +134,7 @@ void test_openai_provider_contract() {
     expect(request->timeout_ms == 60000, "OpenAI request carries default HTTP timeout");
   }
 
-  const auto non_stream_request = provider.build_request(ava::provider::ProviderRequest{.provider_id = "openai",
+  auto const non_stream_request = provider.build_request(ava::provider::ProviderRequest{.provider_id = "openai",
                                                                                         .model_id = "gpt-5.5",
                                                                                         .system_prompt = "system",
                                                                                         .messages = {},
@@ -144,7 +144,7 @@ void test_openai_provider_contract() {
   expect(non_stream_request && non_stream_request->body.find("\"stream\":false") != std::string::npos,
          "OpenAI request preserves stream=false body field");
 
-  const auto reasoning_request = provider.build_request(
+  auto const reasoning_request = provider.build_request(
       ava::provider::ProviderRequest{.provider_id = "openai",
                                      .model_id = "gpt-5.5",
                                      .system_prompt = "system",
@@ -156,7 +156,7 @@ void test_openai_provider_contract() {
              reasoning_request->body.find("\"summary\":\"auto\"") != std::string::npos,
          "OpenAI request serializes reasoning effort with visible summary request");
 
-  const auto invalid_reasoning_budget = provider.build_request(
+  auto const invalid_reasoning_budget = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "openai",
           .model_id = "gpt-5.5",
@@ -169,7 +169,7 @@ void test_openai_provider_contract() {
              invalid_reasoning_budget.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "OpenAI request rejects budgeted reasoning options");
 
-  const auto invalid_reasoning_level = provider.build_request(
+  auto const invalid_reasoning_level = provider.build_request(
       ava::provider::ProviderRequest{.provider_id = "openai",
                                      .model_id = "gpt-5.5",
                                      .system_prompt = "system",
@@ -181,7 +181,7 @@ void test_openai_provider_contract() {
              invalid_reasoning_level.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "OpenAI request rejects unsupported reasoning effort");
 
-  const auto native_parts_request = provider.build_request(
+  auto const native_parts_request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "openai",
           .model_id = "gpt-5.5",
@@ -203,7 +203,7 @@ void test_openai_provider_contract() {
              native_parts_request->body.find("call_ignored") == std::string::npos,
          "OpenAI request ignores native content parts and serializes fallback content only");
 
-  const auto expired_credential_request = provider.build_request(
+  auto const expired_credential_request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system", .messages = {}, .tools_json = {}},
       ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
@@ -216,7 +216,7 @@ void test_openai_provider_contract() {
       !expired_credential_request && expired_credential_request.error().message().find("expired") != std::string::npos,
       "OpenAI provider rejects expired OAuth before building request");
 
-  const auto oauth_credential_request = provider.build_request(
+  auto const oauth_credential_request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system", .messages = {}, .tools_json = {}},
       ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
@@ -237,7 +237,7 @@ void test_openai_provider_contract() {
            "OpenAI OAuth request disables Codex response storage");
   }
 
-  const auto oauth_credential_request_without_now = provider.build_request(
+  auto const oauth_credential_request_without_now = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system", .messages = {}, .tools_json = {}},
       ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
@@ -255,7 +255,7 @@ void test_openai_provider_contract() {
            "OpenAI OAuth request without explicit clock applies Codex auth options");
   }
 
-  const auto invalid_tool = provider.build_request(ava::provider::ProviderRequest{.provider_id = "openai",
+  auto const invalid_tool = provider.build_request(ava::provider::ProviderRequest{.provider_id = "openai",
                                                                                   .model_id = "gpt-5.5",
                                                                                   .system_prompt = "system",
                                                                                   .messages = {},
@@ -264,20 +264,20 @@ void test_openai_provider_contract() {
   expect(!invalid_tool && invalid_tool.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "OpenAI request rejects malformed tool JSON before embedding");
 
-  const auto missing_model = provider.build_request(
+  auto const missing_model = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "openai", .model_id = "", .system_prompt = "system", .messages = {}, .tools_json = {}},
       "oauth-token");
   expect(!missing_model && missing_model.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "OpenAI request rejects empty model");
-  const auto missing_token = provider.build_request(
+  auto const missing_token = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system", .messages = {}, .tools_json = {}},
       "");
   expect(!missing_token && missing_token.error().category() == ava::core::ErrorCategory::PermissionDenied,
          "OpenAI request rejects empty token");
 
-  const std::string sse =
+  std::string const sse =
       "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\r\n\r\n"
       "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_1\",\"name\":\"read_file\"}\r\n\r\n"
       "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_1\",\"delta\":\"{}\"}\n\n"
@@ -361,7 +361,7 @@ void test_openai_provider_contract() {
              http_error.error().message().find("401") != std::string::npos,
          "OpenAI auth response is normalized as a provider error with status context");
   if (!http_error) {
-    const auto formatted = http_error.error().format();
+    auto const formatted = http_error.error().format();
     expect(formatted.find("provider_error_kind: authentication") != std::string::npos &&
                formatted.find("body_snippet") != std::string::npos && formatted.find("bad auth") != std::string::npos &&
                formatted.find("Bearer secret") == std::string::npos,
@@ -400,11 +400,11 @@ void test_openai_provider_contract() {
       ava::provider::RetryOptions{.max_attempts = 2,
                                   .base_delay_ms = 0,
                                   .max_retry_after_ms = 0,
-                                  .on_retry = [&retry_events](const ava::provider::RetryOptions::Event& event) {
+                                  .on_retry = [&retry_events](ava::provider::RetryOptions::Event const& event) {
                                     retry_events.push_back(event);
                                     return ava::core::VoidResult{};
                                   }});
-  const auto retry_request = ava::provider::HttpRequest{.method = "POST",
+  auto const retry_request = ava::provider::HttpRequest{.method = "POST",
                                                         .url = "https://api.example.test",
                                                         .headers = {},
                                                         .body = {},
@@ -430,7 +430,7 @@ void test_openai_provider_contract() {
                                   .base_delay_ms = 1,
                                   .max_retry_after_ms = 1,
                                   .countdown_tick_ms = 1,
-                                  .on_retry = [&countdown_events](const ava::provider::RetryOptions::Event& event) {
+                                  .on_retry = [&countdown_events](ava::provider::RetryOptions::Event const& event) {
                                     countdown_events.push_back(event);
                                     return ava::core::VoidResult{};
                                   }});
@@ -453,7 +453,7 @@ void test_openai_provider_contract() {
                               .max_retry_after_ms = 0,
                               .countdown_tick_ms = 10,
                               .on_retry =
-                                  [&cancel_retry_events](const ava::provider::RetryOptions::Event& event) {
+                                  [&cancel_retry_events](ava::provider::RetryOptions::Event const& event) {
                                     cancel_retry_events.push_back(event);
                                     return ava::core::VoidResult{};
                                   },
@@ -593,7 +593,7 @@ void test_openai_provider_contract() {
   auto missing_text = ava::provider::parse_openai_response_text("{\"id\":\"resp_1\"}");
   expect(!missing_text, "OpenAI non-stream response requires expected text field");
 
-  const ava::provider::OpenAIProvider non_stream_provider("https://api.example.test");
+  ava::provider::OpenAIProvider const non_stream_provider("https://api.example.test");
   auto non_stream_tool = non_stream_provider.parse_response(
       ava::provider::HttpResponse{.status_code = 200,
                                   .headers = {},
@@ -702,7 +702,7 @@ void test_openai_incremental_sse_parser() {
 }
 
 void test_openai_compatible_provider_contract() {
-  const ava::provider::OpenAICompatibleProvider provider(
+  ava::provider::OpenAICompatibleProvider const provider(
       ava::provider::OpenAICompatibleProviderOptions{.base_url = "https://compat.example.test/api",
                                                      .chat_completions_path = "/v1/chat/completions",
                                                      .provider_name = "Compat",
@@ -711,7 +711,7 @@ void test_openai_compatible_provider_contract() {
                                                      .default_temperature = 1.0,
                                                      .preserve_reasoning_content = true,
                                                      .include_stream_usage = true});
-  const auto request = provider.build_request(
+  auto const request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "kimi",
           .model_id = "kimi-k2-thinking",
@@ -773,7 +773,7 @@ void test_openai_compatible_provider_contract() {
            "OpenAI-compatible request converts Responses-style tool schemas to chat-completions tools");
   }
 
-  const auto invalid_tool =
+  auto const invalid_tool =
       provider.build_request(ava::provider::ProviderRequest{.provider_id = "moonshot",
                                                             .model_id = "kimi-k2.6",
                                                             .system_prompt = "",
@@ -783,7 +783,7 @@ void test_openai_compatible_provider_contract() {
   expect(!invalid_tool && invalid_tool.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "OpenAI-compatible request rejects function tools without names");
 
-  const auto invalid_wrapped_tool =
+  auto const invalid_wrapped_tool =
       provider.build_request(ava::provider::ProviderRequest{.provider_id = "moonshot",
                                                             .model_id = "kimi-k2.6",
                                                             .system_prompt = "",
@@ -793,7 +793,7 @@ void test_openai_compatible_provider_contract() {
   expect(!invalid_wrapped_tool && invalid_wrapped_tool.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "OpenAI-compatible request rejects wrapped tools without function names");
 
-  const auto strict_tool = provider.build_request(
+  auto const strict_tool = provider.build_request(
       ava::provider::ProviderRequest{.provider_id = "moonshot",
                                      .model_id = "kimi-k2.6",
                                      .system_prompt = "",
@@ -805,7 +805,7 @@ void test_openai_compatible_provider_contract() {
   expect(strict_tool && strict_tool->body.find("\"strict\":true") != std::string::npos,
          "OpenAI-compatible request preserves strict tool schemas");
 
-  const auto invalid_parameters = provider.build_request(
+  auto const invalid_parameters = provider.build_request(
       ava::provider::ProviderRequest{.provider_id = "moonshot",
                                      .model_id = "kimi-k2.6",
                                      .system_prompt = "",
@@ -816,12 +816,12 @@ void test_openai_compatible_provider_contract() {
   expect(!invalid_parameters && invalid_parameters.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "OpenAI-compatible request rejects malformed tool parameter JSON");
 
-  const ava::provider::OpenAICompatibleProvider kimi_default_reasoning_provider(
+  ava::provider::OpenAICompatibleProvider const kimi_default_reasoning_provider(
       ava::provider::OpenAICompatibleProviderOptions{.base_url = "https://compat.example.test",
                                                      .provider_name = "Kimi",
                                                      .reasoning_format = "reasoning_content",
                                                      .preserve_reasoning_content = true});
-  const auto default_reasoning_request = kimi_default_reasoning_provider.build_request(
+  auto const default_reasoning_request = kimi_default_reasoning_provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "kimi",
           .model_id = "kimi-k2-thinking",
@@ -840,9 +840,9 @@ void test_openai_compatible_provider_contract() {
           default_reasoning_request->body.find("\"thinking\"") == std::string::npos,
       "OpenAI-compatible preserved reasoning replay does not request reasoning after clear/default state");
 
-  const ava::provider::OpenAICompatibleProvider no_preserve_provider(ava::provider::OpenAICompatibleProviderOptions{
+  ava::provider::OpenAICompatibleProvider const no_preserve_provider(ava::provider::OpenAICompatibleProviderOptions{
       .base_url = "https://compat.example.test", .provider_name = "Compat", .reasoning_format = "reasoning_content"});
-  const auto no_preserve_request = no_preserve_provider.build_request(
+  auto const no_preserve_request = no_preserve_provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "moonshot",
           .model_id = "kimi-k2.6",
@@ -891,9 +891,9 @@ void test_openai_compatible_parsing() {
            "OpenAI-compatible SSE done carries usage and normalized tool stop reason");
   }
 
-  const ava::provider::OpenAICompatibleProvider moonshot(ava::provider::OpenAICompatibleProviderOptions{
+  ava::provider::OpenAICompatibleProvider const moonshot(ava::provider::OpenAICompatibleProviderOptions{
       .base_url = "https://moonshot.example.test", .provider_name = "Moonshot"});
-  const auto non_stream = moonshot.parse_response(
+  auto const non_stream = moonshot.parse_response(
       ava::provider::HttpResponse{.status_code = 200,
                                   .headers = {},
                                   .body = "{\"choices\":[{\"message\":{\"reasoning_content\":\"think\","
@@ -910,7 +910,7 @@ void test_openai_compatible_parsing() {
              (*non_stream)[4].stop_reason == "completed",
          "OpenAI-compatible non-stream response parses reasoning_content, text, usage, and stop reason");
 
-  const auto filtered = moonshot.parse_response(
+  auto const filtered = moonshot.parse_response(
       ava::provider::HttpResponse{.status_code = 200,
                                   .headers = {},
                                   .body = "{\"choices\":[{\"finish_reason\":\"content_filter\"}],"
@@ -919,7 +919,7 @@ void test_openai_compatible_parsing() {
   expect(filtered && filtered->size() == 1 && (*filtered)[0].type == ava::provider::StreamEventType::Done &&
              (*filtered)[0].stop_reason == "content_filter",
          "OpenAI-compatible non-stream parser treats filtered empty responses as completed provider turns");
-  const auto unknown_finish =
+  auto const unknown_finish =
       moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200,
                                                           .headers = {},
                                                           .body = "{\"choices\":[{\"message\":{\"content\":\"done\"},"
@@ -930,7 +930,7 @@ void test_openai_compatible_parsing() {
              (*unknown_finish)[1].stop_reason == "provider_custom",
          "OpenAI-compatible non-stream parser preserves unknown finish reasons");
 
-  const auto non_stream_tool = moonshot.parse_response(
+  auto const non_stream_tool = moonshot.parse_response(
       ava::provider::HttpResponse{.status_code = 200,
                                   .headers = {},
                                   .body = "{\"choices\":[{\"message\":{\"tool_calls\":[{"
@@ -946,12 +946,12 @@ void test_openai_compatible_parsing() {
              (*non_stream_tool)[3].stop_reason == "tool_calls",
          "OpenAI-compatible non-stream parser emits tool call events");
 
-  const auto malformed = moonshot.parse_response(
+  auto const malformed = moonshot.parse_response(
       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"choices\":[]}"}, false);
   expect(!malformed && malformed.error().category() == ava::core::ErrorCategory::Provider,
          "OpenAI-compatible non-stream parser rejects missing messages");
 
-  const auto http_error = moonshot.parse_response(
+  auto const http_error = moonshot.parse_response(
       ava::provider::HttpResponse{.status_code = 500,
                                   .headers = {},
                                   .body = "{\"error\":{\"message\":\"bad\",\"reasoning_content\":"
@@ -977,7 +977,7 @@ void test_openai_compatible_parsing() {
              (*malformed_compatible)[0].type == ava::provider::StreamEventType::Error,
          "OpenAI-compatible parser does not add truncation error after malformed SSE data");
 
-  const ava::provider::OpenAICompatibleProvider parser_provider(ava::provider::OpenAICompatibleProviderOptions{
+  ava::provider::OpenAICompatibleProvider const parser_provider(ava::provider::OpenAICompatibleProviderOptions{
       .base_url = "https://compat.example.test", .reasoning_format = "custom_reasoning"});
   auto parser = parser_provider.create_stream_parser();
   auto part_one = parser->append("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"pl");
@@ -1002,7 +1002,7 @@ void test_openai_compatible_parsing() {
   auto second_finish = parser->finish();
   expect(second_finish && second_finish->empty(), "OpenAI-compatible parser finish resets terminal state");
 
-  const auto error = moonshot.parse_response(
+  auto const error = moonshot.parse_response(
       ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "Your request exceeded model token limit"},
       true);
   expect(!error && error.error().format().find("provider_error_kind: context_overflow") != std::string::npos,

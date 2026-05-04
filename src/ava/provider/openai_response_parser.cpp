@@ -25,14 +25,14 @@ std::string normalized_openai_stop_reason(std::string_view reason) {
 }
 
 std::optional<long long> non_negative_integer_field(std::string_view object, std::string_view key) {
-  const auto value = ava::core::json::integer_field(object, key);
+  auto const value = ava::core::json::integer_field(object, key);
   if (!value || *value < 0) return std::nullopt;
   return value;
 }
 
 std::optional<long long> first_integer_field(std::string_view object, std::initializer_list<std::string_view> keys) {
-  for (const auto key : keys) {
-    if (const auto value = non_negative_integer_field(object, key)) return value;
+  for (auto const key : keys) {
+    if (auto const value = non_negative_integer_field(object, key)) return value;
   }
   return std::nullopt;
 }
@@ -49,22 +49,22 @@ std::optional<TokenUsage> usage_from_object(std::string_view usage_object) {
   usage.output_tokens = first_integer_field(usage_object, {"output_tokens", "completion_tokens"});
   usage.total_tokens = first_integer_field(usage_object, {"total_tokens"});
 
-  if (const auto output_details = ava::core::json::object_field(usage_object, "output_tokens_details")) {
+  if (auto const output_details = ava::core::json::object_field(usage_object, "output_tokens_details")) {
     usage.reasoning_tokens = first_integer_field(*output_details, {"reasoning_tokens"});
   }
   if (!usage.reasoning_tokens) {
-    if (const auto completion_details = ava::core::json::object_field(usage_object, "completion_tokens_details")) {
+    if (auto const completion_details = ava::core::json::object_field(usage_object, "completion_tokens_details")) {
       usage.reasoning_tokens = first_integer_field(*completion_details, {"reasoning_tokens"});
     }
   }
   if (!usage.reasoning_tokens) usage.reasoning_tokens = first_integer_field(usage_object, {"reasoning_tokens"});
 
-  if (const auto input_details = ava::core::json::object_field(usage_object, "input_tokens_details")) {
+  if (auto const input_details = ava::core::json::object_field(usage_object, "input_tokens_details")) {
     usage.cache_read_tokens = first_integer_field(*input_details, {"cached_tokens", "cache_read_tokens"});
     usage.cache_write_tokens = first_integer_field(*input_details, {"cache_creation_tokens", "cache_write_tokens"});
   }
   if (!usage.cache_read_tokens || !usage.cache_write_tokens) {
-    if (const auto prompt_details = ava::core::json::object_field(usage_object, "prompt_tokens_details")) {
+    if (auto const prompt_details = ava::core::json::object_field(usage_object, "prompt_tokens_details")) {
       if (!usage.cache_read_tokens) {
         usage.cache_read_tokens = first_integer_field(*prompt_details, {"cached_tokens", "cache_read_tokens"});
       }
@@ -94,7 +94,7 @@ std::optional<TokenUsage> usage_from_object(std::string_view usage_object) {
 namespace detail {
 
 std::optional<std::string> first_string_field(std::string_view object, std::initializer_list<std::string_view> keys) {
-  for (const auto key : keys) {
+  for (auto const key : keys) {
     if (auto value = ava::core::json::string_field(object, key)) return value;
   }
   return std::nullopt;
@@ -102,14 +102,14 @@ std::optional<std::string> first_string_field(std::string_view object, std::init
 
 std::string openai_response_stop_reason(std::string_view object) {
   std::string status = ava::core::json::string_field(object, "status").value_or("");
-  if (const auto response = ava::core::json::object_field(object, "response")) {
+  if (auto const response = ava::core::json::object_field(object, "response")) {
     if (status.empty()) status = ava::core::json::string_field(*response, "status").value_or("");
-    if (const auto details = ava::core::json::object_field(*response, "incomplete_details")) {
+    if (auto const details = ava::core::json::object_field(*response, "incomplete_details")) {
       if (auto reason = ava::core::json::string_field(*details, "reason"))
         return normalized_openai_stop_reason(*reason);
     }
   }
-  if (const auto details = ava::core::json::object_field(object, "incomplete_details")) {
+  if (auto const details = ava::core::json::object_field(object, "incomplete_details")) {
     if (auto reason = ava::core::json::string_field(*details, "reason")) return normalized_openai_stop_reason(*reason);
   }
   return normalized_openai_stop_reason(status);
@@ -123,17 +123,17 @@ std::string reasoning_summary_text_from_object(std::string_view object) {
   if (auto direct_text = ava::core::json::string_field(object, "text")) {
     append_joined_text(text, *direct_text);
   }
-  for (const auto& summary : ava::core::json::objects_in_array_field(object, "summary")) {
+  for (auto const& summary : ava::core::json::objects_in_array_field(object, "summary")) {
     if (auto summary_text = ava::core::json::string_field(summary, "text")) {
       append_joined_text(text, *summary_text);
     } else if (auto nested_summary = ava::core::json::string_field(summary, "summary_text")) {
       append_joined_text(text, *nested_summary);
     }
   }
-  if (const auto part = ava::core::json::object_field(object, "part")) {
+  if (auto const part = ava::core::json::object_field(object, "part")) {
     if (auto part_text = ava::core::json::string_field(*part, "text")) append_joined_text(text, *part_text);
   }
-  if (const auto item = ava::core::json::object_field(object, "item")) {
+  if (auto const item = ava::core::json::object_field(object, "item")) {
     append_joined_text(text, reasoning_summary_text_from_object(*item));
   }
   return text;
@@ -151,14 +151,14 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_sse(std::string_view ss
   return events;
 }
 
-ava::core::Result<std::vector<StreamEvent>> parse_openai_sse_response(const HttpResponse& response) {
+ava::core::Result<std::vector<StreamEvent>> parse_openai_sse_response(HttpResponse const& response) {
   if (response.status_code < 200 || response.status_code >= 300) {
-    const auto kind = classify_provider_error(response);
+    auto const kind = classify_provider_error(response);
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider,
                                   "OpenAI HTTP request failed with status " + std::to_string(response.status_code));
     error.with_context("status", std::to_string(response.status_code));
     error.with_context("provider_error_kind", to_string(kind));
-    if (const auto retry_after = retry_after_header(response)) error.with_context("retry_after", *retry_after);
+    if (auto const retry_after = retry_after_header(response)) error.with_context("retry_after", *retry_after);
     if (!response.body.empty()) {
       error.with_context("body_snippet", sanitized_body_snippet(response.body, {"access_token", "refresh_token",
                                                                                 "api_key", "Authorization"}));
@@ -171,9 +171,9 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_sse_response(const Http
 ava::core::Result<std::string> parse_openai_response_text(std::string_view body) {
   if (auto output = ava::core::json::string_field(body, "output_text")) return *output;
   if (auto text = ava::core::json::string_field(body, "text")) return *text;
-  for (const auto& item : ava::core::json::objects_in_array_field(body, "output")) {
+  for (auto const& item : ava::core::json::objects_in_array_field(body, "output")) {
     if (ava::core::json::string_field(item, "type").value_or("") != "message") continue;
-    for (const auto& content : ava::core::json::objects_in_array_field(item, "content")) {
+    for (auto const& content : ava::core::json::objects_in_array_field(item, "content")) {
       if (auto text = ava::core::json::string_field(content, "text")) return *text;
     }
   }
@@ -184,10 +184,10 @@ namespace detail {
 
 ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std::string_view body) {
   std::vector<StreamEvent> events;
-  const auto stop_reason = openai_response_stop_reason(body);
-  for (const auto& item : ava::core::json::objects_in_array_field(body, "output")) {
+  auto const stop_reason = openai_response_stop_reason(body);
+  for (auto const& item : ava::core::json::objects_in_array_field(body, "output")) {
     if (ava::core::json::string_field(item, "type").value_or("") != "reasoning") continue;
-    const auto summary = reasoning_summary_text_from_object(item);
+    auto const summary = reasoning_summary_text_from_object(item);
     if (summary.empty()) continue;
     events.push_back(StreamEvent{.type = StreamEventType::ReasoningStart,
                                  .text = "",
@@ -219,11 +219,11 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std
                                  .error_message = "",
                                  .usage = std::nullopt});
   }
-  for (const auto& item : ava::core::json::objects_in_array_field(body, "output")) {
+  for (auto const& item : ava::core::json::objects_in_array_field(body, "output")) {
     if (ava::core::json::string_field(item, "type").value_or("") != "function_call") continue;
-    const auto id = first_string_field(item, {"id", "item_id", "call_id"}).value_or("");
-    const auto name = ava::core::json::string_field(item, "name").value_or("");
-    const auto arguments = ava::core::json::string_field(item, "arguments").value_or("");
+    auto const id = first_string_field(item, {"id", "item_id", "call_id"}).value_or("");
+    auto const name = ava::core::json::string_field(item, "name").value_or("");
+    auto const arguments = ava::core::json::string_field(item, "arguments").value_or("");
     events.push_back(StreamEvent{.type = StreamEventType::ToolCallStart,
                                  .text = "",
                                  .tool_call_id = id,
@@ -243,7 +243,7 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std
                                  .error_message = "",
                                  .usage = std::nullopt});
   }
-  const bool allows_empty_terminal = stop_reason == "incomplete" || stop_reason == "max_tokens" ||
+  bool const allows_empty_terminal = stop_reason == "incomplete" || stop_reason == "max_tokens" ||
                                      stop_reason == "content_filter" || stop_reason == "refusal";
   if (events.empty() && !allows_empty_terminal) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI response text is missing"));
@@ -261,9 +261,9 @@ ava::core::Result<std::vector<StreamEvent>> parse_openai_non_stream_response(std
 }  // namespace detail
 
 std::optional<TokenUsage> parse_openai_usage(std::string_view body) {
-  if (const auto usage = ava::core::json::object_field(body, "usage")) return usage_from_object(*usage);
-  if (const auto response = ava::core::json::object_field(body, "response")) {
-    if (const auto usage = ava::core::json::object_field(*response, "usage")) return usage_from_object(*usage);
+  if (auto const usage = ava::core::json::object_field(body, "usage")) return usage_from_object(*usage);
+  if (auto const response = ava::core::json::object_field(body, "response")) {
+    if (auto const usage = ava::core::json::object_field(*response, "usage")) return usage_from_object(*usage);
   }
   return usage_from_object(body);
 }

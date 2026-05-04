@@ -12,7 +12,7 @@ constexpr std::size_t kMaxUndoItems = 100;
 
 bool is_ascii_space_at(std::string_view text, std::size_t cursor) {
   if (cursor >= text.size()) return false;
-  const auto byte = static_cast<unsigned char>(text[cursor]);
+  auto const byte = static_cast<unsigned char>(text[cursor]);
   return (byte & 0x80U) == 0 && std::isspace(byte) != 0;
 }
 
@@ -27,9 +27,9 @@ std::size_t previous_input_cursor(std::string_view text, std::size_t cursor) {
   }
   if (start == 0) return cursor - 1;
 
-  const auto starter = start - 1;
-  const auto expected_length = detail::utf8_sequence_length(static_cast<unsigned char>(text[starter]));
-  const auto actual_length = cursor - starter;
+  auto const starter = start - 1;
+  auto const expected_length = detail::utf8_sequence_length(static_cast<unsigned char>(text[starter]));
+  auto const actual_length = cursor - starter;
   if (expected_length > 1 && expected_length == actual_length) return starter;
   return cursor - 1;
 }
@@ -38,7 +38,7 @@ std::size_t next_input_cursor(std::string_view text, std::size_t cursor) {
   cursor = clamp_composer_draft_cursor(text, cursor);
   if (cursor >= text.size()) return text.size();
 
-  const auto length = detail::utf8_sequence_length(static_cast<unsigned char>(text[cursor]));
+  auto const length = detail::utf8_sequence_length(static_cast<unsigned char>(text[cursor]));
   char32_t codepoint = 0;
   if (length > 1 && detail::decode_utf8_codepoint(text, cursor, length, codepoint)) return cursor + length;
   return cursor + 1;
@@ -47,12 +47,12 @@ std::size_t next_input_cursor(std::string_view text, std::size_t cursor) {
 std::size_t previous_word_cursor(std::string_view text, std::size_t cursor) {
   cursor = clamp_composer_draft_cursor(text, cursor);
   while (cursor > 0) {
-    const auto previous = previous_input_cursor(text, cursor);
+    auto const previous = previous_input_cursor(text, cursor);
     if (!is_ascii_space_at(text, previous)) break;
     cursor = previous;
   }
   while (cursor > 0) {
-    const auto previous = previous_input_cursor(text, cursor);
+    auto const previous = previous_input_cursor(text, cursor);
     if (is_ascii_space_at(text, previous)) break;
     cursor = previous;
   }
@@ -73,18 +73,18 @@ std::size_t next_word_cursor(std::string_view text, std::size_t cursor) {
 std::size_t line_start_cursor(std::string_view text, std::size_t cursor) {
   cursor = clamp_composer_draft_cursor(text, cursor);
   if (cursor == 0) return 0;
-  const auto line_break = text.rfind('\n', cursor - 1);
+  auto const line_break = text.rfind('\n', cursor - 1);
   return line_break == std::string_view::npos ? std::size_t{0} : line_break + 1;
 }
 
 std::size_t line_end_cursor(std::string_view text, std::size_t cursor) {
   cursor = clamp_composer_draft_cursor(text, cursor);
-  const auto line_break = text.find('\n', cursor);
+  auto const line_break = text.find('\n', cursor);
   return line_break == std::string_view::npos ? text.size() : line_break;
 }
 
 void record_undo(ComposerDraftState& draft) {
-  const auto cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
+  auto const cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
   if (!draft.undo_stack.empty() && draft.undo_stack.back().text == draft.text &&
       draft.undo_stack.back().cursor == cursor) {
     return;
@@ -126,7 +126,7 @@ void reset_composer_draft(ComposerDraftState& draft, std::string text, std::size
 }
 
 bool replace_composer_draft(ComposerDraftState& draft, std::string text, std::size_t cursor) {
-  const auto next_cursor = cursor == std::string::npos ? text.size() : clamp_composer_draft_cursor(text, cursor);
+  auto const next_cursor = cursor == std::string::npos ? text.size() : clamp_composer_draft_cursor(text, cursor);
   if (draft.text == text && clamp_composer_draft_cursor(draft.text, draft.cursor) == next_cursor) return false;
   record_undo(draft);
   draft.text = std::move(text);
@@ -216,7 +216,7 @@ std::string normalize_composer_paste_text(std::string_view text) {
   std::string output;
   output.reserve(text.size());
   for (std::size_t index = 0; index < text.size(); ++index) {
-    const auto byte = static_cast<unsigned char>(text[index]);
+    auto const byte = static_cast<unsigned char>(text[index]);
     if (byte == '\r') {
       if (index + 1 < text.size() && text[index + 1] == '\n') ++index;
       output.push_back('\n');

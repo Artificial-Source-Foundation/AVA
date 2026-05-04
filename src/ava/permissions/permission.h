@@ -62,9 +62,9 @@ struct PermissionPrompt {
   bool diff_truncated = false;
 };
 
-using PermissionResolver = std::function<ava::core::Result<PermissionResolution>(const PermissionPrompt&)>;
+using PermissionResolver = std::function<ava::core::Result<PermissionResolution>(PermissionPrompt const&)>;
 
-[[nodiscard]] PermissionDecision decide(const PermissionRequest& request);
+[[nodiscard]] PermissionDecision decide(PermissionRequest const& request);
 [[nodiscard]] PermissionDecision classify_command(std::string_view command);
 [[nodiscard]] std::string to_string(PermissionAction action);
 [[nodiscard]] std::string to_string(PermissionResolution resolution);

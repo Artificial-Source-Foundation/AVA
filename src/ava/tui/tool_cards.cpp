@@ -11,24 +11,24 @@ constexpr auto kBlockMinWidth = std::size_t{32};
 
 bool wide_blocks(std::size_t width) { return width >= kBlockMinWidth; }
 
-void append_tool_detail_lines(std::vector<std::string>& lines, std::string_view label, const std::string& text,
+void append_tool_detail_lines(std::vector<std::string>& lines, std::string_view label, std::string const& text,
                               std::size_t width) {
   if (text.empty()) return;
-  const auto prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
-  const auto label_prefix =
+  auto const prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
+  auto const label_prefix =
       prefix + std::string(detail::kSgrDim) + std::string(label) + ": " + std::string(detail::kSgrReset);
-  for (const auto& raw_line : split_lines(text)) {
+  for (auto const& raw_line : split_lines(text)) {
     lines.push_back(detail::fit_line_preserving_sgr(label_prefix + sanitize_terminal_text(raw_line), width));
   }
 }
 
-void append_diff_lines(std::vector<std::string>& lines, const ToolTimelineItem& item, std::size_t width) {
+void append_diff_lines(std::vector<std::string>& lines, ToolTimelineItem const& item, std::size_t width) {
   if (item.diff.empty()) return;
-  const auto prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
+  auto const prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
   lines.push_back(detail::fit_line_preserving_sgr(
       prefix + std::string(detail::kSgrDim) + "diff:" + std::string(detail::kSgrReset), width));
-  const auto content_prefix = wide_blocks(width) ? std::string("  │       ") : std::string("        ");
-  for (const auto& raw_line : split_lines(item.diff)) {
+  auto const content_prefix = wide_blocks(width) ? std::string("  │       ") : std::string("        ");
+  for (auto const& raw_line : split_lines(item.diff)) {
     auto sanitized = sanitize_terminal_text(raw_line);
     std::string_view sgr = detail::kSgrMuted;
     if (!sanitized.empty() && sanitized.front() == '+') {
@@ -46,7 +46,7 @@ void append_diff_lines(std::vector<std::string>& lines, const ToolTimelineItem& 
   }
 }
 
-std::string truncation_summary(const ToolTimelineItem& item) {
+std::string truncation_summary(ToolTimelineItem const& item) {
   if (!item.truncated && item.spill_path.empty() && !item.spill_truncated) return {};
 
   std::string summary;
@@ -129,14 +129,14 @@ std::string to_string(ToolLifecycleState state) {
 
 namespace detail {
 
-bool tool_card_details_visible(const ToolTimelineItem& item, bool global_details_visible) {
+bool tool_card_details_visible(ToolTimelineItem const& item, bool global_details_visible) {
   return item.details_visible.value_or(global_details_visible);
 }
 
-std::vector<std::string> render_tool_card(const ToolTimelineItem& item, std::size_t width,
+std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::size_t width,
                                           bool global_details_visible) {
   std::vector<std::string> lines;
-  const auto details_visible = tool_card_details_visible(item, global_details_visible);
+  auto const details_visible = tool_card_details_visible(item, global_details_visible);
 
   auto marker = status_marker(item.status);
   auto name_raw = sanitize_terminal_text(item.name.empty() ? "unknown" : item.name);
@@ -169,7 +169,7 @@ std::vector<std::string> render_tool_card(const ToolTimelineItem& item, std::siz
   }
   lines.push_back(fit_line_preserving_sgr(line1, width));
 
-  const auto truncation = truncation_summary(item);
+  auto const truncation = truncation_summary(item);
   if (details_visible) {
     append_tool_detail_lines(lines, "args", item.argument_summary, width);
     append_tool_detail_lines(lines, "result", item.result_summary, width);
@@ -177,7 +177,7 @@ std::vector<std::string> render_tool_card(const ToolTimelineItem& item, std::siz
     if (!item.spill_path.empty()) append_tool_detail_lines(lines, "spill", item.spill_path, width);
     append_diff_lines(lines, item, width);
   } else {
-    const auto compact = !item.result_summary.empty() ? item.result_summary : truncation;
+    auto const compact = !item.result_summary.empty() ? item.result_summary : truncation;
     if (!compact.empty()) {
       auto result_raw = sanitize_terminal_text(compact);
       std::string line2 = (wide_blocks(width) ? std::string("  │     ") : std::string("      ")) +

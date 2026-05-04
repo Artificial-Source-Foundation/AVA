@@ -46,9 +46,9 @@ struct GrepResult {
   std::filesystem::path spill_path;
 };
 
-[[nodiscard]] ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string_view pattern,
+[[nodiscard]] ava::core::Result<GlobResult> glob_files(ToolContext const& context, std::string_view pattern,
                                                        GlobOptions options = {});
-[[nodiscard]] ava::core::Result<GrepResult> grep_files(const ToolContext& context, std::string_view literal_pattern,
+[[nodiscard]] ava::core::Result<GrepResult> grep_files(ToolContext const& context, std::string_view literal_pattern,
                                                        std::string_view include_glob = "**/*",
                                                        GrepOptions options = {});
 

@@ -10,8 +10,8 @@
 
 namespace ava::tools {
 
-[[nodiscard]] bool is_git_dir(const std::filesystem::path& path);
-[[nodiscard]] bool is_generated_dir(const std::filesystem::path& path);
+[[nodiscard]] bool is_git_dir(std::filesystem::path const& path);
+[[nodiscard]] bool is_generated_dir(std::filesystem::path const& path);
 
 class IgnoreMatcher {
  private:
@@ -26,17 +26,17 @@ class IgnoreMatcher {
   };
 
  public:
-  [[nodiscard]] static ava::core::Result<IgnoreMatcher> load(const std::filesystem::path& workspace_dir);
+  [[nodiscard]] static ava::core::Result<IgnoreMatcher> load(std::filesystem::path const& workspace_dir);
 
-  [[nodiscard]] bool ignored(const std::filesystem::path& path, bool is_directory) const;
+  [[nodiscard]] bool ignored(std::filesystem::path const& path, bool is_directory) const;
 
  private:
   explicit IgnoreMatcher(std::filesystem::path workspace_dir);
 
-  [[nodiscard]] static bool rule_matches(const Rule& rule, std::string_view relative_to_base, bool is_directory);
+  [[nodiscard]] static bool rule_matches(Rule const& rule, std::string_view relative_to_base, bool is_directory);
   [[nodiscard]] ava::core::Result<void> load_rules();
-  [[nodiscard]] ava::core::Result<void> load_file(const std::filesystem::path& ignore_file);
-  [[nodiscard]] std::string relative_to_workspace(const std::filesystem::path& path) const;
+  [[nodiscard]] ava::core::Result<void> load_file(std::filesystem::path const& ignore_file);
+  [[nodiscard]] std::string relative_to_workspace(std::filesystem::path const& path) const;
 
   std::filesystem::path workspace_dir_;
   std::vector<Rule> rules_;

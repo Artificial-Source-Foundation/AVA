@@ -28,8 +28,8 @@ constexpr std::string_view kBase64UrlAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcde
 class ScopedFd {
  public:
   explicit ScopedFd(int fd) : fd_(fd) {}
-  ScopedFd(const ScopedFd&) = delete;
-  ScopedFd& operator=(const ScopedFd&) = delete;
+  ScopedFd(ScopedFd const&) = delete;
+  ScopedFd& operator=(ScopedFd const&) = delete;
   ScopedFd(ScopedFd&& other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
   ScopedFd& operator=(ScopedFd&& other) noexcept {
     if (this != &other) {
@@ -52,12 +52,12 @@ class ScopedFd {
 
 std::string errno_message() { return std::strerror(errno); }
 
-std::string base64_url_encode(std::span<const std::uint8_t> bytes) {
+std::string base64_url_encode(std::span<std::uint8_t const> bytes) {
   std::string output;
   output.reserve(((bytes.size() + 2) / 3) * 4);
   std::size_t index = 0;
   while (index + 3 <= bytes.size()) {
-    const auto block = (static_cast<std::uint32_t>(bytes[index]) << 16U) |
+    auto const block = (static_cast<std::uint32_t>(bytes[index]) << 16U) |
                        (static_cast<std::uint32_t>(bytes[index + 1]) << 8U) |
                        static_cast<std::uint32_t>(bytes[index + 2]);
     output.push_back(kBase64UrlAlphabet[(block >> 18U) & 0x3FU]);
@@ -66,13 +66,13 @@ std::string base64_url_encode(std::span<const std::uint8_t> bytes) {
     output.push_back(kBase64UrlAlphabet[block & 0x3FU]);
     index += 3;
   }
-  const auto remaining = bytes.size() - index;
+  auto const remaining = bytes.size() - index;
   if (remaining == 1) {
-    const auto block = static_cast<std::uint32_t>(bytes[index]) << 16U;
+    auto const block = static_cast<std::uint32_t>(bytes[index]) << 16U;
     output.push_back(kBase64UrlAlphabet[(block >> 18U) & 0x3FU]);
     output.push_back(kBase64UrlAlphabet[(block >> 12U) & 0x3FU]);
   } else if (remaining == 2) {
-    const auto block =
+    auto const block =
         (static_cast<std::uint32_t>(bytes[index]) << 16U) | (static_cast<std::uint32_t>(bytes[index + 1]) << 8U);
     output.push_back(kBase64UrlAlphabet[(block >> 18U) & 0x3FU]);
     output.push_back(kBase64UrlAlphabet[(block >> 12U) & 0x3FU]);
@@ -86,9 +86,9 @@ std::optional<std::vector<std::uint8_t>> base64_url_decode(std::string_view valu
   output.reserve((value.size() * 3) / 4);
   std::uint32_t buffer = 0;
   int bits = 0;
-  for (const char ch : value) {
+  for (char const ch : value) {
     if (ch == '=') break;
-    const auto position = kBase64UrlAlphabet.find(ch);
+    auto const position = kBase64UrlAlphabet.find(ch);
     if (position == std::string_view::npos) return std::nullopt;
     buffer = (buffer << 6U) | static_cast<std::uint32_t>(position);
     bits += 6;
@@ -119,7 +119,7 @@ std::array<std::uint8_t, 32> sha256(std::string_view text) {
       0x748f82eeU, 0x78a5636fU, 0x84c87814U, 0x8cc70208U, 0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U};
 
   std::vector<std::uint8_t> data(text.begin(), text.end());
-  const auto bit_length = static_cast<std::uint64_t>(data.size()) * 8U;
+  auto const bit_length = static_cast<std::uint64_t>(data.size()) * 8U;
   data.push_back(0x80U);
   while ((data.size() % 64) != 56) data.push_back(0);
   for (int shift = 56; shift >= 0; shift -= 8) {
@@ -132,7 +132,7 @@ std::array<std::uint8_t, 32> sha256(std::string_view text) {
   for (std::size_t chunk = 0; chunk < data.size(); chunk += 64) {
     std::array<std::uint32_t, 64> words{};
     for (std::size_t index = 0; index < 16; ++index) {
-      const auto offset = chunk + index * 4;
+      auto const offset = chunk + index * 4;
       words[index] =
           (static_cast<std::uint32_t>(data[offset]) << 24U) | (static_cast<std::uint32_t>(data[offset + 1]) << 16U) |
           (static_cast<std::uint32_t>(data[offset + 2]) << 8U) | static_cast<std::uint32_t>(data[offset + 3]);
@@ -151,8 +151,8 @@ std::array<std::uint8_t, 32> sha256(std::string_view text) {
     auto g = hash[6];
     auto h = hash[7];
     for (std::size_t index = 0; index < words.size(); ++index) {
-      const auto temp1 = h + big_sigma1(e) + choose(e, f, g) + kConstants[index] + words[index];
-      const auto temp2 = big_sigma0(a) + majority(a, b, c);
+      auto const temp1 = h + big_sigma1(e) + choose(e, f, g) + kConstants[index] + words[index];
+      auto const temp2 = big_sigma0(a) + majority(a, b, c);
       h = g;
       g = f;
       f = e;
@@ -186,7 +186,7 @@ std::string url_encode(std::string_view value) {
   constexpr std::string_view hex = "0123456789ABCDEF";
   std::string output;
   output.reserve(value.size());
-  for (const unsigned char byte : value) {
+  for (unsigned char const byte : value) {
     if ((byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') || (byte >= '0' && byte <= '9') || byte == '-' ||
         byte == '_' || byte == '.' || byte == '~') {
       output.push_back(static_cast<char>(byte));
@@ -213,7 +213,7 @@ bool is_complete_json_object(std::string_view value) {
   bool escaped = false;
   int depth = 0;
   for (std::size_t index = 0; index < value.size(); ++index) {
-    const char ch = value[index];
+    char const ch = value[index];
     if (escaped) {
       escaped = false;
       continue;
@@ -241,7 +241,7 @@ bool is_complete_json_object(std::string_view value) {
 }
 
 long long token_response_expiry(std::string_view body, long long now_seconds) {
-  if (const auto expires_at = ava::core::json::integer_field(body, "expires_at")) return *expires_at;
+  if (auto const expires_at = ava::core::json::integer_field(body, "expires_at")) return *expires_at;
   return now_seconds + ava::core::json::integer_field(body, "expires_in").value_or(3600);
 }
 
@@ -301,9 +301,9 @@ ava::core::Result<ava::provider::HttpResponse> post_openai_oauth_token_form(std:
 }
 
 std::optional<std::string> jwt_payload(std::string_view token) {
-  const auto first = token.find('.');
+  auto const first = token.find('.');
   if (first == std::string_view::npos) return std::nullopt;
-  const auto second = token.find('.', first + 1);
+  auto const second = token.find('.', first + 1);
   if (second == std::string_view::npos || token.find('.', second + 1) != std::string_view::npos) return std::nullopt;
   auto decoded = base64_url_decode(token.substr(first + 1, second - first - 1));
   if (!decoded) return std::nullopt;
@@ -318,7 +318,7 @@ std::optional<std::string> account_id_from_payload(std::string_view payload) {
     account = ava::core::json::string_field(*auth, "chatgpt_account_id");
     if (account && !account->empty()) return account;
   }
-  const auto organizations = ava::core::json::objects_in_array_field(payload, "organizations");
+  auto const organizations = ava::core::json::objects_in_array_field(payload, "organizations");
   if (!organizations.empty()) {
     account = ava::core::json::string_field(organizations.front(), "id");
     if (account && !account->empty()) return account;
@@ -328,7 +328,7 @@ std::optional<std::string> account_id_from_payload(std::string_view payload) {
 
 ava::core::Result<std::string> random_token(std::size_t bytes) {
   std::vector<std::uint8_t> data(bytes);
-  const ScopedFd fd(::open("/dev/urandom", O_RDONLY | O_CLOEXEC));
+  ScopedFd const fd(::open("/dev/urandom", O_RDONLY | O_CLOEXEC));
   if (fd.get() < 0) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to open randomness source");
     error.with_context("path", "/dev/urandom");
@@ -337,7 +337,7 @@ ava::core::Result<std::string> random_token(std::size_t bytes) {
   }
   std::size_t offset = 0;
   while (offset < data.size()) {
-    const auto count = ::read(fd.get(), data.data() + offset, data.size() - offset);
+    auto const count = ::read(fd.get(), data.data() + offset, data.size() - offset);
     if (count < 0) {
       if (errno == EINTR) continue;
       auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to read randomness source");
@@ -358,7 +358,7 @@ ava::core::Result<std::string> random_token(std::size_t bytes) {
 std::string openai_oauth_code_challenge(std::string_view verifier) { return base64_url_encode(sha256(verifier)); }
 
 std::optional<std::string> openai_oauth_account_id_from_token(std::string_view token) {
-  const auto payload = jwt_payload(token);
+  auto const payload = jwt_payload(token);
   if (!payload) return std::nullopt;
   return account_id_from_payload(*payload);
 }
@@ -380,7 +380,7 @@ ava::core::Result<OpenAIOAuthSession> make_openai_oauth_session(std::string veri
   if (state.empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "OAuth state is missing"));
   }
-  const auto challenge = openai_oauth_code_challenge(verifier);
+  auto const challenge = openai_oauth_code_challenge(verifier);
   std::string url(kAuthorizeUrl);
   url += "?response_type=code";
   url += "&client_id=" + url_encode(kClientId);
@@ -409,7 +409,7 @@ ava::core::Result<OpenAICredential> exchange_openai_oauth_code(std::string_view 
   return parse_openai_oauth_token_response(response->body, now_seconds, "", "");
 }
 
-ava::core::Result<OpenAICredential> refresh_openai_oauth_credential(const OpenAICredential& credential,
+ava::core::Result<OpenAICredential> refresh_openai_oauth_credential(OpenAICredential const& credential,
                                                                     ava::provider::Transport& transport,
                                                                     long long now_seconds) {
   if (credential.type != OpenAICredentialType::OAuth) {

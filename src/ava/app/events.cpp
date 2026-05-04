@@ -40,7 +40,7 @@ void append_required_string_field(std::string& out, std::string_view key, std::s
   out += '"';
 }
 
-void append_string_array_field(std::string& out, std::string_view key, const std::vector<std::string>& values) {
+void append_string_array_field(std::string& out, std::string_view key, std::vector<std::string> const& values) {
   if (values.empty()) return;
   out += ",\"";
   out += key;
@@ -68,7 +68,7 @@ void append_json_object_field(std::string& out, std::string_view key, std::strin
   out += '"';
 }
 
-void append_optional_string_field(std::string& out, std::string_view key, const std::optional<std::string>& value) {
+void append_optional_string_field(std::string& out, std::string_view key, std::optional<std::string> const& value) {
   if (!value || value->empty()) return;
   append_required_string_field(out, key, *value);
 }
@@ -120,7 +120,7 @@ void append_payload_json_object_field(std::string& out, bool& has_field, std::st
 }
 
 void append_payload_string_array_field(std::string& out, bool& has_field, std::string_view key,
-                                       const std::vector<std::string>& values) {
+                                       std::vector<std::string> const& values) {
   if (values.empty()) return;
   if (has_field) out += ',';
   out += '"';
@@ -136,7 +136,7 @@ void append_payload_string_array_field(std::string& out, bool& has_field, std::s
   has_field = true;
 }
 
-std::string payload_json_for_runtime_event(const RuntimeEvent& event) {
+std::string payload_json_for_runtime_event(RuntimeEvent const& event) {
   std::string out = "{";
   bool has_field = false;
   if (event.type == RuntimeEventType::SessionStart) {
@@ -256,7 +256,7 @@ std::string to_string(RuntimeEventType type) {
   return "error";
 }
 
-std::string serialize_event_json(const RuntimeEvent& event) {
+std::string serialize_event_json(RuntimeEvent const& event) {
   std::string out = "{\"type\":\"" + to_string(event.type) + "\"";
   append_string_field(out, "timestamp", event.timestamp);
   append_string_field(out, "session_id", event.session_id);
@@ -310,9 +310,9 @@ std::string serialize_event_json(const RuntimeEvent& event) {
   return out;
 }
 
-std::string serialize_event_jsonl(const RuntimeEvent& event) { return serialize_event_json(event) + '\n'; }
+std::string serialize_event_jsonl(RuntimeEvent const& event) { return serialize_event_json(event) + '\n'; }
 
-ava::core::VoidResult emit_event(const RuntimeEventSink& sink, const RuntimeEvent& event) {
+ava::core::VoidResult emit_event(RuntimeEventSink const& sink, RuntimeEvent const& event) {
   if (!sink) return {};
   return sink(event);
 }
@@ -321,14 +321,14 @@ void EventBus::subscribe(EventEnvelopeSink sink) {
   if (sink) sinks_.push_back(std::move(sink));
 }
 
-ava::core::VoidResult EventBus::publish(const EventEnvelope& envelope) const {
-  for (const auto& sink : sinks_) {
+ava::core::VoidResult EventBus::publish(EventEnvelope const& envelope) const {
+  for (auto const& sink : sinks_) {
     if (auto published = sink(envelope); !published) return std::unexpected(std::move(published.error()));
   }
   return {};
 }
 
-EventEnvelope to_event_envelope(const RuntimeEvent& event, const EventEnvelopeContext& context) {
+EventEnvelope to_event_envelope(RuntimeEvent const& event, EventEnvelopeContext const& context) {
   return EventEnvelope{.schema_version = 1,
                        .event_id = context.event_id ? *context.event_id : ava::core::make_id("event"),
                        .timestamp = event.timestamp,
@@ -342,7 +342,7 @@ EventEnvelope to_event_envelope(const RuntimeEvent& event, const EventEnvelopeCo
                        .payload_json = payload_json_for_runtime_event(event)};
 }
 
-std::string serialize_event_envelope_json(const EventEnvelope& envelope) {
+std::string serialize_event_envelope_json(EventEnvelope const& envelope) {
   std::string out = "{\"schema_version\":" + std::to_string(envelope.schema_version);
   append_required_string_field(out, "event_id", envelope.event_id);
   append_required_string_field(out, "timestamp", envelope.timestamp);
@@ -361,14 +361,14 @@ std::string serialize_event_envelope_json(const EventEnvelope& envelope) {
   return out;
 }
 
-std::string serialize_event_envelope_jsonl(const EventEnvelope& envelope) {
+std::string serialize_event_envelope_jsonl(EventEnvelope const& envelope) {
   return serialize_event_envelope_json(envelope) + '\n';
 }
 
 RuntimeEventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context,
                                                 RuntimeEventSink legacy_sink) {
   return [&bus, context = std::move(context),
-          legacy_sink = std::move(legacy_sink)](const RuntimeEvent& event) -> ava::core::VoidResult {
+          legacy_sink = std::move(legacy_sink)](RuntimeEvent const& event) -> ava::core::VoidResult {
     auto envelope = to_event_envelope(event, context);
     if (auto published = bus.publish(envelope); !published) return std::unexpected(std::move(published.error()));
     return emit_event(legacy_sink, event);

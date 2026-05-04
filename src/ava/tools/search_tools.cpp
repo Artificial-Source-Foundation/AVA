@@ -19,7 +19,7 @@ constexpr std::size_t kSearchVisitedProgressInterval = 10000;
 constexpr std::size_t kSearchMatchProgressInterval = 500;
 
 std::string regex_escape(char ch) {
-  static const std::string special = R"(\.^$|()[]{}+)";
+  static std::string const special = R"(\.^$|()[]{}+)";
   if (special.find(ch) != std::string::npos) {
     return std::string("\\") + ch;
   }
@@ -36,7 +36,7 @@ ava::core::Result<std::regex> glob_to_regex(std::string_view pattern) {
 
   std::string out = "^";
   for (std::size_t i = 0; i < pattern.size(); ++i) {
-    const char ch = pattern[i];
+    char const ch = pattern[i];
     if (ch == '*') {
       if (i + 1 < pattern.size() && pattern[i + 1] == '*') {
         if (i + 2 < pattern.size() && pattern[i + 2] == '/') {
@@ -59,7 +59,7 @@ ava::core::Result<std::regex> glob_to_regex(std::string_view pattern) {
 
   try {
     return std::regex(out, std::regex::ECMAScript);
-  } catch (const std::regex_error& err) {
+  } catch (std::regex_error const& err) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid glob pattern");
     error.with_context("pattern", std::string(pattern));
     error.with_context("cause", err.what());
@@ -67,7 +67,7 @@ ava::core::Result<std::regex> glob_to_regex(std::string_view pattern) {
   }
 }
 
-std::string relative_slash_path(const std::filesystem::path& root, const std::filesystem::path& path) {
+std::string relative_slash_path(std::filesystem::path const& root, std::filesystem::path const& path) {
   std::error_code error;
   auto relative = std::filesystem::relative(path, root, error);
   if (error) {
@@ -78,11 +78,11 @@ std::string relative_slash_path(const std::filesystem::path& root, const std::fi
 
 bool looks_binary(std::string_view line) { return line.find('\0') != std::string_view::npos; }
 
-std::string search_permission_tool_name(const ToolContext& context) {
+std::string search_permission_tool_name(ToolContext const& context) {
   return context.permission_tool_name.empty() ? std::string("search") : context.permission_tool_name;
 }
 
-bool is_canceled(const ToolContext& context) { return context.cancel_requested && context.cancel_requested(); }
+bool is_canceled(ToolContext const& context) { return context.cancel_requested && context.cancel_requested(); }
 
 ava::core::Error search_canceled_error(std::string_view tool_name) {
   auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled");
@@ -90,13 +90,13 @@ ava::core::Error search_canceled_error(std::string_view tool_name) {
   return error;
 }
 
-ava::core::VoidResult check_canceled(const ToolContext& context, std::string_view tool_name) {
+ava::core::VoidResult check_canceled(ToolContext const& context, std::string_view tool_name) {
   if (!is_canceled(context)) return {};
   return std::unexpected(search_canceled_error(tool_name));
 }
 
-ava::core::Result<bool> can_read_search_match(const ToolContext& context, const std::filesystem::path& path) {
-  const auto decision = ava::permissions::decide(ava::permissions::PermissionRequest{
+ava::core::Result<bool> can_read_search_match(ToolContext const& context, std::filesystem::path const& path) {
+  auto const decision = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::ReadFile,
       .mode = context.mode,
       .workspace_dir = context.workspace_dir,
@@ -114,7 +114,7 @@ ava::core::Result<bool> can_read_search_match(const ToolContext& context, const 
   return false;
 }
 
-ava::core::Result<bool> read_limited_line(std::ifstream& file, std::string& line, const std::filesystem::path& path,
+ava::core::Result<bool> read_limited_line(std::ifstream& file, std::string& line, std::filesystem::path const& path,
                                           std::size_t max_line_length, bool& line_truncated, bool& line_binary) {
   line.clear();
   line_truncated = false;
@@ -145,13 +145,13 @@ ava::core::Result<bool> read_limited_line(std::ifstream& file, std::string& line
 
 }  // namespace
 
-ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string_view pattern, GlobOptions options) {
+ava::core::Result<GlobResult> glob_files(ToolContext const& context, std::string_view pattern, GlobOptions options) {
   if (pattern.empty()) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "glob pattern must not be empty");
     return std::unexpected(std::move(error));
   }
   if (auto canceled = check_canceled(context, "glob"); !canceled) return std::unexpected(std::move(canceled.error()));
-  const auto tool_name = context.permission_tool_name.empty() ? std::string("search") : context.permission_tool_name;
+  auto const tool_name = context.permission_tool_name.empty() ? std::string("search") : context.permission_tool_name;
   if (auto permission = ensure_permission(context, ava::permissions::Operation::SearchFiles, context.workspace_dir, "",
                                           tool_name, "tool requires permission");
       !permission) {
@@ -182,7 +182,7 @@ ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string
       iter_error.clear();
       continue;
     }
-    const auto& entry = *it;
+    auto const& entry = *it;
     ++visited;
     if (visited >= next_visited_progress) {
       if (auto progress = emit_tool_progress(context, "glob visited " + std::to_string(visited) + " paths", "running");
@@ -225,11 +225,11 @@ ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string
       continue;
     }
 
-    const auto relative = relative_slash_path(context.workspace_dir, entry.path());
+    auto const relative = relative_slash_path(context.workspace_dir, entry.path());
     bool matched = false;
     try {
       matched = std::regex_match(relative, *matcher);
-    } catch (const std::regex_error& err) {
+    } catch (std::regex_error const& err) {
       auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "glob regex match failed");
       error.with_context("pattern", std::string(pattern));
       error.with_context("cause", err.what());
@@ -261,7 +261,7 @@ ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string
       result.truncated = true;
     }
   }
-  std::ranges::sort(result.paths, {}, [](const std::filesystem::path& path) { return path.generic_string(); });
+  std::ranges::sort(result.paths, {}, [](std::filesystem::path const& path) { return path.generic_string(); });
   if (result.truncated && !context.spill_dir.empty()) {
     auto spill = write_spill_file(context, "glob", "txt", spill_buffer);
     if (!spill) return std::unexpected(std::move(spill.error()));
@@ -283,7 +283,7 @@ ava::core::Result<GlobResult> glob_files(const ToolContext& context, std::string
   return result;
 }
 
-ava::core::Result<GrepResult> grep_files(const ToolContext& context, std::string_view literal_pattern,
+ava::core::Result<GrepResult> grep_files(ToolContext const& context, std::string_view literal_pattern,
                                          std::string_view include_glob, GrepOptions options) {
   if (literal_pattern.empty()) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "grep pattern must not be empty");
@@ -301,7 +301,7 @@ ava::core::Result<GrepResult> grep_files(const ToolContext& context, std::string
   result.truncated = files->truncated;
   SpillBuffer spill_buffer;
   std::size_t next_match_progress = kSearchMatchProgressInterval;
-  for (const auto& path : files->paths) {
+  for (auto const& path : files->paths) {
     if (auto canceled = check_canceled(context, "grep"); !canceled) return std::unexpected(std::move(canceled.error()));
     std::ifstream file(path, std::ios::binary);
     if (!file) {
@@ -332,7 +332,7 @@ ava::core::Result<GrepResult> grep_files(const ToolContext& context, std::string
         file_is_binary = true;
         break;
       }
-      const bool matched = line.find(literal_pattern) != std::string::npos;
+      bool const matched = line.find(literal_pattern) != std::string::npos;
       if (!matched) {
         continue;
       }

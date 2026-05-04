@@ -40,7 +40,7 @@ bool true_field(std::string_view object, std::string_view key) {
   int object_depth = 0;
   int array_depth = 0;
   for (std::size_t index = 0; index < object.size(); ++index) {
-    const char ch = object[index];
+    char const ch = object[index];
     if (escaped) {
       escaped = false;
       continue;
@@ -54,7 +54,7 @@ bool true_field(std::string_view object, std::string_view key) {
         std::size_t end = index + 1;
         bool key_escaped = false;
         while (end < object.size()) {
-          const char key_ch = object[end++];
+          char const key_ch = object[end++];
           if (key_escaped) {
             key_escaped = false;
             continue;
@@ -65,7 +65,7 @@ bool true_field(std::string_view object, std::string_view key) {
           }
           if (key_ch == '"') break;
         }
-        const auto candidate = object.substr(index + 1, end - index - 2);
+        auto const candidate = object.substr(index + 1, end - index - 2);
         if (candidate == key) {
           auto value = end;
           while (value < object.size() && std::isspace(static_cast<unsigned char>(object[value])) != 0) ++value;
@@ -107,7 +107,7 @@ std::string sanitized_openai_compatible_snippet(std::string_view body) {
                                        "reasoning_content", "thinking"});
 }
 
-ava::core::VoidResult validate_tools_json(const ProviderRequest& request) {
+ava::core::VoidResult validate_tools_json(ProviderRequest const& request) {
   for (std::size_t index = 0; index < request.tools_json.size(); ++index) {
     if (is_valid_json_object(request.tools_json[index])) continue;
     auto error =
@@ -123,12 +123,12 @@ ava::core::Result<std::string> chat_completion_tool_json(std::string_view schema
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "OpenAI-compatible tool JSON must be valid JSON"));
   }
-  if (const auto function = ava::core::json::object_field(schema, "function")) {
+  if (auto const function = ava::core::json::object_field(schema, "function")) {
     if (!is_valid_json_object(*function)) {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                               "OpenAI-compatible function tool must be valid JSON"));
     }
-    const auto name = ava::core::json::string_field(*function, "name");
+    auto const name = ava::core::json::string_field(*function, "name");
     if (!name || name->empty()) {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                               "OpenAI-compatible tool JSON requires a function name"));
@@ -136,13 +136,13 @@ ava::core::Result<std::string> chat_completion_tool_json(std::string_view schema
     return std::string(schema);
   }
 
-  const auto name = ava::core::json::string_field(schema, "name");
+  auto const name = ava::core::json::string_field(schema, "name");
   if (!name || name->empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                             "OpenAI-compatible tool JSON requires a function name"));
   }
-  const auto description = ava::core::json::string_field(schema, "description").value_or("");
-  const auto parameters = ava::core::json::object_field(schema, "parameters").value_or("{\"type\":\"object\"}");
+  auto const description = ava::core::json::string_field(schema, "description").value_or("");
+  auto const parameters = ava::core::json::object_field(schema, "parameters").value_or("{\"type\":\"object\"}");
   if (!is_valid_json_object(parameters)) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                             "OpenAI-compatible tool parameters must be valid JSON"));
@@ -154,7 +154,7 @@ ava::core::Result<std::string> chat_completion_tool_json(std::string_view schema
   return "{\"type\":\"function\",\"function\":" + function + "}";
 }
 
-std::string tool_call_json(const ContentPart& part, std::size_t index) {
+std::string tool_call_json(ContentPart const& part, std::size_t index) {
   return "{\"id\":\"" +
          ava::core::json::escape(part.tool_call_id.empty() ? "call_" + std::to_string(index) : part.tool_call_id) +
          "\",\"type\":\"function\",\"function\":{\"name\":\"" + ava::core::json::escape(part.tool_name) +
@@ -166,12 +166,12 @@ std::string role_content_message_json(std::string_view role, std::string_view co
          "\"}";
 }
 
-std::string tool_result_message_json(const ContentPart& part) {
+std::string tool_result_message_json(ContentPart const& part) {
   return "{\"role\":\"tool\",\"tool_call_id\":\"" + ava::core::json::escape(part.tool_call_id) + "\",\"content\":\"" +
          ava::core::json::escape(part.text) + "\"}";
 }
 
-std::vector<std::string> chat_messages_for_message(const ChatMessage& message, std::string_view reasoning_format,
+std::vector<std::string> chat_messages_for_message(ChatMessage const& message, std::string_view reasoning_format,
                                                    bool preserve_reasoning_content) {
   if (message.content_parts.empty()) return {role_content_message_json(message.role, message.content)};
 
@@ -180,7 +180,7 @@ std::vector<std::string> chat_messages_for_message(const ChatMessage& message, s
     std::string text;
     std::string reasoning_content;
     std::vector<std::string> tool_calls;
-    for (const auto& part : message.content_parts) {
+    for (auto const& part : message.content_parts) {
       if (part.type == ContentPartType::Text) {
         if (!text.empty()) text += "\n\n";
         text += part.text;
@@ -212,7 +212,7 @@ std::vector<std::string> chat_messages_for_message(const ChatMessage& message, s
 
   std::string text;
   bool has_tool_result = false;
-  for (const auto& part : message.content_parts) {
+  for (auto const& part : message.content_parts) {
     if (part.type == ContentPartType::Text) {
       if (!text.empty()) text += "\n\n";
       text += part.text;
@@ -228,10 +228,10 @@ std::vector<std::string> chat_messages_for_message(const ChatMessage& message, s
   return result;
 }
 
-std::string reasoning_options_json(const ProviderRequest& request, bool preserve_reasoning_content,
+std::string reasoning_options_json(ProviderRequest const& request, bool preserve_reasoning_content,
                                    std::string_view reasoning_request_field) {
   if (!request.reasoning || reasoning_request_field.empty()) return {};
-  const auto type = request.reasoning->type.empty() ? "enabled" : request.reasoning->type;
+  auto const type = request.reasoning->type.empty() ? "enabled" : request.reasoning->type;
   std::string json = ",\"" + ava::core::json::escape(reasoning_request_field) + "\":{\"type\":\"" +
                      ava::core::json::escape(type) + "\"";
   if (request.reasoning && request.reasoning->budget_tokens) {
@@ -245,10 +245,10 @@ std::string reasoning_options_json(const ProviderRequest& request, bool preserve
   return json;
 }
 
-bool has_replayable_reasoning(const std::vector<ChatMessage>& messages, std::string_view reasoning_format) {
-  for (const auto& message : messages) {
+bool has_replayable_reasoning(std::vector<ChatMessage> const& messages, std::string_view reasoning_format) {
+  for (auto const& message : messages) {
     if (message.role != "assistant") continue;
-    for (const auto& part : message.content_parts) {
+    for (auto const& part : message.content_parts) {
       if (part.type == ContentPartType::Reasoning && !part.redacted && !part.text.empty() &&
           (part.reasoning_format.empty() || part.reasoning_format == reasoning_format)) {
         return true;
@@ -258,18 +258,18 @@ bool has_replayable_reasoning(const std::vector<ChatMessage>& messages, std::str
   return false;
 }
 
-std::string request_body_json(const ProviderRequest& request, const OpenAICompatibleProviderOptions& options) {
+std::string request_body_json(ProviderRequest const& request, OpenAICompatibleProviderOptions const& options) {
   std::string body = "{\"model\":\"" + ava::core::json::escape(request.model_id) +
                      "\",\"stream\":" + (request.stream ? "true" : "false") + ",\"messages\":[";
   bool first_message = true;
-  auto append_message = [&](const std::string& json) {
+  auto append_message = [&](std::string const& json) {
     if (!first_message) body += ',';
     first_message = false;
     body += json;
   };
   if (!request.system_prompt.empty()) append_message(role_content_message_json("system", request.system_prompt));
-  for (const auto& message : request.messages) {
-    for (const auto& json :
+  for (auto const& message : request.messages) {
+    for (auto const& json :
          chat_messages_for_message(message, options.reasoning_format, options.preserve_reasoning_content)) {
       append_message(json);
     }
@@ -281,7 +281,7 @@ std::string request_body_json(const ProviderRequest& request, const OpenAICompat
   }
   if (options.default_temperature) body += ",\"temperature\":" + temperature_json(*options.default_temperature);
   if (request.stream && options.include_stream_usage) body += ",\"stream_options\":{\"include_usage\":true}";
-  const bool preserve_replayed_reasoning = options.preserve_reasoning_content && request.reasoning &&
+  bool const preserve_replayed_reasoning = options.preserve_reasoning_content && request.reasoning &&
                                            has_replayable_reasoning(request.messages, options.reasoning_format);
   body += reasoning_options_json(request, preserve_replayed_reasoning, options.reasoning_request_field);
   body += ",\"tools\":[";
@@ -323,7 +323,7 @@ void append_done(std::vector<StreamEvent>& events, std::optional<TokenUsage> usa
 }
 
 void append_tool_call_end_events(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids) {
-  for (const auto& [_, id] : open_tool_call_ids) {
+  for (auto const& [_, id] : open_tool_call_ids) {
     events.push_back(StreamEvent{.type = StreamEventType::ToolCallEnd,
                                  .text = "",
                                  .tool_call_id = id,
@@ -336,12 +336,12 @@ void append_tool_call_end_events(std::vector<StreamEvent>& events, std::map<int,
 
 void append_tool_call_delta_events(std::vector<StreamEvent>& events, std::map<int, std::string>& open_tool_call_ids,
                                    std::string_view delta) {
-  for (const auto& call : ava::core::json::objects_in_array_field(delta, "tool_calls")) {
-    const auto index_value = ava::core::json::integer_field(call, "index").value_or(0);
-    const auto index = static_cast<int>(index_value);
-    const auto function = ava::core::json::object_field(call, "function");
-    const auto id = ava::core::json::string_field(call, "id").value_or("call_" + std::to_string(index));
-    const auto name = function ? ava::core::json::string_field(*function, "name").value_or("") : "";
+  for (auto const& call : ava::core::json::objects_in_array_field(delta, "tool_calls")) {
+    auto const index_value = ava::core::json::integer_field(call, "index").value_or(0);
+    auto const index = static_cast<int>(index_value);
+    auto const function = ava::core::json::object_field(call, "function");
+    auto const id = ava::core::json::string_field(call, "id").value_or("call_" + std::to_string(index));
+    auto const name = function ? ava::core::json::string_field(*function, "name").value_or("") : "";
     if (!open_tool_call_ids.contains(index)) {
       open_tool_call_ids[index] = id;
       events.push_back(StreamEvent{.type = StreamEventType::ToolCallStart,
@@ -374,7 +374,7 @@ void append_choice_delta_events(std::vector<StreamEvent>& events, std::map<int, 
     }
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_format);
   }
-  const auto delta = ava::core::json::object_field(choice, "delta");
+  auto const delta = ava::core::json::object_field(choice, "delta");
   if (!delta) return;
   if (auto reasoning = ava::core::json::string_field(*delta, "reasoning_content")) {
     if (!reasoning_open) {
@@ -435,11 +435,11 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<int, std::
                                  .usage = std::nullopt});
     return;
   }
-  if (const auto parsed_usage = parse_openai_usage(data)) usage = parsed_usage;
-  for (const auto& choice : ava::core::json::objects_in_array_field(data, "choices")) {
+  if (auto const parsed_usage = parse_openai_usage(data)) usage = parsed_usage;
+  for (auto const& choice : ava::core::json::objects_in_array_field(data, "choices")) {
     append_choice_delta_events(events, open_tool_call_ids, reasoning_open, stop_reason, choice, reasoning_format);
   }
-  if (const auto error_object = ava::core::json::object_field(data, "error")) {
+  if (auto const error_object = ava::core::json::object_field(data, "error")) {
     done_seen = true;
     error_seen = true;
     events.push_back(StreamEvent{.type = StreamEventType::Error,
@@ -476,14 +476,14 @@ void append_events_for_sse_line(std::vector<StreamEvent>& events, std::map<int, 
 ava::core::Result<std::vector<StreamEvent>> parse_chat_completion_message(std::string_view body,
                                                                           std::string_view reasoning_format) {
   std::vector<StreamEvent> events;
-  const auto usage = parse_openai_usage(body);
+  auto const usage = parse_openai_usage(body);
   std::string stop_reason;
   bool parsed_message = false;
-  for (const auto& choice : ava::core::json::objects_in_array_field(body, "choices")) {
+  for (auto const& choice : ava::core::json::objects_in_array_field(body, "choices")) {
     if (auto finish_reason = ava::core::json::string_field(choice, "finish_reason")) {
       stop_reason = normalized_finish_reason(*finish_reason);
     }
-    const auto message = ava::core::json::object_field(choice, "message");
+    auto const message = ava::core::json::object_field(choice, "message");
     if (!message) {
       if (stop_reason == "content_filter" || stop_reason == "refusal") {
         parsed_message = true;
@@ -529,13 +529,13 @@ ava::core::Result<std::vector<StreamEvent>> parse_chat_completion_message(std::s
                                      .usage = std::nullopt});
       }
     }
-    const auto tool_calls = ava::core::json::objects_in_array_field(*message, "tool_calls");
+    auto const tool_calls = ava::core::json::objects_in_array_field(*message, "tool_calls");
     if (!tool_calls.empty()) parsed_content = true;
-    for (const auto& tool_call : tool_calls) {
-      const auto function = ava::core::json::object_field(tool_call, "function");
-      const auto id = ava::core::json::string_field(tool_call, "id").value_or("");
-      const auto name = function ? ava::core::json::string_field(*function, "name").value_or("") : "";
-      const auto arguments = function ? ava::core::json::string_field(*function, "arguments").value_or("") : "";
+    for (auto const& tool_call : tool_calls) {
+      auto const function = ava::core::json::object_field(tool_call, "function");
+      auto const id = ava::core::json::string_field(tool_call, "id").value_or("");
+      auto const name = function ? ava::core::json::string_field(*function, "name").value_or("") : "";
+      auto const arguments = function ? ava::core::json::string_field(*function, "arguments").value_or("") : "";
       events.push_back(StreamEvent{.type = StreamEventType::ToolCallStart,
                                    .text = "",
                                    .tool_call_id = id,
@@ -581,7 +581,7 @@ ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleStreamParser::append
   std::size_t line_start = 0;
   std::size_t search_from = scan_offset_;
   while (true) {
-    const auto newline = pending_line_.find('\n', search_from);
+    auto const newline = pending_line_.find('\n', search_from);
     if (newline == std::string::npos) break;
     append_events_for_sse_line(events, open_tool_call_ids_, reasoning_open_, usage_, stop_reason_, saw_data_,
                                done_seen_, error_seen_, data_, pending_line_.substr(line_start, newline - line_start),
@@ -630,7 +630,7 @@ ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleStreamParser::finish
 OpenAICompatibleProvider::OpenAICompatibleProvider(OpenAICompatibleProviderOptions options)
     : options_(std::move(options)) {}
 
-ava::core::Result<HttpRequest> OpenAICompatibleProvider::build_request(const ProviderRequest& request,
+ava::core::Result<HttpRequest> OpenAICompatibleProvider::build_request(ProviderRequest const& request,
                                                                        std::string_view access_token) const {
   if (request.model_id.empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model id is required"));
@@ -641,7 +641,7 @@ ava::core::Result<HttpRequest> OpenAICompatibleProvider::build_request(const Pro
   }
   if (auto valid_tools = validate_tools_json(request); !valid_tools)
     return std::unexpected(std::move(valid_tools.error()));
-  for (const auto& tool : request.tools_json) {
+  for (auto const& tool : request.tools_json) {
     auto converted = chat_completion_tool_json(tool);
     if (!converted) return std::unexpected(std::move(converted.error()));
   }
@@ -664,16 +664,16 @@ std::unique_ptr<StreamParser> OpenAICompatibleProvider::create_stream_parser() c
   return std::make_unique<OpenAICompatibleStreamParser>(options_.reasoning_format);
 }
 
-ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleProvider::parse_response(const HttpResponse& response,
+ava::core::Result<std::vector<StreamEvent>> OpenAICompatibleProvider::parse_response(HttpResponse const& response,
                                                                                      bool stream) const {
   if (response.status_code < 200 || response.status_code >= 300) {
-    const auto kind = classify_provider_error(response);
+    auto const kind = classify_provider_error(response);
     auto error = ava::core::Error(
         ava::core::ErrorCategory::Provider,
         options_.provider_name + " HTTP request failed with status " + std::to_string(response.status_code));
     error.with_context("status", std::to_string(response.status_code));
     error.with_context("provider_error_kind", to_string(kind));
-    if (const auto retry_after = retry_after_header(response)) error.with_context("retry_after", *retry_after);
+    if (auto const retry_after = retry_after_header(response)) error.with_context("retry_after", *retry_after);
     if (!response.body.empty()) {
       error.with_context("body_snippet", sanitized_openai_compatible_snippet(response.body));
     }

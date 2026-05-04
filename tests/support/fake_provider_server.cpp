@@ -21,8 +21,8 @@ namespace {
 class Fd {
  public:
   explicit Fd(int fd = -1) : fd_(fd) {}
-  Fd(const Fd&) = delete;
-  Fd& operator=(const Fd&) = delete;
+  Fd(Fd const&) = delete;
+  Fd& operator=(Fd const&) = delete;
   Fd(Fd&& other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
   Fd& operator=(Fd&& other) noexcept {
     if (this != &other) {
@@ -55,10 +55,10 @@ std::string_view trim_ascii(std::string_view text) {
 bool starts_with_case_insensitive(std::string_view text, std::string_view prefix) {
   if (text.size() < prefix.size()) return false;
   for (std::size_t index = 0; index < prefix.size(); ++index) {
-    const auto left = static_cast<unsigned char>(text[index]);
-    const auto right = static_cast<unsigned char>(prefix[index]);
-    const auto lower_left = static_cast<char>(left >= 'A' && left <= 'Z' ? left - 'A' + 'a' : left);
-    const auto lower_right = static_cast<char>(right >= 'A' && right <= 'Z' ? right - 'A' + 'a' : right);
+    auto const left = static_cast<unsigned char>(text[index]);
+    auto const right = static_cast<unsigned char>(prefix[index]);
+    auto const lower_left = static_cast<char>(left >= 'A' && left <= 'Z' ? left - 'A' + 'a' : left);
+    auto const lower_right = static_cast<char>(right >= 'A' && right <= 'Z' ? right - 'A' + 'a' : right);
     if (lower_left != lower_right) return false;
   }
   return true;
@@ -67,12 +67,12 @@ bool starts_with_case_insensitive(std::string_view text, std::string_view prefix
 std::optional<std::size_t> content_length(std::string_view headers) {
   std::size_t start = 0;
   while (start < headers.size()) {
-    const auto end = headers.find('\n', start);
-    const auto line = headers.substr(start, end == std::string_view::npos ? headers.size() - start : end - start);
+    auto const end = headers.find('\n', start);
+    auto const line = headers.substr(start, end == std::string_view::npos ? headers.size() - start : end - start);
     if (starts_with_case_insensitive(line, "content-length:")) {
       auto value = trim_ascii(line.substr(std::string_view("content-length:").size()));
       std::size_t parsed = 0;
-      for (const char ch : value) {
+      for (char const ch : value) {
         if (ch < '0' || ch > '9') return std::nullopt;
         parsed = parsed * 10 + static_cast<std::size_t>(ch - '0');
       }
@@ -86,7 +86,7 @@ std::optional<std::size_t> content_length(std::string_view headers) {
 
 bool write_all(int fd, std::string_view text) {
   while (!text.empty()) {
-    const auto written = ::send(fd, text.data(), text.size(), 0);
+    auto const written = ::send(fd, text.data(), text.size(), 0);
     if (written <= 0) return false;
     text.remove_prefix(static_cast<std::size_t>(written));
   }
@@ -96,7 +96,7 @@ bool write_all(int fd, std::string_view text) {
 std::string json_escape(std::string_view text) {
   std::string escaped;
   escaped.reserve(text.size());
-  for (const char ch : text) {
+  for (char const ch : text) {
     switch (ch) {
       case '"':
         escaped += "\\\"";
@@ -130,12 +130,12 @@ std::string read_http_request(int fd) {
   std::array<char, 4096> buffer{};
   constexpr std::size_t kMaxRequestBytes = 1024 * 1024;
   while (request.size() < kMaxRequestBytes) {
-    const auto read = ::recv(fd, buffer.data(), buffer.size(), 0);
+    auto const read = ::recv(fd, buffer.data(), buffer.size(), 0);
     if (read <= 0) break;
     request.append(buffer.data(), static_cast<std::size_t>(read));
-    const auto header_end = request.find("\r\n\r\n");
+    auto const header_end = request.find("\r\n\r\n");
     if (header_end == std::string::npos) continue;
-    const auto length = content_length(std::string_view(request).substr(0, header_end + 2)).value_or(0);
+    auto const length = content_length(std::string_view(request).substr(0, header_end + 2)).value_or(0);
     if (request.size() >= header_end + 4 + length) break;
   }
   return request;
@@ -148,21 +148,21 @@ std::string text_body(std::string_view text) {
 }
 
 std::string read_tool_body(std::string_view path) {
-  const auto arguments = std::string("{\"path\":\"") + json_escape(path) + "\"}";
+  auto const arguments = std::string("{\"path\":\"") + json_escape(path) + "\"}";
   return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_read\",\"type\":\"function\","
          "\"function\":{\"name\":\"read_file\",\"arguments\":\"" +
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
 }
 
 std::string write_tool_body(std::string_view path) {
-  const auto arguments = std::string("{\"path\":\"") + json_escape(path) + "\",\"content\":\"rpc new\\n\"}";
+  auto const arguments = std::string("{\"path\":\"") + json_escape(path) + "\",\"content\":\"rpc new\\n\"}";
   return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_write\",\"type\":\"function\","
          "\"function\":{\"name\":\"write_file\",\"arguments\":\"" +
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
 }
 
 std::string question_tool_body() {
-  const std::string arguments =
+  std::string const arguments =
       "{\"header\":\"Pick\",\"question\":\"Continue?\",\"options\":[{\"value\":\"yes\",\"label\":\"Yes\"}],"
       "\"allow_custom\":true}";
   return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_question\",\"type\":\"function\","
@@ -212,12 +212,12 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  const std::filesystem::path port_file = argv[1];
-  const std::filesystem::path request_log = argv[2];
-  const auto delay = std::chrono::milliseconds(std::stoi(argv[3]));
-  const std::string scenario = argc == 6 ? argv[4] : "text";
-  const std::string target_path = argc == 6 ? argv[5] : "";
-  const int request_count = scenario == "http-error" ? 3
+  std::filesystem::path const port_file = argv[1];
+  std::filesystem::path const request_log = argv[2];
+  auto const delay = std::chrono::milliseconds(std::stoi(argv[3]));
+  std::string const scenario = argc == 6 ? argv[4] : "text";
+  std::string const target_path = argc == 6 ? argv[5] : "";
+  int const request_count = scenario == "http-error" ? 3
                                                      : (scenario == "read-tool" || scenario == "write-tool" ||
                                                                 scenario == "question-tool" || scenario == "compact"
                                                             ? 2
@@ -269,15 +269,15 @@ int main(int argc, char** argv) {
       return 1;
     }
 
-    const auto request = read_http_request(client.get());
+    auto const request = read_http_request(client.get());
     {
       std::ofstream file(request_log, std::ios::binary | std::ios::app);
       file << "--- request " << (request_index + 1) << " ---\n" << request << '\n';
     }
     if (request_index == 0) std::this_thread::sleep_for(delay);
 
-    const auto provider_response = response_for(scenario, request_index, target_path);
-    const std::string response =
+    auto const provider_response = response_for(scenario, request_index, target_path);
+    std::string const response =
         "HTTP/1.1 " + std::to_string(provider_response.status_code) + " " + provider_response.reason +
         "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(provider_response.body.size()) +
         "\r\nConnection: close\r\n\r\n" + provider_response.body;

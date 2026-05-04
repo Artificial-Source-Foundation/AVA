@@ -53,7 +53,7 @@
 
 namespace {
 
-ava::provider::HttpResponse sse_response(const std::string& body) {
+ava::provider::HttpResponse sse_response(std::string const& body) {
   return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = body};
 }
 
@@ -63,7 +63,7 @@ class CallbackTransport final : public ava::provider::Transport {
       : responses_(std::move(responses)), after_send_(std::move(after_send)) {}
 
   [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
-      const ava::provider::HttpRequest& request) override {
+      ava::provider::HttpRequest const& request) override {
     requests_.push_back(request);
     if (responses_.empty()) {
       return std::unexpected(
@@ -75,7 +75,7 @@ class CallbackTransport final : public ava::provider::Transport {
     return response;
   }
 
-  [[nodiscard]] const std::vector<ava::provider::HttpRequest>& requests() const noexcept { return requests_; }
+  [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept { return requests_; }
 
  private:
   std::vector<ava::provider::HttpResponse> responses_;
@@ -86,7 +86,7 @@ class CallbackTransport final : public ava::provider::Transport {
 class EmptyDiagnosticsProvider final : public ava::lsp::DiagnosticsProvider {
  public:
   [[nodiscard]] ava::core::Result<std::vector<ava::lsp::Diagnostic>> diagnostics(
-      const std::filesystem::path&, ava::lsp::CancelCallback = nullptr) override {
+      std::filesystem::path const&, ava::lsp::CancelCallback = nullptr) override {
     return std::vector<ava::lsp::Diagnostic>{};
   }
 };
@@ -96,7 +96,7 @@ class OverflowOnceProvider final : public ava::provider::Provider {
   explicit OverflowOnceProvider(std::string base_url) : delegate_(std::move(base_url)) {}
 
   [[nodiscard]] ava::core::Result<ava::provider::HttpRequest> build_request(
-      const ava::provider::ProviderRequest& request, std::string_view access_token) const override {
+      ava::provider::ProviderRequest const& request, std::string_view access_token) const override {
     ++build_calls_;
     if (build_calls_ == 1) {
       return std::unexpected(
@@ -110,7 +110,7 @@ class OverflowOnceProvider final : public ava::provider::Provider {
   }
 
   [[nodiscard]] ava::core::Result<std::vector<ava::provider::StreamEvent>> parse_response(
-      const ava::provider::HttpResponse& response, bool stream) const override {
+      ava::provider::HttpResponse const& response, bool stream) const override {
     return delegate_.parse_response(response, stream);
   }
 
@@ -120,12 +120,12 @@ class OverflowOnceProvider final : public ava::provider::Provider {
 };
 
 void test_tool_dispatcher() {
-  const auto root = temp_root() / "dispatcher";
+  auto const root = temp_root() / "dispatcher";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  const auto permission_bits = [](const std::filesystem::path& permission_path) {
+  auto const permission_bits = [](std::filesystem::path const& permission_path) {
     constexpr auto mask =
         std::filesystem::perms::owner_all | std::filesystem::perms::group_all | std::filesystem::perms::others_all;
     std::error_code status_error;
@@ -136,7 +136,7 @@ void test_tool_dispatcher() {
     file << "hello dispatcher";
   }
 
-  const ava::agent::ToolDispatcher dispatcher(
+  ava::agent::ToolDispatcher const dispatcher(
       ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build});
   auto read = dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "call_read", .name = "read_file", .arguments_json = "{\"path\":\"note.txt\",\"max_bytes\":5}"});
@@ -208,12 +208,12 @@ void test_tool_dispatcher() {
              no_ignore_grep->result_text.find("explicit local control") != std::string::npos,
          "tool dispatcher rejects provider-controlled grep no_ignore");
 
-  const auto dispatcher_spill_dir = root / "session" / "spill";
-  const ava::agent::ToolDispatcher spilling_dispatcher(ava::tools::ToolContext{
+  auto const dispatcher_spill_dir = root / "session" / "spill";
+  ava::agent::ToolDispatcher const spilling_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace, .spill_dir = dispatcher_spill_dir, .mode = ava::agent::Mode::Build});
   auto dispatcher_spill = spilling_dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "call/dispatcher-spill", .name = "glob", .arguments_json = "{\"pattern\":\"**/*\",\"max_results\":1}"});
-  const auto dispatcher_spill_file = dispatcher_spill
+  auto const dispatcher_spill_file = dispatcher_spill
                                          ? ava::core::json::string_field(dispatcher_spill->result_text, "spill_file")
                                          : std::optional<std::string>{};
   expect(dispatcher_spill && dispatcher_spill->success && dispatcher_spill_file &&
@@ -231,14 +231,14 @@ void test_tool_dispatcher() {
   expect(bad_webfetch && !bad_webfetch->success && bad_webfetch->result_text.find("http") != std::string::npos,
          "tool dispatcher rejects unsupported webfetch URL schemes before network access");
 
-  const ava::agent::ToolDispatcher canceled_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const canceled_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .cancel_requested = [] { return true; },
   });
   auto canceled_glob = canceled_dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "call_canceled_glob", .name = "glob", .arguments_json = "{\"pattern\":\"**/*\"}"});
-  const auto canceled_structured =
+  auto const canceled_structured =
       canceled_glob ? ava::agent::serialize_tool_result_payload_json(*canceled_glob) : std::string{};
   expect(canceled_glob && !canceled_glob->success &&
              canceled_glob->payload.status == ava::agent::ToolResultStatus::Canceled &&
@@ -261,16 +261,16 @@ void test_tool_dispatcher() {
              !std::filesystem::exists(workspace / "cancel.txt"),
          "tool dispatcher reports semantic cancellation for file tools without filesystem mutation");
 
-  const auto canceled_outside_path = root / "dispatcher-canceled-outside.txt";
+  auto const canceled_outside_path = root / "dispatcher-canceled-outside.txt";
   {
     std::ofstream file(canceled_outside_path, std::ios::binary | std::ios::trunc);
     file << "outside canceled";
   }
   int canceled_permission_prompts = 0;
-  const ava::agent::ToolDispatcher canceled_permission_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const canceled_permission_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&canceled_permission_prompts](const ava::permissions::PermissionPrompt&)
+      .permission_resolver = [&canceled_permission_prompts](ava::permissions::PermissionPrompt const&)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++canceled_permission_prompts;
         return ava::permissions::PermissionResolution::Allow;
@@ -290,7 +290,7 @@ void test_tool_dispatcher() {
   expect(
       malformed_args && !malformed_args->success && malformed_args->result_text.find("required") != std::string::npos,
       "tool dispatcher returns structured errors for malformed tool arguments");
-  const auto malformed_structured =
+  auto const malformed_structured =
       malformed_args ? ava::agent::serialize_tool_result_payload_json(*malformed_args) : std::string{};
   expect(malformed_args && malformed_args->payload.status == ava::agent::ToolResultStatus::Error &&
              malformed_args->payload.error_category == "invalid_argument" &&
@@ -302,7 +302,7 @@ void test_tool_dispatcher() {
       .id = "call_patch",
       .name = "apply_patch",
       .arguments_json = "{\"edits\":[{\"path\":\"note.txt\",\"old_text\":\"dispatcher\",\"new_text\":\"patch\"}]}"});
-  const auto patch_diff =
+  auto const patch_diff =
       patch ? ava::core::json::string_field(patch->result_text, "diff") : std::optional<std::string>{};
   expect(patch && patch->success && patch->result_text.find("apply_patch") != std::string::npos && patch_diff &&
              patch_diff->find("--- ") != std::string::npos &&
@@ -310,7 +310,7 @@ void test_tool_dispatcher() {
              patch_diff->find("+hello patch") != std::string::npos && patch_diff->size() <= 32 * 1024 &&
              patch->result_text.find("\"diff_truncated\":false") != std::string::npos,
          "tool dispatcher applies exact patch edits and returns a bounded unified diff");
-  const auto patch_structured = patch ? ava::agent::serialize_tool_result_payload_json(*patch) : std::string{};
+  auto const patch_structured = patch ? ava::agent::serialize_tool_result_payload_json(*patch) : std::string{};
   expect(patch && patch_diff && patch->payload.status == ava::agent::ToolResultStatus::Success &&
              patch->payload.content_type == "application/json" && patch->payload.diff == *patch_diff &&
              patch->payload.changed_paths.size() == 1 &&
@@ -332,7 +332,7 @@ void test_tool_dispatcher() {
       .id = "call_edit_diff",
       .name = "edit_file",
       .arguments_json = "{\"path\":\"edit-diff.txt\",\"old_text\":\"green\",\"new_text\":\"gold\"}"});
-  const auto edit_diff = edit_diff_result ? ava::core::json::string_field(edit_diff_result->result_text, "diff")
+  auto const edit_diff = edit_diff_result ? ava::core::json::string_field(edit_diff_result->result_text, "diff")
                                           : std::optional<std::string>{};
   expect(edit_diff_result && edit_diff_result->success && edit_diff &&
              edit_diff->find("-red green blue") != std::string::npos &&
@@ -340,7 +340,7 @@ void test_tool_dispatcher() {
              edit_diff_result->result_text.find("\"diff_truncated\":false") != std::string::npos,
          "edit_file provider result includes a bounded unified diff preview");
 
-  const auto private_patch_path = workspace / "private-patch.txt";
+  auto const private_patch_path = workspace / "private-patch.txt";
   {
     std::ofstream file(private_patch_path, std::ios::binary | std::ios::trunc);
     file << "private old";
@@ -362,16 +362,16 @@ void test_tool_dispatcher() {
                  (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write),
          "apply_patch preserves 0600 permissions when replacing an existing file");
 
-  const auto audit_patch_path = workspace / "audit-patch.txt";
+  auto const audit_patch_path = workspace / "audit-patch.txt";
   {
     std::ofstream file(audit_patch_path, std::ios::binary | std::ios::trunc);
     file << "audit old";
   }
   std::vector<ava::tools::PermissionAuditEvent> patch_audits;
-  const ava::agent::ToolDispatcher audit_patch_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const audit_patch_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_audit_sink = [&patch_audits](const ava::tools::PermissionAuditEvent& event) -> ava::core::VoidResult {
+      .permission_audit_sink = [&patch_audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
         patch_audits.push_back(event);
         return {};
       }});
@@ -424,7 +424,7 @@ void test_tool_dispatcher() {
       .name = "apply_patch",
       .arguments_json = "{\"edits\":[{\"path\":\"multi-diff.txt\",\"old_text\":\"B\",\"new_text\":\"X\"},"
                         "{\"path\":\"multi-diff.txt\",\"old_text\":\"E\",\"new_text\":\"Y\"}]}"});
-  const auto multi_diff = multi_diff_patch ? ava::core::json::string_field(multi_diff_patch->result_text, "diff")
+  auto const multi_diff = multi_diff_patch ? ava::core::json::string_field(multi_diff_patch->result_text, "diff")
                                            : std::optional<std::string>{};
   expect(multi_diff_patch && multi_diff_patch->success && multi_diff && multi_diff->find("-B") != std::string::npos &&
              multi_diff->find("+X") != std::string::npos && multi_diff->find(" C\n") != std::string::npos &&
@@ -441,7 +441,7 @@ void test_tool_dispatcher() {
     b << "b old";
   }
   auto dispatcher_queue = std::make_shared<ava::tools::MutationQueue>();
-  const ava::agent::ToolDispatcher queued_patch_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const queued_patch_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace, .mode = ava::agent::Mode::Build, .mutation_queue = dispatcher_queue});
   auto queued_patch = queued_patch_dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "call_queued_patch",
@@ -480,16 +480,16 @@ void test_tool_dispatcher() {
              empty_old_patch->result_text.find("old_text must not be empty") != std::string::npos,
          "apply_patch rejects empty old_text before attempting a match");
 
-  const auto outside_path = root / "outside.txt";
+  auto const outside_path = root / "outside.txt";
   {
     std::ofstream outside_file(outside_path, std::ios::binary | std::ios::trunc);
     outside_file << "dispatcher outside";
   }
   int dispatcher_prompts = 0;
-  const ava::agent::ToolDispatcher resolving_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const resolving_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&dispatcher_prompts](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [&dispatcher_prompts](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++dispatcher_prompts;
         expect(prompt.tool_name == "read_file", "dispatcher threads provider tool prompt metadata");
@@ -503,16 +503,16 @@ void test_tool_dispatcher() {
              outside_read->result_text.find("dispatcher outside") != std::string::npos && dispatcher_prompts == 1,
          "tool dispatcher threads resolver into file tools");
 
-  const auto outside_patch_path = root / "outside-patch.txt";
+  auto const outside_patch_path = root / "outside-patch.txt";
   {
     std::ofstream outside_patch_file(outside_patch_path, std::ios::binary | std::ios::trunc);
     outside_patch_file << "outside old";
   }
   std::vector<ava::permissions::PermissionPrompt> apply_patch_prompts;
-  const ava::agent::ToolDispatcher patch_resolving_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const patch_resolving_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&apply_patch_prompts](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [&apply_patch_prompts](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         apply_patch_prompts.push_back(prompt);
         expect(prompt.tool_name == "apply_patch", "apply_patch resolver receives tool name");
@@ -535,7 +535,7 @@ void test_tool_dispatcher() {
              apply_patch_prompts[1].diff_preview.find("+inside new") != std::string::npos,
          "apply_patch resolves external read permission before edit permission");
 
-  const auto outside_no_resolver_path = root / "outside-patch-no-resolver.txt";
+  auto const outside_no_resolver_path = root / "outside-patch-no-resolver.txt";
   {
     std::ofstream file(outside_no_resolver_path, std::ios::binary | std::ios::trunc);
     file << "keep old";
@@ -553,16 +553,16 @@ void test_tool_dispatcher() {
              outside_patch_no_resolver->result_text.find("no_resolver") != std::string::npos,
          "apply_patch fails closed without resolver and does not write external targets");
 
-  const auto outside_denied_patch_path = root / "outside-patch-denied.txt";
+  auto const outside_denied_patch_path = root / "outside-patch-denied.txt";
   {
     std::ofstream file(outside_denied_patch_path, std::ios::binary | std::ios::trunc);
     file << "keep old";
   }
   int denied_patch_prompts = 0;
-  const ava::agent::ToolDispatcher patch_denying_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const patch_denying_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&denied_patch_prompts](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [&denied_patch_prompts](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++denied_patch_prompts;
         expect(prompt.operation == ava::permissions::Operation::ReadFile,
@@ -582,16 +582,16 @@ void test_tool_dispatcher() {
              outside_patch_denied->result_text.find("resolution: deny") != std::string::npos,
          "apply_patch resolver read denial prevents all external writes");
 
-  const auto outside_edit_denied_patch_path = root / "outside-patch-edit-denied.txt";
+  auto const outside_edit_denied_patch_path = root / "outside-patch-edit-denied.txt";
   {
     std::ofstream file(outside_edit_denied_patch_path, std::ios::binary | std::ios::trunc);
     file << "keep old";
   }
   std::vector<ava::permissions::PermissionPrompt> edit_denied_patch_prompts;
-  const ava::agent::ToolDispatcher patch_edit_denying_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const patch_edit_denying_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&edit_denied_patch_prompts](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [&edit_denied_patch_prompts](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         edit_denied_patch_prompts.push_back(prompt);
         if (prompt.operation == ava::permissions::Operation::ReadFile) {
@@ -619,16 +619,16 @@ void test_tool_dispatcher() {
            "apply_patch edit prompt carries backend-generated diff preview");
   }
 
-  const auto outside_failed_patch_path = root / "outside-patch-failed.txt";
+  auto const outside_failed_patch_path = root / "outside-patch-failed.txt";
   {
     std::ofstream file(outside_failed_patch_path, std::ios::binary | std::ios::trunc);
     file << "keep old";
   }
-  const ava::agent::ToolDispatcher patch_failing_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const patch_failing_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver =
-          [](const ava::permissions::PermissionPrompt&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "resolver failed"));
       }});
   auto outside_patch_failed = patch_failing_dispatcher.dispatch(ava::agent::ProviderToolCall{
@@ -644,8 +644,8 @@ void test_tool_dispatcher() {
              outside_patch_failed->result_text.find("resolver_failed") != std::string::npos,
          "apply_patch resolver failure prevents all external writes");
 
-  const auto partial_a = workspace / "partial-a.txt";
-  const auto partial_b = workspace / "partial-b.txt";
+  auto const partial_a = workspace / "partial-a.txt";
+  auto const partial_b = workspace / "partial-b.txt";
   {
     std::ofstream a(partial_a, std::ios::binary | std::ios::trunc);
     a << "alpha old";
@@ -665,15 +665,15 @@ void test_tool_dispatcher() {
              partial_a_read->content == "alpha old" && partial_b_read->content == "beta stays",
          "apply_patch validates all edits before writing so failures do not partially write");
 
-  const auto staged_a = workspace / "staged-a.txt";
+  auto const staged_a = workspace / "staged-a.txt";
   {
     std::ofstream a(staged_a, std::ios::binary | std::ios::trunc);
     a << "stage alpha old";
   }
-  const long name_max = pathconf(workspace.c_str(), _PC_NAME_MAX);
+  long const name_max = pathconf(workspace.c_str(), _PC_NAME_MAX);
   if (name_max > 64 && name_max < 10000) {
-    const std::string long_patch_name(static_cast<std::size_t>(name_max) - 4, 'l');
-    const auto staged_long = workspace / (long_patch_name + ".txt");
+    std::string const long_patch_name(static_cast<std::size_t>(name_max) - 4, 'l');
+    auto const staged_long = workspace / (long_patch_name + ".txt");
     auto long_setup =
         ava::tools::write_file(ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build},
                                staged_long, "stage beta old");
@@ -704,12 +704,12 @@ void test_tool_dispatcher() {
     }
   }
 
-  const auto patch_cancel_path = workspace / "patch-cancel-stage.txt";
+  auto const patch_cancel_path = workspace / "patch-cancel-stage.txt";
   {
     std::ofstream file(patch_cancel_path, std::ios::binary | std::ios::trunc);
     file << "stage cancel old";
   }
-  const auto has_patch_temp = [&workspace] {
+  auto const has_patch_temp = [&workspace] {
     std::error_code iter_error;
     for (std::filesystem::directory_iterator it(workspace, iter_error), end; !iter_error && it != end;
          it.increment(iter_error)) {
@@ -717,7 +717,7 @@ void test_tool_dispatcher() {
     }
     return false;
   };
-  const ava::agent::ToolDispatcher patch_cancel_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const patch_cancel_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .cancel_requested = has_patch_temp,
@@ -734,7 +734,7 @@ void test_tool_dispatcher() {
              patch_canceled_read && patch_canceled_read->content == "stage cancel old" && !has_patch_temp(),
          "apply_patch cleanup removes staged files when cancellation arrives before commit");
 
-  const auto too_large_patch_path = workspace / "too-large-patch.txt";
+  auto const too_large_patch_path = workspace / "too-large-patch.txt";
   {
     std::ofstream large_patch_file(too_large_patch_path, std::ios::binary | std::ios::trunc);
     large_patch_file << "old" << std::string((10 * 1024 * 1024) + 1, 'x');
@@ -757,10 +757,10 @@ void test_tool_dispatcher() {
          "question tool fails closed when no backend resolver is supplied");
 
   int question_prompts = 0;
-  const ava::agent::ToolDispatcher question_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const question_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .question_resolver = [&question_prompts](const ava::agent::QuestionPrompt& prompt)
+      .question_resolver = [&question_prompts](ava::agent::QuestionPrompt const& prompt)
           -> ava::core::Result<ava::agent::QuestionAnswer> {
         ++question_prompts;
         expect(prompt.header == "Choose" && prompt.question == "Which approach?",
@@ -780,11 +780,11 @@ void test_tool_dispatcher() {
              question->result_text.find("\"selected_options\":[\"safe\"]") != std::string::npos,
          "question tool calls resolver and serializes selected answer");
 
-  const ava::agent::ToolDispatcher multi_question_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const multi_question_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .question_resolver =
-          [](const ava::agent::QuestionPrompt& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
+          [](ava::agent::QuestionPrompt const& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
         expect(prompt.multiple && prompt.allow_custom, "question resolver receives multi/custom flags");
         expect(prompt.options.size() == 2 && prompt.options[1].value == "Beta",
                "question resolver accepts string options");
@@ -809,10 +809,10 @@ void test_tool_dispatcher() {
              secret_question->result_text.find("trusted local commands") != std::string::npos,
          "question tool rejects model-originated secret prompts");
 
-  const ava::agent::ToolDispatcher too_many_answers_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const too_many_answers_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .question_resolver = [](const ava::agent::QuestionPrompt&) -> ava::core::Result<ava::agent::QuestionAnswer> {
+      .question_resolver = [](ava::agent::QuestionPrompt const&) -> ava::core::Result<ava::agent::QuestionAnswer> {
         return ava::agent::QuestionAnswer{.selected_options = std::vector<std::string>(65, "option"),
                                           .custom_text = ""};
       }});
@@ -822,12 +822,12 @@ void test_tool_dispatcher() {
              too_many_answers->result_text.find("too many selected options") != std::string::npos,
          "question tool rejects resolver answers with too many selected options");
 
-  const std::string oversized_answer_text(9000, 'x');
-  const ava::agent::ToolDispatcher oversized_selected_dispatcher(ava::tools::ToolContext{
+  std::string const oversized_answer_text(9000, 'x');
+  ava::agent::ToolDispatcher const oversized_selected_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .question_resolver =
-          [&oversized_answer_text](const ava::agent::QuestionPrompt&) -> ava::core::Result<ava::agent::QuestionAnswer> {
+          [&oversized_answer_text](ava::agent::QuestionPrompt const&) -> ava::core::Result<ava::agent::QuestionAnswer> {
         return ava::agent::QuestionAnswer{.selected_options = {oversized_answer_text}, .custom_text = ""};
       }});
   auto oversized_selected = oversized_selected_dispatcher.dispatch(ava::agent::ProviderToolCall{
@@ -836,11 +836,11 @@ void test_tool_dispatcher() {
              oversized_selected->result_text.find("selected option is too long") != std::string::npos,
          "question tool rejects oversized resolver selected option strings");
 
-  const ava::agent::ToolDispatcher oversized_custom_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const oversized_custom_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .question_resolver =
-          [&oversized_answer_text](const ava::agent::QuestionPrompt&) -> ava::core::Result<ava::agent::QuestionAnswer> {
+          [&oversized_answer_text](ava::agent::QuestionPrompt const&) -> ava::core::Result<ava::agent::QuestionAnswer> {
         return ava::agent::QuestionAnswer{.selected_options = {}, .custom_text = oversized_answer_text};
       }});
   auto oversized_custom = oversized_custom_dispatcher.dispatch(ava::agent::ProviderToolCall{
@@ -849,10 +849,10 @@ void test_tool_dispatcher() {
              oversized_custom->result_text.find("custom text is too long") != std::string::npos,
          "question tool rejects oversized resolver custom text");
 
-  const ava::agent::ToolDispatcher failing_question_dispatcher(ava::tools::ToolContext{
+  ava::agent::ToolDispatcher const failing_question_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .question_resolver = [](const ava::agent::QuestionPrompt&) -> ava::core::Result<ava::agent::QuestionAnswer> {
+      .question_resolver = [](ava::agent::QuestionPrompt const&) -> ava::core::Result<ava::agent::QuestionAnswer> {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "question UI unavailable"));
       }});
   auto failed_question = failing_question_dispatcher.dispatch(ava::agent::ProviderToolCall{
@@ -911,14 +911,14 @@ void test_tool_dispatcher() {
   expect(unknown && !unknown->success && unknown->result_text.find("unknown tool") != std::string::npos,
          "tool dispatcher returns structured unknown tool errors");
 
-  const auto default_schemas = ava::agent::ToolDispatcher::tool_schemas_json();
+  auto const default_schemas = ava::agent::ToolDispatcher::tool_schemas_json();
   ava::tools::ToolContext lsp_schema_context;
   lsp_schema_context.lsp_diagnostics_provider = std::make_shared<EmptyDiagnosticsProvider>();
-  const auto configured_schemas = ava::agent::ToolDispatcher::tool_schemas_json(lsp_schema_context);
-  const auto& schemas = configured_schemas;
-  const auto metadata = ava::agent::ToolDispatcher::tool_metadata();
-  const auto& registry = ava::agent::builtin_tool_registry();
-  const auto* registered_read_tool = registry.find("read_file");
+  auto const configured_schemas = ava::agent::ToolDispatcher::tool_schemas_json(lsp_schema_context);
+  auto const& schemas = configured_schemas;
+  auto const metadata = ava::agent::ToolDispatcher::tool_metadata();
+  auto const& registry = ava::agent::builtin_tool_registry();
+  auto const* registered_read_tool = registry.find("read_file");
   expect(registry.entries().size() == metadata.size(), "built-in tool registry covers all static tool metadata");
   expect(registered_read_tool != nullptr && registered_read_tool->source == ava::agent::ToolSource::Builtin,
          "built-in tool registry can resolve read_file with source identity");
@@ -957,7 +957,7 @@ void test_tool_dispatcher() {
   bool glob_has_no_ignore = false;
   bool grep_has_no_ignore = false;
   bool question_has_allow_multiple = false;
-  const auto default_has_lsp_schema = std::ranges::any_of(default_schemas, [](const std::string& schema) {
+  auto const default_has_lsp_schema = std::ranges::any_of(default_schemas, [](std::string const& schema) {
     return schema.find("\"name\":\"lsp_diagnostics\"") != std::string::npos;
   });
   expect(!default_has_lsp_schema && default_schemas.size() + 1 == configured_schemas.size(),
@@ -965,7 +965,7 @@ void test_tool_dispatcher() {
   expect(metadata.size() == schemas.size(),
          "tool metadata and configured schema exports cover the same built-in tools");
   for (std::size_t index = 0; index < metadata.size(); ++index) {
-    const auto& tool = metadata[index];
+    auto const& tool = metadata[index];
     expect(!tool.name.empty() && !tool.description.empty() && !tool.schema_json.empty() &&
                !tool.permission_category.empty() && !tool.output_bound_summary.empty() &&
                !tool.execution_mode.empty() && !tool.event_rendering_hint.empty() &&
@@ -973,10 +973,10 @@ void test_tool_dispatcher() {
            "built-in tool metadata includes required generic fields");
     expect(index < schemas.size() && schemas[index] == tool.schema_json,
            "tool schema export is derived from built-in metadata registry");
-    const auto schema = std::string(tool.schema_json);
+    auto const schema = std::string(tool.schema_json);
     has_apply_patch = has_apply_patch || schema.find("apply_patch") != std::string::npos;
     has_webfetch = has_webfetch || schema.find("webfetch") != std::string::npos;
-    const bool is_lsp_schema = schema.find("\"name\":\"lsp_diagnostics\"") != std::string::npos;
+    bool const is_lsp_schema = schema.find("\"name\":\"lsp_diagnostics\"") != std::string::npos;
     has_lsp_diagnostics = has_lsp_diagnostics || is_lsp_schema;
     lsp_schema_exposes_command =
         lsp_schema_exposes_command ||
@@ -985,7 +985,7 @@ void test_tool_dispatcher() {
                                                 schema.find("no_ignore") != std::string::npos);
     grep_has_no_ignore = grep_has_no_ignore || (schema.find("\"name\":\"grep\"") != std::string::npos &&
                                                 schema.find("no_ignore") != std::string::npos);
-    const bool is_question_schema = schema.find("\"name\":\"question\"") != std::string::npos;
+    bool const is_question_schema = schema.find("\"name\":\"question\"") != std::string::npos;
     has_question = has_question || is_question_schema;
     question_has_allow_multiple =
         question_has_allow_multiple || (is_question_schema && schema.find("allow_multiple") != std::string::npos);
@@ -999,13 +999,13 @@ void test_tool_dispatcher() {
 }
 
 void test_tool_dispatcher_plan_mode_denies_mutation() {
-  const auto root = temp_root() / "dispatcher-plan";
+  auto const root = temp_root() / "dispatcher-plan";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
-  const ava::agent::ToolDispatcher dispatcher(
+  ava::agent::ToolDispatcher const dispatcher(
       ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Plan});
   auto denied = dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "call_write", .name = "write_file", .arguments_json = "{\"path\":\"main.cpp\",\"content\":\"bad\"}"});
@@ -1015,14 +1015,14 @@ void test_tool_dispatcher_plan_mode_denies_mutation() {
 }
 
 void test_agent_loop_text_only_turn() {
-  const auto root = temp_root() / "agent-text";
+  auto const root = temp_root() / "agent-text";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "text"});
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello user\"}\n\n"
                     "data: [DONE]\n\n")});
@@ -1054,14 +1054,14 @@ void test_agent_loop_text_only_turn() {
 }
 
 void test_agent_loop_model_capability_gating() {
-  const auto root = temp_root() / "agent-capabilities";
+  auto const root = temp_root() / "agent-capabilities";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "capabilities"});
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"plain\"}"}});
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
@@ -1083,13 +1083,13 @@ void test_agent_loop_model_capability_gating() {
 }
 
 void test_agent_loop_usage_and_cost_persistence() {
-  const auto root = temp_root() / "agent-usage";
+  auto const root = temp_root() / "agent-usage";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
-  const ava::config::ModelPricing pricing{.input_per_million = 10.0L,
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::config::ModelPricing const pricing{.input_per_million = 10.0L,
                                           .output_per_million = 20.0L,
                                           .cache_read_per_million = std::nullopt,
                                           .cache_write_per_million = std::nullopt,
@@ -1159,10 +1159,10 @@ void test_agent_loop_usage_and_cost_persistence() {
 }
 
 void test_agent_loop_tool_turn_and_continuation() {
-  const auto root = temp_root() / "agent-tool";
+  auto const root = temp_root() / "agent-tool";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {
     std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
@@ -1170,8 +1170,8 @@ void test_agent_loop_tool_turn_and_continuation() {
   }
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "tool"});
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
-  const ava::config::ModelPricing pricing{.input_per_million = 10.0L,
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::config::ModelPricing const pricing{.input_per_million = 10.0L,
                                           .output_per_million = 20.0L,
                                           .cache_read_per_million = std::nullopt,
                                           .cache_write_per_million = std::nullopt,
@@ -1196,7 +1196,7 @@ void test_agent_loop_tool_turn_and_continuation() {
                                    .model_id = "gpt-5.5",
                                    .system_prompt = "system prompt",
                                    .access_token = "token",
-                                   .on_tool_event = [&tool_events](const auto& entry) { tool_events.push_back(entry); },
+                                   .on_tool_event = [&tool_events](auto const& entry) { tool_events.push_back(entry); },
                                    .model_pricing = pricing});
   auto result = loop.run_turn("read note", store, provider, transport);
   expect(result && result->final_text == "read it" && result->tool_calls == 1 && result->provider_iterations == 2 &&
@@ -1230,7 +1230,7 @@ void test_agent_loop_tool_turn_and_continuation() {
   bool saw_tool_result = false;
   bool saw_structured_tool_result = false;
   bool saw_final_assistant = false;
-  for (const auto& entry : *entries) {
+  for (auto const& entry : *entries) {
     saw_tool_call = saw_tool_call || entry.type == ava::session::EntryType::ToolCall;
     saw_tool_result = saw_tool_result || entry.type == ava::session::EntryType::ToolResult;
     saw_structured_tool_result =
@@ -1246,19 +1246,19 @@ void test_agent_loop_tool_turn_and_continuation() {
 }
 
 void test_agent_loop_permission_resolver_threads_to_tools() {
-  const auto root = temp_root() / "agent-permission-resolver";
+  auto const root = temp_root() / "agent-permission-resolver";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  const auto outside_path = root / "outside.txt";
+  auto const outside_path = root / "outside.txt";
   {
     std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
     file << "outside via agent";
   }
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "resolver"});
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response(
            "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_outside\",\"name\":\"read_file\"}\n\n"
@@ -1278,7 +1278,7 @@ void test_agent_loop_permission_resolver_threads_to_tools() {
       .model_id = "gpt-5.5",
       .system_prompt = "system prompt",
       .access_token = "token",
-      .permission_resolver = [&prompts, &outside_path](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [&prompts, &outside_path](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++prompts;
         expect(prompt.target_path == outside_path, "agent loop resolver sees tool target path");
@@ -1302,9 +1302,9 @@ void test_agent_loop_permission_resolver_threads_to_tools() {
          "agent loop persists ask and resolver permission audit entries");
 
   {
-    const auto bash_root = temp_root() / "agent-bash-ask-allow";
+    auto const bash_root = temp_root() / "agent-bash-ask-allow";
     std::filesystem::remove_all(bash_root, remove_error);
-    const auto bash_workspace = bash_root / "workspace";
+    auto const bash_workspace = bash_root / "workspace";
     std::filesystem::create_directories(bash_workspace);
     ava::session::SessionStore bash_store(ava::session::SessionStoreOptions{
         .root_dir = bash_root / "sessions", .workspace_dir = bash_workspace, .session_id = "bash-allow"});
@@ -1325,7 +1325,7 @@ void test_agent_loop_permission_resolver_threads_to_tools() {
         .model_id = "gpt-5.5",
         .system_prompt = "system prompt",
         .access_token = "token",
-        .permission_resolver = [&bash_allow_prompts](const ava::permissions::PermissionPrompt& prompt)
+        .permission_resolver = [&bash_allow_prompts](ava::permissions::PermissionPrompt const& prompt)
             -> ava::core::Result<ava::permissions::PermissionResolution> {
           ++bash_allow_prompts;
           expect(prompt.operation == ava::permissions::Operation::RunCommand,
@@ -1341,9 +1341,9 @@ void test_agent_loop_permission_resolver_threads_to_tools() {
   }
 
   {
-    const auto bash_root = temp_root() / "agent-bash-ask-deny";
+    auto const bash_root = temp_root() / "agent-bash-ask-deny";
     std::filesystem::remove_all(bash_root, remove_error);
-    const auto bash_workspace = bash_root / "workspace";
+    auto const bash_workspace = bash_root / "workspace";
     std::filesystem::create_directories(bash_workspace);
     ava::session::SessionStore bash_store(ava::session::SessionStoreOptions{
         .root_dir = bash_root / "sessions", .workspace_dir = bash_workspace, .session_id = "bash-deny"});
@@ -1364,7 +1364,7 @@ void test_agent_loop_permission_resolver_threads_to_tools() {
         .model_id = "gpt-5.5",
         .system_prompt = "system prompt",
         .access_token = "token",
-        .permission_resolver = [&bash_deny_prompts](const ava::permissions::PermissionPrompt& prompt)
+        .permission_resolver = [&bash_deny_prompts](ava::permissions::PermissionPrompt const& prompt)
             -> ava::core::Result<ava::permissions::PermissionResolution> {
           ++bash_deny_prompts;
           expect(prompt.operation == ava::permissions::Operation::RunCommand,
@@ -1385,9 +1385,9 @@ void test_agent_loop_permission_resolver_threads_to_tools() {
   }
 
   {
-    const auto bash_root = temp_root() / "agent-bash-ask-fail";
+    auto const bash_root = temp_root() / "agent-bash-ask-fail";
     std::filesystem::remove_all(bash_root, remove_error);
-    const auto bash_workspace = bash_root / "workspace";
+    auto const bash_workspace = bash_root / "workspace";
     std::filesystem::create_directories(bash_workspace);
     ava::session::SessionStore bash_store(ava::session::SessionStoreOptions{
         .root_dir = bash_root / "sessions", .workspace_dir = bash_workspace, .session_id = "bash-fail"});
@@ -1408,7 +1408,7 @@ void test_agent_loop_permission_resolver_threads_to_tools() {
         .model_id = "gpt-5.5",
         .system_prompt = "system prompt",
         .access_token = "token",
-        .permission_resolver = [&bash_fail_prompts](const ava::permissions::PermissionPrompt& prompt)
+        .permission_resolver = [&bash_fail_prompts](ava::permissions::PermissionPrompt const& prompt)
             -> ava::core::Result<ava::permissions::PermissionResolution> {
           ++bash_fail_prompts;
           expect(prompt.operation == ava::permissions::Operation::RunCommand,
@@ -1425,14 +1425,14 @@ void test_agent_loop_permission_resolver_threads_to_tools() {
 }
 
 void test_agent_loop_question_resolver_threads_to_tools() {
-  const auto root = temp_root() / "agent-question-resolver";
+  auto const root = temp_root() / "agent-question-resolver";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "question-resolver"});
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response(
            "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_question\",\"name\":\"question\"}\n\n"
@@ -1451,7 +1451,7 @@ void test_agent_loop_question_resolver_threads_to_tools() {
       .system_prompt = "system prompt",
       .access_token = "token",
       .question_resolver =
-          [&prompts](const ava::agent::QuestionPrompt& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
+          [&prompts](ava::agent::QuestionPrompt const& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
         ++prompts;
         expect(prompt.question == "Pick one?" && prompt.options.size() == 2,
                "agent loop question resolver receives provider prompt");
@@ -1467,14 +1467,14 @@ void test_agent_loop_question_resolver_threads_to_tools() {
 }
 
 void test_agent_loop_non_stream_response() {
-  const auto root = temp_root() / "agent-non-stream";
+  auto const root = temp_root() / "agent-non-stream";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "nonstream"});
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
       .status_code = 200, .headers = {}, .body = "{\"output_text\":\"plain response with data: literal\"}"}});
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
@@ -1492,10 +1492,10 @@ void test_agent_loop_non_stream_response() {
 }
 
 void test_agent_loop_compaction_status_metadata() {
-  const auto root = temp_root() / "agent-compaction-status";
+  auto const root = temp_root() / "agent-compaction-status";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "compaction-status"});
@@ -1505,7 +1505,7 @@ void test_agent_loop_compaction_status_metadata() {
                                                           .timestamp = ava::session::now_timestamp(),
                                                           .data_json = "{\"summary\":\"older context\"}"});
   expect(appended.has_value(), "agent loop compaction metadata test seeds compaction entry");
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"after compaction\"}\n\n"
                     "data: [DONE]\n\n")});
@@ -1525,14 +1525,14 @@ void test_agent_loop_compaction_status_metadata() {
 }
 
 void test_agent_loop_replays_steering_after_mid_turn_auto_compaction() {
-  const auto root = temp_root() / "agent-steering-compaction-replay";
+  auto const root = temp_root() / "agent-steering-compaction-replay";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "steering-replay"});
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n"
                     "data: [DONE]\n\n")});
@@ -1551,7 +1551,7 @@ void test_agent_loop_replays_steering_after_mid_turn_auto_compaction() {
         return std::vector<std::string>{"mid-turn steering"};
       },
       .compact_context = [&compact_calls](ava::session::SessionStore& compact_store, std::string_view trigger,
-                                          const std::vector<std::string>&) -> ava::core::Result<bool> {
+                                          std::vector<std::string> const&) -> ava::core::Result<bool> {
         ++compact_calls;
         if (trigger == "auto" && compact_calls == 2) {
           auto appended = compact_store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
@@ -1573,14 +1573,14 @@ void test_agent_loop_replays_steering_after_mid_turn_auto_compaction() {
 }
 
 void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction() {
-  const auto root = temp_root() / "agent-overflow-skip-auto";
+  auto const root = temp_root() / "agent-overflow-skip-auto";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "overflow-skip-auto"});
-  const OverflowOnceProvider provider("https://api.example.test");
+  OverflowOnceProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"retry ok\"}\n\n"
                     "data: [DONE]\n\n")});
@@ -1594,7 +1594,7 @@ void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction() {
       .system_prompt = "system prompt",
       .access_token = "token",
       .compact_context = [&](ava::session::SessionStore& compact_store, std::string_view trigger,
-                             const std::vector<std::string>&) -> ava::core::Result<bool> {
+                             std::vector<std::string> const&) -> ava::core::Result<bool> {
         triggers.push_back(std::string(trigger));
         if (trigger == "context_overflow") {
           overflow_compacted = true;
@@ -1621,17 +1621,17 @@ void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction() {
 
   auto result = loop.run_turn("overflow prompt", store, provider, transport);
   auto entries = store.load();
-  const auto compactions =
+  auto const compactions =
       entries
           ? static_cast<std::size_t>(std::ranges::count_if(*entries,
-                                                           [](const ava::session::SessionEntry& entry) {
+                                                           [](ava::session::SessionEntry const& entry) {
                                                              return entry.type == ava::session::EntryType::Compaction;
                                                            }))
           : 0;
-  const auto user_messages =
+  auto const user_messages =
       entries
           ? static_cast<std::size_t>(std::ranges::count_if(*entries,
-                                                           [](const ava::session::SessionEntry& entry) {
+                                                           [](ava::session::SessionEntry const& entry) {
                                                              return entry.type == ava::session::EntryType::UserMessage;
                                                            }))
           : 0;
@@ -1647,13 +1647,13 @@ void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction() {
 }
 
 void test_agent_loop_cancellation_boundaries() {
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
 
   {
-    const auto root = temp_root() / "agent-cancel-before-turn-start";
+    auto const root = temp_root() / "agent-cancel-before-turn-start";
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
+    auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{
         .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "cancel-before-turn-start"});
@@ -1672,7 +1672,7 @@ void test_agent_loop_cancellation_boundaries() {
     bool saw_user_message = false;
     bool saw_cancel = false;
     if (entries) {
-      for (const auto& entry : *entries) {
+      for (auto const& entry : *entries) {
         saw_user_message = saw_user_message || entry.type == ava::session::EntryType::UserMessage;
         saw_cancel = saw_cancel || (entry.type == ava::session::EntryType::Cancel &&
                                     entry.data_json.find("before_turn_start") != std::string::npos);
@@ -1684,10 +1684,10 @@ void test_agent_loop_cancellation_boundaries() {
   }
 
   {
-    const auto root = temp_root() / "agent-cancel-before-provider";
+    auto const root = temp_root() / "agent-cancel-before-provider";
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
+    auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{
         .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "cancel-before-provider"});
@@ -1707,11 +1707,11 @@ void test_agent_loop_cancellation_boundaries() {
                                                             }});
     auto result = loop.run_turn("cancel before provider", store, provider, transport);
     auto entries = store.load();
-    const bool saw_cancel = entries && std::ranges::any_of(*entries, [](const ava::session::SessionEntry& entry) {
+    bool const saw_cancel = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
                               return entry.type == ava::session::EntryType::Cancel &&
                                      entry.data_json.find("before_provider_call") != std::string::npos;
                             });
-    const bool saw_user_message = entries && std::ranges::any_of(*entries, [](const ava::session::SessionEntry& entry) {
+    bool const saw_user_message = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
                                     return entry.type == ava::session::EntryType::UserMessage;
                                   });
     expect(!result && result.error().message() == "agent loop canceled" && transport.requests().empty() && saw_cancel &&
@@ -1720,10 +1720,10 @@ void test_agent_loop_cancellation_boundaries() {
   }
 
   {
-    const auto root = temp_root() / "agent-cancel-before-tool";
+    auto const root = temp_root() / "agent-cancel-before-tool";
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
+    auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     {
       std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
@@ -1752,7 +1752,7 @@ void test_agent_loop_cancellation_boundaries() {
     bool saw_tool_entry = false;
     bool saw_cancel = false;
     if (entries) {
-      for (const auto& entry : *entries) {
+      for (auto const& entry : *entries) {
         saw_tool_entry = saw_tool_entry || entry.type == ava::session::EntryType::ToolCall ||
                          entry.type == ava::session::EntryType::ToolResult;
         saw_cancel = saw_cancel || (entry.type == ava::session::EntryType::Cancel &&
@@ -1767,10 +1767,10 @@ void test_agent_loop_cancellation_boundaries() {
   }
 
   {
-    const auto root = temp_root() / "agent-cancel-during-bash-tool";
+    auto const root = temp_root() / "agent-cancel-during-bash-tool";
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
+    auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{
         .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "cancel-during-bash-tool"});
@@ -1790,7 +1790,7 @@ void test_agent_loop_cancellation_boundaries() {
         .system_prompt = "system prompt",
         .access_token = "token",
         .on_tool_event =
-            [&bash_started](const auto& entry) {
+            [&bash_started](auto const& entry) {
               if (entry.status == ava::agent::ToolTimelineStatus::Running && entry.name == "bash") {
                 bash_started = true;
               }
@@ -1803,14 +1803,14 @@ void test_agent_loop_cancellation_boundaries() {
             }});
     auto result = loop.run_turn("sleep then cancel", store, provider, transport);
     auto entries = store.load();
-    const bool saw_canceled_tool_result =
-        entries && std::ranges::any_of(*entries, [](const ava::session::SessionEntry& entry) {
+    bool const saw_canceled_tool_result =
+        entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
           return entry.type == ava::session::EntryType::ToolResult &&
                  entry.data_json.find("\"status\":\"canceled\"") != std::string::npos &&
                  entry.data_json.find("\"canceled\":true") != std::string::npos;
         });
-    const bool saw_after_tool_cancel =
-        entries && std::ranges::any_of(*entries, [](const ava::session::SessionEntry& entry) {
+    bool const saw_after_tool_cancel =
+        entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
           return entry.type == ava::session::EntryType::Cancel &&
                  entry.data_json.find("after_tool_dispatch") != std::string::npos;
         });
@@ -1821,13 +1821,13 @@ void test_agent_loop_cancellation_boundaries() {
 }
 
 void test_agent_loop_error_paths_and_bounds() {
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
 
   {
-    const auto root = temp_root() / "agent-provider-error";
+    auto const root = temp_root() / "agent-provider-error";
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
+    auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{
         .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "provider-error"});
@@ -1845,10 +1845,10 @@ void test_agent_loop_error_paths_and_bounds() {
   }
 
   {
-    const auto root = temp_root() / "agent-empty-transport";
+    auto const root = temp_root() / "agent-empty-transport";
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
+    auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{
         .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "empty-transport"});
@@ -1865,10 +1865,10 @@ void test_agent_loop_error_paths_and_bounds() {
   }
 
   {
-    const auto root = temp_root() / "agent-empty-response";
+    auto const root = temp_root() / "agent-empty-response";
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
+    auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{
         .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "empty-response"});
@@ -1885,10 +1885,10 @@ void test_agent_loop_error_paths_and_bounds() {
   }
 
   {
-    const auto root = temp_root() / "agent-event-bound";
+    auto const root = temp_root() / "agent-event-bound";
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
+    auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{
         .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "event-bound"});
@@ -1908,10 +1908,10 @@ void test_agent_loop_error_paths_and_bounds() {
   }
 
   {
-    const auto root = temp_root() / "agent-text-bound";
+    auto const root = temp_root() / "agent-text-bound";
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
+    auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{
         .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "text-bound"});
@@ -1931,10 +1931,10 @@ void test_agent_loop_error_paths_and_bounds() {
   }
 
   {
-    const auto root = temp_root() / "agent-arg-bound";
+    auto const root = temp_root() / "agent-arg-bound";
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
+    auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{
         .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "arg-bound"});
@@ -1957,10 +1957,10 @@ void test_agent_loop_error_paths_and_bounds() {
   }
 
   {
-    const auto root = temp_root() / "agent-control-call-id";
+    auto const root = temp_root() / "agent-control-call-id";
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
+    auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{
         .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "control-call-id"});
@@ -1977,7 +1977,7 @@ void test_agent_loop_error_paths_and_bounds() {
     auto entries = store.load();
     bool saw_tool_entry = false;
     if (entries) {
-      saw_tool_entry = std::ranges::any_of(*entries, [](const ava::session::SessionEntry& entry) {
+      saw_tool_entry = std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
         return entry.type == ava::session::EntryType::ToolCall || entry.type == ava::session::EntryType::ToolResult;
       });
     }
@@ -1986,14 +1986,14 @@ void test_agent_loop_error_paths_and_bounds() {
   }
 
   {
-    const auto root = temp_root() / "agent-long-call-id";
+    auto const root = temp_root() / "agent-long-call-id";
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
+    auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{
         .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "long-call-id"});
-    const std::string long_call_id(300, 'a');
+    std::string const long_call_id(300, 'a');
     ava::tests::FakeTransport transport(
         {sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"" + long_call_id +
                       "\",\"name\":\"read_file\"}\n\n"
@@ -2011,10 +2011,10 @@ void test_agent_loop_error_paths_and_bounds() {
 }
 
 void test_agent_loop_multiple_tools_and_denied_continuation() {
-  const auto root = temp_root() / "agent-multi-tools";
+  auto const root = temp_root() / "agent-multi-tools";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {
     std::ofstream one(workspace / "one.txt", std::ios::binary | std::ios::trunc);
@@ -2024,7 +2024,7 @@ void test_agent_loop_multiple_tools_and_denied_continuation() {
   }
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "multi"});
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response(
            "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_1\",\"name\":\"read_file\"}\n\n"
@@ -2050,9 +2050,9 @@ void test_agent_loop_multiple_tools_and_denied_continuation() {
   expect(result && result->tool_calls == 2 && result->final_text == "done",
          "agent loop handles multiple tool calls before continuation");
 
-  const auto denied_root = temp_root() / "agent-denied-continuation";
+  auto const denied_root = temp_root() / "agent-denied-continuation";
   std::filesystem::remove_all(denied_root, remove_error);
-  const auto denied_workspace = denied_root / "workspace";
+  auto const denied_workspace = denied_root / "workspace";
   std::filesystem::create_directories(denied_workspace);
   ava::session::SessionStore denied_store(ava::session::SessionStoreOptions{
       .root_dir = denied_root / "sessions", .workspace_dir = denied_workspace, .session_id = "denied"});
@@ -2089,13 +2089,13 @@ void test_agent_loop_multiple_tools_and_denied_continuation() {
 }
 
 void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids() {
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
 
   {
-    const auto root = temp_root() / "agent-delta-before-start";
+    auto const root = temp_root() / "agent-delta-before-start";
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
+    auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     {
       std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
@@ -2129,7 +2129,7 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids() {
     std::size_t tool_calls = 0;
     std::size_t tool_results = 0;
     if (entries) {
-      for (const auto& entry : *entries) {
+      for (auto const& entry : *entries) {
         if (entry.type == ava::session::EntryType::ToolCall) ++tool_calls;
         if (entry.type == ava::session::EntryType::ToolResult) ++tool_results;
       }
@@ -2138,10 +2138,10 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids() {
   }
 
   {
-    const auto root = temp_root() / "agent-empty-call-id";
+    auto const root = temp_root() / "agent-empty-call-id";
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
+    auto const workspace = root / "workspace";
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{
         .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "empty-call-id"});
@@ -2158,7 +2158,7 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids() {
     auto entries = store.load();
     bool saw_tool_entry = false;
     if (entries) {
-      for (const auto& entry : *entries) {
+      for (auto const& entry : *entries) {
         saw_tool_entry = saw_tool_entry || entry.type == ava::session::EntryType::ToolCall ||
                          entry.type == ava::session::EntryType::ToolResult;
       }
@@ -2169,10 +2169,10 @@ void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids() {
 }
 
 void test_agent_loop_truncates_tool_context() {
-  const auto root = temp_root() / "agent-tool-truncate";
+  auto const root = temp_root() / "agent-tool-truncate";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {
     std::ofstream large(workspace / "large.txt", std::ios::binary | std::ios::trunc);
@@ -2180,7 +2180,7 @@ void test_agent_loop_truncates_tool_context() {
   }
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "truncate"});
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response(
            "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_large\",\"name\":\"read_file\"}\n\n"
@@ -2204,21 +2204,21 @@ void test_agent_loop_truncates_tool_context() {
 }
 
 void test_agent_loop_max_iteration_guard() {
-  const auto root = temp_root() / "agent-max";
+  auto const root = temp_root() / "agent-max";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "max"});
-  const std::string tool_sse =
+  std::string const tool_sse =
       "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_glob\",\"name\":\"glob\"}\n\n"
       "data: "
       "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_glob\",\"delta\":\"{\\\"pattern\\\":"
       "\\\"**/*\\\"}\"}\n\n"
       "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_glob\"}\n\n"
       "data: [DONE]\n\n";
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(tool_sse), sse_response(tool_sse)});
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                           .mode = ava::agent::Mode::Build,
@@ -2232,7 +2232,7 @@ void test_agent_loop_max_iteration_guard() {
          "agent loop stops repeated tool use at max iteration guard");
   auto entries = store.load();
   expect(entries && std::ranges::any_of(*entries,
-                                        [](const ava::session::SessionEntry& entry) {
+                                        [](ava::session::SessionEntry const& entry) {
                                           return entry.type == ava::session::EntryType::Error &&
                                                  entry.data_json.find("maximum tool iterations") != std::string::npos;
                                         }),

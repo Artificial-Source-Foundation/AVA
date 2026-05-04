@@ -21,7 +21,7 @@ std::string next_resolver_request_id(std::string_view prefix) { return ava::core
 
 bool cancel_pending_resolvers(PendingResolverState& pending_state) {
   std::lock_guard lock(pending_state.mutex);
-  const bool had_pending = !pending_state.permission_requests.empty() || !pending_state.question_requests.empty();
+  bool const had_pending = !pending_state.permission_requests.empty() || !pending_state.question_requests.empty();
   for (auto& [request_id, request] : pending_state.permission_requests) {
     static_cast<void>(request_id);
     request->resolved = true;
@@ -40,10 +40,10 @@ bool cancel_pending_resolvers(PendingResolverState& pending_state) {
 }
 
 ava::permissions::PermissionResolver make_rpc_permission_resolver(
-    PendingResolverState& pending_state, RpcOutput& output, RpcRunState& run_state, const RuntimeSession& session,
+    PendingResolverState& pending_state, RpcOutput& output, RpcRunState& run_state, RuntimeSession const& session,
     std::mutex& session_mutex, ava::permissions::PermissionResolver policy_resolver, std::string prompt_request_id) {
   return [&pending_state, &output, &run_state, &session, &session_mutex, policy_resolver = std::move(policy_resolver),
-          prompt_request_id = std::move(prompt_request_id)](const ava::permissions::PermissionPrompt& prompt)
+          prompt_request_id = std::move(prompt_request_id)](ava::permissions::PermissionPrompt const& prompt)
              -> ava::core::Result<ava::permissions::PermissionResolution> {
     if (cancel_requested(run_state)) return std::unexpected(canceled_error());
     if (input_closed(run_state)) return std::unexpected(canceled_error());
@@ -89,11 +89,11 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(
 }
 
 ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pending_state, RpcOutput& output,
-                                                        RpcRunState& run_state, const RuntimeSession& session,
+                                                        RpcRunState& run_state, RuntimeSession const& session,
                                                         std::mutex& session_mutex, std::string prompt_request_id) {
   return
       [&pending_state, &output, &run_state, &session, &session_mutex, prompt_request_id = std::move(prompt_request_id)](
-          const ava::agent::QuestionPrompt& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
+          ava::agent::QuestionPrompt const& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
         if (cancel_requested(run_state)) return std::unexpected(canceled_error());
         if (input_closed(run_state)) return std::unexpected(canceled_error());
         if (prompt.multiple) {
@@ -169,8 +169,8 @@ ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_sta
 }
 
 ava::core::VoidResult resolve_question_reply(PendingResolverState& pending_state, std::string_view request_id,
-                                             std::string_view correlation_id, const std::optional<std::string>& answer,
-                                             const std::optional<std::string>& selected) {
+                                             std::string_view correlation_id, std::optional<std::string> const& answer,
+                                             std::optional<std::string> const& selected) {
   if (answer && selected) return std::unexpected(invalid_rpc("question_reply requires answer or selected, not both"));
 
   std::shared_ptr<PendingQuestionRequest> pending;
@@ -195,7 +195,7 @@ ava::core::VoidResult resolve_question_reply(PendingResolverState& pending_state
       parsed.custom_text = *answer;
     } else if (selected) {
       bool valid_option = false;
-      for (const auto& option : pending->options) valid_option = valid_option || option.value == *selected;
+      for (auto const& option : pending->options) valid_option = valid_option || option.value == *selected;
       if (!valid_option) {
         return std::unexpected(invalid_rpc("question_reply selected option is not valid for this request"));
       }

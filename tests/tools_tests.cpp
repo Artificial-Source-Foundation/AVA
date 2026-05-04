@@ -52,7 +52,7 @@
 
 namespace {
 
-std::string read_text_file_for_test(const std::filesystem::path& path) {
+std::string read_text_file_for_test(std::filesystem::path const& path) {
   std::ifstream file(path, std::ios::binary);
   std::ostringstream out;
   out << file.rdbuf();
@@ -64,7 +64,7 @@ class StaticTransport final : public ava::provider::Transport {
   explicit StaticTransport(ava::provider::HttpResponse response) : response_(std::move(response)) {}
 
   [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
-      const ava::provider::HttpRequest& request) override {
+      ava::provider::HttpRequest const& request) override {
     requests.push_back(request);
     return response_;
   }
@@ -78,12 +78,12 @@ class StaticTransport final : public ava::provider::Transport {
 class CancelAwareTransport final : public ava::provider::Transport {
  public:
   [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
-      const ava::provider::HttpRequest& request) override {
+      ava::provider::HttpRequest const& request) override {
     requests.push_back(request);
     return ava::provider::HttpResponse{.status_code = 200, .headers = {{"content-type", "text/plain"}}, .body = "ok"};
   }
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(const ava::provider::HttpRequest& request,
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request,
                                                                     CancelCallback cancel_requested) override {
     requests.push_back(request);
     saw_cancel_callback = static_cast<bool>(cancel_requested);
@@ -102,12 +102,12 @@ void test_file_tools() {
   std::filesystem::remove_all(temp_root(), remove_error);
   std::filesystem::create_directories(temp_root());
 
-  const auto workspace = temp_root() / "workspace";
+  auto const workspace = temp_root() / "workspace";
   std::filesystem::create_directories(workspace / "docs");
-  const auto source_path = workspace / "src.txt";
-  const ava::tools::ToolContext build_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
-  const ava::tools::ToolContext plan_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Plan};
-  const auto has_write_temp = [](const std::filesystem::path& directory) {
+  auto const source_path = workspace / "src.txt";
+  ava::tools::ToolContext const build_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
+  ava::tools::ToolContext const plan_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Plan};
+  auto const has_write_temp = [](std::filesystem::path const& directory) {
     std::error_code iter_error;
     for (std::filesystem::directory_iterator it(directory, iter_error), end; !iter_error && it != end;
          it.increment(iter_error)) {
@@ -115,7 +115,7 @@ void test_file_tools() {
     }
     return false;
   };
-  const auto permission_bits = [](const std::filesystem::path& permission_path) {
+  auto const permission_bits = [](std::filesystem::path const& permission_path) {
     constexpr auto mask =
         std::filesystem::perms::owner_all | std::filesystem::perms::group_all | std::filesystem::perms::others_all;
     std::error_code status_error;
@@ -141,7 +141,7 @@ void test_file_tools() {
   auto edited = ava::tools::read_file(build_context, source_path);
   expect(edited && edited->content == "hello ava", "edit_file result is persisted");
 
-  const auto overlapping_path = workspace / "overlapping.txt";
+  auto const overlapping_path = workspace / "overlapping.txt";
   {
     std::ofstream overlapping_file(overlapping_path, std::ios::binary | std::ios::trunc);
     overlapping_file << "aaa";
@@ -152,7 +152,7 @@ void test_file_tools() {
              overlapping_edit.error().format().find("not unique") != std::string::npos,
          "edit_file rejects overlapping old_text matches as ambiguous");
 
-  const auto atomic_path = workspace / "atomic.txt";
+  auto const atomic_path = workspace / "atomic.txt";
   {
     std::ofstream atomic_file(atomic_path, std::ios::binary | std::ios::trunc);
     atomic_file << "original content";
@@ -162,7 +162,7 @@ void test_file_tools() {
   expect(atomic_write && atomic_read && atomic_read->content == "replacement content" && !has_write_temp(workspace),
          "write_file atomically replaces existing content and cleans the staging file on success");
 
-  const auto protected_path = workspace / "protected.txt";
+  auto const protected_path = workspace / "protected.txt";
   {
     std::ofstream protected_file(protected_path, std::ios::binary | std::ios::trunc);
     protected_file << "private original";
@@ -178,7 +178,7 @@ void test_file_tools() {
           permission_bits(protected_path) == (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write),
       "write_file preserves 0600 permissions when overwriting a file");
 
-  const auto edit_private_path = workspace / "edit-private.txt";
+  auto const edit_private_path = workspace / "edit-private.txt";
   {
     std::ofstream edit_private_file(edit_private_path, std::ios::binary | std::ios::trunc);
     edit_private_file << "alpha beta";
@@ -195,7 +195,7 @@ void test_file_tools() {
                  (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write),
          "edit_file preserves 0600 permissions through atomic write_file");
 
-  const auto crlf_path = workspace / "crlf.txt";
+  auto const crlf_path = workspace / "crlf.txt";
   {
     std::ofstream crlf_file(crlf_path, std::ios::binary | std::ios::trunc);
     crlf_file << "alpha\r\nbeta\r\n";
@@ -208,7 +208,7 @@ void test_file_tools() {
              crlf_exact_edit->line_endings == "CRLF",
          "edit_file preserves CRLF bytes when the provider supplies an exact CRLF match");
 
-  const auto bom_path = workspace / "bom.txt";
+  auto const bom_path = workspace / "bom.txt";
   {
     std::ofstream bom_file(bom_path, std::ios::binary | std::ios::trunc);
     bom_file << "\xEF\xBB\xBF"
@@ -221,26 +221,26 @@ void test_file_tools() {
                  "beta\n",
          "edit_file preserves UTF-8 BOM bytes across exact replacements");
 
-  const auto shared_queue = std::make_shared<ava::tools::MutationQueue>();
-  const ava::tools::ToolContext queued_context{
+  auto const shared_queue = std::make_shared<ava::tools::MutationQueue>();
+  ava::tools::ToolContext const queued_context{
       .workspace_dir = workspace, .mode = ava::agent::Mode::Build, .mutation_queue = shared_queue};
-  const auto queued_path = workspace / "queued-edit.txt";
+  auto const queued_path = workspace / "queued-edit.txt";
   auto queued_write = ava::tools::write_file(queued_context, queued_path, "one two");
   auto queued_edit = ava::tools::edit_file(queued_context, queued_path, "two", "three");
   auto queued_read = ava::tools::read_file(queued_context, queued_path);
   expect(queued_write && queued_edit && queued_read && queued_read->content == "one three",
          "write_file and edit_file can share a mutation queue without nested edit deadlock");
 
-  const auto audit_edit_path = workspace / "audit-edit.txt";
+  auto const audit_edit_path = workspace / "audit-edit.txt";
   {
     std::ofstream audit_edit_file(audit_edit_path, std::ios::binary | std::ios::trunc);
     audit_edit_file << "read then edit";
   }
   std::vector<ava::tools::PermissionAuditEvent> edit_audits;
-  const ava::tools::ToolContext audit_edit_context{
+  ava::tools::ToolContext const audit_edit_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_audit_sink = [&edit_audits](const ava::tools::PermissionAuditEvent& event) -> ava::core::VoidResult {
+      .permission_audit_sink = [&edit_audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
         edit_audits.push_back(event);
         return {};
       }};
@@ -249,7 +249,7 @@ void test_file_tools() {
              edit_audits[1].operation == ava::permissions::Operation::EditFile,
          "edit_file audits read permission before edit permission");
 
-  const auto rename_failure_path = workspace / "rename-failure-target";
+  auto const rename_failure_path = workspace / "rename-failure-target";
   std::filesystem::create_directories(rename_failure_path);
   {
     std::ofstream sentinel(rename_failure_path / "sentinel.txt", std::ios::binary | std::ios::trunc);
@@ -304,14 +304,14 @@ void test_file_tools() {
   expect(external_ava_auth.action == ava::permissions::PermissionAction::Deny,
          "external ava auth reads deny before outside-workspace ask");
   std::error_code symlink_error;
-  const auto secret_link = workspace / "safe.txt";
+  auto const secret_link = workspace / "safe.txt";
   std::filesystem::create_symlink(workspace / ".env", secret_link, symlink_error);
   if (!symlink_error) {
     auto linked_secret = ava::tools::read_file(build_context, secret_link);
     expect(!linked_secret, "read_file denies symlink to secret file");
   }
 
-  const auto source_link = workspace / "docs" / "plan-link.md";
+  auto const source_link = workspace / "docs" / "plan-link.md";
   symlink_error.clear();
   std::filesystem::create_symlink(source_path, source_link, symlink_error);
   if (!symlink_error) {
@@ -322,7 +322,7 @@ void test_file_tools() {
   auto plan_doc = ava::tools::write_file(plan_context, workspace / "docs" / "plan.md", "# Plan\n");
   expect(plan_doc.has_value(), "plan mode markdown plan write is allowed");
 
-  const auto large_path = workspace / "large.txt";
+  auto const large_path = workspace / "large.txt";
   {
     std::ofstream large(large_path, std::ios::binary | std::ios::trunc);
     large << std::string(8192, 'x');
@@ -331,21 +331,21 @@ void test_file_tools() {
   expect(large_read && large_read->content.size() == 16 && large_read->total_bytes == 8192,
          "read_file bounds output while counting bytes");
 
-  const auto canceled_existing_path = workspace / "canceled-existing.txt";
+  auto const canceled_existing_path = workspace / "canceled-existing.txt";
   {
     std::ofstream canceled_file(canceled_existing_path, std::ios::binary | std::ios::trunc);
     canceled_file << "keep original";
   }
-  const auto canceled_outside_path = temp_root() / "canceled-outside.txt";
+  auto const canceled_outside_path = temp_root() / "canceled-outside.txt";
   {
     std::ofstream canceled_outside(canceled_outside_path, std::ios::binary | std::ios::trunc);
     canceled_outside << "outside original";
   }
   int canceled_file_prompts = 0;
-  const ava::tools::ToolContext canceled_file_context{
+  ava::tools::ToolContext const canceled_file_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&canceled_file_prompts](const ava::permissions::PermissionPrompt&)
+      .permission_resolver = [&canceled_file_prompts](ava::permissions::PermissionPrompt const&)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++canceled_file_prompts;
         return ava::permissions::PermissionResolution::Allow;
@@ -364,19 +364,19 @@ void test_file_tools() {
          "edit_file observes cancellation before mutating the filesystem");
 
   int write_cancel_checks = 0;
-  const ava::tools::ToolContext cancel_during_write_context{
+  ava::tools::ToolContext const cancel_during_write_context{
       .workspace_dir = workspace, .mode = ava::agent::Mode::Build, .cancel_requested = [&write_cancel_checks] {
         ++write_cancel_checks;
         return write_cancel_checks >= 8;
       }};
-  const auto canceled_large_write_path = workspace / "canceled-large-write.txt";
+  auto const canceled_large_write_path = workspace / "canceled-large-write.txt";
   auto canceled_large_write =
       ava::tools::write_file(cancel_during_write_context, canceled_large_write_path, std::string(64 * 1024, 'x'));
   expect(!canceled_large_write && canceled_large_write.error().message() == "tool canceled" &&
              !std::filesystem::exists(canceled_large_write_path) && !has_write_temp(workspace),
          "write_file cleans staged data when cancellation arrives during chunked writes");
 
-  const auto outside_path = temp_root() / "outside.txt";
+  auto const outside_path = temp_root() / "outside.txt";
   {
     std::ofstream outside_file(outside_path, std::ios::binary | std::ios::trunc);
     outside_file << "outside content";
@@ -390,7 +390,7 @@ void test_file_tools() {
   ava::tools::ToolContext allow_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&allow_prompts, &outside_path](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [&allow_prompts, &outside_path](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++allow_prompts;
         expect(prompt.operation == ava::permissions::Operation::ReadFile, "file resolver receives read operation");
@@ -405,7 +405,7 @@ void test_file_tools() {
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver =
-          [](const ava::permissions::PermissionPrompt&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
         return ava::permissions::PermissionResolution::Deny;
       }};
   auto outside_denied = ava::tools::read_file(deny_context, outside_path);
@@ -416,14 +416,14 @@ void test_file_tools() {
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver =
-          [](const ava::permissions::PermissionPrompt&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "resolver failed"));
       }};
   auto outside_failed = ava::tools::read_file(failing_context, outside_path);
   expect(!outside_failed && outside_failed.error().format().find("resolution: resolver_failed") != std::string::npos,
          "read_file fails closed when resolver fails");
 
-  const auto outside_write_path = temp_root() / "outside-write.txt";
+  auto const outside_write_path = temp_root() / "outside-write.txt";
   auto outside_write_without_resolver = ava::tools::write_file(build_context, outside_write_path, "bad");
   expect(!outside_write_without_resolver && !std::filesystem::exists(outside_write_path) &&
              outside_write_without_resolver.error().format().find("resolution: no_resolver") != std::string::npos,
@@ -433,7 +433,7 @@ void test_file_tools() {
   ava::tools::ToolContext write_deny_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&write_denials](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [&write_denials](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         write_denials.push_back(prompt);
         return ava::permissions::PermissionResolution::Deny;
@@ -448,7 +448,7 @@ void test_file_tools() {
            "write_file includes backend-generated diff preview for denied new-file mutation prompts");
   }
 
-  const auto outside_existing_write_path = temp_root() / "outside-existing-write.txt";
+  auto const outside_existing_write_path = temp_root() / "outside-existing-write.txt";
   {
     std::ofstream file(outside_existing_write_path, std::ios::binary | std::ios::trunc);
     file << "external secret";
@@ -457,7 +457,7 @@ void test_file_tools() {
   ava::tools::ToolContext existing_write_deny_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&existing_write_denials](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [&existing_write_denials](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         existing_write_denials.push_back(prompt);
         return ava::permissions::PermissionResolution::Deny;
@@ -476,7 +476,7 @@ void test_file_tools() {
   ava::tools::ToolContext write_fail_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&write_fail_prompts](const ava::permissions::PermissionPrompt&)
+      .permission_resolver = [&write_fail_prompts](ava::permissions::PermissionPrompt const&)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++write_fail_prompts;
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "resolver failed"));
@@ -497,7 +497,7 @@ void test_file_tools() {
   ava::tools::ToolContext edit_deny_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&edit_prompts](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [&edit_prompts](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++edit_prompts;
         expect(prompt.operation == ava::permissions::Operation::ReadFile,
@@ -515,7 +515,7 @@ void test_file_tools() {
   ava::tools::ToolContext edit_fail_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&edit_fail_prompts](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [&edit_fail_prompts](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++edit_fail_prompts;
         expect(prompt.operation == ava::permissions::Operation::ReadFile,
@@ -533,7 +533,7 @@ void test_file_tools() {
   ava::tools::ToolContext edit_diff_deny_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&edit_diff_denials](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [&edit_diff_denials](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         edit_diff_denials.push_back(prompt);
         if (prompt.operation == ava::permissions::Operation::ReadFile) {
@@ -560,7 +560,7 @@ void test_file_tools() {
   ava::tools::ToolContext edit_allow_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&edit_allow_prompts](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [&edit_allow_prompts](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         edit_allow_prompts.push_back(prompt.operation);
         return ava::permissions::PermissionResolution::Allow;
@@ -575,23 +575,23 @@ void test_file_tools() {
 }
 
 void test_permission_audit_persistence() {
-  const auto root = temp_root() / "permission-audit";
+  auto const root = temp_root() / "permission-audit";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
-  const auto allowed_path = workspace / "allowed.txt";
+  auto const allowed_path = workspace / "allowed.txt";
   {
     std::ofstream file(allowed_path, std::ios::binary | std::ios::trunc);
     file << "allowed";
   }
-  const auto secret_path = workspace / ".env";
+  auto const secret_path = workspace / ".env";
   {
     std::ofstream file(secret_path, std::ios::binary | std::ios::trunc);
     file << "secret";
   }
-  const auto outside_path = root / "outside.txt";
+  auto const outside_path = root / "outside.txt";
   {
     std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
     file << "outside";
@@ -599,10 +599,10 @@ void test_permission_audit_persistence() {
 
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "audit"});
-  auto sink = [&store](const ava::tools::PermissionAuditEvent& event) -> ava::core::VoidResult {
+  auto sink = [&store](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
     return append_permission_audit_for_test(store, event);
   };
-  const ava::tools::ToolContext context{
+  ava::tools::ToolContext const context{
       .workspace_dir = workspace, .mode = ava::agent::Mode::Build, .permission_audit_sink = sink};
 
   auto allowed = ava::tools::read_file(context, allowed_path);
@@ -632,10 +632,10 @@ void test_permission_audit_persistence() {
   }
 
   int prompts = 0;
-  const ava::tools::ToolContext resolving_context{
+  ava::tools::ToolContext const resolving_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&prompts](const ava::permissions::PermissionPrompt&)
+      .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const&)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++prompts;
         return ava::permissions::PermissionResolution::Allow;
@@ -670,7 +670,7 @@ void test_permission_audit_persistence() {
            "bash audit records command without path-only target field");
   }
 
-  const auto exported = ava::session::format_session_markdown(audits);
+  auto const exported = ava::session::format_session_markdown(audits);
   expect(exported.find("## Permission Decision") != std::string::npos &&
              exported.find("\"operation\":\"read\"") != std::string::npos &&
              exported.find("\"resolution_source\":\"resolver\"") != std::string::npos,
@@ -681,8 +681,8 @@ void test_search_tools() {
   std::error_code remove_error;
   std::filesystem::remove_all(temp_root(), remove_error);
 
-  const auto workspace = temp_root() / "workspace";
-  const ava::tools::ToolContext context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
+  auto const workspace = temp_root() / "workspace";
+  ava::tools::ToolContext const context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
 
   expect(ava::tools::write_file(context, workspace / "src" / "main.cpp", "int main() { return 0; }\n").has_value(),
          "search setup writes source");
@@ -720,8 +720,8 @@ void test_search_tools() {
              result_capped->truncated,
          "glob_files reports result-count truncation while counting all matches");
 
-  const auto spill_dir = temp_root() / "session" / "spill";
-  const ava::tools::ToolContext spilling_context{.workspace_dir = workspace,
+  auto const spill_dir = temp_root() / "session" / "spill";
+  ava::tools::ToolContext const spilling_context{.workspace_dir = workspace,
                                                  .spill_dir = spill_dir,
                                                  .mode = ava::agent::Mode::Build,
                                                  .current_tool_name = "glob",
@@ -731,7 +731,7 @@ void test_search_tools() {
              spilling_glob->spill_path.parent_path() == spill_dir && std::filesystem::exists(spilling_glob->spill_path),
          "glob_files writes truncated results to the configured spill directory");
   if (spilling_glob && !spilling_glob->spill_path.empty()) {
-    const auto spill_text = read_text_file_for_test(spilling_glob->spill_path);
+    auto const spill_text = read_text_file_for_test(spilling_glob->spill_path);
     expect(spill_text.find("main.cpp") != std::string::npos && spill_text.find("root.cpp") != std::string::npos,
            "glob spill file records one path per line for all matched paths before the result cap");
     expect(spilling_glob->spill_path.filename().string().find('/') == std::string::npos,
@@ -741,7 +741,7 @@ void test_search_tools() {
   auto capped = ava::tools::glob_files(context, "**/*", ava::tools::GlobOptions{.max_results = 2000, .max_visited = 1});
   expect(capped && capped->truncated, "glob_files reports traversal cap truncation");
 
-  const ava::tools::ToolContext canceled_search_context{
+  ava::tools::ToolContext const canceled_search_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .cancel_requested = [] { return true; },
@@ -760,7 +760,7 @@ void test_search_tools() {
     expect(grep->matches[0].line_number == 1, "grep_files records line numbers");
   }
 
-  const ava::tools::ToolContext spilling_grep_context{.workspace_dir = workspace,
+  ava::tools::ToolContext const spilling_grep_context{.workspace_dir = workspace,
                                                       .spill_dir = spill_dir,
                                                       .mode = ava::agent::Mode::Build,
                                                       .current_tool_name = "grep",
@@ -771,7 +771,7 @@ void test_search_tools() {
              !spilling_grep->spill_path.empty() && spilling_grep->spill_path.parent_path() == spill_dir,
          "grep_files writes truncated matches to the configured spill directory");
   if (spilling_grep && !spilling_grep->spill_path.empty()) {
-    const auto spill_text = read_text_file_for_test(spilling_grep->spill_path);
+    auto const spill_text = read_text_file_for_test(spilling_grep->spill_path);
     expect(spill_text.find("plan.md:1:hello ava") != std::string::npos &&
                spill_text.find("plan.md:2:hello again") != std::string::npos,
            "grep spill file records path, line, and content for all matched lines before the result cap");
@@ -789,7 +789,7 @@ void test_search_tools() {
   auto no_ignore_generated =
       ava::tools::grep_files(context, "hidden", "**/*", ava::tools::GrepOptions{.no_ignore = true});
   expect(no_ignore_generated && std::ranges::any_of(no_ignore_generated->matches,
-                                                    [&workspace](const ava::tools::GrepMatch& match) {
+                                                    [&workspace](ava::tools::GrepMatch const& match) {
                                                       return match.path == workspace / "build" / "ignored.txt";
                                                     }),
          "grep_files no_ignore includes hardcoded generated-directory fallback matches");
@@ -797,11 +797,11 @@ void test_search_tools() {
   auto glob_secrets = ava::tools::glob_files(context, "**/*");
   expect(glob_secrets &&
              std::ranges::none_of(glob_secrets->paths,
-                                  [](const std::filesystem::path& path) { return path.filename() == "id_rsa"; }),
+                                  [](std::filesystem::path const& path) { return path.filename() == "id_rsa"; }),
          "glob_files skips files denied by read policy");
   auto no_ignore_glob_secrets = ava::tools::glob_files(context, "**/*", ava::tools::GlobOptions{.no_ignore = true});
   expect(no_ignore_glob_secrets && std::ranges::none_of(no_ignore_glob_secrets->paths,
-                                                        [](const std::filesystem::path& path) {
+                                                        [](std::filesystem::path const& path) {
                                                           return path.filename() == ".env" ||
                                                                  path.filename() == "id_rsa";
                                                         }),
@@ -813,21 +813,21 @@ void test_search_tools() {
   expect(no_ignore_secret && no_ignore_secret->matches.empty(),
          "grep_files no_ignore still skips files denied by read policy");
 
-  const auto outside_search_path = temp_root() / "outside-search.txt";
+  auto const outside_search_path = temp_root() / "outside-search.txt";
   {
     std::ofstream outside_file(outside_search_path, std::ios::binary | std::ios::trunc);
     outside_file << "outside hello\n";
   }
   std::error_code symlink_error;
-  const auto outside_search_link = workspace / "outside-link.txt";
+  auto const outside_search_link = workspace / "outside-link.txt";
   std::filesystem::create_symlink(outside_search_path, outside_search_link, symlink_error);
   if (!symlink_error) {
     int search_prompts = 0;
     std::vector<ava::tools::PermissionAuditEvent> search_audits;
-    const ava::tools::ToolContext resolving_search_context{
+    ava::tools::ToolContext const resolving_search_context{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .permission_resolver = [&search_prompts, &outside_search_link](const ava::permissions::PermissionPrompt& prompt)
+        .permission_resolver = [&search_prompts, &outside_search_link](ava::permissions::PermissionPrompt const& prompt)
             -> ava::core::Result<ava::permissions::PermissionResolution> {
           ++search_prompts;
           expect(prompt.operation == ava::permissions::Operation::ReadFile,
@@ -836,13 +836,13 @@ void test_search_tools() {
           return ava::permissions::PermissionResolution::Allow;
         },
         .permission_audit_sink =
-            [&search_audits](const ava::tools::PermissionAuditEvent& event) -> ava::core::VoidResult {
+            [&search_audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
           search_audits.push_back(event);
           return {};
         }};
     auto resolved_glob = ava::tools::glob_files(resolving_search_context, "**/*");
-    const bool resolved_includes_link =
-        resolved_glob && std::ranges::any_of(resolved_glob->paths, [&outside_search_link](const auto& path) {
+    bool const resolved_includes_link =
+        resolved_glob && std::ranges::any_of(resolved_glob->paths, [&outside_search_link](auto const& path) {
           return path == outside_search_link;
         });
     expect(resolved_includes_link && search_prompts == 1,
@@ -855,37 +855,37 @@ void test_search_tools() {
            "glob_files audits the search root and ask resolver outcome without per-file allow audits");
 
     int denied_search_prompts = 0;
-    const ava::tools::ToolContext denying_search_context{
+    ava::tools::ToolContext const denying_search_context{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .permission_resolver = [&denied_search_prompts](const ava::permissions::PermissionPrompt&)
+        .permission_resolver = [&denied_search_prompts](ava::permissions::PermissionPrompt const&)
             -> ava::core::Result<ava::permissions::PermissionResolution> {
           ++denied_search_prompts;
           return ava::permissions::PermissionResolution::Deny;
         }};
     auto denied_glob = ava::tools::glob_files(denying_search_context, "**/*");
-    const bool denied_excludes_link =
-        denied_glob && std::ranges::none_of(denied_glob->paths, [&outside_search_link](const auto& path) {
+    bool const denied_excludes_link =
+        denied_glob && std::ranges::none_of(denied_glob->paths, [&outside_search_link](auto const& path) {
           return path == outside_search_link;
         });
     expect(denied_excludes_link && denied_search_prompts == 1, "glob_files keeps resolver-denied ask matches excluded");
 
     int failing_search_prompts = 0;
-    const ava::tools::ToolContext failing_search_context{
+    ava::tools::ToolContext const failing_search_context{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .permission_resolver = [&failing_search_prompts](const ava::permissions::PermissionPrompt&)
+        .permission_resolver = [&failing_search_prompts](ava::permissions::PermissionPrompt const&)
             -> ava::core::Result<ava::permissions::PermissionResolution> {
           ++failing_search_prompts;
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "search resolver failed"));
         }};
     auto failing_glob = ava::tools::glob_files(failing_search_context, "**/*");
-    const bool failing_skips_link =
-        failing_glob && std::ranges::none_of(failing_glob->paths, [&outside_search_link](const auto& path) {
+    bool const failing_skips_link =
+        failing_glob && std::ranges::none_of(failing_glob->paths, [&outside_search_link](auto const& path) {
           return path == outside_search_link;
         });
-    const bool failing_keeps_readable_match =
-        failing_glob && std::ranges::any_of(failing_glob->paths, [&workspace](const auto& path) {
+    bool const failing_keeps_readable_match =
+        failing_glob && std::ranges::any_of(failing_glob->paths, [&workspace](auto const& path) {
           return path == workspace / "docs" / "plan.md";
         });
     expect(failing_skips_link && failing_keeps_readable_match && failing_search_prompts == 1,
@@ -917,7 +917,7 @@ void test_search_tools() {
     std::ofstream binary_file(workspace / "early-match-binary.bin", std::ios::binary | std::ios::trunc);
     binary_file << "hello before binary marker\n" << '\0' << "binary tail\n";
   }
-  const ava::tools::ToolContext binary_spill_context{.workspace_dir = workspace,
+  ava::tools::ToolContext const binary_spill_context{.workspace_dir = workspace,
                                                      .spill_dir = spill_dir,
                                                      .mode = ava::agent::Mode::Build,
                                                      .current_tool_name = "grep",
@@ -927,18 +927,18 @@ void test_search_tools() {
   expect(binary_spill_grep && binary_spill_grep->truncated && !binary_spill_grep->spill_path.empty(),
          "grep_files writes a spill file for truncated non-binary matches");
   if (binary_spill_grep && !binary_spill_grep->spill_path.empty()) {
-    const auto spill_text = read_text_file_for_test(binary_spill_grep->spill_path);
+    auto const spill_text = read_text_file_for_test(binary_spill_grep->spill_path);
     expect(spill_text.find("hello before binary marker") == std::string::npos,
            "grep spill files exclude matches from files later classified as binary");
   }
 }
 
 void test_search_gitignore_rules() {
-  const auto root = temp_root() / "search-ignore";
+  auto const root = temp_root() / "search-ignore";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const ava::tools::ToolContext context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
+  auto const workspace = root / "workspace";
+  ava::tools::ToolContext const context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
 
   expect(ava::tools::write_file(context, workspace / ".gitignore",
                                 "*.log\n"
@@ -993,8 +993,8 @@ void test_search_gitignore_rules() {
   expect(ava::tools::write_file(context, workspace / "zzz_late.txt", "visible late file\n").has_value(),
          "ignore setup writes a late visible file");
 
-  const auto has_path = [](const ava::tools::GlobResult& result, const std::filesystem::path& path) {
-    return std::ranges::any_of(result.paths, [&path](const auto& candidate) { return candidate == path; });
+  auto const has_path = [](ava::tools::GlobResult const& result, std::filesystem::path const& path) {
+    return std::ranges::any_of(result.paths, [&path](auto const& candidate) { return candidate == path; });
   };
 
   auto default_glob = ava::tools::glob_files(context, "**/*");
@@ -1037,7 +1037,7 @@ void test_search_gitignore_rules() {
   expect(pruned_glob && !pruned_glob->truncated && has_path(*pruned_glob, workspace / "zzz_late.txt"),
          "glob_files prunes ignored directories before they exhaust the traversal budget");
 
-  const auto external_ignore = root / "external-ignore";
+  auto const external_ignore = root / "external-ignore";
   {
     std::ofstream file(external_ignore, std::ios::binary | std::ios::trunc);
     file << "*.txt\n";
@@ -1057,7 +1057,7 @@ void test_search_gitignore_rules() {
 
   auto default_grep = ava::tools::grep_files(context, "hidden", "**/*");
   expect(default_grep && std::ranges::none_of(default_grep->matches,
-                                              [&workspace](const ava::tools::GrepMatch& match) {
+                                              [&workspace](ava::tools::GrepMatch const& match) {
                                                 return match.path == workspace / "app.log" ||
                                                        match.path == workspace / "cache" / "data.txt" ||
                                                        match.path == workspace / "logs" / "deep" / "trace.tmp" ||
@@ -1069,9 +1069,9 @@ void test_search_gitignore_rules() {
   expect(no_ignore_grep &&
              std::ranges::any_of(
                  no_ignore_grep->matches,
-                 [&workspace](const ava::tools::GrepMatch& match) { return match.path == workspace / "app.log"; }) &&
+                 [&workspace](ava::tools::GrepMatch const& match) { return match.path == workspace / "app.log"; }) &&
              std::ranges::any_of(no_ignore_grep->matches,
-                                 [&workspace](const ava::tools::GrepMatch& match) {
+                                 [&workspace](ava::tools::GrepMatch const& match) {
                                    return match.path == workspace / "src" / "local.txt";
                                  }),
          "grep_files no_ignore opt-out searches files ignored by .gitignore");
@@ -1082,7 +1082,7 @@ void test_bash_tool() {
   std::filesystem::remove_all(temp_root(), remove_error);
   std::filesystem::create_directories(temp_root());
 
-  const ava::tools::ToolContext context{.workspace_dir = temp_root(), .mode = ava::agent::Mode::Build};
+  ava::tools::ToolContext const context{.workspace_dir = temp_root(), .mode = ava::agent::Mode::Build};
 
   auto pwd = ava::tools::run_bash(context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   expect(pwd.has_value(), "run_bash allows safe command");
@@ -1098,10 +1098,10 @@ void test_bash_tool() {
          "run_bash bounds retained output while reporting total bytes");
 
   std::vector<ava::tools::ToolProgressEvent> bash_progress;
-  const ava::tools::ToolContext progress_context{
+  ava::tools::ToolContext const progress_context{
       .workspace_dir = temp_root(),
       .mode = ava::agent::Mode::Build,
-      .progress_sink = [&bash_progress](const ava::tools::ToolProgressEvent& event) -> ava::core::VoidResult {
+      .progress_sink = [&bash_progress](ava::tools::ToolProgressEvent const& event) -> ava::core::VoidResult {
         bash_progress.push_back(event);
         return {};
       },
@@ -1110,19 +1110,19 @@ void test_bash_tool() {
   auto progress_pwd = ava::tools::run_bash(progress_context, "pwd",
                                            ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   expect(progress_pwd && std::ranges::any_of(bash_progress,
-                                             [](const ava::tools::ToolProgressEvent& event) {
+                                             [](ava::tools::ToolProgressEvent const& event) {
                                                return event.call_id == "call_progress" && event.tool_name == "bash" &&
                                                       event.status == "completed";
                                              }),
          "run_bash emits bounded progress events with current call metadata");
 
-  const auto bash_spill_dir = temp_root() / "session" / "bash-spill";
-  const ava::tools::ToolContext bash_spill_context{
+  auto const bash_spill_dir = temp_root() / "session" / "bash-spill";
+  ava::tools::ToolContext const bash_spill_context{
       .workspace_dir = temp_root(),
       .spill_dir = bash_spill_dir,
       .mode = ava::agent::Mode::Build,
       .permission_resolver =
-          [](const ava::permissions::PermissionPrompt&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
         return ava::permissions::PermissionResolution::Allow;
       },
       .current_tool_name = "bash",
@@ -1146,14 +1146,14 @@ void test_bash_tool() {
              std::filesystem::file_size(capped_spill->spill_path) == ava::tools::kMaxSpillFileBytes,
          "run_bash caps individual spill files and reports spill truncation");
 
-  const auto hijack_path = temp_root() / "pwd";
+  auto const hijack_path = temp_root() / "pwd";
   {
     std::ofstream hijack(hijack_path, std::ios::binary | std::ios::trunc);
     hijack << "#!/bin/sh\nprintf hijacked-path\n";
   }
   expect(chmod(hijack_path.c_str(), 0700) == 0, "test can create executable PATH hijack fixture");
   {
-    const ScopedEnvVar path_guard("PATH", temp_root().string() + ":.:relative");
+    ScopedEnvVar const path_guard("PATH", temp_root().string() + ":.:relative");
     auto sanitized_pwd =
         ava::tools::run_bash(context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
     expect(sanitized_pwd && sanitized_pwd->exit_code == 0 &&
@@ -1182,7 +1182,7 @@ void test_bash_tool() {
   expect(timeout && timeout->timed_out, "run_bash times out long command");
 
   int cancel_checks = 0;
-  const ava::tools::ToolContext cancel_context{
+  ava::tools::ToolContext const cancel_context{
       .workspace_dir = temp_root(), .mode = ava::agent::Mode::Build, .cancel_requested = [&cancel_checks] {
         ++cancel_checks;
         return cancel_checks >= 3;
@@ -1201,7 +1201,7 @@ void test_bash_tool() {
   ava::tools::ToolContext allow_context{
       .workspace_dir = temp_root(),
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&bash_prompts](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [&bash_prompts](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++bash_prompts;
         expect(prompt.operation == ava::permissions::Operation::RunCommand, "bash resolver receives run operation");
@@ -1216,7 +1216,7 @@ void test_bash_tool() {
       .workspace_dir = temp_root(),
       .mode = ava::agent::Mode::Build,
       .permission_resolver =
-          [](const ava::permissions::PermissionPrompt&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
         return ava::permissions::PermissionResolution::Deny;
       }};
   auto ask_denied = ava::tools::run_bash(deny_context, "true");
@@ -1227,7 +1227,7 @@ void test_bash_tool() {
       .workspace_dir = temp_root(),
       .mode = ava::agent::Mode::Build,
       .permission_resolver =
-          [](const ava::permissions::PermissionPrompt&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "resolver failed"));
       }};
   auto ask_failed = ava::tools::run_bash(failing_context, "true");
@@ -1239,16 +1239,16 @@ void test_webfetch_tool() {
   std::error_code remove_error;
   std::filesystem::remove_all(temp_root(), remove_error);
   std::filesystem::create_directories(temp_root());
-  const auto workspace = temp_root() / "webfetch-workspace";
+  auto const workspace = temp_root() / "webfetch-workspace";
   std::filesystem::create_directories(workspace);
 
   StaticTransport transport(ava::provider::HttpResponse{
       .status_code = 200, .headers = {{"content-type", "text/plain; charset=utf-8"}}, .body = "abcdef"});
   int prompts = 0;
-  const ava::tools::ToolContext context{
+  ava::tools::ToolContext const context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [&prompts](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         ++prompts;
         expect(prompt.operation == ava::permissions::Operation::NetworkFetch,
@@ -1289,10 +1289,10 @@ void test_webfetch_tool() {
 
   StaticTransport digit_domain_transport(
       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "domain ok"});
-  const ava::tools::ToolContext permissive_network_context{
+  ava::tools::ToolContext const permissive_network_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [](const ava::permissions::PermissionPrompt& prompt)
+      .permission_resolver = [](ava::permissions::PermissionPrompt const& prompt)
           -> ava::core::Result<ava::permissions::PermissionResolution> {
         expect(prompt.operation == ava::permissions::Operation::NetworkFetch,
                "digit-leading domain still requests network permission");
@@ -1303,7 +1303,7 @@ void test_webfetch_tool() {
   expect(digit_domain && digit_domain->content == "domain ok",
          "webfetch allows digit-leading DNS names that are not IP aliases");
 
-  const ava::tools::ToolContext no_resolver_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
+  ava::tools::ToolContext const no_resolver_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
   auto no_resolver = ava::tools::webfetch(no_resolver_context, "https://example.com/page",
                                           ava::tools::WebFetchOptions{.transport = &unused_transport});
   expect(!no_resolver && no_resolver.error().format().find("no_resolver") != std::string::npos &&
@@ -1319,11 +1319,11 @@ void test_webfetch_tool() {
 
   CancelAwareTransport cancel_aware_transport;
   int cancel_checks = 0;
-  const ava::tools::ToolContext cancel_during_transport_context{
+  ava::tools::ToolContext const cancel_during_transport_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver =
-          [](const ava::permissions::PermissionPrompt&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
         return ava::permissions::PermissionResolution::Allow;
       },
       .cancel_requested =

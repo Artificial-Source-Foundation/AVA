@@ -36,21 +36,21 @@ struct ProviderProfile {
   bool supports_oauth = false;
 };
 
-[[nodiscard]] const ProviderProfile& anthropic_provider_profile();
-[[nodiscard]] const ProviderProfile& kimi_provider_profile();
-[[nodiscard]] const ProviderProfile& moonshot_provider_profile();
-[[nodiscard]] const ProviderProfile& openai_provider_profile();
-[[nodiscard]] const ProviderProfile& openrouter_provider_profile();
-[[nodiscard]] const ProviderProfile& vercel_provider_profile();
+[[nodiscard]] ProviderProfile const& anthropic_provider_profile();
+[[nodiscard]] ProviderProfile const& kimi_provider_profile();
+[[nodiscard]] ProviderProfile const& moonshot_provider_profile();
+[[nodiscard]] ProviderProfile const& openai_provider_profile();
+[[nodiscard]] ProviderProfile const& openrouter_provider_profile();
+[[nodiscard]] ProviderProfile const& vercel_provider_profile();
 
 [[nodiscard]] std::vector<ProviderProfile> builtin_provider_profiles();
 [[nodiscard]] std::optional<ProviderProfile> find_provider_profile(std::string_view provider_id);
-[[nodiscard]] std::optional<ProviderProfile> provider_profile_for_model(const ModelInfo& model);
-[[nodiscard]] std::optional<ProviderProfile> reasoning_provider_profile_for_model(const ModelInfo& model);
+[[nodiscard]] std::optional<ProviderProfile> provider_profile_for_model(ModelInfo const& model);
+[[nodiscard]] std::optional<ProviderProfile> reasoning_provider_profile_for_model(ModelInfo const& model);
 [[nodiscard]] std::string provider_display_name(std::string_view provider_id);
-[[nodiscard]] bool provider_accepts_reasoning_format(const ModelInfo& model, std::string_view format);
+[[nodiscard]] bool provider_accepts_reasoning_format(ModelInfo const& model, std::string_view format);
 
-[[nodiscard]] ava::core::VoidResult validate_reasoning_request(const ModelInfo& model, std::string_view level,
+[[nodiscard]] ava::core::VoidResult validate_reasoning_request(ModelInfo const& model, std::string_view level,
                                                                std::optional<long long> budget_tokens,
                                                                std::string_view display);
 

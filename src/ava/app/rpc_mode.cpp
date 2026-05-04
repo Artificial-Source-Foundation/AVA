@@ -22,8 +22,8 @@
 
 namespace ava::app {
 
-ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOptions& open_options,
-                                   const ava::provider::Provider& provider, ava::provider::Transport& transport,
+ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options,
+                                   ava::provider::Provider const& provider, ava::provider::Transport& transport,
                                    ava::provider::Transport& auth_transport, RuntimeRunOptions runtime_options,
                                    std::istream& in, std::ostream& out) {
   rpc::RpcOutput output(out);
@@ -34,7 +34,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
   if (!runtime_options.permission_resolver) {
     runtime_options.permission_resolver = build_headless_permission_resolver(HeadlessPermissionPolicyOptions{});
   }
-  const std::string injected_provider_id = session.model.provider_id;
+  std::string const injected_provider_id = session.model.provider_id;
 
   auto reap_finished_prompt = [&] {
     if (prompt_worker && !rpc::active_run(run_state)) {
@@ -43,15 +43,15 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
   };
 
   auto write_state_response = [&](std::string_view id) -> ava::core::VoidResult {
-    const bool canceled = rpc::cancel_requested(run_state);
+    bool const canceled = rpc::cancel_requested(run_state);
     std::lock_guard lock(session_mutex);
     return rpc::write_success(output, id, rpc::state_result_json(session, canceled));
   };
 
-  auto write_follow_up_errors = [&](const std::vector<rpc::QueuedRpcMessage>& follow_ups,
+  auto write_follow_up_errors = [&](std::vector<rpc::QueuedRpcMessage> const& follow_ups,
                                     std::string_view reason) -> ava::core::VoidResult {
-    for (const auto& queued : follow_ups) {
-      const auto error = reason == "canceled" ? rpc::canceled_error() : rpc::skipped_follow_up_error(reason);
+    for (auto const& queued : follow_ups) {
+      auto const error = reason == "canceled" ? rpc::canceled_error() : rpc::skipped_follow_up_error(reason);
       if (auto written = rpc::write_error(output, queued.request_id, error); !written) return written;
     }
     return {};
@@ -553,8 +553,8 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
       if (command->type != "compact") lock.lock();
       auto summary_generator =
           command->type == "compact"
-              ? CompactionSummaryGenerator([&](const std::vector<ava::session::SessionEntry>& entries,
-                                               const ava::session::CompactionConfig& config,
+              ? CompactionSummaryGenerator([&](std::vector<ava::session::SessionEntry> const& entries,
+                                               ava::session::CompactionConfig const& config,
                                                std::string_view instructions, std::size_t estimated_tokens) {
                   return generate_compaction_summary(session, entries, config, instructions, estimated_tokens,
                                                      compact_provider->get(), transport, *compact_runtime_options);
@@ -600,8 +600,8 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
       }
       rpc::set_active_run(run_state, true, command->id);
       auto prompt_base_options = runtime_options;
-      const auto prompt_id = command->id;
-      const auto prompt_message = *command->message;
+      auto const prompt_id = command->id;
+      auto const prompt_message = *command->message;
       prompt_worker.emplace([&, prompt_id, prompt_message, prompt_base_options = std::move(prompt_base_options),
                              paths = std::move(paths)](std::stop_token stop_token) mutable {
         auto finish_with_queue_cleanup = [&](std::string_view reason) {
@@ -630,7 +630,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
           return;
         }
         auto policy_permission_resolver = prompt_options->permission_resolver;
-        auto run_one_prompt = [&](const std::string& request_id, const std::string& message) -> ava::core::VoidResult {
+        auto run_one_prompt = [&](std::string const& request_id, std::string const& message) -> ava::core::VoidResult {
           rpc::set_active_request_id(run_state, request_id);
           prompt_options->cancel_requested = [&run_state, stop_token] {
             return stop_token.stop_requested() || rpc::cancel_requested(run_state);
@@ -644,7 +644,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
             auto queued = rpc::take_queued_steering_messages(run_state, request_id);
             std::vector<std::string> messages;
             messages.reserve(queued.size());
-            for (const auto& item : queued) {
+            for (auto const& item : queued) {
               if (auto written = rpc::write_queue_event(output, session, session_mutex, "steer_applied", item);
                   !written) {
                 return std::unexpected(std::move(written.error()));
@@ -716,7 +716,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
           }
         }
 
-        const bool canceled = rpc::cancel_requested(run_state);
+        bool const canceled = rpc::cancel_requested(run_state);
         auto cleared = rpc::deactivate_and_clear_queued_messages(run_state);
         if (auto written = rpc::write_skipped_queue_events(output, session, session_mutex, cleared,
                                                            canceled ? "canceled" : "run_completed_before_safe_point");
@@ -752,13 +752,13 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOpt
   return {};
 }
 
-ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOptions& open_options,
-                                   const ava::provider::Provider& provider, ava::provider::Transport& transport,
+ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options,
+                                   ava::provider::Provider const& provider, ava::provider::Transport& transport,
                                    RuntimeRunOptions runtime_options, std::istream& in, std::ostream& out) {
   return run_rpc_loop(session, open_options, provider, transport, transport, std::move(runtime_options), in, out);
 }
 
-int run_rpc_mode(const RpcModeOptions& options, std::istream& in, std::ostream& out, std::ostream& err) {
+int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err) {
   auto session = open_runtime_session(options.open_options);
   if (!session) {
     err << session.error().format() << '\n';

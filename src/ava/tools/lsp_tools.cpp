@@ -5,7 +5,7 @@
 
 namespace ava::tools {
 
-ava::core::Result<LspDiagnosticsResult> lsp_diagnostics(const ToolContext& context, const std::filesystem::path& path) {
+ava::core::Result<LspDiagnosticsResult> lsp_diagnostics(ToolContext const& context, std::filesystem::path const& path) {
   if (context.cancel_requested && context.cancel_requested()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled"));
   }

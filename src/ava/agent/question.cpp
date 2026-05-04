@@ -23,8 +23,8 @@ ava::core::Error argument_error(std::string_view tool_name, std::string_view arg
 
 ava::core::VoidResult reject_control_arg(std::string_view value, std::string_view tool_name,
                                          std::string_view argument) {
-  for (const char ch : value) {
-    const auto byte = static_cast<unsigned char>(ch);
+  for (char const ch : value) {
+    auto const byte = static_cast<unsigned char>(ch);
     if (byte < 0x20 || byte == 0x7F) {
       return std::unexpected(argument_error(tool_name, argument, "tool argument contains a forbidden control byte"));
     }
@@ -65,10 +65,10 @@ void append_utf8(std::string& out, int codepoint) {
 
 std::optional<int> parse_hex_code_unit(std::string_view text, std::size_t hex_start) {
   if (hex_start + 3 >= text.size()) return std::nullopt;
-  const int a = hex_value(text[hex_start]);
-  const int b = hex_value(text[hex_start + 1]);
-  const int c = hex_value(text[hex_start + 2]);
-  const int d = hex_value(text[hex_start + 3]);
+  int const a = hex_value(text[hex_start]);
+  int const b = hex_value(text[hex_start + 1]);
+  int const c = hex_value(text[hex_start + 2]);
+  int const d = hex_value(text[hex_start + 3]);
   if (a < 0 || b < 0 || c < 0 || d < 0) return std::nullopt;
   return (a << 12) | (b << 8) | (c << 4) | d;
 }
@@ -82,7 +82,7 @@ std::optional<std::string> parse_string_token(std::string_view text, std::size_t
   std::string result;
   bool escaped = false;
   for (std::size_t cursor = index + 1; cursor < text.size(); ++cursor) {
-    const char ch = text[cursor];
+    char const ch = text[cursor];
     if (escaped) {
       switch (ch) {
         case '"':
@@ -110,11 +110,11 @@ std::optional<std::string> parse_string_token(std::string_view text, std::size_t
           result.push_back('\f');
           break;
         case 'u': {
-          const auto code_unit = parse_hex_code_unit(text, cursor + 1);
+          auto const code_unit = parse_hex_code_unit(text, cursor + 1);
           if (!code_unit) return std::nullopt;
           if (is_high_surrogate(*code_unit)) {
             if (cursor + 10 < text.size() && text[cursor + 5] == '\\' && text[cursor + 6] == 'u') {
-              const auto low = parse_hex_code_unit(text, cursor + 7);
+              auto const low = parse_hex_code_unit(text, cursor + 7);
               if (low && is_low_surrogate(*low)) {
                 append_utf8(result, ((*code_unit - 0xD800) << 10) + (*low - 0xDC00) + 0x10000);
                 cursor += 10;
@@ -160,7 +160,7 @@ std::optional<std::string> parse_balanced(std::string_view text, std::size_t sta
   bool escaped = false;
   int depth = 0;
   for (std::size_t index = start; index < text.size(); ++index) {
-    const char ch = text[index];
+    char const ch = text[index];
     if (escaped) {
       escaped = false;
       continue;
@@ -202,9 +202,9 @@ ava::core::Result<std::string> optional_text_field(std::string_view arguments, s
 
 ava::core::Result<std::optional<bool>> optional_bool_field(std::string_view arguments, std::string_view field,
                                                            std::string_view tool_name) {
-  const auto start = ava::core::json::field_value_start(arguments, field);
+  auto const start = ava::core::json::field_value_start(arguments, field);
   if (!start) return std::optional<bool>{};
-  const auto is_value_boundary = [&arguments](std::size_t index) {
+  auto const is_value_boundary = [&arguments](std::size_t index) {
     return index >= arguments.size() || std::isspace(static_cast<unsigned char>(arguments[index])) != 0 ||
            arguments[index] == ',' || arguments[index] == '}' || arguments[index] == ']';
   };
@@ -214,25 +214,25 @@ ava::core::Result<std::optional<bool>> optional_bool_field(std::string_view argu
 }
 
 ava::core::Result<QuestionOption> parse_option_object(std::string_view object, std::string_view tool_name) {
-  const auto value = ava::core::json::string_field(object, "value");
-  const auto label = ava::core::json::string_field(object, "label");
+  auto const value = ava::core::json::string_field(object, "value");
+  auto const label = ava::core::json::string_field(object, "label");
   if (!value && !label) {
     return std::unexpected(argument_error(tool_name, "options", "question option requires a value or label"));
   }
-  const auto option_value = value.value_or(*label);
-  const auto option_label = label.value_or(option_value);
+  auto const option_value = value.value_or(*label);
+  auto const option_label = label.value_or(option_value);
   if (auto safe = reject_control_arg(option_value, tool_name, "options"); !safe) return std::unexpected(safe.error());
   if (auto safe = reject_control_arg(option_label, tool_name, "options"); !safe) return std::unexpected(safe.error());
   return QuestionOption{.value = option_value, .label = option_label};
 }
 
 ava::core::Result<std::vector<QuestionOption>> parse_options(std::string_view arguments, std::string_view tool_name) {
-  const auto start = ava::core::json::field_value_start(arguments, "options");
+  auto const start = ava::core::json::field_value_start(arguments, "options");
   if (!start) return std::vector<QuestionOption>{};
   if (*start >= arguments.size() || arguments[*start] != '[') {
     return std::unexpected(argument_error(tool_name, "options", "question options must be an array"));
   }
-  const auto array = parse_balanced(arguments, *start, '[', ']');
+  auto const array = parse_balanced(arguments, *start, '[', ']');
   if (!array) return std::unexpected(argument_error(tool_name, "options", "question options array is malformed"));
 
   std::vector<QuestionOption> options;
@@ -250,7 +250,7 @@ ava::core::Result<std::vector<QuestionOption>> parse_options(std::string_view ar
       if (auto safe = reject_control_arg(*label, tool_name, "options"); !safe) return std::unexpected(safe.error());
       options.push_back(QuestionOption{.value = *label, .label = *label});
     } else if ((*array)[index] == '{') {
-      const auto object = parse_balanced(*array, index, '{', '}');
+      auto const object = parse_balanced(*array, index, '{', '}');
       if (!object) return std::unexpected(argument_error(tool_name, "options", "question option object is malformed"));
       auto option = parse_option_object(*object, tool_name);
       if (!option) return std::unexpected(option.error());
@@ -309,7 +309,7 @@ ava::core::Result<QuestionPrompt> parse_question_prompt(std::string_view argumen
                         .secret = false};
 }
 
-std::string serialize_question_answer_result(const QuestionPrompt& prompt, const QuestionAnswer& answer) {
+std::string serialize_question_answer_result(QuestionPrompt const& prompt, QuestionAnswer const& answer) {
   std::string text = "{\"tool\":\"question\",\"ok\":true,\"question\":\"" + ava::core::json::escape(prompt.question) +
                      "\",\"multiple\":" + json_bool(prompt.multiple) +
                      ",\"allow_custom\":" + json_bool(prompt.allow_custom) + ",\"answer\":{\"selected_options\":[";

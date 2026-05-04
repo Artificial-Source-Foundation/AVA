@@ -47,7 +47,7 @@ class JsonValidator {
   [[nodiscard]] bool parse_value() {
     skip_ws();
     if (offset_ >= value_.size()) return false;
-    const char ch = value_[offset_];
+    char const ch = value_[offset_];
     if (ch == '"') return parse_string();
     if (ch == '{') return parse_object();
     if (ch == '[') return parse_array();
@@ -89,12 +89,12 @@ class JsonValidator {
   [[nodiscard]] bool parse_string() {
     if (!consume('"')) return false;
     while (offset_ < value_.size()) {
-      const char ch = value_[offset_++];
+      char const ch = value_[offset_++];
       if (static_cast<unsigned char>(ch) < 0x20) return false;
       if (ch == '"') return true;
       if (ch != '\\') continue;
       if (offset_ >= value_.size()) return false;
-      const char escaped = value_[offset_++];
+      char const escaped = value_[offset_++];
       if (escaped == '"' || escaped == '\\' || escaped == '/' || escaped == 'b' || escaped == 'f' || escaped == 'n' ||
           escaped == 'r' || escaped == 't') {
         continue;
@@ -134,7 +134,7 @@ class JsonValidator {
 };
 
 void redact_json_string_value(std::string& snippet, std::string_view key) {
-  const std::string needle = "\"" + std::string(key) + "\"";
+  std::string const needle = "\"" + std::string(key) + "\"";
   std::size_t position = 0;
   while ((position = snippet.find(needle, position)) != std::string::npos) {
     auto value = position + needle.size();
@@ -152,7 +152,7 @@ void redact_json_string_value(std::string& snippet, std::string_view key) {
     bool escaped = false;
     bool redacted = false;
     for (std::size_t end = value + 1; end < snippet.size(); ++end) {
-      const char ch = snippet[end];
+      char const ch = snippet[end];
       if (escaped) {
         escaped = false;
         continue;
@@ -185,7 +185,7 @@ bool is_json_object_shape(std::string_view value) {
   int depth = 0;
   std::size_t end = std::string_view::npos;
   for (std::size_t index = 0; index < value.size(); ++index) {
-    const char ch = value[index];
+    char const ch = value[index];
     if (escaped) {
       escaped = false;
       continue;
@@ -211,7 +211,7 @@ bool is_json_object_shape(std::string_view value) {
   }
   if (in_string || depth != 0 || end == std::string_view::npos) return false;
   if (!trim(value.substr(end + 1)).empty()) return false;
-  const auto first_member = trim(value.substr(1, end - 1));
+  auto const first_member = trim(value.substr(1, end - 1));
   return first_member.empty() || first_member.front() == '"';
 }
 
@@ -221,7 +221,7 @@ std::string sanitized_body_snippet(std::string_view body, std::initializer_list<
   constexpr std::size_t kMaxSnippet = 256;
   constexpr std::size_t kMaxSanitizeBytes = 4096;
   std::string snippet(body.substr(0, std::min(body.size(), kMaxSanitizeBytes)));
-  for (const std::string_view secret_key : secret_keys) {
+  for (std::string_view const secret_key : secret_keys) {
     redact_json_string_value(snippet, secret_key);
   }
   std::size_t bearer = 0;

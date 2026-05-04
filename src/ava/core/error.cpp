@@ -8,9 +8,9 @@ Error::Error(ErrorCategory category, std::string message) : category_(category),
 
 ErrorCategory Error::category() const noexcept { return category_; }
 
-const std::string& Error::message() const noexcept { return message_; }
+std::string const& Error::message() const noexcept { return message_; }
 
-const std::vector<ErrorContext>& Error::context() const noexcept { return context_; }
+std::vector<ErrorContext> const& Error::context() const noexcept { return context_; }
 
 Error& Error::with_context(std::string key, std::string value) {
   context_.push_back(ErrorContext{.key = std::move(key), .value = std::move(value)});
@@ -20,7 +20,7 @@ Error& Error::with_context(std::string key, std::string value) {
 std::string Error::format() const {
   std::ostringstream out;
   out << to_string(category_) << ": " << message_;
-  for (const auto& item : context_) {
+  for (auto const& item : context_) {
     out << "\n  " << item.key << ": " << item.value;
   }
   return out.str();

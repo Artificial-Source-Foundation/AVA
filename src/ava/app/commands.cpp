@@ -35,7 +35,7 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
   CommandResult result;
   if (request.command.empty()) return result;
 
-  const auto* entry = find_command_catalog_entry(request.command);
+  auto const* entry = find_command_catalog_entry(request.command);
   if (!entry) return result;
   request.command = normalize_command_line(request.command, *entry);
 

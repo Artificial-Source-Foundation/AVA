@@ -34,10 +34,10 @@ void append_utf8(std::string& out, int codepoint) {
 
 std::optional<int> parse_hex_code_unit(std::string_view text, std::size_t hex_start) {
   if (hex_start + 3 >= text.size()) return std::nullopt;
-  const int a = hex_value(text[hex_start]);
-  const int b = hex_value(text[hex_start + 1]);
-  const int c = hex_value(text[hex_start + 2]);
-  const int d = hex_value(text[hex_start + 3]);
+  int const a = hex_value(text[hex_start]);
+  int const b = hex_value(text[hex_start + 1]);
+  int const c = hex_value(text[hex_start + 2]);
+  int const d = hex_value(text[hex_start + 3]);
   if (a < 0 || b < 0 || c < 0 || d < 0) return std::nullopt;
   return (a << 12) | (b << 8) | (c << 4) | d;
 }
@@ -81,7 +81,7 @@ class JsonValidator {
   [[nodiscard]] bool parse_value() {
     skip_ws();
     if (offset_ >= value_.size()) return false;
-    const char ch = value_[offset_];
+    char const ch = value_[offset_];
     if (ch == '"') return parse_string();
     if (ch == '{') return parse_object();
     if (ch == '[') return parse_array();
@@ -123,12 +123,12 @@ class JsonValidator {
   [[nodiscard]] bool parse_string() {
     if (!consume('"')) return false;
     while (offset_ < value_.size()) {
-      const char ch = value_[offset_++];
+      char const ch = value_[offset_++];
       if (static_cast<unsigned char>(ch) < 0x20) return false;
       if (ch == '"') return true;
       if (ch != '\\') continue;
       if (offset_ >= value_.size()) return false;
-      const char escaped = value_[offset_++];
+      char const escaped = value_[offset_++];
       if (escaped == '"' || escaped == '\\' || escaped == '/' || escaped == 'b' || escaped == 'f' || escaped == 'n' ||
           escaped == 'r' || escaped == 't') {
         continue;
@@ -172,7 +172,7 @@ std::optional<std::string> parse_string_at(std::string_view text, std::size_t st
   std::string result;
   bool escaped = false;
   for (std::size_t index = start + 1; index < text.size(); ++index) {
-    const char ch = text[index];
+    char const ch = text[index];
     if (escaped) {
       switch (ch) {
         case '"':
@@ -200,10 +200,10 @@ std::optional<std::string> parse_string_at(std::string_view text, std::size_t st
           result.push_back('\f');
           break;
         case 'u':
-          if (const auto code_unit = parse_hex_code_unit(text, index + 1)) {
+          if (auto const code_unit = parse_hex_code_unit(text, index + 1)) {
             if (is_high_surrogate(*code_unit)) {
               if (index + 10 < text.size() && text[index + 5] == '\\' && text[index + 6] == 'u') {
-                const auto low = parse_hex_code_unit(text, index + 7);
+                auto const low = parse_hex_code_unit(text, index + 7);
                 if (low && is_low_surrogate(*low)) {
                   append_utf8(result, ((*code_unit - 0xD800) << 10) + (*low - 0xDC00) + 0x10000);
                   index += 10;
@@ -246,7 +246,7 @@ std::optional<std::size_t> string_literal_end(std::string_view text, std::size_t
   if (start >= text.size() || text[start] != '"') return std::nullopt;
   bool escaped = false;
   for (std::size_t index = start + 1; index < text.size(); ++index) {
-    const char ch = text[index];
+    char const ch = text[index];
     if (escaped) {
       escaped = false;
       continue;
@@ -266,7 +266,7 @@ std::optional<std::string> parse_balanced(std::string_view text, std::size_t sta
   bool escaped = false;
   int depth = 0;
   for (std::size_t index = start; index < text.size(); ++index) {
-    const char ch = text[index];
+    char const ch = text[index];
     if (escaped) {
       escaped = false;
       continue;
@@ -294,7 +294,7 @@ std::optional<std::string> parse_balanced(std::string_view text, std::size_t sta
 std::string escape(std::string_view value) {
   std::string result;
   result.reserve(value.size());
-  for (const char ch : value) {
+  for (char const ch : value) {
     switch (ch) {
       case '"':
         result += "\\\"";
@@ -333,13 +333,13 @@ std::string escape(std::string_view value) {
 }
 
 std::optional<std::size_t> field_value_start(std::string_view object, std::string_view key) {
-  const std::string needle = "\"" + escape(key) + "\"";
+  std::string const needle = "\"" + escape(key) + "\"";
   bool in_string = false;
   bool escaped = false;
   int object_depth = 0;
   int array_depth = 0;
   for (std::size_t index = 0; index < object.size(); ++index) {
-    const char ch = object[index];
+    char const ch = object[index];
     if (in_string) {
       if (escaped) {
         escaped = false;
@@ -381,13 +381,13 @@ std::optional<std::size_t> field_value_start(std::string_view object, std::strin
 }
 
 std::optional<std::string> string_field(std::string_view object, std::string_view key) {
-  const auto start = field_value_start(object, key);
+  auto const start = field_value_start(object, key);
   if (!start) return std::nullopt;
   return parse_string_at(object, *start);
 }
 
 std::optional<long long> integer_field(std::string_view object, std::string_view key) {
-  const auto start = field_value_start(object, key);
+  auto const start = field_value_start(object, key);
   if (!start) return std::nullopt;
   std::size_t end = *start;
   if (end < object.size() && object[end] == '-') ++end;
@@ -401,21 +401,21 @@ std::optional<long long> integer_field(std::string_view object, std::string_view
 }
 
 std::optional<std::string> object_field(std::string_view object, std::string_view key) {
-  const auto start = field_value_start(object, key);
+  auto const start = field_value_start(object, key);
   if (!start) return std::nullopt;
   return parse_balanced(object, *start, '{', '}');
 }
 
 std::vector<std::string> objects_in_array_field(std::string_view object, std::string_view key) {
   std::vector<std::string> result;
-  const auto start = field_value_start(object, key);
+  auto const start = field_value_start(object, key);
   if (!start || *start >= object.size() || object[*start] != '[') return result;
-  const auto array = parse_balanced(object, *start, '[', ']');
+  auto const array = parse_balanced(object, *start, '[', ']');
   if (!array) return result;
   bool in_string = false;
   bool escaped = false;
   for (std::size_t index = 1; index + 1 < array->size(); ++index) {
-    const char ch = (*array)[index];
+    char const ch = (*array)[index];
     if (escaped) {
       escaped = false;
       continue;
@@ -440,9 +440,9 @@ std::vector<std::string> objects_in_array_field(std::string_view object, std::st
 
 std::vector<std::string> strings_in_array_field(std::string_view object, std::string_view key) {
   std::vector<std::string> result;
-  const auto start = field_value_start(object, key);
+  auto const start = field_value_start(object, key);
   if (!start || *start >= object.size() || object[*start] != '[') return result;
-  const auto array = parse_balanced(object, *start, '[', ']');
+  auto const array = parse_balanced(object, *start, '[', ']');
   if (!array) return result;
 
   for (std::size_t index = 1; index + 1 < array->size();) {

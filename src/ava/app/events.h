@@ -83,7 +83,7 @@ struct RuntimeEvent {
   std::size_t total_matches = 0;
 };
 
-using RuntimeEventSink = std::function<ava::core::VoidResult(const RuntimeEvent&)>;
+using RuntimeEventSink = std::function<ava::core::VoidResult(RuntimeEvent const&)>;
 
 struct EventEnvelope {
   int schema_version = 1;
@@ -108,26 +108,26 @@ struct EventEnvelopeContext {
   std::optional<std::string> correlation_id;
 };
 
-using EventEnvelopeSink = std::function<ava::core::VoidResult(const EventEnvelope&)>;
+using EventEnvelopeSink = std::function<ava::core::VoidResult(EventEnvelope const&)>;
 
 class EventBus {
  public:
   void subscribe(EventEnvelopeSink sink);
   // Subscribers are called synchronously in registration order. Publishing stops on the first failure.
-  [[nodiscard]] ava::core::VoidResult publish(const EventEnvelope& envelope) const;
+  [[nodiscard]] ava::core::VoidResult publish(EventEnvelope const& envelope) const;
 
  private:
   std::vector<EventEnvelopeSink> sinks_;
 };
 
 [[nodiscard]] std::string to_string(RuntimeEventType type);
-[[nodiscard]] std::string serialize_event_json(const RuntimeEvent& event);
-[[nodiscard]] std::string serialize_event_jsonl(const RuntimeEvent& event);
-[[nodiscard]] ava::core::VoidResult emit_event(const RuntimeEventSink& sink, const RuntimeEvent& event);
+[[nodiscard]] std::string serialize_event_json(RuntimeEvent const& event);
+[[nodiscard]] std::string serialize_event_jsonl(RuntimeEvent const& event);
+[[nodiscard]] ava::core::VoidResult emit_event(RuntimeEventSink const& sink, RuntimeEvent const& event);
 
-[[nodiscard]] EventEnvelope to_event_envelope(const RuntimeEvent& event, const EventEnvelopeContext& context = {});
-[[nodiscard]] std::string serialize_event_envelope_json(const EventEnvelope& envelope);
-[[nodiscard]] std::string serialize_event_envelope_jsonl(const EventEnvelope& envelope);
+[[nodiscard]] EventEnvelope to_event_envelope(RuntimeEvent const& event, EventEnvelopeContext const& context = {});
+[[nodiscard]] std::string serialize_event_envelope_json(EventEnvelope const& envelope);
+[[nodiscard]] std::string serialize_event_envelope_jsonl(EventEnvelope const& envelope);
 // The returned sink captures `bus` by reference and must not outlive it.
 [[nodiscard]] RuntimeEventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context = {},
                                                               RuntimeEventSink legacy_sink = nullptr);

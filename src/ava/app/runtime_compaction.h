@@ -10,7 +10,7 @@ namespace ava::app::runtime {
 
 [[nodiscard]] ava::core::Result<bool> compact_runtime_context(
     RuntimeSession& session, ava::session::SessionStore& store, std::string_view trigger,
-    const ava::provider::Provider& provider, ava::provider::Transport& transport, const RuntimeRunOptions& options,
-    const std::vector<std::string>& replayed_user_messages);
+    ava::provider::Provider const& provider, ava::provider::Transport& transport, RuntimeRunOptions const& options,
+    std::vector<std::string> const& replayed_user_messages);
 
 }  // namespace ava::app::runtime

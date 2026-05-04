@@ -20,7 +20,7 @@ std::optional<unsigned int> parse_hex_code_unit(std::string_view text, std::size
   if (hex_start + 3 >= text.size()) return std::nullopt;
   unsigned int codepoint = 0;
   for (std::size_t offset = 0; offset < 4; ++offset) {
-    const int value = hex_value(text[hex_start + offset]);
+    int const value = hex_value(text[hex_start + offset]);
     if (value < 0) return std::nullopt;
     codepoint = (codepoint << 4) | static_cast<unsigned int>(value);
   }
@@ -51,7 +51,7 @@ void append_utf8(std::string& output, unsigned int codepoint) {
 
 void append_json_escaped_char(std::string& output, std::string_view object, std::size_t& index) {
   if (index >= object.size()) return;
-  const char escaped = object[index];
+  char const escaped = object[index];
   switch (escaped) {
     case '"':
       output.push_back('"');
@@ -78,14 +78,14 @@ void append_json_escaped_char(std::string& output, std::string_view object, std:
       output.push_back('\t');
       return;
     case 'u': {
-      const auto code_unit = parse_hex_code_unit(object, index + 1);
+      auto const code_unit = parse_hex_code_unit(object, index + 1);
       if (!code_unit) {
         output.push_back('u');
         return;
       }
       if (is_high_surrogate(*code_unit)) {
         if (index + 10 < object.size() && object[index + 5] == '\\' && object[index + 6] == 'u') {
-          const auto low = parse_hex_code_unit(object, index + 7);
+          auto const low = parse_hex_code_unit(object, index + 7);
           if (low && is_low_surrogate(*low)) {
             append_utf8(output, ((*code_unit - 0xD800) << 10) + (*low - 0xDC00) + 0x10000);
             index += 10;
@@ -106,8 +106,8 @@ void append_json_escaped_char(std::string& output, std::string_view object, std:
   }
 }
 
-std::string session_start_data_json(ava::agent::Mode mode, const ava::config::ModelInfo& model,
-                                    const ava::config::PromptSelection& prompt, std::size_t context_source_count) {
+std::string session_start_data_json(ava::agent::Mode mode, ava::config::ModelInfo const& model,
+                                    ava::config::PromptSelection const& prompt, std::size_t context_source_count) {
   std::string json = "{\"mode\":\"" + ava::agent::to_string(mode) + "\",\"provider\":\"" +
                      ava::core::json::escape(model.provider_id) + "\",\"model\":\"" +
                      ava::core::json::escape(model.model_id) +
@@ -137,7 +137,7 @@ std::string session_start_data_json(ava::agent::Mode mode, const ava::config::Mo
   return json;
 }
 
-std::string model_change_data_json(const ava::config::ModelInfo& previous, const ava::config::ModelInfo& current) {
+std::string model_change_data_json(ava::config::ModelInfo const& previous, ava::config::ModelInfo const& current) {
   std::string json = "{";
   json += "\"previous_provider\":\"" + ava::core::json::escape(previous.provider_id) + "\"";
   json += ",\"previous_model\":\"" + ava::core::json::escape(previous.model_id) + "\"";
@@ -163,8 +163,8 @@ std::string model_change_data_json(const ava::config::ModelInfo& previous, const
   return json;
 }
 
-std::string reasoning_change_data_json(const ava::config::ModelInfo& model,
-                                       const std::optional<RuntimeReasoningSelection>& selection) {
+std::string reasoning_change_data_json(ava::config::ModelInfo const& model,
+                                       std::optional<RuntimeReasoningSelection> const& selection) {
   std::string json = "{\"provider\":\"" + ava::core::json::escape(model.provider_id) + "\",\"model\":\"" +
                      ava::core::json::escape(model.model_id) + "\"";
   if (!model.reasoning_format.empty()) {
@@ -199,17 +199,17 @@ std::string json_bool_field(std::string_view key, bool value) {
   return "\"" + std::string(key) + "\":" + (value ? "true" : "false");
 }
 
-std::string optional_bool_json(std::string_view key, const std::optional<bool>& value) {
+std::string optional_bool_json(std::string_view key, std::optional<bool> const& value) {
   if (!value) return {};
   return ",\"" + std::string(key) + "\":" + (*value ? "true" : "false");
 }
 
-std::string optional_integer_json(std::string_view key, const std::optional<long long>& value) {
+std::string optional_integer_json(std::string_view key, std::optional<long long> const& value) {
   if (!value) return {};
   return ",\"" + std::string(key) + "\":" + std::to_string(*value);
 }
 
-std::string string_array_json(const std::vector<std::string>& values) {
+std::string string_array_json(std::vector<std::string> const& values) {
   std::string json = "[";
   for (std::size_t index = 0; index < values.size(); ++index) {
     if (index > 0) json += ',';
@@ -222,7 +222,7 @@ std::string string_array_json(const std::vector<std::string>& values) {
 }
 
 std::vector<std::string> string_array_field(std::string_view object, std::string_view key) {
-  const auto start = ava::core::json::field_value_start(object, key);
+  auto const start = ava::core::json::field_value_start(object, key);
   if (!start || *start >= object.size() || object[*start] != '[') return {};
 
   std::vector<std::string> values;
@@ -232,7 +232,7 @@ std::vector<std::string> string_array_field(std::string_view object, std::string
   int depth = 1;
   std::string current;
   for (std::size_t index = *start + 1; index < object.size(); ++index) {
-    const char ch = object[index];
+    char const ch = object[index];
     if (escaped) {
       if (collecting) {
         auto escape_index = index;
@@ -289,8 +289,8 @@ std::optional<bool> bool_json_field(std::string_view object, std::string_view ke
 }
 
 ava::core::VoidResult append_session_start(ava::session::SessionStore& store, ava::agent::Mode mode,
-                                           const ava::config::ModelInfo& model,
-                                           const ava::config::PromptSelection& prompt,
+                                           ava::config::ModelInfo const& model,
+                                           ava::config::PromptSelection const& prompt,
                                            std::size_t context_source_count) {
   return store.append(ava::session::SessionEntry{
       .id = ava::core::make_id("entry"),
@@ -301,8 +301,8 @@ ava::core::VoidResult append_session_start(ava::session::SessionStore& store, av
   });
 }
 
-ava::core::VoidResult append_model_change(ava::session::SessionStore& store, const ava::config::ModelInfo& previous,
-                                          const ava::config::ModelInfo& current) {
+ava::core::VoidResult append_model_change(ava::session::SessionStore& store, ava::config::ModelInfo const& previous,
+                                          ava::config::ModelInfo const& current) {
   return store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                  .parent_id = "",
                                                  .type = ava::session::EntryType::ModelChange,
@@ -310,8 +310,8 @@ ava::core::VoidResult append_model_change(ava::session::SessionStore& store, con
                                                  .data_json = model_change_data_json(previous, current)});
 }
 
-ava::core::VoidResult append_reasoning_change(ava::session::SessionStore& store, const ava::config::ModelInfo& model,
-                                              const std::optional<RuntimeReasoningSelection>& selection) {
+ava::core::VoidResult append_reasoning_change(ava::session::SessionStore& store, ava::config::ModelInfo const& model,
+                                              std::optional<RuntimeReasoningSelection> const& selection) {
   return store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                  .parent_id = "",
                                                  .type = ava::session::EntryType::ReasoningChange,

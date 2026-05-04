@@ -14,7 +14,7 @@ namespace {
 
 constexpr std::size_t kMaxCompactionPromptEntryBytes = 8192;
 
-RuntimeEvent base_compaction_event_locked(const RuntimeSession& session, const RuntimeRunOptions& options,
+RuntimeEvent base_compaction_event_locked(RuntimeSession const& session, RuntimeRunOptions const& options,
                                           RuntimeEventType type) {
   auto build = [&] {
     RuntimeEvent event;
@@ -31,7 +31,7 @@ RuntimeEvent base_compaction_event_locked(const RuntimeSession& session, const R
   return build();
 }
 
-ava::core::VoidResult emit_compaction_event(const RuntimeSession& session, const RuntimeRunOptions& options,
+ava::core::VoidResult emit_compaction_event(RuntimeSession const& session, RuntimeRunOptions const& options,
                                             RuntimeEvent event) {
   if (!options.event_sink) return {};
   if (event.timestamp.empty()) {
@@ -54,10 +54,10 @@ std::string capped_entry_data(std::string_view data) {
          std::to_string(data.size()) + " bytes]";
 }
 
-std::string sanitized_reasoning_data_for_compaction(const ava::session::SessionEntry& entry) {
+std::string sanitized_reasoning_data_for_compaction(ava::session::SessionEntry const& entry) {
   std::string data = "{";
   bool first = true;
-  auto append_string = [&](std::string_view key, const std::optional<std::string>& value) {
+  auto append_string = [&](std::string_view key, std::optional<std::string> const& value) {
     if (!value || value->empty()) return;
     if (!first) data += ',';
     first = false;
@@ -69,7 +69,7 @@ std::string sanitized_reasoning_data_for_compaction(const ava::session::SessionE
     data += runtime::json_bool_field(key, value);
   };
 
-  const bool redacted = runtime::bool_json_field(entry.data_json, "redacted").value_or(false);
+  bool const redacted = runtime::bool_json_field(entry.data_json, "redacted").value_or(false);
   append_string("provider", ava::core::json::string_field(entry.data_json, "provider"));
   append_string("model", ava::core::json::string_field(entry.data_json, "model"));
   append_string("format", ava::core::json::string_field(entry.data_json, "format"));
@@ -80,7 +80,7 @@ std::string sanitized_reasoning_data_for_compaction(const ava::session::SessionE
   return capped_entry_data(data);
 }
 
-std::string compaction_entry_data(const ava::session::SessionEntry& entry) {
+std::string compaction_entry_data(ava::session::SessionEntry const& entry) {
   if (entry.type == ava::session::EntryType::ReasoningBlock) return sanitized_reasoning_data_for_compaction(entry);
   return capped_entry_data(entry.data_json);
 }
@@ -98,11 +98,11 @@ std::string truncate_recent_context_to_token_budget(std::string tail, std::size_
   if (keep_recent_tokens == 0 || tail.empty()) return {};
   if (ava::session::estimate_tokens(tail) <= keep_recent_tokens) return tail;
 
-  const std::string marker =
+  std::string const marker =
       "[AVA: recent context tail truncated to keep_recent_tokens=" + std::to_string(keep_recent_tokens) + "]\n";
-  const auto max_bytes = keep_recent_tokens * 4;
+  auto const max_bytes = keep_recent_tokens * 4;
   if (max_bytes <= marker.size()) return marker;
-  const auto suffix_bytes = max_bytes - marker.size();
+  auto const suffix_bytes = max_bytes - marker.size();
   if (tail.size() > suffix_bytes) {
     tail = tail.substr(utf8_suffix_start(tail, suffix_bytes));
   }
@@ -110,27 +110,27 @@ std::string truncate_recent_context_to_token_budget(std::string tail, std::size_
 }
 
 void erase_replayed_active_user_messages(std::vector<ava::provider::ChatMessage>& messages,
-                                         const std::vector<std::string>& replayed_user_messages) {
+                                         std::vector<std::string> const& replayed_user_messages) {
   for (auto replay = replayed_user_messages.rbegin(); replay != replayed_user_messages.rend(); ++replay) {
-    const auto match = std::ranges::find_if(messages.rbegin(), messages.rend(), [&](const auto& message) {
+    auto const match = std::ranges::find_if(messages.rbegin(), messages.rend(), [&](auto const& message) {
       return message.role == "user" && message.content == *replay;
     });
     if (match != messages.rend()) messages.erase(std::next(match).base());
   }
 }
 
-ava::core::Result<std::string> build_recent_context_tail(const std::vector<ava::session::SessionEntry>& entries,
+ava::core::Result<std::string> build_recent_context_tail(std::vector<ava::session::SessionEntry> const& entries,
                                                          std::size_t keep_recent_messages,
                                                          std::size_t keep_recent_tokens,
-                                                         const std::vector<std::string>& replayed_user_messages) {
+                                                         std::vector<std::string> const& replayed_user_messages) {
   if (keep_recent_messages == 0 || keep_recent_tokens == 0) return std::string{};
   auto messages = ava::agent::build_provider_messages_from_entries(entries);
   if (!messages) return std::unexpected(std::move(messages.error()));
   if (!replayed_user_messages.empty()) {
     erase_replayed_active_user_messages(*messages, replayed_user_messages);
   }
-  const auto count = std::min(keep_recent_messages, messages->size());
-  const auto start = messages->size() - count;
+  auto const count = std::min(keep_recent_messages, messages->size());
+  auto const start = messages->size() - count;
   std::string tail;
   for (std::size_t index = start; index < messages->size(); ++index) {
     if (!tail.empty()) tail += "\n\n";
@@ -141,8 +141,8 @@ ava::core::Result<std::string> build_recent_context_tail(const std::vector<ava::
   return truncate_recent_context_to_token_budget(std::move(tail), keep_recent_tokens);
 }
 
-ava::core::Result<std::string> parse_compaction_response_text(const ava::provider::Provider& provider,
-                                                              const ava::provider::HttpResponse& response,
+ava::core::Result<std::string> parse_compaction_response_text(ava::provider::Provider const& provider,
+                                                              ava::provider::HttpResponse const& response,
                                                               bool stream) {
   auto events = provider.parse_response(response, stream);
   if (!events) {
@@ -153,7 +153,7 @@ ava::core::Result<std::string> parse_compaction_response_text(const ava::provide
     return std::unexpected(std::move(error));
   }
   std::string streamed_text;
-  for (const auto& event : *events) {
+  for (auto const& event : *events) {
     if (event.type == ava::provider::StreamEventType::TextDelta) {
       streamed_text += event.text;
     } else if (event.type == ava::provider::StreamEventType::Error && !event.error_message.empty()) {
@@ -169,8 +169,8 @@ ava::core::Result<std::string> parse_compaction_response_text(const ava::provide
 
 }  // namespace
 
-bool same_session_snapshot(const std::vector<ava::session::SessionEntry>& expected,
-                           const std::vector<ava::session::SessionEntry>& actual) {
+bool same_session_snapshot(std::vector<ava::session::SessionEntry> const& expected,
+                           std::vector<ava::session::SessionEntry> const& actual) {
   if (expected.size() != actual.size()) return false;
   for (std::size_t index = 0; index < expected.size(); ++index) {
     if (expected[index].id != actual[index].id || expected[index].parent_id != actual[index].parent_id ||
@@ -192,8 +192,8 @@ ava::core::Error stale_compaction_snapshot_error(std::string_view trigger, std::
   return error;
 }
 
-std::string build_compaction_summary_prompt(const std::vector<ava::session::SessionEntry>& entries,
-                                            const ava::session::CompactionConfig& config, std::string_view instructions,
+std::string build_compaction_summary_prompt(std::vector<ava::session::SessionEntry> const& entries,
+                                            ava::session::CompactionConfig const& config, std::string_view instructions,
                                             std::size_t estimated_tokens) {
   std::string prompt;
   prompt += "Generate a provider-backed AVA /compact summary for the session below.\n";
@@ -218,7 +218,7 @@ std::string build_compaction_summary_prompt(const std::vector<ava::session::Sess
   prompt += "Session entries in chronological order:\n";
   std::size_t visible_index = 0;
   for (std::size_t index = 0; index < entries.size(); ++index) {
-    const auto& entry = entries[index];
+    auto const& entry = entries[index];
     if (ava::session::is_internal_replay_user_message(entry)) continue;
     ++visible_index;
     prompt += "\n## Entry " + std::to_string(visible_index) + "\n";
@@ -232,9 +232,9 @@ std::string build_compaction_summary_prompt(const std::vector<ava::session::Sess
 }
 
 ava::core::Result<std::string> generate_compaction_summary(
-    const RuntimeSession& session, const std::vector<ava::session::SessionEntry>& entries,
-    const ava::session::CompactionConfig& config, std::string_view instructions, std::size_t estimated_tokens,
-    const ava::provider::Provider& provider, ava::provider::Transport& transport, const RuntimeRunOptions& options) {
+    RuntimeSession const& session, std::vector<ava::session::SessionEntry> const& entries,
+    ava::session::CompactionConfig const& config, std::string_view instructions, std::size_t estimated_tokens,
+    ava::provider::Provider const& provider, ava::provider::Transport& transport, RuntimeRunOptions const& options) {
   if (options.access_token.empty()) {
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "compaction requires provider access token"));
@@ -252,8 +252,8 @@ ava::core::Result<std::string> generate_compaction_summary(
   constexpr std::string_view system_prompt =
       "You are AVA's deterministic session compaction summarizer. Create faithful continuation context from the "
       "provided session record. Return only the requested Markdown summary; do not include prefaces or code fences.";
-  const auto prompt = build_compaction_summary_prompt(entries, config, instructions, estimated_tokens);
-  const ava::provider::ProviderRequest provider_request{
+  auto const prompt = build_compaction_summary_prompt(entries, config, instructions, estimated_tokens);
+  ava::provider::ProviderRequest const provider_request{
       .provider_id = session.model.provider_id,
       .model_id = config.model_id,
       .system_prompt = std::string(system_prompt),
@@ -261,7 +261,7 @@ ava::core::Result<std::string> generate_compaction_summary(
       .tools_json = {},
       .stream = summary_options.openai_oauth && session.model.supports_streaming.value_or(true),
       .max_output_tokens = session.model.max_output_tokens};
-  const ava::provider::ProviderAuthContext auth_context{
+  ava::provider::ProviderAuthContext const auth_context{
       .access_token = summary_options.access_token,
       .credential_type = summary_options.openai_oauth && summary_options.credential_type == "bearer"
                              ? "oauth"
@@ -294,9 +294,9 @@ ava::core::Result<std::string> generate_compaction_summary(
 namespace ava::app::runtime {
 
 ava::core::Result<bool> compact_runtime_context(RuntimeSession& session, ava::session::SessionStore& store,
-                                                std::string_view trigger, const ava::provider::Provider& provider,
-                                                ava::provider::Transport& transport, const RuntimeRunOptions& options,
-                                                const std::vector<std::string>& replayed_user_messages) {
+                                                std::string_view trigger, ava::provider::Provider const& provider,
+                                                ava::provider::Transport& transport, RuntimeRunOptions const& options,
+                                                std::vector<std::string> const& replayed_user_messages) {
   if (options.access_token.empty()) {
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "compaction requires provider access token"));
@@ -306,7 +306,7 @@ ava::core::Result<bool> compact_runtime_context(RuntimeSession& session, ava::se
   if (!config) return std::unexpected(std::move(config.error()));
 
   constexpr std::size_t max_compaction_attempts = 2;
-  const auto trigger_text = std::string(trigger);
+  auto const trigger_text = std::string(trigger);
   std::size_t last_snapshot_entries = 0;
   std::size_t last_current_entries = 0;
   bool context_retry_event_emitted = false;
@@ -325,11 +325,11 @@ ava::core::Result<bool> compact_runtime_context(RuntimeSession& session, ava::se
     }
     if (!entries) return std::unexpected(std::move(entries.error()));
 
-    const auto threshold = ava::session::effective_auto_threshold_tokens(*config, session.model.context_window_tokens);
+    auto const threshold = ava::session::effective_auto_threshold_tokens(*config, session.model.context_window_tokens);
     std::size_t estimated_tokens = ava::session::estimate_session_tokens(*entries);
     std::size_t threshold_tokens = threshold;
     if (trigger == "auto") {
-      const auto decision = ava::session::should_auto_compact(*entries, *config, session.model.context_window_tokens);
+      auto const decision = ava::session::should_auto_compact(*entries, *config, session.model.context_window_tokens);
       if (!decision.should_compact) return false;
       estimated_tokens = decision.estimated_tokens;
       threshold_tokens = decision.threshold_tokens;

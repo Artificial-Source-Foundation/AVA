@@ -17,13 +17,13 @@ namespace {
 
 std::string json_bool(bool value) { return value ? "true" : "false"; }
 
-void append_spill_fields(std::string& text, const std::filesystem::path& path, bool spill_truncated) {
+void append_spill_fields(std::string& text, std::filesystem::path const& path, bool spill_truncated) {
   if (path.empty()) return;
   text += ",\"spill_file\":\"" + ava::core::json::escape(path.filename().generic_string()) + "\"";
   text += ",\"spill_truncated\":" + json_bool(spill_truncated);
 }
 
-RuntimeEvent command_event(const RuntimeSession& session, RuntimeEventType type) {
+RuntimeEvent command_event(RuntimeSession const& session, RuntimeEventType type) {
   RuntimeEvent event;
   event.type = type;
   event.timestamp = ava::session::now_timestamp();
@@ -34,8 +34,8 @@ RuntimeEvent command_event(const RuntimeSession& session, RuntimeEventType type)
   return event;
 }
 
-ava::core::VoidResult emit_tool_event(const RuntimeSession& session, const RuntimeEventSink& sink,
-                                      const ava::agent::ToolTimelineEntry& entry) {
+ava::core::VoidResult emit_tool_event(RuntimeSession const& session, RuntimeEventSink const& sink,
+                                      ava::agent::ToolTimelineEntry const& entry) {
   auto event =
       command_event(session, entry.status == ava::agent::ToolTimelineStatus::Running ? RuntimeEventType::ToolStart
                                                                                      : RuntimeEventType::ToolResult);
@@ -66,7 +66,7 @@ ava::core::VoidResult emit_tool_event(const RuntimeSession& session, const Runti
   return emit_event(sink, event);
 }
 
-ava::agent::ToolTimelineEntry command_result_entry(const std::string& call_id, std::string name,
+ava::agent::ToolTimelineEntry command_result_entry(std::string const& call_id, std::string name,
                                                    ava::agent::ToolTimelineStatus status, std::string result_summary,
                                                    std::string result_content) {
   if (result_content.empty()) result_content = result_summary;
@@ -82,8 +82,8 @@ ava::agent::ToolTimelineEntry command_result_entry(const std::string& call_id, s
     if (result_content != result_summary) dispatch_result.payload.error_details = result_content;
   }
 
-  const auto result_json = ava::core::json::is_valid_object(result_content) ? result_content : std::string{};
-  const auto& payload = dispatch_result.payload;
+  auto const result_json = ava::core::json::is_valid_object(result_content) ? result_content : std::string{};
+  auto const& payload = dispatch_result.payload;
   return ava::agent::ToolTimelineEntry{
       .status = status,
       .call_id = call_id,
@@ -111,7 +111,7 @@ ava::agent::ToolTimelineEntry command_result_entry(const std::string& call_id, s
   };
 }
 
-ava::core::VoidResult record_tool_event(const RuntimeSession& session, const RuntimeEventSink& sink,
+ava::core::VoidResult record_tool_event(RuntimeSession const& session, RuntimeEventSink const& sink,
                                         CommandResult& result, ava::agent::ToolTimelineEntry entry) {
   if (auto emitted = emit_tool_event(session, sink, entry); !emitted)
     return std::unexpected(std::move(emitted.error()));
@@ -129,7 +129,7 @@ ava::tools::ToolContext make_tool_context(RuntimeSession& session,
       .mode = session.mode,
       .permission_resolver = std::move(permission_resolver),
       .permission_audit_sink =
-          [&store = session.store](const ava::tools::PermissionAuditEvent& event) -> ava::core::VoidResult {
+          [&store = session.store](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
         return store.append(ava::session::SessionEntry{
             .id = ava::core::make_id("entry"),
             .parent_id = "",
@@ -145,8 +145,8 @@ ava::tools::ToolContext make_tool_context(RuntimeSession& session,
       .mcp_project_config_file = session.workspace_dir / ".ava" / "mcp.json"};
 }
 
-ava::core::VoidResult record_tool_start(const RuntimeSession& session, const RuntimeEventSink& sink,
-                                        CommandResult& result, const std::string& call_id, std::string name,
+ava::core::VoidResult record_tool_start(RuntimeSession const& session, RuntimeEventSink const& sink,
+                                        CommandResult& result, std::string const& call_id, std::string name,
                                         std::string argument_summary) {
   return record_tool_event(session, sink, result,
                            ava::agent::ToolTimelineEntry{.status = ava::agent::ToolTimelineStatus::Running,
@@ -155,8 +155,8 @@ ava::core::VoidResult record_tool_start(const RuntimeSession& session, const Run
                                                          .argument_summary = std::move(argument_summary)});
 }
 
-ava::core::VoidResult record_tool_result(const RuntimeSession& session, const RuntimeEventSink& sink,
-                                         CommandResult& result, const std::string& call_id, std::string name,
+ava::core::VoidResult record_tool_result(RuntimeSession const& session, RuntimeEventSink const& sink,
+                                         CommandResult& result, std::string const& call_id, std::string name,
                                          ava::agent::ToolTimelineStatus status, std::string result_summary,
                                          std::string result_content) {
   return record_tool_event(
@@ -167,18 +167,18 @@ ava::core::VoidResult record_tool_result(const RuntimeSession& session, const Ru
 ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, CommandRequest& request) {
   CommandResult result;
   result.handled = true;
-  const auto& line = request.command;
+  auto const& line = request.command;
   auto context = make_tool_context(session, request.permission_resolver);
 
   if (line.starts_with("/read ")) {
-    const auto argument = line.substr(6);
-    const auto call_id = ava::core::make_id("cmd");
+    auto const argument = line.substr(6);
+    auto const call_id = ava::core::make_id("cmd");
     if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "read", argument); !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }
-    const auto output = ava::tools::read_file(context, session.current_dir / argument);
+    auto const output = ava::tools::read_file(context, session.current_dir / argument);
     if (!output) {
-      const auto text = output.error().format();
+      auto const text = output.error().format();
       if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "read",
                                              ava::agent::ToolTimelineStatus::Error, text);
           !recorded) {
@@ -192,7 +192,7 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
       text += "\n[truncated " + std::to_string(output->output_bytes) + '/' + std::to_string(output->total_bytes) +
               " bytes]";
     }
-    const auto read_result_json = "{\"tool\":\"read\",\"ok\":true,\"path\":\"" + ava::core::json::escape(argument) +
+    auto const read_result_json = "{\"tool\":\"read\",\"ok\":true,\"path\":\"" + ava::core::json::escape(argument) +
                                   "\",\"content\":\"" + ava::core::json::escape(output->content) +
                                   "\",\"truncated\":" + json_bool(output->truncated) +
                                   ",\"total_bytes\":" + std::to_string(output->total_bytes) +
@@ -208,14 +208,14 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
   }
 
   if (line.starts_with("/glob ")) {
-    const auto pattern = line.substr(6);
-    const auto call_id = ava::core::make_id("cmd");
+    auto const pattern = line.substr(6);
+    auto const call_id = ava::core::make_id("cmd");
     if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "glob", pattern); !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }
-    const auto glob = ava::tools::glob_files(context, pattern);
+    auto const glob = ava::tools::glob_files(context, pattern);
     if (!glob) {
-      const auto text = glob.error().format();
+      auto const text = glob.error().format();
       if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "glob",
                                              ava::agent::ToolTimelineStatus::Error, text);
           !recorded) {
@@ -225,7 +225,7 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
       return result;
     }
     std::string output;
-    for (const auto& path : glob->paths) output += display_path(path, session.current_dir) + '\n';
+    for (auto const& path : glob->paths) output += display_path(path, session.current_dir) + '\n';
     if (glob->truncated) {
       output += "[truncated " + std::to_string(glob->paths.size()) + '/' + std::to_string(glob->total_matches) +
                 " matches]\n";
@@ -252,17 +252,17 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
   }
 
   if (line.starts_with("/grep ")) {
-    const auto rest = line.substr(6);
-    const auto split = rest.find(' ');
-    const auto pattern = split == std::string::npos ? rest : rest.substr(0, split);
-    const auto include = split == std::string::npos ? std::string("**/*") : rest.substr(split + 1);
-    const auto call_id = ava::core::make_id("cmd");
+    auto const rest = line.substr(6);
+    auto const split = rest.find(' ');
+    auto const pattern = split == std::string::npos ? rest : rest.substr(0, split);
+    auto const include = split == std::string::npos ? std::string("**/*") : rest.substr(split + 1);
+    auto const call_id = ava::core::make_id("cmd");
     if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "grep", pattern); !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }
-    const auto grep = ava::tools::grep_files(context, pattern, include);
+    auto const grep = ava::tools::grep_files(context, pattern, include);
     if (!grep) {
-      const auto text = grep.error().format();
+      auto const text = grep.error().format();
       if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "grep",
                                              ava::agent::ToolTimelineStatus::Error, text);
           !recorded) {
@@ -272,7 +272,7 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
       return result;
     }
     std::string output;
-    for (const auto& match : grep->matches) {
+    for (auto const& match : grep->matches) {
       output +=
           display_path(match.path, session.current_dir) + ':' + std::to_string(match.line_number) + ": " + match.line;
       if (match.line_truncated) output += " [line truncated]";
@@ -300,22 +300,22 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
   }
 
   if (line.starts_with("/write ")) {
-    const auto rest = line.substr(7);
-    const auto split = rest.find(' ');
+    auto const rest = line.substr(7);
+    auto const split = rest.find(' ');
     if (split == std::string::npos) {
       add_output(result, missing_argument("/write <path> <text>"));
       return result;
     }
-    const auto path_text = rest.substr(0, split);
-    const auto text = rest.substr(split + 1);
-    const auto call_id = ava::core::make_id("cmd");
+    auto const path_text = rest.substr(0, split);
+    auto const text = rest.substr(split + 1);
+    auto const call_id = ava::core::make_id("cmd");
     if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "write", path_text);
         !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }
-    const auto write = ava::tools::write_file(context, session.current_dir / path_text, text);
+    auto const write = ava::tools::write_file(context, session.current_dir / path_text, text);
     if (!write) {
-      const auto error_text = write.error().format();
+      auto const error_text = write.error().format();
       if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "write",
                                              ava::agent::ToolTimelineStatus::Error, error_text);
           !recorded) {
@@ -324,8 +324,8 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
       add_output(result, error_text);
       return result;
     }
-    const auto output = "wrote " + std::to_string(write->bytes_written) + " bytes to " + write->path.string();
-    const auto write_result_json = "{\"tool\":\"write\",\"ok\":true,\"path\":\"" +
+    auto const output = "wrote " + std::to_string(write->bytes_written) + " bytes to " + write->path.string();
+    auto const write_result_json = "{\"tool\":\"write\",\"ok\":true,\"path\":\"" +
                                    ava::core::json::escape(write->path.generic_string()) +
                                    "\",\"bytes_written\":" + std::to_string(write->bytes_written) + "}";
     if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "write",
@@ -338,14 +338,14 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
   }
 
   if (line.starts_with("/bash ")) {
-    const auto command = line.substr(6);
-    const auto call_id = ava::core::make_id("cmd");
+    auto const command = line.substr(6);
+    auto const call_id = ava::core::make_id("cmd");
     if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "bash", command); !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }
-    const auto bash = ava::tools::run_bash(context, command);
+    auto const bash = ava::tools::run_bash(context, command);
     if (!bash) {
-      const auto text = bash.error().format();
+      auto const text = bash.error().format();
       if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "bash",
                                              ava::agent::ToolTimelineStatus::Error, text);
           !recorded) {

@@ -39,15 +39,15 @@ struct ManualCompactionRequest {
 
 [[nodiscard]] CompactionConfig default_compaction_config();
 [[nodiscard]] ava::core::Result<CompactionConfig> parse_compaction_config(std::string_view content);
-[[nodiscard]] ava::core::Result<CompactionConfig> load_compaction_config(const ava::config::XdgPaths& paths);
+[[nodiscard]] ava::core::Result<CompactionConfig> load_compaction_config(ava::config::XdgPaths const& paths);
 [[nodiscard]] std::size_t estimate_tokens(std::string_view text) noexcept;
-[[nodiscard]] std::size_t estimate_session_tokens(const std::vector<SessionEntry>& entries) noexcept;
-[[nodiscard]] std::size_t effective_auto_threshold_tokens(const CompactionConfig& config,
+[[nodiscard]] std::size_t estimate_session_tokens(std::vector<SessionEntry> const& entries) noexcept;
+[[nodiscard]] std::size_t effective_auto_threshold_tokens(CompactionConfig const& config,
                                                           std::optional<long long> context_window_tokens) noexcept;
-[[nodiscard]] CompactionDecision should_auto_compact(const std::vector<SessionEntry>& entries,
-                                                     const CompactionConfig& config) noexcept;
-[[nodiscard]] CompactionDecision should_auto_compact(const std::vector<SessionEntry>& entries,
-                                                     const CompactionConfig& config,
+[[nodiscard]] CompactionDecision should_auto_compact(std::vector<SessionEntry> const& entries,
+                                                     CompactionConfig const& config) noexcept;
+[[nodiscard]] CompactionDecision should_auto_compact(std::vector<SessionEntry> const& entries,
+                                                     CompactionConfig const& config,
                                                      std::optional<long long> context_window_tokens) noexcept;
 [[nodiscard]] ava::core::VoidResult append_manual_compaction(SessionStore& store, ManualCompactionRequest request);
 

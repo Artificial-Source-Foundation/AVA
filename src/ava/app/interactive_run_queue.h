@@ -34,20 +34,20 @@ class InteractiveRunQueue {
  public:
   InteractiveRunQueue(std::string session_id, std::string active_request_id, EventEnvelopeSink event_sink);
 
-  [[nodiscard]] const std::string& active_request_id() const noexcept;
+  [[nodiscard]] std::string const& active_request_id() const noexcept;
   [[nodiscard]] ava::core::VoidResult queue_steering(std::string message);
   [[nodiscard]] ava::core::VoidResult queue_follow_up(std::string message);
   [[nodiscard]] ava::core::Result<std::vector<std::string>> take_steering_messages();
   [[nodiscard]] ava::core::VoidResult skip_active_steering(std::string_view reason);
   [[nodiscard]] std::optional<InteractiveQueuedMessage> take_next_follow_up();
-  [[nodiscard]] ava::core::VoidResult mark_follow_up_started(const InteractiveQueuedMessage& message);
+  [[nodiscard]] ava::core::VoidResult mark_follow_up_started(InteractiveQueuedMessage const& message);
   [[nodiscard]] ava::core::Result<InteractiveRestoredMessage> restore_latest();
   [[nodiscard]] ava::core::VoidResult finish(bool canceled);
 
  private:
   [[nodiscard]] ava::core::VoidResult queue_message_locked(std::deque<InteractiveQueuedMessage>& queue,
                                                            std::string message, std::string_view event_name);
-  [[nodiscard]] ava::core::VoidResult emit_event(std::string_view name, const InteractiveQueuedMessage& message,
+  [[nodiscard]] ava::core::VoidResult emit_event(std::string_view name, InteractiveQueuedMessage const& message,
                                                  std::string_view reason = {}) const;
 
   std::string session_id_;

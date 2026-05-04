@@ -35,7 +35,7 @@ namespace {
 
 constexpr std::size_t max_connect_secret_bytes = 64 * 1024;
 
-volatile sig_atomic_t terminal_mode_signal_number = 0;
+sig_atomic_t volatile terminal_mode_signal_number = 0;
 bool terminal_mode_signal_handlers_installed = false;
 struct sigaction previous_sigint_action{};
 struct sigaction previous_sigterm_action{};
@@ -80,8 +80,8 @@ long long unix_time_seconds() {
 class ScopedSocket {
  public:
   explicit ScopedSocket(int fd) : fd_(fd) {}
-  ScopedSocket(const ScopedSocket&) = delete;
-  ScopedSocket& operator=(const ScopedSocket&) = delete;
+  ScopedSocket(ScopedSocket const&) = delete;
+  ScopedSocket& operator=(ScopedSocket const&) = delete;
   ScopedSocket(ScopedSocket&& other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
   ScopedSocket& operator=(ScopedSocket&& other) noexcept {
     if (this != &other) {
@@ -111,8 +111,8 @@ class ScopedTerminalEcho {
     if (::tcsetattr(STDIN_FILENO, TCSAFLUSH, &current) != 0) active_ = false;
   }
 
-  ScopedTerminalEcho(const ScopedTerminalEcho&) = delete;
-  ScopedTerminalEcho& operator=(const ScopedTerminalEcho&) = delete;
+  ScopedTerminalEcho(ScopedTerminalEcho const&) = delete;
+  ScopedTerminalEcho& operator=(ScopedTerminalEcho const&) = delete;
 
   ~ScopedTerminalEcho() {
     if (active_) static_cast<void>(::tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_));
@@ -127,7 +127,7 @@ class ScopedTerminalRawMode {
  public:
   explicit ScopedTerminalRawMode(bool enabled) : active_(enabled && ::tcgetattr(STDIN_FILENO, &original_) == 0) {
     if (!active_) return;
-    const bool signal_handlers_installed = install_terminal_mode_signal_handlers();
+    bool const signal_handlers_installed = install_terminal_mode_signal_handlers();
     auto current = original_;
     current.c_lflag &= static_cast<tcflag_t>(~(ICANON | ECHO));
     current.c_cc[VMIN] = 1;
@@ -140,8 +140,8 @@ class ScopedTerminalRawMode {
     signal_handlers_installed_ = signal_handlers_installed;
   }
 
-  ScopedTerminalRawMode(const ScopedTerminalRawMode&) = delete;
-  ScopedTerminalRawMode& operator=(const ScopedTerminalRawMode&) = delete;
+  ScopedTerminalRawMode(ScopedTerminalRawMode const&) = delete;
+  ScopedTerminalRawMode& operator=(ScopedTerminalRawMode const&) = delete;
 
   ~ScopedTerminalRawMode() {
     if (!active_) return;
@@ -177,7 +177,7 @@ ava::core::Error connect_error(ava::core::ErrorCategory category, std::string me
 ava::core::VoidResult send_all_to_socket(int fd, std::string_view text) {
   std::size_t offset = 0;
   while (offset < text.size()) {
-    const auto written = ::send(fd, text.data() + offset, text.size() - offset, MSG_NOSIGNAL);
+    auto const written = ::send(fd, text.data() + offset, text.size() - offset, MSG_NOSIGNAL);
     if (written < 0) {
       if (errno == EINTR) continue;
       auto error = connect_error(ava::core::ErrorCategory::Io, "failed to write OAuth callback response");
@@ -209,8 +209,8 @@ std::string url_decode(std::string_view value) {
       continue;
     }
     if (value[index] == '%' && index + 2 < value.size()) {
-      const auto high = hex_value(value[index + 1]);
-      const auto low = hex_value(value[index + 2]);
+      auto const high = hex_value(value[index + 1]);
+      auto const low = hex_value(value[index + 2]);
       if (high && low) {
         output.push_back(static_cast<char>((*high << 4U) | *low));
         index += 2;
@@ -226,9 +226,9 @@ std::map<std::string, std::string> parse_query(std::string_view query) {
   std::map<std::string, std::string> fields;
   std::size_t start = 0;
   while (start <= query.size()) {
-    const auto end = query.find('&', start);
-    const auto part = query.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start);
-    const auto split = part.find('=');
+    auto const end = query.find('&', start);
+    auto const part = query.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start);
+    auto const split = part.find('=');
     if (split != std::string_view::npos) {
       fields[url_decode(part.substr(0, split))] = url_decode(part.substr(split + 1));
     }
@@ -246,20 +246,20 @@ struct OAuthCallback {
 };
 
 ava::core::Result<OAuthCallback> parse_oauth_callback_request(std::string_view request) {
-  const auto request_line_end = request.find("\r\n");
-  const auto request_line = request.substr(0, request_line_end);
+  auto const request_line_end = request.find("\r\n");
+  auto const request_line = request.substr(0, request_line_end);
   constexpr std::string_view prefix = "GET ";
   if (!request_line.starts_with(prefix)) {
     return std::unexpected(connect_error(ava::core::ErrorCategory::InvalidArgument, "OAuth callback was not a GET"));
   }
-  const auto target_end = request_line.find(' ', prefix.size());
+  auto const target_end = request_line.find(' ', prefix.size());
   if (target_end == std::string_view::npos) {
     return std::unexpected(
         connect_error(ava::core::ErrorCategory::InvalidArgument, "OAuth callback request line was invalid"));
   }
-  const auto target = request_line.substr(prefix.size(), target_end - prefix.size());
-  const auto query_start = target.find('?');
-  const auto path = target.substr(0, query_start);
+  auto const target = request_line.substr(prefix.size(), target_end - prefix.size());
+  auto const query_start = target.find('?');
+  auto const path = target.substr(0, query_start);
   if (path != "/auth/callback") {
     auto error = connect_error(ava::core::ErrorCategory::InvalidArgument, "OAuth callback path was invalid");
     error.with_context("path", std::string(path));
@@ -268,16 +268,16 @@ ava::core::Result<OAuthCallback> parse_oauth_callback_request(std::string_view r
   if (query_start == std::string_view::npos) {
     return std::unexpected(connect_error(ava::core::ErrorCategory::InvalidArgument, "OAuth callback query missing"));
   }
-  const auto fields = parse_query(target.substr(query_start + 1));
+  auto const fields = parse_query(target.substr(query_start + 1));
   OAuthCallback callback;
-  if (const auto state = fields.find("state"); state != fields.end()) callback.state = state->second;
-  if (const auto error = fields.find("error"); error != fields.end()) callback.error = error->second;
-  if (const auto description = fields.find("error_description"); description != fields.end()) {
+  if (auto const state = fields.find("state"); state != fields.end()) callback.state = state->second;
+  if (auto const error = fields.find("error"); error != fields.end()) callback.error = error->second;
+  if (auto const description = fields.find("error_description"); description != fields.end()) {
     callback.error_description = description->second;
   }
   if (!callback.error.empty()) return callback;
 
-  const auto code = fields.find("code");
+  auto const code = fields.find("code");
   if (code == fields.end() || code->second.empty() || callback.state.empty()) {
     return std::unexpected(
         connect_error(ava::core::ErrorCategory::InvalidArgument, "OAuth callback was missing code or state"));
@@ -290,7 +290,7 @@ ava::core::Result<std::string> read_http_request_with_deadline(int fd, std::chro
   std::string request;
   std::array<char, 4096> buffer{};
   while (request.find("\r\n\r\n") == std::string::npos && request.size() < 16384) {
-    const auto remaining =
+    auto const remaining =
         std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
     if (remaining.count() <= 0) {
       return std::unexpected(connect_error(ava::core::ErrorCategory::Io, "timed out reading OAuth callback"));
@@ -309,7 +309,7 @@ ava::core::Result<std::string> read_http_request_with_deadline(int fd, std::chro
       return std::unexpected(std::move(error));
     }
 
-    const auto count = ::read(fd, buffer.data(), buffer.size());
+    auto const count = ::read(fd, buffer.data(), buffer.size());
     if (count < 0) {
       if (errno == EINTR) continue;
       auto error = connect_error(ava::core::ErrorCategory::Io, "failed to read OAuth callback");
@@ -323,14 +323,14 @@ ava::core::Result<std::string> read_http_request_with_deadline(int fd, std::chro
 }
 
 void send_callback_response(int fd, std::string_view body) {
-  const std::string response =
+  std::string const response =
       "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: " + std::to_string(body.size()) +
       "\r\nConnection: close\r\n\r\n" + std::string(body);
   static_cast<void>(send_all_to_socket(fd, response));
 }
 
 ava::core::Result<OAuthCallback> wait_for_oauth_callback(std::string_view expected_state) {
-  const ScopedSocket server(::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0));
+  ScopedSocket const server(::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0));
   if (server.get() < 0) {
     auto error = connect_error(ava::core::ErrorCategory::Io, "failed to create OAuth callback socket");
     error.with_context("cause", errno_message());
@@ -355,9 +355,9 @@ ava::core::Result<OAuthCallback> wait_for_oauth_callback(std::string_view expect
     return std::unexpected(std::move(error));
   }
 
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(5);
+  auto const deadline = std::chrono::steady_clock::now() + std::chrono::minutes(5);
   while (std::chrono::steady_clock::now() < deadline) {
-    const auto remaining =
+    auto const remaining =
         std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
     pollfd descriptor{.fd = server.get(), .events = POLLIN, .revents = 0};
     int ready = 0;
@@ -371,14 +371,14 @@ ava::core::Result<OAuthCallback> wait_for_oauth_callback(std::string_view expect
       return std::unexpected(std::move(error));
     }
 
-    const ScopedSocket client(::accept4(server.get(), nullptr, nullptr, SOCK_CLOEXEC));
+    ScopedSocket const client(::accept4(server.get(), nullptr, nullptr, SOCK_CLOEXEC));
     if (client.get() < 0) {
       auto error = connect_error(ava::core::ErrorCategory::Io, "failed to accept OAuth callback");
       error.with_context("cause", errno_message());
       return std::unexpected(std::move(error));
     }
 
-    const auto client_deadline = std::min(deadline, std::chrono::steady_clock::now() + std::chrono::seconds(5));
+    auto const client_deadline = std::min(deadline, std::chrono::steady_clock::now() + std::chrono::seconds(5));
     auto request = read_http_request_with_deadline(client.get(), client_deadline);
     if (!request) {
       send_callback_response(client.get(), "AVA could not read this OAuth callback. Return to the terminal.\n");
@@ -417,13 +417,13 @@ std::string credential_type_label(ConnectCredentialType type) {
 std::string lower_ascii(std::string_view text) {
   std::string lowered;
   lowered.reserve(text.size());
-  for (const char ch : text) lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  for (char const ch : text) lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
   return lowered;
 }
 
 std::vector<ConnectProviderMenuItem> connect_provider_menu_items() {
   std::vector<ConnectProviderMenuItem> items;
-  for (const auto& profile : ava::config::builtin_provider_profiles()) {
+  for (auto const& profile : ava::config::builtin_provider_profiles()) {
     items.push_back(
         ConnectProviderMenuItem{.id = profile.provider_id,
                                 .label = profile.display_name,
@@ -432,10 +432,10 @@ std::vector<ConnectProviderMenuItem> connect_provider_menu_items() {
   return items;
 }
 
-bool provider_menu_item_matches(const ConnectProviderMenuItem& item, std::string_view query) {
+bool provider_menu_item_matches(ConnectProviderMenuItem const& item, std::string_view query) {
   if (query.empty()) return true;
-  const auto lowered_query = lower_ascii(query);
-  const auto haystack = lower_ascii(item.id + " " + item.label + " " + item.detail);
+  auto const lowered_query = lower_ascii(query);
+  auto const haystack = lower_ascii(item.id + " " + item.label + " " + item.detail);
   return haystack.find(lowered_query) != std::string::npos;
 }
 
@@ -448,7 +448,7 @@ std::vector<ConnectProviderMenuItem> filtered_provider_menu_items(std::string_vi
 }
 
 void render_provider_menu(std::ostream& out, std::string_view query, std::size_t selected_index) {
-  const auto filtered = filtered_provider_menu_items(query);
+  auto const filtered = filtered_provider_menu_items(query);
   out << "\x1b[2J\x1b[H";
   out << "Add credential\n\n";
   out << "Select provider\n\n";
@@ -458,7 +458,7 @@ void render_provider_menu(std::ostream& out, std::string_view query, std::size_t
     out << "  No matches. Press Enter to use custom provider id.\n";
   } else {
     for (std::size_t index = 0; index < filtered.size(); ++index) {
-      const auto& item = filtered[index];
+      auto const& item = filtered[index];
       out << (index == selected_index ? "> " : "  ") << ava::tui::sanitize_terminal_text(item.label) << "  "
           << ava::tui::sanitize_terminal_text(item.detail) << "\n";
     }
@@ -526,7 +526,7 @@ ava::core::Result<MenuInput> read_menu_input(std::istream& in, bool stdin_is_tty
 ava::core::Result<std::string> select_provider_from_menu(std::istream& in, std::ostream& out, bool stdin_is_tty) {
   std::string query;
   std::size_t selected_index = 0;
-  const ScopedTerminalRawMode raw_mode(stdin_is_tty);
+  ScopedTerminalRawMode const raw_mode(stdin_is_tty);
   while (true) {
     auto filtered = filtered_provider_menu_items(query);
     if (!filtered.empty()) selected_index = std::min(selected_index, filtered.size() - 1);
@@ -583,10 +583,10 @@ std::string trim_stdin_secret(std::string secret) {
 
 bool is_valid_env_var_name(std::string_view name) {
   if (name.empty()) return false;
-  const auto first = static_cast<unsigned char>(name.front());
+  auto const first = static_cast<unsigned char>(name.front());
   if (std::isalpha(first) == 0 && name.front() != '_') return false;
-  for (const char ch : name.substr(1)) {
-    const auto uch = static_cast<unsigned char>(ch);
+  for (char const ch : name.substr(1)) {
+    auto const uch = static_cast<unsigned char>(ch);
     if (std::isalnum(uch) != 0 || ch == '_') continue;
     return false;
   }
@@ -596,7 +596,7 @@ bool is_valid_env_var_name(std::string_view name) {
 bool is_valid_connect_provider_id(std::string_view provider_id) {
   if (provider_id.empty() || provider_id.size() > 128) return false;
   return std::ranges::all_of(provider_id, [](char ch) {
-    const auto uch = static_cast<unsigned char>(ch);
+    auto const uch = static_cast<unsigned char>(ch);
     return std::isalnum(uch) != 0 || ch == '-' || ch == '_';
   });
 }
@@ -606,7 +606,7 @@ ava::core::Result<std::string> read_prompt_line(std::istream& in, std::ostream& 
   out << prompt << std::flush;
   std::string line;
   {
-    const ScopedTerminalEcho echo_guard(secret && stdin_is_tty);
+    ScopedTerminalEcho const echo_guard(secret && stdin_is_tty);
     if (!std::getline(in, line)) {
       return std::unexpected(connect_error(ava::core::ErrorCategory::Io, "failed to read connect prompt input"));
     }
@@ -621,7 +621,7 @@ ava::core::Result<std::string> read_prompt_line(std::istream& in, std::ostream& 
   return line;
 }
 
-ava::core::VoidResult store_connect_secret(const ava::config::XdgPaths& paths, std::string_view provider_id,
+ava::core::VoidResult store_connect_secret(ava::config::XdgPaths const& paths, std::string_view provider_id,
                                            ConnectCredentialType credential_type, std::string secret) {
   if (!is_valid_connect_provider_id(provider_id)) {
     return std::unexpected(connect_error(ava::core::ErrorCategory::InvalidArgument,
@@ -638,13 +638,13 @@ ava::core::VoidResult store_connect_secret(const ava::config::XdgPaths& paths, s
                                              .source = "connect"});
 }
 
-ava::core::Result<std::string> read_connect_secret(const ConnectProviderCredentialOptions& options, std::istream& in) {
+ava::core::Result<std::string> read_connect_secret(ConnectProviderCredentialOptions const& options, std::istream& in) {
   if (options.env_var) {
     if (!is_valid_env_var_name(*options.env_var)) {
       return std::unexpected(
           connect_error(ava::core::ErrorCategory::InvalidArgument, "credential env var name is invalid"));
     }
-    const char* value = std::getenv(options.env_var->c_str());
+    char const* value = std::getenv(options.env_var->c_str());
     if (value == nullptr || std::string_view(value).empty()) {
       return std::unexpected(
           connect_error(ava::core::ErrorCategory::PermissionDenied, "credential env var is not set"));
@@ -679,7 +679,7 @@ ava::core::Result<std::string> read_connect_secret(const ConnectProviderCredenti
 
 }  // namespace
 
-int run_connect_openai(const ava::config::XdgPaths& paths) {
+int run_connect_openai(ava::config::XdgPaths const& paths) {
   auto session = ava::config::make_openai_oauth_session();
   if (!session) {
     std::cerr << ava::tui::sanitize_terminal_text(session.error().format()) << '\n';
@@ -711,7 +711,7 @@ int run_connect_openai(const ava::config::XdgPaths& paths) {
   return 0;
 }
 
-int run_connect_provider_wizard(const ava::config::XdgPaths& paths, const ConnectProviderWizardOptions& options,
+int run_connect_provider_wizard(ava::config::XdgPaths const& paths, ConnectProviderWizardOptions const& options,
                                 std::istream& in, std::ostream& out, std::ostream& err) {
   if (!options.stdin_is_tty) {
     err << "interactive provider login requires a terminal; use --api-key-stdin, --api-key-env, --oauth-token-stdin, "
@@ -772,7 +772,7 @@ int run_connect_provider_wizard(const ava::config::XdgPaths& paths, const Connec
   return 0;
 }
 
-int run_connect_provider_credential(const ava::config::XdgPaths& paths, const ConnectProviderCredentialOptions& options,
+int run_connect_provider_credential(ava::config::XdgPaths const& paths, ConnectProviderCredentialOptions const& options,
                                     std::istream& in, std::ostream& out, std::ostream& err) {
   auto secret = read_connect_secret(options, in);
   if (!secret) {

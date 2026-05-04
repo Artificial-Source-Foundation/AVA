@@ -56,17 +56,17 @@ class PluginProcess final {
   PluginProcess(PluginManifest manifest, PluginRunnerOptions options);
   ~PluginProcess();
 
-  PluginProcess(const PluginProcess&) = delete;
-  PluginProcess& operator=(const PluginProcess&) = delete;
+  PluginProcess(PluginProcess const&) = delete;
+  PluginProcess& operator=(PluginProcess const&) = delete;
   PluginProcess(PluginProcess&&) = delete;
   PluginProcess& operator=(PluginProcess&&) = delete;
 
   [[nodiscard]] static ava::core::Result<std::unique_ptr<PluginProcess>> start(
       PluginManifest manifest, PluginRunnerOptions options, CancelCallback cancel_requested = nullptr);
 
-  [[nodiscard]] const PluginManifest& manifest() const noexcept;
-  [[nodiscard]] const PluginInitialization& initialization() const noexcept;
-  [[nodiscard]] const std::string& stderr_tail() const noexcept;
+  [[nodiscard]] PluginManifest const& manifest() const noexcept;
+  [[nodiscard]] PluginInitialization const& initialization() const noexcept;
+  [[nodiscard]] std::string const& stderr_tail() const noexcept;
   [[nodiscard]] bool stderr_truncated() const noexcept;
 
   [[nodiscard]] ava::core::Result<PluginToolCallResult> call_tool(std::string_view tool_name,

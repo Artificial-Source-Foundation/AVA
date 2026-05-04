@@ -14,10 +14,10 @@ struct ReasoningProfile {
   std::string request_parameters;
 };
 
-[[nodiscard]] const ReasoningProfile& openai_responses_reasoning_profile();
-[[nodiscard]] const ReasoningProfile& openai_compatible_reasoning_content_profile();
-[[nodiscard]] const ReasoningProfile& anthropic_thinking_reasoning_profile();
+[[nodiscard]] ReasoningProfile const& openai_responses_reasoning_profile();
+[[nodiscard]] ReasoningProfile const& openai_compatible_reasoning_content_profile();
+[[nodiscard]] ReasoningProfile const& anthropic_thinking_reasoning_profile();
 
-[[nodiscard]] std::string reasoning_parameter_text(const ModelInfo& model);
+[[nodiscard]] std::string reasoning_parameter_text(ModelInfo const& model);
 
 }  // namespace ava::config

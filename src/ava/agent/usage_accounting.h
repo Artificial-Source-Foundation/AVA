@@ -9,11 +9,11 @@
 
 namespace ava::agent {
 
-[[nodiscard]] std::string usage_json(const ava::provider::TokenUsage& usage,
-                                     const std::optional<long double>& cost_usd);
+[[nodiscard]] std::string usage_json(ava::provider::TokenUsage const& usage,
+                                     std::optional<long double> const& cost_usd);
 [[nodiscard]] ava::provider::TokenUsage with_total_tokens(ava::provider::TokenUsage usage);
 [[nodiscard]] ava::provider::TokenUsage estimate_usage_from_turn(std::string_view request_body,
-                                                                 const ParsedAssistantTurn& turn);
-void accumulate_usage(std::optional<ava::provider::TokenUsage>& total, const ava::provider::TokenUsage& usage);
+                                                                 ParsedAssistantTurn const& turn);
+void accumulate_usage(std::optional<ava::provider::TokenUsage>& total, ava::provider::TokenUsage const& usage);
 
 }  // namespace ava::agent

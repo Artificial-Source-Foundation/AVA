@@ -34,6 +34,6 @@ struct ProviderOutputLimits {
 };
 
 [[nodiscard]] ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(
-    const std::vector<ava::provider::StreamEvent>& events, ProviderOutputLimits limits);
+    std::vector<ava::provider::StreamEvent> const& events, ProviderOutputLimits limits);
 
 }  // namespace ava::agent

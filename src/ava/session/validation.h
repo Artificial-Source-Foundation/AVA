@@ -65,7 +65,7 @@ struct SessionReplayValidation {
 
 [[nodiscard]] std::string_view to_string(SessionReplayIssueSeverity severity) noexcept;
 [[nodiscard]] std::string_view to_string(SessionReplayIssueKind kind) noexcept;
-[[nodiscard]] SessionReplayValidation validate_session_replay(const std::vector<SessionEntry>& entries,
+[[nodiscard]] SessionReplayValidation validate_session_replay(std::vector<SessionEntry> const& entries,
                                                               SessionReplayValidationOptions options = {});
 
 }  // namespace ava::session

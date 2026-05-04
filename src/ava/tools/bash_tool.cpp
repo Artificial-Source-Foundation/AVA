@@ -29,8 +29,8 @@ constexpr auto kBashProgressTimeInterval = std::chrono::seconds(2);
 class UniqueFd {
  public:
   explicit UniqueFd(int fd = -1) : fd_(fd) {}
-  UniqueFd(const UniqueFd&) = delete;
-  UniqueFd& operator=(const UniqueFd&) = delete;
+  UniqueFd(UniqueFd const&) = delete;
+  UniqueFd& operator=(UniqueFd const&) = delete;
   UniqueFd(UniqueFd&& other) noexcept : fd_(other.release()) {}
   UniqueFd& operator=(UniqueFd&& other) noexcept {
     if (this != &other) {
@@ -42,7 +42,7 @@ class UniqueFd {
 
   [[nodiscard]] int get() const noexcept { return fd_; }
   [[nodiscard]] int release() noexcept {
-    const int fd = fd_;
+    int const fd = fd_;
     fd_ = -1;
     return fd;
   }
@@ -80,7 +80,7 @@ ava::core::Result<std::vector<std::string>> parse_command_argv(std::string_view 
   char quote = '\0';
   bool escaping = false;
 
-  for (const char ch : command) {
+  for (char const ch : command) {
     if (escaping) {
       current.push_back(ch);
       escaping = false;
@@ -146,7 +146,7 @@ void append_tail(BashResult& result, std::string_view chunk, std::size_t max_byt
     return;
   }
 
-  const auto next_size = result.output.size() + chunk.size();
+  auto const next_size = result.output.size() + chunk.size();
   if (next_size > max_bytes) {
     result.output.erase(0, next_size - max_bytes);
     result.truncated = true;
@@ -156,7 +156,7 @@ void append_tail(BashResult& result, std::string_view chunk, std::size_t max_byt
 
 ssize_t read_retry(int fd, char* data, std::size_t size) {
   while (true) {
-    const auto bytes = read(fd, data, size);
+    auto const bytes = read(fd, data, size);
     if (bytes < 0 && errno == EINTR) {
       continue;
     }
@@ -166,7 +166,7 @@ ssize_t read_retry(int fd, char* data, std::size_t size) {
 
 pid_t waitpid_retry(pid_t pid, int* status, int options) {
   while (true) {
-    const auto waited = waitpid(pid, status, options);
+    auto const waited = waitpid(pid, status, options);
     if (waited < 0 && errno == EINTR) {
       continue;
     }
@@ -185,8 +185,8 @@ ava::core::Result<std::array<int, 2>> make_pipe() {
 }
 
 void close_nonstandard_fds() {
-  const long open_max = sysconf(_SC_OPEN_MAX);
-  const int max_fd = open_max > 0 ? static_cast<int>(open_max) : 1024;
+  long const open_max = sysconf(_SC_OPEN_MAX);
+  int const max_fd = open_max > 0 ? static_cast<int>(open_max) : 1024;
   for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd) {
     close(fd);
   }
@@ -211,7 +211,7 @@ void signal_process(pid_t pid, bool can_signal_group, int signal) { kill(can_sig
 ava::core::VoidResult stop_process(pid_t pid, bool can_signal_group, int& status, std::string_view command) {
   signal_process(pid, can_signal_group, SIGTERM);
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  const pid_t terminated = waitpid_retry(pid, &status, WNOHANG);
+  pid_t const terminated = waitpid_retry(pid, &status, WNOHANG);
   if (terminated < 0) {
     return std::unexpected(waitpid_error(command));
   }
@@ -224,16 +224,16 @@ ava::core::VoidResult stop_process(pid_t pid, bool can_signal_group, int& status
   return {};
 }
 
-bool is_canceled(const ToolContext& context) { return context.cancel_requested && context.cancel_requested(); }
+bool is_canceled(ToolContext const& context) { return context.cancel_requested && context.cancel_requested(); }
 
 }  // namespace
 
-ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_view command, BashOptions options) {
+ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_view command, BashOptions options) {
   if (command.empty()) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "command must not be empty");
     return std::unexpected(std::move(error));
   }
-  const auto tool_name = context.permission_tool_name.empty() ? std::string("bash") : context.permission_tool_name;
+  auto const tool_name = context.permission_tool_name.empty() ? std::string("bash") : context.permission_tool_name;
   if (auto permission = ensure_permission(context, ava::permissions::Operation::RunCommand, context.workspace_dir,
                                           command, tool_name, "command requires permission");
       !permission) {
@@ -257,7 +257,7 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
   }
   argv.push_back(nullptr);
 
-  const auto workspace_text = context.workspace_dir.string();
+  auto const workspace_text = context.workspace_dir.string();
 
   auto pipe_result = make_pipe();
   if (!pipe_result) {
@@ -266,7 +266,7 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
   UniqueFd read_fd((*pipe_result)[0]);
   UniqueFd write_fd((*pipe_result)[1]);
 
-  const pid_t pid = fork();
+  pid_t const pid = fork();
   if (pid < 0) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to fork process");
     error.with_context("cause", std::strerror(errno));
@@ -290,10 +290,10 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
     _exit(127);
   }
 
-  const bool can_signal_group = setpgid(pid, pid) == 0 || errno == EACCES;
+  bool const can_signal_group = setpgid(pid, pid) == 0 || errno == EACCES;
   int status = 0;
   write_fd.reset();
-  const int flags = fcntl(read_fd.get(), F_GETFL, 0);
+  int const flags = fcntl(read_fd.get(), F_GETFL, 0);
   if (flags < 0) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to read process pipe flags");
     error.with_context("command", std::string(command));
@@ -314,14 +314,14 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
   BashResult result;
   SpillBuffer spill_buffer;
   bool running = true;
-  const auto deadline = std::chrono::steady_clock::now() + options.timeout;
+  auto const deadline = std::chrono::steady_clock::now() + options.timeout;
   auto last_progress = std::chrono::steady_clock::now();
   std::size_t next_progress_bytes = kBashProgressByteInterval;
   std::array<char, 4096> buffer{};
 
-  const auto maybe_emit_progress = [&]() -> ava::core::VoidResult {
+  auto const maybe_emit_progress = [&]() -> ava::core::VoidResult {
     if (!context.progress_sink) return {};
-    const auto now = std::chrono::steady_clock::now();
+    auto const now = std::chrono::steady_clock::now();
     if (result.total_bytes < next_progress_bytes && now - last_progress < kBashProgressTimeInterval) return {};
     while (result.total_bytes >= next_progress_bytes) next_progress_bytes += kBashProgressByteInterval;
     last_progress = now;
@@ -330,9 +330,9 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
 
   while (running) {
     while (true) {
-      const auto bytes = read_retry(read_fd.get(), buffer.data(), buffer.size());
+      auto const bytes = read_retry(read_fd.get(), buffer.data(), buffer.size());
       if (bytes > 0) {
-        const std::string_view chunk(buffer.data(), static_cast<std::size_t>(bytes));
+        std::string_view const chunk(buffer.data(), static_cast<std::size_t>(bytes));
         spill_buffer.append(chunk);
         append_tail(result, chunk, options.max_bytes);
         if (auto progress = maybe_emit_progress(); !progress) {
@@ -360,7 +360,7 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
       break;
     }
 
-    const pid_t waited = waitpid_retry(pid, &status, WNOHANG);
+    pid_t const waited = waitpid_retry(pid, &status, WNOHANG);
     if (waited == pid) {
       running = false;
       break;
@@ -382,7 +382,7 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
   }
 
   while (true) {
-    const auto bytes = read_retry(read_fd.get(), buffer.data(), buffer.size());
+    auto const bytes = read_retry(read_fd.get(), buffer.data(), buffer.size());
     if (bytes <= 0) {
       if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
         auto error = pipe_read_error(command);
@@ -390,7 +390,7 @@ ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_v
       }
       break;
     }
-    const std::string_view chunk(buffer.data(), static_cast<std::size_t>(bytes));
+    std::string_view const chunk(buffer.data(), static_cast<std::size_t>(bytes));
     spill_buffer.append(chunk);
     append_tail(result, chunk, options.max_bytes);
     if (auto progress = maybe_emit_progress(); !progress) return std::unexpected(std::move(progress.error()));

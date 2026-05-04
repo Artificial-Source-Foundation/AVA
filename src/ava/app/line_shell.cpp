@@ -37,8 +37,8 @@ namespace version = ava::core::version;
 
 void print_shell_help() { std::cout << ava::app::command_help_text() << '\n'; }
 
-std::string git_branch_for_sidebar(const std::filesystem::path& workspace) {
-  const auto head_path = workspace / ".git" / "HEAD";
+std::string git_branch_for_sidebar(std::filesystem::path const& workspace) {
+  auto const head_path = workspace / ".git" / "HEAD";
   std::ifstream input(head_path);
   if (!input) return {};
   std::string head;
@@ -48,9 +48,9 @@ std::string git_branch_for_sidebar(const std::filesystem::path& workspace) {
   return head.size() > 12 ? head.substr(0, 12) : head;
 }
 
-std::vector<ava::app::CommandHotkey> command_hotkeys_from_key_bindings(const ava::tui::TuiKeyBindings& key_bindings) {
+std::vector<ava::app::CommandHotkey> command_hotkeys_from_key_bindings(ava::tui::TuiKeyBindings const& key_bindings) {
   std::vector<ava::app::CommandHotkey> hotkeys;
-  for (const auto& item : ava::tui::key_binding_help_items(key_bindings)) {
+  for (auto const& item : ava::tui::key_binding_help_items(key_bindings)) {
     hotkeys.push_back(
         ava::app::CommandHotkey{.action = item.action, .description = item.description, .keys = item.keys});
   }
@@ -69,10 +69,10 @@ ava::tui::ToolTimelineStatus tui_tool_status(ava::agent::ToolTimelineStatus stat
   return ava::tui::ToolTimelineStatus::Error;
 }
 
-std::vector<ava::tui::ToolTimelineItem> tui_tool_timeline(const std::vector<ava::agent::ToolTimelineEntry>& entries) {
+std::vector<ava::tui::ToolTimelineItem> tui_tool_timeline(std::vector<ava::agent::ToolTimelineEntry> const& entries) {
   std::vector<ava::tui::ToolTimelineItem> items;
   items.reserve(entries.size());
-  for (const auto& entry : entries) {
+  for (auto const& entry : entries) {
     items.push_back(ava::tui::ToolTimelineItem{.status = tui_tool_status(entry.status),
                                                .name = entry.name,
                                                .argument_summary = entry.argument_summary,
@@ -81,7 +81,7 @@ std::vector<ava::tui::ToolTimelineItem> tui_tool_timeline(const std::vector<ava:
   return items;
 }
 
-void print_resume_command(const ava::session::SessionStore& store) {
+void print_resume_command(ava::session::SessionStore const& store) {
   std::cout << "Resume this session with: ava --session " << store.session_id() << '\n';
 }
 
@@ -95,7 +95,7 @@ void add_token_component(std::optional<long long>& total, std::optional<long lon
   *total += *value;
 }
 
-std::optional<long long> compact_token_total(const ava::session::SessionStats& stats) {
+std::optional<long long> compact_token_total(ava::session::SessionStats const& stats) {
   if (stats.total_tokens) return stats.total_tokens;
 
   std::optional<long long> total;
@@ -110,7 +110,7 @@ std::optional<long long> compact_token_total(const ava::session::SessionStats& s
 std::string format_compact_token_count(long long value) {
   if (value < 1000) return std::to_string(value);
 
-  const auto format_scaled = [](long long tenths, std::string_view suffix) {
+  auto const format_scaled = [](long long tenths, std::string_view suffix) {
     std::ostringstream output;
     output << (tenths / 10);
     if (tenths % 10 != 0) output << '.' << (tenths % 10);
@@ -127,7 +127,7 @@ std::optional<std::string> format_context_window_percent(long long tokens,
   if (!context_window_tokens || *context_window_tokens <= 0) return std::nullopt;
   if (tokens <= 0) return std::string("0.0%");
 
-  const auto percent = (static_cast<long double>(tokens) * 100.0L) / static_cast<long double>(*context_window_tokens);
+  auto const percent = (static_cast<long double>(tokens) * 100.0L) / static_cast<long double>(*context_window_tokens);
   if (percent > 0.0L && percent < 0.1L) return std::string("<0.1%");
 
   std::ostringstream output;
@@ -135,20 +135,20 @@ std::optional<std::string> format_context_window_percent(long long tokens,
   return output.str();
 }
 
-std::optional<std::string> compact_token_status(const ava::session::SessionStats& stats,
+std::optional<std::string> compact_token_status(ava::session::SessionStats const& stats,
                                                 std::optional<long long> context_window_tokens) {
-  const auto tokens = compact_token_total(stats);
+  auto const tokens = compact_token_total(stats);
   if (!tokens) return std::nullopt;
 
   std::ostringstream output;
   output << format_compact_token_count(*tokens);
-  if (const auto percent = format_context_window_percent(*tokens, context_window_tokens)) {
+  if (auto const percent = format_context_window_percent(*tokens, context_window_tokens)) {
     output << " (" << *percent << ')';
   }
   return output.str();
 }
 
-std::optional<std::string> token_status_for_session(const ava::app::RuntimeSession& session) {
+std::optional<std::string> token_status_for_session(ava::app::RuntimeSession const& session) {
   auto entries = session.store.load();
   if (!entries) return std::nullopt;
   return compact_token_status(ava::session::compute_session_stats(*entries), session.model.context_window_tokens);
@@ -198,10 +198,10 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
   return callback(**provider, transport, run_options);
 }
 
-LineResult handle_line(ShellState& state, const std::string& line,
+LineResult handle_line(ShellState& state, std::string const& line,
                        ava::permissions::PermissionResolver permission_resolver = nullptr,
                        ava::agent::QuestionResolver question_resolver = nullptr,
-                       const std::vector<ava::app::CommandHotkey>& hotkeys = {},
+                       std::vector<ava::app::CommandHotkey> const& hotkeys = {},
                        ava::app::RuntimeEventSink event_sink = nullptr,
                        std::function<bool()> cancel_requested = nullptr,
                        std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr) {
@@ -211,7 +211,7 @@ LineResult handle_line(ShellState& state, const std::string& line,
     if (is_compact_command(line)) {
       return with_provider_runtime(
           state, "\nother slash tool commands still work offline.",
-          [&](const ava::provider::Provider& provider, ava::provider::Transport& transport,
+          [&](ava::provider::Provider const& provider, ava::provider::Transport& transport,
               ava::app::RuntimeRunOptions run_options) {
             run_options.cancel_requested = cancel_requested;
             run_options.event_sink = event_sink;
@@ -222,8 +222,8 @@ LineResult handle_line(ShellState& state, const std::string& line,
                                          .permission_resolver = permission_resolver,
                                          .question_resolver = question_resolver,
                                          .compaction_summary_generator =
-                                             [&](const std::vector<ava::session::SessionEntry>& entries,
-                                                 const ava::session::CompactionConfig& config,
+                                             [&](std::vector<ava::session::SessionEntry> const& entries,
+                                                 ava::session::CompactionConfig const& config,
                                                  std::string_view instructions, std::size_t estimated_tokens) {
                                                return ava::app::generate_compaction_summary(
                                                    state.session, entries, config, instructions, estimated_tokens,
@@ -256,7 +256,7 @@ LineResult handle_line(ShellState& state, const std::string& line,
   }
 
   return with_provider_runtime(state, "\nslash tool commands still work offline.",
-                               [&](const ava::provider::Provider& provider, ava::provider::Transport& transport,
+                               [&](ava::provider::Provider const& provider, ava::provider::Transport& transport,
                                    ava::app::RuntimeRunOptions run_options) {
                                  run_options.permission_resolver = permission_resolver;
                                  run_options.question_resolver = question_resolver;
@@ -296,9 +296,9 @@ int run_line_shell(ShellState state) {
       return 0;
     }
 
-    const auto result = handle_line(state, line);
-    for (const auto& output : result.output) {
-      for (const auto& output_line : ava::tui::split_lines(output)) {
+    auto const result = handle_line(state, line);
+    for (auto const& output : result.output) {
+      for (auto const& output_line : ava::tui::split_lines(output)) {
         std::cout << ava::tui::sanitize_terminal_text(output_line) << '\n';
       }
     }
@@ -351,7 +351,7 @@ int run_tui(ShellState state) {
                   return ava::tui::TuiQueuedFollowUp{.request_id = next->request_id, .message = next->message};
                 },
                 .mark_follow_up_started =
-                    [queue](const ava::tui::TuiQueuedFollowUp& follow_up) {
+                    [queue](ava::tui::TuiQueuedFollowUp const& follow_up) {
                       return queue->mark_follow_up_started(
                           ava::app::InteractiveQueuedMessage{.request_id = follow_up.request_id,
                                                              .correlation_id = follow_up.request_id,
@@ -366,7 +366,7 @@ int run_tui(ShellState state) {
                 .finish = [queue](bool canceled) { return queue->finish(canceled); }};
           },
       .on_submit =
-          [&state, hotkeys](const std::string& submitted, ava::tui::TuiSubmitContext context) {
+          [&state, hotkeys](std::string const& submitted, ava::tui::TuiSubmitContext context) {
             auto line_result =
                 handle_line(state, submitted, context.permission_resolver, context.question_resolver, hotkeys,
                             context.event_sink, context.cancel_requested, context.take_steering_messages);

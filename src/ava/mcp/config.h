@@ -38,9 +38,9 @@ struct McpConfigLoadOptions {
 
 [[nodiscard]] std::string_view to_string(McpServerScope scope);
 [[nodiscard]] bool is_valid_mcp_identifier(std::string_view id);
-[[nodiscard]] McpConfigLoadOptions default_mcp_config_options(const std::filesystem::path& workspace_dir);
+[[nodiscard]] McpConfigLoadOptions default_mcp_config_options(std::filesystem::path const& workspace_dir);
 [[nodiscard]] ava::core::Result<McpConfig> parse_mcp_config(std::string_view json, std::filesystem::path config_path,
                                                             McpServerScope scope);
-[[nodiscard]] ava::core::Result<McpConfig> load_mcp_config(const McpConfigLoadOptions& options);
+[[nodiscard]] ava::core::Result<McpConfig> load_mcp_config(McpConfigLoadOptions const& options);
 
 }  // namespace ava::mcp

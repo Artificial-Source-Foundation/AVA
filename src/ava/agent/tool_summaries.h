@@ -6,7 +6,7 @@
 
 namespace ava::agent {
 
-[[nodiscard]] std::string summarize_tool_arguments(const ProviderToolCall& call);
-[[nodiscard]] std::string summarize_tool_result(const ToolDispatchResult& result);
+[[nodiscard]] std::string summarize_tool_arguments(ProviderToolCall const& call);
+[[nodiscard]] std::string summarize_tool_result(ToolDispatchResult const& result);
 
 }  // namespace ava::agent

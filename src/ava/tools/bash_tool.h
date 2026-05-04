@@ -26,7 +26,7 @@ struct BashResult {
   std::filesystem::path spill_path;
 };
 
-[[nodiscard]] ava::core::Result<BashResult> run_bash(const ToolContext& context, std::string_view command,
+[[nodiscard]] ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_view command,
                                                      BashOptions options = {});
 
 }  // namespace ava::tools

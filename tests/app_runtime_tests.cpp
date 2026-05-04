@@ -74,8 +74,8 @@ class ScopedStdinTerminalState {
  public:
   ScopedStdinTerminalState() : active_(::tcgetattr(STDIN_FILENO, &original_) == 0) {}
 
-  ScopedStdinTerminalState(const ScopedStdinTerminalState&) = delete;
-  ScopedStdinTerminalState& operator=(const ScopedStdinTerminalState&) = delete;
+  ScopedStdinTerminalState(ScopedStdinTerminalState const&) = delete;
+  ScopedStdinTerminalState& operator=(ScopedStdinTerminalState const&) = delete;
 
   ~ScopedStdinTerminalState() { restore(); }
 
@@ -90,12 +90,12 @@ class ScopedStdinTerminalState {
   bool active_ = false;
 };
 
-ava::config::XdgPaths app_test_paths(const std::filesystem::path& root) {
-  const auto config_home = root / "config";
-  const auto state_home = root / "state";
-  const auto data_home = root / "data";
-  const auto ava_config = config_home / "ava";
-  const auto ava_state = state_home / "ava";
+ava::config::XdgPaths app_test_paths(std::filesystem::path const& root) {
+  auto const config_home = root / "config";
+  auto const state_home = root / "state";
+  auto const data_home = root / "data";
+  auto const ava_config = config_home / "ava";
+  auto const ava_state = state_home / "ava";
   return ava::config::XdgPaths{.config_home = config_home,
                                .state_home = state_home,
                                .data_home = data_home,
@@ -137,7 +137,7 @@ std::string app_test_mcp_config_json(std::string_view id, std::string_view name,
          "\",\"enabled\":true}]}";
 }
 
-void write_app_test_file(const std::filesystem::path& path, const std::string& text) {
+void write_app_test_file(std::filesystem::path const& path, std::string const& text) {
   std::filesystem::create_directories(path.parent_path());
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file << text;
@@ -148,7 +148,7 @@ class BlockingInputBuf final : public std::streambuf {
   void push(std::string text) {
     {
       std::lock_guard lock(mutex_);
-      for (const char ch : text) buffer_.push_back(ch);
+      for (char const ch : text) buffer_.push_back(ch);
     }
     cv_.notify_all();
   }
@@ -203,7 +203,7 @@ class ThreadSafeStringBuf final : public std::streambuf {
     return ch;
   }
 
-  std::streamsize xsputn(const char* s, std::streamsize count) override {
+  std::streamsize xsputn(char const* s, std::streamsize count) override {
     {
       std::lock_guard lock(mutex_);
       text_.append(s, static_cast<std::size_t>(count));
@@ -222,11 +222,11 @@ class ChunkedStreamingTransport final : public ava::provider::Transport {
  public:
   explicit ChunkedStreamingTransport(std::vector<std::string> chunks, int status_code = 200)
       : chunks_(std::move(chunks)), status_code_(status_code) {
-    for (const auto& chunk : chunks_) response_body_ += chunk;
+    for (auto const& chunk : chunks_) response_body_ += chunk;
   }
 
   [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
-      const ava::provider::HttpRequest& request) override {
+      ava::provider::HttpRequest const& request) override {
     requests_.push_back(request);
     return ava::provider::HttpResponse{.status_code = status_code_, .headers = {}, .body = response_body_};
   }
@@ -234,10 +234,10 @@ class ChunkedStreamingTransport final : public ava::provider::Transport {
   [[nodiscard]] bool supports_streaming() const noexcept override { return true; }
 
   [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send_streaming(
-      const ava::provider::HttpRequest& request, BodyChunkSink on_body_chunk,
+      ava::provider::HttpRequest const& request, BodyChunkSink on_body_chunk,
       CancelCallback cancel_requested = nullptr) override {
     requests_.push_back(request);
-    for (const auto& chunk : chunks_) {
+    for (auto const& chunk : chunks_) {
       if (cancel_requested && cancel_requested()) {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "stream canceled"));
       }
@@ -246,7 +246,7 @@ class ChunkedStreamingTransport final : public ava::provider::Transport {
     return ava::provider::HttpResponse{.status_code = status_code_, .headers = {}, .body = response_body_};
   }
 
-  [[nodiscard]] const std::vector<ava::provider::HttpRequest>& requests() const noexcept { return requests_; }
+  [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept { return requests_; }
 
  private:
   std::vector<std::string> chunks_;
@@ -260,7 +260,7 @@ class BlockingResponseTransport final : public ava::provider::Transport {
   explicit BlockingResponseTransport(ava::provider::HttpResponse response) : response_(std::move(response)) {}
 
   [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
-      const ava::provider::HttpRequest& request) override {
+      ava::provider::HttpRequest const& request) override {
     {
       std::lock_guard lock(mutex_);
       requests_.push_back(request);
@@ -314,7 +314,7 @@ std::string read_file_call_sse(std::string_view path = "note.txt") {
 }
 
 std::string write_file_call_sse(std::string_view path, std::string_view content) {
-  const auto args =
+  auto const args =
       "{\"path\":\"" + ava::core::json::escape(path) + "\",\"content\":\"" + ava::core::json::escape(content) + "\"}";
   return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_write\",\"name\":\"write_file\"}\n\n"
          "data: "
@@ -340,21 +340,21 @@ std::string final_text_sse(std::string_view text) {
 }
 
 std::string extract_json_string_field(std::string_view text, std::string_view key) {
-  const std::string needle = "\"" + std::string(key) + "\":\"";
-  const auto start = text.find(needle);
+  std::string const needle = "\"" + std::string(key) + "\":\"";
+  auto const start = text.find(needle);
   if (start == std::string_view::npos) return "";
-  const auto value_start = start + needle.size();
-  const auto value_end = text.find('"', value_start);
+  auto const value_start = start + needle.size();
+  auto const value_end = text.find('"', value_start);
   if (value_end == std::string_view::npos) return "";
   return std::string(text.substr(value_start, value_end - value_start));
 }
 
 std::string extract_last_json_string_field(std::string_view text, std::string_view key) {
-  const std::string needle = "\"" + std::string(key) + "\":\"";
-  const auto start = text.rfind(needle);
+  std::string const needle = "\"" + std::string(key) + "\":\"";
+  auto const start = text.rfind(needle);
   if (start == std::string_view::npos) return "";
-  const auto value_start = start + needle.size();
-  const auto value_end = text.find('"', value_start);
+  auto const value_start = start + needle.size();
+  auto const value_end = text.find('"', value_start);
   if (value_end == std::string_view::npos) return "";
   return std::string(text.substr(value_start, value_end - value_start));
 }
@@ -369,13 +369,13 @@ std::size_t count_substrings(std::string_view text, std::string_view needle) {
   return count;
 }
 
-std::size_t count_compaction_entries(const std::vector<ava::session::SessionEntry>& entries) {
+std::size_t count_compaction_entries(std::vector<ava::session::SessionEntry> const& entries) {
   return static_cast<std::size_t>(std::ranges::count_if(
-      entries, [](const auto& entry) { return entry.type == ava::session::EntryType::Compaction; }));
+      entries, [](auto const& entry) { return entry.type == ava::session::EntryType::Compaction; }));
 }
 
 std::optional<ava::session::SessionEntry> latest_compaction_entry(
-    const std::vector<ava::session::SessionEntry>& entries) {
+    std::vector<ava::session::SessionEntry> const& entries) {
   for (auto iterator = entries.rbegin(); iterator != entries.rend(); ++iterator) {
     if (iterator->type == ava::session::EntryType::Compaction) return *iterator;
   }
@@ -388,7 +388,7 @@ class MutatingSummaryTransport final : public ava::provider::Transport {
                            std::size_t mutate_requests = 1)
       : store_(store), responses_(std::move(responses)), mutate_requests_(mutate_requests) {}
 
-  ava::core::Result<ava::provider::HttpResponse> send(const ava::provider::HttpRequest& request) override {
+  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override {
     requests_.push_back(request);
     if (requests_.size() <= mutate_requests_) {
       static_cast<void>(
@@ -406,7 +406,7 @@ class MutatingSummaryTransport final : public ava::provider::Transport {
     return response;
   }
 
-  [[nodiscard]] const std::vector<ava::provider::HttpRequest>& requests() const noexcept { return requests_; }
+  [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept { return requests_; }
 
  private:
   ava::session::SessionStore& store_;
@@ -480,7 +480,7 @@ void test_app_event_serialization() {
   session_event.mode = ava::agent::Mode::Plan;
   session_event.provider_id = "openai";
   session_event.model_id = "gpt-5.5";
-  const auto jsonl = ava::app::serialize_event_jsonl(session_event);
+  auto const jsonl = ava::app::serialize_event_jsonl(session_event);
   expect(jsonl ==
              "{\"type\":\"session_start\",\"timestamp\":\"2026-04-29T00:00:00Z\","
              "\"session_id\":\"session_1\",\"mode\":\"plan\",\"provider\":\"openai\","
@@ -492,7 +492,7 @@ void test_app_event_serialization() {
   message_event.timestamp = "2026-04-29T00:00:01Z";
   message_event.session_id = "session_1";
   message_event.text = "hello\n\"ava\"";
-  const auto message_jsonl = ava::app::serialize_event_jsonl(message_event);
+  auto const message_jsonl = ava::app::serialize_event_jsonl(message_event);
   expect(message_jsonl.find("hello\\n\\\"ava\\\"") != std::string::npos, "runtime event JSONL escapes message text");
   expect(message_jsonl.ends_with('\n') &&
              message_jsonl.substr(0, message_jsonl.size() - 1).find('\n') == std::string::npos,
@@ -500,7 +500,7 @@ void test_app_event_serialization() {
 }
 
 void test_app_rpc_prompt_payload_serialization() {
-  const auto permission_json = ava::app::rpc::permission_request_payload_json(
+  auto const permission_json = ava::app::rpc::permission_request_payload_json(
       "permission_1", ava::permissions::PermissionPrompt{.operation = ava::permissions::Operation::EditFile,
                                                          .mode = ava::agent::Mode::Build,
                                                          .workspace_dir = "/workspace",
@@ -516,7 +516,7 @@ void test_app_rpc_prompt_payload_serialization() {
              permission_json.find("\"diff_truncated\":true") != std::string::npos,
          "RPC permission request payload preserves semantic operation, target, reason, and diff preview data");
 
-  const auto question_json = ava::app::rpc::question_request_payload_json(
+  auto const question_json = ava::app::rpc::question_request_payload_json(
       "question_1",
       ava::agent::QuestionPrompt{.header = "Choose",
                                  .question = "Pick providers",
@@ -536,12 +536,12 @@ void test_app_rpc_prompt_payload_serialization() {
 }
 
 void test_app_runtime_open_session_and_context_prompt() {
-  const auto root = temp_root() / "app-runtime-open";
+  auto const root = temp_root() / "app-runtime-open";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto current = workspace / "src";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const current = workspace / "src";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(current);
   std::filesystem::create_directories(paths.ava_config_dir);
   {
@@ -579,7 +579,7 @@ void test_app_runtime_open_session_and_context_prompt() {
              (*entries)[0].data_json.find("\"context_sources\":3") != std::string::npos,
          "runtime session appends session_start on creation");
 
-  const auto session_id = session->store.session_id();
+  auto const session_id = session->store.session_id();
   ava::app::RuntimeOpenOptions reopen_options;
   reopen_options.workspace_dir = workspace;
   reopen_options.current_dir = current;
@@ -597,11 +597,11 @@ void test_app_runtime_open_session_and_context_prompt() {
 }
 
 void test_app_run_prompt_emits_events() {
-  const auto root = temp_root() / "app-runtime-run";
+  auto const root = temp_root() / "app-runtime-run";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   {
     std::ofstream file(workspace / "AGENTS.md", std::ios::binary | std::ios::trunc);
@@ -617,7 +617,7 @@ void test_app_run_prompt_emits_events() {
   expect(session.has_value(), "runtime run test opens session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
       .status_code = 200,
       .headers = {},
@@ -627,7 +627,7 @@ void test_app_run_prompt_emits_events() {
   std::vector<ava::app::RuntimeEvent> events;
   ava::app::RuntimeRunOptions run_options;
   run_options.access_token = "token";
-  run_options.event_sink = [&events](const ava::app::RuntimeEvent& event) {
+  run_options.event_sink = [&events](ava::app::RuntimeEvent const& event) {
     events.push_back(event);
     return ava::core::VoidResult{};
   };
@@ -650,11 +650,11 @@ void test_app_run_prompt_emits_events() {
 }
 
 void test_app_run_prompt_emits_provider_retry_events_when_enabled() {
-  const auto root = temp_root() / "app-runtime-provider-retry";
+  auto const root = temp_root() / "app-runtime-provider-retry";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -666,7 +666,7 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled() {
   expect(session.has_value(), "runtime provider retry test opens session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{
            .status_code = 429, .headers = {{"Retry-After", "0"}}, .body = "{\"error\":{\"message\":\"rate limited\"}}"},
@@ -675,7 +675,7 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled() {
   ava::app::RuntimeRunOptions run_options;
   run_options.access_token = "token";
   run_options.enable_transport_retries = true;
-  run_options.event_sink = [&events](const ava::app::RuntimeEvent& event) {
+  run_options.event_sink = [&events](ava::app::RuntimeEvent const& event) {
     events.push_back(event);
     return ava::core::VoidResult{};
   };
@@ -686,7 +686,7 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled() {
   expect(result && result->final_text == "retried answer" && transport.requests().size() == 2,
          "runtime run_prompt retries transient provider transport failures when enabled");
   expect(std::ranges::any_of(events,
-                             [](const ava::app::RuntimeEvent& event) {
+                             [](ava::app::RuntimeEvent const& event) {
                                return event.type == ava::app::RuntimeEventType::Retry &&
                                       event.trigger == "provider_transport" && event.reason == "rate_limited" &&
                                       event.attempt == 2 && event.max_attempts == 3 && event.delay_ms == 0 &&
@@ -717,11 +717,11 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled() {
 }
 
 void test_app_run_prompt_emits_tool_progress_and_session_spill() {
-  const auto root = temp_root() / "app-runtime-tool-progress";
+  auto const root = temp_root() / "app-runtime-tool-progress";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -733,7 +733,7 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill() {
   expect(session.has_value(), "runtime tool progress test opens session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
@@ -754,13 +754,13 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill() {
   std::vector<ava::app::RuntimeEvent> events;
   ava::app::RuntimeRunOptions run_options;
   run_options.access_token = "token";
-  run_options.event_sink = [&events](const ava::app::RuntimeEvent& event) {
+  run_options.event_sink = [&events](ava::app::RuntimeEvent const& event) {
     events.push_back(event);
     return ava::core::VoidResult{};
   };
 
   auto result = ava::app::run_prompt(*session, "run pwd", provider, transport, run_options);
-  const auto spill_dir = session->store.session_path().parent_path() / "spill";
+  auto const spill_dir = session->store.session_path().parent_path() / "spill";
   bool has_spill_file = false;
   std::error_code iter_error;
   for (std::filesystem::directory_iterator it(spill_dir, iter_error), end; !iter_error && it != end;
@@ -771,20 +771,20 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill() {
   }
   expect(result && result->final_text == "tool done" &&
              std::ranges::any_of(events,
-                                 [](const ava::app::RuntimeEvent& event) {
+                                 [](ava::app::RuntimeEvent const& event) {
                                    return event.type == ava::app::RuntimeEventType::ToolProgress &&
                                           event.call_id == "call_bash" && event.tool_name == "bash" &&
                                           !event.text.empty();
                                  }),
          "runtime run_prompt emits additive tool_progress events from tool callbacks");
   expect(std::ranges::any_of(events,
-                             [](const ava::app::RuntimeEvent& event) {
+                             [](ava::app::RuntimeEvent const& event) {
                                return event.type == ava::app::RuntimeEventType::ToolStart &&
                                       event.call_id == "call_bash" && event.tool_name == "bash" &&
                                       event.tool_arguments_json.find("\"command\":\"pwd\"") != std::string::npos;
                              }) &&
              std::ranges::any_of(events,
-                                 [](const ava::app::RuntimeEvent& event) {
+                                 [](ava::app::RuntimeEvent const& event) {
                                    return event.type == ava::app::RuntimeEventType::ToolResult &&
                                           event.call_id == "call_bash" && event.tool_name == "bash" &&
                                           event.truncated && event.total_bytes > 0 && !event.spill_path.empty() &&
@@ -795,11 +795,11 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill() {
 }
 
 void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call() {
-  const auto root = temp_root() / "app-runtime-event-sink-cancel";
+  auto const root = temp_root() / "app-runtime-event-sink-cancel";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   {
     std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
@@ -815,7 +815,7 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call() 
   expect(session.has_value(), "runtime event sink failure test opens session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
@@ -836,7 +836,7 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call() 
                                        }});
   ava::app::RuntimeRunOptions run_options;
   run_options.access_token = "token";
-  run_options.event_sink = [](const ava::app::RuntimeEvent& event) {
+  run_options.event_sink = [](ava::app::RuntimeEvent const& event) {
     if (event.type == ava::app::RuntimeEventType::ToolStart) {
       return ava::core::VoidResult{
           std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "event sink failed"))};
@@ -871,38 +871,38 @@ void test_app_print_prompt_merging() {
 }
 
 void test_headless_permission_policy() {
-  const auto workspace = temp_root() / "headless-policy" / "workspace";
-  const auto outside = temp_root() / "headless-policy" / "outside.txt";
+  auto const workspace = temp_root() / "headless-policy" / "workspace";
+  auto const outside = temp_root() / "headless-policy" / "outside.txt";
 
-  const ava::permissions::PermissionPrompt read_prompt{.operation = ava::permissions::Operation::ReadFile,
+  ava::permissions::PermissionPrompt const read_prompt{.operation = ava::permissions::Operation::ReadFile,
                                                        .mode = ava::agent::Mode::Build,
                                                        .workspace_dir = workspace,
                                                        .target_path = outside,
                                                        .command = "",
                                                        .tool_name = "read_file",
                                                        .reason = "target is outside the workspace"};
-  const ava::permissions::PermissionPrompt search_prompt{.operation = ava::permissions::Operation::SearchFiles,
+  ava::permissions::PermissionPrompt const search_prompt{.operation = ava::permissions::Operation::SearchFiles,
                                                          .mode = ava::agent::Mode::Build,
                                                          .workspace_dir = workspace,
                                                          .target_path = workspace,
                                                          .command = "",
                                                          .tool_name = "glob",
                                                          .reason = "search requires approval"};
-  const ava::permissions::PermissionPrompt write_prompt{.operation = ava::permissions::Operation::EditFile,
+  ava::permissions::PermissionPrompt const write_prompt{.operation = ava::permissions::Operation::EditFile,
                                                         .mode = ava::agent::Mode::Build,
                                                         .workspace_dir = workspace,
                                                         .target_path = outside,
                                                         .command = "",
                                                         .tool_name = "write_file",
                                                         .reason = "target is outside the workspace"};
-  const ava::permissions::PermissionPrompt bash_prompt{.operation = ava::permissions::Operation::RunCommand,
+  ava::permissions::PermissionPrompt const bash_prompt{.operation = ava::permissions::Operation::RunCommand,
                                                        .mode = ava::agent::Mode::Build,
                                                        .workspace_dir = workspace,
                                                        .target_path = workspace,
                                                        .command = "true",
                                                        .tool_name = "bash",
                                                        .reason = "command risk is unknown"};
-  const ava::permissions::PermissionPrompt webfetch_prompt{.operation = ava::permissions::Operation::NetworkFetch,
+  ava::permissions::PermissionPrompt const webfetch_prompt{.operation = ava::permissions::Operation::NetworkFetch,
                                                            .mode = ava::agent::Mode::Build,
                                                            .workspace_dir = workspace,
                                                            .target_path = {},
@@ -940,25 +940,25 @@ void test_headless_permission_policy() {
   expect(tools_added.has_value() && tool_options.allowed_tools.size() == 4,
          "headless allow-tool parses supported comma-separated tool names");
   auto tool_resolver = ava::app::build_headless_permission_resolver(tool_options);
-  const auto tool_read = tool_resolver(read_prompt);
-  const auto tool_search = tool_resolver(search_prompt);
-  const auto tool_webfetch = tool_resolver(webfetch_prompt);
-  const ava::permissions::PermissionPrompt lower_layer_read_prompt{.operation = ava::permissions::Operation::ReadFile,
+  auto const tool_read = tool_resolver(read_prompt);
+  auto const tool_search = tool_resolver(search_prompt);
+  auto const tool_webfetch = tool_resolver(webfetch_prompt);
+  ava::permissions::PermissionPrompt const lower_layer_read_prompt{.operation = ava::permissions::Operation::ReadFile,
                                                                    .mode = ava::agent::Mode::Build,
                                                                    .workspace_dir = workspace,
                                                                    .target_path = outside,
                                                                    .command = "",
                                                                    .tool_name = "read",
                                                                    .reason = "target is outside the workspace"};
-  const ava::permissions::PermissionPrompt mismatched_tool_prompt{.operation = ava::permissions::Operation::EditFile,
+  ava::permissions::PermissionPrompt const mismatched_tool_prompt{.operation = ava::permissions::Operation::EditFile,
                                                                   .mode = ava::agent::Mode::Build,
                                                                   .workspace_dir = workspace,
                                                                   .target_path = outside,
                                                                   .command = "",
                                                                   .tool_name = "read_file",
                                                                   .reason = "target is outside the workspace"};
-  const auto lower_layer_read = tool_resolver(lower_layer_read_prompt);
-  const auto mismatched_tool = tool_resolver(mismatched_tool_prompt);
+  auto const lower_layer_read = tool_resolver(lower_layer_read_prompt);
+  auto const mismatched_tool = tool_resolver(mismatched_tool_prompt);
   expect(tool_read && *tool_read == ava::permissions::PermissionResolution::Allow,
          "headless allow-tool allows exact read_file prompts");
   expect(tool_search && *tool_search == ava::permissions::PermissionResolution::Allow,
@@ -982,11 +982,11 @@ void test_headless_permission_policy() {
 }
 
 void test_app_print_text_mode_outputs_final_text_only() {
-  const auto root = temp_root() / "app-print-text";
+  auto const root = temp_root() / "app-print-text";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -998,7 +998,7 @@ void test_app_print_text_mode_outputs_final_text_only() {
   expect(session.has_value(), "print text test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
       .status_code = 200,
       .headers = {},
@@ -1007,7 +1007,7 @@ void test_app_print_text_mode_outputs_final_text_only() {
   }});
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
-  const ava::app::PrintModeRunOptions run_options{.output_format = ava::app::PrintOutputFormat::Text,
+  ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text,
                                                   .runtime_options = runtime_options};
   std::ostringstream out;
   std::ostringstream err;
@@ -1019,11 +1019,11 @@ void test_app_print_text_mode_outputs_final_text_only() {
 }
 
 void test_app_print_text_mode_with_streaming_keeps_stdout_final_only() {
-  const auto root = temp_root() / "app-print-text-streaming";
+  auto const root = temp_root() / "app-print-text-streaming";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -1035,13 +1035,13 @@ void test_app_print_text_mode_with_streaming_keeps_stdout_final_only() {
   expect(session.has_value(), "print text streaming test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ChunkedStreamingTransport transport({"data: {\"type\":\"response.output_text.delta\",\"delta\":\"live \"}\n\n",
                                        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\n",
                                        "data: [DONE]\n\n"});
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
-  const ava::app::PrintModeRunOptions run_options{.output_format = ava::app::PrintOutputFormat::Text,
+  ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text,
                                                   .runtime_options = runtime_options};
   std::ostringstream out;
   std::ostringstream err;
@@ -1052,11 +1052,11 @@ void test_app_print_text_mode_with_streaming_keeps_stdout_final_only() {
 }
 
 void test_app_print_text_mode_reports_stdout_write_failure() {
-  const auto root = temp_root() / "app-print-text-write-failure";
+  auto const root = temp_root() / "app-print-text-write-failure";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -1068,7 +1068,7 @@ void test_app_print_text_mode_reports_stdout_write_failure() {
   expect(session.has_value(), "print text stdout failure test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
       .status_code = 200,
       .headers = {},
@@ -1077,7 +1077,7 @@ void test_app_print_text_mode_reports_stdout_write_failure() {
   }});
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
-  const ava::app::PrintModeRunOptions run_options{.output_format = ava::app::PrintOutputFormat::Text,
+  ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text,
                                                   .runtime_options = runtime_options};
   FailingStreambuf failing_buffer;
   std::ostream out(&failing_buffer);
@@ -1089,12 +1089,12 @@ void test_app_print_text_mode_reports_stdout_write_failure() {
 }
 
 void test_app_print_mode_uses_headless_permission_policy() {
-  const auto root = temp_root() / "app-print-policy";
+  auto const root = temp_root() / "app-print-policy";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto outside_path = root / "outside.txt";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const outside_path = root / "outside.txt";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   {
     std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
@@ -1110,7 +1110,7 @@ void test_app_print_mode_uses_headless_permission_policy() {
   expect(session.has_value(), "print policy test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
@@ -1138,7 +1138,7 @@ void test_app_print_mode_uses_headless_permission_policy() {
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   runtime_options.permission_resolver = ava::app::build_headless_permission_resolver(policy_options);
-  const ava::app::PrintModeRunOptions run_options{.output_format = ava::app::PrintOutputFormat::Text,
+  ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text,
                                                   .runtime_options = std::move(runtime_options)};
   std::ostringstream out;
   std::ostringstream err;
@@ -1152,11 +1152,11 @@ void test_app_print_mode_uses_headless_permission_policy() {
 }
 
 void test_app_print_mode_refreshes_expired_oauth_before_provider_request() {
-  const auto root = temp_root() / "app-print-oauth-refresh";
+  auto const root = temp_root() / "app-print-oauth-refresh";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   auto stored = ava::config::store_openai_credential(
       paths, ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
@@ -1167,7 +1167,7 @@ void test_app_print_mode_refreshes_expired_oauth_before_provider_request() {
                                            .source_path = {}});
   expect(stored.has_value(), "print OAuth refresh test stores expired credential");
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
@@ -1195,7 +1195,7 @@ void test_app_print_mode_refreshes_expired_oauth_before_provider_request() {
   std::istringstream in;
   std::ostringstream out;
   std::ostringstream err;
-  const auto exit_code = ava::app::run_print_mode(options, in, out, err);
+  auto const exit_code = ava::app::run_print_mode(options, in, out, err);
   expect(exit_code == 0 && out.str() == "print refreshed answer" && err.str().empty(),
          "print mode completes after refreshing expired OAuth credentials");
   expect(transport.requests().size() == 2 && transport.requests()[0].url == "https://auth.openai.com/oauth/token" &&
@@ -1211,15 +1211,15 @@ void test_app_print_mode_refreshes_expired_oauth_before_provider_request() {
 
 void test_app_connect_provider_credentials_headlessly() {
   ScopedStdinTerminalState terminal_state;
-  const auto root = temp_root() / "app-connect-provider-credentials";
+  auto const root = temp_root() / "app-connect-provider-credentials";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto paths = app_test_paths(root);
+  auto const paths = app_test_paths(root);
 
   std::istringstream anthropic_input("anthropic-api-key\n");
   std::ostringstream anthropic_out;
   std::ostringstream anthropic_err;
-  const auto anthropic_exit = ava::app::run_connect_provider_credential(
+  auto const anthropic_exit = ava::app::run_connect_provider_credential(
       paths,
       ava::app::ConnectProviderCredentialOptions{.provider_id = "anthropic",
                                                  .credential_type = ava::app::ConnectCredentialType::ApiKey,
@@ -1237,7 +1237,7 @@ void test_app_connect_provider_credentials_headlessly() {
   std::istringstream anthropic_oauth_input("anthropic-oauth-token\r\n");
   std::ostringstream anthropic_oauth_out;
   std::ostringstream anthropic_oauth_err;
-  const auto anthropic_oauth_exit = ava::app::run_connect_provider_credential(
+  auto const anthropic_oauth_exit = ava::app::run_connect_provider_credential(
       paths,
       ava::app::ConnectProviderCredentialOptions{.provider_id = "anthropic",
                                                  .credential_type = ava::app::ConnectCredentialType::OAuthToken,
@@ -1255,7 +1255,7 @@ void test_app_connect_provider_credentials_headlessly() {
   std::istringstream moonshot_input;
   std::ostringstream moonshot_out;
   std::ostringstream moonshot_err;
-  const auto moonshot_exit = ava::app::run_connect_provider_credential(
+  auto const moonshot_exit = ava::app::run_connect_provider_credential(
       paths,
       ava::app::ConnectProviderCredentialOptions{.provider_id = "moonshot",
                                                  .credential_type = ava::app::ConnectCredentialType::ApiKey,
@@ -1274,7 +1274,7 @@ void test_app_connect_provider_credentials_headlessly() {
   std::istringstream invalid_env_input;
   std::ostringstream invalid_env_out;
   std::ostringstream invalid_env_err;
-  const auto invalid_env_exit = ava::app::run_connect_provider_credential(
+  auto const invalid_env_exit = ava::app::run_connect_provider_credential(
       paths,
       ava::app::ConnectProviderCredentialOptions{.provider_id = "anthropic",
                                                  .credential_type = ava::app::ConnectCredentialType::ApiKey,
@@ -1288,7 +1288,7 @@ void test_app_connect_provider_credentials_headlessly() {
   std::istringstream missing_env_input;
   std::ostringstream missing_env_out;
   std::ostringstream missing_env_err;
-  const auto missing_env_exit = ava::app::run_connect_provider_credential(
+  auto const missing_env_exit = ava::app::run_connect_provider_credential(
       paths,
       ava::app::ConnectProviderCredentialOptions{.provider_id = "anthropic",
                                                  .credential_type = ava::app::ConnectCredentialType::ApiKey,
@@ -1302,7 +1302,7 @@ void test_app_connect_provider_credentials_headlessly() {
   std::istringstream empty_stdin_input("\r\n");
   std::ostringstream empty_stdin_out;
   std::ostringstream empty_stdin_err;
-  const auto empty_stdin_exit = ava::app::run_connect_provider_credential(
+  auto const empty_stdin_exit = ava::app::run_connect_provider_credential(
       paths,
       ava::app::ConnectProviderCredentialOptions{.provider_id = "anthropic",
                                                  .credential_type = ava::app::ConnectCredentialType::ApiKey,
@@ -1312,14 +1312,14 @@ void test_app_connect_provider_credentials_headlessly() {
              empty_stdin_err.str().find("credential stdin was empty") != std::string::npos,
          "headless provider connect rejects empty stdin credentials");
 
-  const auto wizard_root = temp_root() / "app-connect-provider-wizard";
+  auto const wizard_root = temp_root() / "app-connect-provider-wizard";
   std::error_code wizard_remove_error;
   std::filesystem::remove_all(wizard_root, wizard_remove_error);
-  const auto wizard_paths = app_test_paths(wizard_root);
+  auto const wizard_paths = app_test_paths(wizard_root);
   std::istringstream wizard_input("anthropic\napi-key\nwizard-api-key\n");
   std::ostringstream wizard_out;
   std::ostringstream wizard_err;
-  const auto wizard_exit = ava::app::run_connect_provider_wizard(
+  auto const wizard_exit = ava::app::run_connect_provider_wizard(
       wizard_paths,
       ava::app::ConnectProviderWizardOptions{
           .provider_id = std::nullopt, .credential_type = std::nullopt, .stdin_is_tty = true},
@@ -1335,7 +1335,7 @@ void test_app_connect_provider_credentials_headlessly() {
   std::istringstream cancelled_wizard_input("\x1b");
   std::ostringstream cancelled_wizard_out;
   std::ostringstream cancelled_wizard_err;
-  const auto cancelled_wizard_exit = ava::app::run_connect_provider_wizard(
+  auto const cancelled_wizard_exit = ava::app::run_connect_provider_wizard(
       wizard_paths,
       ava::app::ConnectProviderWizardOptions{
           .provider_id = std::nullopt, .credential_type = std::nullopt, .stdin_is_tty = true},
@@ -1346,7 +1346,7 @@ void test_app_connect_provider_credentials_headlessly() {
   std::istringstream arrow_wizard_input("\x1b[B\napi-key\narrow-api-key\n");
   std::ostringstream arrow_wizard_out;
   std::ostringstream arrow_wizard_err;
-  const auto arrow_wizard_exit = ava::app::run_connect_provider_wizard(
+  auto const arrow_wizard_exit = ava::app::run_connect_provider_wizard(
       wizard_paths,
       ava::app::ConnectProviderWizardOptions{
           .provider_id = std::nullopt, .credential_type = std::nullopt, .stdin_is_tty = true},
@@ -1360,7 +1360,7 @@ void test_app_connect_provider_credentials_headlessly() {
   std::istringstream ignored_escape_wizard_input("\x1b[Canthropic\napi-key\nright-arrow-api-key\n");
   std::ostringstream ignored_escape_wizard_out;
   std::ostringstream ignored_escape_wizard_err;
-  const auto ignored_escape_wizard_exit = ava::app::run_connect_provider_wizard(
+  auto const ignored_escape_wizard_exit = ava::app::run_connect_provider_wizard(
       wizard_paths,
       ava::app::ConnectProviderWizardOptions{
           .provider_id = std::nullopt, .credential_type = std::nullopt, .stdin_is_tty = true},
@@ -1377,7 +1377,7 @@ void test_app_connect_provider_credentials_headlessly() {
   std::istringstream non_tty_wizard_input;
   std::ostringstream non_tty_wizard_out;
   std::ostringstream non_tty_wizard_err;
-  const auto non_tty_wizard_exit = ava::app::run_connect_provider_wizard(
+  auto const non_tty_wizard_exit = ava::app::run_connect_provider_wizard(
       wizard_paths,
       ava::app::ConnectProviderWizardOptions{.provider_id = "anthropic",
                                              .credential_type = ava::app::ConnectCredentialType::ApiKey,
@@ -1389,11 +1389,11 @@ void test_app_connect_provider_credentials_headlessly() {
 }
 
 void test_app_print_json_mode_outputs_runtime_events() {
-  const auto root = temp_root() / "app-print-json";
+  auto const root = temp_root() / "app-print-json";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -1405,7 +1405,7 @@ void test_app_print_json_mode_outputs_runtime_events() {
   expect(session.has_value(), "print json test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
       .status_code = 200,
       .headers = {},
@@ -1414,14 +1414,14 @@ void test_app_print_json_mode_outputs_runtime_events() {
   }});
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
-  const ava::app::PrintModeRunOptions run_options{.output_format = ava::app::PrintOutputFormat::Json,
+  ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Json,
                                                   .runtime_options = runtime_options};
   std::ostringstream out;
   std::ostringstream err;
   auto result = ava::app::run_print_prompt(*session, "json prompt", provider, transport, run_options, out, err);
-  const auto jsonl = out.str();
-  const auto last_break = jsonl.size() > 1 ? jsonl.rfind('\n', jsonl.size() - 2) : std::string::npos;
-  const auto last_line = jsonl.substr(last_break == std::string::npos ? 0 : last_break + 1);
+  auto const jsonl = out.str();
+  auto const last_break = jsonl.size() > 1 ? jsonl.rfind('\n', jsonl.size() - 2) : std::string::npos;
+  auto const last_line = jsonl.substr(last_break == std::string::npos ? 0 : last_break + 1);
   expect(result && result->final_text == "json answer", "print json mode returns agent result");
   expect(err.str().empty(), "print json mode leaves diagnostics on stderr only when needed");
   expect(std::count(jsonl.begin(), jsonl.end(), '\n') == 4 && jsonl.find("\"schema_version\":1") != std::string::npos &&
@@ -1445,20 +1445,20 @@ void test_app_print_json_mode_outputs_runtime_events() {
   std::ostringstream error_err;
   auto error_result = ava::app::run_print_prompt(*error_session, "json error", provider, error_transport, run_options,
                                                  error_out, error_err);
-  const auto error_jsonl = error_out.str();
-  const auto error_last_break =
+  auto const error_jsonl = error_out.str();
+  auto const error_last_break =
       error_jsonl.size() > 1 ? error_jsonl.rfind('\n', error_jsonl.size() - 2) : std::string::npos;
-  const auto error_last_line = error_jsonl.substr(error_last_break == std::string::npos ? 0 : error_last_break + 1);
+  auto const error_last_line = error_jsonl.substr(error_last_break == std::string::npos ? 0 : error_last_break + 1);
   expect(!error_result && error_err.str().empty() && error_last_line.find("\"name\":\"error\"") != std::string::npos,
          "print json mode writes failed turns as JSONL envelopes ending in error");
 }
 
 void test_app_print_json_mode_streams_provider_deltas_before_final_message() {
-  const auto root = temp_root() / "app-print-json-streaming";
+  auto const root = temp_root() / "app-print-json-streaming";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -1470,21 +1470,21 @@ void test_app_print_json_mode_streams_provider_deltas_before_final_message() {
   expect(session.has_value(), "print json streaming test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ChunkedStreamingTransport transport({"data: {\"type\":\"response.output_text.delta\",\"delta\":\"json \"}\n\n",
                                        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"stream\"}\n\n",
                                        "data: [DONE]\n\n"});
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
-  const ava::app::PrintModeRunOptions run_options{.output_format = ava::app::PrintOutputFormat::Json,
+  ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Json,
                                                   .runtime_options = runtime_options};
   std::ostringstream out;
   std::ostringstream err;
   auto result =
       ava::app::run_print_prompt(*session, "json streaming prompt", provider, transport, run_options, out, err);
-  const auto jsonl = out.str();
-  const auto update_position = jsonl.find("\"name\":\"message_update\"");
-  const auto final_position = jsonl.find("\"name\":\"assistant_message\"");
+  auto const jsonl = out.str();
+  auto const update_position = jsonl.find("\"name\":\"message_update\"");
+  auto const final_position = jsonl.find("\"name\":\"assistant_message\"");
   expect(result && result->final_text == "json stream", "print json streaming mode returns accumulated final text");
   expect(update_position != std::string::npos && final_position != std::string::npos &&
              update_position < final_position && jsonl.find("\"name\":\"message_end\"") != std::string::npos,
@@ -1492,11 +1492,11 @@ void test_app_print_json_mode_streams_provider_deltas_before_final_message() {
 }
 
 void test_app_command_dispatcher() {
-  const auto root = temp_root() / "app-command-dispatcher";
+  auto const root = temp_root() / "app-command-dispatcher";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace / "src");
   std::filesystem::create_directories(paths.ava_config_dir);
   {
@@ -1523,7 +1523,7 @@ void test_app_command_dispatcher() {
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "command dispatcher test opens runtime session");
   if (!session) return;
-  const auto plan_system_prompt = session->system_prompt;
+  auto const plan_system_prompt = session->system_prompt;
 
   expect(
       ava::app::is_backend_command("/model") && ava::app::is_backend_command("/models") &&
@@ -1532,7 +1532,7 @@ void test_app_command_dispatcher() {
           ava::app::is_backend_command("/plugins"),
       "command catalog classifies display toggles, status aliases, disabled aliases, and hotkeys as backend commands");
 
-  const std::vector<ava::app::CommandHotkey> custom_hotkeys = {
+  std::vector<ava::app::CommandHotkey> const custom_hotkeys = {
       ava::app::CommandHotkey{.action = "submit", .description = "Submit custom", .keys = "Ctrl+M"},
       ava::app::CommandHotkey{.action = "variant_cycle", .description = "Cycle variants", .keys = "Ctrl+T"}};
   auto hotkeys =
@@ -1584,26 +1584,26 @@ void test_app_command_dispatcher() {
   expect(plugins_after_enable && plugins_after_enable->handled && !plugins_after_enable->output.empty() &&
              plugins_after_enable->output[0].find("com.example.project  enabled") != std::string::npos,
          "command dispatcher /plugins list reflects enablement state");
-  const auto slash_items = ava::app::command_catalog_slash_items(*session, custom_hotkeys);
-  auto find_slash_item = [&slash_items](std::string_view command) -> const ava::tui::SlashCommandItem* {
-    for (const auto& item : slash_items) {
+  auto const slash_items = ava::app::command_catalog_slash_items(*session, custom_hotkeys);
+  auto find_slash_item = [&slash_items](std::string_view command) -> ava::tui::SlashCommandItem const* {
+    for (auto const& item : slash_items) {
       if (item.command == command) return &item;
     }
     return nullptr;
   };
-  auto has_completion = [](const ava::tui::SlashCommandItem* item, std::size_t argument_index, std::string_view value,
+  auto has_completion = [](ava::tui::SlashCommandItem const* item, std::size_t argument_index, std::string_view value,
                            std::vector<std::string> previous_args = {}) {
-    return item != nullptr && std::ranges::any_of(item->argument_completions, [&](const auto& completion) {
+    return item != nullptr && std::ranges::any_of(item->argument_completions, [&](auto const& completion) {
              return completion.argument_index == argument_index && completion.value == value &&
                     completion.required_previous_args == previous_args;
            });
   };
-  const auto* connect_item = find_slash_item("/connect");
-  const auto* models_item = find_slash_item("/models");
-  const auto* sessions_item = find_slash_item("/sessions");
-  const auto* context_item = find_slash_item("/context");
-  const auto* mcp_item = find_slash_item("/mcp");
-  const auto* plugin_item = find_slash_item("/plugin");
+  auto const* connect_item = find_slash_item("/connect");
+  auto const* models_item = find_slash_item("/models");
+  auto const* sessions_item = find_slash_item("/sessions");
+  auto const* context_item = find_slash_item("/context");
+  auto const* mcp_item = find_slash_item("/mcp");
+  auto const* plugin_item = find_slash_item("/plugin");
   expect(has_completion(connect_item, 0, "openai") && has_completion(connect_item, 1, "api-key") &&
              has_completion(models_item, 0, "openai/gpt-5.5") &&
              has_completion(sessions_item, 0, session->store.session_id()) &&
@@ -1674,7 +1674,7 @@ void test_app_command_dispatcher() {
   bool saw_secret_prompt = false;
   auto connect = ava::app::run_command(
       *session, ava::app::CommandRequest{.command = "/login moonshot oauth",
-                                         .question_resolver = [&](const ava::agent::QuestionPrompt& prompt) {
+                                         .question_resolver = [&](ava::agent::QuestionPrompt const& prompt) {
                                            saw_secret_prompt = prompt.modal && prompt.secret && prompt.allow_custom &&
                                                                prompt.question.find("moonshot") != std::string::npos;
                                            return ava::agent::QuestionAnswer{.selected_options = {},
@@ -1693,7 +1693,7 @@ void test_app_command_dispatcher() {
   auto connect_modal = ava::app::run_command(
       *session,
       ava::app::CommandRequest{
-          .command = "/connect", .question_resolver = [&](const ava::agent::QuestionPrompt& prompt) {
+          .command = "/connect", .question_resolver = [&](ava::agent::QuestionPrompt const& prompt) {
             if (connect_prompt_count == 0) {
               expect(prompt.modal && prompt.searchable && prompt.allow_custom && prompt.question == "Select provider",
                      "slash /connect opens provider selection as searchable modal");
@@ -1730,7 +1730,7 @@ void test_app_command_dispatcher() {
   std::vector<ava::app::RuntimeEvent> command_tool_events;
   auto glob = ava::app::run_command(
       *session, ava::app::CommandRequest{.command = "/glob **/*.cpp",
-                                         .event_sink = [&command_tool_events](const ava::app::RuntimeEvent& event) {
+                                         .event_sink = [&command_tool_events](ava::app::RuntimeEvent const& event) {
                                            command_tool_events.push_back(event);
                                            return ava::core::VoidResult{};
                                          }});
@@ -1749,8 +1749,8 @@ void test_app_command_dispatcher() {
          "command dispatcher emits structured tool result runtime events");
 
   std::size_t compact_generator_calls = 0;
-  auto compact_generator = [&](const std::vector<ava::session::SessionEntry>& entries,
-                               const ava::session::CompactionConfig& config, std::string_view instructions,
+  auto compact_generator = [&](std::vector<ava::session::SessionEntry> const& entries,
+                               ava::session::CompactionConfig const& config, std::string_view instructions,
                                std::size_t estimated_tokens) -> ava::core::Result<std::string> {
     ++compact_generator_calls;
     static_cast<void>(instructions);
@@ -1781,7 +1781,7 @@ void test_app_command_dispatcher() {
 
   auto entries = session->store.load();
   expect(entries && std::ranges::any_of(*entries,
-                                        [](const ava::session::SessionEntry& entry) {
+                                        [](ava::session::SessionEntry const& entry) {
                                           return entry.type == ava::session::EntryType::Compaction &&
                                                  entry.data_json.find("Keep key facts") != std::string::npos &&
                                                  entry.data_json.find("\"summary_unavailable\":false") !=
@@ -1789,7 +1789,7 @@ void test_app_command_dispatcher() {
                                         }),
          "command dispatcher /compact persists generated summary and instructions");
 
-  const auto compactions_before_stale = entries ? count_compaction_entries(*entries) : 0;
+  auto const compactions_before_stale = entries ? count_compaction_entries(*entries) : 0;
   std::mutex session_mutex;
   bool introduced_manual_stale_snapshot = false;
   std::size_t manual_stale_generator_calls = 0;
@@ -1797,8 +1797,8 @@ void test_app_command_dispatcher() {
       *session,
       ava::app::CommandRequest{
           .command = "/compact stale snapshot",
-          .compaction_summary_generator = [&](const std::vector<ava::session::SessionEntry>&,
-                                              const ava::session::CompactionConfig&, std::string_view,
+          .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const&,
+                                              ava::session::CompactionConfig const&, std::string_view,
                                               std::size_t) -> ava::core::Result<std::string> {
             ++manual_stale_generator_calls;
             if (!introduced_manual_stale_snapshot) {
@@ -1822,7 +1822,7 @@ void test_app_command_dispatcher() {
   expect(manual_stale_generator_calls == 2, "manual /compact regenerates summary after a stale snapshot");
   expect(entries && count_compaction_entries(*entries) == compactions_before_stale + 1 &&
              std::ranges::any_of(*entries,
-                                 [](const ava::session::SessionEntry& entry) {
+                                 [](ava::session::SessionEntry const& entry) {
                                    return entry.data_json.find("manual compact concurrent change") != std::string::npos;
                                  }),
          "manual /compact stale snapshot preserves concurrent changes and appends one retried compaction");
@@ -1859,11 +1859,11 @@ void test_app_command_dispatcher() {
 }
 
 void test_app_compact_provider_summary_success() {
-  const auto root = temp_root() / "app-compact-provider-success";
+  auto const root = temp_root() / "app-compact-provider-success";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -1897,10 +1897,10 @@ void test_app_compact_provider_summary_success() {
           R"({"provider":"anthropic","model":"claude","format":"anthropic_thinking","text":"hidden redacted compact reasoning","signature":"redacted-compact-secret","redacted_data":"opaque-hidden-compaction-redacted","redacted": true })"});
   expect(seeded_redacted_reasoning.has_value(), "provider-backed /compact test seeds redacted reasoning source entry");
 
-  const std::string summary =
+  std::string const summary =
       "# Goal\nShip compact\n# Constraints / Preferences\nKeep provider backed\n# Decisions\nUse callback\n"
       "# Files Read or Modified\nsrc/ava/app/commands.cpp\n# Unresolved Tasks\nNone noted.\n# Next Steps\nRun tests.";
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
       .status_code = 200, .headers = {}, .body = "{\"output_text\":\"" + ava::core::json::escape(summary) + "\"}"}});
   ava::app::RuntimeRunOptions run_options;
@@ -1909,8 +1909,8 @@ void test_app_compact_provider_summary_success() {
   auto compact = ava::app::run_command(
       *session, ava::app::CommandRequest{
                     .command = "/compact Keep decisions",
-                    .compaction_summary_generator = [&](const std::vector<ava::session::SessionEntry>& entries,
-                                                        const ava::session::CompactionConfig& config,
+                    .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries,
+                                                        ava::session::CompactionConfig const& config,
                                                         std::string_view instructions, std::size_t estimated_tokens) {
                       return ava::app::generate_compaction_summary(*session, entries, config, instructions,
                                                                    estimated_tokens, provider, transport, run_options);
@@ -1933,7 +1933,7 @@ void test_app_compact_provider_summary_success() {
 
   auto entries = session->store.load();
   expect(entries && std::ranges::any_of(*entries,
-                                        [&](const ava::session::SessionEntry& entry) {
+                                        [&](ava::session::SessionEntry const& entry) {
                                           return entry.type == ava::session::EntryType::Compaction &&
                                                  ava::core::json::string_field(entry.data_json, "summary") == summary &&
                                                  entry.data_json.find("\"summary_unavailable\":false") !=
@@ -1943,11 +1943,11 @@ void test_app_compact_provider_summary_success() {
 }
 
 void test_app_compact_openai_oauth_streaming_summary_success() {
-  const auto root = temp_root() / "app-compact-oauth-streaming";
+  auto const root = temp_root() / "app-compact-oauth-streaming";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -1958,12 +1958,12 @@ void test_app_compact_openai_oauth_streaming_summary_success() {
   expect(session.has_value(), "OAuth streaming /compact test opens runtime session");
   if (!session) return;
 
-  const std::string summary = "# Goal\nLive compaction works.";
-  const std::string sse_body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"" +
+  std::string const summary = "# Goal\nLive compaction works.";
+  std::string const sse_body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"" +
                                ava::core::json::escape(summary) +
                                "\"}\n\n"
                                "data: [DONE]\n\n";
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = sse_body}});
   ava::app::RuntimeRunOptions run_options;
@@ -1986,11 +1986,11 @@ void test_app_compact_openai_oauth_streaming_summary_success() {
 }
 
 void test_app_compact_provider_failure_leaves_session_untouched() {
-  const auto root = temp_root() / "app-compact-provider-failure";
+  auto const root = temp_root() / "app-compact-provider-failure";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -2001,7 +2001,7 @@ void test_app_compact_provider_failure_leaves_session_untouched() {
   expect(session.has_value(), "provider failure /compact test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"boom\"}}"}});
   ava::app::RuntimeRunOptions run_options;
@@ -2010,8 +2010,8 @@ void test_app_compact_provider_failure_leaves_session_untouched() {
   auto compact = ava::app::run_command(
       *session, ava::app::CommandRequest{
                     .command = "/compact",
-                    .compaction_summary_generator = [&](const std::vector<ava::session::SessionEntry>& entries,
-                                                        const ava::session::CompactionConfig& config,
+                    .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries,
+                                                        ava::session::CompactionConfig const& config,
                                                         std::string_view instructions, std::size_t estimated_tokens) {
                       return ava::app::generate_compaction_summary(*session, entries, config, instructions,
                                                                    estimated_tokens, provider, transport, run_options);
@@ -2022,18 +2022,18 @@ void test_app_compact_provider_failure_leaves_session_untouched() {
              compact->output[0].find("boom") != std::string::npos,
          "provider-backed /compact reports provider failure with status and body details");
   expect(entries && std::ranges::none_of(*entries,
-                                         [](const ava::session::SessionEntry& entry) {
+                                         [](ava::session::SessionEntry const& entry) {
                                            return entry.type == ava::session::EntryType::Compaction;
                                          }),
          "provider-backed /compact failure leaves session without compaction entry");
 }
 
 void test_app_compact_oversized_summary_leaves_session_untouched() {
-  const auto root = temp_root() / "app-compact-oversized";
+  auto const root = temp_root() / "app-compact-oversized";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   std::filesystem::create_directories(paths.ava_config_dir);
   {
@@ -2052,8 +2052,8 @@ void test_app_compact_oversized_summary_leaves_session_untouched() {
   auto compact = ava::app::run_command(
       *session, ava::app::CommandRequest{
                     .command = "/compact",
-                    .compaction_summary_generator = [](const std::vector<ava::session::SessionEntry>&,
-                                                       const ava::session::CompactionConfig&, std::string_view,
+                    .compaction_summary_generator = [](std::vector<ava::session::SessionEntry> const&,
+                                                       ava::session::CompactionConfig const&, std::string_view,
                                                        std::size_t) -> ava::core::Result<std::string> {
                       return std::string("this summary is too large");
                     }});
@@ -2062,7 +2062,7 @@ void test_app_compact_oversized_summary_leaves_session_untouched() {
              compact->output[0].find("generated compaction summary is too large") != std::string::npos,
          "/compact reports oversized generated summary");
   expect(entries && std::ranges::none_of(*entries,
-                                         [](const ava::session::SessionEntry& entry) {
+                                         [](ava::session::SessionEntry const& entry) {
                                            return entry.type == ava::session::EntryType::Compaction;
                                          }),
          "oversized generated summary leaves session without compaction entry");
@@ -2070,7 +2070,7 @@ void test_app_compact_oversized_summary_leaves_session_untouched() {
 
 void test_app_compaction_prompt_builder_sections() {
   auto config = ava::session::default_compaction_config();
-  const std::vector<ava::session::SessionEntry> entries = {
+  std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "entry_tool",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ToolResult,
@@ -2082,7 +2082,7 @@ void test_app_compaction_prompt_builder_sections() {
                                  .timestamp = "2026-05-01T00:00:01Z",
                                  .data_json = "{\"text\":\"duplicated active prompt\",\"internal_replay\":true,"
                                               "\"replay_of\":\"entry_user\"}"}};
-  const auto prompt = ava::app::build_compaction_summary_prompt(entries, config, "preserve files", 42);
+  auto const prompt = ava::app::build_compaction_summary_prompt(entries, config, "preserve files", 42);
   expect(prompt.find("# Goal") != std::string::npos &&
              prompt.find("# Constraints / Preferences") != std::string::npos &&
              prompt.find("# Files Read or Modified") != std::string::npos &&
@@ -2093,11 +2093,11 @@ void test_app_compaction_prompt_builder_sections() {
 }
 
 void test_app_auto_compaction_appends_summary_and_rebuilds_context() {
-  const auto root = temp_root() / "app-auto-compact";
+  auto const root = temp_root() / "app-auto-compact";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -2109,7 +2109,7 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context() {
   if (!session) return;
   session->model.context_window_tokens = 100;
 
-  const std::string old_context = "old context marker " + std::string(420, 'x');
+  std::string const old_context = "old context marker " + std::string(420, 'x');
   static_cast<void>(session->store.append(
       ava::session::SessionEntry{.id = "entry_old_user",
                                  .parent_id = "",
@@ -2125,7 +2125,7 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context() {
                                    .data_json = "{\"text\":\"recent filler " + std::to_string(index) + "\"}"}));
   }
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"AUTO SUMMARY\"}"},
        sse_response(final_text_sse("compacted answer"))});
@@ -2134,7 +2134,7 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context() {
 
   auto result = ava::app::run_prompt(*session, "continue after compaction", provider, transport, run_options);
   auto entries = session->store.load();
-  const auto compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
+  auto const compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
   expect(result && result->final_text == "compacted answer", "auto compaction prompt succeeds");
   expect(transport.requests().size() == 2, "auto compaction performs summary request then provider request");
   expect(
@@ -2153,11 +2153,11 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context() {
 }
 
 void test_app_auto_compaction_recent_context_respects_token_budget() {
-  const auto root = temp_root() / "app-auto-compact-recent-budget";
+  auto const root = temp_root() / "app-auto-compact-recent-budget";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   std::filesystem::create_directories(paths.ava_config_dir);
   {
@@ -2182,7 +2182,7 @@ void test_app_auto_compaction_recent_context_respects_token_budget() {
         .data_json = "{\"text\":\"budget filler " + std::to_string(index) + " " + std::string(160, 'b') + "\"}"}));
   }
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"BUDGET SUMMARY\"}"},
        sse_response(final_text_sse("budget answer"))});
@@ -2191,8 +2191,8 @@ void test_app_auto_compaction_recent_context_respects_token_budget() {
 
   auto result = ava::app::run_prompt(*session, "after budget compaction", provider, transport, run_options);
   auto entries = session->store.load();
-  const auto compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
-  const auto recent_context = compaction ? ava::core::json::string_field(compaction->data_json, "recent_context")
+  auto const compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
+  auto const recent_context = compaction ? ava::core::json::string_field(compaction->data_json, "recent_context")
                                          : std::optional<std::string>{};
   expect(result && result->final_text == "budget answer", "recent context token budget prompt succeeds");
   expect(recent_context && recent_context->find("recent context tail truncated") != std::string::npos &&
@@ -2201,11 +2201,11 @@ void test_app_auto_compaction_recent_context_respects_token_budget() {
 }
 
 void test_app_auto_compaction_recent_context_truncates_utf8_safely() {
-  const auto root = temp_root() / "app-auto-compact-recent-utf8";
+  auto const root = temp_root() / "app-auto-compact-recent-utf8";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   std::filesystem::create_directories(paths.ava_config_dir);
   {
@@ -2231,7 +2231,7 @@ void test_app_auto_compaction_recent_context_truncates_utf8_safely() {
                                  .timestamp = ava::session::now_timestamp(),
                                  .data_json = "{\"text\":\"" + ava::core::json::escape(emoji_tail) + "\"}"}));
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"UTF8 SUMMARY\"}"},
        sse_response(final_text_sse("utf8 answer"))});
@@ -2240,12 +2240,12 @@ void test_app_auto_compaction_recent_context_truncates_utf8_safely() {
 
   auto result = ava::app::run_prompt(*session, "after utf8 compaction", provider, transport, run_options);
   auto entries = session->store.load();
-  const auto compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
-  const auto recent_context = compaction ? ava::core::json::string_field(compaction->data_json, "recent_context")
+  auto const compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
+  auto const recent_context = compaction ? ava::core::json::string_field(compaction->data_json, "recent_context")
                                          : std::optional<std::string>{};
   expect(result && result->final_text == "utf8 answer", "recent context UTF-8 prompt succeeds");
-  const auto marker_end = recent_context ? recent_context->find('\n') : std::string::npos;
-  const bool suffix_starts_on_codepoint =
+  auto const marker_end = recent_context ? recent_context->find('\n') : std::string::npos;
+  bool const suffix_starts_on_codepoint =
       recent_context && marker_end != std::string::npos && marker_end + 1 < recent_context->size() &&
       (static_cast<unsigned char>((*recent_context)[marker_end + 1]) & 0xC0U) != 0x80U;
   expect(recent_context && recent_context->find("recent context tail truncated") != std::string::npos &&
@@ -2254,11 +2254,11 @@ void test_app_auto_compaction_recent_context_truncates_utf8_safely() {
 }
 
 void test_app_auto_compaction_explicit_zero_disables() {
-  const auto root = temp_root() / "app-auto-compact-disabled";
+  auto const root = temp_root() / "app-auto-compact-disabled";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   std::filesystem::create_directories(paths.ava_config_dir);
   {
@@ -2281,7 +2281,7 @@ void test_app_auto_compaction_explicit_zero_disables() {
                                                        .timestamp = ava::session::now_timestamp(),
                                                        .data_json = "{\"text\":\"" + std::string(240, 'd') + "\"}"}));
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(final_text_sse("no compact answer"))});
   ava::app::RuntimeRunOptions run_options;
   run_options.access_token = "token";
@@ -2294,11 +2294,11 @@ void test_app_auto_compaction_explicit_zero_disables() {
 }
 
 void test_app_auto_compaction_uses_default_threshold_without_context_window_metadata() {
-  const auto root = temp_root() / "app-auto-compact-default-threshold";
+  auto const root = temp_root() / "app-auto-compact-default-threshold";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -2310,8 +2310,8 @@ void test_app_auto_compaction_uses_default_threshold_without_context_window_meta
   if (!session) return;
   session->model.context_window_tokens = std::nullopt;
 
-  const auto config = ava::session::default_compaction_config();
-  const auto threshold = ava::session::effective_auto_threshold_tokens(config, std::nullopt);
+  auto const config = ava::session::default_compaction_config();
+  auto const threshold = ava::session::effective_auto_threshold_tokens(config, std::nullopt);
   static_cast<void>(session->store.append(
       ava::session::SessionEntry{.id = "entry_default_threshold_big",
                                  .parent_id = "",
@@ -2319,7 +2319,7 @@ void test_app_auto_compaction_uses_default_threshold_without_context_window_meta
                                  .timestamp = ava::session::now_timestamp(),
                                  .data_json = "{\"text\":\"" + std::string(threshold * 4, 'f') + "\"}"}));
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"DEFAULT SUMMARY\"}"},
        sse_response(final_text_sse("default compact answer"))});
@@ -2339,11 +2339,11 @@ void test_app_auto_compaction_uses_default_threshold_without_context_window_meta
 }
 
 void test_app_auto_compaction_retries_stale_snapshot_before_append() {
-  const auto root = temp_root() / "app-auto-compact-revalidate";
+  auto const root = temp_root() / "app-auto-compact-revalidate";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -2362,7 +2362,7 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append() {
                                                        .timestamp = ava::session::now_timestamp(),
                                                        .data_json = "{\"text\":\"" + std::string(420, 'r') + "\"}"}));
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   MutatingSummaryTransport transport(
       session->store,
       {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE SUMMARY\"}"},
@@ -2378,23 +2378,23 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append() {
   expect(transport.requests().size() == 3, "stale auto compaction regenerates one summary before the provider request");
   expect(entries && count_compaction_entries(*entries) == 1,
          "stale auto compaction appends only the summary generated from the fresh snapshot");
-  const auto compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
+  auto const compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
   expect(compaction && compaction->data_json.find("RETRIED SUMMARY") != std::string::npos &&
              compaction->data_json.find("STALE SUMMARY") == std::string::npos,
          "auto compaction discards the stale summary instead of recording it");
   expect(entries && std::ranges::any_of(*entries,
-                                        [](const ava::session::SessionEntry& entry) {
+                                        [](ava::session::SessionEntry const& entry) {
                                           return entry.data_json.find("concurrent change") != std::string::npos;
                                         }),
          "auto compaction retry test introduced a concurrent session change");
 }
 
 void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append() {
-  const auto root = temp_root() / "app-auto-compact-repeated-stale";
+  auto const root = temp_root() / "app-auto-compact-repeated-stale";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -2413,7 +2413,7 @@ void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append() {
                                                        .timestamp = ava::session::now_timestamp(),
                                                        .data_json = "{\"text\":\"" + std::string(420, 's') + "\"}"}));
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   MutatingSummaryTransport transport(
       session->store,
       {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE ONE\"}"},
@@ -2432,11 +2432,11 @@ void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append() {
 }
 
 void test_app_context_overflow_compacts_and_retries_once_successfully() {
-  const auto root = temp_root() / "app-context-overflow-retry";
+  auto const root = temp_root() / "app-context-overflow-retry";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -2447,7 +2447,7 @@ void test_app_context_overflow_compacts_and_retries_once_successfully() {
   expect(session.has_value(), "context overflow retry test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 400,
                                    .headers = {},
@@ -2457,33 +2457,33 @@ void test_app_context_overflow_compacts_and_retries_once_successfully() {
   ava::app::RuntimeRunOptions run_options;
   run_options.access_token = "token";
   std::vector<ava::app::RuntimeEvent> events;
-  run_options.event_sink = [&events](const ava::app::RuntimeEvent& event) {
+  run_options.event_sink = [&events](ava::app::RuntimeEvent const& event) {
     events.push_back(event);
     return ava::core::VoidResult{};
   };
 
   auto result = ava::app::run_prompt(*session, "overflow prompt", provider, transport, run_options);
   auto entries = session->store.load();
-  const auto compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
+  auto const compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
   expect(result && result->final_text == "retry answer", "context overflow retry succeeds after compaction");
   expect(transport.requests().size() == 3, "context overflow performs original call, compaction, and one retry");
   expect(compaction && compaction->data_json.find("\"trigger\":\"context_overflow\"") != std::string::npos &&
              compaction->data_json.find("OVERFLOW SUMMARY") != std::string::npos,
          "context overflow retry appends a context_overflow compaction summary");
   expect(std::ranges::any_of(events,
-                             [](const ava::app::RuntimeEvent& event) {
+                             [](ava::app::RuntimeEvent const& event) {
                                return event.type == ava::app::RuntimeEventType::Retry &&
                                       event.reason == "context_overflow" && event.attempt == 1 &&
                                       event.max_attempts == 1;
                              }) &&
              std::ranges::any_of(events,
-                                 [](const ava::app::RuntimeEvent& event) {
+                                 [](ava::app::RuntimeEvent const& event) {
                                    return event.type == ava::app::RuntimeEventType::CompactionStart &&
                                           event.trigger == "context_overflow" && event.attempt == 1 &&
                                           event.max_attempts == 2;
                                  }) &&
              std::ranges::any_of(events,
-                                 [](const ava::app::RuntimeEvent& event) {
+                                 [](ava::app::RuntimeEvent const& event) {
                                    return event.type == ava::app::RuntimeEventType::CompactionEnd &&
                                           event.summary_bytes == std::string("OVERFLOW SUMMARY").size() &&
                                           event.attempt == 1 && event.max_attempts == 2;
@@ -2494,25 +2494,25 @@ void test_app_context_overflow_compacts_and_retries_once_successfully() {
              transport.requests()[2].body.find("\"content\":\"overflow prompt\"") != std::string::npos &&
              count_substrings(transport.requests()[2].body, "overflow prompt") == 1,
          "context overflow retry rebuilds provider context with one active prompt replay");
-  const auto recent_context = compaction ? ava::core::json::string_field(compaction->data_json, "recent_context")
+  auto const recent_context = compaction ? ava::core::json::string_field(compaction->data_json, "recent_context")
                                          : std::optional<std::string>{};
   expect(recent_context && recent_context->find("overflow prompt") == std::string::npos,
          "context overflow compaction excludes active prompts that will be replayed from recent context");
   expect(entries && std::ranges::count_if(*entries, ava::session::is_internal_replay_user_message) == 1,
          "context overflow compaction stores active prompt replay as an internal user message");
-  const auto markdown = entries ? ava::session::format_session_markdown(*entries) : std::string{};
-  const auto stats = entries ? ava::session::compute_session_stats(*entries) : ava::session::SessionStats{};
+  auto const markdown = entries ? ava::session::format_session_markdown(*entries) : std::string{};
+  auto const stats = entries ? ava::session::compute_session_stats(*entries) : ava::session::SessionStats{};
   expect(markdown.find("internal_replay") == std::string::npos && count_substrings(markdown, "overflow prompt") == 1 &&
              stats.counts.user_message == 1,
          "consumer-facing export and stats hide internal active prompt replays");
 }
 
 void test_app_context_overflow_compaction_failure_leaves_no_partial_entry() {
-  const auto root = temp_root() / "app-context-overflow-compaction-fails";
+  auto const root = temp_root() / "app-context-overflow-compaction-fails";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -2523,7 +2523,7 @@ void test_app_context_overflow_compaction_failure_leaves_no_partial_entry() {
   expect(session.has_value(), "context overflow compaction failure test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 400,
                                    .headers = {},
@@ -2546,11 +2546,11 @@ void test_app_context_overflow_compaction_failure_leaves_no_partial_entry() {
 }
 
 void test_app_non_overflow_provider_error_does_not_compact_or_retry() {
-  const auto root = temp_root() / "app-non-overflow-error";
+  auto const root = temp_root() / "app-non-overflow-error";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -2561,7 +2561,7 @@ void test_app_non_overflow_provider_error_does_not_compact_or_retry() {
   expect(session.has_value(), "non-overflow provider error test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "server unavailable"}});
   ava::app::RuntimeRunOptions run_options;
@@ -2582,11 +2582,11 @@ void test_app_non_overflow_provider_error_does_not_compact_or_retry() {
 }
 
 void test_app_context_overflow_retry_is_bounded() {
-  const auto root = temp_root() / "app-context-overflow-bounded";
+  auto const root = temp_root() / "app-context-overflow-bounded";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -2597,7 +2597,7 @@ void test_app_context_overflow_retry_is_bounded() {
   expect(session.has_value(), "bounded overflow retry test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 400,
                                    .headers = {},
@@ -2634,11 +2634,11 @@ void test_app_rpc_parsing_and_response_serialization() {
   expect(!oversized_id && oversized_id.error().message() == "RPC identifier is too long",
          "RPC parser rejects oversized request identifiers before queueing");
 
-  const auto success = ava::app::serialize_rpc_success_jsonl("a\"b", "{\"value\":1}");
+  auto const success = ava::app::serialize_rpc_success_jsonl("a\"b", "{\"value\":1}");
   expect(success == "{\"id\":\"a\\\"b\",\"type\":\"response\",\"success\":true,\"result\":{\"value\":1}}\n",
          "RPC success response serializes deterministic JSONL with escaped id");
 
-  const auto error = ava::app::serialize_rpc_error_jsonl(
+  auto const error = ava::app::serialize_rpc_error_jsonl(
       "e1", ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "bad \"request\""));
   expect(error.find("\"success\":false") != std::string::npos &&
              error.find("bad \\\"request\\\"") != std::string::npos && error.ends_with('\n'),
@@ -2681,11 +2681,11 @@ void test_app_rpc_identifier_validation() {
 }
 
 void test_app_rpc_prompt_with_fake_transport_streams_events() {
-  const auto root = temp_root() / "app-rpc-prompt";
+  auto const root = temp_root() / "app-rpc-prompt";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -2697,7 +2697,7 @@ void test_app_rpc_prompt_with_fake_transport_streams_events() {
   expect(session.has_value(), "RPC prompt test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
       .status_code = 200,
       .headers = {},
@@ -2714,10 +2714,10 @@ void test_app_rpc_prompt_with_fake_transport_streams_events() {
   std::jthread rpc_thread(
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello rpc\"}\n");
-  const bool completed = output_buffer.wait_contains("rpc answer", std::chrono::seconds(2));
+  bool const completed = output_buffer.wait_contains("rpc answer", std::chrono::seconds(2));
   input_buffer.close();
   rpc_thread.join();
-  const auto jsonl = output_buffer.str();
+  auto const jsonl = output_buffer.str();
   expect(result.has_value(), "RPC prompt loop completes successfully");
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("hello rpc") != std::string::npos,
          "RPC prompt sends command message through shared runtime");
@@ -2730,11 +2730,11 @@ void test_app_rpc_prompt_with_fake_transport_streams_events() {
 }
 
 void test_app_rpc_prompt_streams_provider_deltas_before_final_response() {
-  const auto root = temp_root() / "app-rpc-prompt-streaming";
+  auto const root = temp_root() / "app-rpc-prompt-streaming";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -2746,7 +2746,7 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response() {
   expect(session.has_value(), "RPC streaming prompt test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ChunkedStreamingTransport transport({"data: {\"type\":\"response.output_text.delta\",\"delta\":\"rpc \"}\n\n",
                                        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"stream\"}\n\n",
                                        "data: [DONE]\n\n"});
@@ -2760,13 +2760,13 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response() {
   std::jthread rpc_thread(
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello rpc stream\"}\n");
-  const bool completed = output_buffer.wait_contains("\"success\":true", std::chrono::seconds(2));
+  bool const completed = output_buffer.wait_contains("\"success\":true", std::chrono::seconds(2));
   input_buffer.close();
   rpc_thread.join();
-  const auto jsonl = output_buffer.str();
-  const auto update_position = jsonl.find("\"name\":\"message_update\"");
-  const auto final_position = jsonl.find("\"name\":\"assistant_message\"");
-  const auto response_position = jsonl.find("\"type\":\"response\"");
+  auto const jsonl = output_buffer.str();
+  auto const update_position = jsonl.find("\"name\":\"message_update\"");
+  auto const final_position = jsonl.find("\"name\":\"assistant_message\"");
+  auto const response_position = jsonl.find("\"type\":\"response\"");
   expect(result.has_value(), "RPC streaming prompt loop completes successfully");
   expect(update_position != std::string::npos && final_position != std::string::npos && completed &&
              response_position != std::string::npos && update_position < final_position &&
@@ -2775,11 +2775,11 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response() {
 }
 
 void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request() {
-  const auto root = temp_root() / "app-rpc-oauth-refresh";
+  auto const root = temp_root() / "app-rpc-oauth-refresh";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   auto stored = ava::config::store_openai_credential(
       paths, ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
@@ -2799,7 +2799,7 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request() {
   expect(session.has_value(), "RPC OAuth refresh test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
@@ -2824,10 +2824,10 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request() {
         ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
   });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello refreshed rpc\"}\n");
-  const bool completed = output_buffer.wait_contains("\"success\":true", std::chrono::seconds(2));
+  bool const completed = output_buffer.wait_contains("\"success\":true", std::chrono::seconds(2));
   input_buffer.close();
   rpc_thread.join();
-  const auto jsonl = output_buffer.str();
+  auto const jsonl = output_buffer.str();
   expect(result.has_value(), "RPC prompt with expired OAuth completes after refresh");
   expect(transport.requests().size() == 2 && transport.requests()[0].url == "https://auth.openai.com/oauth/token" &&
              transport.requests()[1].headers.at("Authorization") == "Bearer rpc-refreshed-access" &&
@@ -2843,11 +2843,11 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request() {
 }
 
 void test_app_rpc_malformed_line_recovery_and_unknown_command() {
-  const auto root = temp_root() / "app-rpc-recovery";
+  auto const root = temp_root() / "app-rpc-recovery";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -2858,7 +2858,7 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command() {
   expect(session.has_value(), "RPC recovery test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
   std::istringstream in(
       "not json\n{\"id\":\"s1\",\"type\":\"get_state\"}\n"
@@ -2866,7 +2866,7 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command() {
   std::ostringstream out;
   auto result =
       ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
-  const auto jsonl = out.str();
+  auto const jsonl = out.str();
   expect(result.has_value(), "RPC loop continues after malformed and unknown commands");
   expect(std::count(jsonl.begin(), jsonl.end(), '\n') == 3 && jsonl.find("\"id\":\"\"") != std::string::npos &&
              jsonl.find("malformed RPC JSON object") != std::string::npos &&
@@ -2877,11 +2877,11 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command() {
 }
 
 void test_app_rpc_state_list_sessions_and_open_session() {
-  const auto root = temp_root() / "app-rpc-state";
+  auto const root = temp_root() / "app-rpc-state";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -2892,10 +2892,10 @@ void test_app_rpc_state_list_sessions_and_open_session() {
   auto second = ava::app::open_runtime_session(open_options);
   expect(first.has_value() && second.has_value(), "RPC state test opens multiple sessions");
   if (!first || !second) return;
-  const auto first_id = first->store.session_id();
-  const auto second_id = second->store.session_id();
+  auto const first_id = first->store.session_id();
+  auto const second_id = second->store.session_id();
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
   std::istringstream in(
       "{\"id\":\"state\",\"type\":\"get_state\"}\n"
@@ -2905,7 +2905,7 @@ void test_app_rpc_state_list_sessions_and_open_session() {
   std::ostringstream out;
   auto result =
       ava::app::run_rpc_loop(*second, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
-  const auto jsonl = out.str();
+  auto const jsonl = out.str();
   expect(result.has_value(), "RPC state/list/open loop completes successfully");
   expect(jsonl.find("\"id\":\"state\"") != std::string::npos && jsonl.find(second_id) != std::string::npos &&
              jsonl.find("\"id\":\"list\"") != std::string::npos && jsonl.find(first_id) != std::string::npos &&
@@ -2915,11 +2915,11 @@ void test_app_rpc_state_list_sessions_and_open_session() {
 }
 
 void test_app_runtime_model_switch_persists_and_reopens() {
-  const auto root = temp_root() / "app-runtime-model-switch";
+  auto const root = temp_root() / "app-runtime-model-switch";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   std::filesystem::create_directories(paths.ava_config_dir);
   {
@@ -2953,7 +2953,7 @@ void test_app_runtime_model_switch_persists_and_reopens() {
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "runtime model switch test opens runtime session");
   if (!session) return;
-  const auto session_id = session->store.session_id();
+  auto const session_id = session->store.session_id();
 
   auto model = ava::app::resolve_runtime_model(paths, "anthropic", "claude-test");
   expect(model.has_value(), "runtime resolves configured Anthropic model");
@@ -2967,7 +2967,7 @@ void test_app_runtime_model_switch_persists_and_reopens() {
   expect(entries.has_value(), "runtime model switch loads session entries");
   bool saw_model_change = false;
   if (entries) {
-    for (const auto& entry : *entries) {
+    for (auto const& entry : *entries) {
       saw_model_change =
           saw_model_change || (entry.type == ava::session::EntryType::ModelChange &&
                                entry.data_json.find("\"previous_provider\":\"openai\"") != std::string::npos &&
@@ -2994,20 +2994,20 @@ void test_app_runtime_model_switch_persists_and_reopens() {
          "runtime reopen restores latest persisted model_change");
   bool restored_emoji_quirk = false;
   if (reopened) {
-    const auto emoji_quirk = std::string("\xF0\x9F\x98\x80");
+    auto const emoji_quirk = std::string("\xF0\x9F\x98\x80");
     restored_emoji_quirk = std::ranges::find(reopened->model.compatibility_quirks, emoji_quirk) !=
                            reopened->model.compatibility_quirks.end();
   }
   expect(restored_emoji_quirk, "runtime reopen decodes escaped supplementary-plane metadata");
   if (reopened) {
-    const ava::provider::OpenAIProvider provider("https://api.example.test");
+    ava::provider::OpenAIProvider const provider("https://api.example.test");
     ava::tests::FakeTransport transport({});
     std::istringstream in("{\"id\":\"list\",\"type\":\"list_models\"}\n");
     std::ostringstream out;
     auto result =
         ava::app::run_rpc_loop(*reopened, reopen_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
-    const auto jsonl = out.str();
-    const auto restored_position = jsonl.find("\"model\":\"claude-test\"");
+    auto const jsonl = out.str();
+    auto const restored_position = jsonl.find("\"model\":\"claude-test\"");
     expect(result.has_value() && restored_position != std::string::npos,
            "RPC list_models includes restored removed current model");
     expect(restored_position != std::string::npos &&
@@ -3025,11 +3025,11 @@ void test_app_runtime_model_switch_persists_and_reopens() {
 }
 
 void test_app_runtime_model_switch_rejects_incompatible_history() {
-  const auto root = temp_root() / "app-runtime-model-switch-compatibility";
+  auto const root = temp_root() / "app-runtime-model-switch-compatibility";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   std::filesystem::create_directories(paths.ava_config_dir);
   {
@@ -3166,18 +3166,18 @@ void test_app_runtime_model_switch_rejects_incompatible_history() {
   auto entries = session->store.load();
   expect(entries.has_value(), "model switch compatibility test reloads entries");
   if (entries) {
-    const auto model_changes = std::ranges::count_if(
-        *entries, [](const auto& entry) { return entry.type == ava::session::EntryType::ModelChange; });
+    auto const model_changes = std::ranges::count_if(
+        *entries, [](auto const& entry) { return entry.type == ava::session::EntryType::ModelChange; });
     expect(model_changes == 3, "rejected model switches do not append model_change entries");
   }
 }
 
 void test_app_runtime_reasoning_selection_persists_and_requests() {
-  const auto root = temp_root() / "app-runtime-reasoning-selection";
+  auto const root = temp_root() / "app-runtime-reasoning-selection";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   std::filesystem::create_directories(paths.ava_config_dir);
   {
@@ -3232,7 +3232,7 @@ void test_app_runtime_reasoning_selection_persists_and_requests() {
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "runtime reasoning test opens runtime session");
   if (!session) return;
-  const auto session_id = session->store.session_id();
+  auto const session_id = session->store.session_id();
 
   auto selected = ava::app::set_runtime_reasoning(
       *session, ava::app::RuntimeReasoningSelection{.level = " low ", .budget_tokens = std::nullopt, .display = ""});
@@ -3247,7 +3247,7 @@ void test_app_runtime_reasoning_selection_persists_and_requests() {
       *session, ava::app::RuntimeReasoningSelection{.level = "ultra", .budget_tokens = std::nullopt, .display = ""});
   expect(!invalid.has_value(), "runtime reasoning selection rejects unsupported model levels");
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
       .status_code = 200,
       .headers = {},
@@ -3269,8 +3269,8 @@ void test_app_runtime_reasoning_selection_persists_and_requests() {
   auto entries = session->store.load();
   expect(entries.has_value(), "runtime reasoning test reloads session entries");
   if (entries) {
-    const auto reasoning_changes = std::ranges::count_if(
-        *entries, [](const auto& entry) { return entry.type == ava::session::EntryType::ReasoningChange; });
+    auto const reasoning_changes = std::ranges::count_if(
+        *entries, [](auto const& entry) { return entry.type == ava::session::EntryType::ReasoningChange; });
     expect(reasoning_changes == 1, "runtime reasoning selection appends one durable reasoning_change entry");
   }
 
@@ -3360,11 +3360,11 @@ void test_app_runtime_reasoning_selection_persists_and_requests() {
 }
 
 void test_app_rpc_model_commands() {
-  const auto root = temp_root() / "app-rpc-model-commands";
+  auto const root = temp_root() / "app-rpc-model-commands";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -3375,7 +3375,7 @@ void test_app_rpc_model_commands() {
   expect(session.has_value(), "RPC model command test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
   std::istringstream in(
       "{\"id\":\"list\",\"type\":\"list_models\"}\n"
@@ -3387,7 +3387,7 @@ void test_app_rpc_model_commands() {
   std::ostringstream out;
   auto result =
       ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
-  const auto jsonl = out.str();
+  auto const jsonl = out.str();
   expect(result.has_value(), "RPC model command loop completes successfully");
   expect(jsonl.find("\"id\":\"list\"") != std::string::npos && jsonl.find("\"models\"") != std::string::npos &&
              jsonl.find("claude-sonnet-4-5") != std::string::npos,
@@ -3408,11 +3408,11 @@ void test_app_rpc_model_commands() {
 }
 
 void test_app_rpc_reasoning_commands() {
-  const auto root = temp_root() / "app-rpc-reasoning-commands";
+  auto const root = temp_root() / "app-rpc-reasoning-commands";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -3423,7 +3423,7 @@ void test_app_rpc_reasoning_commands() {
   expect(session.has_value(), "RPC reasoning command test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
   std::istringstream in(
       "{\"id\":\"set\",\"type\":\"set_reasoning\",\"reasoning_level\":\"medium\"}\n"
@@ -3433,7 +3433,7 @@ void test_app_rpc_reasoning_commands() {
   std::ostringstream out;
   auto result =
       ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
-  const auto jsonl = out.str();
+  auto const jsonl = out.str();
   expect(result.has_value(), "RPC reasoning command loop completes successfully");
   expect(jsonl.find("\"id\":\"set\"") != std::string::npos &&
              jsonl.find("\"reasoning_enabled\":true") != std::string::npos &&
@@ -3453,18 +3453,18 @@ void test_app_rpc_reasoning_commands() {
   auto entries = session->store.load();
   expect(entries.has_value(), "RPC reasoning command test reloads entries");
   if (entries) {
-    const auto reasoning_changes = std::ranges::count_if(
-        *entries, [](const auto& entry) { return entry.type == ava::session::EntryType::ReasoningChange; });
+    auto const reasoning_changes = std::ranges::count_if(
+        *entries, [](auto const& entry) { return entry.type == ava::session::EntryType::ReasoningChange; });
     expect(reasoning_changes == 2, "RPC reasoning commands persist set and clear reasoning_change entries");
   }
 }
 
 void test_app_rpc_protocol_version_and_session_commands() {
-  const auto root = temp_root() / "app-rpc-protocol-session";
+  auto const root = temp_root() / "app-rpc-protocol-session";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -3474,7 +3474,7 @@ void test_app_rpc_protocol_version_and_session_commands() {
   auto session = ava::app::open_runtime_session(open_options);
   expect(session.has_value(), "RPC protocol/session test opens runtime session");
   if (!session) return;
-  const auto initial_id = session->store.session_id();
+  auto const initial_id = session->store.session_id();
 
   auto appended_user = session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                         .parent_id = "",
@@ -3551,7 +3551,7 @@ void test_app_rpc_protocol_version_and_session_commands() {
              appended_cancel.has_value(),
          "RPC protocol/session test appends messages and stats foundation entries");
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
   std::istringstream in(
       "{\"id\":\"proto\",\"type\":\"get_protocol\",\"protocol_version\":1}\n"
@@ -3565,7 +3565,7 @@ void test_app_rpc_protocol_version_and_session_commands() {
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
-  const auto jsonl = out.str();
+  auto const jsonl = out.str();
   expect(result.has_value(), "RPC protocol/session loop completes successfully");
   expect(jsonl.find("\"id\":\"proto\"") != std::string::npos &&
              jsonl.find("\"protocol_version\":1") != std::string::npos &&
@@ -3602,11 +3602,11 @@ void test_app_rpc_protocol_version_and_session_commands() {
 }
 
 void test_app_rpc_protocol_version_and_resolver_reply_errors() {
-  const auto root = temp_root() / "app-rpc-protocol-errors";
+  auto const root = temp_root() / "app-rpc-protocol-errors";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -3617,7 +3617,7 @@ void test_app_rpc_protocol_version_and_resolver_reply_errors() {
   expect(session.has_value(), "RPC protocol error test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
   std::string input =
       "{\"id\":\"bad-version\",\"type\":\"get_state\",\"protocol_version\":999}\n"
@@ -3633,7 +3633,7 @@ void test_app_rpc_protocol_version_and_resolver_reply_errors() {
   std::ostringstream out;
   auto result =
       ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
-  const auto jsonl = out.str();
+  auto const jsonl = out.str();
   expect(result.has_value(), "RPC protocol error loop recovers after unsupported commands");
   expect(jsonl.find("unsupported RPC protocol version") != std::string::npos &&
              jsonl.find("RPC protocol_version must be an integer") != std::string::npos &&
@@ -3649,11 +3649,11 @@ void test_app_rpc_mcp_command_responses() {
   expect(!std::string_view(AVA_FAKE_MCP_SERVER_PATH).empty(), "RPC MCP command test has fake server path");
   if (std::string_view(AVA_FAKE_MCP_SERVER_PATH).empty()) return;
 
-  const auto root = temp_root() / "app-rpc-mcp-commands";
+  auto const root = temp_root() / "app-rpc-mcp-commands";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   write_app_test_file(workspace / ".ava" / "mcp.json",
                       app_test_mcp_config_json("demo", "Demo MCP", AVA_FAKE_MCP_SERVER_PATH));
@@ -3668,13 +3668,13 @@ void test_app_rpc_mcp_command_responses() {
 
   std::vector<ava::permissions::PermissionPrompt> prompts;
   ava::app::RuntimeRunOptions runtime_options;
-  runtime_options.permission_resolver = [&prompts](const ava::permissions::PermissionPrompt& prompt)
+  runtime_options.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
       -> ava::core::Result<ava::permissions::PermissionResolution> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
   std::istringstream in(
       "{\"id\":\"mcp-list\",\"type\":\"list_mcp_servers\"}\n"
@@ -3683,9 +3683,9 @@ void test_app_rpc_mcp_command_responses() {
       "{\"id\":\"mcp-restart\",\"type\":\"restart_mcp_server\",\"server_id\":\"demo\"}\n");
   std::ostringstream out;
   auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
-  const auto jsonl = out.str();
+  auto const jsonl = out.str();
 
-  const auto has_id = [&jsonl](std::string_view id) {
+  auto const has_id = [&jsonl](std::string_view id) {
     return jsonl.find("\"id\":\"" + std::string(id) + "\"") != std::string::npos;
   };
   expect(result.has_value(), "RPC MCP command loop completes successfully");
@@ -3698,10 +3698,10 @@ void test_app_rpc_mcp_command_responses() {
              jsonl.find("next discovery or tool call will launch a fresh process") != std::string::npos,
          "RPC MCP command responses expose list, inspect, tools, and restart output");
 
-  const auto has_launch_prompt = std::ranges::any_of(prompts, [](const auto& prompt) {
+  auto const has_launch_prompt = std::ranges::any_of(prompts, [](auto const& prompt) {
     return prompt.operation == ava::permissions::Operation::McpServerLaunch && prompt.tool_name == "mcp_tools";
   });
-  const auto has_connect_prompt = std::ranges::any_of(prompts, [](const auto& prompt) {
+  auto const has_connect_prompt = std::ranges::any_of(prompts, [](auto const& prompt) {
     return prompt.operation == ava::permissions::Operation::McpServerConnect && prompt.tool_name == "mcp_tools" &&
            prompt.command == "demo";
   });
@@ -3710,11 +3710,11 @@ void test_app_rpc_mcp_command_responses() {
 }
 
 void test_app_rpc_command_responses_for_context_compact_export() {
-  const auto root = temp_root() / "app-rpc-commands";
+  auto const root = temp_root() / "app-rpc-commands";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   {
     std::ofstream file(workspace / "AGENTS.md", std::ios::binary | std::ios::trunc);
@@ -3732,8 +3732,8 @@ void test_app_rpc_command_responses_for_context_compact_export() {
   expect(session.has_value(), "RPC command test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
-  const std::string rpc_summary =
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  std::string const rpc_summary =
       "# Goal\nRemember RPC facts\n# Constraints / Preferences\nNone noted.\n# Decisions\nNone noted.\n"
       "# Files Read or Modified\nNone noted.\n# Unresolved Tasks\nNone noted.\n# Next Steps\nContinue.";
   ava::tests::FakeTransport transport(
@@ -3754,7 +3754,7 @@ void test_app_rpc_command_responses_for_context_compact_export() {
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
   auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
-  const auto jsonl = out.str();
+  auto const jsonl = out.str();
   expect(result.has_value(), "RPC context/compact/export loop completes successfully");
   expect(jsonl.find("\"id\":\"plugins\"") != std::string::npos && jsonl.find("com.example.rpc") != std::string::npos &&
              jsonl.find("\"id\":\"plugin-enable\"") != std::string::npos &&
@@ -3777,11 +3777,11 @@ void test_app_rpc_command_responses_for_context_compact_export() {
 }
 
 void test_app_rpc_compact_provider_failure_is_error_response() {
-  const auto root = temp_root() / "app-rpc-compact-failure";
+  auto const root = temp_root() / "app-rpc-compact-failure";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -3792,7 +3792,7 @@ void test_app_rpc_compact_provider_failure_is_error_response() {
   expect(session.has_value(), "RPC compact failure test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
       .status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"summary failed\"}}"}});
   std::istringstream in("{\"id\":\"cmp-fail\",\"type\":\"compact\"}\n");
@@ -3801,7 +3801,7 @@ void test_app_rpc_compact_provider_failure_is_error_response() {
   runtime_options.access_token = "token";
 
   auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
-  const auto jsonl = out.str();
+  auto const jsonl = out.str();
   auto entries = session->store.load();
   expect(result.has_value(), "RPC compact failure loop completes after error response");
   expect(jsonl.find("\"id\":\"cmp-fail\"") != std::string::npos &&
@@ -3814,11 +3814,11 @@ void test_app_rpc_compact_provider_failure_is_error_response() {
 }
 
 void test_app_rpc_cancel_affects_subsequent_prompt() {
-  const auto root = temp_root() / "app-rpc-cancel";
+  auto const root = temp_root() / "app-rpc-cancel";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -3829,7 +3829,7 @@ void test_app_rpc_cancel_affects_subsequent_prompt() {
   expect(session.has_value(), "RPC cancel test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
@@ -3839,7 +3839,7 @@ void test_app_rpc_cancel_affects_subsequent_prompt() {
       "{\"id\":\"prompt\",\"type\":\"prompt\",\"message\":\"should cancel\"}\n");
   std::ostringstream out;
   auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
-  const auto jsonl = out.str();
+  auto const jsonl = out.str();
   expect(result.has_value(), "RPC cancel loop completes after canceled prompt response");
   expect(transport.requests().empty(), "RPC cancel flag prevents subsequent prompt provider request");
   expect(jsonl.find("\"id\":\"cancel\"") != std::string::npos &&
@@ -3853,17 +3853,17 @@ void test_app_rpc_cancel_affects_subsequent_prompt() {
 }
 
 void test_app_rpc_active_prompt_cancel_unblocks_pending_permission() {
-  const auto root = temp_root() / "app-rpc-active-cancel";
+  auto const root = temp_root() / "app-rpc-active-cancel";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   {
     std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
     file << "rpc cancel note";
   }
-  const auto outside_path = root / "outside.txt";
+  auto const outside_path = root / "outside.txt";
   {
     std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
     file << "outside cancel note";
@@ -3877,7 +3877,7 @@ void test_app_rpc_active_prompt_cancel_unblocks_pending_permission() {
   expect(session.has_value(), "RPC active cancel test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string()))});
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
@@ -3890,13 +3890,13 @@ void test_app_rpc_active_prompt_cancel_unblocks_pending_permission() {
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read note\"}\n");
-  const bool requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
+  bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
   expect(requested, "RPC active cancel test observes pending permission request");
   input_buffer.push("{\"id\":\"cancel\",\"type\":\"cancel\"}\n");
   input_buffer.close();
   rpc_thread.join();
 
-  const auto jsonl = output_buffer.str();
+  auto const jsonl = output_buffer.str();
   expect(result.has_value(), "RPC active cancel loop exits successfully");
   expect(
       jsonl.find("\"id\":\"cancel\"") != std::string::npos && jsonl.find("\"active_run\":true") != std::string::npos &&
@@ -3908,13 +3908,13 @@ void test_app_rpc_active_prompt_cancel_unblocks_pending_permission() {
 }
 
 void test_app_rpc_steer_applies_before_next_provider_request() {
-  const auto root = temp_root() / "app-rpc-steer";
+  auto const root = temp_root() / "app-rpc-steer";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  const auto outside_path = root / "outside.txt";
+  auto const outside_path = root / "outside.txt";
   {
     std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
     file << "outside steer note";
@@ -3928,7 +3928,7 @@ void test_app_rpc_steer_applies_before_next_provider_request() {
   expect(session.has_value(), "RPC steer test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("after steer"))});
   ava::app::RuntimeRunOptions runtime_options;
@@ -3942,17 +3942,17 @@ void test_app_rpc_steer_applies_before_next_provider_request() {
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read before steer\"}\n");
-  const bool requested = output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
-  const auto resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
+  bool const requested = output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
+  auto const resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
   expect(requested && !resolver_request_id.empty(), "RPC steer test observes permission wait safe point");
   input_buffer.push("{\"id\":\"s1\",\"type\":\"steer\",\"message\":\"steer this turn\"}\n");
   input_buffer.push("{\"id\":\"reply\",\"type\":\"permission_reply\",\"request_id\":\"" + resolver_request_id +
                     "\",\"correlation_id\":\"p1\",\"decision\":\"allow\"}\n");
-  const bool completed = output_buffer.wait_contains("after steer", std::chrono::seconds(2));
+  bool const completed = output_buffer.wait_contains("after steer", std::chrono::seconds(2));
   input_buffer.close();
   rpc_thread.join();
 
-  const auto jsonl = output_buffer.str();
+  auto const jsonl = output_buffer.str();
   expect(result.has_value() && completed, "RPC steer loop exits successfully");
   expect(transport.requests().size() == 2 && transport.requests()[1].body.find("steer this turn") != std::string::npos,
          "RPC steer is appended before the next provider request after tool completion");
@@ -3964,13 +3964,13 @@ void test_app_rpc_steer_applies_before_next_provider_request() {
 }
 
 void test_app_rpc_follow_up_runs_after_active_prompt() {
-  const auto root = temp_root() / "app-rpc-follow-up";
+  auto const root = temp_root() / "app-rpc-follow-up";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  const auto outside_path = root / "outside.txt";
+  auto const outside_path = root / "outside.txt";
   {
     std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
     file << "outside follow note";
@@ -3984,7 +3984,7 @@ void test_app_rpc_follow_up_runs_after_active_prompt() {
   expect(session.has_value(), "RPC follow_up test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())),
                                        sse_response(final_text_sse("first done")),
                                        sse_response(final_text_sse("follow done"))});
@@ -3999,20 +3999,20 @@ void test_app_rpc_follow_up_runs_after_active_prompt() {
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"first prompt\"}\n");
-  const bool requested = output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
-  const auto resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
+  bool const requested = output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
+  auto const resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
   expect(requested && !resolver_request_id.empty(), "RPC follow_up test observes active prompt wait");
   input_buffer.push("{\"id\":\"fu1\",\"type\":\"follow_up\",\"message\":\"follow message\"}\n");
   input_buffer.push("{\"id\":\"reply\",\"type\":\"permission_reply\",\"request_id\":\"" + resolver_request_id +
                     "\",\"correlation_id\":\"p1\",\"decision\":\"allow\"}\n");
-  const bool followed = output_buffer.wait_contains("follow done", std::chrono::seconds(2));
+  bool const followed = output_buffer.wait_contains("follow done", std::chrono::seconds(2));
   input_buffer.close();
   rpc_thread.join();
 
-  const auto jsonl = output_buffer.str();
-  const auto first_response = jsonl.find("\"id\":\"p1\"");
-  const auto started = jsonl.find("\"name\":\"follow_up_started\"");
-  const auto follow_response = jsonl.find("\"id\":\"fu1\"");
+  auto const jsonl = output_buffer.str();
+  auto const first_response = jsonl.find("\"id\":\"p1\"");
+  auto const started = jsonl.find("\"name\":\"follow_up_started\"");
+  auto const follow_response = jsonl.find("\"id\":\"fu1\"");
   expect(result.has_value() && followed, "RPC follow_up loop runs queued follow-up successfully");
   expect(transport.requests().size() == 3 && transport.requests()[2].body.find("follow message") != std::string::npos,
          "RPC follow_up starts a new provider turn with the queued message");
@@ -4023,11 +4023,11 @@ void test_app_rpc_follow_up_runs_after_active_prompt() {
 }
 
 void test_app_rpc_prompt_start_failure_cleans_queued_messages() {
-  const auto root = temp_root() / "app-rpc-prompt-start-fail-queue";
+  auto const root = temp_root() / "app-rpc-prompt-start-fail-queue";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   auto stored = ava::config::store_openai_credential(
       paths, ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
@@ -4046,7 +4046,7 @@ void test_app_rpc_prompt_start_failure_cleans_queued_messages() {
   expect(session.has_value(), "RPC prompt start failure test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   BlockingResponseTransport transport(
       ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":\"refresh failed\"}"});
   BlockingInputBuf input_buffer;
@@ -4058,18 +4058,18 @@ void test_app_rpc_prompt_start_failure_cleans_queued_messages() {
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, {}, in, out); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"will fail before run\"}\n");
-  const bool refresh_requested = transport.wait_for_request(std::chrono::seconds(2));
+  bool const refresh_requested = transport.wait_for_request(std::chrono::seconds(2));
   expect(refresh_requested, "RPC prompt start failure test blocks during OAuth refresh");
   input_buffer.push("{\"id\":\"s1\",\"type\":\"steer\",\"message\":\"never apply\"}\n");
   input_buffer.push("{\"id\":\"fu1\",\"type\":\"follow_up\",\"message\":\"never run\"}\n");
-  const bool queued = output_buffer.wait_contains("\"name\":\"follow_up_queued\"", std::chrono::seconds(2));
+  bool const queued = output_buffer.wait_contains("\"name\":\"follow_up_queued\"", std::chrono::seconds(2));
   expect(queued, "RPC prompt start failure test queues follow-up before startup failure");
   transport.release();
-  const bool skipped = output_buffer.wait_contains("prompt_start_failed", std::chrono::seconds(2));
+  bool const skipped = output_buffer.wait_contains("prompt_start_failed", std::chrono::seconds(2));
   input_buffer.close();
   rpc_thread.join();
 
-  const auto jsonl = output_buffer.str();
+  auto const jsonl = output_buffer.str();
   expect(result.has_value(), "RPC prompt start failure queue cleanup loop exits successfully");
   expect(skipped && jsonl.find("\"name\":\"steer_skipped\"") != std::string::npos &&
              jsonl.find("\"name\":\"follow_up_skipped\"") != std::string::npos &&
@@ -4080,13 +4080,13 @@ void test_app_rpc_prompt_start_failure_cleans_queued_messages() {
 }
 
 void test_app_rpc_steer_after_follow_up_started_targets_follow_up() {
-  const auto root = temp_root() / "app-rpc-follow-up-steer";
+  auto const root = temp_root() / "app-rpc-follow-up-steer";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  const auto outside_path = root / "outside.txt";
+  auto const outside_path = root / "outside.txt";
   {
     std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
     file << "outside follow steer note";
@@ -4100,7 +4100,7 @@ void test_app_rpc_steer_after_follow_up_started_targets_follow_up() {
   expect(session.has_value(), "RPC follow-up steer test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())),
                                        sse_response(final_text_sse("first done")),
                                        sse_response(read_file_call_sse(outside_path.generic_string())),
@@ -4116,28 +4116,28 @@ void test_app_rpc_steer_after_follow_up_started_targets_follow_up() {
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"first prompt\"}\n");
-  const bool parent_requested =
+  bool const parent_requested =
       output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
-  const auto parent_resolver_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
+  auto const parent_resolver_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
   expect(parent_requested && !parent_resolver_id.empty(), "RPC follow-up steer test observes parent permission wait");
   input_buffer.push("{\"id\":\"fu1\",\"type\":\"follow_up\",\"message\":\"follow message\"}\n");
   input_buffer.push("{\"id\":\"reply1\",\"type\":\"permission_reply\",\"request_id\":\"" + parent_resolver_id +
                     "\",\"correlation_id\":\"p1\",\"decision\":\"allow\"}\n");
-  const bool started = output_buffer.wait_contains("\"name\":\"follow_up_started\"", std::chrono::seconds(2));
+  bool const started = output_buffer.wait_contains("\"name\":\"follow_up_started\"", std::chrono::seconds(2));
   expect(started, "RPC follow-up steer test observes follow-up start event");
   input_buffer.push("{\"id\":\"sfu\",\"type\":\"steer\",\"message\":\"steer follow turn\"}\n");
-  const bool follow_requested = output_buffer.wait_contains(
+  bool const follow_requested = output_buffer.wait_contains(
       "\"correlation_id\":\"fu1\",\"name\":\"permission_requested\"", std::chrono::seconds(2));
-  const auto follow_resolver_id = extract_last_json_string_field(output_buffer.str(), "resolver_request_id");
+  auto const follow_resolver_id = extract_last_json_string_field(output_buffer.str(), "resolver_request_id");
   expect(follow_requested && !follow_resolver_id.empty(),
          "RPC follow-up steer test observes follow-up permission wait");
   input_buffer.push("{\"id\":\"reply2\",\"type\":\"permission_reply\",\"request_id\":\"" + follow_resolver_id +
                     "\",\"correlation_id\":\"fu1\",\"decision\":\"allow\"}\n");
-  const bool completed = output_buffer.wait_contains("follow steered done", std::chrono::seconds(2));
+  bool const completed = output_buffer.wait_contains("follow steered done", std::chrono::seconds(2));
   input_buffer.close();
   rpc_thread.join();
 
-  const auto jsonl = output_buffer.str();
+  auto const jsonl = output_buffer.str();
   expect(result.has_value() && completed, "RPC follow-up steer loop exits successfully");
   expect(
       transport.requests().size() == 4 && transport.requests()[3].body.find("steer follow turn") != std::string::npos,
@@ -4150,13 +4150,13 @@ void test_app_rpc_steer_after_follow_up_started_targets_follow_up() {
 }
 
 void test_app_rpc_queue_limit_rejects_new_items() {
-  const auto root = temp_root() / "app-rpc-queue-limit";
+  auto const root = temp_root() / "app-rpc-queue-limit";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  const auto outside_path = root / "outside.txt";
+  auto const outside_path = root / "outside.txt";
   {
     std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
     file << "outside queue limit note";
@@ -4170,7 +4170,7 @@ void test_app_rpc_queue_limit_rejects_new_items() {
   expect(session.has_value(), "RPC queue limit test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string()))});
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
@@ -4183,18 +4183,18 @@ void test_app_rpc_queue_limit_rejects_new_items() {
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read before limit\"}\n");
-  const bool requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
+  bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
   expect(requested, "RPC queue limit test observes active permission wait");
   for (int index = 0; index < 65; ++index) {
     input_buffer.push("{\"id\":\"s" + std::to_string(index) + "\",\"type\":\"steer\",\"message\":\"queued steer\"}\n");
   }
-  const bool rejected = output_buffer.wait_contains("RPC queued message limit exceeded", std::chrono::seconds(2));
+  bool const rejected = output_buffer.wait_contains("RPC queued message limit exceeded", std::chrono::seconds(2));
   expect(rejected, "RPC queue limit test observes capped steer rejection");
   input_buffer.push("{\"id\":\"cancel\",\"type\":\"cancel\"}\n");
   input_buffer.close();
   rpc_thread.join();
 
-  const auto jsonl = output_buffer.str();
+  auto const jsonl = output_buffer.str();
   expect(result.has_value(), "RPC queue limit loop exits successfully");
   expect(count_substrings(jsonl, "\"name\":\"steer_queued\"") == 64 &&
              jsonl.find("\"id\":\"s64\"") != std::string::npos &&
@@ -4204,13 +4204,13 @@ void test_app_rpc_queue_limit_rejects_new_items() {
 }
 
 void test_app_rpc_eof_clears_queued_follow_up_without_running() {
-  const auto root = temp_root() / "app-rpc-eof-clears-follow-up";
+  auto const root = temp_root() / "app-rpc-eof-clears-follow-up";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  const auto outside_path = root / "outside.txt";
+  auto const outside_path = root / "outside.txt";
   {
     std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
     file << "outside eof note";
@@ -4224,7 +4224,7 @@ void test_app_rpc_eof_clears_queued_follow_up_without_running() {
   expect(session.has_value(), "RPC EOF queue cleanup test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())),
                                        sse_response(final_text_sse("would only run if not canceled"))});
   ava::app::RuntimeRunOptions runtime_options;
@@ -4238,15 +4238,15 @@ void test_app_rpc_eof_clears_queued_follow_up_without_running() {
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read before eof\"}\n");
-  const bool requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
+  bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
   expect(requested, "RPC EOF queue cleanup test observes active permission wait");
   input_buffer.push("{\"id\":\"fu1\",\"type\":\"follow_up\",\"message\":\"must not run\"}\n");
-  const bool queued = output_buffer.wait_contains("\"name\":\"follow_up_queued\"", std::chrono::seconds(2));
+  bool const queued = output_buffer.wait_contains("\"name\":\"follow_up_queued\"", std::chrono::seconds(2));
   expect(queued, "RPC EOF queue cleanup test observes queued follow-up");
   input_buffer.close();
   rpc_thread.join();
 
-  const auto jsonl = output_buffer.str();
+  auto const jsonl = output_buffer.str();
   expect(result.has_value(), "RPC EOF queue cleanup loop exits successfully");
   expect(transport.requests().size() == 1,
          "RPC EOF cancels active prompt and prevents queued follow-up provider calls");
@@ -4258,13 +4258,13 @@ void test_app_rpc_eof_clears_queued_follow_up_without_running() {
 }
 
 void test_app_rpc_cancel_clears_queued_steer_and_follow_up() {
-  const auto root = temp_root() / "app-rpc-queue-cancel";
+  auto const root = temp_root() / "app-rpc-queue-cancel";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  const auto outside_path = root / "outside.txt";
+  auto const outside_path = root / "outside.txt";
   {
     std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
     file << "outside cancel queue note";
@@ -4278,7 +4278,7 @@ void test_app_rpc_cancel_clears_queued_steer_and_follow_up() {
   expect(session.has_value(), "RPC queued cancel test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string()))});
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
@@ -4291,17 +4291,17 @@ void test_app_rpc_cancel_clears_queued_steer_and_follow_up() {
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read before cancel\"}\n");
-  const bool requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
+  bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
   expect(requested, "RPC queued cancel test observes active permission wait");
   input_buffer.push("{\"id\":\"s1\",\"type\":\"steer\",\"message\":\"never apply\"}\n");
   input_buffer.push("{\"id\":\"fu1\",\"type\":\"follow_up\",\"message\":\"never run\"}\n");
-  const bool queued = output_buffer.wait_contains("\"name\":\"follow_up_queued\"", std::chrono::seconds(2));
+  bool const queued = output_buffer.wait_contains("\"name\":\"follow_up_queued\"", std::chrono::seconds(2));
   expect(queued, "RPC queued cancel test observes queued follow-up");
   input_buffer.push("{\"id\":\"cancel\",\"type\":\"cancel\"}\n");
   input_buffer.close();
   rpc_thread.join();
 
-  const auto jsonl = output_buffer.str();
+  auto const jsonl = output_buffer.str();
   expect(result.has_value(), "RPC queued cancel loop exits successfully");
   expect(transport.requests().size() == 1, "RPC cancel prevents queued steer/follow-up provider requests");
   expect(jsonl.find("\"name\":\"steer_skipped\"") != std::string::npos &&
@@ -4314,17 +4314,17 @@ void test_app_rpc_cancel_clears_queued_steer_and_follow_up() {
 }
 
 void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch() {
-  const auto root = temp_root() / "app-rpc-active-rejects";
+  auto const root = temp_root() / "app-rpc-active-rejects";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   {
     std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
     file << "rpc active reject note";
   }
-  const auto outside_path = root / "outside.txt";
+  auto const outside_path = root / "outside.txt";
   {
     std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
     file << "outside reject note";
@@ -4339,7 +4339,7 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch() {
   expect(session.has_value() && other.has_value(), "RPC active reject test opens runtime sessions");
   if (!session || !other) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string()))});
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
@@ -4352,7 +4352,7 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch() {
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read note\"}\n");
-  const bool requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
+  bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
   expect(requested, "RPC active reject test observes pending permission request");
   input_buffer.push("{\"id\":\"p2\",\"type\":\"prompt\",\"message\":\"second\"}\n");
   input_buffer.push("{\"id\":\"new\",\"type\":\"new_session\"}\n");
@@ -4363,7 +4363,7 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch() {
   input_buffer.close();
   rpc_thread.join();
 
-  const auto jsonl = output_buffer.str();
+  auto const jsonl = output_buffer.str();
   expect(result.has_value(), "RPC active reject loop exits successfully");
   expect(jsonl.find("\"id\":\"p2\"") != std::string::npos && jsonl.find("\"id\":\"new\"") != std::string::npos &&
              jsonl.find("\"id\":\"switch\"") != std::string::npos &&
@@ -4373,13 +4373,13 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch() {
 }
 
 void test_app_rpc_permission_policy_auto_allows_before_resolver_event() {
-  const auto root = temp_root() / "app-rpc-policy-auto-allow";
+  auto const root = temp_root() / "app-rpc-policy-auto-allow";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  const auto outside_path = root / "outside.txt";
+  auto const outside_path = root / "outside.txt";
   {
     std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
     file << "outside permission note";
@@ -4393,7 +4393,7 @@ void test_app_rpc_permission_policy_auto_allows_before_resolver_event() {
   expect(session.has_value(), "RPC permission policy auto-allow test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())),
                                        sse_response(final_text_sse("after policy allow"))});
   ava::app::HeadlessPermissionPolicyOptions policy_options;
@@ -4411,11 +4411,11 @@ void test_app_rpc_permission_policy_auto_allows_before_resolver_event() {
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read outside\"}\n");
-  const bool completed = output_buffer.wait_contains("after policy allow", std::chrono::seconds(2));
+  bool const completed = output_buffer.wait_contains("after policy allow", std::chrono::seconds(2));
   input_buffer.close();
   rpc_thread.join();
 
-  const auto jsonl = output_buffer.str();
+  auto const jsonl = output_buffer.str();
   expect(result.has_value() && completed, "RPC permission policy auto-allow prompt completes");
   expect(jsonl.find("permission_requested") == std::string::npos,
          "RPC permission policy auto-allows matching read prompt before resolver event");
@@ -4423,18 +4423,18 @@ void test_app_rpc_permission_policy_auto_allows_before_resolver_event() {
 
 void test_app_rpc_permission_reply_allow_and_deny_flows() {
   for (std::string_view decision : {"allow", "deny"}) {
-    const auto decision_text = std::string(decision);
-    const auto root = temp_root() / ("app-rpc-permission-" + decision_text);
+    auto const decision_text = std::string(decision);
+    auto const root = temp_root() / ("app-rpc-permission-" + decision_text);
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
-    const auto workspace = root / "workspace";
-    const auto paths = app_test_paths(root);
+    auto const workspace = root / "workspace";
+    auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
     {
       std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
       file << "rpc permission note";
     }
-    const auto outside_path = root / "outside.txt";
+    auto const outside_path = root / "outside.txt";
     {
       std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
       file << "outside permission note";
@@ -4448,7 +4448,7 @@ void test_app_rpc_permission_reply_allow_and_deny_flows() {
     expect(session.has_value(), "RPC permission reply test opens runtime session");
     if (!session) return;
 
-    const ava::provider::OpenAIProvider provider("https://api.example.test");
+    ava::provider::OpenAIProvider const provider("https://api.example.test");
     ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())),
                                          sse_response(final_text_sse("after " + decision_text))});
     ava::app::RuntimeRunOptions runtime_options;
@@ -4463,17 +4463,17 @@ void test_app_rpc_permission_reply_allow_and_deny_flows() {
     });
 
     input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read note\"}\n");
-    const bool requested =
+    bool const requested =
         output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
-    const auto resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
+    auto const resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
     expect(requested && !resolver_request_id.empty(), "RPC permission reply test observes resolver request id");
     input_buffer.push("{\"id\":\"reply\",\"type\":\"permission_reply\",\"request_id\":\"" + resolver_request_id +
                       "\",\"correlation_id\":\"p1\",\"decision\":\"" + decision_text + "\"}\n");
-    const bool completed = output_buffer.wait_contains("after " + decision_text, std::chrono::seconds(2));
+    bool const completed = output_buffer.wait_contains("after " + decision_text, std::chrono::seconds(2));
     input_buffer.close();
     rpc_thread.join();
 
-    const auto jsonl = output_buffer.str();
+    auto const jsonl = output_buffer.str();
     expect(result.has_value() && completed, "RPC permission reply loop exits successfully");
     expect(jsonl.find("\"id\":\"reply\"") != std::string::npos && jsonl.find("\"success\":true") != std::string::npos &&
                jsonl.find("after " + decision_text) != std::string::npos &&
@@ -4484,13 +4484,13 @@ void test_app_rpc_permission_reply_allow_and_deny_flows() {
 }
 
 void test_app_rpc_permission_request_includes_mutation_diff_preview() {
-  const auto root = temp_root() / "app-rpc-permission-diff";
+  auto const root = temp_root() / "app-rpc-permission-diff";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  const auto outside_path = root / "outside-created.txt";
+  auto const outside_path = root / "outside-created.txt";
 
   ava::app::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
@@ -4500,7 +4500,7 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview() {
   expect(session.has_value(), "RPC permission diff test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(write_file_call_sse(outside_path.generic_string(), "rpc new\n")),
                                        sse_response(final_text_sse("after diff deny"))});
   ava::app::RuntimeRunOptions runtime_options;
@@ -4514,16 +4514,16 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview() {
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"write outside\"}\n");
-  const bool requested = output_buffer.wait_contains("\"diff_preview\"", std::chrono::seconds(2));
-  const auto resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
+  bool const requested = output_buffer.wait_contains("\"diff_preview\"", std::chrono::seconds(2));
+  auto const resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
   expect(requested && !resolver_request_id.empty(), "RPC permission diff test observes mutation diff preview");
   input_buffer.push("{\"id\":\"reply\",\"type\":\"permission_reply\",\"request_id\":\"" + resolver_request_id +
                     "\",\"correlation_id\":\"p1\",\"decision\":\"deny\"}\n");
-  const bool completed = output_buffer.wait_contains("after diff deny", std::chrono::seconds(2));
+  bool const completed = output_buffer.wait_contains("after diff deny", std::chrono::seconds(2));
   input_buffer.close();
   rpc_thread.join();
 
-  const auto jsonl = output_buffer.str();
+  auto const jsonl = output_buffer.str();
   expect(result.has_value() && completed && !std::filesystem::exists(outside_path),
          "RPC permission diff test completes after denied mutation without writing");
   expect(jsonl.find("\"name\":\"permission_requested\"") != std::string::npos &&
@@ -4535,11 +4535,11 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview() {
 }
 
 void test_app_rpc_question_reply_flow() {
-  const auto root = temp_root() / "app-rpc-question";
+  auto const root = temp_root() / "app-rpc-question";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -4550,7 +4550,7 @@ void test_app_rpc_question_reply_flow() {
   expect(session.has_value(), "RPC question reply test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response(question_call_sse()), sse_response(final_text_sse("question done"))});
   ava::app::RuntimeRunOptions runtime_options;
@@ -4564,16 +4564,16 @@ void test_app_rpc_question_reply_flow() {
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"ask question\"}\n");
-  const bool requested = output_buffer.wait_contains("\"name\":\"question_requested\"", std::chrono::seconds(2));
-  const auto resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
+  bool const requested = output_buffer.wait_contains("\"name\":\"question_requested\"", std::chrono::seconds(2));
+  auto const resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
   expect(requested && !resolver_request_id.empty(), "RPC question reply test observes question request event");
   input_buffer.push("{\"id\":\"reply\",\"type\":\"question_reply\",\"request_id\":\"" + resolver_request_id +
                     "\",\"correlation_id\":\"p1\",\"answer\":\"custom ok\"}\n");
-  const bool completed = output_buffer.wait_contains("question done", std::chrono::seconds(2));
+  bool const completed = output_buffer.wait_contains("question done", std::chrono::seconds(2));
   input_buffer.close();
   rpc_thread.join();
 
-  const auto jsonl = output_buffer.str();
+  auto const jsonl = output_buffer.str();
   expect(result.has_value() && completed, "RPC question reply loop exits successfully");
   expect(jsonl.find("\"id\":\"reply\"") != std::string::npos && jsonl.find("\"success\":true") != std::string::npos &&
              jsonl.find("question done") != std::string::npos &&
@@ -4583,11 +4583,11 @@ void test_app_rpc_question_reply_flow() {
 }
 
 void test_app_rpc_question_reply_selected_option_flow() {
-  const auto root = temp_root() / "app-rpc-question-selected";
+  auto const root = temp_root() / "app-rpc-question-selected";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto paths = app_test_paths(root);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
   ava::app::RuntimeOpenOptions open_options;
@@ -4598,7 +4598,7 @@ void test_app_rpc_question_reply_selected_option_flow() {
   expect(session.has_value(), "RPC selected question reply test opens runtime session");
   if (!session) return;
 
-  const ava::provider::OpenAIProvider provider("https://api.example.test");
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response(question_call_sse()), sse_response(final_text_sse("selected question done"))});
   ava::app::RuntimeRunOptions runtime_options;
@@ -4612,20 +4612,20 @@ void test_app_rpc_question_reply_selected_option_flow() {
       [&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
 
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"ask question\"}\n");
-  const bool requested = output_buffer.wait_contains("\"name\":\"question_requested\"", std::chrono::seconds(2));
-  const auto resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
+  bool const requested = output_buffer.wait_contains("\"name\":\"question_requested\"", std::chrono::seconds(2));
+  auto const resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
   expect(requested && !resolver_request_id.empty(), "RPC selected question reply observes request event");
   input_buffer.push("{\"id\":\"bad\",\"type\":\"question_reply\",\"request_id\":\"" + resolver_request_id +
                     "\",\"correlation_id\":\"p1\",\"selected\":\"no\"}\n");
-  const bool rejected =
+  bool const rejected =
       output_buffer.wait_contains("question_reply selected option is not valid", std::chrono::seconds(2));
   input_buffer.push("{\"id\":\"reply\",\"type\":\"question_reply\",\"request_id\":\"" + resolver_request_id +
                     "\",\"correlation_id\":\"p1\",\"selected\":\"yes\"}\n");
-  const bool completed = output_buffer.wait_contains("selected question done", std::chrono::seconds(2));
+  bool const completed = output_buffer.wait_contains("selected question done", std::chrono::seconds(2));
   input_buffer.close();
   rpc_thread.join();
 
-  const auto jsonl = output_buffer.str();
+  auto const jsonl = output_buffer.str();
   expect(result.has_value() && rejected && completed, "RPC selected question reply loop exits successfully");
   expect(jsonl.find("\"id\":\"bad\"") != std::string::npos &&
              jsonl.find("question_reply selected option is not valid") != std::string::npos,

@@ -14,7 +14,7 @@ std::unique_ptr<StreamParser> OpenAIProvider::create_stream_parser() const {
   return std::make_unique<OpenAIStreamParser>();
 }
 
-ava::core::Result<std::vector<StreamEvent>> OpenAIProvider::parse_response(const HttpResponse& response,
+ava::core::Result<std::vector<StreamEvent>> OpenAIProvider::parse_response(HttpResponse const& response,
                                                                            bool stream) const {
   if (stream) return parse_openai_sse_response(response);
   if (response.status_code < 200 || response.status_code >= 300) return parse_openai_sse_response(response);

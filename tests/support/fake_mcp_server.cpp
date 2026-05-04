@@ -32,7 +32,7 @@ std::optional<std::string> read_message() {
     saw_header = true;
     if (!line.empty() && line.back() == '\r') line.pop_back();
     if (line.empty()) break;
-    const auto colon = line.find(':');
+    auto const colon = line.find(':');
     if (colon == std::string::npos) continue;
     if (lowercase(trim(line.substr(0, colon))) != "content-length") continue;
     try {
@@ -76,8 +76,8 @@ int main(int argc, char** argv) {
   }
 
   while (auto message = read_message()) {
-    const auto method = ava::core::json::string_field(*message, "method");
-    const auto id = ava::core::json::string_field(*message, "id");
+    auto const method = ava::core::json::string_field(*message, "method");
+    auto const id = ava::core::json::string_field(*message, "id");
     if (!method || !id) continue;
 
     if (mode == "timeout-initialize" && *method == "initialize") {

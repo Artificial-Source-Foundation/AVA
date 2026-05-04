@@ -21,7 +21,7 @@ bool is_ignored_lifecycle_event(std::string_view type) {
          type == "response.function_call_arguments.done";
 }
 
-bool contains_string(const std::vector<std::string>& values, std::string_view value) {
+bool contains_string(std::vector<std::string> const& values, std::string_view value) {
   return std::ranges::find(values, value) != values.end();
 }
 
@@ -119,12 +119,12 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
                                  .usage = std::nullopt});
     return;
   }
-  const auto type = ava::core::json::string_field(data, "type").value_or("");
+  auto const type = ava::core::json::string_field(data, "type").value_or("");
   if (type == "response.output_item.added") {
-    const auto item = ava::core::json::object_field(data, "item");
-    const auto item_type = item ? ava::core::json::string_field(*item, "type").value_or("") : "";
+    auto const item = ava::core::json::object_field(data, "item");
+    auto const item_type = item ? ava::core::json::string_field(*item, "type").value_or("") : "";
     if (item_type == "reasoning") {
-      const auto item_id = reasoning_item_id_from_event(data, *item);
+      auto const item_id = reasoning_item_id_from_event(data, *item);
       if (contains_string(completed_reasoning_item_ids, item_id)) return;
       saw_content = true;
       set_active_reasoning_item_id(active_reasoning_item_id, item_id);
@@ -148,10 +148,10 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     return;
   }
   if (type == "response.output_item.done") {
-    const auto item = ava::core::json::object_field(data, "item");
+    auto const item = ava::core::json::object_field(data, "item");
     if (item && ava::core::json::string_field(*item, "type").value_or("") == "reasoning") {
-      const auto item_id = reasoning_item_id_from_event(data, *item);
-      const auto summary = detail::reasoning_summary_text_from_object(*item);
+      auto const item_id = reasoning_item_id_from_event(data, *item);
+      auto const summary = detail::reasoning_summary_text_from_object(*item);
       if (contains_string(completed_reasoning_item_ids, item_id) ||
           contains_string(completed_reasoning_texts, summary)) {
         return;
@@ -167,7 +167,7 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     return;
   }
   if (type == "response.reasoning_summary_part.added") {
-    const auto item_id = reasoning_item_id_from_event(data);
+    auto const item_id = reasoning_item_id_from_event(data);
     if (contains_string(completed_reasoning_item_ids, item_id)) return;
     saw_content = true;
     set_active_reasoning_item_id(active_reasoning_item_id, item_id);
@@ -175,7 +175,7 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     return;
   }
   if (type == "response.reasoning_summary_text.delta" || type == "response.reasoning_text.delta") {
-    const auto item_id = reasoning_item_id_from_event(data);
+    auto const item_id = reasoning_item_id_from_event(data);
     if (contains_string(completed_reasoning_item_ids, item_id)) return;
     saw_content = true;
     set_active_reasoning_item_id(active_reasoning_item_id, item_id);
@@ -185,8 +185,8 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
   }
   if (type == "response.reasoning_summary_text.done" || type == "response.reasoning_summary_part.done" ||
       type == "response.reasoning_text.done") {
-    const auto item_id = reasoning_item_id_from_event(data);
-    const auto summary = detail::reasoning_summary_text_from_object(data);
+    auto const item_id = reasoning_item_id_from_event(data);
+    auto const summary = detail::reasoning_summary_text_from_object(data);
     if (contains_string(completed_reasoning_item_ids, item_id) || contains_string(completed_reasoning_texts, summary)) {
       return;
     }
@@ -276,7 +276,7 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::string_view da
     error_seen = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_text_seen, active_reasoning_item_id,
                                     active_reasoning_text, completed_reasoning_item_ids, completed_reasoning_texts);
-    const auto error_object = ava::core::json::object_field(data, "error");
+    auto const error_object = ava::core::json::object_field(data, "error");
     events.push_back(
         StreamEvent{.type = StreamEventType::Error,
                     .text = "",
@@ -323,7 +323,7 @@ ava::core::Result<std::vector<StreamEvent>> OpenAIStreamParser::append(std::stri
   std::size_t line_start = 0;
   std::size_t search_from = scan_offset_;
   while (true) {
-    const auto newline = pending_line_.find('\n', search_from);
+    auto const newline = pending_line_.find('\n', search_from);
     if (newline == std::string::npos) break;
     append_events_for_sse_line(events, data_, saw_content_, reasoning_open_, reasoning_text_seen_,
                                active_reasoning_item_id_, active_reasoning_text_, completed_reasoning_item_ids_,

@@ -16,12 +16,12 @@ bool has_json_value_terminator(std::string_view object, std::size_t offset) {
 }
 
 bool bool_field_is_true(std::string_view object, std::string_view key) {
-  const auto start = ava::core::json::field_value_start(object, key);
+  auto const start = ava::core::json::field_value_start(object, key);
   return start && object.substr(*start, 4) == "true" && has_json_value_terminator(object, *start + 4);
 }
 
 std::optional<std::size_t> optional_size_field(std::string_view object, std::string_view key) {
-  const auto value = ava::core::json::integer_field(object, key);
+  auto const value = ava::core::json::integer_field(object, key);
   if (!value || *value < 0) return std::nullopt;
   return static_cast<std::size_t>(*value);
 }
@@ -37,7 +37,7 @@ void assign_size_field(std::optional<std::size_t>& target, std::string_view obje
   if (auto value = optional_size_field(object, key)) target = *value;
 }
 
-bool has_error_fields(const ToolResultPayload& payload) {
+bool has_error_fields(ToolResultPayload const& payload) {
   return !payload.error_category.empty() || !payload.error_code.empty() || !payload.error_message.empty() ||
          !payload.error_details.empty();
 }
@@ -66,7 +66,7 @@ void append_bool_field(std::string& out, std::string_view key, bool value) {
   out += value ? "true" : "false";
 }
 
-void append_optional_number_field(std::string& out, std::string_view key, const std::optional<std::size_t>& value) {
+void append_optional_number_field(std::string& out, std::string_view key, std::optional<std::size_t> const& value) {
   if (!value) return;
   out += ",\"";
   out += key;
@@ -74,7 +74,7 @@ void append_optional_number_field(std::string& out, std::string_view key, const 
   out += std::to_string(*value);
 }
 
-void append_string_array_field(std::string& out, std::string_view key, const std::vector<std::string>& values) {
+void append_string_array_field(std::string& out, std::string_view key, std::vector<std::string> const& values) {
   if (values.empty()) return;
   out += ",\"";
   out += key;
@@ -88,7 +88,7 @@ void append_string_array_field(std::string& out, std::string_view key, const std
   out += ']';
 }
 
-void append_content_field(std::string& out, const ToolResultPayload& payload) {
+void append_content_field(std::string& out, ToolResultPayload const& payload) {
   out += ",\"content\":";
   if (payload.content_type == "application/json" && ava::core::json::is_valid_object(payload.content)) {
     out += payload.content;
@@ -101,7 +101,7 @@ void append_content_field(std::string& out, const ToolResultPayload& payload) {
 
 ToolResultPayload merge_payload_defaults(ToolResultPayload payload, std::string_view tool_name, bool success,
                                          std::string_view result_text) {
-  const auto explicit_status = payload.status;
+  auto const explicit_status = payload.status;
   auto parsed = parse_tool_result_payload(tool_name, success, result_text);
   if (payload.summary.empty()) payload.summary = std::move(parsed.summary);
   if (payload.content.empty()) payload.content = std::move(parsed.content);
@@ -147,13 +147,13 @@ ToolResultPayload parse_tool_result_payload(std::string_view tool_name, bool suc
   payload.content = std::string(result_text);
   payload.content_type = ava::core::json::is_valid_object(result_text) ? "application/json" : "text/plain";
   add_changed_path(payload, ava::core::json::string_field(result_text, "path").value_or(""));
-  for (const auto& path : ava::core::json::strings_in_array_field(result_text, "changed_paths")) {
+  for (auto const& path : ava::core::json::strings_in_array_field(result_text, "changed_paths")) {
     add_changed_path(payload, path);
   }
-  for (const auto& path : ava::core::json::strings_in_array_field(result_text, "changed_files")) {
+  for (auto const& path : ava::core::json::strings_in_array_field(result_text, "changed_files")) {
     add_changed_path(payload, path);
   }
-  for (const auto& edit : ava::core::json::objects_in_array_field(result_text, "edits")) {
+  for (auto const& edit : ava::core::json::objects_in_array_field(result_text, "edits")) {
     add_changed_path(payload, ava::core::json::string_field(edit, "path").value_or(""));
   }
 
@@ -174,7 +174,7 @@ ToolResultPayload parse_tool_result_payload(std::string_view tool_name, bool suc
   assign_size_field(payload.visible_matches, result_text, "returned_matches");
   assign_size_field(payload.total_matches, result_text, "total_matches");
 
-  if (const auto error = ava::core::json::object_field(result_text, "error")) {
+  if (auto const error = ava::core::json::object_field(result_text, "error")) {
     payload.error_category = ava::core::json::string_field(*error, "category").value_or("");
     payload.error_code = ava::core::json::string_field(*error, "code").value_or("");
     payload.error_message = ava::core::json::string_field(*error, "message").value_or("");
@@ -189,8 +189,8 @@ ToolDispatchResult with_tool_result_payload(ToolDispatchResult result) {
   return result;
 }
 
-std::string serialize_tool_result_payload_json(const ToolDispatchResult& result) {
-  const auto payload = merge_payload_defaults(result.payload, result.name, result.success, result.result_text);
+std::string serialize_tool_result_payload_json(ToolDispatchResult const& result) {
+  auto const payload = merge_payload_defaults(result.payload, result.name, result.success, result.result_text);
   std::string out = "{\"schema_version\":1";
   append_required_string_field(out, "call_id", result.call_id);
   append_required_string_field(out, "tool", result.name);
@@ -202,7 +202,7 @@ std::string serialize_tool_result_payload_json(const ToolDispatchResult& result)
   if (has_error_fields(payload)) {
     out += ",\"error\":{";
     bool needs_comma = false;
-    const auto append_error_string = [&](std::string_view key, std::string_view value) {
+    auto const append_error_string = [&](std::string_view key, std::string_view value) {
       if (value.empty()) return;
       if (needs_comma) out += ',';
       out += '"';

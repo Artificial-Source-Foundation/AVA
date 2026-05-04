@@ -82,15 +82,15 @@ struct AgentLoopOptions {
   bool model_supports_streaming = true;
   std::optional<long long> model_max_output_tokens = std::nullopt;
   std::optional<ava::provider::ProviderReasoningOptions> reasoning = std::nullopt;
-  std::function<void(const ToolTimelineEntry&)> on_tool_event = nullptr;
-  std::function<ava::core::VoidResult(const ToolProgressEntry&)> on_tool_progress = nullptr;
-  std::function<ava::core::VoidResult(const ava::provider::StreamEvent&)> on_stream_event = nullptr;
+  std::function<void(ToolTimelineEntry const&)> on_tool_event = nullptr;
+  std::function<ava::core::VoidResult(ToolProgressEntry const&)> on_tool_progress = nullptr;
+  std::function<ava::core::VoidResult(ava::provider::StreamEvent const&)> on_stream_event = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
   std::function<ava::core::Result<bool>(ava::session::SessionStore&, std::string_view,
-                                        const std::vector<std::string>& replayed_user_messages)>
+                                        std::vector<std::string> const& replayed_user_messages)>
       compact_context = nullptr;
   std::mutex* session_mutex = nullptr;
   std::optional<ava::config::ModelPricing> model_pricing = std::nullopt;
@@ -113,9 +113,9 @@ class AgentLoop {
  public:
   explicit AgentLoop(AgentLoopOptions options);
 
-  [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn(const std::string& user_message,
+  [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn(std::string const& user_message,
                                                             ava::session::SessionStore& store,
-                                                            const ava::provider::Provider& provider,
+                                                            ava::provider::Provider const& provider,
                                                             ava::provider::Transport& transport);
 
  private:

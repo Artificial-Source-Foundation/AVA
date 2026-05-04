@@ -8,7 +8,7 @@
 namespace ava::app::runtime {
 
 [[nodiscard]] ava::core::Result<RuntimePromptState> load_runtime_prompt_state(
-    const ava::config::XdgPaths& paths, const ava::config::ModelInfo& model, ava::agent::Mode mode,
-    const std::filesystem::path& workspace_dir, const std::filesystem::path& current_dir);
+    ava::config::XdgPaths const& paths, ava::config::ModelInfo const& model, ava::agent::Mode mode,
+    std::filesystem::path const& workspace_dir, std::filesystem::path const& current_dir);
 
 }  // namespace ava::app::runtime

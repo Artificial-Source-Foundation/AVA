@@ -57,9 +57,9 @@ struct TuiEventState {
   std::optional<std::size_t> stream_assistant_transcript_index = std::nullopt;
 };
 
-void apply_runtime_event(TuiEventState& state, const ava::app::RuntimeEvent& event);
-void apply_event_envelope(TuiEventState& state, const ava::app::EventEnvelope& envelope);
+void apply_runtime_event(TuiEventState& state, ava::app::RuntimeEvent const& event);
+void apply_event_envelope(TuiEventState& state, ava::app::EventEnvelope const& envelope);
 
-[[nodiscard]] std::vector<TranscriptItem> event_state_transcript_snapshot(const TuiEventState& state);
+[[nodiscard]] std::vector<TranscriptItem> event_state_transcript_snapshot(TuiEventState const& state);
 
 }  // namespace ava::tui

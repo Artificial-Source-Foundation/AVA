@@ -25,7 +25,7 @@ enum class ToolSource {
 // Built-in handlers receive the full ToolContext. External plugin/MCP tools should register AVA-owned broker
 // executors here, not plugin code with direct access to internal safety escape hatches.
 using ToolExecutor =
-    std::function<ToolDispatchResult(const ava::tools::ToolContext& context, const ProviderToolCall& call)>;
+    std::function<ToolDispatchResult(ava::tools::ToolContext const& context, ProviderToolCall const& call)>;
 
 struct RegisteredToolMetadata {
   std::string name;
@@ -40,7 +40,7 @@ struct RegisteredToolMetadata {
   [[nodiscard]] ToolMetadata view() const noexcept;
 };
 
-[[nodiscard]] RegisteredToolMetadata own_tool_metadata(const ToolMetadata& metadata);
+[[nodiscard]] RegisteredToolMetadata own_tool_metadata(ToolMetadata const& metadata);
 
 struct RegisteredTool {
   RegisteredToolMetadata metadata;
@@ -54,15 +54,15 @@ struct RegisteredTool {
 class ToolRegistry {
  public:
   [[nodiscard]] ava::core::VoidResult register_tool(RegisteredTool tool);
-  [[nodiscard]] const RegisteredTool* find(std::string_view name) const noexcept;
-  [[nodiscard]] std::span<const RegisteredTool> entries() const noexcept;
+  [[nodiscard]] RegisteredTool const* find(std::string_view name) const noexcept;
+  [[nodiscard]] std::span<RegisteredTool const> entries() const noexcept;
   [[nodiscard]] std::vector<ToolMetadata> metadata() const;
-  [[nodiscard]] std::vector<std::string> tool_schemas_json(const ava::tools::ToolContext& context) const;
+  [[nodiscard]] std::vector<std::string> tool_schemas_json(ava::tools::ToolContext const& context) const;
 
  private:
   std::vector<RegisteredTool> tools_;
 };
 
-[[nodiscard]] const ToolRegistry& builtin_tool_registry();
+[[nodiscard]] ToolRegistry const& builtin_tool_registry();
 
 }  // namespace ava::agent

@@ -27,9 +27,9 @@ ava::core::Error queue_limit_error(std::string_view command_type) {
   return error;
 }
 
-std::size_t queued_message_bytes(const std::deque<QueuedRpcMessage>& queue) {
+std::size_t queued_message_bytes(std::deque<QueuedRpcMessage> const& queue) {
   std::size_t bytes = 0;
-  for (const auto& queued : queue) bytes += queued.message.size();
+  for (auto const& queued : queue) bytes += queued.message.size();
   return bytes;
 }
 

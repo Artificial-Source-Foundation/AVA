@@ -15,17 +15,17 @@ struct RpcModeOptions {
   HeadlessPermissionPolicyOptions permission_policy;
 };
 
-[[nodiscard]] ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOptions& open_options,
-                                                 const ava::provider::Provider& provider,
+[[nodiscard]] ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options,
+                                                 ava::provider::Provider const& provider,
                                                  ava::provider::Transport& transport, RuntimeRunOptions runtime_options,
                                                  std::istream& in, std::ostream& out);
-[[nodiscard]] ava::core::VoidResult run_rpc_loop(RuntimeSession& session, const RuntimeOpenOptions& open_options,
-                                                 const ava::provider::Provider& provider,
+[[nodiscard]] ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options,
+                                                 ava::provider::Provider const& provider,
                                                  ava::provider::Transport& transport,
                                                  ava::provider::Transport& auth_transport,
                                                  RuntimeRunOptions runtime_options, std::istream& in,
                                                  std::ostream& out);
 
-[[nodiscard]] int run_rpc_mode(const RpcModeOptions& options, std::istream& in, std::ostream& out, std::ostream& err);
+[[nodiscard]] int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err);
 
 }  // namespace ava::app

@@ -30,10 +30,10 @@ struct QuestionAnswer {
   std::string custom_text;
 };
 
-using QuestionResolver = std::function<ava::core::Result<QuestionAnswer>(const QuestionPrompt&)>;
+using QuestionResolver = std::function<ava::core::Result<QuestionAnswer>(QuestionPrompt const&)>;
 
 [[nodiscard]] ava::core::Result<QuestionPrompt> parse_question_prompt(std::string_view arguments_json,
                                                                       std::string_view tool_name);
-[[nodiscard]] std::string serialize_question_answer_result(const QuestionPrompt& prompt, const QuestionAnswer& answer);
+[[nodiscard]] std::string serialize_question_answer_result(QuestionPrompt const& prompt, QuestionAnswer const& answer);
 
 }  // namespace ava::agent

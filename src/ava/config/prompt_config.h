@@ -15,7 +15,7 @@ struct PromptSelection {
 };
 
 [[nodiscard]] std::string builtin_prompt(std::string_view provider_id, std::string_view family, ava::agent::Mode mode);
-[[nodiscard]] ava::core::Result<PromptSelection> select_prompt(const XdgPaths& paths, const ModelInfo& model,
+[[nodiscard]] ava::core::Result<PromptSelection> select_prompt(XdgPaths const& paths, ModelInfo const& model,
                                                                ava::agent::Mode mode);
 
 }  // namespace ava::config

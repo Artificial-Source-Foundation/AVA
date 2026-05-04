@@ -30,8 +30,8 @@ struct ContextLoadOptions {
 
 [[nodiscard]] std::string to_string(ContextSourceType source_type);
 
-[[nodiscard]] ava::core::Result<std::vector<LoadedContextFile>> load_context_files(const ContextLoadOptions& options);
+[[nodiscard]] ava::core::Result<std::vector<LoadedContextFile>> load_context_files(ContextLoadOptions const& options);
 
-[[nodiscard]] std::string format_context_for_prompt(const std::vector<LoadedContextFile>& files);
+[[nodiscard]] std::string format_context_for_prompt(std::vector<LoadedContextFile> const& files);
 
 }  // namespace ava::context

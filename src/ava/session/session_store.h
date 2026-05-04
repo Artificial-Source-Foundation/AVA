@@ -53,19 +53,19 @@ class SessionStore {
  public:
   explicit SessionStore(SessionStoreOptions options);
 
-  [[nodiscard]] const std::string& session_id() const noexcept;
+  [[nodiscard]] std::string const& session_id() const noexcept;
   [[nodiscard]] std::filesystem::path session_path() const;
 
-  [[nodiscard]] ava::core::VoidResult append(const SessionEntry& entry);
+  [[nodiscard]] ava::core::VoidResult append(SessionEntry const& entry);
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load() const;
 
   [[nodiscard]] static ava::core::Result<SessionStore> create(
-      const std::filesystem::path& workspace_dir, const std::filesystem::path& root_dir = default_root_dir());
-  [[nodiscard]] static ava::core::Result<SessionStore> open(const std::filesystem::path& workspace_dir,
+      std::filesystem::path const& workspace_dir, std::filesystem::path const& root_dir = default_root_dir());
+  [[nodiscard]] static ava::core::Result<SessionStore> open(std::filesystem::path const& workspace_dir,
                                                             std::string session_id,
-                                                            const std::filesystem::path& root_dir = default_root_dir());
+                                                            std::filesystem::path const& root_dir = default_root_dir());
   [[nodiscard]] static ava::core::Result<std::vector<SessionSummary>> list_sessions(
-      const std::filesystem::path& workspace_dir, const std::filesystem::path& root_dir = default_root_dir());
+      std::filesystem::path const& workspace_dir, std::filesystem::path const& root_dir = default_root_dir());
   [[nodiscard]] static std::filesystem::path default_root_dir();
 
  private:
@@ -74,7 +74,7 @@ class SessionStore {
 
 [[nodiscard]] std::string to_string(EntryType type);
 [[nodiscard]] ava::core::Result<EntryType> parse_entry_type(std::string_view value);
-[[nodiscard]] bool is_internal_replay_user_message(const SessionEntry& entry);
+[[nodiscard]] bool is_internal_replay_user_message(SessionEntry const& entry);
 [[nodiscard]] std::string now_timestamp();
 [[nodiscard]] std::string json_escape(std::string_view value);
 

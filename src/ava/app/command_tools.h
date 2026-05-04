@@ -10,12 +10,12 @@ namespace ava::app {
 [[nodiscard]] ava::tools::ToolContext make_tool_context(RuntimeSession& session,
                                                         ava::permissions::PermissionResolver permission_resolver);
 
-[[nodiscard]] ava::core::VoidResult record_tool_start(const RuntimeSession& session, const RuntimeEventSink& sink,
-                                                      CommandResult& result, const std::string& call_id,
+[[nodiscard]] ava::core::VoidResult record_tool_start(RuntimeSession const& session, RuntimeEventSink const& sink,
+                                                      CommandResult& result, std::string const& call_id,
                                                       std::string name, std::string argument_summary);
 
-[[nodiscard]] ava::core::VoidResult record_tool_result(const RuntimeSession& session, const RuntimeEventSink& sink,
-                                                       CommandResult& result, const std::string& call_id,
+[[nodiscard]] ava::core::VoidResult record_tool_result(RuntimeSession const& session, RuntimeEventSink const& sink,
+                                                       CommandResult& result, std::string const& call_id,
                                                        std::string name, ava::agent::ToolTimelineStatus status,
                                                        std::string result_summary, std::string result_content = {});
 

@@ -62,12 +62,12 @@ std::string_view exit_status_text(int status) {
   return "session saved with warnings";
 }
 
-void print_exit_card(const ava::app::RuntimeSession& session, int status) {
-  const bool use_color = stdout_is_tty() && std::getenv("NO_COLOR") == nullptr;
-  const auto blue = use_color ? std::string_view("\x1b[38;2;77;158;246m") : std::string_view("");
-  const auto muted = use_color ? std::string_view("\x1b[38;2;148;163;184m") : std::string_view("");
-  const auto bold = use_color ? std::string_view("\x1b[1m") : std::string_view("");
-  const auto reset = use_color ? std::string_view("\x1b[0m") : std::string_view("");
+void print_exit_card(ava::app::RuntimeSession const& session, int status) {
+  bool const use_color = stdout_is_tty() && std::getenv("NO_COLOR") == nullptr;
+  auto const blue = use_color ? std::string_view("\x1b[38;2;77;158;246m") : std::string_view("");
+  auto const muted = use_color ? std::string_view("\x1b[38;2;148;163;184m") : std::string_view("");
+  auto const bold = use_color ? std::string_view("\x1b[1m") : std::string_view("");
+  auto const reset = use_color ? std::string_view("\x1b[0m") : std::string_view("");
   auto art = [&](std::string_view text) { std::cout << blue << text << reset << '\n'; };
 
   if (stdout_is_tty()) std::cout << "\x1b(B\x1b[0m";
@@ -103,7 +103,7 @@ int run(int argc, char** argv) {
   bool print_permission_flag_seen = false;
   ava::app::HeadlessPermissionPolicyOptions headless_permission_policy;
 
-  const auto paths = ava::config::xdg_paths();
+  auto const paths = ava::config::xdg_paths();
 
   auto parse_connect_like_command = [&](int& index, std::optional<std::string> provider,
                                         bool preserve_openai_browser_default) -> int {
@@ -128,7 +128,7 @@ int run(int argc, char** argv) {
     };
 
     while (index + 1 < argc) {
-      const std::string_view option(argv[++index]);
+      std::string_view const option(argv[++index]);
       if (option == "--api-key") {
         if (!set_source(CredentialSource::Prompt, ava::app::ConnectCredentialType::ApiKey)) return 2;
         continue;
@@ -190,7 +190,7 @@ int run(int argc, char** argv) {
   };
 
   for (int index = 1; index < argc; ++index) {
-    const std::string_view arg(argv[index]);
+    std::string_view const arg(argv[index]);
     if (arg == "connect") {
       std::optional<std::string> provider;
       if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--")) provider = argv[++index];
@@ -256,7 +256,7 @@ int run(int argc, char** argv) {
         std::cerr << "--output requires json, text, or rpc\n";
         return 2;
       }
-      const std::string_view output(argv[++index]);
+      std::string_view const output(argv[++index]);
       if (output == "json") {
         print_output_format = ava::app::PrintOutputFormat::Json;
       } else if (output == "text") {
@@ -370,8 +370,8 @@ int run(int argc, char** argv) {
     return 1;
   }
 
-  const bool print_farewell = stdin_is_tty() && stdout_is_tty();
-  const int status = run_interactive(*session);
+  bool const print_farewell = stdin_is_tty() && stdout_is_tty();
+  int const status = run_interactive(*session);
   if (print_farewell) print_exit_card(*session, status);
   return status;
 }

@@ -10,19 +10,19 @@
 namespace ava::app::runtime {
 namespace {
 
-bool has_reasoning_level(const ava::config::ModelInfo& model, std::string_view level) {
+bool has_reasoning_level(ava::config::ModelInfo const& model, std::string_view level) {
   return std::ranges::find(model.reasoning_levels, level) != model.reasoning_levels.end();
 }
 
-bool same_reasoning_selection(const std::optional<RuntimeReasoningSelection>& left,
-                              const std::optional<RuntimeReasoningSelection>& right) {
+bool same_reasoning_selection(std::optional<RuntimeReasoningSelection> const& left,
+                              std::optional<RuntimeReasoningSelection> const& right) {
   if (!left || !right) return !left && !right;
   return left->level == right->level && left->budget_tokens == right->budget_tokens && left->display == right->display;
 }
 
-ava::core::VoidResult validate_reasoning_selection(const ava::config::ModelInfo& model,
-                                                   const RuntimeReasoningSelection& selection) {
-  const auto level = trim(selection.level);
+ava::core::VoidResult validate_reasoning_selection(ava::config::ModelInfo const& model,
+                                                   RuntimeReasoningSelection const& selection) {
+  auto const level = trim(selection.level);
   if (level.empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reasoning level is required"));
   }
@@ -61,16 +61,16 @@ ava::core::VoidResult validate_reasoning_selection(const ava::config::ModelInfo&
 
 }  // namespace
 
-ava::provider::ProviderReasoningOptions provider_reasoning_options(const RuntimeReasoningSelection& selection) {
+ava::provider::ProviderReasoningOptions provider_reasoning_options(RuntimeReasoningSelection const& selection) {
   return ava::provider::ProviderReasoningOptions{
       .type = selection.level, .budget_tokens = selection.budget_tokens, .display = selection.display};
 }
 
 std::optional<RuntimeReasoningSelection> latest_persisted_reasoning(
-    const std::vector<ava::session::SessionEntry>& entries, const ava::config::ModelInfo& model) {
+    std::vector<ava::session::SessionEntry> const& entries, ava::config::ModelInfo const& model) {
   std::optional<RuntimeReasoningSelection> latest;
   bool saw_change = false;
-  for (const auto& entry : entries) {
+  for (auto const& entry : entries) {
     if (entry.type == ava::session::EntryType::SessionStart || entry.type == ava::session::EntryType::ModelChange) {
       latest = std::nullopt;
       continue;

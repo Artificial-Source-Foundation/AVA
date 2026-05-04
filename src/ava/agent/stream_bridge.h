@@ -6,7 +6,7 @@
 
 namespace ava::agent {
 
-[[nodiscard]] ava::core::VoidResult publish_stream_event(const AgentLoopOptions& options,
-                                                         const ava::provider::StreamEvent& event);
+[[nodiscard]] ava::core::VoidResult publish_stream_event(AgentLoopOptions const& options,
+                                                         ava::provider::StreamEvent const& event);
 
 }  // namespace ava::agent

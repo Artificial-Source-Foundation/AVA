@@ -8,6 +8,6 @@
 namespace ava::app::runtime {
 
 [[nodiscard]] std::optional<ava::config::ModelInfo> latest_persisted_model(
-    const ava::config::ModelRegistry& registry, const std::vector<ava::session::SessionEntry>& entries);
+    ava::config::ModelRegistry const& registry, std::vector<ava::session::SessionEntry> const& entries);
 
 }  // namespace ava::app::runtime

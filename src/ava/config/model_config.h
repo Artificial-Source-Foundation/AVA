@@ -46,11 +46,11 @@ struct ModelRegistry {
 
 [[nodiscard]] ModelRegistry builtin_model_registry();
 [[nodiscard]] ModelRegistry parse_model_registry(std::string_view content);
-[[nodiscard]] ava::core::Result<ModelRegistry> load_model_registry(const XdgPaths& paths);
-[[nodiscard]] std::optional<ModelInfo> find_model(const ModelRegistry& registry, std::string_view provider_id,
+[[nodiscard]] ava::core::Result<ModelRegistry> load_model_registry(XdgPaths const& paths);
+[[nodiscard]] std::optional<ModelInfo> find_model(ModelRegistry const& registry, std::string_view provider_id,
                                                   std::string_view model_id);
-[[nodiscard]] ModelInfo select_default_model(const ModelRegistry& registry);
-[[nodiscard]] std::optional<long double> usage_cost_usd(const ModelPricing& pricing,
-                                                        const ava::provider::TokenUsage& usage);
+[[nodiscard]] ModelInfo select_default_model(ModelRegistry const& registry);
+[[nodiscard]] std::optional<long double> usage_cost_usd(ModelPricing const& pricing,
+                                                        ava::provider::TokenUsage const& usage);
 
 }  // namespace ava::config

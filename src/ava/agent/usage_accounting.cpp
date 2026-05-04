@@ -13,7 +13,7 @@ std::string decimal_json(long double value) {
   return out.str();
 }
 
-void append_optional_integer_field(std::string& json, std::string_view key, const std::optional<long long>& value,
+void append_optional_integer_field(std::string& json, std::string_view key, std::optional<long long> const& value,
                                    bool& first) {
   if (!value || *value < 0) return;
   if (!first) json += ',';
@@ -24,14 +24,14 @@ void append_optional_integer_field(std::string& json, std::string_view key, cons
   json += std::to_string(*value);
 }
 
-std::size_t output_estimate_bytes(const ParsedAssistantTurn& turn) {
+std::size_t output_estimate_bytes(ParsedAssistantTurn const& turn) {
   std::size_t bytes = turn.text.size();
-  for (const auto& reasoning : turn.reasoning_blocks) {
+  for (auto const& reasoning : turn.reasoning_blocks) {
     bytes += reasoning.text.size();
     bytes += reasoning.signature.size();
     bytes += reasoning.redacted_data.size();
   }
-  for (const auto& call : turn.tool_calls) {
+  for (auto const& call : turn.tool_calls) {
     bytes += call.id.size();
     bytes += call.name.size();
     bytes += call.arguments_json.size();
@@ -39,7 +39,7 @@ std::size_t output_estimate_bytes(const ParsedAssistantTurn& turn) {
   return bytes;
 }
 
-void add_optional_usage_field(std::optional<long long>& total, const std::optional<long long>& value) {
+void add_optional_usage_field(std::optional<long long>& total, std::optional<long long> const& value) {
   if (!value || *value < 0) return;
   if (!total) total = 0;
   *total += *value;
@@ -47,7 +47,7 @@ void add_optional_usage_field(std::optional<long long>& total, const std::option
 
 }  // namespace
 
-std::string usage_json(const ava::provider::TokenUsage& usage, const std::optional<long double>& cost_usd) {
+std::string usage_json(ava::provider::TokenUsage const& usage, std::optional<long double> const& cost_usd) {
   std::string json = "{";
   bool first = true;
   append_optional_integer_field(json, "input_tokens", usage.input_tokens, first);
@@ -85,9 +85,9 @@ ava::provider::TokenUsage with_total_tokens(ava::provider::TokenUsage usage) {
   return usage;
 }
 
-ava::provider::TokenUsage estimate_usage_from_turn(std::string_view request_body, const ParsedAssistantTurn& turn) {
-  const auto input_bytes = static_cast<long long>(request_body.size());
-  const auto output_bytes = static_cast<long long>(output_estimate_bytes(turn));
+ava::provider::TokenUsage estimate_usage_from_turn(std::string_view request_body, ParsedAssistantTurn const& turn) {
+  auto const input_bytes = static_cast<long long>(request_body.size());
+  auto const output_bytes = static_cast<long long>(output_estimate_bytes(turn));
   return ava::provider::TokenUsage{.input_tokens = std::nullopt,
                                    .output_tokens = std::nullopt,
                                    .reasoning_tokens = std::nullopt,
@@ -100,7 +100,7 @@ ava::provider::TokenUsage estimate_usage_from_turn(std::string_view request_body
                                    .estimated = true};
 }
 
-void accumulate_usage(std::optional<ava::provider::TokenUsage>& total, const ava::provider::TokenUsage& usage) {
+void accumulate_usage(std::optional<ava::provider::TokenUsage>& total, ava::provider::TokenUsage const& usage) {
   if (!total) total = ava::provider::TokenUsage{};
   add_optional_usage_field(total->input_tokens, usage.input_tokens);
   add_optional_usage_field(total->output_tokens, usage.output_tokens);

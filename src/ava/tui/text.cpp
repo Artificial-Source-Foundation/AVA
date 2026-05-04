@@ -27,9 +27,9 @@ void append_markdown_inline(Text& text, std::string_view line) {
   std::size_t plain_start = 0;
   for (std::size_t index = 0; index < line.size();) {
     if (line[index] == '[') {
-      const auto label_end = line.find("](", index + 1);
+      auto const label_end = line.find("](", index + 1);
       if (label_end != std::string_view::npos) {
-        const auto target_end = line.find(')', label_end + 2);
+        auto const target_end = line.find(')', label_end + 2);
         if (target_end != std::string_view::npos && label_end > index + 1 && target_end > label_end + 2) {
           append_plain_segment(text, line.substr(plain_start, index - plain_start));
           static_cast<void>(append_span(text, std::string(line.substr(index + 1, label_end - index - 1)),
@@ -44,7 +44,7 @@ void append_markdown_inline(Text& text, std::string_view line) {
       }
     }
     if (index + 1 < line.size() && line[index] == '*' && line[index + 1] == '*') {
-      const auto end = line.find("**", index + 2);
+      auto const end = line.find("**", index + 2);
       if (end != std::string_view::npos && end > index + 2) {
         append_plain_segment(text, line.substr(plain_start, index - plain_start));
         static_cast<void>(
@@ -55,7 +55,7 @@ void append_markdown_inline(Text& text, std::string_view line) {
       }
     }
     if (line[index] == '*') {
-      const auto end = line.find('*', index + 1);
+      auto const end = line.find('*', index + 1);
       if (end != std::string_view::npos && end > index + 1) {
         append_plain_segment(text, line.substr(plain_start, index - plain_start));
         static_cast<void>(
@@ -66,7 +66,7 @@ void append_markdown_inline(Text& text, std::string_view line) {
       }
     }
     if (line[index] == '`') {
-      const auto end = line.find('`', index + 1);
+      auto const end = line.find('`', index + 1);
       if (end != std::string_view::npos && end > index + 1) {
         append_plain_segment(text, line.substr(plain_start, index - plain_start));
         static_cast<void>(append_span(text, std::string(line.substr(index + 1, end - index - 1)),
@@ -87,7 +87,7 @@ bool text_run_has_embedded_newline(std::string_view text) {
   return text.find('\n') != std::string_view::npos || text.find('\r') != std::string_view::npos;
 }
 
-bool text_empty(const Text& text) { return text.runs.empty(); }
+bool text_empty(Text const& text) { return text.runs.empty(); }
 
 ava::core::VoidResult append_string(Text& text, std::string value) {
   if (text_run_has_embedded_newline(value)) {
@@ -132,11 +132,11 @@ Text text_from_markdown(std::string_view value) {
   bool in_fence = false;
   std::size_t start = 0;
   for (std::size_t index = 0; index <= value.size(); ++index) {
-    const bool at_end = index == value.size();
-    const bool at_break = !at_end && (value[index] == '\n' || value[index] == '\r');
+    bool const at_end = index == value.size();
+    bool const at_break = !at_end && (value[index] == '\n' || value[index] == '\r');
     if (!at_end && !at_break) continue;
 
-    const auto line = value.substr(start, index - start);
+    auto const line = value.substr(start, index - start);
     if (starts_fence(line)) {
       static_cast<void>(
           append_span(text, std::string(line), Rendition{.dim = true, .code = true, .color = TextColorRole::Code}));
@@ -144,7 +144,7 @@ Text text_from_markdown(std::string_view value) {
     } else if (in_fence) {
       static_cast<void>(
           append_span(text, std::string(line), Rendition{.dim = true, .code = true, .color = TextColorRole::Code}));
-    } else if (const auto heading = heading_marker_size(line); heading > 0) {
+    } else if (auto const heading = heading_marker_size(line); heading > 0) {
       static_cast<void>(append_span(text, std::string(line.substr(heading)), Rendition{.bold = true}));
     } else {
       append_markdown_inline(text, line);
@@ -159,28 +159,28 @@ Text text_from_markdown(std::string_view value) {
   return text;
 }
 
-std::string to_plain_text(const Text& text) {
+std::string to_plain_text(Text const& text) {
   std::string output;
-  for (const auto& run : text.runs) {
+  for (auto const& run : text.runs) {
     if (std::holds_alternative<NewLine>(run)) {
       output.push_back('\n');
-    } else if (const auto* string = std::get_if<String>(&run)) {
+    } else if (auto const* string = std::get_if<String>(&run)) {
       output += string->text;
-    } else if (const auto* span = std::get_if<TextSpan>(&run)) {
+    } else if (auto const* span = std::get_if<TextSpan>(&run)) {
       output += span->text;
     }
   }
   return output;
 }
 
-ava::core::VoidResult validate_text(const Text& text) {
-  for (const auto& run : text.runs) {
-    if (const auto* string = std::get_if<String>(&run)) {
+ava::core::VoidResult validate_text(Text const& text) {
+  for (auto const& run : text.runs) {
+    if (auto const* string = std::get_if<String>(&run)) {
       if (text_run_has_embedded_newline(string->text)) {
         return std::unexpected(
             ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "text string run contains embedded newline"));
       }
-    } else if (const auto* span = std::get_if<TextSpan>(&run)) {
+    } else if (auto const* span = std::get_if<TextSpan>(&run)) {
       if (text_run_has_embedded_newline(span->text)) {
         return std::unexpected(
             ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "text span run contains embedded newline"));

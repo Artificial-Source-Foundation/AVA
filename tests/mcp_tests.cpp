@@ -20,7 +20,7 @@
 
 namespace {
 
-void write_text(const std::filesystem::path& path, const std::string& text) {
+void write_text(std::filesystem::path const& path, std::string const& text) {
   std::filesystem::create_directories(path.parent_path());
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file << text;
@@ -32,7 +32,7 @@ std::string mcp_config_json(std::string id, std::string command, bool enabled = 
          ",\"enabled\":" + (enabled ? "true" : "false") + "}]}";
 }
 
-ava::mcp::McpServerConfig fake_server_config(const std::filesystem::path& root) {
+ava::mcp::McpServerConfig fake_server_config(std::filesystem::path const& root) {
   return ava::mcp::McpServerConfig{.id = "demo",
                                    .name = "Demo MCP",
                                    .command = AVA_FAKE_MCP_SERVER_PATH,
@@ -42,7 +42,7 @@ ava::mcp::McpServerConfig fake_server_config(const std::filesystem::path& root) 
                                    .source_path = root / "mcp.json"};
 }
 
-ava::mcp::McpStdioClientOptions fake_client_options(const std::filesystem::path& workspace) {
+ava::mcp::McpStdioClientOptions fake_client_options(std::filesystem::path const& workspace) {
   ava::mcp::McpStdioClientOptions options;
   options.workspace_dir = workspace;
   options.startup_timeout = std::chrono::milliseconds(500);
@@ -70,11 +70,11 @@ void test_mcp_config_parsing() {
   expect(!bad_id && bad_id.error().message().find("valid id") != std::string::npos,
          "MCP config rejects invalid server ids");
 
-  const auto root = temp_root() / "mcp-config";
+  auto const root = temp_root() / "mcp-config";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto global_path = root / "global" / "mcp.json";
-  const auto project_path = root / "workspace" / ".ava" / "mcp.json";
+  auto const global_path = root / "global" / "mcp.json";
+  auto const project_path = root / "workspace" / ".ava" / "mcp.json";
   write_text(global_path, mcp_config_json("same", "/bin/demo"));
   write_text(project_path, mcp_config_json("same", "/bin/demo", true));
   auto duplicate = ava::mcp::load_mcp_config(ava::mcp::McpConfigLoadOptions{
@@ -84,10 +84,10 @@ void test_mcp_config_parsing() {
 }
 
 void test_mcp_stdio_client_lists_and_calls_tools() {
-  const auto root = temp_root() / "mcp-client";
+  auto const root = temp_root() / "mcp-client";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
   auto startup_cancel_server = fake_server_config(root);
@@ -107,7 +107,7 @@ void test_mcp_stdio_client_lists_and_calls_tools() {
   auto exit_start_server = fake_server_config(root);
   exit_start_server.args = {"exit-initialize"};
   auto exit_start = ava::mcp::McpStdioClient::start(exit_start_server, fake_client_options(workspace));
-  const auto exit_start_format = exit_start ? std::string{} : exit_start.error().format();
+  auto const exit_start_format = exit_start ? std::string{} : exit_start.error().format();
   expect(!exit_start && exit_start.error().message().find("closed stdout") != std::string::npos &&
              exit_start_format.find("status: exit 42") != std::string::npos &&
              exit_start_format.find("fake MCP exited during initialize") != std::string::npos,
@@ -196,11 +196,11 @@ void test_mcp_stdio_client_lists_and_calls_tools() {
 }
 
 void test_mcp_tool_dispatcher() {
-  const auto root = temp_root() / "mcp-dispatcher";
+  auto const root = temp_root() / "mcp-dispatcher";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto project_config = workspace / ".ava" / "mcp.json";
+  auto const workspace = root / "workspace";
+  auto const project_config = workspace / ".ava" / "mcp.json";
   std::filesystem::create_directories(workspace);
   write_text(project_config, mcp_config_json("demo", AVA_FAKE_MCP_SERVER_PATH, true));
 
@@ -211,20 +211,20 @@ void test_mcp_tool_dispatcher() {
   context.workspace_dir = workspace;
   context.mcp_global_config_file = root / "missing-global-mcp.json";
   context.mcp_project_config_file = project_config;
-  context.permission_resolver = [&prompts](const ava::permissions::PermissionPrompt& prompt)
+  context.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
       -> ava::core::Result<ava::permissions::PermissionResolution> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
-  context.permission_audit_sink = [&audits](const ava::tools::PermissionAuditEvent& event) -> ava::core::VoidResult {
+  context.permission_audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
     audits.push_back(event);
     return {};
   };
   context.cancel_requested = [&] { return cancel_requested; };
 
-  const auto model_tool_name = ava::mcp::mcp_model_tool_name("demo", "echo");
-  const auto schemas = ava::agent::ToolDispatcher::tool_schemas_json(context);
-  const bool has_mcp_schema = std::any_of(schemas.begin(), schemas.end(), [&](const std::string& schema) {
+  auto const model_tool_name = ava::mcp::mcp_model_tool_name("demo", "echo");
+  auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(context);
+  bool const has_mcp_schema = std::any_of(schemas.begin(), schemas.end(), [&](std::string const& schema) {
     return schema.find("\"name\":\"" + model_tool_name + "\"") != std::string::npos &&
            schema.find("\"parameters\"") != std::string::npos;
   });
@@ -242,19 +242,19 @@ void test_mcp_tool_dispatcher() {
              dispatched->payload.content.find("MCP call ok") != std::string::npos,
          "MCP tool dispatcher attaches structured semantic result payloads");
 
-  const auto has_launch = std::any_of(prompts.begin(), prompts.end(), [](const auto& prompt) {
+  auto const has_launch = std::any_of(prompts.begin(), prompts.end(), [](auto const& prompt) {
     return prompt.operation == ava::permissions::Operation::McpServerLaunch;
   });
-  const auto has_connect = std::any_of(prompts.begin(), prompts.end(), [](const auto& prompt) {
+  auto const has_connect = std::any_of(prompts.begin(), prompts.end(), [](auto const& prompt) {
     return prompt.operation == ava::permissions::Operation::McpServerConnect;
   });
-  const auto has_tool_call = std::any_of(prompts.begin(), prompts.end(), [&](const auto& prompt) {
+  auto const has_tool_call = std::any_of(prompts.begin(), prompts.end(), [&](auto const& prompt) {
     return prompt.operation == ava::permissions::Operation::McpToolCall && prompt.tool_name == model_tool_name &&
            prompt.command == "demo:echo";
   });
   expect(has_launch && has_connect && has_tool_call,
          "MCP tools require launch, connect, and mcp.tool.call permission approval");
-  const auto audited_tool_call = std::any_of(audits.begin(), audits.end(), [](const auto& event) {
+  auto const audited_tool_call = std::any_of(audits.begin(), audits.end(), [](auto const& event) {
     return event.operation == ava::permissions::Operation::McpToolCall && event.resolution == "allow";
   });
   expect(audited_tool_call, "MCP tool permission decisions are audited");
@@ -267,7 +267,7 @@ void test_mcp_tool_dispatcher() {
              invalid_args->payload.error_category == "invalid_argument",
          "MCP tool dispatcher attaches structured semantic error payloads");
 
-  const auto prompts_before_cancel = prompts.size();
+  auto const prompts_before_cancel = prompts.size();
   cancel_requested = true;
   auto canceled = dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "call_canceled", .name = model_tool_name, .arguments_json = "{}"});
@@ -277,11 +277,11 @@ void test_mcp_tool_dispatcher() {
 }
 
 void test_mcp_tool_dispatcher_contains_tool_errors() {
-  const auto root = temp_root() / "mcp-dispatcher-tool-error";
+  auto const root = temp_root() / "mcp-dispatcher-tool-error";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
-  const auto project_config = workspace / ".ava" / "mcp.json";
+  auto const workspace = root / "workspace";
+  auto const project_config = workspace / ".ava" / "mcp.json";
   std::filesystem::create_directories(workspace);
   write_text(project_config, mcp_config_json("demo", AVA_FAKE_MCP_SERVER_PATH, true, "[\"tool-error\"]"));
 
@@ -290,13 +290,13 @@ void test_mcp_tool_dispatcher_contains_tool_errors() {
   context.workspace_dir = workspace;
   context.mcp_global_config_file = root / "missing-global-mcp.json";
   context.mcp_project_config_file = project_config;
-  context.permission_resolver = [&prompts](const ava::permissions::PermissionPrompt& prompt)
+  context.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
       -> ava::core::Result<ava::permissions::PermissionResolution> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
 
-  const auto model_tool_name = ava::mcp::mcp_model_tool_name("demo", "echo");
+  auto const model_tool_name = ava::mcp::mcp_model_tool_name("demo", "echo");
   ava::agent::ToolDispatcher dispatcher(context);
   auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "call_mcp_tool_error", .name = model_tool_name, .arguments_json = "{\"text\":\"hello\"}"});

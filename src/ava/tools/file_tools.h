@@ -31,7 +31,7 @@ struct PermissionAuditEvent {
   std::string resolution_source;
 };
 
-using PermissionAuditSink = std::function<ava::core::VoidResult(const PermissionAuditEvent&)>;
+using PermissionAuditSink = std::function<ava::core::VoidResult(PermissionAuditEvent const&)>;
 
 struct ToolProgressEvent {
   std::string text;
@@ -40,7 +40,7 @@ struct ToolProgressEvent {
   std::string status = "running";
 };
 
-using ToolProgressSink = std::function<ava::core::VoidResult(const ToolProgressEvent&)>;
+using ToolProgressSink = std::function<ava::core::VoidResult(ToolProgressEvent const&)>;
 
 struct ToolContext {
   std::filesystem::path workspace_dir;
@@ -89,22 +89,22 @@ struct WriteOptions {
   bool mutation_already_locked = false;
 };
 
-[[nodiscard]] ava::core::Result<TextOutput> read_file(const ToolContext& context, const std::filesystem::path& path,
+[[nodiscard]] ava::core::Result<TextOutput> read_file(ToolContext const& context, std::filesystem::path const& path,
                                                       ReadOptions options = {});
-[[nodiscard]] ava::core::Result<FileMutationResult> write_file(const ToolContext& context,
-                                                               const std::filesystem::path& path,
+[[nodiscard]] ava::core::Result<FileMutationResult> write_file(ToolContext const& context,
+                                                               std::filesystem::path const& path,
                                                                std::string_view content, WriteOptions options = {});
-[[nodiscard]] ava::core::Result<FileMutationResult> edit_file(const ToolContext& context,
-                                                              const std::filesystem::path& path,
+[[nodiscard]] ava::core::Result<FileMutationResult> edit_file(ToolContext const& context,
+                                                              std::filesystem::path const& path,
                                                               std::string_view old_text, std::string_view new_text);
-[[nodiscard]] ava::core::VoidResult ensure_permission(const ToolContext& context, ava::permissions::Operation operation,
-                                                      const std::filesystem::path& target_path,
+[[nodiscard]] ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permissions::Operation operation,
+                                                      std::filesystem::path const& target_path,
                                                       std::string_view command, std::string_view tool_name,
                                                       std::string_view error_message,
                                                       std::string_view diff_preview = {}, bool diff_truncated = false);
-[[nodiscard]] std::string permission_audit_data_json(const PermissionAuditEvent& event);
-[[nodiscard]] ava::core::VoidResult replace_file_with_staged_file(const std::filesystem::path& staged_path,
-                                                                  const std::filesystem::path& target_path);
-void remove_staged_file_best_effort(const std::filesystem::path& staged_path);
+[[nodiscard]] std::string permission_audit_data_json(PermissionAuditEvent const& event);
+[[nodiscard]] ava::core::VoidResult replace_file_with_staged_file(std::filesystem::path const& staged_path,
+                                                                  std::filesystem::path const& target_path);
+void remove_staged_file_best_effort(std::filesystem::path const& staged_path);
 
 }  // namespace ava::tools

@@ -23,8 +23,8 @@ struct CommandHotkey {
   std::string keys;
 };
 
-[[nodiscard]] const std::vector<CommandCatalogEntry>& command_catalog();
-[[nodiscard]] const CommandCatalogEntry* find_command_catalog_entry(std::string_view line) noexcept;
-[[nodiscard]] std::string normalize_command_line(std::string_view line, const CommandCatalogEntry& entry);
+[[nodiscard]] std::vector<CommandCatalogEntry> const& command_catalog();
+[[nodiscard]] CommandCatalogEntry const* find_command_catalog_entry(std::string_view line) noexcept;
+[[nodiscard]] std::string normalize_command_line(std::string_view line, CommandCatalogEntry const& entry);
 
 }  // namespace ava::app

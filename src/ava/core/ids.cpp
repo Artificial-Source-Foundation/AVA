@@ -11,7 +11,7 @@
 namespace ava::core {
 
 std::string make_id(std::string_view prefix) {
-  const auto now = std::chrono::system_clock::now().time_since_epoch().count();
+  auto const now = std::chrono::system_clock::now().time_since_epoch().count();
   std::uint64_t seed = static_cast<std::uint64_t>(now);
   try {
     std::random_device device;
@@ -21,7 +21,7 @@ std::string make_id(std::string_view prefix) {
     seed ^= std::hash<std::thread::id>{}(std::this_thread::get_id());
   }
   std::mt19937_64 generator(seed);
-  const auto random = generator();
+  auto const random = generator();
 
   std::ostringstream out;
   out << prefix << '_';

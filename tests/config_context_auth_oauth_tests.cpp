@@ -52,7 +52,7 @@
 namespace {
 
 void test_xdg_paths() {
-  const auto root = temp_root() / "xdg";
+  auto const root = temp_root() / "xdg";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
   std::filesystem::create_directories(root);
@@ -100,21 +100,21 @@ void test_xdg_paths() {
 }
 
 void test_context_loader() {
-  const auto root = temp_root() / "context";
-  const auto workspace = root / "workspace";
-  const auto nested = workspace / "src" / "feature";
-  const auto config = root / "config" / "ava";
-  const auto outside = root / "outside";
+  auto const root = temp_root() / "context";
+  auto const workspace = root / "workspace";
+  auto const nested = workspace / "src" / "feature";
+  auto const config = root / "config" / "ava";
+  auto const outside = root / "outside";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
   std::filesystem::create_directories(nested);
   std::filesystem::create_directories(config);
   std::filesystem::create_directories(outside);
 
-  const auto root_agents = workspace / "AGENTS.md";
-  const auto src_agents = workspace / "src" / "AGENTS.md";
-  const auto nested_agents = nested / "AGENTS.md";
-  const auto global_agents = config / "AGENTS.md";
+  auto const root_agents = workspace / "AGENTS.md";
+  auto const src_agents = workspace / "src" / "AGENTS.md";
+  auto const nested_agents = nested / "AGENTS.md";
+  auto const global_agents = config / "AGENTS.md";
   {
     std::ofstream file(root_agents, std::ios::binary | std::ios::trunc);
     file << "root instructions\n";
@@ -177,7 +177,7 @@ void test_context_loader() {
       expect((*with_global)[3].source_type == ava::context::ContextSourceType::Global,
              "global AGENTS.md records global source type");
 
-      const auto formatted = ava::context::format_context_for_prompt(*with_global);
+      auto const formatted = ava::context::format_context_for_prompt(*with_global);
       expect(formatted.find("# Loaded Project Instructions") != std::string::npos,
              "formatted context includes a section title");
       expect(formatted.find("## workspace: " + std::filesystem::weakly_canonical(root_agents).string()) !=
@@ -203,7 +203,7 @@ void test_context_loader() {
     expect(deduped_global->size() == 3, "duplicate global AGENTS.md is not loaded twice");
   }
 
-  const auto oversized_workspace = root / "oversized";
+  auto const oversized_workspace = root / "oversized";
   std::filesystem::create_directories(oversized_workspace);
   {
     std::ofstream file(oversized_workspace / "AGENTS.md", std::ios::binary | std::ios::trunc);
@@ -218,8 +218,8 @@ void test_context_loader() {
   expect(!oversized && oversized.error().category() == ava::core::ErrorCategory::Io,
          "oversized context files fail safely");
 
-  const auto symlink_workspace = root / "symlink-workspace";
-  const auto symlink_target = root / "outside-secret.md";
+  auto const symlink_workspace = root / "symlink-workspace";
+  auto const symlink_target = root / "outside-secret.md";
   std::filesystem::create_directories(symlink_workspace);
   {
     std::ofstream file(symlink_target, std::ios::binary | std::ios::trunc);
@@ -241,7 +241,7 @@ void test_context_loader() {
 }
 
 void test_auth_load_and_store() {
-  const auto root = temp_root() / "auth";
+  auto const root = temp_root() / "auth";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
   std::filesystem::create_directories(root / "config" / "ava");
@@ -250,7 +250,7 @@ void test_auth_load_and_store() {
   setenv("XDG_STATE_HOME", (root / "state").c_str(), 1);
   setenv("XDG_DATA_HOME", (root / "data").c_str(), 1);
 
-  const auto paths = ava::config::xdg_paths();
+  auto const paths = ava::config::xdg_paths();
   {
     std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
     file << "{\"openai\":{\"type\":\"oauth\",\"access_token\":\"secret-token\",\"refresh_token\":\"refresh\",\"expires_"
@@ -413,7 +413,7 @@ void test_auth_load_and_store() {
   std::ifstream repaired_auth_file(paths.auth_file, std::ios::binary);
   std::stringstream repaired_auth_stream;
   repaired_auth_stream << repaired_auth_file.rdbuf();
-  const auto repaired_auth_json = repaired_auth_stream.str();
+  auto const repaired_auth_json = repaired_auth_stream.str();
   expect(repaired_auth_json.find("openai") == std::string::npos &&
              repaired_auth_json.find("anthropic") == std::string::npos &&
              repaired_auth_json.find("moonshot") == std::string::npos,
@@ -552,7 +552,7 @@ void test_auth_load_and_store() {
   expect(!broad_auth_file && broad_auth_file.error().category() == ava::core::ErrorCategory::PermissionDenied,
          "OpenAI credential load rejects group-readable auth file");
 
-  const auto symlink_target = root / "symlink-target.json";
+  auto const symlink_target = root / "symlink-target.json";
   {
     std::ofstream file(symlink_target, std::ios::binary | std::ios::trunc);
     file << "unchanged";
@@ -577,7 +577,7 @@ void test_auth_load_and_store() {
 }
 
 void test_openai_oauth_helpers() {
-  const std::string verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+  std::string const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
   expect(ava::config::openai_oauth_code_challenge(verifier) == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
          "OpenAI OAuth PKCE challenge matches RFC 7636 test vector");
   expect(ava::config::openai_oauth_account_id_from_token(
@@ -619,7 +619,7 @@ void test_openai_oauth_helpers() {
                credential->account_id == "acct_123",
            "OpenAI OAuth code exchange returns OAuth credential with absolute expiry and account id");
   }
-  const auto& requests = transport.requests();
+  auto const& requests = transport.requests();
   expect(requests.size() == 1 && requests.front().url == "https://auth.openai.com/oauth/token" &&
              requests.front().method == "POST",
          "OpenAI OAuth code exchange posts to token endpoint");
@@ -638,7 +638,7 @@ void test_openai_oauth_refresh() {
       .body = "{\"access_token\":\"refreshed-access\",\"refresh_token\":\"rotated-refresh\","
               "\"expires_in\":120,\"account_id\":\"acct_rotated\"}",
   }});
-  const auto refreshed = ava::config::refresh_openai_oauth_credential(
+  auto const refreshed = ava::config::refresh_openai_oauth_credential(
       ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
                                     .access_token = "old-access",
                                     .refresh_token = "old refresh/token",
@@ -649,7 +649,7 @@ void test_openai_oauth_refresh() {
   expect(refreshed && refreshed->access_token == "refreshed-access" && refreshed->refresh_token == "rotated-refresh" &&
              refreshed->expires_at == 1120 && refreshed->account_id == "acct_rotated",
          "OpenAI OAuth refresh parses rotated token response");
-  const auto& refresh_requests = refresh_transport.requests();
+  auto const& refresh_requests = refresh_transport.requests();
   expect(refresh_requests.size() == 1 && refresh_requests.front().url == "https://auth.openai.com/oauth/token" &&
              refresh_requests.front().method == "POST",
          "OpenAI OAuth refresh posts to token endpoint");
@@ -665,7 +665,7 @@ void test_openai_oauth_refresh() {
       .headers = {},
       .body = "{\"access_token\":\"preserved-access\",\"expires_at\":2222}",
   }});
-  const auto preserved = ava::config::refresh_openai_oauth_credential(
+  auto const preserved = ava::config::refresh_openai_oauth_credential(
       ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
                                     .access_token = "old-access",
                                     .refresh_token = "stable-refresh",
@@ -684,7 +684,7 @@ void test_openai_oauth_refresh() {
               "\"expires_in\":120,\"id_token\":\"header."
               "eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdF8xMjMifX0.sig\"}",
   }});
-  const auto id_token_refreshed = ava::config::refresh_openai_oauth_credential(
+  auto const id_token_refreshed = ava::config::refresh_openai_oauth_credential(
       ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
                                     .access_token = "old-access",
                                     .refresh_token = "id-token-refresh-input",
@@ -700,7 +700,7 @@ void test_openai_oauth_refresh() {
       .headers = {},
       .body = "not json",
   }});
-  const auto malformed = ava::config::refresh_openai_oauth_credential(
+  auto const malformed = ava::config::refresh_openai_oauth_credential(
       ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
                                     .access_token = "old-access",
                                     .refresh_token = "refresh",
@@ -711,14 +711,14 @@ void test_openai_oauth_refresh() {
   expect(!malformed && malformed.error().message().find("malformed JSON") != std::string::npos,
          "OpenAI OAuth refresh reports malformed JSON responses clearly");
 
-  const auto root = temp_root() / "oauth-refresh";
+  auto const root = temp_root() / "oauth-refresh";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
   setenv("HOME", (root / "home").c_str(), 1);
   setenv("XDG_CONFIG_HOME", (root / "config").c_str(), 1);
   setenv("XDG_STATE_HOME", (root / "state").c_str(), 1);
   setenv("XDG_DATA_HOME", (root / "data").c_str(), 1);
-  const auto paths = ava::config::xdg_paths();
+  auto const paths = ava::config::xdg_paths();
   auto stored = ava::config::store_openai_credential(
       paths, ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::OAuth,
                                            .access_token = "expired-access",
@@ -772,23 +772,23 @@ void test_openai_oauth_refresh() {
 }
 
 void test_model_and_prompt_config() {
-  const auto root = temp_root() / "model";
+  auto const root = temp_root() / "model";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
   setenv("HOME", (root / "home").c_str(), 1);
   setenv("XDG_CONFIG_HOME", (root / "config").c_str(), 1);
   setenv("XDG_STATE_HOME", (root / "state").c_str(), 1);
   setenv("XDG_DATA_HOME", (root / "data").c_str(), 1);
-  const auto paths = ava::config::xdg_paths();
+  auto const paths = ava::config::xdg_paths();
 
-  const auto builtin = ava::config::builtin_model_registry();
+  auto const builtin = ava::config::builtin_model_registry();
   auto selected = ava::config::select_default_model(builtin);
-  const auto openai_profile = ava::config::find_provider_profile("openai");
+  auto const openai_profile = ava::config::find_provider_profile("openai");
   expect(openai_profile && openai_profile->display_name == "OpenAI" &&
              openai_profile->api_family == selected.api_family && openai_profile->supports_oauth,
          "provider profile centralizes OpenAI display, API family, and OAuth capability");
   expect(ava::config::model_display_label("gpt-5.5") == "GPT-5.5", "model profile centralizes GPT display labels");
-  const auto vercel_profile = ava::config::find_provider_profile("vercel");
+  auto const vercel_profile = ava::config::find_provider_profile("vercel");
   expect(vercel_profile && vercel_profile->display_name == "Vercel AI Gateway" &&
              vercel_profile->connect_detail == "API key",
          "provider profile centralizes non-runtime gateway connect metadata");
@@ -805,7 +805,7 @@ void test_model_and_prompt_config() {
   bool saw_moonshot_builtin = false;
   bool all_builtins_have_context_windows = !builtin.models.empty();
   bool all_builtins_have_text_output = !builtin.models.empty();
-  for (const auto& model : builtin.models) {
+  for (auto const& model : builtin.models) {
     all_builtins_have_context_windows = all_builtins_have_context_windows && model.context_window_tokens.has_value();
     all_builtins_have_text_output = all_builtins_have_text_output &&
                                     std::find(model.output_modalities.begin(), model.output_modalities.end(), "text") !=
@@ -864,7 +864,7 @@ void test_model_and_prompt_config() {
     selected = ava::config::select_default_model(*registry);
     expect(selected.model_id == "gpt-5.5-mini" && selected.display_name == "Mini",
            "default model override selects user model");
-    const ava::provider::TokenUsage usage{.input_tokens = 1000,
+    ava::provider::TokenUsage const usage{.input_tokens = 1000,
                                           .output_tokens = 2000,
                                           .reasoning_tokens = std::nullopt,
                                           .cache_read_tokens = std::nullopt,
@@ -885,7 +885,7 @@ void test_model_and_prompt_config() {
            "model registry parses local capability and pricing metadata and calculates cost");
     expect(!ava::config::usage_cost_usd(ava::config::ModelPricing{}, usage),
            "usage cost remains unknown when pricing rates are absent");
-    const ava::provider::TokenUsage cached_usage{.input_tokens = 1000,
+    ava::provider::TokenUsage const cached_usage{.input_tokens = 1000,
                                                  .output_tokens = 0,
                                                  .reasoning_tokens = std::nullopt,
                                                  .cache_read_tokens = 100,

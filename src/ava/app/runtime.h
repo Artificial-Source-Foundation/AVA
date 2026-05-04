@@ -79,17 +79,17 @@ struct RuntimeRunOptions {
 };
 
 using CompactionSummaryGenerator = std::function<ava::core::Result<std::string>(
-    const std::vector<ava::session::SessionEntry>& entries, const ava::session::CompactionConfig& config,
+    std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
     std::string_view instructions, std::size_t estimated_tokens)>;
 
-[[nodiscard]] ava::core::Result<RuntimeSession> open_runtime_session(const RuntimeOpenOptions& options);
+[[nodiscard]] ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const& options);
 
-[[nodiscard]] ava::core::Result<RuntimePromptState> select_runtime_prompt_state(const RuntimeSession& session,
+[[nodiscard]] ava::core::Result<RuntimePromptState> select_runtime_prompt_state(RuntimeSession const& session,
                                                                                 ava::agent::Mode mode);
 
 void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prompt_state);
 
-[[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(const ava::config::XdgPaths& paths,
+[[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths,
                                                                               std::string_view provider_id,
                                                                               std::string_view model_id);
 
@@ -99,24 +99,24 @@ void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prom
                                                             std::optional<RuntimeReasoningSelection> selection);
 
 [[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& session,
-                                                                        const std::string& user_message,
-                                                                        const ava::provider::Provider& provider,
+                                                                        std::string const& user_message,
+                                                                        ava::provider::Provider const& provider,
                                                                         ava::provider::Transport& transport,
-                                                                        const RuntimeRunOptions& options);
+                                                                        RuntimeRunOptions const& options);
 
-[[nodiscard]] bool same_session_snapshot(const std::vector<ava::session::SessionEntry>& expected,
-                                         const std::vector<ava::session::SessionEntry>& actual);
+[[nodiscard]] bool same_session_snapshot(std::vector<ava::session::SessionEntry> const& expected,
+                                         std::vector<ava::session::SessionEntry> const& actual);
 
 [[nodiscard]] ava::core::Error stale_compaction_snapshot_error(std::string_view trigger, std::size_t snapshot_entries,
                                                                std::size_t current_entries);
 
-[[nodiscard]] std::string build_compaction_summary_prompt(const std::vector<ava::session::SessionEntry>& entries,
-                                                          const ava::session::CompactionConfig& config,
+[[nodiscard]] std::string build_compaction_summary_prompt(std::vector<ava::session::SessionEntry> const& entries,
+                                                          ava::session::CompactionConfig const& config,
                                                           std::string_view instructions, std::size_t estimated_tokens);
 
 [[nodiscard]] ava::core::Result<std::string> generate_compaction_summary(
-    const RuntimeSession& session, const std::vector<ava::session::SessionEntry>& entries,
-    const ava::session::CompactionConfig& config, std::string_view instructions, std::size_t estimated_tokens,
-    const ava::provider::Provider& provider, ava::provider::Transport& transport, const RuntimeRunOptions& options);
+    RuntimeSession const& session, std::vector<ava::session::SessionEntry> const& entries,
+    ava::session::CompactionConfig const& config, std::string_view instructions, std::size_t estimated_tokens,
+    ava::provider::Provider const& provider, ava::provider::Transport& transport, RuntimeRunOptions const& options);
 
 }  // namespace ava::app

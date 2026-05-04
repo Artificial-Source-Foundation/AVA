@@ -5,8 +5,8 @@
 namespace ava::app {
 
 [[nodiscard]] ava::core::Result<CommandResult> run_plugins_command(RuntimeSession& session,
-                                                                   const CommandRequest& request);
+                                                                   CommandRequest const& request);
 [[nodiscard]] ava::core::Result<CommandResult> run_plugin_command(RuntimeSession& session,
-                                                                  const CommandRequest& request);
+                                                                  CommandRequest const& request);
 
 }  // namespace ava::app

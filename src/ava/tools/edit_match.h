@@ -25,7 +25,7 @@ struct TextMatch {
 [[nodiscard]] TextAnalysis analyze_text(std::string_view text);
 [[nodiscard]] std::string to_string(LineEndingStyle style);
 [[nodiscard]] ava::core::Result<TextMatch> find_unique_text_match(std::string_view content, std::string_view old_text,
-                                                                  const std::filesystem::path& path,
+                                                                  std::filesystem::path const& path,
                                                                   std::string_view missing_message,
                                                                   std::string_view non_unique_message);
 

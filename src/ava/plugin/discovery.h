@@ -13,7 +13,7 @@ struct PluginDiscoveryOptions {
   std::filesystem::path project_plugins_dir;
 };
 
-[[nodiscard]] PluginDiscoveryOptions default_plugin_discovery_options(const std::filesystem::path& workspace_root);
-[[nodiscard]] ava::core::Result<std::vector<DiscoveredPlugin>> discover_plugins(const PluginDiscoveryOptions& options);
+[[nodiscard]] PluginDiscoveryOptions default_plugin_discovery_options(std::filesystem::path const& workspace_root);
+[[nodiscard]] ava::core::Result<std::vector<DiscoveredPlugin>> discover_plugins(PluginDiscoveryOptions const& options);
 
 }  // namespace ava::plugin

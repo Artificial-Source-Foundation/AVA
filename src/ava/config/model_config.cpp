@@ -19,7 +19,7 @@ namespace {
 
 constexpr std::size_t max_model_config_bytes = 1024 * 1024;
 
-ava::core::Result<std::string> read_text(const std::filesystem::path& path) {
+ava::core::Result<std::string> read_text(std::filesystem::path const& path) {
   std::error_code status_error;
   if (!std::filesystem::is_regular_file(path, status_error)) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "model config is not a regular file");
@@ -28,7 +28,7 @@ ava::core::Result<std::string> read_text(const std::filesystem::path& path) {
     return std::unexpected(std::move(error));
   }
   std::error_code size_error;
-  const auto size = std::filesystem::file_size(path, size_error);
+  auto const size = std::filesystem::file_size(path, size_error);
   if (size_error || size > max_model_config_bytes) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "model config is too large");
     error.with_context("path", path.string());
@@ -64,7 +64,7 @@ ava::core::Result<std::string> read_text(const std::filesystem::path& path) {
 
 std::string family_from_model_id(std::string_view model_id) {
   if (model_id == "gpt-5" || model_id.starts_with("gpt-5.") || model_id.starts_with("gpt-5-")) return "gpt-5";
-  const auto dash = model_id.find_last_of('-');
+  auto const dash = model_id.find_last_of('-');
   if (dash == std::string_view::npos) return std::string(model_id);
   return std::string(model_id.substr(0, dash));
 }
@@ -74,24 +74,24 @@ bool is_number_delimiter(char ch) {
 }
 
 std::optional<long double> number_field(std::string_view object, std::string_view key) {
-  const auto start = ava::core::json::field_value_start(object, key);
+  auto const start = ava::core::json::field_value_start(object, key);
   if (!start || *start >= object.size()) return std::nullopt;
 
   std::size_t index = *start;
   if (object[index] == '-') ++index;
-  const auto digits_start = index;
+  auto const digits_start = index;
   while (index < object.size() && std::isdigit(static_cast<unsigned char>(object[index])) != 0) ++index;
   if (index == digits_start) return std::nullopt;
   if (index < object.size() && object[index] == '.') {
     ++index;
-    const auto fraction_start = index;
+    auto const fraction_start = index;
     while (index < object.size() && std::isdigit(static_cast<unsigned char>(object[index])) != 0) ++index;
     if (index == fraction_start) return std::nullopt;
   }
   if (index < object.size() && (object[index] == 'e' || object[index] == 'E')) {
     ++index;
     if (index < object.size() && (object[index] == '+' || object[index] == '-')) ++index;
-    const auto exponent_start = index;
+    auto const exponent_start = index;
     while (index < object.size() && std::isdigit(static_cast<unsigned char>(object[index])) != 0) ++index;
     if (index == exponent_start) return std::nullopt;
   }
@@ -105,25 +105,25 @@ std::optional<long double> number_field(std::string_view object, std::string_vie
 }
 
 std::optional<long double> first_number_field(std::string_view object, std::initializer_list<std::string_view> keys) {
-  for (const auto key : keys) {
-    if (const auto value = number_field(object, key); value && *value >= 0.0L) return value;
+  for (auto const key : keys) {
+    if (auto const value = number_field(object, key); value && *value >= 0.0L) return value;
   }
   return std::nullopt;
 }
 
 std::optional<long long> positive_integer_field(std::string_view object, std::initializer_list<std::string_view> keys) {
-  for (const auto key : keys) {
-    const auto value = ava::core::json::integer_field(object, key);
+  for (auto const key : keys) {
+    auto const value = ava::core::json::integer_field(object, key);
     if (value && *value > 0) return value;
   }
   return std::nullopt;
 }
 
 std::optional<bool> bool_field(std::string_view object, std::initializer_list<std::string_view> keys) {
-  for (const auto key : keys) {
-    const auto start = ava::core::json::field_value_start(object, key);
+  for (auto const key : keys) {
+    auto const start = ava::core::json::field_value_start(object, key);
     if (!start) continue;
-    const auto value = object.substr(*start);
+    auto const value = object.substr(*start);
     if (value.starts_with("true") && (value.size() == 4 || is_number_delimiter(value[4]))) return true;
     if (value.starts_with("false") && (value.size() == 5 || is_number_delimiter(value[5]))) return false;
   }
@@ -131,15 +131,15 @@ std::optional<bool> bool_field(std::string_view object, std::initializer_list<st
 }
 
 bool has_any_field(std::string_view object, std::initializer_list<std::string_view> keys) {
-  for (const auto key : keys) {
+  for (auto const key : keys) {
     if (ava::core::json::field_value_start(object, key)) return true;
   }
   return false;
 }
 
 std::vector<std::string> string_array_field(std::string_view object, std::initializer_list<std::string_view> keys) {
-  for (const auto key : keys) {
-    const auto start = ava::core::json::field_value_start(object, key);
+  for (auto const key : keys) {
+    auto const start = ava::core::json::field_value_start(object, key);
     if (!start || *start >= object.size() || object[*start] != '[') continue;
     std::vector<std::string> values;
     bool in_string = false;
@@ -149,7 +149,7 @@ std::vector<std::string> string_array_field(std::string_view object, std::initia
     int object_depth = 0;
     std::string current;
     for (std::size_t index = *start + 1; index < object.size(); ++index) {
-      const char ch = object[index];
+      char const ch = object[index];
       if (escaped) {
         if (collecting) current.push_back(ch);
         escaped = false;
@@ -209,7 +209,7 @@ std::optional<ModelPricing> pricing_from_object(std::string_view object) {
 }
 
 std::optional<ModelPricing> model_pricing_from_item(std::string_view item) {
-  if (const auto object = ava::core::json::object_field(item, "pricing")) return pricing_from_object(*object);
+  if (auto const object = ava::core::json::object_field(item, "pricing")) return pricing_from_object(*object);
   return pricing_from_object(item);
 }
 
@@ -227,7 +227,7 @@ ModelRegistry parse_model_registry(std::string_view content) {
     registry.default_provider_id = *provider;
   if (auto model = ava::core::json::string_field(content, "default_model")) registry.default_model_id = *model;
 
-  for (const auto& item : ava::core::json::objects_in_array_field(content, "models")) {
+  for (auto const& item : ava::core::json::objects_in_array_field(content, "models")) {
     auto provider = ava::core::json::string_field(item, "provider");
     auto id = ava::core::json::string_field(item, "id");
     if (!provider || !id) continue;
@@ -290,23 +290,23 @@ ModelRegistry parse_model_registry(std::string_view content) {
   return registry;
 }
 
-ava::core::Result<ModelRegistry> load_model_registry(const XdgPaths& paths) {
+ava::core::Result<ModelRegistry> load_model_registry(XdgPaths const& paths) {
   if (!std::filesystem::exists(paths.models_file)) return builtin_model_registry();
   auto content = read_text(paths.models_file);
   if (!content) return std::unexpected(content.error());
   return parse_model_registry(*content);
 }
 
-std::optional<ModelInfo> find_model(const ModelRegistry& registry, std::string_view provider_id,
+std::optional<ModelInfo> find_model(ModelRegistry const& registry, std::string_view provider_id,
                                     std::string_view model_id) {
   for (auto it = registry.models.rbegin(); it != registry.models.rend(); ++it) {
-    const auto& model = *it;
+    auto const& model = *it;
     if (model.provider_id == provider_id && model.model_id == model_id) return model;
   }
   return std::nullopt;
 }
 
-ModelInfo select_default_model(const ModelRegistry& registry) {
+ModelInfo select_default_model(ModelRegistry const& registry) {
   if (auto model = find_model(registry, registry.default_provider_id, registry.default_model_id)) return *model;
   return ModelInfo{
       .provider_id = registry.default_provider_id,
@@ -329,12 +329,12 @@ ModelInfo select_default_model(const ModelRegistry& registry) {
   };
 }
 
-std::optional<long double> usage_cost_usd(const ModelPricing& pricing, const ava::provider::TokenUsage& usage) {
+std::optional<long double> usage_cost_usd(ModelPricing const& pricing, ava::provider::TokenUsage const& usage) {
   if (usage.estimated) return std::nullopt;
 
-  const long long input_tokens = usage.input_tokens.value_or(0);
-  const long long cache_read_tokens = usage.cache_read_tokens.value_or(0);
-  const long long cache_write_tokens = usage.cache_write_tokens.value_or(0);
+  long long const input_tokens = usage.input_tokens.value_or(0);
+  long long const cache_read_tokens = usage.cache_read_tokens.value_or(0);
+  long long const cache_write_tokens = usage.cache_write_tokens.value_or(0);
   if (cache_read_tokens > 0 && !pricing.cache_read_per_million) return std::nullopt;
   if (cache_write_tokens > 0 && !pricing.cache_write_per_million) return std::nullopt;
   long long regular_input_tokens = input_tokens;
@@ -345,7 +345,7 @@ std::optional<long double> usage_cost_usd(const ModelPricing& pricing, const ava
     if (!usage.total_tokens || *usage.total_tokens < input_tokens) return std::nullopt;
     return *usage.total_tokens - input_tokens;
   });
-  const long long reasoning_tokens = usage.reasoning_tokens.value_or(0);
+  long long const reasoning_tokens = usage.reasoning_tokens.value_or(0);
   long long regular_output_tokens = output_tokens.value_or(0);
   if (pricing.reasoning_per_million) regular_output_tokens -= std::min(regular_output_tokens, reasoning_tokens);
 

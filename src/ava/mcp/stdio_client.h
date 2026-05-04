@@ -49,17 +49,17 @@ class McpStdioClient final {
   McpStdioClient(McpServerConfig server, McpStdioClientOptions options);
   ~McpStdioClient();
 
-  McpStdioClient(const McpStdioClient&) = delete;
-  McpStdioClient& operator=(const McpStdioClient&) = delete;
+  McpStdioClient(McpStdioClient const&) = delete;
+  McpStdioClient& operator=(McpStdioClient const&) = delete;
   McpStdioClient(McpStdioClient&&) = delete;
   McpStdioClient& operator=(McpStdioClient&&) = delete;
 
   [[nodiscard]] static ava::core::Result<std::unique_ptr<McpStdioClient>> start(
       McpServerConfig server, McpStdioClientOptions options, CancelCallback cancel_requested = nullptr);
 
-  [[nodiscard]] const McpServerConfig& server() const noexcept;
-  [[nodiscard]] const McpInitialization& initialization() const noexcept;
-  [[nodiscard]] const std::string& stderr_tail() const noexcept;
+  [[nodiscard]] McpServerConfig const& server() const noexcept;
+  [[nodiscard]] McpInitialization const& initialization() const noexcept;
+  [[nodiscard]] std::string const& stderr_tail() const noexcept;
   [[nodiscard]] bool stderr_truncated() const noexcept;
 
   [[nodiscard]] ava::core::Result<std::vector<McpToolDescription>> list_tools(

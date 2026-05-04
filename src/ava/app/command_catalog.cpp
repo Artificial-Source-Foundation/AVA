@@ -7,20 +7,20 @@
 namespace ava::app {
 namespace {
 
-bool token_matches(std::string_view token, const CommandCatalogEntry& entry) noexcept {
+bool token_matches(std::string_view token, CommandCatalogEntry const& entry) noexcept {
   if (token == entry.command) return true;
   return std::ranges::find(entry.aliases, token) != entry.aliases.end();
 }
 
 std::string_view command_token(std::string_view line) noexcept {
-  const auto end = line.find_first_of(" \t\r\n");
+  auto const end = line.find_first_of(" \t\r\n");
   return line.substr(0, end == std::string_view::npos ? line.size() : end);
 }
 
 }  // namespace
 
-const std::vector<CommandCatalogEntry>& command_catalog() {
-  static const auto catalog = std::vector<CommandCatalogEntry>{
+std::vector<CommandCatalogEntry> const& command_catalog() {
+  static auto const catalog = std::vector<CommandCatalogEntry>{
       CommandCatalogEntry{
           .command = "/help", .description = "Show commands and effective hotkeys", .category = "General"},
       CommandCatalogEntry{.command = "/hotkeys", .description = "Show effective TUI hotkeys", .category = "General"},
@@ -120,19 +120,19 @@ const std::vector<CommandCatalogEntry>& command_catalog() {
   return catalog;
 }
 
-const CommandCatalogEntry* find_command_catalog_entry(std::string_view line) noexcept {
+CommandCatalogEntry const* find_command_catalog_entry(std::string_view line) noexcept {
   if (!line.starts_with('/')) return nullptr;
-  const auto token = command_token(line);
-  for (const auto& entry : command_catalog()) {
+  auto const token = command_token(line);
+  for (auto const& entry : command_catalog()) {
     if (token_matches(token, entry)) return &entry;
   }
   return nullptr;
 }
 
-std::string normalize_command_line(std::string_view line, const CommandCatalogEntry& entry) {
-  const auto token = command_token(line);
+std::string normalize_command_line(std::string_view line, CommandCatalogEntry const& entry) {
+  auto const token = command_token(line);
   if (token == entry.command) return std::string(line);
-  const auto rest = line.substr(token.size());
+  auto const rest = line.substr(token.size());
   return entry.command + std::string(rest);
 }
 

@@ -22,17 +22,17 @@ ava::core::Error config_error(std::string message) {
 }
 
 bool has_forbidden_byte(std::string_view value) {
-  for (const char ch : value) {
-    const auto byte = static_cast<unsigned char>(ch);
+  for (char const ch : value) {
+    auto const byte = static_cast<unsigned char>(ch);
     if (byte < 0x20 || byte == 0x7F) return true;
   }
   return false;
 }
 
 std::optional<bool> bool_field(std::string_view object, std::string_view key) {
-  const auto start = ava::core::json::field_value_start(object, key);
+  auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return std::nullopt;
-  const auto valid_terminator = [](std::string_view value, std::size_t offset) {
+  auto const valid_terminator = [](std::string_view value, std::size_t offset) {
     while (offset < value.size() && std::isspace(static_cast<unsigned char>(value[offset])) != 0) ++offset;
     return offset >= value.size() || value[offset] == ',' || value[offset] == '}';
   };
@@ -42,13 +42,13 @@ std::optional<bool> bool_field(std::string_view object, std::string_view key) {
 }
 
 std::optional<std::string> array_field(std::string_view object, std::string_view key) {
-  const auto start = ava::core::json::field_value_start(object, key);
+  auto const start = ava::core::json::field_value_start(object, key);
   if (!start || *start >= object.size() || object[*start] != '[') return std::nullopt;
   bool in_string = false;
   bool escaped = false;
   int depth = 0;
   for (std::size_t index = *start; index < object.size(); ++index) {
-    const char ch = object[index];
+    char const ch = object[index];
     if (escaped) {
       escaped = false;
       continue;
@@ -78,7 +78,7 @@ std::optional<std::string> parse_string_literal(std::string_view literal) {
 ava::core::Result<std::vector<std::string>> string_array_field(std::string_view object, std::string_view key) {
   std::vector<std::string> values;
   if (!ava::core::json::field_value_start(object, key)) return values;
-  const auto array = array_field(object, key);
+  auto const array = array_field(object, key);
   if (!array) {
     return std::unexpected(
         config_error("MCP config field must be an array of strings").with_context("field", std::string(key)));
@@ -94,7 +94,7 @@ ava::core::Result<std::vector<std::string>> string_array_field(std::string_view 
     std::size_t end = index + 1;
     bool escaped = false;
     while (end < array->size()) {
-      const char ch = (*array)[end];
+      char const ch = (*array)[end];
       if (escaped) {
         escaped = false;
       } else if (ch == '\\') {
@@ -127,9 +127,9 @@ ava::core::Result<std::vector<std::string>> string_array_field(std::string_view 
   return values;
 }
 
-ava::core::Result<std::string> read_config_file(const std::filesystem::path& path) {
+ava::core::Result<std::string> read_config_file(std::filesystem::path const& path) {
   std::error_code status_error;
-  const auto status = std::filesystem::status(path, status_error);
+  auto const status = std::filesystem::status(path, status_error);
   if (status_error) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect MCP config")
                                .with_context("path", path.string())
@@ -139,7 +139,7 @@ ava::core::Result<std::string> read_config_file(const std::filesystem::path& pat
     return std::unexpected(config_error("MCP config must be a regular file").with_context("path", path.string()));
   }
   std::error_code size_error;
-  const auto size = std::filesystem::file_size(path, size_error);
+  auto const size = std::filesystem::file_size(path, size_error);
   if (size_error) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect MCP config size")
                                .with_context("path", path.string())
@@ -164,7 +164,7 @@ ava::core::Result<std::string> read_config_file(const std::filesystem::path& pat
   return buffer.str();
 }
 
-ava::core::Result<McpConfig> load_optional_config(const std::filesystem::path& path, McpServerScope scope) {
+ava::core::Result<McpConfig> load_optional_config(std::filesystem::path const& path, McpServerScope scope) {
   McpConfig config;
   if (scope == McpServerScope::Global) {
     config.global_config_file = path;
@@ -173,7 +173,7 @@ ava::core::Result<McpConfig> load_optional_config(const std::filesystem::path& p
   }
   if (path.empty()) return config;
   std::error_code exists_error;
-  const bool exists = std::filesystem::exists(path, exists_error);
+  bool const exists = std::filesystem::exists(path, exists_error);
   if (exists_error) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect MCP config")
                                .with_context("path", path.string())
@@ -189,8 +189,8 @@ ava::core::VoidResult append_config(McpConfig& target, McpConfig source) {
   if (!source.global_config_file.empty()) target.global_config_file = std::move(source.global_config_file);
   if (!source.project_config_file.empty()) target.project_config_file = std::move(source.project_config_file);
   for (auto& server : source.servers) {
-    const auto duplicate =
-        std::ranges::find_if(target.servers, [&](const McpServerConfig& existing) { return existing.id == server.id; });
+    auto const duplicate =
+        std::ranges::find_if(target.servers, [&](McpServerConfig const& existing) { return existing.id == server.id; });
     if (duplicate != target.servers.end()) {
       return std::unexpected(config_error("duplicate MCP server id")
                                  .with_context("server", server.id)
@@ -217,9 +217,9 @@ std::string_view to_string(McpServerScope scope) {
 bool is_valid_mcp_identifier(std::string_view id) {
   if (id.empty() || id.size() > 128) return false;
   bool last_was_separator = false;
-  for (const char ch : id) {
-    const auto byte = static_cast<unsigned char>(ch);
-    const bool allowed = std::isalnum(byte) != 0 || ch == '.' || ch == '_' || ch == '-';
+  for (char const ch : id) {
+    auto const byte = static_cast<unsigned char>(ch);
+    bool const allowed = std::isalnum(byte) != 0 || ch == '.' || ch == '_' || ch == '-';
     if (!allowed) return false;
     if ((ch == '.' || ch == '_' || ch == '-') && last_was_separator) return false;
     last_was_separator = ch == '.' || ch == '_' || ch == '-';
@@ -227,7 +227,7 @@ bool is_valid_mcp_identifier(std::string_view id) {
   return !last_was_separator;
 }
 
-McpConfigLoadOptions default_mcp_config_options(const std::filesystem::path& workspace_dir) {
+McpConfigLoadOptions default_mcp_config_options(std::filesystem::path const& workspace_dir) {
   auto paths = ava::config::xdg_paths();
   McpConfigLoadOptions options;
   options.workspace_dir = workspace_dir;
@@ -256,7 +256,7 @@ ava::core::Result<McpConfig> parse_mcp_config(std::string_view json, std::filesy
     config.project_config_file = config_path;
   }
 
-  for (const auto& server_json : ava::core::json::objects_in_array_field(json, "servers")) {
+  for (auto const& server_json : ava::core::json::objects_in_array_field(json, "servers")) {
     auto id = ava::core::json::string_field(server_json, "id");
     if (!id || !is_valid_mcp_identifier(*id)) {
       return std::unexpected(
@@ -270,15 +270,15 @@ ava::core::Result<McpConfig> parse_mcp_config(std::string_view json, std::filesy
     }
     auto args = string_array_field(server_json, "args");
     if (!args) return std::unexpected(std::move(args.error()));
-    for (const auto& arg : *args) {
+    for (auto const& arg : *args) {
       if (arg.size() > kMaxMcpArgBytes || has_forbidden_byte(arg)) {
         return std::unexpected(config_error("MCP server arg is unsafe")
                                    .with_context("server", *id)
                                    .with_context("config", config_path.string()));
       }
     }
-    const auto enabled = bool_field(server_json, "enabled").value_or(scope == McpServerScope::Global);
-    const auto name = ava::core::json::string_field(server_json, "name").value_or(*id);
+    auto const enabled = bool_field(server_json, "enabled").value_or(scope == McpServerScope::Global);
+    auto const name = ava::core::json::string_field(server_json, "name").value_or(*id);
     if (name.empty() || name.size() > 256 || has_forbidden_byte(name)) {
       return std::unexpected(config_error("MCP server name is unsafe")
                                  .with_context("server", *id)
@@ -296,7 +296,7 @@ ava::core::Result<McpConfig> parse_mcp_config(std::string_view json, std::filesy
   return config;
 }
 
-ava::core::Result<McpConfig> load_mcp_config(const McpConfigLoadOptions& options) {
+ava::core::Result<McpConfig> load_mcp_config(McpConfigLoadOptions const& options) {
   McpConfig merged;
   merged.global_config_file = options.global_config_file;
   merged.project_config_file = options.project_config_file;

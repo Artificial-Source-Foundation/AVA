@@ -45,10 +45,10 @@ class OpenAICompatibleProvider final : public Provider {
   using Provider::build_request;
 
   explicit OpenAICompatibleProvider(OpenAICompatibleProviderOptions options = {});
-  [[nodiscard]] ava::core::Result<HttpRequest> build_request(const ProviderRequest& request,
+  [[nodiscard]] ava::core::Result<HttpRequest> build_request(ProviderRequest const& request,
                                                              std::string_view access_token) const override;
   [[nodiscard]] std::unique_ptr<StreamParser> create_stream_parser() const override;
-  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_response(const HttpResponse& response,
+  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_response(HttpResponse const& response,
                                                                            bool stream) const override;
 
  private:

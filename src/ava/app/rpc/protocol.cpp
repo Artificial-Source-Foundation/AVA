@@ -25,7 +25,7 @@ bool is_json_object_line(std::string_view line) {
   int depth = 0;
   std::size_t object_end = std::string_view::npos;
   for (std::size_t index = 0; index < line.size(); ++index) {
-    const char ch = line[index];
+    char const ch = line[index];
     if (escaped) {
       escaped = false;
       continue;
@@ -60,16 +60,16 @@ std::string string_field_json(std::string_view key, std::string_view value) {
 
 ava::core::Result<std::optional<long long>> exact_optional_integer_field(std::string_view object,
                                                                          std::string_view key) {
-  const auto start = ava::core::json::field_value_start(object, key);
+  auto const start = ava::core::json::field_value_start(object, key);
   if (!start) return std::optional<long long>{};
-  const auto field_name = std::string(key);
+  auto const field_name = std::string(key);
   std::size_t end = *start;
   if (end < object.size() && object[end] == '-') ++end;
-  const auto digits_start = end;
+  auto const digits_start = end;
   while (end < object.size() && std::isdigit(static_cast<unsigned char>(object[end])) != 0) ++end;
   if (end == digits_start) return std::unexpected(invalid_rpc("RPC " + field_name + " must be an integer"));
-  const bool negative = object[*start] == '-';
-  const auto unsigned_start = negative ? *start + 1 : *start;
+  bool const negative = object[*start] == '-';
+  auto const unsigned_start = negative ? *start + 1 : *start;
   if (end - unsigned_start > 1 && object[unsigned_start] == '0') {
     return std::unexpected(invalid_rpc("RPC " + field_name + " must be an integer"));
   }
@@ -116,8 +116,8 @@ ava::core::VoidResult validate_rpc_identifier(std::string_view value, std::strin
     return std::unexpected(std::move(error));
   }
 
-  for (const char ch : value) {
-    const auto byte = static_cast<unsigned char>(ch);
+  for (char const ch : value) {
+    auto const byte = static_cast<unsigned char>(ch);
     if (byte < 0x20 || byte == 0x7F || ch == ' ' || is_rpc_identifier_metacharacter(ch)) {
       auto error = invalid_rpc("RPC identifier contains invalid character");
       error.with_context("field", std::string(field_name));
@@ -128,7 +128,7 @@ ava::core::VoidResult validate_rpc_identifier(std::string_view value, std::strin
   return {};
 }
 
-ava::core::VoidResult validate_optional_rpc_identifier(const std::optional<std::string>& value,
+ava::core::VoidResult validate_optional_rpc_identifier(std::optional<std::string> const& value,
                                                        std::string_view field_name) {
   if (!value) return {};
   return validate_rpc_identifier(*value, field_name);
@@ -140,7 +140,7 @@ ava::core::Error invalid_rpc(std::string message) {
   return ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
 }
 
-ava::core::VoidResult validate_protocol_version(const RpcCommand& command) {
+ava::core::VoidResult validate_protocol_version(RpcCommand const& command) {
   if (!command.protocol_version) return {};
   if (*command.protocol_version == kRpcProtocolVersion) return {};
 
@@ -167,13 +167,13 @@ ava::core::Result<bool> read_rpc_line_bounded(std::istream& in, std::string& lin
   line.clear();
   bool oversized = false;
   while (true) {
-    const auto next = in.get();
+    auto const next = in.get();
     if (next == std::istream::traits_type::eof()) {
       if (oversized) return std::unexpected(invalid_rpc("RPC request line is too large"));
       if (in.eof()) return !line.empty() || oversized;
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read RPC stdin"));
     }
-    const char ch = static_cast<char>(next);
+    char const ch = static_cast<char>(next);
     if (ch == '\n') break;
     if (line.size() >= kMaxRpcLineBytes) {
       oversized = true;
@@ -265,7 +265,7 @@ std::string serialize_rpc_success_jsonl(std::string_view id, std::string_view re
   return json;
 }
 
-std::string serialize_rpc_error_jsonl(std::string_view id, const ava::core::Error& error) {
+std::string serialize_rpc_error_jsonl(std::string_view id, ava::core::Error const& error) {
   std::string json =
       "{\"id\":\"" + ava::core::json::escape(id) + "\",\"type\":\"response\",\"success\":false,\"error\":{";
   json += rpc::string_field_json("category", ava::core::to_string(error.category()));

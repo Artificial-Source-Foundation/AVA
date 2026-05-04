@@ -11,7 +11,7 @@ constexpr std::size_t kMaxSummaryValueBytes = 80;
 
 std::string safe_summary_text(std::string text, std::size_t max_bytes = kMaxSummaryValueBytes) {
   for (char& ch : text) {
-    const auto byte = static_cast<unsigned char>(ch);
+    auto const byte = static_cast<unsigned char>(ch);
     if (byte < 0x20 || byte == 0x7F) ch = '?';
   }
   if (text.size() <= max_bytes) return text;
@@ -26,8 +26,8 @@ std::string safe_summary_text(std::string text, std::size_t max_bytes = kMaxSumm
 }
 
 bool has_control_byte(std::string_view value) {
-  for (const char ch : value) {
-    const auto byte = static_cast<unsigned char>(ch);
+  for (char const ch : value) {
+    auto const byte = static_cast<unsigned char>(ch);
     if (byte < 0x20 || byte == 0x7F) return true;
   }
   return false;

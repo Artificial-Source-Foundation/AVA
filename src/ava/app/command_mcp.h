@@ -4,6 +4,6 @@
 
 namespace ava::app {
 
-[[nodiscard]] ava::core::Result<CommandResult> run_mcp_command(RuntimeSession& session, const CommandRequest& request);
+[[nodiscard]] ava::core::Result<CommandResult> run_mcp_command(RuntimeSession& session, CommandRequest const& request);
 
 }  // namespace ava::app

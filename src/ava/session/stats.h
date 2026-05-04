@@ -47,6 +47,6 @@ struct SessionStats {
   std::size_t estimated_usage_entries = 0;
 };
 
-[[nodiscard]] SessionStats compute_session_stats(const std::vector<SessionEntry>& entries);
+[[nodiscard]] SessionStats compute_session_stats(std::vector<SessionEntry> const& entries);
 
 }  // namespace ava::session

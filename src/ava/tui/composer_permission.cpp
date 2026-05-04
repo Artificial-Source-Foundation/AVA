@@ -45,7 +45,7 @@ std::string permission_dock_header(std::size_t width) {
   return std::string(kSgrDim) + text + std::string(kSgrReset);
 }
 
-std::string permission_dock_summary(const PermissionPromptView& prompt, std::size_t width) {
+std::string permission_dock_summary(PermissionPromptView const& prompt, std::size_t width) {
   std::string summary = "  ";
   if (!prompt.tool_name.empty()) {
     summary += std::string(kSgrBold) + sanitize_terminal_text(prompt.tool_name) + std::string(kSgrReset);
@@ -81,7 +81,7 @@ std::string permission_dock_summary(const PermissionPromptView& prompt, std::siz
 std::string key_pill(std::string_view key) { return std::string(kSgrBold) + std::string(key) + std::string(kSgrReset); }
 
 std::string permission_dock_actions(PermissionPromptChoice selected, std::size_t width) {
-  const std::array candidates = {
+  std::array const candidates = {
       std::string("  ") + render_permission_choice("[Deny]", selected == PermissionPromptChoice::Deny) + "  " +
           render_permission_choice("[Allow once]", selected == PermissionPromptChoice::Allow),
       std::string("  ") + render_compact_permission_choice("[D]", selected == PermissionPromptChoice::Deny) + " " +
@@ -92,14 +92,14 @@ std::string permission_dock_actions(PermissionPromptChoice selected, std::size_t
           render_permission_choice("[A]", selected == PermissionPromptChoice::Allow),
   };
 
-  for (const auto& candidate : candidates) {
+  for (auto const& candidate : candidates) {
     if (terminal_text_columns(candidate) <= width) return candidate;
   }
   return fit_line_preserving_sgr(candidates.back(), width);
 }
 
 std::string permission_dock_keys(std::size_t width) {
-  const std::array candidates = {
+  std::array const candidates = {
       std::string("  ") + key_pill("A") + " allow once  " + key_pill("D") + " deny  " + key_pill("Enter") +
           " confirm  " + key_pill("Esc") + " deny  " + key_pill("Tab/arrows") + " move",
       std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " deny  " + key_pill("Enter") + " confirm  " +
@@ -110,22 +110,22 @@ std::string permission_dock_keys(std::size_t width) {
       std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=deny",
   };
 
-  for (const auto& candidate : candidates) {
+  for (auto const& candidate : candidates) {
     if (terminal_text_columns(candidate) <= width) return candidate;
   }
   return fit_line_preserving_sgr(std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=deny", width);
 }
 
-void append_permission_diff_lines(std::vector<std::string>& lines, const PermissionPromptView& prompt,
+void append_permission_diff_lines(std::vector<std::string>& lines, PermissionPromptView const& prompt,
                                   std::size_t width, std::size_t budget) {
   if (prompt.diff_preview.empty() || budget == 0) return;
-  const auto prefix = std::string("  ");
+  auto const prefix = std::string("  ");
   lines.push_back(fit_line_preserving_sgr(prefix + std::string(kSgrDim) + "diff:" + std::string(kSgrReset), width));
   if (lines.size() >= budget) return;
 
-  const auto line_prefix = std::string("    ");
-  const auto diff_line_budget = prompt.diff_truncated && budget > lines.size() ? budget - 1 : budget;
-  for (const auto& raw_line : split_lines(prompt.diff_preview)) {
+  auto const line_prefix = std::string("    ");
+  auto const diff_line_budget = prompt.diff_truncated && budget > lines.size() ? budget - 1 : budget;
+  for (auto const& raw_line : split_lines(prompt.diff_preview)) {
     if (lines.size() >= diff_line_budget) break;
     auto sanitized = sanitize_terminal_text(raw_line);
     std::string_view sgr = kSgrMuted;
@@ -143,7 +143,7 @@ void append_permission_diff_lines(std::vector<std::string>& lines, const Permiss
   }
 }
 
-std::string question_dock_header(const QuestionPromptView& prompt, std::size_t width) {
+std::string question_dock_header(QuestionPromptView const& prompt, std::size_t width) {
   auto label = prompt.header.empty() ? std::string("QUESTION") : sanitize_terminal_text(prompt.header);
   label = prompt.multiple ? label + " (multi-select)" : label;
   std::string text = "  -- " + label;
@@ -153,8 +153,8 @@ std::string question_dock_header(const QuestionPromptView& prompt, std::size_t w
   return std::string(kSgrDim) + text + std::string(kSgrReset);
 }
 
-std::string question_option_line(const QuestionPromptView& prompt, std::size_t index, std::size_t width) {
-  const auto& option = prompt.options[index];
+std::string question_option_line(QuestionPromptView const& prompt, std::size_t index, std::size_t width) {
+  auto const& option = prompt.options[index];
   std::string text = "  ";
   text += index == prompt.selected_option_index ? "> " : "  ";
   text += std::to_string(index + 1) + ". ";
@@ -164,7 +164,7 @@ std::string question_option_line(const QuestionPromptView& prompt, std::size_t i
   return fit_line_preserving_sgr(text, width);
 }
 
-std::string question_custom_line(const QuestionPromptView& prompt, std::size_t width) {
+std::string question_custom_line(QuestionPromptView const& prompt, std::size_t width) {
   std::string text = "  Custom: ";
   if (prompt.custom_text.empty()) {
     text += prompt.secret ? std::string("paste secret") : std::string("type to answer");
@@ -179,20 +179,20 @@ std::string question_custom_line(const QuestionPromptView& prompt, std::size_t w
 std::string lower_ascii(std::string_view text) {
   std::string lowered;
   lowered.reserve(text.size());
-  for (const char ch : text) lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  for (char const ch : text) lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
   return lowered;
 }
 
-bool prompt_option_matches(const QuestionPromptView& prompt, std::size_t index) {
+bool prompt_option_matches(QuestionPromptView const& prompt, std::size_t index) {
   if (!prompt.searchable || prompt.custom_text.empty()) return true;
-  const auto query = lower_ascii(prompt.custom_text);
-  const auto& option = prompt.options[index];
-  const auto label = lower_ascii(option.label.empty() ? option.value : option.label);
-  const auto value = lower_ascii(option.value);
+  auto const query = lower_ascii(prompt.custom_text);
+  auto const& option = prompt.options[index];
+  auto const label = lower_ascii(option.label.empty() ? option.value : option.label);
+  auto const value = lower_ascii(option.value);
   return label.find(query) != std::string::npos || value.find(query) != std::string::npos;
 }
 
-std::vector<std::size_t> matching_option_indices(const QuestionPromptView& prompt) {
+std::vector<std::size_t> matching_option_indices(QuestionPromptView const& prompt) {
   std::vector<std::size_t> indices;
   for (std::size_t index = 0; index < prompt.options.size(); ++index) {
     if (prompt_option_matches(prompt, index)) indices.push_back(index);
@@ -204,26 +204,26 @@ std::string modal_line(std::string content, std::size_t width) {
   return composer_surface_line("  " + std::move(content), width);
 }
 
-std::string modal_title_line(const QuestionPromptView& prompt, std::size_t width) {
-  const auto title =
+std::string modal_title_line(QuestionPromptView const& prompt, std::size_t width) {
+  auto const title =
       prompt.header.empty() ? sanitize_terminal_text(prompt.question) : sanitize_terminal_text(prompt.header);
   std::string line = std::string(kSgrBold) + title + std::string(kSgrReset) + std::string(kSgrComposerBg);
-  const std::string esc = std::string(kSgrMuted) + "esc" + std::string(kSgrReset) + std::string(kSgrComposerBg);
-  const auto line_cols = terminal_text_columns(line);
-  const auto esc_cols = terminal_text_columns(esc);
+  std::string const esc = std::string(kSgrMuted) + "esc" + std::string(kSgrReset) + std::string(kSgrComposerBg);
+  auto const line_cols = terminal_text_columns(line);
+  auto const esc_cols = terminal_text_columns(esc);
   if (line_cols + esc_cols + 3 < width) line += std::string(width - line_cols - esc_cols - 2, ' ') + esc;
   return modal_line(std::move(line), width);
 }
 
-std::string modal_search_line(const QuestionPromptView& prompt, std::size_t width) {
+std::string modal_search_line(QuestionPromptView const& prompt, std::size_t width) {
   std::string query = sanitize_terminal_text(prompt.custom_text);
   if (query.empty()) query = std::string(kSgrMuted) + "Search" + std::string(kSgrReset) + std::string(kSgrComposerBg);
   query += std::string(kSgrAccent) + "█" + std::string(kSgrReset) + std::string(kSgrComposerBg);
   return modal_line("Search: " + std::move(query), width);
 }
 
-std::string modal_option_line(const QuestionPromptView& prompt, std::size_t index, std::size_t width) {
-  const auto& option = prompt.options[index];
+std::string modal_option_line(QuestionPromptView const& prompt, std::size_t index, std::size_t width) {
+  auto const& option = prompt.options[index];
   std::string text = index == prompt.selected_option_index ? "› " : "  ";
   text += option.selected ? "✓ " : "  ";
   text += sanitize_terminal_text(option.label.empty() ? option.value : option.label);
@@ -231,20 +231,20 @@ std::string modal_option_line(const QuestionPromptView& prompt, std::size_t inde
   return modal_line(std::move(text), width);
 }
 
-std::string modal_keys_line(const QuestionPromptView& prompt, std::size_t width) {
-  const auto search = prompt.searchable ? std::string("  Type to search  ") : std::string("  ");
+std::string modal_keys_line(QuestionPromptView const& prompt, std::size_t width) {
+  auto const search = prompt.searchable ? std::string("  Type to search  ") : std::string("  ");
   return modal_line(
       std::string(kSgrMuted) + "↑/↓ select  Enter confirm" + search + "Esc cancel" + std::string(kSgrReset), width);
 }
 
-std::string question_dock_keys(const QuestionPromptView& prompt, std::size_t width) {
-  const auto select = prompt.multiple ? std::string("Space toggle  Enter send") : std::string("Enter/1-9 select");
-  const std::array candidates = {
+std::string question_dock_keys(QuestionPromptView const& prompt, std::size_t width) {
+  auto const select = prompt.multiple ? std::string("Space toggle  Enter send") : std::string("Enter/1-9 select");
+  std::array const candidates = {
       std::string("  ") + key_pill("Tab/arrows") + " move  " + key_pill(select) + "  " + key_pill("Esc") + " cancel",
       std::string("  ") + key_pill("Tab") + " move  " + key_pill("Enter") + " send  " + key_pill("Esc") + " cancel",
       std::string("  ") + key_pill("Enter") + " send  " + key_pill("Esc") + " cancel",
   };
-  for (const auto& candidate : candidates) {
+  for (auto const& candidate : candidates) {
     if (terminal_text_columns(candidate) <= width) return candidate;
   }
   return fit_line_preserving_sgr(candidates.back(), width);
@@ -252,7 +252,7 @@ std::string question_dock_keys(const QuestionPromptView& prompt, std::size_t wid
 
 }  // namespace
 
-std::vector<std::string> render_permission_prompt(const PermissionPromptView& prompt, std::size_t width,
+std::vector<std::string> render_permission_prompt(PermissionPromptView const& prompt, std::size_t width,
                                                   std::size_t max_lines) {
   std::vector<std::string> lines;
   if (max_lines == 0) return lines;
@@ -278,7 +278,7 @@ std::vector<std::string> render_permission_prompt(const PermissionPromptView& pr
 
   constexpr std::size_t kReservedActionLines = 2;
   if (!prompt.diff_preview.empty() && max_lines > lines.size() + kReservedActionLines) {
-    const auto diff_budget = max_lines - lines.size() - kReservedActionLines;
+    auto const diff_budget = max_lines - lines.size() - kReservedActionLines;
     std::vector<std::string> diff_lines;
     append_permission_diff_lines(diff_lines, prompt, width, diff_budget);
     lines.insert(lines.end(), diff_lines.begin(), diff_lines.end());
@@ -291,7 +291,7 @@ std::vector<std::string> render_permission_prompt(const PermissionPromptView& pr
   return lines;
 }
 
-std::vector<std::string> render_question_prompt(const QuestionPromptView& prompt, std::size_t width,
+std::vector<std::string> render_question_prompt(QuestionPromptView const& prompt, std::size_t width,
                                                 std::size_t max_lines) {
   std::vector<std::string> lines;
   if (max_lines == 0) return lines;
@@ -300,9 +300,9 @@ std::vector<std::string> render_question_prompt(const QuestionPromptView& prompt
   lines.push_back(fit_line_preserving_sgr("  " + sanitize_terminal_text(prompt.question), width));
   if (lines.size() >= max_lines) return lines;
 
-  const auto option_budget =
+  auto const option_budget =
       prompt.allow_custom && max_lines > lines.size() + 2 ? max_lines - lines.size() - 2 : max_lines - lines.size() - 1;
-  const auto option_count = std::min(prompt.options.size(), option_budget);
+  auto const option_count = std::min(prompt.options.size(), option_budget);
   for (std::size_t index = 0; index < option_count; ++index) {
     lines.push_back(question_option_line(prompt, index, width));
   }
@@ -318,7 +318,7 @@ std::vector<std::string> render_question_prompt(const QuestionPromptView& prompt
   return lines;
 }
 
-std::vector<std::string> render_question_modal(const QuestionPromptView& prompt, std::size_t width,
+std::vector<std::string> render_question_modal(QuestionPromptView const& prompt, std::size_t width,
                                                std::size_t max_lines) {
   std::vector<std::string> lines;
   if (max_lines == 0) return lines;
@@ -346,10 +346,10 @@ std::vector<std::string> render_question_modal(const QuestionPromptView& prompt,
       lines.push_back(modal_line(std::string(kSgrWarning) + "Popular" + std::string(kSgrReset), width));
       if (lines.size() >= max_lines) return lines;
     }
-    const auto matches = matching_option_indices(prompt);
-    const auto reserved_footer = std::size_t{2};
-    const auto budget = max_lines > lines.size() + reserved_footer ? max_lines - lines.size() - reserved_footer : 0;
-    const auto count = std::min(matches.size(), budget);
+    auto const matches = matching_option_indices(prompt);
+    auto const reserved_footer = std::size_t{2};
+    auto const budget = max_lines > lines.size() + reserved_footer ? max_lines - lines.size() - reserved_footer : 0;
+    auto const count = std::min(matches.size(), budget);
     std::size_t rendered_options = 0;
     for (std::size_t visible = 0; visible < count && lines.size() + reserved_footer < max_lines; ++visible) {
       if (prompt.searchable && visible == 4 && lines.size() + reserved_footer + 1 < max_lines) {
@@ -434,12 +434,12 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
   return {.selected_choice = selected_choice, .action = PermissionPromptInputAction::None};
 }
 
-QuestionPromptInputResult handle_question_prompt_input(const QuestionPromptView& prompt, InputEvent event) {
+QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const& prompt, InputEvent event) {
   auto result = QuestionPromptInputResult{.selected_option_index = prompt.selected_option_index,
                                           .options = prompt.options,
                                           .custom_text = prompt.custom_text,
                                           .action = QuestionPromptInputAction::None};
-  const auto has_options = !result.options.empty();
+  auto const has_options = !result.options.empty();
   auto matching_indices = [&]() {
     QuestionPromptView current = prompt;
     current.options = result.options;
@@ -453,7 +453,7 @@ QuestionPromptInputResult handle_question_prompt_input(const QuestionPromptView&
       return;
     }
     if (prompt.searchable) {
-      const auto matches = matching_indices();
+      auto const matches = matching_indices();
       if (matches.empty()) {
         result.selected_option_index = 0;
         return;
@@ -466,9 +466,9 @@ QuestionPromptInputResult handle_question_prompt_input(const QuestionPromptView&
     result.selected_option_index = std::min(result.selected_option_index, result.options.size() - 1);
   };
   auto move_search_selection = [&](int delta) {
-    const auto matches = matching_indices();
+    auto const matches = matching_indices();
     if (matches.empty()) return;
-    const auto current = std::ranges::find(matches, result.selected_option_index);
+    auto const current = std::ranges::find(matches, result.selected_option_index);
     auto visible = current == matches.end() ? std::size_t{0} : static_cast<std::size_t>(current - matches.begin());
     if (delta < 0) {
       visible = visible == 0 ? matches.size() - 1 : visible - 1;
@@ -511,7 +511,7 @@ QuestionPromptInputResult handle_question_prompt_input(const QuestionPromptView&
         break;
       }
       if (event.character >= '1' && event.character <= '9') {
-        const auto index = static_cast<std::size_t>(event.character - '1');
+        auto const index = static_cast<std::size_t>(event.character - '1');
         if (index < result.options.size()) {
           result.selected_option_index = index;
           toggle_selected();

@@ -36,7 +36,7 @@ struct RpcCommand {
 
 [[nodiscard]] ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line);
 [[nodiscard]] std::string serialize_rpc_success_jsonl(std::string_view id, std::string_view result_json);
-[[nodiscard]] std::string serialize_rpc_error_jsonl(std::string_view id, const ava::core::Error& error);
+[[nodiscard]] std::string serialize_rpc_error_jsonl(std::string_view id, ava::core::Error const& error);
 
 }  // namespace ava::app
 
@@ -53,7 +53,7 @@ inline constexpr long long kRpcProtocolVersion = 1;
 
 [[nodiscard]] ava::core::Error invalid_rpc(std::string message);
 
-[[nodiscard]] ava::core::VoidResult validate_protocol_version(const RpcCommand& command);
+[[nodiscard]] ava::core::VoidResult validate_protocol_version(RpcCommand const& command);
 [[nodiscard]] std::string rpc_protocol_result_json();
 [[nodiscard]] std::string parse_error_response_id(std::string_view line);
 [[nodiscard]] ava::core::Result<bool> read_rpc_line_bounded(std::istream& in, std::string& line);

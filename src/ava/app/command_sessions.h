@@ -13,7 +13,7 @@ namespace ava::app {
                                                                    std::string_view query = {});
 [[nodiscard]] ava::core::Result<CommandResult> run_stats_command(RuntimeSession& session);
 [[nodiscard]] ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session,
-                                                                   const CommandRequest& request);
+                                                                   CommandRequest const& request);
 [[nodiscard]] ava::core::Result<CommandResult> run_export_command(RuntimeSession& session);
 
 }  // namespace ava::app

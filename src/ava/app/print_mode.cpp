@@ -14,19 +14,19 @@
 namespace ava::app {
 namespace {
 
-bool has_value(const std::optional<std::string>& value) { return value && !value->empty(); }
+bool has_value(std::optional<std::string> const& value) { return value && !value->empty(); }
 
 std::string read_all(std::istream& in) {
   return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
 ava::permissions::PermissionResolver deny_permission_resolver() {
-  return [](const ava::permissions::PermissionPrompt&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+  return [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
     return ava::permissions::PermissionResolution::Deny;
   };
 }
 
-void write_text_event_diagnostic(const RuntimeEvent& event, std::ostream& err) {
+void write_text_event_diagnostic(RuntimeEvent const& event, std::ostream& err) {
   if (event.type == RuntimeEventType::ToolStart) {
     err << "tool_start";
     if (!event.tool_name.empty()) err << " " << event.tool_name;
@@ -55,7 +55,7 @@ RuntimeRunOptions print_runtime_options(RuntimeRunOptions options) {
   return options;
 }
 
-RuntimeEvent runtime_error_event(const RuntimeSession& session, const ava::core::Error& error) {
+RuntimeEvent runtime_error_event(RuntimeSession const& session, ava::core::Error const& error) {
   RuntimeEvent event;
   event.type = RuntimeEventType::Error;
   event.timestamp = ava::session::now_timestamp();
@@ -71,9 +71,9 @@ RuntimeEvent runtime_error_event(const RuntimeSession& session, const ava::core:
 
 }  // namespace
 
-ava::core::Result<std::string> merge_print_prompt(const PrintPromptInputs& inputs) {
-  const bool has_explicit = has_value(inputs.explicit_prompt);
-  const bool has_stdin = has_value(inputs.stdin_prompt);
+ava::core::Result<std::string> merge_print_prompt(PrintPromptInputs const& inputs) {
+  bool const has_explicit = has_value(inputs.explicit_prompt);
+  bool const has_stdin = has_value(inputs.stdin_prompt);
   if (has_explicit && has_stdin) return *inputs.explicit_prompt + "\n\n" + *inputs.stdin_prompt;
   if (has_explicit) return *inputs.explicit_prompt;
   if (has_stdin) return *inputs.stdin_prompt;
@@ -81,16 +81,16 @@ ava::core::Result<std::string> merge_print_prompt(const PrintPromptInputs& input
       ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "print mode requires a prompt argument or stdin"));
 }
 
-ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& session, const std::string& prompt,
-                                                                const ava::provider::Provider& provider,
+ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& session, std::string const& prompt,
+                                                                ava::provider::Provider const& provider,
                                                                 ava::provider::Transport& transport,
-                                                                const PrintModeRunOptions& options, std::ostream& out,
+                                                                PrintModeRunOptions const& options, std::ostream& out,
                                                                 std::ostream& err) {
   bool emitted_error = false;
   auto runtime_options = print_runtime_options(options.runtime_options);
   EventBus event_bus;
   if (options.output_format == PrintOutputFormat::Json) {
-    event_bus.subscribe([&out, &emitted_error](const EventEnvelope& envelope) {
+    event_bus.subscribe([&out, &emitted_error](EventEnvelope const& envelope) {
       if (envelope.name == to_string(RuntimeEventType::Error)) emitted_error = true;
       out << serialize_event_envelope_jsonl(envelope);
       if (!out) {
@@ -101,7 +101,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& 
     });
     runtime_options.event_sink = make_runtime_event_bus_adapter(event_bus);
   } else {
-    runtime_options.event_sink = [&err, &emitted_error](const RuntimeEvent& event) {
+    runtime_options.event_sink = [&err, &emitted_error](RuntimeEvent const& event) {
       if (event.type == RuntimeEventType::Error) emitted_error = true;
       write_text_event_diagnostic(event, err);
       if (!err) {
@@ -134,7 +134,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& 
   return result;
 }
 
-int run_print_mode(const PrintModeOptions& options, std::istream& in, std::ostream& out, std::ostream& err) {
+int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err) {
   std::optional<std::string> stdin_prompt;
   if (options.read_stdin) stdin_prompt = read_all(in);
 
@@ -176,9 +176,9 @@ int run_print_mode(const PrintModeOptions& options, std::istream& in, std::ostre
     err << default_provider.error().format() << '\n';
     return 1;
   }
-  const ava::provider::Provider& provider = options.provider_override
+  ava::provider::Provider const& provider = options.provider_override
                                                 ? options.provider_override->get()
-                                                : static_cast<const ava::provider::Provider&>(**default_provider);
+                                                : static_cast<ava::provider::Provider const&>(**default_provider);
   RuntimeRunOptions runtime_options;
   runtime_options.access_token = (*request_credential)->access_token;
   runtime_options.credential_type = (*request_credential)->credential_type;
@@ -188,7 +188,7 @@ int run_print_mode(const PrintModeOptions& options, std::istream& in, std::ostre
   runtime_options.enable_transport_retries = !options.transport_override.has_value();
   runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);
 
-  const PrintModeRunOptions run_options{.output_format = options.output_format,
+  PrintModeRunOptions const run_options{.output_format = options.output_format,
                                         .runtime_options = std::move(runtime_options)};
   auto result = run_print_prompt(*session, *prompt, provider, transport, run_options, out, err);
   return result ? 0 : 1;

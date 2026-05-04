@@ -50,10 +50,10 @@
 
 namespace {
 
-bool has_replay_issue(const ava::session::SessionReplayValidation& validation,
+bool has_replay_issue(ava::session::SessionReplayValidation const& validation,
                       ava::session::SessionReplayIssueKind kind) {
   return std::ranges::any_of(validation.issues,
-                             [kind](const ava::session::SessionReplayIssue& issue) { return issue.kind == kind; });
+                             [kind](ava::session::SessionReplayIssue const& issue) { return issue.kind == kind; });
 }
 
 void test_session_store_round_trip() {
@@ -78,7 +78,7 @@ void test_session_store_round_trip() {
     expect((session_stat.st_mode & 0777) == 0600, "session file is owner read/write only");
   }
   struct stat session_dir_stat{};
-  const auto session_dir = store->session_path().parent_path();
+  auto const session_dir = store->session_path().parent_path();
   if (stat(session_dir.c_str(), &session_dir_stat) == 0) {
     expect((session_dir_stat.st_mode & 0777) == 0700, "session directory is owner-only");
   }
@@ -96,7 +96,7 @@ void test_session_store_round_trip() {
   auto text_store = ava::session::SessionStore::create(std::filesystem::current_path(), temp_root());
   expect(text_store.has_value(), "text session store creates");
   if (!text_store) return;
-  const auto text_append = text_store->append(ava::session::SessionEntry{
+  auto const text_append = text_store->append(ava::session::SessionEntry{
       .id = "entry_2\n",
       .parent_id = "",
       .type = ava::session::EntryType::UserMessage,
@@ -108,7 +108,7 @@ void test_session_store_round_trip() {
   expect(text_loaded && !text_loaded->empty() && (*text_loaded)[0].id == "entry_2\n",
          "session escaped strings round trip");
 
-  const auto raw_newline_append = text_store->append(ava::session::SessionEntry{
+  auto const raw_newline_append = text_store->append(ava::session::SessionEntry{
       .id = "entry_raw_newline",
       .parent_id = "",
       .type = ava::session::EntryType::UserMessage,
@@ -117,7 +117,7 @@ void test_session_store_round_trip() {
   });
   expect(!raw_newline_append, "session data_json rejects raw newlines to preserve JSONL entries");
 
-  const auto raw_carriage_return_append = text_store->append(ava::session::SessionEntry{
+  auto const raw_carriage_return_append = text_store->append(ava::session::SessionEntry{
       .id = "entry_raw_carriage_return",
       .parent_id = "",
       .type = ava::session::EntryType::UserMessage,
@@ -129,7 +129,7 @@ void test_session_store_round_trip() {
   auto large_store = ava::session::SessionStore::create(std::filesystem::current_path(), temp_root());
   expect(large_store.has_value(), "large session store creates");
   if (large_store) {
-    const auto large_append = large_store->append(ava::session::SessionEntry{
+    auto const large_append = large_store->append(ava::session::SessionEntry{
         .id = std::string(600000, '"'),
         .parent_id = "",
         .type = ava::session::EntryType::UserMessage,
@@ -153,7 +153,7 @@ void test_session_store_round_trip() {
   }
   expect(!oversized_load_store.load(), "session load rejects oversized JSONL lines without parsing them");
 
-  const std::vector<std::string> bad_session_ids = {"",
+  std::vector<std::string> const bad_session_ids = {"",
                                                     ".",
                                                     "..",
                                                     "/",
@@ -163,13 +163,13 @@ void test_session_store_round_trip() {
                                                     "with\\slash",
                                                     std::string("bad\0id", 6),
                                                     std::string("bad\x1Fid", 6)};
-  for (const auto& bad_session_id : bad_session_ids) {
+  for (auto const& bad_session_id : bad_session_ids) {
     ava::session::SessionStore bad_store(ava::session::SessionStoreOptions{
         .root_dir = temp_root(),
         .workspace_dir = std::filesystem::current_path(),
         .session_id = bad_session_id,
     });
-    const auto bad_append = bad_store.append(ava::session::SessionEntry{
+    auto const bad_append = bad_store.append(ava::session::SessionEntry{
         .id = "entry_bad_session",
         .parent_id = "",
         .type = ava::session::EntryType::UserMessage,
@@ -185,10 +185,10 @@ void test_session_store_round_trip() {
       .workspace_dir = std::filesystem::current_path(),
       .session_id = "../escape",
   });
-  const auto attempted_traversal_path = traversal_store.session_path().lexically_normal();
+  auto const attempted_traversal_path = traversal_store.session_path().lexically_normal();
   std::error_code cleanup_error;
   std::filesystem::remove(attempted_traversal_path, cleanup_error);
-  const auto traversal_append = traversal_store.append(ava::session::SessionEntry{
+  auto const traversal_append = traversal_store.append(ava::session::SessionEntry{
       .id = "entry_traversal",
       .parent_id = "",
       .type = ava::session::EntryType::UserMessage,
@@ -322,7 +322,7 @@ void test_session_store_round_trip() {
 }
 
 void test_session_stats_helper() {
-  const std::vector<ava::session::SessionEntry> entries = {
+  std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "start_1",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::SessionStart,
@@ -385,7 +385,7 @@ void test_session_stats_helper() {
                                  .data_json = "{}"},
   };
 
-  const auto stats = ava::session::compute_session_stats(entries);
+  auto const stats = ava::session::compute_session_stats(entries);
   expect(stats.entry_count == entries.size() && stats.first_timestamp == "2026-04-29T00:00:00Z" &&
              stats.last_timestamp == "2026-04-29T00:00:06Z",
          "session stats helper reports entry count and timestamps");
@@ -407,13 +407,13 @@ void test_session_stats_helper() {
   expect(stats.exact_usage_entries == 1 && stats.estimated_usage_entries == 1,
          "session stats helper counts exact and estimated usage entries");
 
-  const auto empty_stats = ava::session::compute_session_stats({});
+  auto const empty_stats = ava::session::compute_session_stats({});
   expect(!empty_stats.input_tokens && !empty_stats.total_cost_usd,
          "session stats helper leaves token and cost totals absent when no entry JSON supplies them");
 }
 
 void test_session_stats_omits_incomplete_cost_total() {
-  const std::vector<ava::session::SessionEntry> entries = {
+  std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "assistant_priced",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::AssistantMessage,
@@ -429,7 +429,7 @@ void test_session_stats_omits_incomplete_cost_total() {
                                               "\"total_tokens\":4,\"source\":\"provider\"}}"},
   };
 
-  const auto stats = ava::session::compute_session_stats(entries);
+  auto const stats = ava::session::compute_session_stats(entries);
   expect(stats.exact_usage_entries == 2 && stats.estimated_usage_entries == 0,
          "session stats counts mixed exact usage entries");
   expect(stats.known_cost_usd && *stats.known_cost_usd > 0.0009L && *stats.known_cost_usd < 0.0011L,
@@ -439,7 +439,7 @@ void test_session_stats_omits_incomplete_cost_total() {
 }
 
 void test_session_stats_flags_legacy_assistant_tokens_without_cost() {
-  const std::vector<ava::session::SessionEntry> entries = {
+  std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "assistant_legacy_tokens",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::AssistantMessage,
@@ -448,7 +448,7 @@ void test_session_stats_flags_legacy_assistant_tokens_without_cost() {
                                               "\"output_tokens\":3,\"total_tokens\":10}"},
   };
 
-  const auto stats = ava::session::compute_session_stats(entries);
+  auto const stats = ava::session::compute_session_stats(entries);
   expect(stats.input_tokens && *stats.input_tokens == 7 && stats.output_tokens && *stats.output_tokens == 3 &&
              stats.total_tokens && *stats.total_tokens == 10,
          "session stats still aggregates legacy top-level assistant token totals");
@@ -459,7 +459,7 @@ void test_session_stats_flags_legacy_assistant_tokens_without_cost() {
 }
 
 void test_session_replay_validation() {
-  const std::vector<ava::session::SessionEntry> valid_entries = {
+  std::vector<ava::session::SessionEntry> const valid_entries = {
       ava::session::SessionEntry{.id = "start",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::SessionStart,
@@ -494,39 +494,39 @@ void test_session_replay_validation() {
                                               "\"content_type\":\"text/plain\",\"content\":\"note contents\"}}"},
   };
 
-  const auto valid = ava::session::validate_session_replay(
+  auto const valid = ava::session::validate_session_replay(
       valid_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
   expect(valid.ok() && valid.issues.empty(), "session replay validator accepts paired structured tool history");
 
   auto unsupported_version_entries = valid_entries;
   unsupported_version_entries[1].version = ava::session::kCurrentSessionEntryVersion + 1;
-  const auto unsupported_version = ava::session::validate_session_replay(unsupported_version_entries);
+  auto const unsupported_version = ava::session::validate_session_replay(unsupported_version_entries);
   expect(!unsupported_version.ok() &&
              has_replay_issue(unsupported_version, ava::session::SessionReplayIssueKind::UnsupportedEntryVersion),
          "session replay validator flags unsupported in-memory entry versions");
 
-  const std::vector<ava::session::SessionEntry> duplicate_entry_entries = {
+  std::vector<ava::session::SessionEntry> const duplicate_entry_entries = {
       valid_entries[0],
       valid_entries[0],
   };
-  const auto duplicate_entry = ava::session::validate_session_replay(duplicate_entry_entries);
+  auto const duplicate_entry = ava::session::validate_session_replay(duplicate_entry_entries);
   expect(!duplicate_entry.ok() &&
              has_replay_issue(duplicate_entry, ava::session::SessionReplayIssueKind::DuplicateEntryId),
          "session replay validator flags duplicate entry ids");
 
-  const std::vector<ava::session::SessionEntry> unknown_parent_entries = {
+  std::vector<ava::session::SessionEntry> const unknown_parent_entries = {
       ava::session::SessionEntry{.id = "child",
                                  .parent_id = "missing_parent",
                                  .type = ava::session::EntryType::UserMessage,
                                  .timestamp = "2026-04-29T00:00:00Z",
                                  .data_json = "{\"text\":\"orphan\"}"},
   };
-  const auto unknown_parent = ava::session::validate_session_replay(unknown_parent_entries);
+  auto const unknown_parent = ava::session::validate_session_replay(unknown_parent_entries);
   expect(
       !unknown_parent.ok() && has_replay_issue(unknown_parent, ava::session::SessionReplayIssueKind::UnknownParentId),
       "session replay validator flags parent ids that do not reference earlier entries");
 
-  const std::vector<ava::session::SessionEntry> result_without_call_entries = {
+  std::vector<ava::session::SessionEntry> const result_without_call_entries = {
       ava::session::SessionEntry{.id = "tool_result",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ToolResult,
@@ -534,7 +534,7 @@ void test_session_replay_validation() {
                                  .data_json = "{\"call_id\":\"call_missing\",\"name\":\"read_file\","
                                               "\"success\":true,\"result\":\"orphan\"}"},
   };
-  const auto result_without_call = ava::session::validate_session_replay(result_without_call_entries);
+  auto const result_without_call = ava::session::validate_session_replay(result_without_call_entries);
   expect(!result_without_call.ok() &&
              has_replay_issue(result_without_call, ava::session::SessionReplayIssueKind::ToolResultWithoutCall),
          "session replay validator flags tool results without earlier tool calls");
@@ -542,13 +542,13 @@ void test_session_replay_validation() {
   auto mismatch_entries = valid_entries;
   mismatch_entries.back().data_json =
       "{\"call_id\":\"call_read\",\"name\":\"bash\",\"success\":true,\"result\":\"wrong tool\"}";
-  const auto mismatch = ava::session::validate_session_replay(mismatch_entries);
+  auto const mismatch = ava::session::validate_session_replay(mismatch_entries);
   expect(!mismatch.ok() && has_replay_issue(mismatch, ava::session::SessionReplayIssueKind::ToolResultToolMismatch),
          "session replay validator flags tool result name mismatches");
 
   auto unresolved_entries = valid_entries;
   unresolved_entries.pop_back();
-  const auto unresolved = ava::session::validate_session_replay(unresolved_entries);
+  auto const unresolved = ava::session::validate_session_replay(unresolved_entries);
   expect(!unresolved.ok() && has_replay_issue(unresolved, ava::session::SessionReplayIssueKind::UnresolvedToolCall),
          "session replay validator flags unresolved tool calls");
 
@@ -556,7 +556,7 @@ void test_session_replay_validation() {
   missing_structured_entries.back().data_json =
       "{\"call_id\":\"call_read\",\"name\":\"read_file\",\"success\":true,\"status\":\"success\","
       "\"result\":\"legacy result\"}";
-  const auto missing_structured = ava::session::validate_session_replay(
+  auto const missing_structured = ava::session::validate_session_replay(
       missing_structured_entries,
       ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
   expect(!missing_structured.ok() &&
@@ -569,14 +569,14 @@ void test_session_replay_validation() {
       "\"result\":\"note contents\",\"structured_result\":{\"schema_version\":1,"
       "\"call_id\":\"call_other\",\"tool\":\"read_file\",\"status\":\"success\",\"ok\":true,"
       "\"content_type\":\"text/plain\",\"content\":\"note contents\"}}";
-  const auto structured_mismatch = ava::session::validate_session_replay(
+  auto const structured_mismatch = ava::session::validate_session_replay(
       structured_mismatch_entries,
       ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
   expect(!structured_mismatch.ok() &&
              has_replay_issue(structured_mismatch, ava::session::SessionReplayIssueKind::StructuredToolResultMismatch),
          "session replay validator flags structured result call/tool/status mismatches");
 
-  const std::vector<ava::session::SessionEntry> valid_permission_entries = {
+  std::vector<ava::session::SessionEntry> const valid_permission_entries = {
       ava::session::SessionEntry{.id = "permission_policy_allow",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::PermissionDecision,
@@ -605,11 +605,11 @@ void test_session_replay_validation() {
                                               "\"target_path\":\"/tmp/outside.txt\","
                                               "\"resolution\":\"deny\",\"resolution_source\":\"resolver\"}"},
   };
-  const auto valid_permission = ava::session::validate_session_replay(valid_permission_entries);
+  auto const valid_permission = ava::session::validate_session_replay(valid_permission_entries);
   expect(valid_permission.ok() && valid_permission.issues.empty(),
          "session replay validator accepts complete permission audit decisions");
 
-  const std::vector<ava::session::SessionEntry> invalid_permission_entries = {
+  std::vector<ava::session::SessionEntry> const invalid_permission_entries = {
       ava::session::SessionEntry{.id = "permission_invalid",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::PermissionDecision,
@@ -619,12 +619,12 @@ void test_session_replay_validation() {
                                               "\"reason\":\"bad\",\"resolution\":\"allow\","
                                               "\"resolution_source\":\"policy\"}"},
   };
-  const auto invalid_permission = ava::session::validate_session_replay(invalid_permission_entries);
+  auto const invalid_permission = ava::session::validate_session_replay(invalid_permission_entries);
   expect(!invalid_permission.ok() &&
              has_replay_issue(invalid_permission, ava::session::SessionReplayIssueKind::InvalidPermissionDecision),
          "session replay validator flags malformed permission audit decisions");
 
-  const std::vector<ava::session::SessionEntry> resolution_without_ask_entries = {
+  std::vector<ava::session::SessionEntry> const resolution_without_ask_entries = {
       ava::session::SessionEntry{.id = "permission_resolution_without_ask",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::PermissionDecision,
@@ -635,13 +635,13 @@ void test_session_replay_validation() {
                                               "\"target_path\":\"/tmp/outside.txt\","
                                               "\"resolution\":\"allow\",\"resolution_source\":\"resolver\"}"},
   };
-  const auto resolution_without_ask = ava::session::validate_session_replay(resolution_without_ask_entries);
+  auto const resolution_without_ask = ava::session::validate_session_replay(resolution_without_ask_entries);
   expect(!resolution_without_ask.ok() &&
              has_replay_issue(resolution_without_ask,
                               ava::session::SessionReplayIssueKind::PermissionResolutionWithoutAsk),
          "session replay validator flags resolver outcomes without earlier ask prompts");
 
-  const std::vector<ava::session::SessionEntry> unresolved_permission_entries = {
+  std::vector<ava::session::SessionEntry> const unresolved_permission_entries = {
       ava::session::SessionEntry{.id = "permission_unresolved",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::PermissionDecision,
@@ -652,7 +652,7 @@ void test_session_replay_validation() {
                                               "\"command\":\"https://example.com\","
                                               "\"resolution_source\":\"policy\"}"},
   };
-  const auto unresolved_permission = ava::session::validate_session_replay(unresolved_permission_entries);
+  auto const unresolved_permission = ava::session::validate_session_replay(unresolved_permission_entries);
   expect(!unresolved_permission.ok() &&
              has_replay_issue(unresolved_permission, ava::session::SessionReplayIssueKind::UnresolvedPermissionPrompt),
          "session replay validator flags ask permission prompts without outcomes");
@@ -668,7 +668,7 @@ void test_session_replay_validation() {
                    "\"instructions\":\"keep the file result\",\"model\":\"gpt-5.5\","
                    "\"threshold_tokens\":100,\"estimated_tokens\":125,"
                    "\"keep_recent_tokens\":64,\"keep_recent_messages\":4,\"max_summary_bytes\":65536}"});
-  const auto valid_compaction = ava::session::validate_session_replay(
+  auto const valid_compaction = ava::session::validate_session_replay(
       valid_compaction_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
   expect(valid_compaction.ok() && valid_compaction.issues.empty(),
          "session replay validator accepts compaction after resolved tool state");
@@ -681,7 +681,7 @@ void test_session_replay_validation() {
                                                                   .data_json = "{\"status\":\"recorded\","
                                                                                "\"summary_unavailable\":false,"
                                                                                "\"summary\":\"\"}"});
-  const auto invalid_compaction = ava::session::validate_session_replay(invalid_compaction_entries);
+  auto const invalid_compaction = ava::session::validate_session_replay(invalid_compaction_entries);
   expect(!invalid_compaction.ok() &&
              has_replay_issue(invalid_compaction, ava::session::SessionReplayIssueKind::InvalidCompactionEntry),
          "session replay validator flags compaction entries without durable summaries");
@@ -694,7 +694,7 @@ void test_session_replay_validation() {
                                  .timestamp = "2026-04-29T00:00:05Z",
                                  .data_json = "{\"status\":\"recorded\",\"summary\":\"durable summary\","
                                               "\"summary_unavailable\":false,\"threshold_tokens\":1.5}"});
-  const auto malformed_compaction_metadata =
+  auto const malformed_compaction_metadata =
       ava::session::validate_session_replay(malformed_compaction_metadata_entries);
   expect(
       !malformed_compaction_metadata.ok() &&
@@ -709,13 +709,13 @@ void test_session_replay_validation() {
                                  .type = ava::session::EntryType::Compaction,
                                  .timestamp = "2026-04-29T00:00:04Z",
                                  .data_json = "{\"summary\":\"tool call still pending\"}"});
-  const auto unresolved_tool_compaction = ava::session::validate_session_replay(unresolved_tool_compaction_entries);
+  auto const unresolved_tool_compaction = ava::session::validate_session_replay(unresolved_tool_compaction_entries);
   expect(!unresolved_tool_compaction.ok() &&
              has_replay_issue(unresolved_tool_compaction,
                               ava::session::SessionReplayIssueKind::CompactionWithUnresolvedToolCall),
          "session replay validator flags compaction before unresolved tool results");
 
-  const std::vector<ava::session::SessionEntry> unresolved_permission_compaction_entries = {
+  std::vector<ava::session::SessionEntry> const unresolved_permission_compaction_entries = {
       unresolved_permission_entries[0],
       ava::session::SessionEntry{.id = "compaction_before_permission_resolution",
                                  .parent_id = "permission_unresolved",
@@ -723,14 +723,14 @@ void test_session_replay_validation() {
                                  .timestamp = "2026-04-29T00:00:01Z",
                                  .data_json = "{\"summary\":\"permission prompt still pending\"}"},
   };
-  const auto unresolved_permission_compaction =
+  auto const unresolved_permission_compaction =
       ava::session::validate_session_replay(unresolved_permission_compaction_entries);
   expect(!unresolved_permission_compaction.ok() &&
              has_replay_issue(unresolved_permission_compaction,
                               ava::session::SessionReplayIssueKind::CompactionWithUnresolvedPermissionPrompt),
          "session replay validator flags compaction before unresolved permission decisions");
 
-  const std::vector<ava::session::SessionEntry> valid_model_reasoning_entries = {
+  std::vector<ava::session::SessionEntry> const valid_model_reasoning_entries = {
       ava::session::SessionEntry{.id = "model_start",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::SessionStart,
@@ -761,18 +761,18 @@ void test_session_replay_validation() {
                                               "\"format\":\"reasoning_content\",\"text\":\"reasoned\","
                                               "\"redacted\":false}"},
   };
-  const auto valid_model_reasoning = ava::session::validate_session_replay(valid_model_reasoning_entries);
+  auto const valid_model_reasoning = ava::session::validate_session_replay(valid_model_reasoning_entries);
   expect(valid_model_reasoning.ok() && valid_model_reasoning.issues.empty(),
          "session replay validator accepts durable model and reasoning metadata");
 
-  const std::vector<ava::session::SessionEntry> invalid_model_start_entries = {
+  std::vector<ava::session::SessionEntry> const invalid_model_start_entries = {
       ava::session::SessionEntry{.id = "bad_start",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::SessionStart,
                                  .timestamp = "2026-04-29T00:00:00Z",
                                  .data_json = "{\"mode\":\"build\",\"model\":\"gpt-5.5\"}"},
   };
-  const auto invalid_model_start = ava::session::validate_session_replay(invalid_model_start_entries);
+  auto const invalid_model_start = ava::session::validate_session_replay(invalid_model_start_entries);
   expect(!invalid_model_start.ok() &&
              has_replay_issue(invalid_model_start, ava::session::SessionReplayIssueKind::InvalidModelEntry),
          "session replay validator flags session_start entries without provider/model metadata");
@@ -781,7 +781,7 @@ void test_session_replay_validation() {
   invalid_model_change_entries[1].data_json =
       "{\"previous_provider\":\"anthropic\",\"previous_model\":\"claude\","
       "\"provider\":\"kimi\",\"model\":\"kimi-k2-thinking\"}";
-  const auto invalid_model_change = ava::session::validate_session_replay(invalid_model_change_entries);
+  auto const invalid_model_change = ava::session::validate_session_replay(invalid_model_change_entries);
   expect(!invalid_model_change.ok() &&
              has_replay_issue(invalid_model_change, ava::session::SessionReplayIssueKind::InvalidModelEntry),
          "session replay validator flags model_change entries whose previous model does not match active state");
@@ -789,7 +789,7 @@ void test_session_replay_validation() {
   auto invalid_reasoning_change_entries = valid_model_reasoning_entries;
   invalid_reasoning_change_entries[2].data_json =
       "{\"provider\":\"kimi\",\"model\":\"kimi-k2-thinking\",\"enabled\":true}";
-  const auto invalid_reasoning_change = ava::session::validate_session_replay(invalid_reasoning_change_entries);
+  auto const invalid_reasoning_change = ava::session::validate_session_replay(invalid_reasoning_change_entries);
   expect(!invalid_reasoning_change.ok() &&
              has_replay_issue(invalid_reasoning_change, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "session replay validator flags enabled reasoning_change entries without a level");
@@ -797,7 +797,7 @@ void test_session_replay_validation() {
   auto mismatched_reasoning_change_entries = valid_model_reasoning_entries;
   mismatched_reasoning_change_entries[2].data_json =
       "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"enabled\":true,\"level\":\"low\"}";
-  const auto mismatched_reasoning_change = ava::session::validate_session_replay(mismatched_reasoning_change_entries);
+  auto const mismatched_reasoning_change = ava::session::validate_session_replay(mismatched_reasoning_change_entries);
   expect(!mismatched_reasoning_change.ok() &&
              has_replay_issue(mismatched_reasoning_change, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "session replay validator flags reasoning_change entries for the wrong active model");
@@ -806,7 +806,7 @@ void test_session_replay_validation() {
   invalid_reasoning_block_entries[3].data_json =
       "{\"provider\":\"kimi\",\"model\":\"kimi-k2-thinking\",\"format\":\"reasoning_content\","
       "\"redacted\":false}";
-  const auto invalid_reasoning_block = ava::session::validate_session_replay(invalid_reasoning_block_entries);
+  auto const invalid_reasoning_block = ava::session::validate_session_replay(invalid_reasoning_block_entries);
   expect(!invalid_reasoning_block.ok() &&
              has_replay_issue(invalid_reasoning_block, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "session replay validator flags reasoning_block entries without replayable content");
@@ -823,12 +823,12 @@ void test_session_replay_validation() {
 }
 
 void test_session_resume_and_listing() {
-  const auto root = temp_root() / "session-resume";
+  auto const root = temp_root() / "session-resume";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  const auto session_root = root / "sessions";
+  auto const session_root = root / "sessions";
 
   auto first = ava::session::SessionStore::create(workspace, session_root);
   auto second = ava::session::SessionStore::create(workspace, session_root);
@@ -852,8 +852,8 @@ void test_session_resume_and_listing() {
              .has_value(),
          "second resume test session appends");
 
-  const auto old_time = std::filesystem::file_time_type::clock::now() - std::chrono::minutes(2);
-  const auto new_time = std::filesystem::file_time_type::clock::now();
+  auto const old_time = std::filesystem::file_time_type::clock::now() - std::chrono::minutes(2);
+  auto const new_time = std::filesystem::file_time_type::clock::now();
   std::filesystem::last_write_time(first->session_path(), old_time);
   std::filesystem::last_write_time(second->session_path(), new_time);
 
@@ -948,10 +948,10 @@ void test_session_resume_and_listing() {
 }
 
 void test_session_compaction_entry_round_trip() {
-  const auto root = temp_root() / "compaction-round-trip";
+  auto const root = temp_root() / "compaction-round-trip";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
@@ -1040,7 +1040,7 @@ void test_session_compaction_entry_round_trip() {
 }
 
 void test_session_markdown_export() {
-  const std::vector<ava::session::SessionEntry> entries = {
+  std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "start_1",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::SessionStart,
@@ -1117,7 +1117,7 @@ void test_session_markdown_export() {
                                  .data_json = R"json({"text":"first\nsecond\tindent\u0000\u001B\u007F\r"})json"},
   };
 
-  const auto basic = ava::session::format_session_markdown(entries);
+  auto const basic = ava::session::format_session_markdown(entries);
   expect(basic.find("# AVA Session Export") != std::string::npos, "markdown export has deterministic title");
   expect(basic.find("## User") != std::string::npos && basic.find("Hello AVA") != std::string::npos,
          "markdown export renders user messages");
@@ -1143,28 +1143,28 @@ void test_session_markdown_export() {
          "markdown export omits metadata by default");
   expect(basic.find("`````text\nbefore ``` after ```` done\n`````") != std::string::npos,
          "markdown export expands fences around backtick content");
-  const std::string escaped_control_markdown = std::string("first\nsecond\tindent") + "\\u0000\\u001B\\u007F\\u000D";
+  std::string const escaped_control_markdown = std::string("first\nsecond\tindent") + "\\u0000\\u001B\\u007F\\u000D";
   expect(basic.find(escaped_control_markdown) != std::string::npos,
          "markdown export escapes decoded fenced control bytes while preserving newlines and tabs");
   expect(basic.find('\0') == std::string::npos && basic.find('\x1B') == std::string::npos &&
              basic.find('\x7F') == std::string::npos && basic.find('\r') == std::string::npos,
          "markdown export does not emit raw NUL, escape, DEL, or carriage return bytes");
 
-  const auto with_tools = ava::session::format_session_markdown(
+  auto const with_tools = ava::session::format_session_markdown(
       entries, ava::session::ExportOptions{.include_tool_details = true, .include_metadata = false});
   expect(with_tools.find("## Tool Call") != std::string::npos && with_tools.find("README.md") != std::string::npos &&
              with_tools.find("## Tool Result") != std::string::npos &&
              with_tools.find("tool output") != std::string::npos,
          "markdown export includes tool calls and results when requested");
 
-  const auto without_compactions = ava::session::format_session_markdown(
+  auto const without_compactions = ava::session::format_session_markdown(
       entries, ava::session::ExportOptions{
                    .include_tool_details = false, .include_metadata = false, .include_compactions = false});
   expect(without_compactions.find("## Compaction") == std::string::npos &&
              without_compactions.find("Prior summary") == std::string::npos,
          "markdown export can omit compaction entries");
 
-  const auto with_metadata = ava::session::format_session_markdown(
+  auto const with_metadata = ava::session::format_session_markdown(
       entries, ava::session::ExportOptions{
                    .include_tool_details = false, .include_metadata = true, .include_compactions = true});
   expect(with_metadata.find("Metadata:") != std::string::npos &&
@@ -1175,21 +1175,21 @@ void test_session_markdown_export() {
 }
 
 void test_compaction_config_and_thresholds() {
-  const auto root = temp_root() / "compaction-config";
+  auto const root = temp_root() / "compaction-config";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
   setenv("HOME", (root / "home").c_str(), 1);
   setenv("XDG_CONFIG_HOME", (root / "config").c_str(), 1);
   setenv("XDG_STATE_HOME", (root / "state").c_str(), 1);
   setenv("XDG_DATA_HOME", (root / "data").c_str(), 1);
-  const auto paths = ava::config::xdg_paths();
+  auto const paths = ava::config::xdg_paths();
 
   expect(paths.compaction_file == root / "config" / "ava" / "compaction.json",
          "compaction config path follows XDG config home");
   auto missing = ava::session::load_compaction_config(paths);
   expect(missing && missing->model_id == "gpt-5.5" && missing->auto_threshold_tokens == 0,
          "missing compaction config uses safe defaults");
-  const auto fallback_threshold = ava::session::effective_auto_threshold_tokens(*missing, std::nullopt);
+  auto const fallback_threshold = ava::session::effective_auto_threshold_tokens(*missing, std::nullopt);
   expect(fallback_threshold > 0,
          "missing compaction config uses a nonzero effective auto-compaction threshold without model metadata");
 
@@ -1209,7 +1209,7 @@ void test_compaction_config_and_thresholds() {
   expect(ava::session::estimate_tokens("") == 0 && ava::session::estimate_tokens("abcd") == 1 &&
              ava::session::estimate_tokens("abcde") == 2,
          "compaction token estimate uses deterministic chars over four heuristic");
-  const std::vector<ava::session::SessionEntry> entries = {
+  std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "u",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::UserMessage,
@@ -1222,7 +1222,7 @@ void test_compaction_config_and_thresholds() {
                                  .data_json = "{\"mode\":\"build\"}"}};
   auto config = ava::session::default_compaction_config();
   config.auto_threshold_tokens = ava::session::estimate_session_tokens(entries);
-  const auto decision = ava::session::should_auto_compact(entries, config);
+  auto const decision = ava::session::should_auto_compact(entries, config);
   expect(decision.should_compact && decision.estimated_tokens == config.auto_threshold_tokens,
          "auto compaction triggers when estimated tokens reach threshold");
   config.auto_threshold_tokens = decision.estimated_tokens + 1;
@@ -1232,7 +1232,7 @@ void test_compaction_config_and_thresholds() {
   expect(!ava::session::should_auto_compact(entries, config).should_compact,
          "auto compaction threshold zero disables automatic compaction");
   config.auto_threshold_tokens_explicit = false;
-  const std::vector<ava::session::SessionEntry> fallback_entries = {
+  std::vector<ava::session::SessionEntry> const fallback_entries = {
       ava::session::SessionEntry{.id = "fallback_big",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::UserMessage,
@@ -1246,7 +1246,7 @@ void test_compaction_config_and_thresholds() {
 }
 
 void test_compaction_context_reconstruction() {
-  const std::vector<ava::session::SessionEntry> entries = {
+  std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "old_user",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::UserMessage,
@@ -1313,7 +1313,7 @@ void test_compaction_context_reconstruction() {
   expect((*messages)[0].role == "user" && (*messages)[0].content.find("latest summary") != std::string::npos &&
              (*messages)[0].content.find("carry this") != std::string::npos,
          "latest compaction summary becomes provider-visible context");
-  const std::string joined = (*messages)[0].content + (*messages)[1].content + (*messages)[2].content +
+  std::string const joined = (*messages)[0].content + (*messages)[1].content + (*messages)[2].content +
                              (*messages)[3].content + (*messages)[4].content + (*messages)[5].content;
   expect(joined.find("old raw user") == std::string::npos && joined.find("old raw assistant") == std::string::npos &&
              joined.find("old raw tool") == std::string::npos && joined.find("middle raw user") == std::string::npos &&
@@ -1342,8 +1342,8 @@ void test_compaction_context_reconstruction() {
 }
 
 void test_tool_content_parts_reconstruction() {
-  const std::string long_result(80, 'r');
-  const std::vector<ava::session::SessionEntry> entries = {
+  std::string const long_result(80, 'r');
+  std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "tool_call",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ToolCall,
@@ -1379,7 +1379,7 @@ void test_tool_content_parts_reconstruction() {
              (*messages)[1].content_parts[0].text.find("[AVA: tool result content truncated]") != std::string::npos,
          "failed tool-result entry reconstructs native error metadata and truncated result text");
 
-  const std::vector<ava::session::SessionEntry> permission_entries = {
+  std::vector<ava::session::SessionEntry> const permission_entries = {
       ava::session::SessionEntry{.id = "permission_tool_call",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ToolCall,
@@ -1405,9 +1405,9 @@ void test_tool_content_parts_reconstruction() {
          "native tool replay allows internal permission metadata between tool call and result");
 
   constexpr std::string_view truncation_marker = "\n[AVA: tool result content truncated]";
-  const std::string euro = std::string("\xE2") + "\x82" + "\xAC";
-  const std::string utf8_result = "abc" + euro + std::string(80, 'x');
-  const std::vector<ava::session::SessionEntry> utf8_entries = {
+  std::string const euro = std::string("\xE2") + "\x82" + "\xAC";
+  std::string const utf8_result = "abc" + euro + std::string(80, 'x');
+  std::vector<ava::session::SessionEntry> const utf8_entries = {
       ava::session::SessionEntry{.id = "utf8_tool_call",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ToolCall,
@@ -1429,7 +1429,7 @@ void test_tool_content_parts_reconstruction() {
              (*utf8_messages)[1].content_parts[0].text.find(euro) == std::string::npos,
          "native tool-result truncation avoids splitting utf8 code points");
 
-  const std::vector<ava::session::SessionEntry> malformed_success_entries = {
+  std::vector<ava::session::SessionEntry> const malformed_success_entries = {
       ava::session::SessionEntry{.id = "malformed_success_call",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ToolCall,
@@ -1450,7 +1450,7 @@ void test_tool_content_parts_reconstruction() {
              !(*malformed_success_messages)[1].content_parts[0].is_error,
          "malformed success bool prefixes do not parse as native error metadata");
 
-  const std::vector<ava::session::SessionEntry> malformed_entries = {
+  std::vector<ava::session::SessionEntry> const malformed_entries = {
       ava::session::SessionEntry{.id = "malformed_tool_call",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ToolCall,
@@ -1473,7 +1473,7 @@ void test_tool_content_parts_reconstruction() {
              (*malformed_messages)[1].content_parts.empty(),
          "malformed native tool-use replay falls back to text-only without dangling native tool-result");
 
-  const std::vector<ava::session::SessionEntry> malformed_id_entries = {
+  std::vector<ava::session::SessionEntry> const malformed_id_entries = {
       ava::session::SessionEntry{.id = "malformed_id_tool_call",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ToolCall,
@@ -1493,7 +1493,7 @@ void test_tool_content_parts_reconstruction() {
   expect((*malformed_id_messages)[0].content_parts.empty() && (*malformed_id_messages)[1].content_parts.empty(),
          "malformed native tool ids fall back to text-only replay");
 
-  const std::vector<ava::session::SessionEntry> duplicate_batch_id_entries = {
+  std::vector<ava::session::SessionEntry> const duplicate_batch_id_entries = {
       ava::session::SessionEntry{.id = "duplicate_batch_assistant",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::AssistantMessage,
@@ -1533,7 +1533,7 @@ void test_tool_content_parts_reconstruction() {
              (*duplicate_batch_id_messages)[4].content_parts.empty(),
          "duplicate same-turn native tool ids fall back to text-only replay");
 
-  const std::vector<ava::session::SessionEntry> reused_id_entries = {
+  std::vector<ava::session::SessionEntry> const reused_id_entries = {
       ava::session::SessionEntry{.id = "valid_tool_call",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ToolCall,
@@ -1566,7 +1566,7 @@ void test_tool_content_parts_reconstruction() {
              (*reused_id_messages)[2].content_parts.empty() && (*reused_id_messages)[3].content_parts.empty(),
          "native tool-result matching is one-shot and reused native ids fall back to text-only");
 
-  const std::vector<ava::session::SessionEntry> interrupted_entries = {
+  std::vector<ava::session::SessionEntry> const interrupted_entries = {
       ava::session::SessionEntry{.id = "interrupted_tool_call",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ToolCall,

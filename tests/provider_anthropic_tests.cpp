@@ -39,8 +39,8 @@ void test_json_object_validator() {
 }
 
 void test_anthropic_provider_contract() {
-  const ava::provider::AnthropicProvider provider("https://anthropic.example.test/");
-  const auto request = provider.build_request(
+  ava::provider::AnthropicProvider const provider("https://anthropic.example.test/");
+  auto const request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -75,7 +75,7 @@ void test_anthropic_provider_contract() {
            "Anthropic request does not send OpenAI parameters key");
   }
 
-  const auto empty_system = provider.build_request(
+  auto const empty_system = provider.build_request(
       ava::provider::ProviderRequest{.provider_id = "anthropic",
                                      .model_id = "claude-sonnet-4-5",
                                      .system_prompt = "",
@@ -105,7 +105,7 @@ void test_anthropic_provider_contract() {
            "Anthropic non-stream request asks for JSON and does not follow authenticated redirects");
   }
 
-  const auto collapsed = provider.build_request(
+  auto const collapsed = provider.build_request(
       ava::provider::ProviderRequest{.provider_id = "anthropic",
                                      .model_id = "claude-sonnet-4-5",
                                      .system_prompt = "system",
@@ -120,7 +120,7 @@ void test_anthropic_provider_contract() {
              collapsed->body.find("third\\n\\nfourth") != std::string::npos,
          "Anthropic request collapses consecutive same-role messages for role alternation");
 
-  const auto cached_collapse = provider.build_request(
+  auto const cached_collapse = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -152,7 +152,7 @@ void test_anthropic_provider_contract() {
            "Anthropic collapse does not merge uncached text into a cache-controlled block");
   }
 
-  const auto reasoning_and_cache = provider.build_request(
+  auto const reasoning_and_cache = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -190,7 +190,7 @@ void test_anthropic_provider_contract() {
            "Anthropic request serializes thinking controls");
   }
 
-  const auto invalid_budget = provider.build_request(
+  auto const invalid_budget = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -204,7 +204,7 @@ void test_anthropic_provider_contract() {
   expect(!invalid_budget && invalid_budget.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects thinking budgets at or above max_tokens");
 
-  const auto too_small_budget = provider.build_request(
+  auto const too_small_budget = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -218,7 +218,7 @@ void test_anthropic_provider_contract() {
   expect(!too_small_budget && too_small_budget.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects thinking budgets below provider minimum");
 
-  const auto adaptive_with_budget = provider.build_request(
+  auto const adaptive_with_budget = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -232,7 +232,7 @@ void test_anthropic_provider_contract() {
   expect(!adaptive_with_budget && adaptive_with_budget.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects adaptive thinking with a fixed budget");
 
-  const auto unsupported_adaptive = provider.build_request(
+  auto const unsupported_adaptive = provider.build_request(
       ava::provider::ProviderRequest{.provider_id = "anthropic",
                                      .model_id = "claude-sonnet-4-5",
                                      .system_prompt = "system",
@@ -244,7 +244,7 @@ void test_anthropic_provider_contract() {
   expect(!unsupported_adaptive && unsupported_adaptive.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects adaptive thinking for Sonnet 4.5");
 
-  const auto invalid_cache_ttl =
+  auto const invalid_cache_ttl =
       provider.build_request(ava::provider::ProviderRequest{.provider_id = "anthropic",
                                                             .model_id = "claude-sonnet-4-5",
                                                             .system_prompt = "system",
@@ -256,7 +256,7 @@ void test_anthropic_provider_contract() {
   expect(!invalid_cache_ttl && invalid_cache_ttl.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects unsupported cache-control ttl values");
 
-  const auto invalid_cache_order = provider.build_request(
+  auto const invalid_cache_order = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -278,7 +278,7 @@ void test_anthropic_provider_contract() {
   expect(!invalid_cache_order && invalid_cache_order.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects 1h cache-control after a 5m breakpoint");
 
-  const auto empty_system_cache =
+  auto const empty_system_cache =
       provider.build_request(ava::provider::ProviderRequest{.provider_id = "anthropic",
                                                             .model_id = "claude-sonnet-4-5",
                                                             .system_prompt = "",
@@ -290,7 +290,7 @@ void test_anthropic_provider_contract() {
   expect(!empty_system_cache && empty_system_cache.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects cache-control on empty system prompts");
 
-  const auto empty_text_cache = provider.build_request(
+  auto const empty_text_cache = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -311,7 +311,7 @@ void test_anthropic_provider_contract() {
   expect(!empty_text_cache && empty_text_cache.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects cache-control on empty text blocks");
 
-  const auto too_many_cache_breakpoints = provider.build_request(
+  auto const too_many_cache_breakpoints = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -355,7 +355,7 @@ void test_anthropic_provider_contract() {
              too_many_cache_breakpoints.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects more than four cache-control breakpoints");
 
-  const auto missing_token = provider.build_request(ava::provider::ProviderRequest{.provider_id = "anthropic",
+  auto const missing_token = provider.build_request(ava::provider::ProviderRequest{.provider_id = "anthropic",
                                                                                    .model_id = "claude-sonnet-4-5",
                                                                                    .system_prompt = "system",
                                                                                    .messages = {},
@@ -366,8 +366,8 @@ void test_anthropic_provider_contract() {
 }
 
 void test_anthropic_native_content_parts_request() {
-  const ava::provider::AnthropicProvider provider("https://anthropic.example.test");
-  const auto request = provider.build_request(
+  ava::provider::AnthropicProvider const provider("https://anthropic.example.test");
+  auto const request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -407,7 +407,7 @@ void test_anthropic_native_content_parts_request() {
              request->body.find("fallback tool result text") == std::string::npos,
          "Anthropic native content parts are canonical over fallback text");
 
-  const auto reasoning_request = provider.build_request(
+  auto const reasoning_request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -452,7 +452,7 @@ void test_anthropic_native_content_parts_request() {
            "Anthropic reasoning content parts are canonical over fallback text");
   }
 
-  const auto wrong_reasoning_role = provider.build_request(
+  auto const wrong_reasoning_role = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -472,7 +472,7 @@ void test_anthropic_native_content_parts_request() {
   expect(!wrong_reasoning_role && wrong_reasoning_role.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects reasoning content outside assistant role");
 
-  const auto reasoning_cache_control = provider.build_request(
+  auto const reasoning_cache_control = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -494,7 +494,7 @@ void test_anthropic_native_content_parts_request() {
              reasoning_cache_control.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects cache-control on reasoning content blocks");
 
-  const auto wrong_reasoning_format = provider.build_request(
+  auto const wrong_reasoning_format = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -516,7 +516,7 @@ void test_anthropic_native_content_parts_request() {
       !wrong_reasoning_format && wrong_reasoning_format.error().category() == ava::core::ErrorCategory::InvalidArgument,
       "Anthropic request rejects non-Anthropic reasoning replay formats");
 
-  const auto cached_tool_request = provider.build_request(
+  auto const cached_tool_request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -558,7 +558,7 @@ void test_anthropic_native_content_parts_request() {
         "Anthropic request serializes tool_result cache control");
   }
 
-  const auto invalid_input = provider.build_request(
+  auto const invalid_input = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -578,7 +578,7 @@ void test_anthropic_native_content_parts_request() {
   expect(!invalid_input && invalid_input.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects invalid native tool_use input before serialization");
 
-  const auto wrong_role = provider.build_request(
+  auto const wrong_role = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -598,7 +598,7 @@ void test_anthropic_native_content_parts_request() {
   expect(!wrong_role && wrong_role.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects role-incompatible native content parts");
 
-  const auto dangling_tool_use = provider.build_request(
+  auto const dangling_tool_use = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -618,7 +618,7 @@ void test_anthropic_native_content_parts_request() {
   expect(!dangling_tool_use && dangling_tool_use.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects native tool_use blocks without matching tool_result");
 
-  const auto dangling_tool_result = provider.build_request(
+  auto const dangling_tool_result = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -638,7 +638,7 @@ void test_anthropic_native_content_parts_request() {
   expect(!dangling_tool_result && dangling_tool_result.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects native tool_result blocks without a preceding tool_use");
 
-  const auto duplicate_tool_use = provider.build_request(
+  auto const duplicate_tool_use = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -664,7 +664,7 @@ void test_anthropic_native_content_parts_request() {
   expect(!duplicate_tool_use && duplicate_tool_use.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects duplicate native tool_use ids");
 
-  const auto text_before_tool_result = provider.build_request(
+  auto const text_before_tool_result = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -701,7 +701,7 @@ void test_anthropic_native_content_parts_request() {
              text_before_tool_result.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects ordinary user text before matching native tool_result");
 
-  const auto reversed_tool_results = provider.build_request(
+  auto const reversed_tool_results = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
@@ -747,7 +747,7 @@ void test_anthropic_native_content_parts_request() {
 }
 
 void test_anthropic_parsing() {
-  const std::string sse =
+  std::string const sse =
       "event: message_start\n"
       "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,"
       "\"cache_read_input_tokens\":2}}}\n\n"
@@ -795,7 +795,7 @@ void test_anthropic_parsing() {
            "Anthropic SSE usage and stop reason accumulate from message_delta");
   }
 
-  const std::string reasoning_sse =
+  std::string const reasoning_sse =
       "event: content_block_start\n"
       "data: "
       "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n"
@@ -843,7 +843,7 @@ void test_anthropic_parsing() {
            "Anthropic SSE reasoning stream ends with done event");
   }
 
-  const std::string oversized_signature(70 * 1024, 's');
+  std::string const oversized_signature(70 * 1024, 's');
   auto oversized_initial_signature = ava::provider::parse_anthropic_sse(
       "event: content_block_start\n"
       "data: "
@@ -968,7 +968,7 @@ void test_anthropic_parsing() {
              (*non_stream_reasoning)[6].type == ava::provider::StreamEventType::Done,
          "Anthropic non-stream response parses thinking and redacted thinking blocks");
 
-  const std::string oversized_redacted_data(70 * 1024, 'r');
+  std::string const oversized_redacted_data(70 * 1024, 'r');
   auto oversized_redacted = ava::provider::parse_anthropic_response(ava::provider::HttpResponse{
       .status_code = 200,
       .headers = {},
@@ -984,7 +984,7 @@ void test_anthropic_parsing() {
       .headers = {},
       .body =
           R"({"error":{"type":"overloaded_error","message":"Overloaded","api_key":"secret-key","signature":"secret-signature","redacted_data":"opaque-redacted","data":"opaque-data","thinking":"secret thinking"}})"});
-  const auto error_text = http_error ? std::string{} : http_error.error().format();
+  auto const error_text = http_error ? std::string{} : http_error.error().format();
   expect(!http_error && error_text.find("provider_error_kind: transient") != std::string::npos &&
              error_text.find("[redacted]") != std::string::npos && error_text.find("secret-key") == std::string::npos &&
              error_text.find("secret-signature") == std::string::npos &&
@@ -1000,13 +1000,13 @@ void test_anthropic_registry_and_env_auth() {
   auto provider = registry.create("anthropic");
   expect(provider.has_value() && *provider, "builtin provider registry creates Anthropic provider");
 
-  const auto root = temp_root() / "anthropic-auth";
-  const auto config_home = root / "config";
-  const auto state_home = root / "state";
-  const auto data_home = root / "data";
-  const auto ava_config = config_home / "ava";
-  const auto ava_state = state_home / "ava";
-  const auto paths = ava::config::XdgPaths{.config_home = config_home,
+  auto const root = temp_root() / "anthropic-auth";
+  auto const config_home = root / "config";
+  auto const state_home = root / "state";
+  auto const data_home = root / "data";
+  auto const ava_config = config_home / "ava";
+  auto const ava_state = state_home / "ava";
+  auto const paths = ava::config::XdgPaths{.config_home = config_home,
                                            .state_home = state_home,
                                            .data_home = data_home,
                                            .ava_config_dir = ava_config,
@@ -1033,10 +1033,10 @@ void test_anthropic_registry_and_env_auth() {
 }
 
 void test_anthropic_agent_tool_loop_native_replay() {
-  const auto root = temp_root() / "anthropic-tool-loop";
+  auto const root = temp_root() / "anthropic-tool-loop";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {
     std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
@@ -1045,7 +1045,7 @@ void test_anthropic_agent_tool_loop_native_replay() {
 
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "anthropic-tool"});
-  const ava::provider::AnthropicProvider provider("https://anthropic.example.test");
+  ava::provider::AnthropicProvider const provider("https://anthropic.example.test");
   ava::tests::FakeTransport transport(
       {sse_response("event: content_block_start\n"
                     "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{"
@@ -1077,7 +1077,7 @@ void test_anthropic_agent_tool_loop_native_replay() {
          "Anthropic agent loop runs one native tool call then continues to final answer");
   expect(transport.requests().size() == 2, "Anthropic tool loop makes initial and continuation requests");
   if (transport.requests().size() != 2) return;
-  const auto& continuation = transport.requests()[1].body;
+  auto const& continuation = transport.requests()[1].body;
   expect(continuation.find(R"("type":"tool_use","id":"toolu_1","name":"read_file")") != std::string::npos &&
              continuation.find(R"("input":{"path":"note.txt"})") != std::string::npos,
          "Anthropic continuation replays native tool_use block");
@@ -1090,15 +1090,15 @@ void test_anthropic_agent_tool_loop_native_replay() {
 }
 
 void test_anthropic_agent_reasoning_native_replay() {
-  const auto root = temp_root() / "anthropic-reasoning-replay";
+  auto const root = temp_root() / "anthropic-reasoning-replay";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "anthropic-reasoning"});
-  const ava::provider::AnthropicProvider provider("https://anthropic.example.test");
+  ava::provider::AnthropicProvider const provider("https://anthropic.example.test");
   ava::tests::FakeTransport transport(
       {sse_response("event: content_block_start\n"
                     "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{"
@@ -1140,7 +1140,7 @@ void test_anthropic_agent_reasoning_native_replay() {
   expect(second && second->final_text == "second answer", "Anthropic agent loop continues after reasoning response");
   expect(transport.requests().size() == 2, "Anthropic reasoning replay test makes two provider requests");
   if (transport.requests().size() != 2) return;
-  const auto& continuation = transport.requests()[1].body;
+  auto const& continuation = transport.requests()[1].body;
   expect(continuation.find(R"("type":"thinking","thinking":"visible plan","signature":"sig-1")") != std::string::npos,
          "Anthropic continuation replays native thinking block with signature");
   expect(continuation.find(R"("type":"text","text":"first answer")") != std::string::npos,
@@ -1150,7 +1150,7 @@ void test_anthropic_agent_reasoning_native_replay() {
   expect(entries.has_value(), "Anthropic reasoning replay session loads");
   if (!entries) return;
   bool saw_reasoning = false;
-  for (const auto& entry : *entries) {
+  for (auto const& entry : *entries) {
     if (entry.type == ava::session::EntryType::ReasoningBlock &&
         entry.data_json.find("visible plan") != std::string::npos &&
         entry.data_json.find("sig-1") != std::string::npos) {
@@ -1161,15 +1161,15 @@ void test_anthropic_agent_reasoning_native_replay() {
 }
 
 void test_anthropic_agent_redacted_reasoning_native_replay() {
-  const auto root = temp_root() / "anthropic-redacted-reasoning-replay";
+  auto const root = temp_root() / "anthropic-redacted-reasoning-replay";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "anthropic-redacted-reasoning"});
-  const ava::provider::AnthropicProvider provider("https://anthropic.example.test");
+  ava::provider::AnthropicProvider const provider("https://anthropic.example.test");
   ava::tests::FakeTransport transport(
       {sse_response("event: content_block_start\n"
                     "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{"
@@ -1205,7 +1205,7 @@ void test_anthropic_agent_redacted_reasoning_native_replay() {
   expect(second && second->final_text == "second answer", "Anthropic agent loop continues after redacted reasoning");
   expect(transport.requests().size() == 2, "Anthropic redacted reasoning replay test makes two provider requests");
   if (transport.requests().size() != 2) return;
-  const auto& continuation = transport.requests()[1].body;
+  auto const& continuation = transport.requests()[1].body;
   expect(continuation.find(R"({"type":"redacted_thinking","data":"opaque-redacted"})") != std::string::npos,
          "Anthropic continuation replays native redacted thinking block");
   expect(continuation.find(R"("thinking":"opaque-redacted")") == std::string::npos &&
@@ -1214,15 +1214,15 @@ void test_anthropic_agent_redacted_reasoning_native_replay() {
 }
 
 void test_anthropic_agent_non_stream_reasoning_events() {
-  const auto root = temp_root() / "anthropic-non-stream-reasoning-events";
+  auto const root = temp_root() / "anthropic-non-stream-reasoning-events";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "anthropic-non-stream-reasoning"});
-  const ava::provider::AnthropicProvider provider("https://anthropic.example.test");
+  ava::provider::AnthropicProvider const provider("https://anthropic.example.test");
   ava::tests::FakeTransport transport({ava::provider::HttpResponse{
       .status_code = 200,
       .headers = {},
@@ -1238,21 +1238,21 @@ void test_anthropic_agent_non_stream_reasoning_events() {
       .system_prompt = "system prompt",
       .access_token = "anthropic-key",
       .stream = false,
-      .on_stream_event = [&](const ava::provider::StreamEvent& event) -> ava::core::VoidResult {
+      .on_stream_event = [&](ava::provider::StreamEvent const& event) -> ava::core::VoidResult {
         published_events.push_back(event);
         return {};
       }});
   auto result = loop.run_turn("first", store, provider, transport);
   expect(result && result->final_text == "answer" && result->stop_reason == "completed",
          "Anthropic non-stream reasoning turn completes with normalized stop reason");
-  const auto reasoning_end = std::find_if(published_events.begin(), published_events.end(), [](const auto& event) {
+  auto const reasoning_end = std::find_if(published_events.begin(), published_events.end(), [](auto const& event) {
     return event.type == ava::provider::StreamEventType::ReasoningEnd;
   });
   expect(std::find_if(published_events.begin(), published_events.end(),
-                      [](const auto& event) { return event.type == ava::provider::StreamEventType::ReasoningStart; }) !=
+                      [](auto const& event) { return event.type == ava::provider::StreamEventType::ReasoningStart; }) !=
                  published_events.end() &&
              std::find_if(published_events.begin(), published_events.end(),
-                          [](const auto& event) {
+                          [](auto const& event) {
                             return event.type == ava::provider::StreamEventType::ReasoningDelta;
                           }) != published_events.end() &&
              reasoning_end != published_events.end(),
@@ -1263,10 +1263,10 @@ void test_anthropic_agent_non_stream_reasoning_events() {
 }
 
 void test_anthropic_agent_multi_tool_native_replay() {
-  const auto root = temp_root() / "anthropic-multi-tool-loop";
+  auto const root = temp_root() / "anthropic-multi-tool-loop";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {
     std::ofstream first(workspace / "one.txt", std::ios::binary | std::ios::trunc);
@@ -1277,7 +1277,7 @@ void test_anthropic_agent_multi_tool_native_replay() {
 
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "anthropic-multi-tool"});
-  const ava::provider::AnthropicProvider provider("https://anthropic.example.test");
+  ava::provider::AnthropicProvider const provider("https://anthropic.example.test");
   ava::tests::FakeTransport transport(
       {sse_response("event: content_block_start\n"
                     "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{"
@@ -1317,7 +1317,7 @@ void test_anthropic_agent_multi_tool_native_replay() {
          "Anthropic agent loop runs multiple native tool calls then continues");
   expect(transport.requests().size() == 2, "Anthropic multi-tool loop makes initial and continuation requests");
   if (transport.requests().size() != 2) return;
-  const auto& continuation = transport.requests()[1].body;
+  auto const& continuation = transport.requests()[1].body;
   expect(continuation.find(R"("type":"tool_use","id":"toolu_1","name":"read_file")") != std::string::npos &&
              continuation.find(R"("input":{"path":"one.txt"})") != std::string::npos &&
              continuation.find(R"("type":"tool_result","tool_use_id":"toolu_1")") != std::string::npos &&
@@ -1328,10 +1328,10 @@ void test_anthropic_agent_multi_tool_native_replay() {
              continuation.find(R"("type":"tool_result","tool_use_id":"toolu_2")") != std::string::npos &&
              continuation.find("second content") != std::string::npos,
          "Anthropic continuation replays second native tool pair");
-  const auto first_use = continuation.find(R"("type":"tool_use","id":"toolu_1")");
-  const auto second_use = continuation.find(R"("type":"tool_use","id":"toolu_2")");
-  const auto first_result = continuation.find(R"("type":"tool_result","tool_use_id":"toolu_1")");
-  const auto second_result = continuation.find(R"("type":"tool_result","tool_use_id":"toolu_2")");
+  auto const first_use = continuation.find(R"("type":"tool_use","id":"toolu_1")");
+  auto const second_use = continuation.find(R"("type":"tool_use","id":"toolu_2")");
+  auto const first_result = continuation.find(R"("type":"tool_result","tool_use_id":"toolu_1")");
+  auto const second_result = continuation.find(R"("type":"tool_result","tool_use_id":"toolu_2")");
   expect(first_use != std::string::npos && second_use != std::string::npos && first_result != std::string::npos &&
              second_result != std::string::npos && first_use < second_use && second_use < first_result &&
              first_result < second_result,
@@ -1339,10 +1339,10 @@ void test_anthropic_agent_multi_tool_native_replay() {
 }
 
 void test_anthropic_agent_non_stream_tool_loop_native_replay() {
-  const auto root = temp_root() / "anthropic-non-stream-tool-loop";
+  auto const root = temp_root() / "anthropic-non-stream-tool-loop";
   std::error_code remove_error;
   std::filesystem::remove_all(root, remove_error);
-  const auto workspace = root / "workspace";
+  auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   {
     std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
@@ -1351,7 +1351,7 @@ void test_anthropic_agent_non_stream_tool_loop_native_replay() {
 
   ava::session::SessionStore store(ava::session::SessionStoreOptions{
       .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "anthropic-non-stream-tool"});
-  const ava::provider::AnthropicProvider provider("https://anthropic.example.test");
+  ava::provider::AnthropicProvider const provider("https://anthropic.example.test");
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{
            .status_code = 200,
@@ -1374,7 +1374,7 @@ void test_anthropic_agent_non_stream_tool_loop_native_replay() {
       "Anthropic non-stream agent loop runs native tool call then continues");
   expect(transport.requests().size() == 2, "Anthropic non-stream tool loop makes initial and continuation requests");
   if (transport.requests().size() != 2) return;
-  const auto& continuation = transport.requests()[1].body;
+  auto const& continuation = transport.requests()[1].body;
   expect(continuation.find(R"("stream":false)") != std::string::npos,
          "Anthropic non-stream continuation preserves stream=false");
   expect(continuation.find(R"("type":"tool_use","id":"toolu_1","name":"read_file")") != std::string::npos &&

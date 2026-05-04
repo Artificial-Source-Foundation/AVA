@@ -32,7 +32,7 @@ void strip_unescaped_trailing_spaces(std::string& line) {
 }
 
 std::string regex_escape(char ch) {
-  static const std::string special = R"(\.^$|()[]{}+*?)";
+  static std::string const special = R"(\.^$|()[]{}+*?)";
   if (special.find(ch) != std::string::npos) return std::string("\\") + ch;
   return std::string(1, ch);
 }
@@ -40,7 +40,7 @@ std::string regex_escape(char ch) {
 std::string wildcard_to_regex(std::string_view pattern) {
   std::string out = "^";
   for (std::size_t index = 0; index < pattern.size(); ++index) {
-    const char ch = pattern[index];
+    char const ch = pattern[index];
     if (ch == '\\' && index + 1 < pattern.size()) {
       out += regex_escape(pattern[index + 1]);
       ++index;
@@ -70,8 +70,8 @@ std::vector<std::string_view> slash_components(std::string_view path) {
   std::vector<std::string_view> components;
   std::size_t start = 0;
   while (start <= path.size()) {
-    const auto slash = path.find('/', start);
-    const auto end = slash == std::string_view::npos ? path.size() : slash;
+    auto const slash = path.find('/', start);
+    auto const end = slash == std::string_view::npos ? path.size() : slash;
     if (end > start) components.push_back(path.substr(start, end - start));
     if (slash == std::string_view::npos) break;
     start = slash + 1;
@@ -81,8 +81,8 @@ std::vector<std::string_view> slash_components(std::string_view path) {
 
 std::vector<std::string> ancestor_dirs(std::string_view path, bool is_directory) {
   std::vector<std::string> ancestors;
-  const auto components = slash_components(path);
-  const auto count = is_directory ? components.size() : (components.empty() ? 0 : components.size() - 1);
+  auto const components = slash_components(path);
+  auto const count = is_directory ? components.size() : (components.empty() ? 0 : components.size() - 1);
   std::string current;
   for (std::size_t index = 0; index < count; ++index) {
     if (!current.empty()) current += '/';
@@ -99,31 +99,31 @@ bool starts_with_path_prefix(std::string_view value, std::string_view prefix) {
 
 }  // namespace
 
-bool is_git_dir(const std::filesystem::path& path) {
-  for (const auto& part : path) {
+bool is_git_dir(std::filesystem::path const& path) {
+  for (auto const& part : path) {
     if (part == ".git") return true;
   }
   return false;
 }
 
-bool is_generated_dir(const std::filesystem::path& path) {
-  const auto name = path.filename().string();
+bool is_generated_dir(std::filesystem::path const& path) {
+  auto const name = path.filename().string();
   return name == "build" || name == "node_modules" || name == "target" || name == "dist";
 }
 
 IgnoreMatcher::IgnoreMatcher(std::filesystem::path workspace_dir) : workspace_dir_(std::move(workspace_dir)) {}
 
-ava::core::Result<IgnoreMatcher> IgnoreMatcher::load(const std::filesystem::path& workspace_dir) {
+ava::core::Result<IgnoreMatcher> IgnoreMatcher::load(std::filesystem::path const& workspace_dir) {
   IgnoreMatcher matcher(workspace_dir);
   auto loaded = matcher.load_rules();
   if (!loaded) return std::unexpected(loaded.error());
   return matcher;
 }
 
-bool IgnoreMatcher::ignored(const std::filesystem::path& path, bool is_directory) const {
-  const auto relative = relative_to_workspace(path);
+bool IgnoreMatcher::ignored(std::filesystem::path const& path, bool is_directory) const {
+  auto const relative = relative_to_workspace(path);
   bool ignored = false;
-  for (const auto& rule : rules_) {
+  for (auto const& rule : rules_) {
     if (!starts_with_path_prefix(relative, rule.base_relative)) continue;
     std::string_view relative_to_base = relative;
     if (!rule.base_relative.empty()) {
@@ -136,10 +136,10 @@ bool IgnoreMatcher::ignored(const std::filesystem::path& path, bool is_directory
   return ignored;
 }
 
-bool IgnoreMatcher::rule_matches(const Rule& rule, std::string_view relative_to_base, bool is_directory) {
+bool IgnoreMatcher::rule_matches(Rule const& rule, std::string_view relative_to_base, bool is_directory) {
   if (rule.anchored || rule.contains_slash) {
     if (rule.directory_only) {
-      for (const auto& ancestor : ancestor_dirs(relative_to_base, is_directory)) {
+      for (auto const& ancestor : ancestor_dirs(relative_to_base, is_directory)) {
         if (std::regex_match(ancestor, rule.matcher)) return true;
       }
       return false;
@@ -147,8 +147,8 @@ bool IgnoreMatcher::rule_matches(const Rule& rule, std::string_view relative_to_
     return std::regex_match(std::string(relative_to_base), rule.matcher);
   }
 
-  const auto components = slash_components(relative_to_base);
-  const auto limit =
+  auto const components = slash_components(relative_to_base);
+  auto const limit =
       rule.directory_only && !is_directory && !components.empty() ? components.size() - 1 : components.size();
   for (std::size_t index = 0; index < limit; ++index) {
     if (std::regex_match(std::string(components[index]), rule.matcher)) return true;
@@ -175,7 +175,7 @@ ava::core::Result<void> IgnoreMatcher::load_rules() {
       error.with_context("max_visited", std::to_string(kMaxIgnoreRuleWalkEntries));
       return std::unexpected(std::move(error));
     }
-    const auto& entry = *it;
+    auto const& entry = *it;
     if (entry.is_directory(iter_error)) {
       if (is_git_dir(entry.path()) || is_generated_dir(entry.path())) {
         it.disable_recursion_pending();
@@ -192,15 +192,15 @@ ava::core::Result<void> IgnoreMatcher::load_rules() {
   return {};
 }
 
-ava::core::Result<void> IgnoreMatcher::load_file(const std::filesystem::path& ignore_file) {
+ava::core::Result<void> IgnoreMatcher::load_file(std::filesystem::path const& ignore_file) {
   std::error_code status_error;
-  const auto status = std::filesystem::symlink_status(ignore_file, status_error);
+  auto const status = std::filesystem::symlink_status(ignore_file, status_error);
   if (status_error || std::filesystem::is_symlink(status)) return {};
 
   std::ifstream file(ignore_file, std::ios::binary);
   if (!file) return {};
 
-  const auto base_relative = relative_to_workspace(ignore_file.parent_path());
+  auto const base_relative = relative_to_workspace(ignore_file.parent_path());
   std::string line;
   while (std::getline(file, line)) {
     if (!line.empty() && line.back() == '\r') line.pop_back();
@@ -230,7 +230,7 @@ ava::core::Result<void> IgnoreMatcher::load_file(const std::filesystem::path& ig
     rule.contains_slash = rule.pattern.find('/') != std::string::npos;
     try {
       rule.matcher = std::regex(wildcard_to_regex(rule.pattern), std::regex::ECMAScript);
-    } catch (const std::regex_error& err) {
+    } catch (std::regex_error const& err) {
       auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid .gitignore pattern");
       error.with_context("path", ignore_file.string());
       error.with_context("pattern", rule.pattern);
@@ -248,7 +248,7 @@ ava::core::Result<void> IgnoreMatcher::load_file(const std::filesystem::path& ig
   return {};
 }
 
-std::string IgnoreMatcher::relative_to_workspace(const std::filesystem::path& path) const {
+std::string IgnoreMatcher::relative_to_workspace(std::filesystem::path const& path) const {
   std::error_code error;
   auto relative = std::filesystem::relative(path, workspace_dir_, error);
   if (error) return {};

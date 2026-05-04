@@ -9,8 +9,8 @@
 namespace ava::app::runtime {
 
 [[nodiscard]] std::optional<RuntimeReasoningSelection> latest_persisted_reasoning(
-    const std::vector<ava::session::SessionEntry>& entries, const ava::config::ModelInfo& model);
+    std::vector<ava::session::SessionEntry> const& entries, ava::config::ModelInfo const& model);
 [[nodiscard]] ava::provider::ProviderReasoningOptions provider_reasoning_options(
-    const RuntimeReasoningSelection& selection);
+    RuntimeReasoningSelection const& selection);
 
 }  // namespace ava::app::runtime

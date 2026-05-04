@@ -50,8 +50,8 @@ struct InputEvent {
 
 class CursesSession {
  public:
-  CursesSession(const CursesSession&) = delete;
-  CursesSession& operator=(const CursesSession&) = delete;
+  CursesSession(CursesSession const&) = delete;
+  CursesSession& operator=(CursesSession const&) = delete;
   CursesSession(CursesSession&& other) noexcept;
   CursesSession& operator=(CursesSession&& other) noexcept;
   ~CursesSession();

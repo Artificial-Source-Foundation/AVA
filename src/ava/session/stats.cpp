@@ -18,22 +18,22 @@ void add_optional_integer(std::optional<long long>& total, std::optional<long lo
 }
 
 std::optional<long long> integer_field_from_usage_or_entry(std::string_view data_json, std::string_view key) {
-  if (const auto usage = ava::core::json::object_field(data_json, "usage")) {
-    if (const auto value = ava::core::json::integer_field(*usage, key)) return value;
+  if (auto const usage = ava::core::json::object_field(data_json, "usage")) {
+    if (auto const value = ava::core::json::integer_field(*usage, key)) return value;
   }
   return ava::core::json::integer_field(data_json, key);
 }
 
 std::optional<long long> integer_field_from_usage_or_entry(std::string_view data_json,
                                                            std::initializer_list<std::string_view> keys) {
-  for (const auto key : keys) {
-    if (const auto value = integer_field_from_usage_or_entry(data_json, key)) return value;
+  for (auto const key : keys) {
+    if (auto const value = integer_field_from_usage_or_entry(data_json, key)) return value;
   }
   return std::nullopt;
 }
 
 bool bool_field_is_true(std::string_view object, std::string_view key) {
-  const auto start = ava::core::json::field_value_start(object, key);
+  auto const start = ava::core::json::field_value_start(object, key);
   return start && object.substr(*start, 4) == "true";
 }
 
@@ -43,7 +43,7 @@ bool usage_is_estimated(std::string_view usage) {
 }
 
 bool positive_integer_field(std::string_view object, std::string_view key) {
-  const auto value = ava::core::json::integer_field(object, key);
+  auto const value = ava::core::json::integer_field(object, key);
   return value && *value > 0;
 }
 
@@ -61,24 +61,24 @@ bool is_number_delimiter(char ch) {
 }
 
 std::optional<long double> number_field(std::string_view object, std::string_view key) {
-  const auto start = ava::core::json::field_value_start(object, key);
+  auto const start = ava::core::json::field_value_start(object, key);
   if (!start || *start >= object.size()) return std::nullopt;
 
   std::size_t index = *start;
   if (object[index] == '-') ++index;
-  const auto digits_start = index;
+  auto const digits_start = index;
   while (index < object.size() && std::isdigit(static_cast<unsigned char>(object[index])) != 0) ++index;
   if (index == digits_start) return std::nullopt;
   if (index < object.size() && object[index] == '.') {
     ++index;
-    const auto fraction_start = index;
+    auto const fraction_start = index;
     while (index < object.size() && std::isdigit(static_cast<unsigned char>(object[index])) != 0) ++index;
     if (index == fraction_start) return std::nullopt;
   }
   if (index < object.size() && (object[index] == 'e' || object[index] == 'E')) {
     ++index;
     if (index < object.size() && (object[index] == '+' || object[index] == '-')) ++index;
-    const auto exponent_start = index;
+    auto const exponent_start = index;
     while (index < object.size() && std::isdigit(static_cast<unsigned char>(object[index])) != 0) ++index;
     if (index == exponent_start) return std::nullopt;
   }
@@ -92,11 +92,11 @@ std::optional<long double> number_field(std::string_view object, std::string_vie
 }
 
 std::optional<long double> cost_field_from_usage_or_entry(std::string_view data_json) {
-  if (const auto usage = ava::core::json::object_field(data_json, "usage")) {
-    if (const auto value = number_field(*usage, "cost_usd")) return value;
-    if (const auto value = number_field(*usage, "total_cost_usd")) return value;
+  if (auto const usage = ava::core::json::object_field(data_json, "usage")) {
+    if (auto const value = number_field(*usage, "cost_usd")) return value;
+    if (auto const value = number_field(*usage, "total_cost_usd")) return value;
   }
-  if (const auto value = number_field(data_json, "cost_usd")) return value;
+  if (auto const value = number_field(data_json, "cost_usd")) return value;
   return number_field(data_json, "total_cost_usd");
 }
 
@@ -108,11 +108,11 @@ void add_optional_cost(std::optional<long double>& total, std::optional<long dou
 
 }  // namespace
 
-SessionStats compute_session_stats(const std::vector<SessionEntry>& entries) {
+SessionStats compute_session_stats(std::vector<SessionEntry> const& entries) {
   SessionStats stats;
   stats.entry_count = entries.size();
 
-  for (const auto& entry : entries) {
+  for (auto const& entry : entries) {
     if (stats.first_timestamp.empty()) stats.first_timestamp = entry.timestamp;
     stats.last_timestamp = entry.timestamp;
 
@@ -158,7 +158,7 @@ SessionStats compute_session_stats(const std::vector<SessionEntry>& entries) {
         break;
     }
 
-    const auto usage = ava::core::json::object_field(entry.data_json, "usage");
+    auto const usage = ava::core::json::object_field(entry.data_json, "usage");
     if (usage) {
       if (usage_is_estimated(*usage)) {
         add_optional_integer(stats.estimated_input_bytes,
@@ -186,11 +186,11 @@ SessionStats compute_session_stats(const std::vector<SessionEntry>& entries) {
         integer_field_from_usage_or_entry(entry.data_json, {"cache_write_tokens", "cache_creation_input_tokens"}));
     add_optional_integer(stats.total_tokens, integer_field_from_usage_or_entry(entry.data_json, "total_tokens"));
 
-    const auto cost = cost_field_from_usage_or_entry(entry.data_json);
-    const bool has_known_cost = cost && *cost >= 0.0L;
+    auto const cost = cost_field_from_usage_or_entry(entry.data_json);
+    bool const has_known_cost = cost && *cost >= 0.0L;
     if (has_known_cost) add_optional_cost(stats.known_cost_usd, cost);
-    const bool has_billable_usage_tokens = usage && object_has_billable_tokens(*usage);
-    const bool has_billable_legacy_assistant_tokens =
+    bool const has_billable_usage_tokens = usage && object_has_billable_tokens(*usage);
+    bool const has_billable_legacy_assistant_tokens =
         !usage && entry.type == EntryType::AssistantMessage && object_has_billable_tokens(entry.data_json);
     if ((has_billable_usage_tokens || has_billable_legacy_assistant_tokens) && !has_known_cost) {
       ++stats.unknown_cost_entries;

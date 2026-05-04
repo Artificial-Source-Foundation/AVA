@@ -212,32 +212,32 @@ struct ComposerSnapshot {
 };
 
 [[nodiscard]] std::vector<SlashCommandItem> filter_slash_commands(std::string_view input,
-                                                                  const std::vector<SlashCommandItem>& commands);
-[[nodiscard]] bool slash_palette_visible(std::string_view input, const std::vector<SlashCommandItem>& commands);
+                                                                  std::vector<SlashCommandItem> const& commands);
+[[nodiscard]] bool slash_palette_visible(std::string_view input, std::vector<SlashCommandItem> const& commands);
 [[nodiscard]] std::size_t clamp_slash_palette_selection(std::string_view input,
-                                                        const std::vector<SlashCommandItem>& commands,
+                                                        std::vector<SlashCommandItem> const& commands,
                                                         std::size_t selected_index);
 [[nodiscard]] std::size_t previous_slash_palette_selection(std::string_view input,
-                                                           const std::vector<SlashCommandItem>& commands,
+                                                           std::vector<SlashCommandItem> const& commands,
                                                            std::size_t selected_index);
 [[nodiscard]] std::size_t next_slash_palette_selection(std::string_view input,
-                                                       const std::vector<SlashCommandItem>& commands,
+                                                       std::vector<SlashCommandItem> const& commands,
                                                        std::size_t selected_index);
 [[nodiscard]] std::string slash_command_selection_text(std::string_view input,
-                                                       const std::vector<SlashCommandItem>& commands,
+                                                       std::vector<SlashCommandItem> const& commands,
                                                        std::size_t selected_index);
 [[nodiscard]] std::optional<std::string> slash_command_selection_disabled_reason(
-    std::string_view input, const std::vector<SlashCommandItem>& commands, std::size_t selected_index);
-[[nodiscard]] std::optional<std::size_t> slash_palette_selection_for_screen_row(const ComposerSnapshot& snapshot,
+    std::string_view input, std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
+[[nodiscard]] std::optional<std::size_t> slash_palette_selection_for_screen_row(ComposerSnapshot const& snapshot,
                                                                                 std::size_t row);
-[[nodiscard]] std::vector<std::string> render_composer(const ComposerSnapshot& snapshot);
-[[nodiscard]] std::size_t composer_main_width(const ComposerSnapshot& snapshot);
-[[nodiscard]] bool draw_screen(const ComposerSnapshot& snapshot);
+[[nodiscard]] std::vector<std::string> render_composer(ComposerSnapshot const& snapshot);
+[[nodiscard]] std::size_t composer_main_width(ComposerSnapshot const& snapshot);
+[[nodiscard]] bool draw_screen(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::string sanitize_terminal_text(std::string_view text);
 [[nodiscard]] std::vector<std::string> split_lines(std::string_view text);
 [[nodiscard]] PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice,
                                                                          InputEvent event);
-[[nodiscard]] QuestionPromptInputResult handle_question_prompt_input(const QuestionPromptView& prompt,
+[[nodiscard]] QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const& prompt,
                                                                      InputEvent event);
 [[nodiscard]] std::string to_string(ToolTimelineStatus status);
 [[nodiscard]] std::string to_string(ToolLifecycleState state);

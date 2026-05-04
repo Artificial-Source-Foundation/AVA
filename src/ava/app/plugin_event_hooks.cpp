@@ -26,7 +26,7 @@ struct PluginEventHookBinding {
 std::string normalized_event_name(std::string_view event) {
   std::string normalized;
   normalized.reserve(event.size());
-  for (const char ch : event) {
+  for (char const ch : event) {
     if (ch == '.') {
       normalized.push_back('_');
       continue;
@@ -40,11 +40,11 @@ bool event_matches(std::string_view hook_event, std::string_view runtime_event) 
   return normalized_event_name(hook_event) == normalized_event_name(runtime_event);
 }
 
-bool contains(const std::vector<std::string>& values, std::string_view value) {
+bool contains(std::vector<std::string> const& values, std::string_view value) {
   return std::ranges::find(values, value) != values.end();
 }
 
-std::string observation_key(const ava::plugin::PluginManifest& manifest, std::string_view event) {
+std::string observation_key(ava::plugin::PluginManifest const& manifest, std::string_view event) {
   return manifest.id + "\n" + std::string(event);
 }
 
@@ -52,13 +52,13 @@ class PluginEventObserverState final {
  public:
   explicit PluginEventObserverState(PluginEventObserverOptions options) : options_(std::move(options)) {}
 
-  void observe(const RuntimeEvent& event) {
+  void observe(RuntimeEvent const& event) {
     ensure_loaded();
     if (hooks_.empty()) return;
 
-    const auto event_name = to_string(event.type);
-    const auto payload = to_event_envelope(event).payload_json;
-    for (const auto& binding : hooks_) {
+    auto const event_name = to_string(event.type);
+    auto const payload = to_event_envelope(event).payload_json;
+    for (auto const& binding : hooks_) {
       if (!event_matches(binding.hook.event, event_name)) continue;
       if (!ensure_launch_permission(binding.manifest)) continue;
       if (!ensure_observe_permission(binding.manifest, binding.hook.event)) continue;
@@ -78,7 +78,7 @@ class PluginEventObserverState final {
   }
 
  private:
-  void notify_failure(const PluginEventHookBinding& binding, const ava::core::Error& error) const {
+  void notify_failure(PluginEventHookBinding const& binding, ava::core::Error const& error) const {
     if (!options_.hook_failure_sink) return;
     try {
       options_.hook_failure_sink(binding.manifest.id, binding.hook.event, error);
@@ -103,9 +103,9 @@ class PluginEventObserverState final {
 
     auto diagnostics =
         ava::plugin::collect_plugin_diagnostics(discovery_options, enablement_file, options_.workspace_dir);
-    for (const auto& status : diagnostics.plugins) {
+    for (auto const& status : diagnostics.plugins) {
       if (!status.enabled) continue;
-      for (const auto& hook : status.plugin.manifest.contributes.event_hooks) {
+      for (auto const& hook : status.plugin.manifest.contributes.event_hooks) {
         hooks_.push_back(PluginEventHookBinding{.manifest = status.plugin.manifest, .hook = hook});
       }
     }
@@ -120,11 +120,11 @@ class PluginEventObserverState final {
                                    .current_tool_name = std::string(tool_name)};
   }
 
-  bool ensure_launch_permission(const ava::plugin::PluginManifest& manifest) {
+  bool ensure_launch_permission(ava::plugin::PluginManifest const& manifest) {
     if (contains(launch_allowed_plugins_, manifest.id)) return true;
     if (contains(launch_denied_plugins_, manifest.id)) return false;
 
-    const auto context = permission_context("plugin_event_observe");
+    auto const context = permission_context("plugin_event_observe");
     auto permission =
         ava::tools::ensure_permission(context, ava::permissions::Operation::PluginExecute, manifest.path, manifest.id,
                                       "plugin_event_observe", "plugin event hook launch requires permission");
@@ -136,13 +136,13 @@ class PluginEventObserverState final {
     return false;
   }
 
-  bool ensure_observe_permission(const ava::plugin::PluginManifest& manifest, std::string_view event) {
-    const auto key = observation_key(manifest, event);
+  bool ensure_observe_permission(ava::plugin::PluginManifest const& manifest, std::string_view event) {
+    auto const key = observation_key(manifest, event);
     if (contains(observe_allowed_, key)) return true;
     if (contains(observe_denied_, key)) return false;
 
-    const auto context = permission_context("plugin_event_observe");
-    const auto command = manifest.id + ":" + std::string(event);
+    auto const context = permission_context("plugin_event_observe");
+    auto const command = manifest.id + ":" + std::string(event);
     auto permission =
         ava::tools::ensure_permission(context, ava::permissions::Operation::PluginEventObserve, manifest.path, command,
                                       "plugin_event_observe", "plugin event observation requires permission");
@@ -164,7 +164,7 @@ class PluginEventObserverState final {
 };
 
 ava::core::VoidResult append_permission_decision(ava::session::SessionStore& store,
-                                                 const ava::tools::PermissionAuditEvent& event) {
+                                                 ava::tools::PermissionAuditEvent const& event) {
   return store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                  .parent_id = "",
                                                  .type = ava::session::EntryType::PermissionDecision,
@@ -185,7 +185,7 @@ PluginEventObserverOptions plugin_event_observer_options(RuntimeSession& session
       .mode = session.mode,
       .permission_resolver = std::move(permission_resolver),
       .permission_audit_sink = [&store = session.store,
-                                session_mutex](const ava::tools::PermissionAuditEvent& event) -> ava::core::VoidResult {
+                                session_mutex](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
         if (session_mutex) {
           std::lock_guard lock(*session_mutex);
           return append_permission_decision(store, event);
@@ -196,7 +196,7 @@ PluginEventObserverOptions plugin_event_observer_options(RuntimeSession& session
 
 RuntimeEventSink make_plugin_event_observer_sink(PluginEventObserverOptions options, RuntimeEventSink next) {
   auto state = std::make_shared<PluginEventObserverState>(std::move(options));
-  return [state = std::move(state), next = std::move(next)](const RuntimeEvent& event) -> ava::core::VoidResult {
+  return [state = std::move(state), next = std::move(next)](RuntimeEvent const& event) -> ava::core::VoidResult {
     state->observe(event);
     return emit_event(next, event);
   };

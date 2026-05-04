@@ -45,7 +45,7 @@ ToolMetadata RegisteredToolMetadata::view() const noexcept {
                                                 : std::nullopt};
 }
 
-RegisteredToolMetadata own_tool_metadata(const ToolMetadata& metadata) {
+RegisteredToolMetadata own_tool_metadata(ToolMetadata const& metadata) {
   return RegisteredToolMetadata{
       .name = std::string(metadata.name),
       .description = std::string(metadata.description),
@@ -83,7 +83,7 @@ ava::core::VoidResult ToolRegistry::register_tool(RegisteredTool tool) {
     error.with_context("source_id", tool.source_id);
     return std::unexpected(std::move(error));
   }
-  const auto schema_name = tool_name_from_schema(tool.metadata.schema_json);
+  auto const schema_name = tool_name_from_schema(tool.metadata.schema_json);
   if (!schema_name || *schema_name != tool.metadata.name) {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                   "tool registry schema name must match metadata name");
@@ -103,28 +103,28 @@ ava::core::VoidResult ToolRegistry::register_tool(RegisteredTool tool) {
   return {};
 }
 
-const RegisteredTool* ToolRegistry::find(std::string_view name) const noexcept {
-  const auto it =
-      std::ranges::find_if(tools_, [name](const RegisteredTool& tool) { return tool.metadata.name == name; });
+RegisteredTool const* ToolRegistry::find(std::string_view name) const noexcept {
+  auto const it =
+      std::ranges::find_if(tools_, [name](RegisteredTool const& tool) { return tool.metadata.name == name; });
   if (it == tools_.end()) return nullptr;
   return &*it;
 }
 
-std::span<const RegisteredTool> ToolRegistry::entries() const noexcept {
-  return std::span<const RegisteredTool>(tools_.data(), tools_.size());
+std::span<RegisteredTool const> ToolRegistry::entries() const noexcept {
+  return std::span<RegisteredTool const>(tools_.data(), tools_.size());
 }
 
 std::vector<ToolMetadata> ToolRegistry::metadata() const {
   std::vector<ToolMetadata> result;
   result.reserve(tools_.size());
-  for (const auto& tool : tools_) result.push_back(tool.metadata.view());
+  for (auto const& tool : tools_) result.push_back(tool.metadata.view());
   return result;
 }
 
-std::vector<std::string> ToolRegistry::tool_schemas_json(const ava::tools::ToolContext& context) const {
+std::vector<std::string> ToolRegistry::tool_schemas_json(ava::tools::ToolContext const& context) const {
   std::vector<std::string> schemas;
   schemas.reserve(tools_.size());
-  for (const auto& tool : tools_) {
+  for (auto const& tool : tools_) {
     if (tool.requires_lsp_diagnostics && context.lsp_diagnostics_provider == nullptr) continue;
     schemas.emplace_back(tool.metadata.schema_json);
   }

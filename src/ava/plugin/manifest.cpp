@@ -198,14 +198,13 @@ ava::core::Result<PluginContributions> parse_contributions(std::string_view mani
       }
       auto path = ava::core::json::string_field(resource, "path");
       if (!path || !is_valid_resource_path(*path)) {
-        return std::unexpected(manifest_error("plugin " + std::string(label) +
-                                              " contribution requires a safe relative path")
-                                   .with_context(std::string(label), *name));
+        return std::unexpected(
+            manifest_error("plugin " + std::string(label) + " contribution requires a safe relative path")
+                .with_context(std::string(label), *name));
       }
       auto description = ava::core::json::string_field(resource, "description").value_or("");
-      resources.push_back(PluginResourceContribution{.name = std::move(*name),
-                                                     .description = std::move(description),
-                                                     .path = std::move(*path)});
+      resources.push_back(PluginResourceContribution{
+          .name = std::move(*name), .description = std::move(description), .path = std::move(*path)});
     }
     return resources;
   };

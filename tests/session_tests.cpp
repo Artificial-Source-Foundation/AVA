@@ -73,11 +73,11 @@ void test_session_store_round_trip() {
   });
   expect(append.has_value(), "session entry appends");
 
-  struct stat session_stat {};
+  struct stat session_stat{};
   if (stat(store->session_path().c_str(), &session_stat) == 0) {
     expect((session_stat.st_mode & 0777) == 0600, "session file is owner read/write only");
   }
-  struct stat session_dir_stat {};
+  struct stat session_dir_stat{};
   const auto session_dir = store->session_path().parent_path();
   if (stat(session_dir.c_str(), &session_dir_stat) == 0) {
     expect((session_dir_stat.st_mode & 0777) == 0700, "session directory is owner-only");

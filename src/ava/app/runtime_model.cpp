@@ -94,8 +94,8 @@ ava::core::VoidResult validate_model_switch_history(const RuntimeSession& sessio
 
 }  // namespace
 
-std::optional<ava::config::ModelInfo> latest_persisted_model(
-    const ava::config::ModelRegistry& registry, const std::vector<ava::session::SessionEntry>& entries) {
+std::optional<ava::config::ModelInfo> latest_persisted_model(const ava::config::ModelRegistry& registry,
+                                                             const std::vector<ava::session::SessionEntry>& entries) {
   std::optional<std::string> provider_id;
   std::optional<std::string> model_id;
   std::string display_name;
@@ -184,8 +184,8 @@ ava::core::Result<bool> switch_runtime_model(RuntimeSession& session, ava::confi
   auto compatible = runtime::validate_model_switch_history(session, model);
   if (!compatible) return std::unexpected(std::move(compatible.error()));
 
-  auto prompt_state =
-      runtime::load_runtime_prompt_state(session.paths, model, session.mode, session.workspace_dir, session.current_dir);
+  auto prompt_state = runtime::load_runtime_prompt_state(session.paths, model, session.mode, session.workspace_dir,
+                                                         session.current_dir);
   if (!prompt_state) return std::unexpected(std::move(prompt_state.error()));
 
   const auto previous = session.model;

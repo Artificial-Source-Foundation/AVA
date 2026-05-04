@@ -38,15 +38,15 @@ void add_completion(tui::SlashCommandItem& item, std::size_t argument_index, std
                     std::vector<std::string> previous_args = {}, bool append_space = true, bool enabled = true,
                     std::string disabled_reason = {}) {
   if (value.empty() || completion_exists(item.argument_completions, argument_index, previous_args, value)) return;
-  item.argument_completions.push_back(tui::SlashCommandArgumentCompletion{
-      .value = std::move(value),
-      .description = std::move(description),
-      .category = std::move(category),
-      .required_previous_args = std::move(previous_args),
-      .argument_index = argument_index,
-      .append_space = append_space,
-      .enabled = enabled,
-      .disabled_reason = std::move(disabled_reason)});
+  item.argument_completions.push_back(
+      tui::SlashCommandArgumentCompletion{.value = std::move(value),
+                                          .description = std::move(description),
+                                          .category = std::move(category),
+                                          .required_previous_args = std::move(previous_args),
+                                          .argument_index = argument_index,
+                                          .append_space = append_space,
+                                          .enabled = enabled,
+                                          .disabled_reason = std::move(disabled_reason)});
 }
 
 std::optional<std::size_t> find_item_index(const std::vector<tui::SlashCommandItem>& items, std::string_view command) {
@@ -145,8 +145,8 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
   if (auto index = find_item_index(items, "/context")) {
     auto& item = items[*index];
     for (const auto& source : session.context_sources) {
-      add_completion(item, 0, source.path.generic_string(), std::to_string(source.byte_count) + " bytes", "Context",
-                     {}, false);
+      add_completion(item, 0, source.path.generic_string(), std::to_string(source.byte_count) + " bytes", "Context", {},
+                     false);
     }
   }
 
@@ -165,9 +165,8 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     }
   }
 
-  const auto diagnostics =
-      ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session),
-                                              session.workspace_dir);
+  const auto diagnostics = ava::plugin::collect_plugin_diagnostics(
+      plugin_discovery_options(session), plugin_enablement_file(session), session.workspace_dir);
   if (auto index = find_item_index(items, "/plugins")) {
     auto& item = items[*index];
     for (const auto& subcommand :

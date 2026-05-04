@@ -42,15 +42,15 @@ struct ProviderCredential {
 [[nodiscard]] ava::core::VoidResult store_openai_credential(const XdgPaths& paths, const OpenAICredential& credential);
 [[nodiscard]] bool is_openai_credential_expired(const OpenAICredential& credential, long long now_seconds);
 [[nodiscard]] ava::core::Result<std::string> openai_access_token_for_request(const OpenAICredential& credential,
-                                                                              long long now_seconds);
+                                                                             long long now_seconds);
 [[nodiscard]] ava::core::Result<std::string> openai_access_token_for_request(const OpenAICredential& credential);
 [[nodiscard]] ava::core::Result<OpenAICredential> openai_credential_for_request(const XdgPaths& paths,
                                                                                 const OpenAICredential& credential,
                                                                                 ava::provider::Transport& transport,
                                                                                 long long now_seconds);
 [[nodiscard]] ava::core::Result<OpenAICredential> openai_credential_for_request(const XdgPaths& paths,
-                                                                                 const OpenAICredential& credential,
-                                                                                 ava::provider::Transport& transport);
+                                                                                const OpenAICredential& credential,
+                                                                                ava::provider::Transport& transport);
 [[nodiscard]] ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(
     const XdgPaths& paths, std::string_view provider_id, ava::provider::Transport& transport);
 [[nodiscard]] ava::core::VoidResult store_provider_credential(const XdgPaths& paths,

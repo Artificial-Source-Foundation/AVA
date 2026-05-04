@@ -258,7 +258,9 @@ int main(int argc, char** argv) {
     file << ntohs(address.sin_port) << '\n';
   }
 
-  { std::ofstream file(request_log, std::ios::binary | std::ios::trunc); }
+  {
+    std::ofstream file(request_log, std::ios::binary | std::ios::trunc);
+  }
 
   for (int request_index = 0; request_index < request_count; ++request_index) {
     Fd client(::accept(server.get(), nullptr, nullptr));

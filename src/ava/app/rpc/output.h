@@ -12,10 +12,8 @@
 namespace ava::app::rpc {
 
 [[nodiscard]] ava::core::VoidResult write_record(RpcOutput& output, std::string_view record);
-[[nodiscard]] ava::core::VoidResult write_success(RpcOutput& output, std::string_view id,
-                                                  std::string_view result_json);
-[[nodiscard]] ava::core::VoidResult write_error(RpcOutput& output, std::string_view id,
-                                                const ava::core::Error& error);
+[[nodiscard]] ava::core::VoidResult write_success(RpcOutput& output, std::string_view id, std::string_view result_json);
+[[nodiscard]] ava::core::VoidResult write_error(RpcOutput& output, std::string_view id, const ava::core::Error& error);
 
 void subscribe_event_envelope_writer(EventBus& bus, RpcOutput& output);
 [[nodiscard]] EventEnvelopeContext rpc_event_context(std::string_view request_id);
@@ -26,11 +24,10 @@ void subscribe_event_envelope_writer(EventBus& bus, RpcOutput& output);
 
 [[nodiscard]] ava::core::VoidResult write_queue_event(RpcOutput& output, const RuntimeSession& session,
                                                       std::mutex& session_mutex, std::string_view name,
-                                                      const QueuedRpcMessage& queued,
-                                                      std::string_view reason = {});
+                                                      const QueuedRpcMessage& queued, std::string_view reason = {});
 [[nodiscard]] ava::core::VoidResult write_skipped_queue_events(RpcOutput& output, const RuntimeSession& session,
-                                                              std::mutex& session_mutex,
-                                                              const ClearedRpcQueues& cleared,
-                                                              std::string_view reason);
+                                                               std::mutex& session_mutex,
+                                                               const ClearedRpcQueues& cleared,
+                                                               std::string_view reason);
 
 }  // namespace ava::app::rpc

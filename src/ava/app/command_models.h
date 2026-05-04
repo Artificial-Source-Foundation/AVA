@@ -6,7 +6,6 @@
 
 namespace ava::app {
 
-[[nodiscard]] ava::core::Result<CommandResult> run_models_command(RuntimeSession& session,
-                                                                  std::string_view query = {});
+[[nodiscard]] ava::core::Result<CommandResult> run_models_command(RuntimeSession& session, std::string_view query = {});
 
 }  // namespace ava::app

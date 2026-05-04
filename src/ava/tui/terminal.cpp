@@ -21,13 +21,13 @@ namespace ava::tui {
 namespace {
 
 volatile sig_atomic_t g_terminal_signal = 0;
-struct sigaction g_curses_previous_sigint {};
-struct sigaction g_curses_previous_sigterm {};
+struct sigaction g_curses_previous_sigint{};
+struct sigaction g_curses_previous_sigterm{};
 
 void mark_terminal_signal(int signal_number) { g_terminal_signal = signal_number; }
 
 void install_curses_signal_flags() {
-  struct sigaction action {};
+  struct sigaction action{};
   action.sa_handler = mark_terminal_signal;
   sigemptyset(&action.sa_mask);
   sigaddset(&action.sa_mask, SIGINT);

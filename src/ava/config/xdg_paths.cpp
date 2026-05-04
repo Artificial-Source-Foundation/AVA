@@ -1,10 +1,11 @@
 #include "ava/config/xdg_paths.h"
 
-#include <cstdlib>
 #include <pwd.h>
-#include <string_view>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include <cstdlib>
+#include <string_view>
 
 namespace ava::config {
 namespace {

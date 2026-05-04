@@ -129,7 +129,7 @@ class TempBodyFile {
 class ScopedSignalIgnore {
  public:
   explicit ScopedSignalIgnore(int signal) : signal_(signal) {
-    struct sigaction action {};
+    struct sigaction action{};
     action.sa_handler = SIG_IGN;
     sigemptyset(&action.sa_mask);
     active_ = sigaction(signal_, &action, &previous_) == 0;
@@ -143,7 +143,7 @@ class ScopedSignalIgnore {
  private:
   int signal_ = 0;
   bool active_ = false;
-  struct sigaction previous_ {};
+  struct sigaction previous_{};
 };
 
 ava::core::Result<std::array<int, 2>> make_pipe() {

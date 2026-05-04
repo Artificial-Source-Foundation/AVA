@@ -5,20 +5,20 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <array>
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
-#include <cctype>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "ava/core/json.h"
 #include "ava/config/openai_oauth.h"
+#include "ava/core/json.h"
 
 namespace ava::config {
 namespace {
@@ -58,10 +58,10 @@ std::optional<ProviderCredential> provider_credential_from_env(std::string_view 
     const char* value = std::getenv(key.c_str());
     if (value == nullptr || std::string_view(value).empty()) continue;
     return ProviderCredential{.provider_id = std::string(provider_id),
-                               .access_token = value,
-                               .credential_type = key.ends_with("_OAUTH_TOKEN") ? "oauth" : "api_key",
-                               .account_id = "",
-                               .source = "env:" + key};
+                              .access_token = value,
+                              .credential_type = key.ends_with("_OAUTH_TOKEN") ? "oauth" : "api_key",
+                              .account_id = "",
+                              .source = "env:" + key};
   }
   return std::nullopt;
 }
@@ -95,8 +95,7 @@ struct CandidateRead {
   std::optional<std::string> content;
 };
 
-ava::core::Result<CandidateRead> read_text_if_exists(const std::filesystem::path& path,
-                                                     bool explicit_ava_auth_file,
+ava::core::Result<CandidateRead> read_text_if_exists(const std::filesystem::path& path, bool explicit_ava_auth_file,
                                                      bool allow_broad_permissions = false);
 
 struct AuthMember {
@@ -139,8 +138,7 @@ std::string errno_message() { return std::strerror(errno); }
 
 bool is_symlink_mode(mode_t mode) { return S_ISLNK(mode); }
 
-ava::core::Error auth_file_error(ava::core::ErrorCategory category,
-                                 std::string message,
+ava::core::Error auth_file_error(ava::core::ErrorCategory category, std::string message,
                                  const std::filesystem::path& path) {
   auto error = ava::core::Error(category, std::move(message));
   error.with_context("path", path.string());
@@ -148,9 +146,8 @@ ava::core::Error auth_file_error(ava::core::ErrorCategory category,
 }
 
 bool has_error_context(const ava::core::Error& error, std::string_view key, std::string_view value) {
-  return std::ranges::any_of(error.context(), [&](const ava::core::ErrorContext& item) {
-    return item.key == key && item.value == value;
-  });
+  return std::ranges::any_of(
+      error.context(), [&](const ava::core::ErrorContext& item) { return item.key == key && item.value == value; });
 }
 
 bool is_json_ws(char ch) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; }
@@ -159,16 +156,13 @@ void skip_json_ws(std::string_view text, std::size_t& index) {
   while (index < text.size() && is_json_ws(text[index])) ++index;
 }
 
-bool is_hex_digit(char ch) {
-  return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
-}
+bool is_hex_digit(char ch) { return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F'); }
 
-ava::core::Result<std::string> parse_auth_member_key(std::string_view text,
-                                                      std::size_t& index,
-                                                      const std::filesystem::path& path) {
+ava::core::Result<std::string> parse_auth_member_key(std::string_view text, std::size_t& index,
+                                                     const std::filesystem::path& path) {
   if (index >= text.size() || text[index] != '"') {
-    return std::unexpected(auth_file_error(ava::core::ErrorCategory::InvalidArgument,
-                                           "auth file member key must be a JSON string", path));
+    return std::unexpected(
+        auth_file_error(ava::core::ErrorCategory::InvalidArgument, "auth file member key must be a JSON string", path));
   }
   ++index;
   std::string key;
@@ -227,8 +221,8 @@ ava::core::Result<std::string> parse_auth_member_key(std::string_view text,
     }
     key.push_back(ch);
   }
-  return std::unexpected(auth_file_error(ava::core::ErrorCategory::InvalidArgument,
-                                         "auth file member key is unterminated", path));
+  return std::unexpected(
+      auth_file_error(ava::core::ErrorCategory::InvalidArgument, "auth file member key is unterminated", path));
 }
 
 std::optional<std::size_t> raw_json_value_end(std::string_view text, std::size_t start) {
@@ -299,8 +293,8 @@ ava::core::Result<std::vector<AuthMember>> parse_auth_members(std::string_view t
   skip_json_ws(text, index);
   if (index >= text.size()) return members;
   if (text[index] != '{') {
-    return std::unexpected(auth_file_error(ava::core::ErrorCategory::InvalidArgument,
-                                           "auth file must be a JSON object", path));
+    return std::unexpected(
+        auth_file_error(ava::core::ErrorCategory::InvalidArgument, "auth file must be a JSON object", path));
   }
   ++index;
   skip_json_ws(text, index);
@@ -316,16 +310,16 @@ ava::core::Result<std::vector<AuthMember>> parse_auth_members(std::string_view t
     if (!key) return std::unexpected(std::move(key.error()));
     skip_json_ws(text, index);
     if (index >= text.size() || text[index] != ':') {
-      return std::unexpected(auth_file_error(ava::core::ErrorCategory::InvalidArgument,
-                                             "auth file member is missing a colon", path));
+      return std::unexpected(
+          auth_file_error(ava::core::ErrorCategory::InvalidArgument, "auth file member is missing a colon", path));
     }
     ++index;
     skip_json_ws(text, index);
     const auto value_start = index;
     const auto value_end = raw_json_value_end(text, value_start);
     if (!value_end || *value_end <= value_start) {
-      return std::unexpected(auth_file_error(ava::core::ErrorCategory::InvalidArgument,
-                                             "auth file member has an invalid value", path));
+      return std::unexpected(
+          auth_file_error(ava::core::ErrorCategory::InvalidArgument, "auth file member has an invalid value", path));
     }
     members.push_back(AuthMember{.key = std::move(*key),
                                  .raw_value = std::string(text.substr(value_start, *value_end - value_start))});
@@ -344,11 +338,11 @@ ava::core::Result<std::vector<AuthMember>> parse_auth_members(std::string_view t
       return std::unexpected(auth_file_error(ava::core::ErrorCategory::InvalidArgument,
                                              "auth file has trailing content after JSON object", path));
     }
-    return std::unexpected(auth_file_error(ava::core::ErrorCategory::InvalidArgument,
-                                           "auth file object has an invalid separator", path));
+    return std::unexpected(
+        auth_file_error(ava::core::ErrorCategory::InvalidArgument, "auth file object has an invalid separator", path));
   }
-  return std::unexpected(auth_file_error(ava::core::ErrorCategory::InvalidArgument,
-                                         "auth file JSON object is unterminated", path));
+  return std::unexpected(
+      auth_file_error(ava::core::ErrorCategory::InvalidArgument, "auth file JSON object is unterminated", path));
 }
 
 ava::core::VoidResult ensure_auth_directory(const XdgPaths& paths) {
@@ -380,12 +374,12 @@ ava::core::VoidResult reject_unsafe_auth_replace_target(const std::filesystem::p
   }
   if (!std::filesystem::exists(status)) return {};
   if (std::filesystem::is_symlink(status)) {
-    return std::unexpected(auth_file_error(ava::core::ErrorCategory::PermissionDenied,
-                                           "auth file is a symbolic link", path));
+    return std::unexpected(
+        auth_file_error(ava::core::ErrorCategory::PermissionDenied, "auth file is a symbolic link", path));
   }
   if (!std::filesystem::is_regular_file(status)) {
-    return std::unexpected(auth_file_error(ava::core::ErrorCategory::PermissionDenied,
-                                           "auth file is not a regular file", path));
+    return std::unexpected(
+        auth_file_error(ava::core::ErrorCategory::PermissionDenied, "auth file is not a regular file", path));
   }
   return {};
 }
@@ -438,15 +432,15 @@ ava::core::Result<ScopedFd> acquire_auth_lock(const XdgPaths& paths) {
     return std::unexpected(std::move(error));
   }
 
-  struct stat opened_st {};
+  struct stat opened_st{};
   if (::fstat(fd.get(), &opened_st) != 0) {
     auto error = auth_file_error(ava::core::ErrorCategory::Io, "failed to inspect auth lock file", lock_path);
     error.with_context("cause", errno_message());
     return std::unexpected(std::move(error));
   }
   if (!S_ISREG(opened_st.st_mode)) {
-    return std::unexpected(auth_file_error(ava::core::ErrorCategory::PermissionDenied,
-                                           "auth lock file is not regular", lock_path));
+    return std::unexpected(
+        auth_file_error(ava::core::ErrorCategory::PermissionDenied, "auth lock file is not regular", lock_path));
   }
   if (::fchmod(fd.get(), S_IRUSR | S_IWUSR) != 0) {
     auto error = auth_file_error(ava::core::ErrorCategory::Io, "failed to set auth lock permissions", lock_path);
@@ -478,15 +472,15 @@ ava::core::VoidResult write_auth_file_atomic(const std::filesystem::path& path, 
       return std::unexpected(std::move(error));
     }
     TempPathCleanup cleanup(temp_path);
-    struct stat opened_st {};
+    struct stat opened_st{};
     if (::fstat(fd.get(), &opened_st) != 0) {
       auto error = auth_file_error(ava::core::ErrorCategory::Io, "failed to inspect temporary auth file", temp_path);
       error.with_context("cause", errno_message());
       return std::unexpected(std::move(error));
     }
     if (!S_ISREG(opened_st.st_mode)) {
-      return std::unexpected(auth_file_error(ava::core::ErrorCategory::PermissionDenied,
-                                             "temporary auth file is not regular", temp_path));
+      return std::unexpected(
+          auth_file_error(ava::core::ErrorCategory::PermissionDenied, "temporary auth file is not regular", temp_path));
     }
     if (::fchmod(fd.get(), S_IRUSR | S_IWUSR) != 0) {
       auto error = auth_file_error(ava::core::ErrorCategory::Io, "failed to set auth file permissions", temp_path);
@@ -504,8 +498,8 @@ ava::core::VoidResult write_auth_file_atomic(const std::filesystem::path& path, 
     static_cast<void>(fsync_parent_dir(path));
     return {};
   }
-  return std::unexpected(auth_file_error(ava::core::ErrorCategory::Io,
-                                        "failed to create unique temporary auth file", path));
+  return std::unexpected(
+      auth_file_error(ava::core::ErrorCategory::Io, "failed to create unique temporary auth file", path));
 }
 
 bool is_valid_provider_id(std::string_view provider_id) {
@@ -530,8 +524,8 @@ ava::core::Result<std::string> provider_credential_object_json(const ProviderCre
     return std::unexpected(std::move(error));
   }
   if (credential.credential_type == "api_key") {
-    return "{\n    \"type\": \"api_key\",\n    \"api_key\": \"" +
-           ava::core::json::escape(credential.access_token) + "\"\n  }";
+    return "{\n    \"type\": \"api_key\",\n    \"api_key\": \"" + ava::core::json::escape(credential.access_token) +
+           "\"\n  }";
   }
   if (credential.credential_type == "oauth") {
     std::string body = "{\n    \"type\": \"oauth\",\n    \"access_token\": \"" +
@@ -548,8 +542,7 @@ ava::core::Result<std::string> provider_credential_object_json(const ProviderCre
   return std::unexpected(std::move(error));
 }
 
-ava::core::VoidResult store_provider_object(const XdgPaths& paths,
-                                            std::string_view provider_id,
+ava::core::VoidResult store_provider_object(const XdgPaths& paths, std::string_view provider_id,
                                             std::string raw_object) {
   if (auto ensured = ensure_auth_directory(paths); !ensured) return ensured;
   auto lock = acquire_auth_lock(paths);
@@ -590,8 +583,7 @@ ava::core::VoidResult store_provider_object(const XdgPaths& paths,
 }
 
 ava::core::Result<CandidateRead> missing_or_ignored_auth_file(const std::filesystem::path& path,
-                                                              bool explicit_ava_auth_file,
-                                                              std::string_view message,
+                                                              bool explicit_ava_auth_file, std::string_view message,
                                                               std::string_view cause = {}) {
   if (!explicit_ava_auth_file) return CandidateRead{};
   auto error = auth_file_error(ava::core::ErrorCategory::Io, std::string(message), path);
@@ -599,8 +591,7 @@ ava::core::Result<CandidateRead> missing_or_ignored_auth_file(const std::filesys
   return std::unexpected(std::move(error));
 }
 
-ava::core::Result<CandidateRead> read_text_if_exists(const std::filesystem::path& path,
-                                                     bool explicit_ava_auth_file,
+ava::core::Result<CandidateRead> read_text_if_exists(const std::filesystem::path& path, bool explicit_ava_auth_file,
                                                      bool allow_broad_permissions) {
   std::error_code status_error;
   const auto status = std::filesystem::symlink_status(path, status_error);
@@ -630,7 +621,7 @@ ava::core::Result<CandidateRead> read_text_if_exists(const std::filesystem::path
     return missing_or_ignored_auth_file(path, explicit_ava_auth_file, "failed to open auth file", errno_message());
   }
 
-  struct stat st {};
+  struct stat st{};
   if (::fstat(fd.get(), &st) != 0) {
     return missing_or_ignored_auth_file(path, explicit_ava_auth_file, "failed to inspect opened auth file",
                                         errno_message());
@@ -642,8 +633,8 @@ ava::core::Result<CandidateRead> read_text_if_exists(const std::filesystem::path
   }
   if (st.st_uid != ::geteuid()) {
     if (!explicit_ava_auth_file) return CandidateRead{};
-    auto error = auth_file_error(ava::core::ErrorCategory::PermissionDenied,
-                                 "auth file is not owned by the current user", path);
+    auto error =
+        auth_file_error(ava::core::ErrorCategory::PermissionDenied, "auth file is not owned by the current user", path);
     return std::unexpected(std::move(error));
   }
   if (!allow_broad_permissions && (st.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
@@ -662,10 +653,9 @@ ava::core::Result<CandidateRead> read_text_if_exists(const std::filesystem::path
   }
 
 #ifndef O_NOFOLLOW
-  struct stat path_st {};
+  struct stat path_st{};
   if (::lstat(path.c_str(), &path_st) != 0) {
-    return missing_or_ignored_auth_file(path, explicit_ava_auth_file, "failed to inspect auth file",
-                                        errno_message());
+    return missing_or_ignored_auth_file(path, explicit_ava_auth_file, "failed to inspect auth file", errno_message());
   }
   if (is_symlink_mode(path_st.st_mode) || path_st.st_dev != st.st_dev || path_st.st_ino != st.st_ino) {
     if (!explicit_ava_auth_file) return CandidateRead{};
@@ -715,8 +705,7 @@ std::optional<std::string> generic_api_key_from(std::string_view scope) {
   return key;
 }
 
-std::optional<ProviderCredential> parse_provider_credential(std::string_view content,
-                                                            std::string_view provider_id,
+std::optional<ProviderCredential> parse_provider_credential(std::string_view content, std::string_view provider_id,
                                                             const std::filesystem::path& source_path) {
   const auto provider = ava::core::json::object_field(content, provider_id);
   if (!provider) return std::nullopt;
@@ -839,12 +828,11 @@ ava::core::Result<std::optional<OpenAICredential>> load_openai_credential(const 
 ava::core::VoidResult store_openai_credential(const XdgPaths& paths, const OpenAICredential& credential) {
   std::string body;
   if (credential.type == OpenAICredentialType::ApiKey) {
-    body = "{\n    \"type\": \"api_key\",\n    \"api_key\": \"" +
-           ava::core::json::escape(credential.access_token) + "\"\n  }";
+    body = "{\n    \"type\": \"api_key\",\n    \"api_key\": \"" + ava::core::json::escape(credential.access_token) +
+           "\"\n  }";
   } else {
-    body = "{\n    \"type\": \"oauth\",\n    \"access_token\": \"" +
-           ava::core::json::escape(credential.access_token) + "\",\n    \"refresh_token\": \"" +
-           ava::core::json::escape(credential.refresh_token) +
+    body = "{\n    \"type\": \"oauth\",\n    \"access_token\": \"" + ava::core::json::escape(credential.access_token) +
+           "\",\n    \"refresh_token\": \"" + ava::core::json::escape(credential.refresh_token) +
            "\",\n    \"expires_at\": " + std::to_string(credential.expires_at);
     if (!credential.account_id.empty()) {
       body += ",\n    \"account_id\": \"" + ava::core::json::escape(credential.account_id) + "\"";
@@ -924,8 +912,8 @@ ava::core::Result<OpenAICredential> openai_credential_for_request(const XdgPaths
 }
 
 ava::core::Result<OpenAICredential> openai_credential_for_request(const XdgPaths& paths,
-                                                                   const OpenAICredential& credential,
-                                                                   ava::provider::Transport& transport) {
+                                                                  const OpenAICredential& credential,
+                                                                  ava::provider::Transport& transport) {
   return openai_credential_for_request(paths, credential, transport, unix_time_seconds());
 }
 
@@ -943,11 +931,12 @@ ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_req
       if (credential->type == OpenAICredentialType::OAuth && account_id.empty()) {
         account_id = openai_oauth_account_id_from_token(credential->access_token).value_or("");
       }
-      return ProviderCredential{.provider_id = "openai",
-                                .access_token = *access_token,
-                                .credential_type = credential->type == OpenAICredentialType::OAuth ? "oauth" : "api_key",
-                                .account_id = std::move(account_id),
-                                .source = credential->source_path.empty() ? "auth_file" : credential->source_path.string()};
+      return ProviderCredential{
+          .provider_id = "openai",
+          .access_token = *access_token,
+          .credential_type = credential->type == OpenAICredentialType::OAuth ? "oauth" : "api_key",
+          .account_id = std::move(account_id),
+          .source = credential->source_path.empty() ? "auth_file" : credential->source_path.string()};
     }
   } else {
     auto stored = load_provider_credential_from_auth_file(paths, provider_id);

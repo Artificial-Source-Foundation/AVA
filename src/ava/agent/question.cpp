@@ -310,8 +310,8 @@ ava::core::Result<QuestionPrompt> parse_question_prompt(std::string_view argumen
 }
 
 std::string serialize_question_answer_result(const QuestionPrompt& prompt, const QuestionAnswer& answer) {
-  std::string text = "{\"tool\":\"question\",\"ok\":true,\"question\":\"" +
-                     ava::core::json::escape(prompt.question) + "\",\"multiple\":" + json_bool(prompt.multiple) +
+  std::string text = "{\"tool\":\"question\",\"ok\":true,\"question\":\"" + ava::core::json::escape(prompt.question) +
+                     "\",\"multiple\":" + json_bool(prompt.multiple) +
                      ",\"allow_custom\":" + json_bool(prompt.allow_custom) + ",\"answer\":{\"selected_options\":[";
   for (std::size_t index = 0; index < answer.selected_options.size(); ++index) {
     if (index > 0) text += ',';

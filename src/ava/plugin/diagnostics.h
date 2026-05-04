@@ -28,7 +28,7 @@ struct PluginDiagnostics {
 };
 
 [[nodiscard]] PluginDiagnostics collect_plugin_diagnostics(const PluginDiscoveryOptions& options,
-                                                          const std::filesystem::path& enablement_file,
-                                                          const std::filesystem::path& workspace_root);
+                                                           const std::filesystem::path& enablement_file,
+                                                           const std::filesystem::path& workspace_root);
 
 }  // namespace ava::plugin

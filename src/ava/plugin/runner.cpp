@@ -60,7 +60,7 @@ class UniqueFd {
 class ScopedSignalIgnore {
  public:
   explicit ScopedSignalIgnore(int signal) : signal_(signal) {
-    struct sigaction action {};
+    struct sigaction action{};
     action.sa_handler = SIG_IGN;
     sigemptyset(&action.sa_mask);
     if (sigaction(signal_, &action, &previous_) == 0) installed_ = true;
@@ -77,7 +77,7 @@ class ScopedSignalIgnore {
 
  private:
   int signal_ = 0;
-  struct sigaction previous_ {};
+  struct sigaction previous_{};
   bool installed_ = false;
 };
 

@@ -26,6 +26,6 @@ struct WebFetchResult {
 };
 
 [[nodiscard]] ava::core::Result<WebFetchResult> webfetch(const ToolContext& context, std::string_view url,
-                                                        WebFetchOptions options = {});
+                                                         WebFetchOptions options = {});
 
 }  // namespace ava::tools

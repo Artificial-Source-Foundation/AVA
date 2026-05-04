@@ -90,10 +90,8 @@ ava::core::VoidResult append_if_present(std::vector<LoadedContextFile>& files, s
   if (!seen_paths.insert(normalized.string()).second) return {};
   auto content = read_file_limited(path, max_file_bytes);
   if (!content) return std::unexpected(content.error());
-  files.push_back(LoadedContextFile{.path = normalized,
-                                    .source_type = source_type,
-                                    .byte_count = content->size(),
-                                    .content = std::move(*content)});
+  files.push_back(LoadedContextFile{
+      .path = normalized, .source_type = source_type, .byte_count = content->size(), .content = std::move(*content)});
   return {};
 }
 
@@ -134,8 +132,8 @@ ava::core::Result<std::vector<LoadedContextFile>> load_context_files(const Conte
   std::set<std::string> seen_paths;
 
   for (const auto& dir : context_dirs_root_to_current(options.workspace_root, options.current_dir)) {
-    auto appended = append_if_present(files, seen_paths, dir / "AGENTS.md", ContextSourceType::Workspace,
-                                      options.max_file_bytes);
+    auto appended =
+        append_if_present(files, seen_paths, dir / "AGENTS.md", ContextSourceType::Workspace, options.max_file_bytes);
     if (!appended) return std::unexpected(appended.error());
   }
 

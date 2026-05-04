@@ -55,8 +55,7 @@ void append_diff_line(DiffPreview& preview, char prefix, std::string_view line, 
 }
 
 Alignment next_alignment(const std::vector<LogicalLine>& old_lines, const std::vector<LogicalLine>& new_lines,
-                         std::size_t old_start, std::size_t old_end, std::size_t new_start,
-                         std::size_t new_end) {
+                         std::size_t old_start, std::size_t old_end, std::size_t new_start, std::size_t new_end) {
   constexpr std::size_t kAlignmentLookahead = 64;
   const auto old_limit = std::min(old_end, old_start + kAlignmentLookahead);
   const auto new_limit = std::min(new_end, new_start + kAlignmentLookahead);

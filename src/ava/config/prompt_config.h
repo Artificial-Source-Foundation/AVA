@@ -14,11 +14,8 @@ struct PromptSelection {
   bool from_override = false;
 };
 
-[[nodiscard]] std::string builtin_prompt(std::string_view provider_id,
-                                         std::string_view family,
-                                         ava::agent::Mode mode);
-[[nodiscard]] ava::core::Result<PromptSelection> select_prompt(const XdgPaths& paths,
-                                                               const ModelInfo& model,
+[[nodiscard]] std::string builtin_prompt(std::string_view provider_id, std::string_view family, ava::agent::Mode mode);
+[[nodiscard]] ava::core::Result<PromptSelection> select_prompt(const XdgPaths& paths, const ModelInfo& model,
                                                                ava::agent::Mode mode);
 
 }  // namespace ava::config

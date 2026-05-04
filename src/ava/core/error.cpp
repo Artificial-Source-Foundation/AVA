@@ -4,8 +4,7 @@
 
 namespace ava::core {
 
-Error::Error(ErrorCategory category, std::string message)
-    : category_(category), message_(std::move(message)) {}
+Error::Error(ErrorCategory category, std::string message) : category_(category), message_(std::move(message)) {}
 
 ErrorCategory Error::category() const noexcept { return category_; }
 

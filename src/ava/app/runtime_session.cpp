@@ -1,9 +1,8 @@
-#include "ava/app/runtime.h"
-
 #include <filesystem>
 #include <utility>
 #include <vector>
 
+#include "ava/app/runtime.h"
 #include "ava/app/runtime_json.h"
 #include "ava/app/runtime_model.h"
 #include "ava/app/runtime_prompt.h"
@@ -90,14 +89,16 @@ ava::core::Result<RuntimeSession> open_runtime_session(const RuntimeOpenOptions&
   if (!created) {
     auto entries = store->load();
     if (!entries) return std::unexpected(std::move(entries.error()));
-    if (auto persisted_model = runtime::latest_persisted_model(*registry, *entries)) model = std::move(*persisted_model);
+    if (auto persisted_model = runtime::latest_persisted_model(*registry, *entries))
+      model = std::move(*persisted_model);
     loaded_entries = std::move(*entries);
   }
 
   std::optional<RuntimeReasoningSelection> reasoning;
   if (loaded_entries) reasoning = runtime::latest_persisted_reasoning(*loaded_entries, model);
 
-  auto prompt_state = runtime::load_runtime_prompt_state(options.paths, model, options.mode, workspace_dir, current_dir);
+  auto prompt_state =
+      runtime::load_runtime_prompt_state(options.paths, model, options.mode, workspace_dir, current_dir);
   if (!prompt_state) return std::unexpected(prompt_state.error());
 
   if (created) {

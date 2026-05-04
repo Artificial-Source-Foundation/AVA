@@ -57,8 +57,7 @@ struct PendingResolverState {
                                                              std::string_view correlation_id,
                                                              std::string_view decision);
 [[nodiscard]] ava::core::VoidResult resolve_question_reply(PendingResolverState& pending_state,
-                                                           std::string_view request_id,
-                                                           std::string_view correlation_id,
+                                                           std::string_view request_id, std::string_view correlation_id,
                                                            const std::optional<std::string>& answer,
                                                            const std::optional<std::string>& selected);
 

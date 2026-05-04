@@ -42,14 +42,13 @@ struct ManualCompactionRequest {
 [[nodiscard]] ava::core::Result<CompactionConfig> load_compaction_config(const ava::config::XdgPaths& paths);
 [[nodiscard]] std::size_t estimate_tokens(std::string_view text) noexcept;
 [[nodiscard]] std::size_t estimate_session_tokens(const std::vector<SessionEntry>& entries) noexcept;
-[[nodiscard]] std::size_t effective_auto_threshold_tokens(
-    const CompactionConfig& config, std::optional<long long> context_window_tokens) noexcept;
+[[nodiscard]] std::size_t effective_auto_threshold_tokens(const CompactionConfig& config,
+                                                          std::optional<long long> context_window_tokens) noexcept;
 [[nodiscard]] CompactionDecision should_auto_compact(const std::vector<SessionEntry>& entries,
-                                                      const CompactionConfig& config) noexcept;
-[[nodiscard]] CompactionDecision should_auto_compact(
-    const std::vector<SessionEntry>& entries, const CompactionConfig& config,
-    std::optional<long long> context_window_tokens) noexcept;
-[[nodiscard]] ava::core::VoidResult append_manual_compaction(SessionStore& store,
-                                                              ManualCompactionRequest request);
+                                                     const CompactionConfig& config) noexcept;
+[[nodiscard]] CompactionDecision should_auto_compact(const std::vector<SessionEntry>& entries,
+                                                     const CompactionConfig& config,
+                                                     std::optional<long long> context_window_tokens) noexcept;
+[[nodiscard]] ava::core::VoidResult append_manual_compaction(SessionStore& store, ManualCompactionRequest request);
 
 }  // namespace ava::session

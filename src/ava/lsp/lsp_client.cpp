@@ -31,7 +31,7 @@ constexpr std::size_t kMaxLspMessageBytes = 4 * 1024 * 1024;
 class ScopedSignalIgnore {
  public:
   explicit ScopedSignalIgnore(int signal_number) : signal_number_(signal_number) {
-    struct sigaction ignored {};
+    struct sigaction ignored{};
     ignored.sa_handler = SIG_IGN;
     sigemptyset(&ignored.sa_mask);
     active_ = sigaction(signal_number_, &ignored, &previous_) == 0;
@@ -47,7 +47,7 @@ class ScopedSignalIgnore {
  private:
   int signal_number_ = 0;
   bool active_ = false;
-  struct sigaction previous_ {};
+  struct sigaction previous_{};
 };
 
 std::string command_label(const std::vector<std::string>& argv) {

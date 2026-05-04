@@ -28,8 +28,6 @@ ava::core::Result<Mode> parse_mode(std::string_view value) {
   return std::unexpected(std::move(error));
 }
 
-Mode toggle_mode(Mode mode) noexcept {
-  return mode == Mode::Build ? Mode::Plan : Mode::Build;
-}
+Mode toggle_mode(Mode mode) noexcept { return mode == Mode::Build ? Mode::Plan : Mode::Build; }
 
 }  // namespace ava::agent

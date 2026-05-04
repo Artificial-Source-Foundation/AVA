@@ -28,8 +28,8 @@ namespace ava::app::runtime {
 [[nodiscard]] ava::core::VoidResult append_model_change(ava::session::SessionStore& store,
                                                         const ava::config::ModelInfo& previous,
                                                         const ava::config::ModelInfo& current);
-[[nodiscard]] ava::core::VoidResult append_reasoning_change(
-    ava::session::SessionStore& store, const ava::config::ModelInfo& model,
-    const std::optional<RuntimeReasoningSelection>& selection);
+[[nodiscard]] ava::core::VoidResult append_reasoning_change(ava::session::SessionStore& store,
+                                                            const ava::config::ModelInfo& model,
+                                                            const std::optional<RuntimeReasoningSelection>& selection);
 
 }  // namespace ava::app::runtime

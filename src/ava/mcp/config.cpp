@@ -80,16 +80,16 @@ ava::core::Result<std::vector<std::string>> string_array_field(std::string_view 
   if (!ava::core::json::field_value_start(object, key)) return values;
   const auto array = array_field(object, key);
   if (!array) {
-    return std::unexpected(config_error("MCP config field must be an array of strings")
-                               .with_context("field", std::string(key)));
+    return std::unexpected(
+        config_error("MCP config field must be an array of strings").with_context("field", std::string(key)));
   }
   std::size_t index = 1;
   while (index + 1 < array->size()) {
     while (index + 1 < array->size() && std::isspace(static_cast<unsigned char>((*array)[index])) != 0) ++index;
     if (index + 1 >= array->size() || (*array)[index] == ']') break;
     if ((*array)[index] != '"') {
-      return std::unexpected(config_error("MCP config field must contain only strings")
-                                 .with_context("field", std::string(key)));
+      return std::unexpected(
+          config_error("MCP config field must contain only strings").with_context("field", std::string(key)));
     }
     std::size_t end = index + 1;
     bool escaped = false;
@@ -105,13 +105,13 @@ ava::core::Result<std::vector<std::string>> string_array_field(std::string_view 
       ++end;
     }
     if (end >= array->size()) {
-      return std::unexpected(config_error("MCP config string array has unterminated string")
-                                 .with_context("field", std::string(key)));
+      return std::unexpected(
+          config_error("MCP config string array has unterminated string").with_context("field", std::string(key)));
     }
     auto value = parse_string_literal(array->substr(index, end - index + 1));
     if (!value) {
-      return std::unexpected(config_error("MCP config string array has invalid string escape")
-                                 .with_context("field", std::string(key)));
+      return std::unexpected(
+          config_error("MCP config string array has invalid string escape").with_context("field", std::string(key)));
     }
     values.push_back(std::move(*value));
     index = end + 1;
@@ -121,8 +121,8 @@ ava::core::Result<std::vector<std::string>> string_array_field(std::string_view 
       continue;
     }
     if (index < array->size() && (*array)[index] == ']') break;
-    return std::unexpected(config_error("MCP config string array has invalid separator")
-                               .with_context("field", std::string(key)));
+    return std::unexpected(
+        config_error("MCP config string array has invalid separator").with_context("field", std::string(key)));
   }
   return values;
 }
@@ -189,9 +189,8 @@ ava::core::VoidResult append_config(McpConfig& target, McpConfig source) {
   if (!source.global_config_file.empty()) target.global_config_file = std::move(source.global_config_file);
   if (!source.project_config_file.empty()) target.project_config_file = std::move(source.project_config_file);
   for (auto& server : source.servers) {
-    const auto duplicate = std::ranges::find_if(target.servers, [&](const McpServerConfig& existing) {
-      return existing.id == server.id;
-    });
+    const auto duplicate =
+        std::ranges::find_if(target.servers, [&](const McpServerConfig& existing) { return existing.id == server.id; });
     if (duplicate != target.servers.end()) {
       return std::unexpected(config_error("duplicate MCP server id")
                                  .with_context("server", server.id)
@@ -240,8 +239,8 @@ McpConfigLoadOptions default_mcp_config_options(const std::filesystem::path& wor
 ava::core::Result<McpConfig> parse_mcp_config(std::string_view json, std::filesystem::path config_path,
                                               McpServerScope scope) {
   if (json.size() > kMaxMcpConfigBytes) {
-    return std::unexpected(config_error("MCP config exceeds maximum size")
-                               .with_context("max_bytes", std::to_string(kMaxMcpConfigBytes)));
+    return std::unexpected(
+        config_error("MCP config exceeds maximum size").with_context("max_bytes", std::to_string(kMaxMcpConfigBytes)));
   }
   if (!ava::core::json::is_valid_object(json)) {
     return std::unexpected(config_error("MCP config must be a valid JSON object"));
@@ -260,7 +259,8 @@ ava::core::Result<McpConfig> parse_mcp_config(std::string_view json, std::filesy
   for (const auto& server_json : ava::core::json::objects_in_array_field(json, "servers")) {
     auto id = ava::core::json::string_field(server_json, "id");
     if (!id || !is_valid_mcp_identifier(*id)) {
-      return std::unexpected(config_error("MCP server requires a valid id").with_context("config", config_path.string()));
+      return std::unexpected(
+          config_error("MCP server requires a valid id").with_context("config", config_path.string()));
     }
     auto command = ava::core::json::string_field(server_json, "command");
     if (!command || command->empty() || command->size() > kMaxMcpArgBytes || has_forbidden_byte(*command)) {

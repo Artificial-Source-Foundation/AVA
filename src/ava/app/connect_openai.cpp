@@ -37,15 +37,15 @@ constexpr std::size_t max_connect_secret_bytes = 64 * 1024;
 
 volatile sig_atomic_t terminal_mode_signal_number = 0;
 bool terminal_mode_signal_handlers_installed = false;
-struct sigaction previous_sigint_action {};
-struct sigaction previous_sigterm_action {};
-struct sigaction previous_sighup_action {};
+struct sigaction previous_sigint_action{};
+struct sigaction previous_sigterm_action{};
+struct sigaction previous_sighup_action{};
 
 void terminal_mode_signal_handler(int signal_number) { terminal_mode_signal_number = signal_number; }
 
 bool install_terminal_mode_signal_handlers() {
   terminal_mode_signal_number = 0;
-  struct sigaction action {};
+  struct sigaction action{};
   action.sa_handler = terminal_mode_signal_handler;
   sigemptyset(&action.sa_mask);
   action.sa_flags = 0;

@@ -407,7 +407,7 @@ void test_auth_load_and_store() {
                                              .account_id = "",
                                              .source = "test"});
   expect(repaired_broad_permissions.has_value(), "provider credential store repairs user-owned broad auth permissions");
-  struct stat auth_stat {};
+  struct stat auth_stat{};
   expect(::stat(paths.auth_file.c_str(), &auth_stat) == 0 && (auth_stat.st_mode & (S_IRWXG | S_IRWXO)) == 0,
          "provider credential store rewrites auth file with owner-only permissions");
   std::ifstream repaired_auth_file(paths.auth_file, std::ios::binary);
@@ -529,13 +529,13 @@ void test_auth_load_and_store() {
                                            .account_id = "",
                                            .source_path = {}});
   expect(restored_api.has_value(), "OpenAI API key credential restores after env discovery checks");
-  struct stat st {};
+  struct stat st{};
   if (::stat(paths.auth_file.c_str(), &st) == 0) {
     expect((st.st_mode & 0777) == 0600, "auth file is owner-only");
   } else {
     expect(false, "auth file stat succeeds");
   }
-  struct stat dir_st {};
+  struct stat dir_st{};
   if (::stat(paths.auth_file.parent_path().c_str(), &dir_st) == 0) {
     expect((dir_st.st_mode & 0777) == 0700, "auth directory is owner-only");
   } else {

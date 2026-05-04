@@ -51,8 +51,8 @@ ava::core::Result<RuntimeSession> create_new_session(const RuntimeSession& curre
 }
 
 ava::core::Result<RuntimeSession> open_requested_session(const RuntimeSession& current,
-                                                        const RuntimeOpenOptions& base_options,
-                                                        std::string_view requested_session_id) {
+                                                         const RuntimeOpenOptions& base_options,
+                                                         std::string_view requested_session_id) {
   RuntimeOpenOptions options = base_options;
   options.workspace_dir = current.workspace_dir;
   options.current_dir = current.current_dir;

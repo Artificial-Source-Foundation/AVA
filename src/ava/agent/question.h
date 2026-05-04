@@ -33,7 +33,7 @@ struct QuestionAnswer {
 using QuestionResolver = std::function<ava::core::Result<QuestionAnswer>(const QuestionPrompt&)>;
 
 [[nodiscard]] ava::core::Result<QuestionPrompt> parse_question_prompt(std::string_view arguments_json,
-                                                                     std::string_view tool_name);
+                                                                      std::string_view tool_name);
 [[nodiscard]] std::string serialize_question_answer_result(const QuestionPrompt& prompt, const QuestionAnswer& answer);
 
 }  // namespace ava::agent

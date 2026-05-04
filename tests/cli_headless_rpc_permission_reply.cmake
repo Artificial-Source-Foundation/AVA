@@ -16,6 +16,7 @@ set(HOME_DIR "${TEST_ROOT}/home")
 set(CONFIG_DIR "${TEST_ROOT}/config")
 set(STATE_DIR "${TEST_ROOT}/state")
 set(DATA_DIR "${TEST_ROOT}/data")
+set(TARGET_FILE "${TEST_ROOT}/created-by-tool.txt")
 set(PORT_FILE "${TEST_ROOT}/provider-port")
 set(REQUEST_LOG "${TEST_ROOT}/provider-request.log")
 set(PROVIDER_OUT "${TEST_ROOT}/provider.out")
@@ -30,7 +31,7 @@ file(MAKE_DIRECTORY "${WORKSPACE}" "${HOME_DIR}" "${CONFIG_DIR}/ava" "${STATE_DI
 file(WRITE "${CONFIG_DIR}/ava/models.json"
      "{\"default_provider\":\"moonshot\",\"default_model\":\"ava-headless-fake\","
      "\"models\":[{\"provider\":\"moonshot\",\"id\":\"ava-headless-fake\",\"family\":\"fake\","
-     "\"context_window_tokens\":8192,\"max_output_tokens\":1024,\"supports_tools\":false,"
+     "\"context_window_tokens\":8192,\"max_output_tokens\":1024,\"supports_tools\":true,"
      "\"supports_streaming\":false,\"supports_reasoning\":false,\"reports_usage\":true}]}\n")
 
 file(WRITE "${DRIVER_FILE}"
@@ -44,7 +45,7 @@ file(WRITE "${DRIVER_FILE}"
 "}\n"
 "trap cleanup EXIT INT TERM\n"
 "rm -f \"${RPC_IN}\" \"${RPC_OUT}\" \"${RPC_ERR}\" \"${PORT_FILE}\" \"${REQUEST_LOG}\" \"${PROVIDER_OUT}\" \"${PROVIDER_ERR}\"\n"
-"\"${AVA_FAKE_PROVIDER_EXE}\" \"${PORT_FILE}\" \"${REQUEST_LOG}\" 1500 > \"${PROVIDER_OUT}\" 2> \"${PROVIDER_ERR}\" &\n"
+"\"${AVA_FAKE_PROVIDER_EXE}\" \"${PORT_FILE}\" \"${REQUEST_LOG}\" 0 write-tool \"${TARGET_FILE}\" > \"${PROVIDER_OUT}\" 2> \"${PROVIDER_ERR}\" &\n"
 "provider_pid=$!\n"
 "i=0\n"
 "while [ ! -s \"${PORT_FILE}\" ]; do\n"
@@ -65,44 +66,41 @@ file(WRITE "${DRIVER_FILE}"
 "HOME=\"${HOME_DIR}\" XDG_CONFIG_HOME=\"${CONFIG_DIR}\" XDG_STATE_HOME=\"${STATE_DIR}\" XDG_DATA_HOME=\"${DATA_DIR}\" NO_COLOR=1 MOONSHOT_API_KEY=test-key MOONSHOT_BASE_URL=\"http://127.0.0.1:$port\" \"${AVA_EXE}\" --rpc < \"${RPC_IN}\" > \"${RPC_OUT}\" 2> \"${RPC_ERR}\" &\n"
 "ava_pid=$!\n"
 "exec 3>\"${RPC_IN}\"\n"
-"printf '%s\\n' '{\"id\":\"prompt\",\"type\":\"prompt\",\"protocol_version\":1,\"message\":\"first active prompt\"}' >&3\n"
+"printf '%s\\n' '{\"id\":\"prompt\",\"type\":\"prompt\",\"protocol_version\":1,\"message\":\"write outside with reply\"}' >&3\n"
+"resolver_id=\n"
 "i=0\n"
-"while [ ! -s \"${REQUEST_LOG}\" ]; do\n"
+"while [ -z \"$resolver_id\" ]; do\n"
+"  if [ -s \"${RPC_OUT}\" ]; then\n"
+"    resolver_id=$(sed -n 's/.*\"resolver_request_id\":\"\\([^\"]*\\)\".*/\\1/p' \"${RPC_OUT}\" | head -n 1)\n"
+"  fi\n"
+"  if [ -n \"$resolver_id\" ]; then break; fi\n"
 "  if ! kill -0 \"$ava_pid\" 2>/dev/null; then\n"
-"    echo \"ava exited before provider request was observed\" >&2\n"
+"    echo \"ava exited before permission request\" >&2\n"
 "    cat \"${RPC_OUT}\" >&2 2>/dev/null || true\n"
 "    cat \"${RPC_ERR}\" >&2 2>/dev/null || true\n"
 "    exit 1\n"
 "  fi\n"
-"  if ! kill -0 \"$provider_pid\" 2>/dev/null; then\n"
-"    echo \"fake provider exited before request log was written\" >&2\n"
-"    cat \"${PROVIDER_ERR}\" >&2 2>/dev/null || true\n"
-"    exit 1\n"
-"  fi\n"
 "  i=$((i + 1))\n"
 "  if [ \"$i\" -gt 200 ]; then\n"
-"    echo \"timed out waiting for provider request\" >&2\n"
+"    echo \"timed out waiting for permission request\" >&2\n"
 "    cat \"${RPC_OUT}\" >&2 2>/dev/null || true\n"
 "    cat \"${RPC_ERR}\" >&2 2>/dev/null || true\n"
 "    exit 1\n"
 "  fi\n"
 "  sleep 0.05\n"
 "done\n"
-"printf '%s\\n' '{\"id\":\"state-active\",\"type\":\"get_state\"}' >&3\n"
-"printf '%s\\n' '{\"id\":\"messages-active\",\"type\":\"get_messages\"}' >&3\n"
-"printf '%s\\n' '{\"id\":\"context-active\",\"type\":\"context\"}' >&3\n"
-"printf '%s\\n' '{\"id\":\"prompt2\",\"type\":\"prompt\",\"message\":\"second prompt\"}' >&3\n"
+"printf '%s\\n' \"{\\\"id\\\":\\\"reply\\\",\\\"type\\\":\\\"permission_reply\\\",\\\"request_id\\\":\\\"$resolver_id\\\",\\\"correlation_id\\\":\\\"prompt\\\",\\\"decision\\\":\\\"deny\\\"}\" >&3\n"
 "i=0\n"
-"while ! grep -q '\"id\":\"prompt\".*\"success\":true' \"${RPC_OUT}\" 2>/dev/null; do\n"
+"while ! grep -q 'after permission deny' \"${RPC_OUT}\" 2>/dev/null; do\n"
 "  if ! kill -0 \"$ava_pid\" 2>/dev/null; then\n"
-"    echo \"ava exited before prompt succeeded\" >&2\n"
+"    echo \"ava exited before permission-deny prompt completed\" >&2\n"
 "    cat \"${RPC_OUT}\" >&2 2>/dev/null || true\n"
 "    cat \"${RPC_ERR}\" >&2 2>/dev/null || true\n"
 "    exit 1\n"
 "  fi\n"
 "  i=$((i + 1))\n"
 "  if [ \"$i\" -gt 200 ]; then\n"
-"    echo \"timed out waiting for prompt success\" >&2\n"
+"    echo \"timed out waiting for permission-deny prompt completion\" >&2\n"
 "    cat \"${RPC_OUT}\" >&2 2>/dev/null || true\n"
 "    cat \"${RPC_ERR}\" >&2 2>/dev/null || true\n"
 "    exit 1\n"
@@ -139,35 +137,44 @@ execute_process(
 )
 
 if(NOT DRIVER_RESULT EQUAL 0)
-  message(FATAL_ERROR "headless active-run driver exited with ${DRIVER_RESULT}\nstdout:\n${DRIVER_OUTPUT}\nstderr:\n${DRIVER_ERROR}")
+  message(FATAL_ERROR "headless permission-reply driver exited with ${DRIVER_RESULT}\nstdout:\n${DRIVER_OUTPUT}\nstderr:\n${DRIVER_ERROR}")
 endif()
 
 file(READ "${RPC_OUT}" AVA_OUTPUT)
 file(READ "${RPC_ERR}" AVA_ERROR)
 file(READ "${REQUEST_LOG}" PROVIDER_REQUEST)
 
+if(EXISTS "${TARGET_FILE}")
+  message(FATAL_ERROR "denied write_file RPC permission flow unexpectedly created ${TARGET_FILE}\nstdout:\n${AVA_OUTPUT}\nstderr:\n${AVA_ERROR}")
+endif()
+
 foreach(NEEDLE
-        "POST /v1/chat/completions"
+        "--- request 1 ---"
+        "--- request 2 ---"
         "\"model\":\"ava-headless-fake\""
         "\"stream\":false"
-        "first active prompt")
+        "\"tool_call_id\":\"call_write\"")
   string(FIND "${PROVIDER_REQUEST}" "${NEEDLE}" NEEDLE_INDEX)
   if(NEEDLE_INDEX EQUAL -1)
-    message(FATAL_ERROR "fake provider request did not contain ${NEEDLE}\nrequest:\n${PROVIDER_REQUEST}\nstderr:\n${AVA_ERROR}")
+    message(FATAL_ERROR "fake provider request log did not contain ${NEEDLE}\nrequest:\n${PROVIDER_REQUEST}\nstderr:\n${AVA_ERROR}")
   endif()
 endforeach()
 
 foreach(NEEDLE
-        "\"id\":\"state-active\""
-        "\"success\":true"
-        "\"id\":\"messages-active\""
-        "\"id\":\"context-active\""
-        "\"id\":\"prompt2\""
-        "RPC command is unavailable while a prompt is active"
+        "\"name\":\"permission_requested\""
+        "\"resolver_request_id\":\"permission_"
+        "\"operation\":\"edit\""
+        "\"target_path\":\"${TARGET_FILE}\""
+        "\"tool_name\":\"write_file\""
+        "\"diff_preview\""
+        "+rpc new"
+        "\"id\":\"reply\""
+        "\"name\":\"permission_replied\""
+        "\"decision\":\"deny\""
         "\"id\":\"prompt\""
-        "headless active prompt complete"
+        "after permission deny"
         "\"id\":\"messages-after\""
-        "\"message_count\":2")
+        "\"type\":\"tool_result\"")
   string(FIND "${AVA_OUTPUT}" "${NEEDLE}" NEEDLE_INDEX)
   if(NEEDLE_INDEX EQUAL -1)
     message(FATAL_ERROR "ava --rpc output did not contain ${NEEDLE}\nstdout:\n${AVA_OUTPUT}\nstderr:\n${AVA_ERROR}")

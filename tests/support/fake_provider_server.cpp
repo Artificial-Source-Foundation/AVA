@@ -93,6 +93,38 @@ bool write_all(int fd, std::string_view text) {
   return true;
 }
 
+std::string json_escape(std::string_view text) {
+  std::string escaped;
+  escaped.reserve(text.size());
+  for (const char ch : text) {
+    switch (ch) {
+      case '"':
+        escaped += "\\\"";
+        break;
+      case '\\':
+        escaped += "\\\\";
+        break;
+      case '\n':
+        escaped += "\\n";
+        break;
+      case '\r':
+        escaped += "\\r";
+        break;
+      case '\t':
+        escaped += "\\t";
+        break;
+      default:
+        if (static_cast<unsigned char>(ch) < 0x20) {
+          escaped += '?';
+        } else {
+          escaped.push_back(ch);
+        }
+        break;
+    }
+  }
+  return escaped;
+}
+
 std::string read_http_request(int fd) {
   std::string request;
   std::array<char, 4096> buffer{};
@@ -109,17 +141,50 @@ std::string read_http_request(int fd) {
   return request;
 }
 
+std::string text_body(std::string_view text) {
+  return "{\"choices\":[{\"message\":{\"content\":\"" + json_escape(text) +
+         "\"},\"finish_reason\":\"stop\"}],"
+         "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}";
+}
+
+std::string read_tool_body(std::string_view path) {
+  const auto arguments = std::string("{\"path\":\"") + json_escape(path) + "\"}";
+  return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_read\",\"type\":\"function\","
+         "\"function\":{\"name\":\"read_file\",\"arguments\":\"" +
+         json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+}
+
+std::string write_tool_body(std::string_view path) {
+  const auto arguments = std::string("{\"path\":\"") + json_escape(path) + "\",\"content\":\"rpc new\\n\"}";
+  return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_write\",\"type\":\"function\","
+         "\"function\":{\"name\":\"write_file\",\"arguments\":\"" +
+         json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+}
+
+std::string response_body(std::string_view scenario, int request_index, std::string_view target_path) {
+  if (scenario == "read-tool") {
+    return request_index == 0 ? read_tool_body(target_path) : text_body("after permission deny");
+  }
+  if (scenario == "write-tool") {
+    return request_index == 0 ? write_tool_body(target_path) : text_body("after permission deny");
+  }
+  return text_body("headless active prompt complete");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 4) {
-    std::cerr << "usage: ava_fake_provider_server PORT_FILE REQUEST_LOG DELAY_MS\n";
+  if (argc != 4 && argc != 6) {
+    std::cerr << "usage: ava_fake_provider_server PORT_FILE REQUEST_LOG DELAY_MS [SCENARIO TARGET_PATH]\n";
     return 2;
   }
 
   const std::filesystem::path port_file = argv[1];
   const std::filesystem::path request_log = argv[2];
   const auto delay = std::chrono::milliseconds(std::stoi(argv[3]));
+  const std::string scenario = argc == 6 ? argv[4] : "text";
+  const std::string target_path = argc == 6 ? argv[5] : "";
+  const int request_count = scenario == "read-tool" || scenario == "write-tool" ? 2 : 1;
 
   Fd server(::socket(AF_INET, SOCK_STREAM, 0));
   if (server.get() < 0) {
@@ -156,28 +221,30 @@ int main(int argc, char** argv) {
     file << ntohs(address.sin_port) << '\n';
   }
 
-  Fd client(::accept(server.get(), nullptr, nullptr));
-  if (client.get() < 0) {
-    std::cerr << "accept failed: " << errno_text() << '\n';
-    return 1;
-  }
+  { std::ofstream file(request_log, std::ios::binary | std::ios::trunc); }
 
-  const auto request = read_http_request(client.get());
-  {
-    std::ofstream file(request_log, std::ios::binary | std::ios::trunc);
-    file << request;
-  }
-  std::this_thread::sleep_for(delay);
+  for (int request_index = 0; request_index < request_count; ++request_index) {
+    Fd client(::accept(server.get(), nullptr, nullptr));
+    if (client.get() < 0) {
+      std::cerr << "accept failed: " << errno_text() << '\n';
+      return 1;
+    }
 
-  const std::string body =
-      "{\"choices\":[{\"message\":{\"content\":\"headless active prompt complete\"},\"finish_reason\":\"stop\"}],"
-      "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}";
-  const std::string response =
-      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) +
-      "\r\nConnection: close\r\n\r\n" + body;
-  if (!write_all(client.get(), response)) {
-    std::cerr << "response write failed: " << errno_text() << '\n';
-    return 1;
+    const auto request = read_http_request(client.get());
+    {
+      std::ofstream file(request_log, std::ios::binary | std::ios::app);
+      file << "--- request " << (request_index + 1) << " ---\n" << request << '\n';
+    }
+    if (request_index == 0) std::this_thread::sleep_for(delay);
+
+    const std::string body = response_body(scenario, request_index, target_path);
+    const std::string response =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) +
+        "\r\nConnection: close\r\n\r\n" + body;
+    if (!write_all(client.get(), response)) {
+      std::cerr << "response write failed: " << errno_text() << '\n';
+      return 1;
+    }
   }
   return 0;
 }

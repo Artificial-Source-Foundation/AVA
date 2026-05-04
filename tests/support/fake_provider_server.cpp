@@ -175,6 +175,15 @@ std::string write_tool_body(std::string_view path)
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
 }
 
+std::string bash_tool_body(std::string_view marker_path)
+{
+  auto const command = std::string("/bin/sh -c \"sleep 1; printf leaked > ") + std::string(marker_path) + " & wait\"";
+  auto const arguments = std::string("{\"command\":\"") + json_escape(command) + "\",\"timeout_ms\":50}";
+  return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_bash\",\"type\":\"function\","
+         "\"function\":{\"name\":\"bash\",\"arguments\":\"" +
+         json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+}
+
 std::string question_tool_body()
 {
   std::string const arguments =
@@ -224,6 +233,10 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
     return ProviderResponse{.body =
                                 request_index == 0 ? write_tool_body(target_path) : text_body("after permission deny")};
   }
+  if (scenario == "bash-timeout-tree") {
+    return ProviderResponse{.body = request_index == 0 ? bash_tool_body(target_path)
+                                                       : text_body("after bash process cleanup")};
+  }
   if (scenario == "question-tool") {
     return ProviderResponse{.body = request_index == 0 ? question_tool_body() : text_body("after question reply")};
   }
@@ -253,7 +266,7 @@ int main(int argc, char** argv)
                             : scenario == "read-tool-twice"  ? 4
                             : scenario == "read-tool-thrice" ? 6
                             : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "write-tool" ||
-                               scenario == "question-tool" || scenario == "compact")
+                               scenario == "bash-timeout-tree" || scenario == "question-tool" || scenario == "compact")
                                 ? 2
                                 : 1;
 

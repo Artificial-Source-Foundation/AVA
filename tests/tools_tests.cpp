@@ -14,6 +14,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -1208,6 +1209,27 @@ void test_bash_tool()
   auto timeout =
       ava::tools::run_bash(context, "sleep 2", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(50)});
   expect(timeout && timeout->timed_out, "run_bash times out long command");
+
+  auto const timeout_marker = temp_root() / "bash-timeout-child-leak.txt";
+  std::filesystem::remove(timeout_marker, remove_error);
+  int timeout_tree_prompts = 0;
+  ava::tools::ToolContext const timeout_tree_context{
+      .workspace_dir = temp_root(),
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&timeout_tree_prompts](ava::permissions::PermissionPrompt const& prompt)
+          -> ava::core::Result<ava::permissions::PermissionResolution> {
+        ++timeout_tree_prompts;
+        expect(prompt.operation == ava::permissions::Operation::RunCommand,
+               "bash process-tree timeout resolver receives run operation");
+        return ava::permissions::PermissionResolution::Allow;
+      }};
+  auto timeout_tree = ava::tools::run_bash(
+      timeout_tree_context, "/bin/sh -c \"sleep 1; printf leaked > " + timeout_marker.generic_string() + " & wait\"",
+      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(50), .max_bytes = 1024});
+  std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+  expect(
+      timeout_tree && timeout_tree->timed_out && timeout_tree_prompts == 1 && !std::filesystem::exists(timeout_marker),
+      "run_bash timeout terminates child processes in the command process group");
 
   int cancel_checks = 0;
   ava::tools::ToolContext const cancel_context{

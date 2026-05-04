@@ -237,12 +237,24 @@ ava::core::Result<std::vector<StreamEvent>> Provider::parse_response(const HttpR
 
 bool Transport::supports_streaming() const noexcept { return false; }
 
+ava::core::Result<HttpResponse> Transport::send(const HttpRequest& request, CancelCallback cancel_requested) {
+  if (cancel_requested && cancel_requested()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
+  }
+  auto response = send(request);
+  if (!response) return std::unexpected(std::move(response.error()));
+  if (cancel_requested && cancel_requested()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
+  }
+  return response;
+}
+
 ava::core::Result<HttpResponse> Transport::send_streaming(const HttpRequest& request, BodyChunkSink on_body_chunk,
                                                           CancelCallback cancel_requested) {
   if (cancel_requested && cancel_requested()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
   }
-  auto response = send(request);
+  auto response = send(request, cancel_requested);
   if (!response) return std::unexpected(std::move(response.error()));
   if (cancel_requested && cancel_requested()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
@@ -259,10 +271,14 @@ ava::core::Result<HttpResponse> Transport::send_streaming(const HttpRequest& req
 
 RetryTransport::RetryTransport(Transport& inner, RetryOptions options) : inner_(inner), options_(options) {}
 
-ava::core::Result<HttpResponse> RetryTransport::send(const HttpRequest& request) {
+ava::core::Result<HttpResponse> RetryTransport::send(const HttpRequest& request) { return send(request, nullptr); }
+
+ava::core::Result<HttpResponse> RetryTransport::send(const HttpRequest& request, CancelCallback cancel_requested) {
   const int max_attempts = std::max(1, options_.max_attempts);
-  ava::core::Result<HttpResponse> response = inner_.send(request);
+  if (retry_cancel_requested(options_, cancel_requested)) return std::unexpected(retry_canceled_error());
+  ava::core::Result<HttpResponse> response = inner_.send(request, cancel_requested);
   for (int attempt = 1; attempt < max_attempts; ++attempt) {
+    if (retry_cancel_requested(options_, cancel_requested)) return std::unexpected(retry_canceled_error());
     if (response) {
       if (!is_retryable_kind(classify_provider_error(*response))) break;
       const auto reason = to_string(classify_provider_error(*response));
@@ -276,7 +292,7 @@ ava::core::Result<HttpResponse> RetryTransport::send(const HttpRequest& request)
       }
       if (auto slept = sleep_before_retry(options_, static_cast<std::size_t>(attempt + 1),
                                           static_cast<std::size_t>(max_attempts), delay_ms, reason,
-                                          response->status_code, false);
+                                          response->status_code, false, cancel_requested);
           !slept) {
         return std::unexpected(std::move(slept.error()));
       }
@@ -290,12 +306,14 @@ ava::core::Result<HttpResponse> RetryTransport::send(const HttpRequest& request)
         return std::unexpected(std::move(published.error()));
       }
       if (auto slept = sleep_before_retry(options_, static_cast<std::size_t>(attempt + 1),
-                                          static_cast<std::size_t>(max_attempts), delay_ms, "transport_io", 0, false);
+                                          static_cast<std::size_t>(max_attempts), delay_ms, "transport_io", 0, false,
+                                          cancel_requested);
           !slept) {
         return std::unexpected(std::move(slept.error()));
       }
     }
-    response = inner_.send(request);
+    if (retry_cancel_requested(options_, cancel_requested)) return std::unexpected(retry_canceled_error());
+    response = inner_.send(request, cancel_requested);
   }
   return response;
 }

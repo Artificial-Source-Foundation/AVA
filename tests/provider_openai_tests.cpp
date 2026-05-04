@@ -464,6 +464,23 @@ void test_openai_provider_contract() {
              cancel_retry_inner.requests().size() == 1 && cancel_retry_events.size() == 1,
          "retry transport observes cancellation before sleeping for a retry");
 
+  ava::tests::FakeTransport direct_cancel_inner(
+      {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  auto direct_canceled =
+      static_cast<ava::provider::Transport&>(direct_cancel_inner).send(retry_request, [] { return true; });
+  expect(!direct_canceled && direct_canceled.error().message().find("canceled") != std::string::npos &&
+             direct_cancel_inner.requests().empty(),
+         "transport default cancellable send checks cancellation before dispatch");
+
+  ava::tests::FakeTransport retry_call_cancel_inner(
+      {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"}});
+  ava::provider::RetryTransport retry_call_cancel_transport(
+      retry_call_cancel_inner, ava::provider::RetryOptions{.max_attempts = 2, .base_delay_ms = 0});
+  auto retry_call_canceled = retry_call_cancel_transport.send(retry_request, [] { return true; });
+  expect(!retry_call_canceled && retry_call_canceled.error().message().find("retry canceled") != std::string::npos &&
+             retry_call_cancel_inner.requests().empty(),
+         "retry transport cancellable send checks cancellation before dispatch");
+
   FailingOnceTransport failing_once;
   ava::provider::RetryTransport retry_transport_error(
       failing_once, ava::provider::RetryOptions{.max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0});

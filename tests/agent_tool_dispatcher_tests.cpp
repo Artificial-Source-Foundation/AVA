@@ -1687,6 +1687,7 @@ void test_agent_loop_cancellation_boundaries() {
                          entry.type == ava::session::EntryType::ToolResult;
         saw_cancel = saw_cancel || (entry.type == ava::session::EntryType::Cancel &&
                                     (entry.data_json.find("before_tool_dispatch") != std::string::npos ||
+                                     entry.data_json.find("during_provider_request") != std::string::npos ||
                                      entry.data_json.find("after_provider_call") != std::string::npos));
       }
     }

@@ -317,7 +317,8 @@ ava::core::Result<HttpResponse> parse_curl_output(std::string output, bool inclu
     bool first_line = true;
     while (line_start <= header_text.size()) {
       auto line_end = header_text.find('\n', line_start);
-      auto line = header_text.substr(line_start, line_end == std::string::npos ? std::string::npos : line_end - line_start);
+      auto line =
+          header_text.substr(line_start, line_end == std::string::npos ? std::string::npos : line_end - line_start);
       if (!line.empty() && line.back() == '\r') line.pop_back();
       if (!first_line) {
         if (const auto colon = line.find(':'); colon != std::string::npos) {
@@ -339,7 +340,12 @@ ava::core::Result<HttpResponse> parse_curl_output(std::string output, bool inclu
 
 }  // namespace
 
-ava::core::Result<HttpResponse> CurlCliTransport::send(const HttpRequest& request) {
+ava::core::Result<HttpResponse> CurlCliTransport::send(const HttpRequest& request) { return send(request, nullptr); }
+
+ava::core::Result<HttpResponse> CurlCliTransport::send(const HttpRequest& request, CancelCallback cancel_requested) {
+  if (cancel_requested && cancel_requested()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
+  }
   auto body_file = TempBodyFile::create(request.body);
   if (!body_file) return std::unexpected(body_file.error());
   const auto config = build_curl_config(request, body_file->path());
@@ -386,7 +392,25 @@ ava::core::Result<HttpResponse> CurlCliTransport::send(const HttpRequest& reques
 
   std::string output;
   std::array<char, 4096> buffer{};
-  while (true) {
+  bool stdout_open = true;
+  while (stdout_open) {
+    if (cancel_requested && cancel_requested()) {
+      kill_and_wait(pid);
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
+    }
+
+    pollfd poll_fd{.fd = stdout_read.get(), .events = POLLIN, .revents = 0};
+    const int poll_result = poll(&poll_fd, 1, 100);
+    if (poll_result < 0 && errno == EINTR) continue;
+    if (poll_result < 0) {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to poll curl output");
+      error.with_context("cause", std::strerror(errno));
+      kill_and_wait(pid);
+      return std::unexpected(std::move(error));
+    }
+    if (poll_result == 0) continue;
+    if ((poll_fd.revents & (POLLIN | POLLHUP | POLLERR)) == 0) continue;
+
     const auto count = read_retry(stdout_read.get(), buffer.data(), buffer.size());
     if (count < 0) {
       auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to read curl output");
@@ -394,7 +418,11 @@ ava::core::Result<HttpResponse> CurlCliTransport::send(const HttpRequest& reques
       kill_and_wait(pid);
       return std::unexpected(std::move(error));
     }
-    if (count == 0) break;
+    if (count == 0) {
+      stdout_open = false;
+      stdout_read.reset();
+      break;
+    }
     output.append(buffer.data(), static_cast<std::size_t>(count));
     if (output.size() > kMaxCurlResponseBytes) {
       auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "curl response exceeded byte limit");
@@ -402,6 +430,11 @@ ava::core::Result<HttpResponse> CurlCliTransport::send(const HttpRequest& reques
       kill_and_wait(pid);
       return std::unexpected(std::move(error));
     }
+  }
+
+  if (cancel_requested && cancel_requested()) {
+    kill_and_wait(pid);
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
   }
 
   int status = 0;
@@ -426,7 +459,7 @@ ava::core::Result<HttpResponse> CurlCliTransport::send_streaming(const HttpReque
                                                                  CancelCallback cancel_requested) {
   if (request.include_response_headers) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                           "streaming curl transport does not support response headers"));
+                                            "streaming curl transport does not support response headers"));
   }
   auto body_file = TempBodyFile::create(request.body);
   if (!body_file) return std::unexpected(body_file.error());

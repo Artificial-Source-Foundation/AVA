@@ -172,6 +172,8 @@ class Transport {
 
   virtual ~Transport() = default;
   [[nodiscard]] virtual ava::core::Result<HttpResponse> send(const HttpRequest& request) = 0;
+  [[nodiscard]] virtual ava::core::Result<HttpResponse> send(const HttpRequest& request,
+                                                             CancelCallback cancel_requested);
   [[nodiscard]] virtual bool supports_streaming() const noexcept;
   [[nodiscard]] virtual ava::core::Result<HttpResponse> send_streaming(const HttpRequest& request,
                                                                        BodyChunkSink on_body_chunk,
@@ -201,6 +203,8 @@ class RetryTransport final : public Transport {
  public:
   RetryTransport(Transport& inner, RetryOptions options = {});
   [[nodiscard]] ava::core::Result<HttpResponse> send(const HttpRequest& request) override;
+  [[nodiscard]] ava::core::Result<HttpResponse> send(const HttpRequest& request,
+                                                     CancelCallback cancel_requested) override;
   [[nodiscard]] bool supports_streaming() const noexcept override;
   [[nodiscard]] ava::core::Result<HttpResponse> send_streaming(const HttpRequest& request, BodyChunkSink on_body_chunk,
                                                                CancelCallback cancel_requested = nullptr) override;

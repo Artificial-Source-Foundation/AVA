@@ -590,8 +590,13 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(const std::string& user_m
         }
       }
     } else {
-      auto response = transport.send(*request);
+      auto response = transport.send(*request, [&options = options_]() { return is_canceled(options); });
       if (!response) {
+        if (is_canceled(options_)) {
+          if (auto not_canceled = check_canceled_locked("during_provider_request"); !not_canceled) {
+            return std::unexpected(std::move(not_canceled.error()));
+          }
+        }
         if (auto retry = prepare_context_overflow_retry(response.error()); !retry) {
           return std::unexpected(std::move(retry.error()));
         } else if (*retry) {

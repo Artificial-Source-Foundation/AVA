@@ -270,7 +270,7 @@ ava::core::Result<std::string> generate_compaction_summary(
   auto request = provider.build_request(provider_request, auth_context);
   if (!request) return std::unexpected(std::move(request.error()));
 
-  auto response = summary_transport->send(*request);
+  auto response = summary_transport->send(*request, summary_options.cancel_requested);
   if (!response) return std::unexpected(std::move(response.error()));
   auto summary = parse_compaction_response_text(provider, *response, provider_request.stream);
   if (!summary) return std::unexpected(std::move(summary.error()));

@@ -1,14 +1,15 @@
 #include "ava/tools/webfetch_tool.h"
 
-#include <algorithm>
 #include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+
+#include <algorithm>
 #include <cctype>
 #include <charconv>
 #include <cstring>
 #include <memory>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
 #include <span>
 #include <string_view>
 
@@ -59,7 +60,8 @@ bool numeric_ipv4_literal_or_alias(std::string_view host) {
   std::size_t part_start = 0;
   while (part_start <= host.size()) {
     const auto dot = host.find('.', part_start);
-    const auto part = host.substr(part_start, dot == std::string_view::npos ? std::string_view::npos : dot - part_start);
+    const auto part =
+        host.substr(part_start, dot == std::string_view::npos ? std::string_view::npos : dot - part_start);
     if (!all_decimal_digits(part) && !hex_literal(part)) return false;
     if (dot == std::string_view::npos) break;
     part_start = dot + 1;
@@ -82,13 +84,14 @@ bool private_or_non_global_ipv6(const in6_addr& address) {
   const auto* bytes = address.s6_addr;
   const bool ipv4_mapped = std::ranges::all_of(std::span(bytes, 10), [](unsigned char byte) { return byte == 0; }) &&
                            bytes[10] == 0xFF && bytes[11] == 0xFF;
-  const bool nat64_well_known = bytes[0] == 0x00 && bytes[1] == 0x64 && bytes[2] == 0xFF && bytes[3] == 0x9B &&
-                                std::ranges::all_of(std::span(bytes + 4, 8), [](unsigned char byte) { return byte == 0; });
+  const bool nat64_well_known =
+      bytes[0] == 0x00 && bytes[1] == 0x64 && bytes[2] == 0xFF && bytes[3] == 0x9B &&
+      std::ranges::all_of(std::span(bytes + 4, 8), [](unsigned char byte) { return byte == 0; });
   const bool nat64_local_use = bytes[0] == 0x00 && bytes[1] == 0x64 && bytes[2] == 0xFF && bytes[3] == 0x9B &&
                                bytes[4] == 0x00 && bytes[5] == 0x01;
   const bool unspecified = std::ranges::all_of(std::span(bytes, 16), [](unsigned char byte) { return byte == 0; });
-  const bool loopback = std::ranges::all_of(std::span(bytes, 15), [](unsigned char byte) { return byte == 0; }) &&
-                        bytes[15] == 1;
+  const bool loopback =
+      std::ranges::all_of(std::span(bytes, 15), [](unsigned char byte) { return byte == 0; }) && bytes[15] == 1;
   return ipv4_mapped || nat64_well_known || nat64_local_use || unspecified || loopback || bytes[0] == 0xFF ||
          (bytes[0] & 0xFE) == 0xFC || (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0x80) ||
          (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0xC0) ||
@@ -172,8 +175,8 @@ ava::core::Result<ValidatedUrl> validated_url(std::string_view url) {
   }
   const auto authority_start = https ? std::string_view("https://").size() : std::string_view("http://").size();
   const auto path_start = url.find_first_of("/?#", authority_start);
-  auto authority = url.substr(authority_start, path_start == std::string_view::npos ? std::string_view::npos
-                                                                                     : path_start - authority_start);
+  auto authority = url.substr(
+      authority_start, path_start == std::string_view::npos ? std::string_view::npos : path_start - authority_start);
   if (authority.empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch URL host is empty"));
   }
@@ -189,7 +192,8 @@ ava::core::Result<ValidatedUrl> validated_url(std::string_view url) {
   if (const auto colon = authority.rfind(':'); colon != std::string_view::npos) {
     port = std::string(authority.substr(colon + 1));
     if (port.empty() || !std::ranges::all_of(port, [](unsigned char ch) { return std::isdigit(ch); })) {
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch URL port is invalid"));
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch URL port is invalid"));
     }
     authority = authority.substr(0, colon);
   }
@@ -224,10 +228,9 @@ ava::core::Result<ValidatedUrl> validated_url(std::string_view url) {
     part_start = dot + 1;
   }
   if (ipv4 && part_start == host.size() + 1) {
-    const bool private_or_local = octets[0] == 10 || octets[0] == 127 || octets[0] == 0 ||
-                                  (octets[0] == 169 && octets[1] == 254) ||
-                                  (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31) ||
-                                  (octets[0] == 192 && octets[1] == 168);
+    const bool private_or_local =
+        octets[0] == 10 || octets[0] == 127 || octets[0] == 0 || (octets[0] == 169 && octets[1] == 254) ||
+        (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31) || (octets[0] == 192 && octets[1] == 168);
     if (private_or_local) {
       return std::unexpected(
           ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch blocks private IP hosts"));
@@ -247,9 +250,10 @@ std::string header_value(const std::map<std::string, std::string>& headers, std:
 
 bool looks_binary(std::string_view body, std::string_view content_type) {
   const auto type = lowercase(content_type);
-  if (!type.empty() && !(type.starts_with("text/") || type.find("json") != std::string::npos ||
-                         type.find("xml") != std::string::npos || type.find("html") != std::string::npos ||
-                         type.find("javascript") != std::string::npos || type.find("ecmascript") != std::string::npos)) {
+  if (!type.empty() &&
+      !(type.starts_with("text/") || type.find("json") != std::string::npos || type.find("xml") != std::string::npos ||
+        type.find("html") != std::string::npos || type.find("javascript") != std::string::npos ||
+        type.find("ecmascript") != std::string::npos)) {
     return true;
   }
   return body.find('\0') != std::string_view::npos;
@@ -258,17 +262,23 @@ bool looks_binary(std::string_view body, std::string_view content_type) {
 }  // namespace
 
 ava::core::Result<WebFetchResult> webfetch(const ToolContext& context, std::string_view url, WebFetchOptions options) {
+  if (context.cancel_requested && context.cancel_requested()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled"));
+  }
   auto safe_url = validated_url(url);
   if (!safe_url) return std::unexpected(std::move(safe_url.error()));
 
-  if (auto permission = ensure_permission(context, ava::permissions::Operation::NetworkFetch, {}, safe_url->url, "webfetch",
-                                           "network fetch requires permission");
+  if (auto permission = ensure_permission(context, ava::permissions::Operation::NetworkFetch, {}, safe_url->url,
+                                          "webfetch", "network fetch requires permission");
       !permission) {
     return std::unexpected(std::move(permission.error()));
   }
+  if (context.cancel_requested && context.cancel_requested()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled"));
+  }
 
-  const auto max_bytes = std::min(options.max_bytes == 0 ? std::size_t{1024 * 1024} : options.max_bytes,
-                                  kMaxWebFetchBytes);
+  const auto max_bytes =
+      std::min(options.max_bytes == 0 ? std::size_t{1024 * 1024} : options.max_bytes, kMaxWebFetchBytes);
   const auto timeout_ms = std::clamp(options.timeout_ms <= 0 ? 30000 : options.timeout_ms, 1000, kMaxWebFetchTimeoutMs);
 
   std::vector<std::string> resolve_hosts;
@@ -280,16 +290,22 @@ ava::core::Result<WebFetchResult> webfetch(const ToolContext& context, std::stri
 
   ava::provider::CurlCliTransport default_transport;
   auto& transport = options.transport ? *options.transport : static_cast<ava::provider::Transport&>(default_transport);
-  auto response = transport.send(ava::provider::HttpRequest{.method = "GET",
-                                                            .url = safe_url->url,
-                                                            .headers = {{"Accept", "text/html,text/plain,application/json,application/xml;q=0.9,*/*;q=0.1"},
-                                                                        {"User-Agent", "AVA/1.0 webfetch"}},
-                                                            .body = "",
-                                                            .timeout_ms = timeout_ms,
-                                                            .follow_redirects = false,
-                                                            .include_response_headers = true,
-                                                            .resolve_hosts = std::move(resolve_hosts)});
+  auto response = transport.send(
+      ava::provider::HttpRequest{
+          .method = "GET",
+          .url = safe_url->url,
+          .headers = {{"Accept", "text/html,text/plain,application/json,application/xml;q=0.9,*/*;q=0.1"},
+                      {"User-Agent", "AVA/1.0 webfetch"}},
+          .body = "",
+          .timeout_ms = timeout_ms,
+          .follow_redirects = false,
+          .include_response_headers = true,
+          .resolve_hosts = std::move(resolve_hosts)},
+      context.cancel_requested);
   if (!response) return std::unexpected(std::move(response.error()));
+  if (context.cancel_requested && context.cancel_requested()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled"));
+  }
   if (response->status_code < 200 || response->status_code >= 300) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "webfetch HTTP request failed");
     error.with_context("status_code", std::to_string(response->status_code));

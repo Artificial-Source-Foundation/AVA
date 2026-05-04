@@ -75,6 +75,28 @@ class StaticTransport final : public ava::provider::Transport {
   ava::provider::HttpResponse response_;
 };
 
+class CancelAwareTransport final : public ava::provider::Transport {
+ public:
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
+      const ava::provider::HttpRequest& request) override {
+    requests.push_back(request);
+    return ava::provider::HttpResponse{.status_code = 200, .headers = {{"content-type", "text/plain"}}, .body = "ok"};
+  }
+
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(const ava::provider::HttpRequest& request,
+                                                                    CancelCallback cancel_requested) override {
+    requests.push_back(request);
+    saw_cancel_callback = static_cast<bool>(cancel_requested);
+    if (cancel_requested && cancel_requested()) {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
+    }
+    return ava::provider::HttpResponse{.status_code = 200, .headers = {{"content-type", "text/plain"}}, .body = "ok"};
+  }
+
+  bool saw_cancel_callback = false;
+  std::vector<ava::provider::HttpRequest> requests;
+};
+
 void test_file_tools() {
   std::error_code remove_error;
   std::filesystem::remove_all(temp_root(), remove_error);
@@ -1249,6 +1271,27 @@ void test_webfetch_tool() {
                                      ava::tools::WebFetchOptions{.transport = &binary_transport});
   expect(!binary && binary.error().message().find("binary") != std::string::npos,
          "webfetch rejects binary response content types");
+
+  CancelAwareTransport cancel_aware_transport;
+  int cancel_checks = 0;
+  const ava::tools::ToolContext cancel_during_transport_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver =
+          [](const ava::permissions::PermissionPrompt&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .cancel_requested =
+          [&cancel_checks] {
+            ++cancel_checks;
+            return cancel_checks >= 3;
+          },
+  };
+  auto canceled_fetch = ava::tools::webfetch(cancel_during_transport_context, "https://example.com/page",
+                                             ava::tools::WebFetchOptions{.transport = &cancel_aware_transport});
+  expect(!canceled_fetch && canceled_fetch.error().message().find("canceled") != std::string::npos &&
+             cancel_aware_transport.saw_cancel_callback && cancel_aware_transport.requests.size() == 1,
+         "webfetch passes cancellation into the transport request boundary");
 }
 
 }  // namespace

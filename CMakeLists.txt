@@ -257,6 +257,13 @@ if(AVA_BUILD_TESTS)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_contract.cmake)
 
   add_test(
+    NAME ava_cli.headless_rpc_context_export
+    COMMAND ${CMAKE_COMMAND}
+            -DAVA_EXE=$<TARGET_FILE:ava>
+            -DAVA_CLI_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cli-headless-rpc-context-export
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_context_export.cmake)
+
+  add_test(
     NAME ava_cli.headless_rpc_cancel
     COMMAND ${CMAKE_COMMAND}
             -DAVA_EXE=$<TARGET_FILE:ava>

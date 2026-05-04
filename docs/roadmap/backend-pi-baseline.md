@@ -181,6 +181,8 @@ Deliverables:
   tests. MCP stdio now covers malformed initialize responses, early startup/discovery exits, tool-level errors, timeout,
   cancellation, stderr tails, and direct headless invalid-config containment.
 - Keep direct `ava --rpc` headless smokes for backend command surfaces that can run without live provider credentials.
+  Current subprocess coverage includes protocol/state/model/session/stat validation, cancellation, recoverable malformed
+  requests, MCP and plugin command surfaces, invalid MCP config containment, and context/export materialization.
 
 Exit gate:
 

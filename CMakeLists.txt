@@ -75,6 +75,7 @@ add_library(ava_core
   src/ava/config/model_config.cpp
   src/ava/config/model_config_support.cpp
   src/ava/config/model_profiles.cpp
+  src/ava/config/oauth_crypto_support.cpp
   src/ava/config/openai_oauth.cpp
   src/ava/config/openai_oauth_support.cpp
   src/ava/config/provider_profiles.cpp
@@ -313,6 +314,7 @@ if(AVA_BUILD_TESTS)
     tests/bash_tool_support_tests.cpp
     tests/config_context_auth_oauth_tests.cpp
     tests/config_model_config_support_tests.cpp
+    tests/config_oauth_crypto_support_tests.cpp
     tests/config_openai_oauth_support_tests.cpp
     tests/config_provider_credential_support_tests.cpp
     tests/core_tests.cpp
@@ -384,6 +386,7 @@ if(AVA_BUILD_TESTS)
     json_support
     config_context_auth_oauth
     config_model_config_support
+    config_oauth_crypto_support
     config_openai_oauth_support
     config_provider_credential_support
     app_event_json_support

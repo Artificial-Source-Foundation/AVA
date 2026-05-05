@@ -21,6 +21,7 @@
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/patch_staging.h"
+#include "ava/agent/question_answer_validation.h"
 #include "ava/agent/tool_arguments.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
@@ -269,6 +270,34 @@ void test_tool_result_json_helpers()
              *diff == "-old\n+new" && result.find("\"diff_truncated\":true") != std::string::npos && spill_file &&
              *spill_file == "result.jsonl" && result.find("\"spill_truncated\":true") != std::string::npos,
          "tool result JSON helpers append changed files, diffs, and spill metadata");
+}
+
+void test_question_answer_validation_helpers()
+{
+  auto valid = ava::agent::validate_question_answer(
+      ava::agent::QuestionAnswer{.selected_options = {"safe"}, .custom_text = "extra"}, "question");
+  expect(valid.has_value(), "question answer validation accepts bounded selected options and custom text");
+
+  auto too_many = ava::agent::validate_question_answer(
+      ava::agent::QuestionAnswer{.selected_options = std::vector<std::string>(65, "option"), .custom_text = ""},
+      "question");
+  expect(!too_many && too_many.error().message().find("too many selected options") != std::string::npos &&
+             too_many.error().format().find("selected_options") != std::string::npos,
+         "question answer validation rejects too many selected options with field context");
+
+  auto oversized_text = std::string(8193, 'x');
+  auto oversized_selected = ava::agent::validate_question_answer(
+      ava::agent::QuestionAnswer{.selected_options = {oversized_text}, .custom_text = ""}, "question");
+  expect(!oversized_selected &&
+             oversized_selected.error().message().find("selected option is too long") != std::string::npos &&
+             oversized_selected.error().format().find("index: 0") != std::string::npos,
+         "question answer validation rejects oversized selected option text with index context");
+
+  auto oversized_custom = ava::agent::validate_question_answer(
+      ava::agent::QuestionAnswer{.selected_options = {}, .custom_text = oversized_text}, "question");
+  expect(!oversized_custom && oversized_custom.error().message().find("custom text is too long") != std::string::npos &&
+             oversized_custom.error().format().find("custom_text") != std::string::npos,
+         "question answer validation rejects oversized custom text with field context");
 }
 
 void test_tool_dispatcher()
@@ -2422,6 +2451,7 @@ void run_agent_tool_dispatcher_tests()
   test_provider_tool_argument_helpers();
   test_patch_staging_helpers();
   test_tool_result_json_helpers();
+  test_question_answer_validation_helpers();
   test_tool_dispatcher();
   test_tool_dispatcher_plan_mode_denies_mutation();
   test_agent_loop_text_only_turn();

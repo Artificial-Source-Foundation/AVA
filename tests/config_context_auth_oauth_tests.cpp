@@ -26,6 +26,7 @@
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/config/auth.h"
+#include "ava/config/auth_file_json.h"
 #include "ava/config/model_config.h"
 #include "ava/config/model_profiles.h"
 #include "ava/config/openai_oauth.h"
@@ -242,6 +243,54 @@ void test_context_loader()
   }
 }
 
+void test_auth_file_json_helpers()
+{
+  auto const path = temp_root() / "auth-file-json" / "auth.json";
+  auto members = ava::config::parse_auth_members(
+      "{\n"
+      "  \"alpha\": {\"type\":\"api_key\",\"api_key\":\"secret\"},\n"
+      "  \"escaped\\nkey\": [1, {\"nested\": true}],\n"
+      "  \"number\": 42\n"
+      "}",
+      path);
+  expect(members && members->size() == 3 && (*members)[0].key == "alpha" &&
+             (*members)[0].raw_value == "{\"type\":\"api_key\",\"api_key\":\"secret\"}" &&
+             (*members)[1].key == "escaped\nkey" && (*members)[1].raw_value == "[1, {\"nested\": true}]" &&
+             (*members)[2].raw_value == "42",
+         "auth file JSON member parser preserves keys and raw values for safe credential merges");
+
+  auto malformed = ava::config::parse_auth_members("{\"alpha\": }", path);
+  expect(!malformed && malformed.error().format().find("invalid value") != std::string::npos,
+         "auth file JSON member parser rejects missing values with actionable errors");
+
+  auto rendered = ava::config::render_auth_members(std::vector<ava::config::AuthMember>{
+      {.key = "alpha", .raw_value = "1"}, {.key = "quote\"key", .raw_value = "true"}});
+  expect(rendered == "{\n  \"alpha\": 1,\n  \"quote\\\"key\": true\n}\n",
+         "auth file JSON renderer keeps deterministic object formatting and escapes keys");
+
+  auto api_key =
+      ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "test-provider",
+                                                                                   .access_token = "api-secret",
+                                                                                   .credential_type = "api_key",
+                                                                                   .account_id = "",
+                                                                                   .source = "test"});
+  auto oauth =
+      ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "test_provider",
+                                                                                   .access_token = "oauth-secret",
+                                                                                   .credential_type = "oauth",
+                                                                                   .account_id = "acct_123",
+                                                                                   .source = "test"});
+  auto invalid =
+      ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "bad provider",
+                                                                                   .access_token = "token",
+                                                                                   .credential_type = "api_key",
+                                                                                   .account_id = "",
+                                                                                   .source = "test"});
+  expect(api_key && api_key->find("\"api_key\": \"api-secret\"") != std::string::npos && oauth &&
+             oauth->find("\"account_id\": \"acct_123\"") != std::string::npos && !invalid,
+         "provider credential JSON helper formats supported credential types and rejects invalid provider ids");
+}
+
 void test_auth_load_and_store()
 {
   auto const root = temp_root() / "auth";
@@ -410,7 +459,7 @@ void test_auth_load_and_store()
                                              .account_id = "",
                                              .source = "test"});
   expect(repaired_broad_permissions.has_value(), "provider credential store repairs user-owned broad auth permissions");
-  struct stat auth_stat{};
+  struct stat auth_stat {};
   expect(::stat(paths.auth_file.c_str(), &auth_stat) == 0 && (auth_stat.st_mode & (S_IRWXG | S_IRWXO)) == 0,
          "provider credential store rewrites auth file with owner-only permissions");
   std::ifstream repaired_auth_file(paths.auth_file, std::ios::binary);
@@ -532,13 +581,13 @@ void test_auth_load_and_store()
                                            .account_id = "",
                                            .source_path = {}});
   expect(restored_api.has_value(), "OpenAI API key credential restores after env discovery checks");
-  struct stat st{};
+  struct stat st {};
   if (::stat(paths.auth_file.c_str(), &st) == 0) {
     expect((st.st_mode & 0777) == 0600, "auth file is owner-only");
   } else {
     expect(false, "auth file stat succeeds");
   }
-  struct stat dir_st{};
+  struct stat dir_st {};
   if (::stat(paths.auth_file.parent_path().c_str(), &dir_st) == 0) {
     expect((dir_st.st_mode & 0777) == 0700, "auth directory is owner-only");
   } else {
@@ -958,6 +1007,7 @@ void run_config_context_auth_oauth_tests()
 {
   test_xdg_paths();
   test_context_loader();
+  test_auth_file_json_helpers();
   test_auth_load_and_store();
   test_openai_oauth_helpers();
   test_openai_oauth_refresh();

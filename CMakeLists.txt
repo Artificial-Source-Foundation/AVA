@@ -77,6 +77,7 @@ add_library(ava_core
   src/ava/config/openai_oauth.cpp
   src/ava/config/openai_oauth_support.cpp
   src/ava/config/provider_profiles.cpp
+  src/ava/config/provider_credential_support.cpp
   src/ava/config/prompt_config.cpp
   src/ava/config/reasoning_profiles.cpp
   src/ava/config/xdg_paths.cpp
@@ -300,6 +301,7 @@ if(AVA_BUILD_TESTS)
     tests/config_context_auth_oauth_tests.cpp
     tests/config_model_config_support_tests.cpp
     tests/config_openai_oauth_support_tests.cpp
+    tests/config_provider_credential_support_tests.cpp
     tests/core_tests.cpp
     tests/core_mode_json_permissions_tests.cpp
     tests/events_tests.cpp
@@ -364,6 +366,7 @@ if(AVA_BUILD_TESTS)
     config_context_auth_oauth
     config_model_config_support
     config_openai_oauth_support
+    config_provider_credential_support
     app_event_json_support
     app_event_serialization
     app_event_bus

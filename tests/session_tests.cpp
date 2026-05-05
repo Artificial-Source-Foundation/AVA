@@ -24,6 +24,7 @@
 
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
+#include "ava/session/record.h"
 #include "ava/session/session_store.h"
 #include "ava/session/stats.h"
 #include "ava/session/validation.h"
@@ -85,11 +86,11 @@ void test_session_store_round_trip()
   });
   expect(append.has_value(), "session entry appends");
 
-  struct stat session_stat{};
+  struct stat session_stat {};
   if (stat(store->session_path().c_str(), &session_stat) == 0) {
     expect((session_stat.st_mode & 0777) == 0600, "session file is owner read/write only");
   }
-  struct stat session_dir_stat{};
+  struct stat session_dir_stat {};
   auto const session_dir = store->session_path().parent_path();
   if (stat(session_dir.c_str(), &session_dir_stat) == 0) {
     expect((session_dir_stat.st_mode & 0777) == 0700, "session directory is owner-only");
@@ -331,6 +332,59 @@ void test_session_store_round_trip()
                                                     .timestamp = "2026-04-27T00:00:00Z",
                                                     .data_json = "{\"text\":\"hello\"}"});
   expect(!invalid_parent_append, "session append rejects unsafe parent_id values");
+}
+
+void test_session_record_round_trip()
+{
+  ava::session::SessionEntry const original{.id = "entry_\n",
+                                            .parent_id = "parent_id",
+                                            .type = ava::session::EntryType::ToolResult,
+                                            .timestamp = "2026-04-27T00:00:00Z",
+                                            .data_json = "{\"text\":\"hello\",\"nested\":{\"ok\":true}}"};
+
+  auto line = ava::session::serialize_session_entry_line(original);
+  expect(line && line->find('\n') == std::string::npos && line->find("\"version\":2") != std::string::npos,
+         line ? "session record serializer emits one current-version JSONL record"
+              : "session record serializer emits one current-version JSONL record: " + line.error().format());
+  if (!line) return;
+
+  auto parsed = ava::session::parse_session_entry_line(*line, "/tmp/session.jsonl");
+  expect(parsed && parsed->id == original.id && parsed->parent_id == original.parent_id &&
+             parsed->type == original.type && parsed->timestamp == original.timestamp &&
+             parsed->data_json == original.data_json && parsed->version == ava::session::kCurrentSessionEntryVersion,
+         parsed ? "session record parser round-trips serialized entries"
+                : "session record parser round-trips serialized entries: " + parsed.error().format());
+
+  auto legacy = ava::session::parse_session_entry_line(
+      "{\"version\":1,\"id\":\"entry_\\uD834\\uDD1E\",\"parent_id\":\"\",\"type\":\"user_message\","
+      "\"timestamp\":\"2026-04-27T00:00:00Z\",\"data\":{\"text\":\"hello\"}}",
+      "/tmp/session.jsonl");
+  expect(legacy && legacy->id == std::string("entry_\xF0\x9D\x84\x9E") && legacy->version == 1,
+         legacy ? "session record parser decodes legacy unicode escapes"
+                : "session record parser decodes legacy unicode escapes: " + legacy.error().format());
+
+  auto unsupported = ava::session::parse_session_entry_line(
+      "{\"version\":999,\"id\":\"entry\",\"parent_id\":\"\",\"type\":\"user_message\","
+      "\"timestamp\":\"2026-04-27T00:00:00Z\",\"data\":{\"text\":\"hello\"}}",
+      "/tmp/session.jsonl");
+  expect(!unsupported && ava::session::is_unsupported_session_version_error(unsupported.error()),
+         "session record parser flags unsupported versions explicitly");
+
+  auto malformed = ava::session::parse_session_entry_line(
+      "{\"version\":2,\"id\":\"entry\",\"parent_id\":\"bad/slash\",\"type\":\"user_message\","
+      "\"timestamp\":\"2026-04-27T00:00:00Z\",\"data\":{\"text\":\"hello\"}}",
+      "/tmp/session.jsonl");
+  expect(!malformed && malformed.error().format().find("parent_id") != std::string::npos,
+         "session record parser rejects unsafe parent ids");
+
+  auto too_large = ava::session::serialize_session_entry_line(ava::session::SessionEntry{
+      .id = std::string(600000, '"'),
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-04-27T00:00:00Z",
+      .data_json = "{\"text\":\"hello\"}",
+  });
+  expect(!too_large, "session record serializer rejects oversized records before append");
 }
 
 void test_session_stats_helper()
@@ -1678,6 +1732,7 @@ void test_tool_content_parts_reconstruction()
 void run_session_tests()
 {
   test_session_store_round_trip();
+  test_session_record_round_trip();
   test_session_stats_helper();
   test_session_stats_omits_incomplete_cost_total();
   test_session_stats_flags_legacy_assistant_tokens_without_cost();

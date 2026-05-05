@@ -102,6 +102,7 @@ add_library(ava_core
   src/ava/session/session_store.cpp
   src/ava/session/stats.cpp
   src/ava/session/validation.cpp
+  src/ava/session/validation_fields.cpp
   src/ava/tools/bash_tool.cpp
   src/ava/tools/diff_utils.cpp
   src/ava/tools/edit_match.cpp

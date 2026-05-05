@@ -45,6 +45,7 @@
 #include "ava/tools/mutation_queue.h"
 #include "ava/tools/search_tools.h"
 #include "ava/tools/spill_files.h"
+#include "ava/tools/tool_permissions.h"
 #include "ava/tools/webfetch_tool.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/terminal.h"
@@ -576,6 +577,73 @@ void test_file_tools()
              edit_allow_prompts[1] == ava::permissions::Operation::EditFile && outside_after_allowed_edit &&
              outside_after_allowed_edit->content == "external content",
          "edit_file resolves external read permission before edit permission");
+}
+
+void test_tool_permission_helpers()
+{
+  auto const workspace = temp_root() / "tool-permission-helpers";
+  std::error_code remove_error;
+  std::filesystem::remove_all(workspace, remove_error);
+  std::filesystem::create_directories(workspace);
+
+  ava::tools::PermissionAuditEvent const event{
+      .permission_request_id = "permreq_test",
+      .operation = ava::permissions::Operation::EditFile,
+      .mode = ava::agent::Mode::Build,
+      .tool_name = "write_file",
+      .action = ava::permissions::PermissionAction::Ask,
+      .reason = "outside workspace",
+      .risk = ava::permissions::PermissionRisk::High,
+      .target_path = workspace / "outside.txt",
+      .command = "",
+      .resolution = "allow",
+      .resolution_source = "resolver",
+  };
+  auto const data = ava::tools::permission_audit_data_json(event);
+  expect(ava::core::json::string_field(data, "permission_request_id") == "permreq_test" &&
+             ava::core::json::string_field(data, "operation") == "edit" &&
+             ava::core::json::string_field(data, "mode") == "build" &&
+             ava::core::json::string_field(data, "tool_name") == "write_file" &&
+             ava::core::json::string_field(data, "action") == "ask" &&
+             ava::core::json::string_field(data, "reason") == "outside workspace" &&
+             ava::core::json::string_field(data, "risk") == "high" &&
+             ava::core::json::string_field(data, "target_path") == (workspace / "outside.txt").string() &&
+             ava::core::json::string_field(data, "resolution") == "allow" &&
+             ava::core::json::string_field(data, "resolution_source") == "resolver",
+         "tool permission helpers serialize semantic audit data");
+
+  ava::tools::PermissionAuditEvent const command_event{
+      .operation = ava::permissions::Operation::RunCommand,
+      .mode = ava::agent::Mode::Build,
+      .tool_name = "bash",
+      .action = ava::permissions::PermissionAction::Deny,
+      .reason = "unsafe command",
+      .risk = ava::permissions::PermissionRisk::Critical,
+      .target_path = workspace,
+      .command = "rm -rf build",
+      .resolution = "deny",
+      .resolution_source = "policy",
+  };
+  auto const command_data = ava::tools::permission_audit_data_json(command_event);
+  expect(ava::core::json::string_field(command_data, "command") == "rm -rf build" &&
+             !ava::core::json::string_field(command_data, "target_path"),
+         "tool permission helpers keep command audits command-shaped instead of path-shaped");
+
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  ava::tools::ToolContext const context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_audit_sink = [&audits](ava::tools::PermissionAuditEvent const& audit) -> ava::core::VoidResult {
+        audits.push_back(audit);
+        return {};
+      },
+  };
+  auto allowed = ava::tools::ensure_permission(context, ava::permissions::Operation::ReadFile,
+                                               workspace / "visible.txt", "", "read_file", "tool requires permission");
+  expect(allowed && audits.size() == 1 && audits[0].operation == ava::permissions::Operation::ReadFile &&
+             audits[0].tool_name == "read_file" && audits[0].action == ava::permissions::PermissionAction::Allow &&
+             audits[0].resolution == "allow" && audits[0].resolution_source == "policy",
+         "tool permission helpers audit policy-allowed permission checks");
 }
 
 void test_permission_audit_persistence()
@@ -1395,6 +1463,7 @@ void test_webfetch_tool()
 void run_tools_tests()
 {
   test_file_tools();
+  test_tool_permission_helpers();
   test_permission_audit_persistence();
   test_search_tools();
   test_search_gitignore_rules();

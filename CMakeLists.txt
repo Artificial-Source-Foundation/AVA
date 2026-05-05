@@ -122,6 +122,7 @@ add_library(ava_core
   src/ava/tools/mutation_queue.cpp
   src/ava/tools/search_tools.cpp
   src/ava/tools/spill_files.cpp
+  src/ava/tools/tool_permissions.cpp
   src/ava/tools/webfetch_tool.cpp
 )
 

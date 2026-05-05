@@ -117,6 +117,7 @@ add_library(ava_core
   src/ava/provider/anthropic_response_support.cpp
   src/ava/provider/openai_compatible_provider.cpp
   src/ava/provider/openai_compatible_request.cpp
+  src/ava/provider/openai_compatible_response.cpp
   src/ava/provider/openai_provider.cpp
   src/ava/provider/openai_request.cpp
   src/ava/provider/openai_response_parser.cpp
@@ -276,6 +277,7 @@ if(AVA_BUILD_TESTS)
     tests/provider_anthropic_tests.cpp
     tests/provider_event_buffer_tests.cpp
     tests/provider_openai_tests.cpp
+    tests/provider_openai_compatible_response_tests.cpp
     tests/provider_transport_tests.cpp
     tests/session_validation_compaction_tests.cpp
     tests/session_validation_permission_tests.cpp
@@ -315,6 +317,7 @@ if(AVA_BUILD_TESTS)
     provider_openai
     provider_anthropic
     provider_event_buffer
+    provider_openai_compatible_response
     provider_transport
     agent_tool_dispatcher
     lsp

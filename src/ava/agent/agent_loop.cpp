@@ -1,25 +1,40 @@
 #include "ava/agent/agent_loop.h"
 
+#include "ava/agent/agent_loop_session.h"
+#include "ava/agent/assistant_turn.h"
+#include "ava/agent/message_builder.h"
+#include "ava/agent/provider_output_validation.h"
+#include "ava/agent/stream_bridge.h"
+#include "ava/agent/tool_dispatcher.h"
+#include "ava/agent/tool_result.h"
+#include "ava/agent/tool_summaries.h"
+#include "ava/agent/usage_accounting.h"
+
+#include "ava/core/json.h"
+
+#include <algorithm>
+#include <map>
 #include <optional>
 #include <string_view>
 #include <utility>
 #include <vector>
 
-#include "ava/agent/agent_loop_active_turn.h"
-#include "ava/agent/agent_loop_cancellation.h"
-#include "ava/agent/agent_loop_context_retry.h"
-#include "ava/agent/assistant_turn.h"
-#include "ava/agent/message_builder.h"
-#include "ava/agent/provider_event_buffer.h"
-#include "ava/agent/session_recorder.h"
-#include "ava/agent/stream_bridge.h"
-#include "ava/agent/tool_dispatcher.h"
-#include "ava/agent/tool_summaries.h"
-#include "ava/agent/tool_timeline.h"
-#include "ava/agent/usage_accounting.h"
-
 namespace ava::agent {
 namespace {
+
+std::string dispatch_error_result_json(ProviderToolCall const& call, ava::core::Error const& error)
+{
+  return "{\"tool\":\"" + ava::core::json::escape(call.name) + "\",\"ok\":false,\"error\":{\"category\":\"" +
+         ava::core::json::escape(ava::core::to_string(error.category())) + "\",\"message\":\"" +
+         ava::core::json::escape(error.message()) + "\",\"details\":\"" + ava::core::json::escape(error.format()) +
+         "\"}}";
+}
+
+ToolDispatchResult synthetic_failed_dispatch_result(ProviderToolCall const& call, ava::core::Error const& error)
+{
+  return with_tool_result_payload(ToolDispatchResult{
+      .call_id = call.id, .name = call.name, .success = false, .result_text = dispatch_error_result_json(call, error)});
+}
 
 void publish_tool_event(AgentLoopOptions const& options, ToolTimelineEntry const& event)
 {
@@ -32,10 +47,62 @@ ava::core::VoidResult publish_tool_progress(AgentLoopOptions const& options, Too
   return options.on_tool_progress(event);
 }
 
+void populate_tool_timeline_metadata(ToolTimelineEntry& entry, ToolDispatchResult const& result)
+{
+  auto const& payload = result.payload;
+  entry.result_json = result.result_text;
+  entry.structured_result_json = serialize_tool_result_payload_json(result);
+  entry.content_type = payload.content_type;
+  entry.error_category = payload.error_category;
+  entry.error_code = payload.error_code;
+  entry.error_message = payload.error_message;
+  entry.error_details = payload.error_details;
+  entry.diff = payload.diff;
+  entry.diff_truncated = payload.diff_truncated;
+  entry.truncated = payload.truncated;
+  entry.spill_truncated = payload.spill_truncated;
+  entry.spill_path = payload.spill_path;
+  entry.output_bytes = payload.output_bytes;
+  entry.total_bytes = payload.total_bytes;
+  entry.omitted_bytes = payload.omitted_bytes;
+  entry.omitted_lines = payload.omitted_lines;
+  entry.visible_matches = payload.visible_matches;
+  entry.total_matches = payload.total_matches;
+  entry.changed_paths = payload.changed_paths;
+}
+
+bool is_canceled(AgentLoopOptions const& options)
+{
+  return options.cancel_requested && options.cancel_requested();
+}
+
+ava::core::VoidResult check_canceled(AgentLoopOptions const& options, ava::session::SessionStore& store,
+                                     std::string_view boundary)
+{
+  if (!is_canceled(options)) return {};
+  static_cast<void>(append_cancel(store, boundary));
+  auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled");
+  error.with_context("boundary", std::string(boundary));
+  return std::unexpected(std::move(error));
+}
+
 }  // namespace
 
 AgentLoop::AgentLoop(AgentLoopOptions options) : options_(std::move(options))
 {
+}
+
+std::string to_string(ToolTimelineStatus status)
+{
+  switch (status) {
+    case ToolTimelineStatus::Running:
+      return "running";
+    case ToolTimelineStatus::Success:
+      return "success";
+    case ToolTimelineStatus::Error:
+      return "error";
+  }
+  return "unknown";
 }
 
 ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_message,
@@ -44,7 +111,18 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
                                                        ava::provider::Transport& transport)
 {
   auto check_canceled_locked = [&](std::string_view boundary) -> ava::core::VoidResult {
-    return check_agent_loop_canceled(options_.cancel_requested, store, options_.session_mutex, boundary);
+    if (options_.session_mutex) {
+      std::lock_guard lock(*options_.session_mutex);
+      return check_canceled(options_, store, boundary);
+    }
+    return check_canceled(options_, store, boundary);
+  };
+  auto append_user_message_locked = [&](std::string const& text) -> ava::core::Result<std::string> {
+    if (options_.session_mutex) {
+      std::lock_guard lock(*options_.session_mutex);
+      return append_user_message(store, text);
+    }
+    return append_user_message(store, text);
   };
   auto build_messages_locked = [&]() -> ava::core::Result<BuiltProviderMessages> {
     if (options_.session_mutex) {
@@ -98,29 +176,72 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
     }
     return append_error(store, error);
   };
-  ActiveTurnMessages active_turn_user_messages;
+  struct ActiveTurnUserMessage {
+    std::string id;
+    std::string text;
+  };
+  std::vector<ActiveTurnUserMessage> active_turn_user_messages;
+  auto replayable_active_turn_texts = [&]() {
+    std::vector<std::string> messages;
+    messages.reserve(active_turn_user_messages.size());
+    for (auto const& message : active_turn_user_messages) messages.push_back(message.text);
+    return messages;
+  };
   auto compact_context = [&](std::string_view trigger) -> ava::core::Result<bool> {
     if (!options_.compact_context) {
       auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "context compaction is unavailable");
       error.with_context("trigger", std::string(trigger));
       return std::unexpected(std::move(error));
     }
-    auto const replayed_messages = active_turn_user_messages.replayable_texts();
+    auto const replayed_messages = replayable_active_turn_texts();
     return options_.compact_context(store, trigger, replayed_messages);
   };
   auto append_active_turn_user_message_locked = [&](std::string const& text) -> ava::core::VoidResult {
-    return active_turn_user_messages.append_user_message(store, options_.session_mutex, text);
+    auto appended = append_user_message_locked(text);
+    if (!appended) return std::unexpected(std::move(appended.error()));
+    active_turn_user_messages.push_back(ActiveTurnUserMessage{.id = *appended, .text = text});
+    return {};
   };
   auto replay_active_turn_user_messages_locked = [&]() -> ava::core::VoidResult {
-    return active_turn_user_messages.replay_user_messages(store, options_.session_mutex);
+    for (auto const& message : active_turn_user_messages) {
+      auto replayed = [&]() -> ava::core::VoidResult {
+        if (options_.session_mutex) {
+          std::lock_guard lock(*options_.session_mutex);
+          return append_replay_user_message(store, message.text, message.id);
+        }
+        return append_replay_user_message(store, message.text, message.id);
+      }();
+      if (!replayed) return replayed;
+    }
+    return {};
   };
-  ContextOverflowRetryState context_overflow_retry;
+  bool context_overflow_retry_used = false;
+  bool skip_auto_compaction_after_overflow_retry = false;
   auto prepare_context_overflow_retry = [&](ava::core::Error const& error) -> ava::core::Result<bool> {
-    return prepare_context_overflow_retry_attempt(
-        error, options_.compact_context != nullptr, context_overflow_retry,
-        ContextOverflowRetryCallbacks{.check_canceled = check_canceled_locked,
-                                      .compact_context = compact_context,
-                                      .replay_active_turn_user_messages = replay_active_turn_user_messages_locked});
+    if (!ava::provider::is_context_overflow_error(error) || context_overflow_retry_used || !options_.compact_context) {
+      return false;
+    }
+    context_overflow_retry_used = true;
+    if (auto not_canceled = check_canceled_locked("before_context_overflow_compaction"); !not_canceled) {
+      return std::unexpected(std::move(not_canceled.error()));
+    }
+    auto compacted = compact_context("context_overflow");
+    if (!compacted) {
+      auto compact_error = ava::core::Error(ava::core::ErrorCategory::Provider, "context overflow compaction failed");
+      compact_error.with_context("provider_error", error.format());
+      compact_error.with_context("compaction_error", compacted.error().format());
+      return std::unexpected(std::move(compact_error));
+    }
+    if (*compacted) {
+      if (auto replayed = replay_active_turn_user_messages_locked(); !replayed) {
+        return std::unexpected(std::move(replayed.error()));
+      }
+      skip_auto_compaction_after_overflow_retry = true;
+    }
+    if (auto not_canceled = check_canceled_locked("after_context_overflow_compaction"); !not_canceled) {
+      return std::unexpected(std::move(not_canceled.error()));
+    }
+    return true;
   };
 
   if (auto not_canceled = check_canceled_locked("before_turn_start"); !not_canceled) {
@@ -179,8 +300,8 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       }
     }
 
-    if (context_overflow_retry.skip_next_auto_compaction) {
-      context_overflow_retry.skip_next_auto_compaction = false;
+    if (skip_auto_compaction_after_overflow_retry) {
+      skip_auto_compaction_after_overflow_retry = false;
     } else if (options_.compact_context && result.provider_iterations == 0 && !pre_turn_compacted) {
       auto compacted = compact_context("auto");
       if (!compacted) return std::unexpected(std::move(compacted.error()));
@@ -226,18 +347,62 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
     if (result.provider_iterations == 0) {
       result.initial_context_messages = provider_request.messages.size();
     }
-    auto const provider_output_limits =
-        ProviderOutputLimits{.max_events = options_.max_provider_events,
-                             .max_assistant_text_bytes = options_.max_assistant_text_bytes,
-                             .max_tool_argument_bytes = options_.max_tool_argument_bytes};
-    ProviderEventBuffer provider_events(provider_output_limits);
+    std::vector<ava::provider::StreamEvent> provider_events;
+    std::size_t streamed_assistant_text_bytes = 0;
+    std::map<std::string, std::size_t> streamed_tool_argument_bytes;
     bool processed_stream_chunks = false;
-    auto publish_provider_event = [&](ava::provider::StreamEvent const& event) -> ava::core::VoidResult {
-      return publish_stream_event(options_, event);
-    };
     auto append_stream_events = [&](std::vector<ava::provider::StreamEvent> new_events,
                                     bool publish_all_events = true) -> ava::core::VoidResult {
-      return provider_events.append(std::move(new_events), publish_provider_event, publish_all_events);
+      for (auto& event : new_events) {
+        if (options_.max_provider_events > 0 && provider_events.size() >= options_.max_provider_events) {
+          return std::unexpected(output_limit_error("provider output event limit exceeded", "max_provider_events",
+                                                    options_.max_provider_events));
+        }
+        if (event.type == ava::provider::StreamEventType::TextDelta) {
+          if (would_exceed(streamed_assistant_text_bytes, event.text.size(), options_.max_assistant_text_bytes)) {
+            return std::unexpected(output_limit_error("assistant text byte limit exceeded", "max_assistant_text_bytes",
+                                                      options_.max_assistant_text_bytes));
+          }
+          streamed_assistant_text_bytes += event.text.size();
+        } else if (event.type == ava::provider::StreamEventType::ReasoningStart ||
+                   event.type == ava::provider::StreamEventType::ReasoningDelta ||
+                   event.type == ava::provider::StreamEventType::ReasoningEnd) {
+          auto const event_bytes =
+              event.type == ava::provider::StreamEventType::ReasoningEnd
+                  ? event.reasoning_signature.size() + event.reasoning_redacted_data.size()
+                  : event.text.size() + event.reasoning_signature.size() + event.reasoning_redacted_data.size();
+          if (would_exceed(streamed_assistant_text_bytes, event_bytes, options_.max_assistant_text_bytes)) {
+            return std::unexpected(output_limit_error("reasoning byte limit exceeded", "max_assistant_text_bytes",
+                                                      options_.max_assistant_text_bytes));
+          }
+          streamed_assistant_text_bytes += event_bytes;
+        } else if (event.type == ava::provider::StreamEventType::ToolCallStart) {
+          if (auto valid_id = validate_provider_tool_call_id(event.tool_call_id); !valid_id) {
+            return std::unexpected(std::move(valid_id.error()));
+          }
+        } else if (event.type == ava::provider::StreamEventType::ToolCallDelta) {
+          if (auto valid_id = validate_provider_tool_call_id(event.tool_call_id); !valid_id) {
+            return std::unexpected(std::move(valid_id.error()));
+          }
+          auto& bytes = streamed_tool_argument_bytes[event.tool_call_id];
+          if (would_exceed(bytes, event.text.size(), options_.max_tool_argument_bytes)) {
+            return std::unexpected(output_limit_error("tool argument byte limit exceeded", "max_tool_argument_bytes",
+                                                      options_.max_tool_argument_bytes));
+          }
+          bytes += event.text.size();
+        }
+        bool const should_publish = publish_all_events ||
+                                    event.type == ava::provider::StreamEventType::ReasoningStart ||
+                                    event.type == ava::provider::StreamEventType::ReasoningDelta ||
+                                    event.type == ava::provider::StreamEventType::ReasoningEnd;
+        if (should_publish) {
+          if (auto published = publish_stream_event(options_, event); !published) {
+            return std::unexpected(std::move(published.error()));
+          }
+        }
+        provider_events.push_back(std::move(event));
+      }
+      return {};
     };
 
     if (provider_request.stream && transport.supports_streaming()) {
@@ -246,16 +411,16 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
           *request,
           [&](std::string_view chunk) -> ava::core::VoidResult {
             processed_stream_chunks = true;
-            if (agent_loop_canceled(options_.cancel_requested)) {
+            if (is_canceled(options_)) {
               return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled"));
             }
             auto parsed = stream_parser->append(chunk);
             if (!parsed) return std::unexpected(std::move(parsed.error()));
             return append_stream_events(std::move(*parsed));
           },
-          [&options = options_]() { return agent_loop_canceled(options.cancel_requested); });
+          [&options = options_]() { return is_canceled(options); });
       if (!response) {
-        if (agent_loop_canceled(options_.cancel_requested)) {
+        if (is_canceled(options_)) {
           if (auto not_canceled = check_canceled_locked("during_provider_stream"); !not_canceled) {
             return std::unexpected(std::move(not_canceled.error()));
           }
@@ -303,7 +468,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
           return std::unexpected(events.error());
         }
         if (auto appended = append_stream_events(std::move(*events)); !appended) {
-          if (agent_loop_canceled(options_.cancel_requested)) {
+          if (is_canceled(options_)) {
             if (auto not_canceled = check_canceled_locked("during_provider_stream"); !not_canceled) {
               return std::unexpected(std::move(not_canceled.error()));
             }
@@ -328,7 +493,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
           return std::unexpected(parsed.error());
         }
         if (auto appended = append_stream_events(std::move(*parsed)); !appended) {
-          if (agent_loop_canceled(options_.cancel_requested)) {
+          if (is_canceled(options_)) {
             if (auto not_canceled = check_canceled_locked("during_provider_stream"); !not_canceled) {
               return std::unexpected(std::move(not_canceled.error()));
             }
@@ -343,10 +508,9 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
         }
       }
     } else {
-      auto response =
-          transport.send(*request, [&options = options_]() { return agent_loop_canceled(options.cancel_requested); });
+      auto response = transport.send(*request, [&options = options_]() { return is_canceled(options); });
       if (!response) {
-        if (agent_loop_canceled(options_.cancel_requested)) {
+        if (is_canceled(options_)) {
           if (auto not_canceled = check_canceled_locked("during_provider_request"); !not_canceled) {
             return std::unexpected(std::move(not_canceled.error()));
           }
@@ -383,7 +547,10 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       }
     }
 
-    auto turn = parse_assistant_turn(provider_events.events(), provider_output_limits);
+    auto turn = parse_assistant_turn(provider_events,
+                                     ProviderOutputLimits{.max_events = options_.max_provider_events,
+                                                          .max_assistant_text_bytes = options_.max_assistant_text_bytes,
+                                                          .max_tool_argument_bytes = options_.max_tool_argument_bytes});
     if (!turn) {
       if (auto retry = prepare_context_overflow_retry(turn.error()); !retry) {
         return std::unexpected(std::move(retry.error()));

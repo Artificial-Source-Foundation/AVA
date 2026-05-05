@@ -1,18 +1,22 @@
 #pragma once
 
+#include "ava/app/events.h"
+
+#include "ava/agent/question.h"
+
+#include "ava/tui/composer.h"
+#include "ava/tui/keybindings.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/core/result.h"
+#include "ava/core/version.h"
+
 #include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/agent/question.h"
-#include "ava/app/events.h"
-#include "ava/core/result.h"
-#include "ava/core/version.h"
-#include "ava/permissions/permission.h"
-#include "ava/tui/composer.h"
-#include "ava/tui/keybindings.h"
 
 namespace ava::tui {
 

@@ -1,8 +1,8 @@
 #include "ava/app/rpc/run_state.h"
 
-#include <utility>
-
 #include "ava/app/rpc/protocol.h"
+
+#include <utility>
 
 namespace ava::app::rpc {
 namespace {
@@ -163,17 +163,6 @@ std::vector<QueuedRpcMessage> clear_queued_steering_messages(RpcRunState& state)
     state.steering_messages.pop_front();
   }
   return cleared;
-}
-
-CancelRunSnapshot request_cancel_and_clear_queued_messages(RpcRunState& state)
-{
-  std::lock_guard lock(state.mutex);
-  state.cancel_requested.store(true, std::memory_order_relaxed);
-  CancelRunSnapshot snapshot;
-  snapshot.was_active = state.active_run;
-  snapshot.active_request_id = state.active_request_id;
-  snapshot.cleared = clear_queued_messages_locked(state);
-  return snapshot;
 }
 
 ClearedRpcQueues deactivate_and_clear_queued_messages(RpcRunState& state)

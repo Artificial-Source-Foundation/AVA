@@ -1,11 +1,11 @@
 #include "ava/app/headless_policy.h"
 
+#include "ava/core/error.h"
+
 #include <algorithm>
 #include <set>
 #include <string>
 #include <utility>
-
-#include "ava/core/error.h"
 
 namespace ava::app {
 namespace {
@@ -93,7 +93,7 @@ ava::permissions::PermissionResolver build_headless_permission_resolver(Headless
   std::set<std::string> allowed_tools(options.allowed_tools.begin(), options.allowed_tools.end());
   return [allow_read_only = options.allow_read_only,
           allowed_tools = std::move(allowed_tools)](ava::permissions::PermissionPrompt const& prompt)
-             -> ava::core::Result<ava::permissions::PermissionResolution> {
+             -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     if (allow_read_only && prompt_matches_read_only(prompt)) {
       return ava::permissions::PermissionResolution::Allow;
     }

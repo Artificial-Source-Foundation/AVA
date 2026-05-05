@@ -1,12 +1,13 @@
 #include "ava/app/reasoning_controls.h"
 
+#include "ava/config/provider_profiles.h"
+
+#include "ava/core/error.h"
+
 #include <algorithm>
 #include <optional>
 #include <string>
 #include <utility>
-
-#include "ava/config/provider_profiles.h"
-#include "ava/core/error.h"
 
 namespace ava::app {
 namespace {

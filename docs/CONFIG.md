@@ -57,7 +57,7 @@ API key format:
 {"openai":{"type":"api_key","api_key":"sk-..."},"anthropic":{"type":"api_key","api_key":"sk-ant-..."}}
 ```
 
-Auth files are written owner-only. Provider credential setup preserves existing provider entries in the same auth file. Explicit AVA auth entries take precedence; AVA also attempts to read legacy `~/.ava/credentials.json` and a legacy compatible XDG auth file for OpenAI migration when no AVA OpenAI credential is stored.
+Auth files are written owner-only. Provider credential setup preserves existing provider entries in the same auth file. Explicit AVA auth entries take precedence; AVA also attempts to read legacy `~/.ava/credentials.json` and the legacy-compatible XDG auth file for OpenAI migration when no AVA OpenAI credential is stored.
 
 OAuth credentials refresh automatically before use when a refresh token is present. If refresh fails or the credential has no refresh token, rerun `ava connect openai`.
 

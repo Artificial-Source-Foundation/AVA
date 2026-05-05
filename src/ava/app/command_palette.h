@@ -1,9 +1,10 @@
 #pragma once
 
-#include <vector>
-
 #include "ava/app/command_catalog.h"
+
 #include "ava/tui/composer.h"
+
+#include <vector>
 
 namespace ava::app {
 

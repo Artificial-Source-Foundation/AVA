@@ -1,19 +1,24 @@
 #include "ava/app/command_palette.h"
 
+#include "ava/app/runtime.h"
+
+#include "ava/plugin/diagnostics.h"
+
+#include "ava/mcp/config.h"
+
+#include "ava/config/model_config.h"
+#include "ava/config/provider_profiles.h"
+
+#include "ava/session/session_store.h"
+
+#include "ava/provider/registry.h"
+
 #include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
-
-#include "ava/app/runtime.h"
-#include "ava/config/model_config.h"
-#include "ava/config/provider_profiles.h"
-#include "ava/mcp/config.h"
-#include "ava/plugin/diagnostics.h"
-#include "ava/provider/registry.h"
-#include "ava/session/session_store.h"
 
 namespace ava::app {
 namespace {

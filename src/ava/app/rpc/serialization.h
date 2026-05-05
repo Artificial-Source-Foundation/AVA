@@ -1,19 +1,23 @@
 #pragma once
 
+#include "ava/app/commands.h"
+#include "ava/app/runtime.h"
+
+#include "ava/agent/agent_loop.h"
+#include "ava/agent/question.h"
+
+#include "ava/config/model_config.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/core/result.h"
+
 #include <cstddef>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/agent/agent_loop.h"
-#include "ava/agent/question.h"
-#include "ava/app/commands.h"
-#include "ava/app/runtime.h"
-#include "ava/config/model_config.h"
-#include "ava/core/result.h"
-#include "ava/permissions/permission.h"
 
 namespace ava::app::rpc {
 
@@ -37,11 +41,12 @@ namespace ava::app::rpc {
                                                           ava::permissions::PermissionPrompt const& prompt);
 [[nodiscard]] std::string question_request_payload_json(std::string_view resolver_request_id,
                                                         ava::agent::QuestionPrompt const& prompt);
-[[nodiscard]] std::string permission_reply_payload_json(std::string_view resolver_request_id,
-                                                        std::string_view decision);
-[[nodiscard]] std::string question_reply_payload_json(std::string_view resolver_request_id,
-                                                      std::optional<std::string> const& answer,
-                                                      std::optional<std::string> const& selected);
+[[nodiscard]] std::string permission_reply_payload_json(std::string_view resolver_request_id, std::string_view decision,
+                                                        std::optional<std::string> const& reason = std::nullopt);
+[[nodiscard]] std::string question_reply_payload_json(
+    std::string_view resolver_request_id, std::optional<std::string> const& answer,
+    std::optional<std::string> const& selected,
+    std::optional<std::vector<std::string>> const& selected_options = std::nullopt);
 [[nodiscard]] std::string cancel_requested_payload_json(bool active_run, std::size_t cleared_steer,
                                                         std::size_t cleared_follow_up,
                                                         std::string_view active_request_id = {});

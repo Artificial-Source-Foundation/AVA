@@ -1,5 +1,9 @@
 #pragma once
 
+#include "ava/mcp/config.h"
+
+#include "ava/core/result.h"
+
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -9,10 +13,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/core/result.h"
-#include "ava/mcp/config.h"
-#include "ava/mcp/tool_list_parser.h"
 
 namespace ava::mcp {
 
@@ -31,6 +31,12 @@ struct McpInitialization {
   std::string server_version;
   std::string capabilities_json;
   std::string raw_json;
+};
+
+struct McpToolDescription {
+  std::string name;
+  std::string description;
+  std::string input_schema_json;
 };
 
 struct McpToolCallResult {

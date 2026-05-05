@@ -1,9 +1,9 @@
 #include "ava/tui/composer_editor.h"
 
+#include "ava/tui/composer_internal.h"
+
 #include <algorithm>
 #include <cctype>
-
-#include "ava/tui/composer_internal.h"
 
 namespace ava::tui {
 namespace {

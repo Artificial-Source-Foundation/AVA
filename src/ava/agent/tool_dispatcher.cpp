@@ -1,5 +1,23 @@
 #include "ava/agent/tool_dispatcher.h"
 
+#include "ava/agent/question.h"
+#include "ava/agent/tool_dispatch_common.h"
+#include "ava/agent/tool_dispatch_patch.h"
+#include "ava/agent/tool_registry.h"
+#include "ava/agent/tool_result.h"
+
+#include "ava/tools/bash_tool.h"
+#include "ava/tools/lsp_tools.h"
+#include "ava/tools/mutation_queue.h"
+#include "ava/tools/search_tools.h"
+#include "ava/tools/webfetch_tool.h"
+
+#include "ava/plugin/tool_broker.h"
+
+#include "ava/mcp/tool_broker.h"
+
+#include "ava/core/json.h"
+
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -8,40 +26,287 @@
 #include <utility>
 #include <vector>
 
-#include "ava/agent/question.h"
-#include "ava/agent/question_answer_validation.h"
-#include "ava/agent/tool_dispatch_support.h"
-#include "ava/agent/tool_file_dispatch.h"
-#include "ava/agent/tool_lsp_dispatch.h"
-#include "ava/agent/tool_network_dispatch.h"
-#include "ava/agent/tool_patch_dispatch.h"
-#include "ava/agent/tool_process_dispatch.h"
-#include "ava/agent/tool_registry.h"
-#include "ava/agent/tool_result.h"
-#include "ava/agent/tool_search_dispatch.h"
-#include "ava/mcp/tool_broker.h"
-#include "ava/plugin/tool_broker.h"
-#include "ava/tools/mutation_queue.h"
-
 namespace ava::agent {
 namespace {
 
-using detail::apply_patch_result;
-using detail::bash_result;
-using detail::canceled_error;
-using detail::check_canceled;
-using detail::context_for_provider_tool;
-using detail::edit_file_result;
-using detail::glob_result;
-using detail::grep_result;
-using detail::is_canceled;
-using detail::is_lsp_diagnostics_metadata;
-using detail::lsp_diagnostics_result;
-using detail::read_file_result;
-using detail::simple_error_result;
-using detail::tool_error_result;
-using detail::webfetch_result;
-using detail::write_file_result;
+constexpr std::size_t kMaxProviderToolCallIdBytes = 256;
+constexpr std::size_t kMaxQuestionAnswerSelectedOptions = 64;
+constexpr std::size_t kMaxQuestionAnswerStringBytes = 8192;
+constexpr std::size_t kMaxLspProviderDiagnostics = 200;
+constexpr std::size_t kMaxLspProviderJsonBytes = 64 * 1024;
+constexpr std::size_t kMaxLspProviderPathBytes = 4096;
+
+using namespace ava::agent::tool_dispatch;
+
+bool is_lsp_diagnostics_metadata(ToolMetadata const& tool)
+{
+  return tool.name == std::string_view("lsp_diagnostics");
+}
+
+ToolDispatchResult lsp_error_result(ProviderToolCall const& call, ava::core::Error const& error)
+{
+  if (error.message().find("canceled") != std::string::npos || error.message().find("cancelled") != std::string::npos) {
+    return tool_error_result(call, error);
+  }
+  if (error.category() == ava::core::ErrorCategory::PermissionDenied ||
+      error.category() == ava::core::ErrorCategory::InvalidArgument) {
+    return tool_error_result(call, error);
+  }
+  auto redacted = ava::core::Error(error.category(), "LSP diagnostics failed");
+  redacted.with_context("tool", call.name);
+  return tool_error_result(call, redacted);
+}
+
+ava::core::Error question_answer_error(std::string_view tool_name, std::string_view field, std::string message)
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
+  error.with_context("tool", std::string(tool_name));
+  error.with_context("field", std::string(field));
+  return error;
+}
+
+ava::core::VoidResult validate_question_answer(QuestionAnswer const& answer, std::string_view tool_name)
+{
+  if (answer.selected_options.size() > kMaxQuestionAnswerSelectedOptions) {
+    auto error = question_answer_error(tool_name, "selected_options", "question answer has too many selected options");
+    error.with_context("max_options", std::to_string(kMaxQuestionAnswerSelectedOptions));
+    return std::unexpected(std::move(error));
+  }
+  for (std::size_t index = 0; index < answer.selected_options.size(); ++index) {
+    if (answer.selected_options[index].size() > kMaxQuestionAnswerStringBytes) {
+      auto error = question_answer_error(tool_name, "selected_options", "question answer selected option is too long");
+      error.with_context("index", std::to_string(index));
+      error.with_context("max_bytes", std::to_string(kMaxQuestionAnswerStringBytes));
+      return std::unexpected(std::move(error));
+    }
+  }
+  if (answer.custom_text.size() > kMaxQuestionAnswerStringBytes) {
+    auto error = question_answer_error(tool_name, "custom_text", "question answer custom text is too long");
+    error.with_context("max_bytes", std::to_string(kMaxQuestionAnswerStringBytes));
+    return std::unexpected(std::move(error));
+  }
+  return {};
+}
+
+ToolDispatchResult read_file_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto path = required_safe_string_arg(call.arguments_json, "path", call.name);
+  if (!path) return tool_error_result(call, path.error());
+  auto const tool_context = context_for_provider_tool(context, call);
+  auto result = ava::tools::read_file(
+      tool_context, workspace_path(context, *path),
+      ava::tools::ReadOptions{.max_bytes = optional_size_arg(call.arguments_json, "max_bytes", 50 * 1024, 512 * 1024)});
+  if (!result) return tool_error_result(call, result.error());
+  return ToolDispatchResult{
+      .call_id = call.id,
+      .name = call.name,
+      .success = true,
+      .result_text = "{\"tool\":\"read_file\",\"ok\":true,\"path\":\"" + ava::core::json::escape(*path) +
+                     "\",\"content\":\"" + ava::core::json::escape(result->content) + "\",\"truncated\":" +
+                     json_bool(result->truncated) + ",\"total_bytes\":" + std::to_string(result->total_bytes) +
+                     ",\"output_bytes\":" + std::to_string(result->output_bytes) + "}"};
+}
+
+ToolDispatchResult write_file_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto path = required_safe_string_arg(call.arguments_json, "path", call.name);
+  if (!path) return tool_error_result(call, path.error());
+  auto content = required_text_arg(call.arguments_json, "content", call.name);
+  if (!content) return tool_error_result(call, content.error());
+  auto const tool_context = context_for_provider_tool(context, call);
+  auto result = ava::tools::write_file(tool_context, workspace_path(context, *path), *content);
+  if (!result) return tool_error_result(call, result.error());
+  return ToolDispatchResult{.call_id = call.id,
+                            .name = call.name,
+                            .success = true,
+                            .result_text = "{\"tool\":\"write_file\",\"ok\":true,\"path\":\"" +
+                                           ava::core::json::escape(result->path.generic_string()) +
+                                           "\",\"bytes_written\":" + std::to_string(result->bytes_written) + "}"};
+}
+
+ToolDispatchResult edit_file_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto path = required_safe_string_arg(call.arguments_json, "path", call.name);
+  if (!path) return tool_error_result(call, path.error());
+  auto old_text = required_text_arg(call.arguments_json, "old_text", call.name);
+  if (!old_text) return tool_error_result(call, old_text.error());
+  auto new_text = required_text_arg(call.arguments_json, "new_text", call.name);
+  if (!new_text) return tool_error_result(call, new_text.error());
+  auto const tool_context = context_for_provider_tool(context, call);
+  auto result = ava::tools::edit_file(tool_context, workspace_path(context, *path), *old_text, *new_text);
+  if (!result) return tool_error_result(call, result.error());
+  return ToolDispatchResult{.call_id = call.id,
+                            .name = call.name,
+                            .success = true,
+                            .result_text = "{\"tool\":\"edit_file\",\"ok\":true,\"path\":\"" +
+                                           ava::core::json::escape(result->path.generic_string()) +
+                                           "\",\"bytes_written\":" + std::to_string(result->bytes_written) +
+                                           ",\"diff\":\"" + ava::core::json::escape(result->diff) +
+                                           "\",\"diff_truncated\":" + json_bool(result->diff_truncated) +
+                                           ",\"line_endings\":\"" + ava::core::json::escape(result->line_endings) +
+                                           "\",\"utf8_bom\":" + json_bool(result->had_utf8_bom) + "}"};
+}
+
+ToolDispatchResult glob_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto pattern = required_safe_string_arg(call.arguments_json, "pattern", call.name);
+  if (!pattern) return tool_error_result(call, pattern.error());
+  if (auto no_ignore_allowed = reject_provider_no_ignore(call.arguments_json, call.name); !no_ignore_allowed) {
+    return tool_error_result(call, no_ignore_allowed.error());
+  }
+  auto const tool_context = context_for_provider_tool(context, call);
+  auto result = ava::tools::glob_files(
+      tool_context, *pattern,
+      ava::tools::GlobOptions{.max_results = optional_size_arg(call.arguments_json, "max_results", 2000, 10000)});
+  if (!result) return tool_error_result(call, result.error());
+  std::string text =
+      "{\"tool\":\"glob\",\"ok\":true,\"pattern\":\"" + ava::core::json::escape(*pattern) + "\",\"paths\":[";
+  for (std::size_t index = 0; index < result->paths.size(); ++index) {
+    if (index > 0) text += ',';
+    text += "\"" + ava::core::json::escape(result->paths[index].generic_string()) + "\"";
+  }
+  text +=
+      "],\"truncated\":" + json_bool(result->truncated) + ",\"total_matches\":" + std::to_string(result->total_matches);
+  append_spill_fields(text, result->spill_path, result->spill_truncated);
+  text += "}";
+  return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text};
+}
+
+ToolDispatchResult grep_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto pattern = required_text_arg(call.arguments_json, "pattern", call.name);
+  if (!pattern) return tool_error_result(call, pattern.error());
+  auto const include_value = ava::core::json::string_field(call.arguments_json, "include");
+  if (include_value) {
+    if (auto safe = reject_control_arg(*include_value, "include", call.name); !safe) {
+      return tool_error_result(call, safe.error());
+    }
+  }
+  auto const include = include_value.value_or("**/*");
+  if (auto no_ignore_allowed = reject_provider_no_ignore(call.arguments_json, call.name); !no_ignore_allowed) {
+    return tool_error_result(call, no_ignore_allowed.error());
+  }
+  auto const tool_context = context_for_provider_tool(context, call);
+  auto result = ava::tools::grep_files(
+      tool_context, *pattern, include,
+      ava::tools::GrepOptions{.max_matches = optional_size_arg(call.arguments_json, "max_matches", 2000, 10000)});
+  if (!result) return tool_error_result(call, result.error());
+  std::string text = "{\"tool\":\"grep\",\"ok\":true,\"pattern\":\"" + ava::core::json::escape(*pattern) +
+                     "\",\"include\":\"" + ava::core::json::escape(include) + "\",\"matches\":[";
+  for (std::size_t index = 0; index < result->matches.size(); ++index) {
+    auto const& match = result->matches[index];
+    if (index > 0) text += ',';
+    text += "{\"path\":\"" + ava::core::json::escape(match.path.generic_string()) +
+            "\",\"line_number\":" + std::to_string(match.line_number) + ",\"line\":\"" +
+            ava::core::json::escape(match.line) + "\",\"line_truncated\":" + json_bool(match.line_truncated) + "}";
+  }
+  text +=
+      "],\"truncated\":" + json_bool(result->truncated) + ",\"total_matches\":" + std::to_string(result->total_matches);
+  append_spill_fields(text, result->spill_path, result->spill_truncated);
+  text += "}";
+  return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text};
+}
+
+ToolDispatchResult bash_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto command = required_safe_string_arg(call.arguments_json, "command", call.name);
+  if (!command) return tool_error_result(call, command.error());
+  auto const tool_context = context_for_provider_tool(context, call);
+  auto result = ava::tools::run_bash(
+      tool_context, *command,
+      ava::tools::BashOptions{
+          .timeout = std::chrono::milliseconds(optional_size_arg(call.arguments_json, "timeout_ms", 30000, 120000)),
+          .max_bytes = optional_size_arg(call.arguments_json, "max_bytes", 50 * 1024, 512 * 1024)});
+  if (!result) return tool_error_result(call, result.error());
+  return ToolDispatchResult{.call_id = call.id,
+                            .name = call.name,
+                            .success = result->exit_code == 0 && !result->timed_out && !result->canceled,
+                            .result_text =
+                                [&] {
+                                  std::string text =
+                                      "{\"tool\":\"bash\",\"ok\":" +
+                                      json_bool(result->exit_code == 0 && !result->timed_out && !result->canceled) +
+                                      ",\"exit_code\":" + std::to_string(result->exit_code) +
+                                      ",\"timed_out\":" + json_bool(result->timed_out) +
+                                      ",\"canceled\":" + json_bool(result->canceled) +
+                                      ",\"truncated\":" + json_bool(result->truncated) +
+                                      ",\"total_bytes\":" + std::to_string(result->total_bytes) + ",\"output\":\"" +
+                                      ava::core::json::escape(result->output) + "\"";
+                                  append_spill_fields(text, result->spill_path, result->spill_truncated);
+                                  text += "}";
+                                  return text;
+                                }(),
+                            .payload =
+                                [&] {
+                                  ava::agent::ToolResultPayload payload;
+                                  payload.status = result->canceled ? ava::agent::ToolResultStatus::Canceled
+                                                                    : ava::agent::ToolResultStatus::Success;
+                                  return payload;
+                                }()};
+}
+
+ToolDispatchResult webfetch_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto url = required_safe_string_arg(call.arguments_json, "url", call.name);
+  if (!url) return tool_error_result(call, url.error());
+  auto const tool_context = context_for_provider_tool(context, call);
+  auto result = ava::tools::webfetch(
+      tool_context, *url,
+      ava::tools::WebFetchOptions{
+          .max_bytes = optional_size_arg(call.arguments_json, "max_bytes", 1024 * 1024, 5 * 1024 * 1024),
+          .timeout_ms = static_cast<int>(optional_size_arg(call.arguments_json, "timeout_ms", 30000, 120000)),
+      });
+  if (!result) return tool_error_result(call, result.error());
+  return ToolDispatchResult{
+      .call_id = call.id,
+      .name = call.name,
+      .success = true,
+      .result_text = "{\"tool\":\"webfetch\",\"ok\":true,\"url\":\"" + ava::core::json::escape(result->url) +
+                     "\",\"status_code\":" + std::to_string(result->status_code) + ",\"content_type\":\"" +
+                     ava::core::json::escape(result->content_type) + "\",\"content\":\"" +
+                     ava::core::json::escape(result->content) + "\",\"truncated\":" + json_bool(result->truncated) +
+                     ",\"total_bytes\":" + std::to_string(result->total_bytes) +
+                     ",\"output_bytes\":" + std::to_string(result->output_bytes) + "}"};
+}
+
+ToolDispatchResult lsp_diagnostics_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto path = required_safe_string_arg(call.arguments_json, "path", call.name);
+  if (!path) return tool_error_result(call, path.error());
+  if (path->size() > kMaxLspProviderPathBytes) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "lsp_diagnostics path is too long");
+    error.with_context("max_bytes", std::to_string(kMaxLspProviderPathBytes));
+    return tool_error_result(call, error);
+  }
+  auto const tool_context = context_for_provider_tool(context, call);
+  auto result = ava::tools::lsp_diagnostics(tool_context, workspace_path(context, *path));
+  if (!result) return lsp_error_result(call, result.error());
+
+  std::string text =
+      "{\"tool\":\"lsp_diagnostics\",\"ok\":true,\"path\":\"" + ava::core::json::escape(*path) + "\",\"diagnostics\":[";
+  auto const total_diagnostics = result->diagnostics.size();
+  bool truncated = false;
+  for (std::size_t index = 0; index < result->diagnostics.size(); ++index) {
+    if (index >= kMaxLspProviderDiagnostics) {
+      truncated = true;
+      break;
+    }
+    auto const& diagnostic = result->diagnostics[index];
+    auto entry = std::string{"{\"severity\":"} + std::to_string(diagnostic.severity) + ",\"message\":\"" +
+                 ava::core::json::escape(diagnostic.message) + "\",\"line\":" + std::to_string(diagnostic.line) +
+                 ",\"column\":" + std::to_string(diagnostic.column) + ",\"code\":\"" +
+                 ava::core::json::escape(diagnostic.code) + "\"}";
+    if (text.size() + entry.size() + 80 > kMaxLspProviderJsonBytes) {
+      truncated = true;
+      break;
+    }
+    if (index > 0) text += ',';
+    text += std::move(entry);
+  }
+  text +=
+      "],\"truncated\":" + json_bool(truncated) + ",\"total_diagnostics\":" + std::to_string(total_diagnostics) + "}";
+  return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
+}
 
 ToolDispatchResult question_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
 {
@@ -125,9 +390,23 @@ ToolDispatcher::ToolDispatcher(ava::tools::ToolContext context)
 
 ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(ProviderToolCall const& call) const
 {
-  ProviderToolCall const normalized = detail::normalize_provider_tool_call(call);
-  if (auto valid = detail::validate_provider_tool_call(normalized); !valid) {
-    return std::unexpected(std::move(valid.error()));
+  auto const arguments = call.arguments_json.empty() ? std::string("{}") : call.arguments_json;
+  ProviderToolCall const normalized{.id = call.id, .name = call.name, .arguments_json = arguments};
+  if (normalized.id.empty()) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "tool call id is required");
+    error.with_context("tool", normalized.name);
+    return std::unexpected(std::move(error));
+  }
+  if (normalized.id.size() > kMaxProviderToolCallIdBytes) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "tool call id is too long");
+    error.with_context("tool", normalized.name);
+    error.with_context("max_bytes", std::to_string(kMaxProviderToolCallIdBytes));
+    return std::unexpected(std::move(error));
+  }
+  if (auto safe_id = reject_control_value(normalized.id, "id", "tool call id contains a forbidden control byte");
+      !safe_id) {
+    safe_id.error().with_context("tool", normalized.name);
+    return std::unexpected(std::move(safe_id.error()));
   }
   auto const* tool = registry_.find(normalized.name);
   if (tool != nullptr) {

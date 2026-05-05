@@ -1,15 +1,17 @@
 #pragma once
 
+#include "ava/tools/file_tools.h"
+
+#include "ava/session/session_store.h"
+
+#include "ava/core/error.h"
+
 #include <filesystem>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/core/error.h"
-#include "ava/session/session_store.h"
-#include "ava/tools/file_tools.h"
 
 namespace ava::test {
 int& failure_count();

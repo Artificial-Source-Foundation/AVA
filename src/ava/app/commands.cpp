@@ -1,8 +1,5 @@
 #include "ava/app/commands.h"
 
-#include <string_view>
-#include <utility>
-
 #include "ava/app/command_connect.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_help.h"
@@ -12,6 +9,9 @@
 #include "ava/app/command_sessions.h"
 #include "ava/app/command_tools.h"
 #include "ava/app/plugin_event_hooks.h"
+
+#include <string_view>
+#include <utility>
 
 namespace ava::app {
 namespace {

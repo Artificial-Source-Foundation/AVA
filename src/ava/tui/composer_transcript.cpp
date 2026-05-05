@@ -1,8 +1,8 @@
-#include <algorithm>
-#include <cctype>
-
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/tool_cards.h"
+
+#include <algorithm>
+#include <cctype>
 
 namespace ava::tui {
 namespace detail {

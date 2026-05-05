@@ -1,5 +1,22 @@
 #pragma once
 
+#include "ava/app/events.h"
+
+#include "ava/agent/agent_loop.h"
+
+#include "ava/config/model_config.h"
+#include "ava/config/prompt_config.h"
+#include "ava/config/xdg_paths.h"
+
+#include "ava/session/compaction.h"
+#include "ava/session/session_store.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/provider/provider.h"
+
+#include "ava/context/context_loader.h"
+
 #include <filesystem>
 #include <functional>
 #include <mutex>
@@ -7,17 +24,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/agent/agent_loop.h"
-#include "ava/app/events.h"
-#include "ava/config/model_config.h"
-#include "ava/config/prompt_config.h"
-#include "ava/config/xdg_paths.h"
-#include "ava/context/context_loader.h"
-#include "ava/permissions/permission.h"
-#include "ava/provider/provider.h"
-#include "ava/session/compaction.h"
-#include "ava/session/session_store.h"
 
 namespace ava::app {
 

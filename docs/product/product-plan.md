@@ -1,6 +1,6 @@
 # AVA Product Plan
 
-AVA is a lean C++ agentic coding tool. It should feel fast and direct while carrying practical built-in tool quality.
+AVA is a lean C++ agentic coding tool. It should feel fast and direct while carrying the practical built-in tool quality expected from the backend maturity baseline.
 
 This document defines the product before implementation. It is intentionally biased toward a small first version.
 
@@ -17,9 +17,9 @@ AVA is a native coding agent for developers who want:
 
 AVA should not start as a platform, plugin marketplace, desktop app, web app, or multi-client server. Those can exist later only if the core loop is excellent.
 
-## Reference Products
+## Reference Systems
 
-### Runtime Lessons
+### Lean Harness Lessons
 
 Useful product ideas:
 
@@ -38,7 +38,7 @@ What AVA should not copy initially:
 - Deep theme/custom UI system.
 - Broad SDK surface before the CLI is stable.
 
-### Frontend Lessons
+### Full-Featured Agent Lessons
 
 Useful product ideas:
 
@@ -57,9 +57,9 @@ What AVA should not copy initially:
 - MCP as a core requirement.
 - Broad plugin/runtime system before core safety and sessions are stable.
 
-### Old Rust AVA Reference
+### Historical AVA Reference
 
-Old Rust AVA is a historical reference for tool card and permission modal ideas only; do not restore its architecture or code.
+Historical AVA prototypes are references for tool card and permission modal ideas only; do not restore their architecture or code.
 
 ## Design Principles
 
@@ -272,10 +272,10 @@ Deferred:
 ### Planned 0.2 Focus
 
 - Polish the interactive TUI until it is comfortable for daily coding sessions.
-- Use external behavior references and old Rust AVA only as secondary references for compact tool cards and permission prompts.
+- Use external reference systems as visual/interaction baselines for compact tool cards and permission prompts.
 - Decide whether to keep the custom terminal path or adopt FTXUI before adding a new TUI dependency.
 - Make agent tool calls, results, failures, and truncation visible in the transcript.
-- Add slash command palette discovery and readable thinking/progress visibility.
+- Add reference-informed slash command palette discovery and readable thinking/progress visibility.
 - Add interactive permission prompts for `ask` decisions while keeping non-interactive mode fail-closed.
 - Verify the existing 0.1 tools through real agent workflows before adding more providers or automation modes.
 - Keep additional providers, MCP/plugins, subagents, LSP, web fetch, and automation beyond the current print/RPC MVP deferred to later versions.

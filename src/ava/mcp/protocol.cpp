@@ -1,17 +1,21 @@
 #include "ava/mcp/protocol.h"
 
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <cctype>
-#include <optional>
-
-#include "ava/core/json.h"
+#include <string>
+#include <utility>
 
 namespace ava::mcp {
 namespace {
 
-ava::core::Error protocol_error(std::string message)
+ava::core::Error mcp_protocol_error(std::string message, McpServerConfig const& server)
 {
-  return ava::core::Error(ava::core::ErrorCategory::Tool, std::move(message));
+  auto error = ava::core::Error(ava::core::ErrorCategory::Tool, std::move(message));
+  error.with_context("mcp_server", server.id);
+  if (!server.source_path.empty()) error.with_context("config", server.source_path.string());
+  return error;
 }
 
 std::string trim_ascii(std::string text)
@@ -65,34 +69,6 @@ std::optional<std::size_t> field_value_start_any_depth(std::string_view object, 
 
 }  // namespace
 
-std::string mcp_json_string(std::string_view value)
-{
-  return "\"" + ava::core::json::escape(value) + "\"";
-}
-
-std::string mcp_initialize_params_json(std::string_view client_version)
-{
-  return "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"ava\","
-         "\"version\":" +
-         mcp_json_string(client_version) + "}}";
-}
-
-std::string mcp_initialized_notification_json()
-{
-  return "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}";
-}
-
-std::string mcp_request_json(std::string_view request_id, std::string_view method, std::string_view params_json)
-{
-  return "{\"jsonrpc\":\"2.0\",\"id\":" + mcp_json_string(request_id) + ",\"method\":" + mcp_json_string(method) +
-         ",\"params\":" + std::string(params_json) + "}";
-}
-
-std::string mcp_tool_call_params_json(std::string_view tool_name, std::string_view arguments_json)
-{
-  return "{\"name\":" + mcp_json_string(tool_name) + ",\"arguments\":" + std::string(arguments_json) + "}";
-}
-
 std::optional<bool> mcp_bool_field(std::string_view object, std::string_view key)
 {
   auto const start = ava::core::json::field_value_start(object, key);
@@ -136,7 +112,15 @@ bool mcp_json_depth_within_limit(std::string_view value, int max_depth)
   return true;
 }
 
-ava::core::Result<std::size_t> parse_mcp_content_length(std::string_view headers, std::size_t max_message_bytes)
+std::optional<std::size_t> mcp_header_end_offset(std::string_view buffer)
+{
+  if (auto const crlf = buffer.find("\r\n\r\n"); crlf != std::string_view::npos) return crlf + 4;
+  if (auto const lf = buffer.find("\n\n"); lf != std::string_view::npos) return lf + 2;
+  return std::nullopt;
+}
+
+ava::core::Result<std::size_t> parse_mcp_content_length(std::string_view headers, McpServerConfig const& server,
+                                                        std::size_t max_message_bytes)
 {
   std::optional<std::size_t> content_length;
   std::size_t line_start = 0;
@@ -152,32 +136,25 @@ ava::core::Result<std::size_t> parse_mcp_content_length(std::string_view headers
         auto value = trim_ascii(std::string(line.substr(colon + 1)));
         if (value.empty() ||
             !std::ranges::all_of(value, [](char ch) { return std::isdigit(static_cast<unsigned char>(ch)) != 0; })) {
-          return std::unexpected(protocol_error("MCP Content-Length header is invalid"));
+          return std::unexpected(mcp_protocol_error("MCP Content-Length header is invalid", server));
         }
         try {
           content_length = static_cast<std::size_t>(std::stoull(value));
         } catch (...) {
-          return std::unexpected(protocol_error("MCP Content-Length header is out of range"));
+          return std::unexpected(mcp_protocol_error("MCP Content-Length header is out of range", server));
         }
       }
     }
     if (line_end == std::string_view::npos) break;
     line_start = line_end + 1;
   }
-  if (!content_length) return std::unexpected(protocol_error("MCP message is missing Content-Length"));
+  if (!content_length) return std::unexpected(mcp_protocol_error("MCP message is missing Content-Length", server));
   if (*content_length > max_message_bytes) {
-    auto error = protocol_error("MCP message exceeds size cap");
+    auto error = mcp_protocol_error("MCP message exceeds size cap", server);
     error.with_context("max_bytes", std::to_string(max_message_bytes));
     return std::unexpected(std::move(error));
   }
   return *content_length;
-}
-
-std::optional<std::size_t> mcp_header_end_offset(std::string_view buffer)
-{
-  if (auto const crlf = buffer.find("\r\n\r\n"); crlf != std::string_view::npos) return crlf + 4;
-  if (auto const lf = buffer.find("\n\n"); lf != std::string_view::npos) return lf + 2;
-  return std::nullopt;
 }
 
 std::optional<std::string> mcp_response_id(std::string_view message)

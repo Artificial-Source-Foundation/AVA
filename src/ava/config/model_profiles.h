@@ -1,9 +1,9 @@
 #pragma once
 
+#include "ava/config/model_config.h"
+
 #include <string>
 #include <string_view>
-
-#include "ava/config/model_config.h"
 
 namespace ava::config {
 

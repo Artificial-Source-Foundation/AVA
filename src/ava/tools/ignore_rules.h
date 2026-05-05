@@ -1,12 +1,12 @@
 #pragma once
 
+#include "ava/core/result.h"
+
 #include <filesystem>
 #include <regex>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/core/result.h"
 
 namespace ava::tools {
 

@@ -1,8 +1,3 @@
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -15,6 +10,11 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 namespace {
 
@@ -194,6 +194,16 @@ std::string question_tool_body()
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
 }
 
+std::string multi_question_tool_body()
+{
+  std::string const arguments =
+      "{\"header\":\"Pick\",\"question\":\"Choose providers\",\"options\":[{\"value\":\"alpha\",\"label\":\"Alpha\"},"
+      "{\"value\":\"beta\",\"label\":\"Beta\"}],\"multiple\":true,\"allow_custom\":true}";
+  return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_question\",\"type\":\"function\","
+         "\"function\":{\"name\":\"question\",\"arguments\":\"" +
+         json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+}
+
 struct ProviderResponse {
   int status_code = 200;
   std::string reason = "OK";
@@ -240,6 +250,10 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
   if (scenario == "question-tool") {
     return ProviderResponse{.body = request_index == 0 ? question_tool_body() : text_body("after question reply")};
   }
+  if (scenario == "question-tool-multi") {
+    return ProviderResponse{.body = request_index == 0 ? multi_question_tool_body()
+                                                       : text_body("after multi question reply")};
+  }
   if (scenario == "compact") {
     return ProviderResponse{.body = request_index == 0
                                         ? text_body("before compact")
@@ -266,7 +280,8 @@ int main(int argc, char** argv)
                             : scenario == "read-tool-twice"  ? 4
                             : scenario == "read-tool-thrice" ? 6
                             : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "write-tool" ||
-                               scenario == "bash-timeout-tree" || scenario == "question-tool" || scenario == "compact")
+                               scenario == "bash-timeout-tree" || scenario == "question-tool" ||
+                               scenario == "question-tool-multi" || scenario == "compact")
                                 ? 2
                                 : 1;
 

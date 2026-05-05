@@ -1,11 +1,11 @@
 #include "ava/agent/tool_registry.h"
 
+#include "ava/core/error.h"
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <string>
 #include <utility>
-
-#include "ava/core/error.h"
-#include "ava/core/json.h"
 
 namespace ava::agent {
 namespace {

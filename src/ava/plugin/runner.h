@@ -1,16 +1,16 @@
 #pragma once
 
+#include "ava/plugin/manifest.h"
+
+#include "ava/core/result.h"
+
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <string>
 #include <string_view>
-
-#include "ava/core/result.h"
-#include "ava/plugin/manifest.h"
-#include "ava/plugin/protocol.h"
-#include "ava/plugin/stream_buffers.h"
 
 namespace ava::plugin {
 
@@ -22,6 +22,34 @@ struct PluginRunnerOptions {
   std::chrono::milliseconds request_timeout{5000};
   std::size_t max_record_bytes = 64 * 1024;
   std::size_t max_stderr_bytes = 64 * 1024;
+};
+
+struct PluginInitialization {
+  std::string api_version;
+  std::string plugin_version;
+  std::string contributions_json;
+  std::string raw_json;
+};
+
+struct PluginToolCallResult {
+  bool ok = false;
+  std::string content;
+  std::string metadata_json;
+  std::string raw_json;
+};
+
+struct PluginCommandCallResult {
+  bool ok = false;
+  std::string content;
+  std::string metadata_json;
+  std::string raw_json;
+};
+
+struct PluginEventObserveResult {
+  bool ok = false;
+  std::string content;
+  std::string metadata_json;
+  std::string raw_json;
 };
 
 class PluginProcess final {
@@ -76,6 +104,7 @@ class PluginProcess final {
   [[nodiscard]] ava::core::VoidResult drain_stderr();
   [[nodiscard]] ava::core::VoidResult reap_child();
   [[nodiscard]] ava::core::VoidResult set_pipe_nonblocking(int fd, std::string_view pipe_name);
+  void append_stderr(std::string_view chunk);
   void close_fds() noexcept;
   void terminate_child() noexcept;
   void drain_available_noexcept() noexcept;
@@ -90,9 +119,10 @@ class PluginProcess final {
   int child_status_ = 0;
   bool child_exited_ = false;
   bool can_signal_group_ = false;
+  bool stderr_truncated_ = false;
   std::size_t next_request_id_ = 2;
-  PluginRecordBuffer stdout_buffer_;
-  PluginStderrTail stderr_tail_;
+  std::string stdout_buffer_;
+  std::string stderr_tail_;
 };
 
 }  // namespace ava::plugin

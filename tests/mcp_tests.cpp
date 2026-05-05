@@ -1,21 +1,24 @@
+#include "ava/agent/tool_dispatcher.h"
+
+#include "ava/tools/file_tools.h"
+
+#include "ava/mcp/config.h"
+#include "ava/mcp/protocol.h"
+#include "ava/mcp/stdio_client.h"
+#include "ava/mcp/tool_broker.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/core/json.h"
+
+#include "tests/support/test_harness.h"
+
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
-
-#include "ava/agent/tool_dispatcher.h"
-#include "ava/core/json.h"
-#include "ava/mcp/config.h"
-#include "ava/mcp/process_support.h"
-#include "ava/mcp/protocol.h"
-#include "ava/mcp/stdio_client.h"
-#include "ava/mcp/stdio_support.h"
-#include "ava/mcp/tool_broker.h"
-#include "ava/permissions/permission.h"
-#include "ava/tools/file_tools.h"
-#include "tests/support/test_harness.h"
 
 #ifndef AVA_FAKE_MCP_SERVER_PATH
 #define AVA_FAKE_MCP_SERVER_PATH ""
@@ -57,6 +60,15 @@ ava::mcp::McpStdioClientOptions fake_client_options(std::filesystem::path const&
   return options;
 }
 
+std::string nested_arrays_json(std::size_t depth)
+{
+  std::string text;
+  text.reserve(depth * 2);
+  for (std::size_t index = 0; index < depth; ++index) text += '[';
+  for (std::size_t index = 0; index < depth; ++index) text += ']';
+  return text;
+}
+
 void test_mcp_config_parsing()
 {
   auto global =
@@ -91,117 +103,50 @@ void test_mcp_config_parsing()
          "MCP config rejects duplicate server ids across scopes");
 }
 
-void test_mcp_protocol_helpers()
+void test_mcp_protocol_parsing()
 {
-  auto const request = ava::mcp::mcp_request_json("ava_mcp_1", "tools/list", "{}");
-  expect(request.find("\"id\":\"ava_mcp_1\"") != std::string::npos &&
-             request.find("\"method\":\"tools/list\"") != std::string::npos,
-         "MCP protocol formats JSON-RPC requests");
+  auto const server = fake_server_config("/tmp/mcp-protocol");
 
-  auto const params = ava::mcp::mcp_tool_call_params_json("echo", "{\"text\":\"hello\"}");
-  expect(params == "{\"name\":\"echo\",\"arguments\":{\"text\":\"hello\"}}", "MCP protocol formats tool call params");
+  auto content_length =
+      ava::mcp::parse_mcp_content_length("X-Test: ignored\r\n content-length : 42\r\n\r\n", server, 64);
+  expect(content_length && *content_length == 42,
+         content_length
+             ? "MCP protocol parses trimmed case-insensitive Content-Length"
+             : "MCP protocol parses trimmed case-insensitive Content-Length: " + content_length.error().format());
 
-  auto const header_end = ava::mcp::mcp_header_end_offset("Content-Length: 2\r\n\r\n{}");
-  expect(header_end && *header_end == 21, "MCP protocol finds CRLF frame header boundary");
-
-  auto const content_length = ava::mcp::parse_mcp_content_length("Content-Length: 7\r\n\r\n", 16);
-  expect(content_length && *content_length == 7,
-         content_length ? "MCP protocol parses Content-Length"
-                        : "MCP protocol parses Content-Length: " + content_length.error().format());
-
-  auto const invalid_length = ava::mcp::parse_mcp_content_length("Content-Length: nope\r\n\r\n", 16);
+  auto invalid_length = ava::mcp::parse_mcp_content_length("Content-Length: 4x\r\n\r\n", server, 64);
   expect(!invalid_length && invalid_length.error().message().find("invalid") != std::string::npos,
-         "MCP protocol rejects invalid Content-Length");
+         "MCP protocol rejects invalid Content-Length values");
 
-  auto const capped_length = ava::mcp::parse_mcp_content_length("Content-Length: 17\r\n\r\n", 16);
-  expect(!capped_length && capped_length.error().message().find("size cap") != std::string::npos,
-         "MCP protocol rejects oversized frames");
+  auto oversized_length = ava::mcp::parse_mcp_content_length("Content-Length: 65\r\n\r\n", server, 64);
+  expect(!oversized_length && oversized_length.error().message().find("size cap") != std::string::npos,
+         "MCP protocol rejects oversized Content-Length values");
 
-  expect(ava::mcp::mcp_response_id("{\"jsonrpc\":\"2.0\",\"id\":\"abc\",\"result\":{}}").value_or("") == "abc",
-         "MCP protocol parses string response ids");
-  expect(ava::mcp::mcp_response_id("{\"jsonrpc\":\"2.0\",\"id\":42,\"result\":{}}").value_or("") == "42",
-         "MCP protocol parses numeric response ids");
+  expect(ava::mcp::mcp_header_end_offset("Content-Length: 2\r\n\r\n{}").value_or(0) == 21 &&
+             ava::mcp::mcp_header_end_offset("Content-Length: 2\n\n{}").value_or(0) == 19,
+         "MCP protocol finds CRLF and LF header terminators");
 
-  expect(ava::mcp::mcp_bool_field("{\"isError\":true}", "isError").value_or(false),
+  expect(ava::mcp::mcp_response_id("{\"jsonrpc\":\"2.0\",\"id\":\"abc\",\"result\":{}}").value_or("") == "abc" &&
+             ava::mcp::mcp_response_id("{\"jsonrpc\":\"2.0\",\"id\":42,\"result\":{}}").value_or("") == "42",
+         "MCP protocol parses string and numeric response IDs");
+
+  expect(ava::mcp::mcp_bool_field("{\"isError\":false}", "isError").value_or(true) == false,
          "MCP protocol parses boolean result fields");
-  expect(ava::mcp::mcp_json_depth_within_limit("{\"a\":[1]}", 2) &&
-             !ava::mcp::mcp_json_depth_within_limit("{\"a\":[{\"b\":[]}]}", 2),
-         "MCP protocol enforces JSON depth limits");
 
   expect(ava::mcp::is_valid_mcp_tool_name("server.tool") && !ava::mcp::is_valid_mcp_tool_name("") &&
              !ava::mcp::is_valid_mcp_tool_name("bad\nname"),
-         "MCP protocol validates tool names");
+         "MCP protocol validates model-facing tool names");
 
-  auto const text_content = ava::mcp::mcp_text_content_from_result(
-      "{\"content\":[{\"type\":\"text\",\"text\":\"one\"},"
+  auto text_content = ava::mcp::mcp_text_content_from_result(
+      "{\"content\":[{\"type\":\"text\",\"text\":\"one\"},{\"type\":\"image\",\"data\":\"ignored\"},"
       "{\"type\":\"text\",\"text\":\"two\"}]}");
-  expect(text_content == "one\ntwo", "MCP protocol extracts text content from tool results");
+  expect(text_content == "one\ntwo", "MCP protocol joins text content blocks");
 
-  auto const structured_content = ava::mcp::mcp_text_content_from_result("{\"structuredContent\":{\"ok\":true}}");
-  expect(structured_content == "{\"ok\":true}", "MCP protocol falls back to structured tool content");
-}
+  auto structured_content = ava::mcp::mcp_text_content_from_result("{\"structuredContent\":{\"ok\":true}}");
+  expect(structured_content == "{\"ok\":true}", "MCP protocol falls back to structuredContent JSON");
 
-void test_mcp_process_support_helpers()
-{
-  auto const root = temp_root() / "mcp-process-support";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  std::filesystem::create_directories(root);
-  auto pipe = ava::mcp::detail::make_mcp_pipe(fake_server_config(root));
-  expect(pipe && (*pipe)[0] > 2 && (*pipe)[1] > 2 && (*pipe)[0] != (*pipe)[1],
-         pipe ? "MCP process support creates non-standard pipe fds"
-              : "MCP process support creates non-standard pipe fds: " + pipe.error().format());
-
-  if (pipe) {
-    ava::mcp::detail::UniqueFd read_fd((*pipe)[0]);
-    ava::mcp::detail::UniqueFd write_fd((*pipe)[1]);
-    char const input = 'x';
-    char output = '\0';
-    auto const written = ava::mcp::detail::write_retry(write_fd.get(), &input, 1);
-    auto const read = ava::mcp::detail::read_retry(read_fd.get(), &output, 1);
-    expect(written == 1 && read == 1 && output == input, "MCP process support retries pipe read/write syscalls");
-
-    int released = read_fd.release();
-    ava::mcp::detail::close_fd(released);
-    expect(released == -1, "MCP process support close_fd resets fd references");
-  }
-
-  auto const now = std::chrono::steady_clock::now();
-  auto const future = ava::mcp::detail::remaining_ms(now + std::chrono::milliseconds(250));
-  expect(ava::mcp::detail::remaining_ms(now - std::chrono::milliseconds(1)) == 0 && future > 0 && future <= 250,
-         "MCP process support computes bounded remaining timeout milliseconds");
-}
-
-void test_mcp_stdio_support_helpers()
-{
-  auto const root = temp_root() / "mcp-stdio-support";
-  auto server = fake_server_config(root);
-  server.command = "/bin/sh";
-  server.args = {"server.sh", "--stdio"};
-
-  auto const argv = ava::mcp::detail::mcp_argv(server);
-  expect(argv.size() == 3 && argv[0] == "/bin/sh" && argv[1] == "server.sh" && argv[2] == "--stdio",
-         "MCP stdio support builds child argv from server config");
-
-  ava::mcp::McpStdioClientOptions options;
-  options.workspace_dir = root / "workspace";
-  expect(ava::mcp::detail::child_working_dir(options) == options.workspace_dir,
-         "MCP stdio support uses configured workspace cwd");
-
-  ava::mcp::McpStdioClientOptions default_options;
-  auto valid = ava::mcp::detail::validate_start_request(server, default_options, nullptr);
-  expect(valid && !default_options.workspace_dir.empty(),
-         "MCP stdio support validates defaults and fills workspace cwd");
-
-  auto bad_timeout_options = default_options;
-  bad_timeout_options.request_timeout = std::chrono::milliseconds(1);
-  auto bad_timeout = ava::mcp::detail::validate_start_request(server, bad_timeout_options, nullptr);
-  expect(!bad_timeout && bad_timeout.error().message().find("request timeout") != std::string::npos,
-         "MCP stdio support rejects request timeouts below the safe bound");
-
-  auto canceled = ava::mcp::detail::validate_start_request(server, default_options, [] { return true; });
-  expect(!canceled && canceled.error().message() == "MCP startup canceled",
-         "MCP stdio support preserves fail-closed startup cancellation");
+  expect(!ava::mcp::mcp_json_depth_within_limit("{\"deep\":" + nested_arrays_json(130) + "}"),
+         "MCP protocol rejects excessively deep JSON records");
 }
 
 void test_mcp_stdio_client_lists_and_calls_tools()
@@ -335,7 +280,7 @@ void test_mcp_tool_dispatcher()
   context.mcp_global_config_file = root / "missing-global-mcp.json";
   context.mcp_project_config_file = project_config;
   context.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
-      -> ava::core::Result<ava::permissions::PermissionResolution> {
+      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
@@ -415,7 +360,7 @@ void test_mcp_tool_dispatcher_contains_tool_errors()
   context.mcp_global_config_file = root / "missing-global-mcp.json";
   context.mcp_project_config_file = project_config;
   context.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
-      -> ava::core::Result<ava::permissions::PermissionResolution> {
+      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
@@ -439,9 +384,7 @@ void test_mcp_tool_dispatcher_contains_tool_errors()
 void run_mcp_tests()
 {
   test_mcp_config_parsing();
-  test_mcp_protocol_helpers();
-  test_mcp_process_support_helpers();
-  test_mcp_stdio_support_helpers();
+  test_mcp_protocol_parsing();
   test_mcp_stdio_client_lists_and_calls_tools();
   test_mcp_tool_dispatcher();
   test_mcp_tool_dispatcher_contains_tool_errors();

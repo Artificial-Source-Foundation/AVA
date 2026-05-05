@@ -22,6 +22,7 @@ string(REPLACE "\"" "\\\"" FAKE_MCP_SERVER_JSON "${FAKE_MCP_SERVER_JSON}")
 file(REMOVE_RECURSE "${TEST_ROOT}")
 file(MAKE_DIRECTORY "${WORKSPACE}/.ava" "${TEST_ROOT}/home" "${TEST_ROOT}/config" "${TEST_ROOT}/state"
                     "${TEST_ROOT}/data")
+file(REAL_PATH "${WORKSPACE}" REAL_WORKSPACE)
 file(WRITE "${PROJECT_MCP_CONFIG}"
      "{\"servers\":[{\"id\":\"demo\",\"name\":\"Demo MCP\",\"command\":\"${FAKE_MCP_SERVER_JSON}\","
      "\"enabled\":true}]}\n")
@@ -67,7 +68,7 @@ foreach(NEEDLE
         "permission_denied"
         "resolution: deny"
         "MCP server demo uses per-request stdio processes"
-        "\"workspace_dir\":\"${WORKSPACE}\"")
+        "\"workspace_dir\":\"${REAL_WORKSPACE}\"")
   string(FIND "${AVA_OUTPUT}" "${NEEDLE}" NEEDLE_INDEX)
   if(NEEDLE_INDEX EQUAL -1)
     message(FATAL_ERROR "ava --rpc output did not contain ${NEEDLE}\nstdout:\n${AVA_OUTPUT}\nstderr:\n${AVA_ERROR}")

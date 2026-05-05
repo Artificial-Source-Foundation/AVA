@@ -1,0 +1,124 @@
+#include "ava/agent/agent_loop_session.h"
+
+#include "ava/agent/tool_result.h"
+#include "ava/agent/usage_accounting.h"
+
+#include "ava/core/ids.h"
+#include "ava/core/json.h"
+
+#include <utility>
+
+namespace ava::agent {
+namespace {
+
+ava::core::VoidResult append_entry_with_id(ava::session::SessionStore& store, ava::session::EntryType type,
+                                           std::string const& id, std::string data_json)
+{
+  return store.append(ava::session::SessionEntry{.id = id,
+                                                 .parent_id = "",
+                                                 .type = type,
+                                                 .timestamp = ava::session::now_timestamp(),
+                                                 .data_json = std::move(data_json)});
+}
+
+ava::core::VoidResult append_entry(ava::session::SessionStore& store, ava::session::EntryType type,
+                                   std::string data_json)
+{
+  return append_entry_with_id(store, type, ava::core::make_id("entry"), std::move(data_json));
+}
+
+std::string reasoning_block_data_json(ParsedReasoningBlock const& block, std::string_view provider_id,
+                                      std::string_view model_id)
+{
+  std::string json = "{\"provider\":\"" + ava::core::json::escape(provider_id) + "\",\"model\":\"" +
+                     ava::core::json::escape(model_id) + "\"";
+  if (!block.format.empty()) json += ",\"format\":\"" + ava::core::json::escape(block.format) + "\"";
+  if (!block.text.empty()) json += ",\"text\":\"" + ava::core::json::escape(block.text) + "\"";
+  if (!block.signature.empty()) json += ",\"signature\":\"" + ava::core::json::escape(block.signature) + "\"";
+  if (!block.redacted_data.empty()) {
+    json += ",\"redacted_data\":\"" + ava::core::json::escape(block.redacted_data) + "\"";
+  }
+  json += ",\"redacted\":";
+  json += block.redacted ? "true" : "false";
+  json += '}';
+  return json;
+}
+
+}  // namespace
+
+ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text)
+{
+  auto id = ava::core::make_id("entry");
+  auto appended = append_entry_with_id(store, ava::session::EntryType::UserMessage, id,
+                                       "{\"text\":\"" + ava::core::json::escape(text) + "\"}");
+  if (!appended) return std::unexpected(std::move(appended.error()));
+  return id;
+}
+
+ava::core::VoidResult append_replay_user_message(ava::session::SessionStore& store, std::string const& text,
+                                                 std::string const& replay_of)
+{
+  return append_entry(store, ava::session::EntryType::UserMessage,
+                      "{\"text\":\"" + ava::core::json::escape(text) + "\",\"internal_replay\":true,\"replay_of\":\"" +
+                          ava::core::json::escape(replay_of) +
+                          "\",\"reason\":\"context_compaction_active_prompt_replay\"}");
+}
+
+ava::core::VoidResult append_assistant_message(ava::session::SessionStore& store, std::string const& text,
+                                               std::size_t tool_call_count, ava::provider::TokenUsage const& usage,
+                                               std::optional<long double> const& cost_usd)
+{
+  return append_entry(store, ava::session::EntryType::AssistantMessage,
+                      "{\"text\":\"" + ava::core::json::escape(text) + "\",\"tool_calls\":" +
+                          std::to_string(tool_call_count) + ",\"usage\":" + usage_json(usage, cost_usd) + "}");
+}
+
+ava::core::VoidResult append_reasoning_block(ava::session::SessionStore& store, ParsedReasoningBlock const& block,
+                                             std::string_view provider_id, std::string_view model_id)
+{
+  if (block.text.empty() && block.signature.empty() && block.redacted_data.empty()) return {};
+  return append_entry(store, ava::session::EntryType::ReasoningBlock,
+                      reasoning_block_data_json(block, provider_id, model_id));
+}
+
+ava::core::VoidResult append_tool_call(ava::session::SessionStore& store, ProviderToolCall const& call)
+{
+  return append_entry(store, ava::session::EntryType::ToolCall,
+                      "{\"call_id\":\"" + ava::core::json::escape(call.id) + "\",\"name\":\"" +
+                          ava::core::json::escape(call.name) + "\",\"arguments\":\"" +
+                          ava::core::json::escape(call.arguments_json) + "\"}");
+}
+
+ava::core::VoidResult append_tool_result(ava::session::SessionStore& store, ToolDispatchResult const& result)
+{
+  return append_entry(store, ava::session::EntryType::ToolResult,
+                      "{\"call_id\":\"" + ava::core::json::escape(result.call_id) + "\",\"name\":\"" +
+                          ava::core::json::escape(result.name) +
+                          "\",\"success\":" + (result.success ? std::string("true") : std::string("false")) +
+                          ",\"status\":\"" + ava::core::json::escape(to_string(result.payload.status)) +
+                          "\",\"result\":\"" + ava::core::json::escape(result.result_text) +
+                          "\",\"structured_result\":" + serialize_tool_result_payload_json(result) + "}");
+}
+
+ava::core::VoidResult append_permission_decision(ava::session::SessionStore& store,
+                                                 ava::tools::PermissionAuditEvent const& event)
+{
+  return append_entry(store, ava::session::EntryType::PermissionDecision,
+                      ava::tools::permission_audit_data_json(event));
+}
+
+ava::core::VoidResult append_error(ava::session::SessionStore& store, ava::core::Error const& error)
+{
+  return append_entry(store, ava::session::EntryType::Error,
+                      "{\"category\":\"" + ava::core::json::escape(ava::core::to_string(error.category())) +
+                          "\",\"message\":\"" + ava::core::json::escape(error.message()) + "\",\"details\":\"" +
+                          ava::core::json::escape(error.format()) + "\"}");
+}
+
+ava::core::VoidResult append_cancel(ava::session::SessionStore& store, std::string_view boundary)
+{
+  return append_entry(store, ava::session::EntryType::Cancel,
+                      "{\"reason\":\"cancel_requested\",\"boundary\":\"" + ava::core::json::escape(boundary) + "\"}");
+}
+
+}  // namespace ava::agent

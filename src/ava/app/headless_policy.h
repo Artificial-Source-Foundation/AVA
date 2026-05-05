@@ -1,11 +1,12 @@
 #pragma once
 
+#include "ava/permissions/permission.h"
+
+#include "ava/core/result.h"
+
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/core/result.h"
-#include "ava/permissions/permission.h"
 
 namespace ava::app {
 

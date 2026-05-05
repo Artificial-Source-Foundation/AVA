@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/core/result.h"
+
 #include <atomic>
 #include <deque>
 #include <functional>
@@ -9,8 +11,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/core/result.h"
 
 namespace ava::app::rpc {
 
@@ -31,12 +31,6 @@ struct QueuedRpcMessage {
 struct ClearedRpcQueues {
   std::vector<QueuedRpcMessage> steering_messages;
   std::vector<QueuedRpcMessage> follow_up_messages;
-};
-
-struct CancelRunSnapshot {
-  bool was_active = false;
-  std::string active_request_id;
-  ClearedRpcQueues cleared;
 };
 
 struct RpcRunState {
@@ -67,7 +61,6 @@ void set_active_request_id(RpcRunState& state, std::string request_id);
                                                                           std::string_view correlation_id);
 [[nodiscard]] std::optional<QueuedRpcMessage> take_next_follow_up_message(RpcRunState& state);
 [[nodiscard]] std::vector<QueuedRpcMessage> clear_queued_steering_messages(RpcRunState& state);
-[[nodiscard]] CancelRunSnapshot request_cancel_and_clear_queued_messages(RpcRunState& state);
 [[nodiscard]] ClearedRpcQueues deactivate_and_clear_queued_messages(RpcRunState& state);
 [[nodiscard]] ClearedRpcQueues close_input_and_cancel(RpcRunState& state);
 

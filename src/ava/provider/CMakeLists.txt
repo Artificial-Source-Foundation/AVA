@@ -1,0 +1,18 @@
+add_library(ava_provider
+  "curl_transport.cpp"
+  "anthropic_provider.cpp"
+  "anthropic_request.cpp"
+  "openai_compatible_provider.cpp"
+  "openai_compatible_request.cpp"
+  "openai_provider.cpp"
+  "openai_request.cpp"
+  "openai_response_parser.cpp"
+  "openai_stream_parser.cpp"
+  "provider.cpp"
+  "provider_utils.cpp"
+  "registry.cpp"
+)
+
+target_include_directories(ava_provider PUBLIC "${CMAKE_SOURCE_DIR}/src")
+ava_apply_warnings(ava_provider)
+ava_apply_sanitizers(ava_provider)

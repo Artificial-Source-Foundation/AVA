@@ -1,10 +1,10 @@
 #pragma once
 
+#include "ava/core/result.h"
+
 #include <filesystem>
 #include <string>
 #include <vector>
-
-#include "ava/core/result.h"
 
 namespace ava::plugin {
 

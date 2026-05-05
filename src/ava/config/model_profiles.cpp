@@ -1,11 +1,11 @@
 #include "ava/config/model_profiles.h"
 
+#include "ava/config/provider_profiles.h"
+
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
-
-#include "ava/config/provider_profiles.h"
 
 namespace ava::config {
 namespace {

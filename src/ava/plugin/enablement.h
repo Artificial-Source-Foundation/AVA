@@ -1,11 +1,12 @@
 #pragma once
 
+#include "ava/plugin/manifest.h"
+
+#include "ava/core/result.h"
+
 #include <filesystem>
 #include <string>
 #include <vector>
-
-#include "ava/core/result.h"
-#include "ava/plugin/manifest.h"
 
 namespace ava::plugin {
 

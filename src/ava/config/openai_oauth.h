@@ -1,12 +1,14 @@
 #pragma once
 
+#include "ava/config/auth.h"
+
+#include "ava/provider/provider.h"
+
+#include "ava/core/result.h"
+
 #include <optional>
 #include <string>
 #include <string_view>
-
-#include "ava/config/auth.h"
-#include "ava/core/result.h"
-#include "ava/provider/provider.h"
 
 namespace ava::config {
 

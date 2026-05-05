@@ -1,3 +1,22 @@
+#include "ava/app/plugin_event_hooks.h"
+
+#include "ava/agent/tool_dispatcher.h"
+
+#include "ava/tools/file_tools.h"
+
+#include "ava/plugin/discovery.h"
+#include "ava/plugin/enablement.h"
+#include "ava/plugin/manifest.h"
+#include "ava/plugin/runner.h"
+#include "ava/plugin/runner_protocol.h"
+#include "ava/plugin/tool_broker.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/core/json.h"
+
+#include "tests/support/test_harness.h"
+
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
@@ -6,22 +25,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/agent/tool_dispatcher.h"
-#include "ava/app/plugin_event_hooks.h"
-#include "ava/core/json.h"
-#include "ava/permissions/permission.h"
-#include "ava/plugin/discovery.h"
-#include "ava/plugin/enablement.h"
-#include "ava/plugin/manifest.h"
-#include "ava/plugin/protocol.h"
-#include "ava/plugin/resources.h"
-#include "ava/plugin/runner.h"
-#include "ava/plugin/runner_support.h"
-#include "ava/plugin/stream_buffers.h"
-#include "ava/plugin/tool_broker.h"
-#include "ava/tools/file_tools.h"
-#include "tests/support/test_harness.h"
 
 namespace {
 
@@ -148,6 +151,15 @@ ava::plugin::PluginRunnerOptions runner_options(std::filesystem::path const& wor
   return options;
 }
 
+std::string nested_arrays_json(std::size_t depth)
+{
+  std::string text;
+  text.reserve(depth * 2);
+  for (std::size_t index = 0; index < depth; ++index) text += '[';
+  for (std::size_t index = 0; index < depth; ++index) text += ']';
+  return text;
+}
+
 void test_plugin_manifest_parsing()
 {
   auto parsed = ava::plugin::parse_plugin_manifest(valid_manifest_json(), "/tmp/plugin/plugin.json");
@@ -209,52 +221,47 @@ void test_plugin_manifest_parsing()
          "plugin manifest rejects prompt and skill paths that escape the plugin directory");
 }
 
-void test_plugin_resource_helpers()
+void test_plugin_runner_protocol_parsing()
 {
-  auto const root = temp_root() / "plugin-resources";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  auto const plugin_dir = root / "plugin";
-  auto const manifest_path = plugin_dir / "plugin.json";
-  write_text(manifest_path, valid_manifest_json("com.example.resources"));
-  write_text(plugin_dir / "prompts" / "review.md", "review prompt");
-  write_text(plugin_dir / "skills" / "triage.md", "triage skill");
+  auto initialized = ava::plugin::parse_initialized_response(
+      "{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava.plugin.v1\",\"plugin_version\":\"0.1.0\","
+      "\"contributions\":{\"tools\":[],\"commands\":[]}}");
+  expect(initialized && initialized->plugin_version == "0.1.0" &&
+             initialized->contributions_json.find("\"tools\":[]") != std::string::npos,
+         "plugin runner protocol parses initialization responses");
 
-  auto manifest = ava::plugin::load_plugin_manifest(manifest_path);
-  expect(manifest.has_value(), manifest ? "plugin resource helper test manifest loads"
-                                        : "plugin resource helper test manifest loads: " + manifest.error().format());
-  if (!manifest) return;
+  auto unsupported = ava::plugin::parse_initialized_response(
+      "{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"wrong\",\"plugin_version\":\"0.1.0\","
+      "\"contributions\":{}}");
+  expect(!unsupported, "plugin runner protocol rejects unsupported API versions");
 
-  auto const* prompt = ava::plugin::find_plugin_resource(manifest->contributes.prompts, "review");
-  auto const* missing = ava::plugin::find_plugin_resource(manifest->contributes.prompts, "missing");
-  expect(prompt != nullptr && missing == nullptr, "plugin resource helper finds resources by contribution name");
-  if (prompt) {
-    auto path = ava::plugin::resolve_plugin_resource_path(*manifest, *prompt);
-    expect(path && *path == std::filesystem::weakly_canonical(plugin_dir / "prompts" / "review.md"),
-           "plugin resource helper resolves resource paths inside the plugin directory");
-    auto content = ava::plugin::read_plugin_resource_text(*manifest, *prompt);
-    expect(content && *content == "review prompt", "plugin resource helper reads bounded resource text");
-  }
+  auto tool_result = ava::plugin::parse_tool_result_response(
+      "{\"id\":\"ava_tool_call_1\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"done\","
+      "\"metadata\":{\"count\":1}}",
+      "ava_tool_call_1");
+  expect(tool_result && tool_result->ok && tool_result->content == "done" &&
+             tool_result->metadata_json.find("\"count\":1") != std::string::npos,
+         "plugin runner protocol parses tool result metadata");
 
-  ava::plugin::PluginManifest unsafe_manifest;
-  unsafe_manifest.id = "com.example.resources";
-  unsafe_manifest.directory = plugin_dir;
-  auto escape = ava::plugin::resolve_plugin_resource_path(
-      unsafe_manifest, ava::plugin::PluginResourceContribution{.name = "escape", .description = "", .path = "../x"});
-  expect(!escape && escape.error().category() == ava::core::ErrorCategory::InvalidArgument,
-         "plugin resource helper rejects paths that escape the plugin directory");
+  auto mismatched_tool_result = ava::plugin::parse_tool_result_response(
+      "{\"id\":\"ava_tool_other\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"done\"}", "ava_tool_call_1");
+  expect(!mismatched_tool_result, "plugin runner protocol rejects mismatched response IDs");
 
-  auto directory_resource = ava::plugin::read_plugin_resource_text(
-      *manifest, ava::plugin::PluginResourceContribution{.name = "dir", .description = "", .path = "prompts"});
-  expect(!directory_resource && directory_resource.error().category() == ava::core::ErrorCategory::InvalidArgument,
-         "plugin resource helper rejects directories as resource files");
+  auto command_result = ava::plugin::parse_command_result_response(
+      "{\"id\":\"ava_command_1\",\"type\":\"command.result\",\"ok\":false,\"content\":\"failed\"}", "ava_command_1");
+  expect(command_result && !command_result->ok && command_result->content == "failed",
+         "plugin runner protocol parses command failures as structured results");
 
-  write_text(plugin_dir / "prompts" / "too-large.md", std::string(ava::plugin::kMaxPluginResourceBytes + 1, 'x'));
-  auto oversized = ava::plugin::read_plugin_resource_text(
-      *manifest,
-      ava::plugin::PluginResourceContribution{.name = "too-large", .description = "", .path = "prompts/too-large.md"});
-  expect(!oversized && oversized.error().message().find("size cap") != std::string::npos,
-         "plugin resource helper rejects oversized resource files before returning content");
+  auto event_result = ava::plugin::parse_event_observed_response(
+      "{\"id\":\"ava_event_1\",\"type\":\"event.observed\",\"ok\":true}", "ava_event_1");
+  expect(event_result && event_result->ok && event_result->content.empty(),
+         "plugin runner protocol treats missing event content as empty text");
+
+  auto too_deep = ava::plugin::parse_tool_result_response(
+      "{\"id\":\"ava_tool_deep\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"x\",\"metadata\":" +
+          nested_arrays_json(130) + "}",
+      "ava_tool_deep");
+  expect(!too_deep, "plugin runner protocol rejects excessively deep JSON records");
 }
 
 void test_plugin_discovery()
@@ -386,140 +393,6 @@ void test_plugin_enablement()
   expect(escaped && escaped->size() == 1 && escaped->front().workspace == std::filesystem::path("/tmp/work{\"q\"}") &&
              escaped->front().enabled,
          "plugin enablement parses escaped keys and braces inside strings");
-}
-
-void test_plugin_protocol_helpers()
-{
-  auto const init_request =
-      ava::plugin::plugin_initialize_request_json(ava::plugin::kPluginApiVersion, "com.example.todo", "/tmp/work");
-  expect(init_request.find("\"type\":\"initialize\"") != std::string::npos &&
-             init_request.find("\"plugin_id\":\"com.example.todo\"") != std::string::npos &&
-             init_request.find("\"workspace\":\"/tmp/work\"") != std::string::npos,
-         "plugin protocol formats initialize requests");
-
-  auto const tool_request = ava::plugin::plugin_tool_call_request_json("ava_tool_call_1", "todo_add",
-                                                                       "{\"text\":\"hi\"}", "call_1", "/tmp/work");
-  expect(tool_request.find("\"type\":\"tool.call\"") != std::string::npos &&
-             tool_request.find("\"tool\":\"todo_add\"") != std::string::npos &&
-             tool_request.find("\"call_id\":\"call_1\"") != std::string::npos,
-         "plugin protocol formats tool call requests");
-
-  auto const command_request = ava::plugin::plugin_command_call_request_json(
-      "ava_command_cmd_1", "todo", "{\"filter\":\"open\"}", "cmd_1", "/tmp/work");
-  expect(command_request.find("\"type\":\"command.call\"") != std::string::npos &&
-             command_request.find("\"command\":\"todo\"") != std::string::npos,
-         "plugin protocol formats command call requests");
-
-  auto const event_request = ava::plugin::plugin_event_observe_request_json(
-      "ava_event_event_1", "tool_result", "{\"tool\":\"demo\"}", "event_1", "/tmp/work");
-  expect(event_request.find("\"type\":\"event.observe\"") != std::string::npos &&
-             event_request.find("\"event\":\"tool_result\"") != std::string::npos,
-         "plugin protocol formats event observe requests");
-
-  auto const initialized = ava::plugin::parse_plugin_initialized_response(
-      "{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava.plugin.v1\",\"plugin_version\":\"0.1.0\","
-      "\"contributions\":{\"tools\":[]}}");
-  expect(initialized && initialized->plugin_version == "0.1.0" &&
-             initialized->contributions_json.find("\"tools\":[]") != std::string::npos,
-         initialized ? "plugin protocol parses initialized responses" : "plugin protocol parses initialized responses");
-
-  auto const unsupported = ava::plugin::parse_plugin_initialized_response(
-      "{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"wrong\",\"plugin_version\":\"0.1.0\","
-      "\"contributions\":{}}");
-  expect(!unsupported, "plugin protocol rejects unsupported initialized responses");
-
-  expect(ava::plugin::plugin_json_depth_within_limit("{\"a\":[1]}", 2) &&
-             !ava::plugin::plugin_json_depth_within_limit("{\"a\":[{\"b\":[]}]}", 2),
-         "plugin protocol enforces JSON depth limits");
-
-  auto const tool_result = ava::plugin::parse_plugin_tool_result_response(
-      "{\"id\":\"ava_tool_call_1\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"Added\","
-      "\"metadata\":{\"count\":1}}",
-      "ava_tool_call_1");
-  expect(tool_result && tool_result->ok && tool_result->content == "Added" &&
-             tool_result->metadata_json.find("\"count\":1") != std::string::npos,
-         "plugin protocol parses tool results");
-
-  auto const command_result = ava::plugin::parse_plugin_command_result_response(
-      "{\"id\":\"ava_command_cmd_1\",\"type\":\"command.result\",\"ok\":true,\"content\":\"Done\"}",
-      "ava_command_cmd_1");
-  expect(command_result && command_result->ok && command_result->content == "Done",
-         "plugin protocol parses command results");
-
-  auto const event_result = ava::plugin::parse_plugin_event_observed_response(
-      "{\"id\":\"ava_event_event_1\",\"type\":\"event.observed\",\"ok\":true}", "ava_event_event_1");
-  expect(event_result && event_result->ok && event_result->content.empty(),
-         "plugin protocol parses event observed responses with optional content");
-
-  auto const wrong_id = ava::plugin::parse_plugin_tool_result_response(
-      "{\"id\":\"wrong\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"Added\"}", "ava_tool_call_1");
-  expect(!wrong_id, "plugin protocol rejects response id mismatches");
-}
-
-void test_plugin_stream_buffers()
-{
-  ava::plugin::PluginRecordBuffer records(8);
-  records.append("one\r\n");
-  auto first = records.take_record();
-  expect(first && *first == "one" && records.empty(), "plugin record buffer extracts CRLF-delimited records");
-
-  records.append("two\nthree");
-  auto second = records.take_record();
-  expect(second && *second == "two" && records.size() == 5 && !records.exceeds_limit(),
-         "plugin record buffer preserves buffered partial records after a newline");
-
-  records.append("xxxx");
-  expect(records.exceeds_limit(), "plugin record buffer reports newline-free records over the byte cap");
-  records.trim_front_to_limit();
-  expect(records.size() == 8, "plugin record buffer trims retained stdout to the configured cap");
-
-  ava::plugin::PluginRecordBuffer oversized_line(4);
-  oversized_line.append("12345\n");
-  expect(oversized_line.exceeds_limit(), "plugin record buffer reports oversized delimited records");
-
-  ava::plugin::PluginStderrTail tail(6);
-  tail.append("abc");
-  tail.append("defg");
-  expect(tail.text() == "bcdefg" && tail.truncated(), "plugin stderr tail keeps only the newest bytes");
-  tail.append("123456789");
-  expect(tail.text() == "456789" && tail.truncated(), "plugin stderr tail bounds chunks larger than the cap");
-}
-
-void test_plugin_runner_support_helpers()
-{
-  ava::plugin::PluginManifest manifest;
-  manifest.id = "com.example.support";
-  manifest.path = temp_root() / "support-plugin" / "plugin.json";
-  manifest.directory = manifest.path.parent_path();
-  manifest.entrypoint.command = "/bin/sh";
-  manifest.entrypoint.args = {"plugin.sh", "--safe"};
-
-  auto const argv = ava::plugin::detail::plugin_argv(manifest);
-  expect(argv.size() == 3 && argv[0] == "/bin/sh" && argv[1] == "plugin.sh" && argv[2] == "--safe",
-         "plugin runner support builds child argv from manifest entrypoint");
-
-  ava::plugin::PluginRunnerOptions options;
-  options.workspace_dir = temp_root() / "workspace";
-  expect(ava::plugin::detail::child_working_dir(manifest, options) == manifest.directory,
-         "plugin runner support prefers manifest directory for child cwd");
-  manifest.directory.clear();
-  expect(ava::plugin::detail::child_working_dir(manifest, options) == options.workspace_dir,
-         "plugin runner support falls back to workspace cwd");
-
-  ava::plugin::PluginRunnerOptions default_options;
-  auto valid = ava::plugin::detail::validate_start_request(manifest, default_options, nullptr);
-  expect(valid && !default_options.workspace_dir.empty(),
-         "plugin runner support validates defaults and fills workspace cwd");
-
-  auto bad_timeout_options = default_options;
-  bad_timeout_options.startup_timeout = std::chrono::milliseconds(1);
-  auto bad_timeout = ava::plugin::detail::validate_start_request(manifest, bad_timeout_options, nullptr);
-  expect(!bad_timeout && bad_timeout.error().message().find("startup timeout") != std::string::npos,
-         "plugin runner support rejects startup timeouts below the safe bound");
-
-  auto canceled = ava::plugin::detail::validate_start_request(manifest, default_options, [] { return true; });
-  expect(!canceled && canceled.error().message() == "plugin startup canceled",
-         "plugin runner support preserves fail-closed startup cancellation");
 }
 
 void test_plugin_runner_initializes_and_shuts_down()
@@ -920,7 +793,7 @@ void test_enabled_plugin_event_hooks_observe_runtime_events()
           .plugin_enablement_file = state_file,
           .mode = ava::agent::Mode::Build,
           .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
-              -> ava::core::Result<ava::permissions::PermissionResolution> {
+              -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
             prompts.push_back(prompt);
             return ava::permissions::PermissionResolution::Allow;
           }},
@@ -992,7 +865,7 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
           .plugin_enablement_file = state_file,
           .mode = ava::agent::Mode::Build,
           .permission_resolver = [](ava::permissions::PermissionPrompt const&)
-              -> ava::core::Result<ava::permissions::PermissionResolution> {
+              -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
             return ava::permissions::PermissionResolution::Allow;
           },
           .hook_failure_sink =
@@ -1064,7 +937,7 @@ void test_plugin_tool_dispatcher()
   context.plugin_project_plugins_dir = project_plugins;
   context.plugin_enablement_file = state_file;
   context.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
-      -> ava::core::Result<ava::permissions::PermissionResolution> {
+      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
@@ -1115,7 +988,7 @@ void test_plugin_tool_dispatcher()
   std::vector<ava::permissions::PermissionPrompt> denied_prompts;
   auto denied_context = context;
   denied_context.permission_resolver = [&denied_prompts](ava::permissions::PermissionPrompt const& prompt)
-      -> ava::core::Result<ava::permissions::PermissionResolution> {
+      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     denied_prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Deny;
   };
@@ -1163,8 +1036,8 @@ void test_plugin_tool_dispatcher_rejects_invalid_result()
   context.plugin_global_plugins_dir = root / "global-plugins";
   context.plugin_project_plugins_dir = project_plugins;
   context.plugin_enablement_file = state_file;
-  context.permission_resolver =
-      [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+  context.permission_resolver = [](ava::permissions::PermissionPrompt const&)
+      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     return ava::permissions::PermissionResolution::Allow;
   };
 
@@ -1213,12 +1086,9 @@ void test_plugin_tool_registry_skips_name_collisions()
 void run_plugin_tests()
 {
   test_plugin_manifest_parsing();
-  test_plugin_resource_helpers();
+  test_plugin_runner_protocol_parsing();
   test_plugin_discovery();
   test_plugin_enablement();
-  test_plugin_protocol_helpers();
-  test_plugin_stream_buffers();
-  test_plugin_runner_support_helpers();
   test_plugin_runner_initializes_and_shuts_down();
   test_plugin_runner_accepts_buffered_extra_records();
   test_plugin_runner_contained_failures();

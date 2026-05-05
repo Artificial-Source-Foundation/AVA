@@ -1,5 +1,46 @@
-#include <sys/stat.h>
-#include <unistd.h>
+#include "ava/app/commands.h"
+#include "ava/app/events.h"
+#include "ava/app/headless_policy.h"
+#include "ava/app/print_mode.h"
+#include "ava/app/rpc_mode.h"
+#include "ava/app/runtime.h"
+
+#include "ava/agent/agent_loop.h"
+#include "ava/agent/mode.h"
+#include "ava/agent/tool_dispatcher.h"
+
+#include "ava/tools/bash_tool.h"
+#include "ava/tools/file_tools.h"
+#include "ava/tools/search_tools.h"
+
+#include "ava/tui/composer.h"
+#include "ava/tui/terminal.h"
+
+#include "ava/config/auth.h"
+#include "ava/config/auth_record.h"
+#include "ava/config/model_config.h"
+#include "ava/config/model_profiles.h"
+#include "ava/config/openai_oauth.h"
+#include "ava/config/prompt_config.h"
+#include "ava/config/provider_profiles.h"
+#include "ava/config/reasoning_profiles.h"
+#include "ava/config/xdg_paths.h"
+
+#include "ava/session/compaction.h"
+#include "ava/session/export.h"
+#include "ava/session/session_store.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/provider/openai_provider.h"
+
+#include "ava/context/context_loader.h"
+
+#include "ava/core/ids.h"
+#include "ava/core/json.h"
+
+#include "tests/support/fake_transport.h"
+#include "tests/support/test_harness.h"
 
 #include <algorithm>
 #include <chrono>
@@ -16,52 +57,10 @@
 #include <utility>
 #include <vector>
 
-#include "ava/agent/agent_loop.h"
-#include "ava/agent/mode.h"
-#include "ava/agent/tool_dispatcher.h"
-#include "ava/app/commands.h"
-#include "ava/app/events.h"
-#include "ava/app/headless_policy.h"
-#include "ava/app/print_mode.h"
-#include "ava/app/rpc_mode.h"
-#include "ava/app/runtime.h"
-#include "ava/config/auth.h"
-#include "ava/config/auth_file_json.h"
-#include "ava/config/auth_storage.h"
-#include "ava/config/model_config.h"
-#include "ava/config/model_profiles.h"
-#include "ava/config/openai_oauth.h"
-#include "ava/config/prompt_config.h"
-#include "ava/config/provider_profiles.h"
-#include "ava/config/reasoning_profiles.h"
-#include "ava/config/xdg_paths.h"
-#include "ava/context/context_loader.h"
-#include "ava/core/ids.h"
-#include "ava/core/json.h"
-#include "ava/permissions/permission.h"
-#include "ava/provider/openai_provider.h"
-#include "ava/session/compaction.h"
-#include "ava/session/export.h"
-#include "ava/session/session_store.h"
-#include "ava/tools/bash_tool.h"
-#include "ava/tools/file_tools.h"
-#include "ava/tools/search_tools.h"
-#include "ava/tui/composer.h"
-#include "ava/tui/terminal.h"
-#include "tests/support/fake_transport.h"
-#include "tests/support/test_harness.h"
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace {
-
-std::filesystem::path legacy_compatible_auth_dir(std::filesystem::path const& root)
-{
-  return root / "data" / (std::string("open") + "code");
-}
-
-std::filesystem::path legacy_compatible_auth_file(std::filesystem::path const& root)
-{
-  return legacy_compatible_auth_dir(root) / "auth.json";
-}
 
 void test_xdg_paths()
 {
@@ -91,8 +90,10 @@ void test_xdg_paths()
   auto overridden = ava::config::xdg_paths();
   expect(overridden.ava_config_dir == root / "config" / "ava", "XDG config override is honored");
   expect(overridden.ava_state_dir == root / "state" / "ava", "XDG state override is honored");
-  expect(ava::config::legacy_compatible_auth_path() == legacy_compatible_auth_file(root),
-         "legacy compatible auth path follows XDG data home");
+  auto const compatible_auth_path = ava::config::legacy_compatible_auth_path();
+  expect(compatible_auth_path.filename() == "auth.json", "compatible auth path points at auth file");
+  expect(compatible_auth_path.parent_path().parent_path() == root / "data",
+         "compatible auth path follows XDG data home");
 
   setenv("XDG_CONFIG_HOME", "relative-config", 1);
   auto relative_ignored = ava::config::xdg_paths();
@@ -110,51 +111,6 @@ void test_xdg_paths()
   setenv("HOME", "", 1);
   auto empty_home = ava::config::xdg_paths();
   expect(empty_home.state_home.is_absolute(), "XDG state fallback remains absolute when HOME is empty");
-}
-
-void test_auth_storage_helpers()
-{
-  auto const root = temp_root() / "auth-storage";
-  std::error_code remove_error;
-  std::filesystem::remove_all(root, remove_error);
-  std::filesystem::create_directories(root);
-
-  setenv("HOME", (root / "home").c_str(), 1);
-  setenv("XDG_CONFIG_HOME", (root / "config").c_str(), 1);
-  setenv("XDG_STATE_HOME", (root / "state").c_str(), 1);
-  setenv("XDG_DATA_HOME", (root / "data").c_str(), 1);
-
-  auto const paths = ava::config::xdg_paths();
-  auto missing = ava::config::read_auth_text_if_exists(paths.auth_file, true);
-  expect(missing && !missing->content, "auth storage read treats missing explicit auth file as empty");
-
-  auto ensured = ava::config::ensure_auth_directory(paths);
-  expect(ensured.has_value(), "auth storage creates the auth directory");
-  auto lock = ava::config::acquire_auth_file_lock(paths);
-  expect(lock.has_value(), "auth storage acquires a regular lock file");
-
-  {
-    std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
-    file << "{\"openai\":{\"type\":\"api_key\",\"api_key\":\"stored\"}}";
-  }
-  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
-  auto private_read = ava::config::read_auth_text_if_exists(paths.auth_file, true);
-  expect(private_read && private_read->content && private_read->content->find("\"stored\"") != std::string::npos,
-         "auth storage reads private regular auth files");
-
-  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR | S_IRGRP);
-  auto broad_read = ava::config::read_auth_text_if_exists(paths.auth_file, true);
-  expect(!broad_read && broad_read.error().category() == ava::core::ErrorCategory::PermissionDenied &&
-             ava::config::auth_error_has_context(broad_read.error(), "reason", "broad_permissions"),
-         "auth storage rejects group-readable explicit auth files by default");
-  auto broad_allowed = ava::config::read_auth_text_if_exists(paths.auth_file, true, true);
-  expect(broad_allowed && broad_allowed->content, "auth storage can opt into broad-permission reads for migration");
-
-  auto written = ava::config::write_auth_file_atomic(paths.auth_file, "{\"openai\":{\"type\":\"api_key\"}}\n");
-  expect(written.has_value(), "auth storage writes auth files through atomic replacement");
-  auto rewritten = ava::config::read_auth_text_if_exists(paths.auth_file, true);
-  expect(rewritten && rewritten->content && *rewritten->content == "{\"openai\":{\"type\":\"api_key\"}}\n",
-         "auth storage atomic replacement preserves exact content");
 }
 
 void test_context_loader()
@@ -299,52 +255,73 @@ void test_context_loader()
   }
 }
 
-void test_auth_file_json_helpers()
+void test_auth_record_helpers()
 {
-  auto const path = temp_root() / "auth-file-json" / "auth.json";
-  auto members = ava::config::parse_auth_members(
-      "{\n"
-      "  \"alpha\": {\"type\":\"api_key\",\"api_key\":\"secret\"},\n"
-      "  \"escaped\\nkey\": [1, {\"nested\": true}],\n"
-      "  \"number\": 42\n"
-      "}",
-      path);
-  expect(members && members->size() == 3 && (*members)[0].key == "alpha" &&
-             (*members)[0].raw_value == "{\"type\":\"api_key\",\"api_key\":\"secret\"}" &&
-             (*members)[1].key == "escaped\nkey" && (*members)[1].raw_value == "[1, {\"nested\": true}]" &&
-             (*members)[2].raw_value == "42",
-         "auth file JSON member parser preserves keys and raw values for safe credential merges");
+  expect(ava::config::is_valid_provider_id("openai") && ava::config::is_valid_provider_id("custom-provider_1"),
+         "auth record provider id accepts provider-safe names");
+  expect(!ava::config::is_valid_provider_id("") && !ava::config::is_valid_provider_id("bad provider"),
+         "auth record provider id rejects empty and whitespace names");
 
-  auto malformed = ava::config::parse_auth_members("{\"alpha\": }", path);
-  expect(!malformed && malformed.error().format().find("invalid value") != std::string::npos,
-         "auth file JSON member parser rejects missing values with actionable errors");
-
-  auto rendered = ava::config::render_auth_members(std::vector<ava::config::AuthMember>{
-      {.key = "alpha", .raw_value = "1"}, {.key = "quote\"key", .raw_value = "true"}});
-  expect(rendered == "{\n  \"alpha\": 1,\n  \"quote\\\"key\": true\n}\n",
-         "auth file JSON renderer keeps deterministic object formatting and escapes keys");
-
-  auto api_key =
-      ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "test-provider",
-                                                                                   .access_token = "api-secret",
+  auto const api_object =
+      ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "custom",
+                                                                                   .access_token = "token\"with-quote",
                                                                                    .credential_type = "api_key",
                                                                                    .account_id = "",
                                                                                    .source = "test"});
-  auto oauth =
-      ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "test_provider",
-                                                                                   .access_token = "oauth-secret",
+  expect(api_object && api_object->find("\"type\": \"api_key\"") != std::string::npos &&
+             api_object->find("token\\\"with-quote") != std::string::npos,
+         "auth record serializes provider API key credential object with JSON escaping");
+
+  auto const oauth_object =
+      ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "custom",
+                                                                                   .access_token = "oauth-token",
                                                                                    .credential_type = "oauth",
                                                                                    .account_id = "acct_123",
                                                                                    .source = "test"});
-  auto invalid =
+  expect(oauth_object && oauth_object->find("\"type\": \"oauth\"") != std::string::npos &&
+             oauth_object->find("\"account_id\": \"acct_123\"") != std::string::npos,
+         "auth record serializes provider OAuth credential object with account metadata");
+
+  auto const bad_provider =
       ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "bad provider",
                                                                                    .access_token = "token",
                                                                                    .credential_type = "api_key",
                                                                                    .account_id = "",
                                                                                    .source = "test"});
-  expect(api_key && api_key->find("\"api_key\": \"api-secret\"") != std::string::npos && oauth &&
-             oauth->find("\"account_id\": \"acct_123\"") != std::string::npos && !invalid,
-         "provider credential JSON helper formats supported credential types and rejects invalid provider ids");
+  expect(!bad_provider && bad_provider.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "auth record rejects invalid provider ids before serializing credentials");
+
+  auto const path = std::filesystem::path("/tmp/auth-record.json");
+  auto parsed = ava::config::parse_auth_record_members(
+      "{\n"
+      "  \"openai\": {\"type\":\"api_key\",\"api_key\":\"k\"},\n"
+      "  \"nested\": [1, {\"text\": \"value, with comma\"}],\n"
+      "  \"escaped\\nkey\": true\n"
+      "}\n",
+      path);
+  expect(parsed && parsed->size() == 3, "auth record parser preserves top-level JSON members");
+  if (parsed && parsed->size() == 3) {
+    expect((*parsed)[0].key == "openai" && (*parsed)[0].raw_value.find("\"api_key\":\"k\"") != std::string::npos,
+           "auth record parser captures object member raw JSON");
+    expect((*parsed)[1].key == "nested" && (*parsed)[1].raw_value.find("value, with comma") != std::string::npos,
+           "auth record parser handles nested arrays and string commas");
+    expect((*parsed)[2].key == "escaped\nkey" && (*parsed)[2].raw_value == "true",
+           "auth record parser decodes escaped member keys");
+
+    auto serialized = ava::config::serialize_auth_record_members(*parsed);
+    auto reparsed = ava::config::parse_auth_record_members(serialized, path);
+    expect(reparsed && reparsed->size() == parsed->size() && (*reparsed)[2].key == "escaped\nkey",
+           "auth record serialization round trips parser-visible members");
+  }
+
+  expect(ava::config::serialize_auth_record_members({}) == "{\n}\n",
+         "auth record serialization emits an empty JSON object for no members");
+  auto const trailing = ava::config::parse_auth_record_members("{\"openai\": true} trailing", path);
+  expect(!trailing && trailing.error().format().find("trailing content") != std::string::npos,
+         "auth record parser rejects trailing content");
+  auto const missing_value = ava::config::parse_auth_record_members("{\"openai\": }", path);
+  expect(!missing_value && missing_value.error().format().find("invalid value") != std::string::npos,
+         "auth record parser rejects missing member values");
 }
 
 void test_auth_load_and_store()
@@ -373,19 +350,20 @@ void test_auth_load_and_store()
   }
 
   std::filesystem::remove(paths.auth_file, remove_error);
-  std::filesystem::create_directories(legacy_compatible_auth_dir(root));
+  auto const compatible_auth_path = ava::config::legacy_compatible_auth_path();
+  std::filesystem::create_directories(compatible_auth_path.parent_path());
   {
-    std::ofstream file(legacy_compatible_auth_file(root), std::ios::binary | std::ios::trunc);
+    std::ofstream file(compatible_auth_path, std::ios::binary | std::ios::trunc);
     file << "{\"openai\":{\"type\":\"oauth\",\"access\":\"legacy-token\",\"refresh\":\"r\",\"expires\":7}}";
   }
-  ::chmod(legacy_compatible_auth_file(root).c_str(), S_IRUSR | S_IWUSR | S_IRGRP);
+  ::chmod(compatible_auth_path.c_str(), S_IRUSR | S_IWUSR | S_IRGRP);
   auto insecure_import = ava::config::load_openai_credential(paths);
   expect(insecure_import && !insecure_import->has_value(),
          "OpenAI credential load skips group-readable fallback auth file");
-  ::chmod(legacy_compatible_auth_file(root).c_str(), S_IRUSR | S_IWUSR);
+  ::chmod(compatible_auth_path.c_str(), S_IRUSR | S_IWUSR);
   auto imported = ava::config::load_openai_credential(paths);
   expect(imported && imported->has_value() && (*imported)->access_token == "legacy-token",
-         "OpenAI OAuth credential is recognized from legacy compatible auth path");
+         "OpenAI OAuth credential is recognized from compatible auth path");
 
   {
     std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
@@ -402,10 +380,10 @@ void test_auth_load_and_store()
   std::filesystem::remove_all(root / "home" / ".ava", remove_error);
   std::filesystem::create_directories(root / "home" / ".ava" / "credentials.json");
   {
-    std::ofstream file(legacy_compatible_auth_file(root), std::ios::binary | std::ios::trunc);
+    std::ofstream file(compatible_auth_path, std::ios::binary | std::ios::trunc);
     file << "{\"openai\":{\"type\":\"api\",\"key\":\"legacy-api-key\"}}";
   }
-  ::chmod(legacy_compatible_auth_file(root).c_str(), S_IRUSR | S_IWUSR);
+  ::chmod(compatible_auth_path.c_str(), S_IRUSR | S_IWUSR);
   auto api_key = ava::config::load_openai_credential(paths);
   expect(api_key && api_key->has_value() && (*api_key)->access_token == "legacy-api-key" &&
              (*api_key)->type == ava::config::OpenAICredentialType::ApiKey,
@@ -602,7 +580,7 @@ void test_auth_load_and_store()
              (*stored_provider_credential)->credential_type == "api_key",
          "provider credential discovery prefers stored OpenAI auth before env fallback");
   std::filesystem::remove(paths.auth_file, remove_error);
-  std::filesystem::remove(legacy_compatible_auth_file(root), remove_error);
+  std::filesystem::remove(compatible_auth_path, remove_error);
   auto env_openai_credential = ava::config::provider_credential_for_request(paths, "openai", env_transport);
   expect(env_openai_credential && env_openai_credential->has_value() &&
              (*env_openai_credential)->access_token == "env-openai-key" &&
@@ -692,7 +670,7 @@ void test_openai_oauth_helpers()
   expect(ava::config::openai_oauth_account_id_from_token(
              "header.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdF8xMjMifX0.sig") ==
              "acct_123",
-         "OpenAI OAuth account id extracts from Codex JWT claim");
+         "OpenAI OAuth account id extracts from compatibility JWT claim");
 
   auto session = ava::config::make_openai_oauth_session(verifier, "state value");
   expect(session.has_value(), "OpenAI OAuth deterministic session builds");
@@ -700,7 +678,7 @@ void test_openai_oauth_helpers()
     expect(session->authorization_url.find("https://auth.openai.com/oauth/authorize?") == 0,
            "OpenAI OAuth authorization URL uses auth.openai.com");
     expect(session->authorization_url.find("client_id=app_EMoamEEZ73f0CkXaXp7hrann") != std::string::npos,
-           "OpenAI OAuth authorization URL includes Codex client id");
+           "OpenAI OAuth authorization URL includes compatibility client id");
     expect(session->authorization_url.find("redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback") !=
                std::string::npos,
            "OpenAI OAuth authorization URL includes local callback redirect");
@@ -1062,9 +1040,8 @@ void test_model_and_prompt_config()
 void run_config_context_auth_oauth_tests()
 {
   test_xdg_paths();
-  test_auth_storage_helpers();
   test_context_loader();
-  test_auth_file_json_helpers();
+  test_auth_record_helpers();
   test_auth_load_and_store();
   test_openai_oauth_helpers();
   test_openai_oauth_refresh();

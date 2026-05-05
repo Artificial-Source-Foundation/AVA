@@ -1,9 +1,10 @@
 #pragma once
 
-#include <string_view>
+#include "ava/provider/provider.h"
 
 #include "ava/core/result.h"
-#include "ava/provider/provider.h"
+
+#include <string_view>
 
 namespace ava::provider::detail {
 

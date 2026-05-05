@@ -1,10 +1,10 @@
 #pragma once
 
+#include "ava/session/session_store.h"
+
 #include <cstddef>
 #include <string>
 #include <vector>
-
-#include "ava/session/session_store.h"
 
 namespace ava::session {
 

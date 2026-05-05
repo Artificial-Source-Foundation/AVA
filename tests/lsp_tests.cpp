@@ -1,19 +1,21 @@
+#include "ava/agent/tool_dispatcher.h"
+
+#include "ava/tools/file_tools.h"
+#include "ava/tools/lsp_tools.h"
+
+#include "ava/lsp/lsp_client.h"
+
+#include "ava/core/json.h"
+
+#include "tests/support/test_harness.h"
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/agent/tool_dispatcher.h"
-#include "ava/agent/tool_lsp_dispatch.h"
-#include "ava/core/json.h"
-#include "ava/lsp/lsp_client.h"
-#include "ava/tools/file_tools.h"
-#include "ava/tools/lsp_tools.h"
-#include "tests/support/test_harness.h"
 
 namespace {
 
@@ -53,40 +55,6 @@ class ManyDiagnosticsProvider final : public ava::lsp::DiagnosticsProvider {
     return diagnostics;
   }
 };
-
-void test_lsp_dispatch_adapter_helpers()
-{
-  bool saw_lsp_metadata = false;
-  for (auto const& metadata : ava::agent::builtin_tool_metadata()) {
-    bool const is_lsp = metadata.name == std::string_view("lsp_diagnostics");
-    saw_lsp_metadata = saw_lsp_metadata || is_lsp;
-    expect(ava::agent::detail::is_lsp_diagnostics_metadata(metadata) == is_lsp,
-           "LSP dispatch adapter marks only diagnostics metadata as requiring a local provider");
-  }
-  expect(saw_lsp_metadata, "LSP dispatch adapter test finds diagnostics metadata");
-
-  auto const workspace = make_lsp_workspace("lsp-dispatch-adapter");
-  ava::tools::ToolContext const context{.workspace_dir = workspace,
-                                        .lsp_diagnostics_provider = std::make_shared<ManyDiagnosticsProvider>()};
-  auto bounded = ava::agent::detail::lsp_diagnostics_result(
-      context, ava::agent::ProviderToolCall{
-                   .id = "call_lsp_adapter", .name = "lsp_diagnostics", .arguments_json = "{\"path\":\"main.cpp\"}"});
-  expect(bounded.success && bounded.result_text.size() <= 64 * 1024 &&
-             bounded.result_text.find("\"truncated\":true") != std::string::npos &&
-             bounded.result_text.find("\"total_diagnostics\":300") != std::string::npos,
-         "LSP dispatch adapter bounds provider-facing diagnostics JSON");
-
-  auto long_path = std::string(5000, 'a');
-  auto too_long =
-      ava::agent::detail::lsp_diagnostics_result(context, ava::agent::ProviderToolCall{
-                                                              .id = "call_lsp_adapter_long",
-                                                              .name = "lsp_diagnostics",
-                                                              .arguments_json = "{\"path\":\"" + long_path + "\"}",
-                                                          });
-  expect(!too_long.success && too_long.result_text.find("path is too long") != std::string::npos &&
-             too_long.result_text.size() <= 64 * 1024,
-         "LSP dispatch adapter rejects oversized provider path arguments before JSON reflection can exceed the cap");
-}
 
 void test_lsp_manager_fake_server_diagnostics()
 {
@@ -324,7 +292,6 @@ void test_lsp_dispatcher_bounds_provider_json()
 
 void run_lsp_tests()
 {
-  test_lsp_dispatch_adapter_helpers();
   test_lsp_manager_fake_server_diagnostics();
   test_lsp_manager_malformed_response_error();
   test_lsp_manager_crash_error();

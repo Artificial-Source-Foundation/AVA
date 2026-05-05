@@ -1,6 +1,47 @@
-#include <curses.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include "ava/app/commands.h"
+#include "ava/app/events.h"
+#include "ava/app/headless_policy.h"
+#include "ava/app/print_mode.h"
+#include "ava/app/rpc_mode.h"
+#include "ava/app/runtime.h"
+
+#include "ava/agent/agent_loop.h"
+#include "ava/agent/mode.h"
+#include "ava/agent/tool_dispatcher.h"
+
+#include "ava/tools/bash_tool.h"
+#include "ava/tools/file_tools.h"
+#include "ava/tools/search_tools.h"
+
+#include "ava/tui/composer.h"
+#include "ava/tui/composer_editor.h"
+#include "ava/tui/composer_internal.h"
+#include "ava/tui/event_state.h"
+#include "ava/tui/keybindings.h"
+#include "ava/tui/runtime.h"
+#include "ava/tui/terminal.h"
+
+#include "ava/config/auth.h"
+#include "ava/config/model_config.h"
+#include "ava/config/openai_oauth.h"
+#include "ava/config/prompt_config.h"
+#include "ava/config/xdg_paths.h"
+
+#include "ava/session/compaction.h"
+#include "ava/session/export.h"
+#include "ava/session/session_store.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/provider/openai_provider.h"
+
+#include "ava/context/context_loader.h"
+
+#include "ava/core/ids.h"
+#include "ava/core/json.h"
+
+#include "tests/support/fake_transport.h"
+#include "tests/support/test_harness.h"
 
 #include <algorithm>
 #include <chrono>
@@ -20,40 +61,9 @@
 #include <utility>
 #include <vector>
 
-#include "ava/agent/agent_loop.h"
-#include "ava/agent/mode.h"
-#include "ava/agent/tool_dispatcher.h"
-#include "ava/app/commands.h"
-#include "ava/app/events.h"
-#include "ava/app/headless_policy.h"
-#include "ava/app/print_mode.h"
-#include "ava/app/rpc_mode.h"
-#include "ava/app/runtime.h"
-#include "ava/config/auth.h"
-#include "ava/config/model_config.h"
-#include "ava/config/openai_oauth.h"
-#include "ava/config/prompt_config.h"
-#include "ava/config/xdg_paths.h"
-#include "ava/context/context_loader.h"
-#include "ava/core/ids.h"
-#include "ava/core/json.h"
-#include "ava/permissions/permission.h"
-#include "ava/provider/openai_provider.h"
-#include "ava/session/compaction.h"
-#include "ava/session/export.h"
-#include "ava/session/session_store.h"
-#include "ava/tools/bash_tool.h"
-#include "ava/tools/file_tools.h"
-#include "ava/tools/search_tools.h"
-#include "ava/tui/composer.h"
-#include "ava/tui/composer_editor.h"
-#include "ava/tui/composer_internal.h"
-#include "ava/tui/event_state.h"
-#include "ava/tui/keybindings.h"
-#include "ava/tui/runtime.h"
-#include "ava/tui/terminal.h"
-#include "tests/support/fake_transport.h"
-#include "tests/support/test_harness.h"
+#include <curses.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace {
 
@@ -401,7 +411,7 @@ void test_tui_composer_rendering_and_input()
                                return visible.find("Build · GPT-5.5 OpenAI · low") != std::string::npos &&
                                       visible.find("reasoning") == std::string::npos;
                              }),
-         "tui shows selected reasoning level in the composer as compact metadata");
+         "tui shows selected reasoning level in the composer metadata");
 
   auto const default_reasoning_lines =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -2219,7 +2229,7 @@ void test_tui_composer_rendering_and_input()
              std::ranges::none_of(sidebar_frame,
                                   [](std::string const& line) { return line.find("\x1b[31m") != std::string::npos; }) &&
              std::ranges::all_of(sidebar_frame, [](std::string const& line) { return visible_columns(line) <= 128; }),
-         "tui renders the sidebar with activity, modified files, session metadata, and version");
+         "tui renders a sidebar with activity, modified files, session metadata, and version");
   expect(std::ranges::any_of(sidebar_frame,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
@@ -2657,7 +2667,7 @@ void test_tui_event_state_reduces_runtime_events()
                              [](std::string const& line) {
                                return strip_sgr(line).find("Thinking: checking options") != std::string::npos;
                              }),
-         "tui renders reasoning content as an inline thinking transcript block with a compact prefix");
+         "tui renders reasoning content as an inline thinking transcript block with a stable prefix");
   expect(std::ranges::any_of(thinking_render,
                              [](std::string const& line) {
                                return strip_sgr(line).find("Thinking:") != std::string::npos &&

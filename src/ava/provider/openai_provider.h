@@ -1,13 +1,14 @@
 #pragma once
 
-#include <memory>
-#include <string>
-#include <string_view>
-
 #include "ava/config/auth.h"
+
 #include "ava/provider/openai_response_parser.h"
 #include "ava/provider/openai_stream_parser.h"
 #include "ava/provider/provider.h"
+
+#include <memory>
+#include <string>
+#include <string_view>
 
 namespace ava::provider {
 

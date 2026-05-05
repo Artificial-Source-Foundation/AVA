@@ -1,16 +1,19 @@
 #include "ava/app/rpc/serialization.h"
 
+#include "ava/app/rpc/protocol.h"
+
+#include "ava/session/stats.h"
+#include "ava/session/validation.h"
+
+#include "ava/provider/registry.h"
+
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <cctype>
 #include <iomanip>
 #include <sstream>
 #include <utility>
-
-#include "ava/app/rpc/protocol.h"
-#include "ava/core/json.h"
-#include "ava/provider/registry.h"
-#include "ava/session/stats.h"
-#include "ava/session/validation.h"
 
 namespace ava::app::rpc {
 namespace {
@@ -685,18 +688,24 @@ std::string question_request_payload_json(std::string_view resolver_request_id,
   return json;
 }
 
-std::string permission_reply_payload_json(std::string_view resolver_request_id, std::string_view decision)
+std::string permission_reply_payload_json(std::string_view resolver_request_id, std::string_view decision,
+                                          std::optional<std::string> const& reason)
 {
   std::string json = "{";
   json += string_field_json("resolver_request_id", resolver_request_id);
   json += ',';
   json += string_field_json("decision", decision);
+  if (reason && !reason->empty()) {
+    json += ',';
+    json += string_field_json("reason", *reason);
+  }
   json += '}';
   return json;
 }
 
 std::string question_reply_payload_json(std::string_view resolver_request_id, std::optional<std::string> const& answer,
-                                        std::optional<std::string> const& selected)
+                                        std::optional<std::string> const& selected,
+                                        std::optional<std::vector<std::string>> const& selected_options)
 {
   std::string json = "{";
   json += string_field_json("resolver_request_id", resolver_request_id);
@@ -707,6 +716,10 @@ std::string question_reply_payload_json(std::string_view resolver_request_id, st
   if (selected) {
     json += ',';
     json += string_field_json("selected", *selected);
+  }
+  if (selected_options) {
+    json += ",\"selected_options\":";
+    json += string_array_json(*selected_options);
   }
   json += '}';
   return json;

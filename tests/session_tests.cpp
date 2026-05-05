@@ -1,5 +1,45 @@
-#include <sys/stat.h>
-#include <unistd.h>
+#include "ava/app/commands.h"
+#include "ava/app/events.h"
+#include "ava/app/headless_policy.h"
+#include "ava/app/print_mode.h"
+#include "ava/app/rpc_mode.h"
+#include "ava/app/runtime.h"
+
+#include "ava/agent/agent_loop.h"
+#include "ava/agent/mode.h"
+#include "ava/agent/tool_dispatcher.h"
+
+#include "ava/tools/bash_tool.h"
+#include "ava/tools/file_tools.h"
+#include "ava/tools/search_tools.h"
+
+#include "ava/tui/composer.h"
+#include "ava/tui/terminal.h"
+
+#include "ava/config/auth.h"
+#include "ava/config/model_config.h"
+#include "ava/config/openai_oauth.h"
+#include "ava/config/prompt_config.h"
+#include "ava/config/xdg_paths.h"
+
+#include "ava/session/compaction.h"
+#include "ava/session/export.h"
+#include "ava/session/record.h"
+#include "ava/session/session_store.h"
+#include "ava/session/stats.h"
+#include "ava/session/validation.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/provider/openai_provider.h"
+
+#include "ava/context/context_loader.h"
+
+#include "ava/core/ids.h"
+#include "ava/core/json.h"
+
+#include "tests/support/fake_transport.h"
+#include "tests/support/test_harness.h"
 
 #include <algorithm>
 #include <chrono>
@@ -16,39 +56,8 @@
 #include <utility>
 #include <vector>
 
-#include "ava/agent/agent_loop.h"
-#include "ava/agent/mode.h"
-#include "ava/agent/tool_dispatcher.h"
-#include "ava/app/commands.h"
-#include "ava/app/events.h"
-#include "ava/app/headless_policy.h"
-#include "ava/app/print_mode.h"
-#include "ava/app/rpc_mode.h"
-#include "ava/app/runtime.h"
-#include "ava/config/auth.h"
-#include "ava/config/model_config.h"
-#include "ava/config/openai_oauth.h"
-#include "ava/config/prompt_config.h"
-#include "ava/config/xdg_paths.h"
-#include "ava/context/context_loader.h"
-#include "ava/core/ids.h"
-#include "ava/core/json.h"
-#include "ava/permissions/permission.h"
-#include "ava/provider/openai_provider.h"
-#include "ava/session/compaction.h"
-#include "ava/session/export.h"
-#include "ava/session/session_entry_codec.h"
-#include "ava/session/session_store.h"
-#include "ava/session/stats.h"
-#include "ava/session/validation.h"
-#include "ava/session/validation_fields.h"
-#include "ava/tools/bash_tool.h"
-#include "ava/tools/file_tools.h"
-#include "ava/tools/search_tools.h"
-#include "ava/tui/composer.h"
-#include "ava/tui/terminal.h"
-#include "tests/support/fake_transport.h"
-#include "tests/support/test_harness.h"
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace {
 
@@ -57,104 +66,6 @@ bool has_replay_issue(ava::session::SessionReplayValidation const& validation,
 {
   return std::ranges::any_of(validation.issues,
                              [kind](ava::session::SessionReplayIssue const& issue) { return issue.kind == kind; });
-}
-
-void test_session_entry_codec_helpers()
-{
-  auto line = ava::session::encode_session_entry_line(ava::session::SessionEntry{
-      .id = "entry_\n",
-      .parent_id = "parent",
-      .type = ava::session::EntryType::UserMessage,
-      .timestamp = "2026-04-27T00:00:00Z",
-      .data_json = "{\"text\":\"hello\"}",
-  });
-  auto const current_version_json = "\"version\":" + std::to_string(ava::session::kCurrentSessionEntryVersion);
-  expect(line && line->find(current_version_json) != std::string::npos,
-         "session entry codec encodes current entry version");
-  if (line) {
-    auto decoded = ava::session::decode_session_entry_line(*line, "/tmp/session.jsonl");
-    expect(decoded && decoded->id == "entry_\n" && decoded->parent_id == "parent" &&
-               decoded->type == ava::session::EntryType::UserMessage && decoded->timestamp == "2026-04-27T00:00:00Z" &&
-               decoded->data_json == "{\"text\":\"hello\"}" &&
-               decoded->version == ava::session::kCurrentSessionEntryVersion,
-           "session entry codec decodes encoded JSONL line");
-  }
-
-  std::istringstream crlf_stream("first\r\nsecond");
-  std::string limited;
-  auto first = ava::session::read_limited_session_line(crlf_stream, limited);
-  expect(first && *first && limited == "first", "session entry codec trims CRLF while reading bounded lines");
-  auto second = ava::session::read_limited_session_line(crlf_stream, limited);
-  expect(second && *second && limited == "second", "session entry codec reads final unterminated line");
-  auto eof = ava::session::read_limited_session_line(crlf_stream, limited);
-  expect(eof && !*eof, "session entry codec reports clean EOF");
-
-  auto invalid_session_id = ava::session::validate_session_id("../escape");
-  expect(!invalid_session_id && invalid_session_id.error().message().find("invalid session id") != std::string::npos,
-         "session entry codec rejects unsafe session ids");
-  auto invalid_parent = ava::session::validate_parent_id("bad/parent", "entry");
-  expect(!invalid_parent && invalid_parent.error().message().find("invalid session parent_id") != std::string::npos,
-         "session entry codec rejects unsafe parent ids");
-
-  auto bad_data = ava::session::encode_session_entry_line(ava::session::SessionEntry{
-      .id = "entry_bad_data",
-      .parent_id = "",
-      .type = ava::session::EntryType::UserMessage,
-      .timestamp = "2026-04-27T00:00:00Z",
-      .data_json = "{\"text\":\"bad\nsplit\"}",
-  });
-  expect(!bad_data && bad_data.error().message().find("raw newlines") != std::string::npos,
-         "session entry codec rejects raw newlines inside JSONL data objects");
-
-  auto future = ava::session::decode_session_entry_line(
-      "{\"version\":999,\"id\":\"entry_future\",\"parent_id\":\"\","
-      "\"type\":\"user_message\",\"timestamp\":\"2026-04-27T00:00:00Z\","
-      "\"data\":{\"text\":\"hello\"}}",
-      "/tmp/session.jsonl");
-  expect(!future && ava::session::is_unsupported_session_version_error(future.error()),
-         "session entry codec exposes unsupported-version errors for session listing");
-}
-
-void test_session_validation_field_helpers()
-{
-  expect(ava::session::bool_field_is_true("{\"enabled\":true}", "enabled"),
-         "session validation fields parse true booleans");
-  expect(!ava::session::bool_field_is_true("{\"enabled\":trueish}", "enabled"),
-         "session validation fields reject true prefixes");
-  expect(ava::session::bool_field_is_false("{\"enabled\":false}", "enabled"),
-         "session validation fields parse false booleans");
-  expect(!ava::session::bool_field_is_false("{\"enabled\":\"false\"}", "enabled"),
-         "session validation fields reject string booleans");
-
-  expect(ava::session::valid_status("success") && ava::session::valid_status("error") &&
-             !ava::session::valid_status("pending"),
-         "session validation fields constrain tool result statuses");
-  expect(ava::session::valid_operation("read") && ava::session::valid_operation("mcp.tool.call") &&
-             !ava::session::valid_operation("unknown"),
-         "session validation fields constrain permission operations");
-  expect(ava::session::valid_mode("build") && ava::session::valid_mode("plan") && !ava::session::valid_mode("review"),
-         "session validation fields constrain session modes");
-  expect(ava::session::valid_action("allow") && ava::session::valid_resolution("deny") &&
-             ava::session::valid_resolution_source("session_grant") && ava::session::valid_risk("critical") &&
-             !ava::session::valid_risk("extreme"),
-         "session validation fields constrain permission decision enums");
-
-  expect(ava::session::present_non_empty_string("{}", "reason") &&
-             ava::session::present_non_empty_string("{\"reason\":\"ok\"}", "reason") &&
-             !ava::session::present_non_empty_string("{\"reason\":\"\"}", "reason"),
-         "session validation fields allow missing optional strings but reject empty present strings");
-  expect(ava::session::present_boolean("{}", "redacted") &&
-             ava::session::present_boolean("{\"redacted\":false}", "redacted") &&
-             !ava::session::present_boolean("{\"redacted\":\"false\"}", "redacted"),
-         "session validation fields allow missing optional booleans but reject non-boolean values");
-  expect(ava::session::required_boolean("{\"enabled\":true}", "enabled") &&
-             !ava::session::required_boolean("{}", "enabled"),
-         "session validation fields require booleans when requested");
-  expect(ava::session::present_integer_matching("{}", "tokens", false) &&
-             ava::session::present_integer_matching("{\"tokens\":0}", "tokens", false) &&
-             !ava::session::present_integer_matching("{\"tokens\":0}", "tokens", true) &&
-             !ava::session::present_integer_matching("{\"tokens\":1.5}", "tokens", false),
-         "session validation fields constrain optional integer metadata");
 }
 
 void test_session_store_round_trip()
@@ -421,6 +332,59 @@ void test_session_store_round_trip()
                                                     .timestamp = "2026-04-27T00:00:00Z",
                                                     .data_json = "{\"text\":\"hello\"}"});
   expect(!invalid_parent_append, "session append rejects unsafe parent_id values");
+}
+
+void test_session_record_round_trip()
+{
+  ava::session::SessionEntry const original{.id = "entry_\n",
+                                            .parent_id = "parent_id",
+                                            .type = ava::session::EntryType::ToolResult,
+                                            .timestamp = "2026-04-27T00:00:00Z",
+                                            .data_json = "{\"text\":\"hello\",\"nested\":{\"ok\":true}}"};
+
+  auto line = ava::session::serialize_session_entry_line(original);
+  expect(line && line->find('\n') == std::string::npos && line->find("\"version\":2") != std::string::npos,
+         line ? "session record serializer emits one current-version JSONL record"
+              : "session record serializer emits one current-version JSONL record: " + line.error().format());
+  if (!line) return;
+
+  auto parsed = ava::session::parse_session_entry_line(*line, "/tmp/session.jsonl");
+  expect(parsed && parsed->id == original.id && parsed->parent_id == original.parent_id &&
+             parsed->type == original.type && parsed->timestamp == original.timestamp &&
+             parsed->data_json == original.data_json && parsed->version == ava::session::kCurrentSessionEntryVersion,
+         parsed ? "session record parser round-trips serialized entries"
+                : "session record parser round-trips serialized entries: " + parsed.error().format());
+
+  auto legacy = ava::session::parse_session_entry_line(
+      "{\"version\":1,\"id\":\"entry_\\uD834\\uDD1E\",\"parent_id\":\"\",\"type\":\"user_message\","
+      "\"timestamp\":\"2026-04-27T00:00:00Z\",\"data\":{\"text\":\"hello\"}}",
+      "/tmp/session.jsonl");
+  expect(legacy && legacy->id == std::string("entry_\xF0\x9D\x84\x9E") && legacy->version == 1,
+         legacy ? "session record parser decodes legacy unicode escapes"
+                : "session record parser decodes legacy unicode escapes: " + legacy.error().format());
+
+  auto unsupported = ava::session::parse_session_entry_line(
+      "{\"version\":999,\"id\":\"entry\",\"parent_id\":\"\",\"type\":\"user_message\","
+      "\"timestamp\":\"2026-04-27T00:00:00Z\",\"data\":{\"text\":\"hello\"}}",
+      "/tmp/session.jsonl");
+  expect(!unsupported && ava::session::is_unsupported_session_version_error(unsupported.error()),
+         "session record parser flags unsupported versions explicitly");
+
+  auto malformed = ava::session::parse_session_entry_line(
+      "{\"version\":2,\"id\":\"entry\",\"parent_id\":\"bad/slash\",\"type\":\"user_message\","
+      "\"timestamp\":\"2026-04-27T00:00:00Z\",\"data\":{\"text\":\"hello\"}}",
+      "/tmp/session.jsonl");
+  expect(!malformed && malformed.error().format().find("parent_id") != std::string::npos,
+         "session record parser rejects unsafe parent ids");
+
+  auto too_large = ava::session::serialize_session_entry_line(ava::session::SessionEntry{
+      .id = std::string(600000, '"'),
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-04-27T00:00:00Z",
+      .data_json = "{\"text\":\"hello\"}",
+  });
+  expect(!too_large, "session record serializer rejects oversized records before append");
 }
 
 void test_session_stats_helper()
@@ -1767,9 +1731,8 @@ void test_tool_content_parts_reconstruction()
 
 void run_session_tests()
 {
-  test_session_entry_codec_helpers();
-  test_session_validation_field_helpers();
   test_session_store_round_trip();
+  test_session_record_round_trip();
   test_session_stats_helper();
   test_session_stats_omits_incomplete_cost_total();
   test_session_stats_flags_legacy_assistant_tokens_without_cost();

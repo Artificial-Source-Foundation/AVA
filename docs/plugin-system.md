@@ -1,14 +1,20 @@
 # AVA Plugin And MCP Foundation
 
-This document defines AVA's current 1.0 plugin and MCP foundation. It is grounded in external extension lessons, but adapted for AVA's constraints: native C++23, one binary, explicit permission boundaries, inspectable local files, and a core that keeps working when plugins fail.
+This document defines AVA's current 1.0 plugin and MCP foundation. It is grounded in external extension-system lessons, but adapted for AVA's constraints: native C++23, one binary, explicit permission boundaries, inspectable local files, and a core that keeps working when plugins fail.
 
 Advanced extension features remain 1.1+ roadmap work.
 
-## Extension Reference Lessons
+## External Reference Lessons
 
-The external extension reference uses trusted TypeScript extensions loaded in-process. Relevant local material is under `docs/reference-code/`.
+The external reference systems use trusted TypeScript extensions loaded in-process. The relevant behavior areas are:
 
-Useful ideas:
+- Extension user-facing documentation.
+- Extension type definitions.
+- Extension loading and runner lifecycle code.
+- Extension process/wrapper code.
+- Package and skill resource documentation.
+
+Useful external-baseline ideas:
 
 - Extensions are easy to author: a small module gets an API object and calls `registerTool`, `registerCommand`, or `on` for events.
 - Extension resources are discovered from global, project, package, and explicit CLI/config paths.
@@ -19,11 +25,11 @@ Useful ideas:
 - Skills and prompt templates are filesystem resources, not compiled code.
 - RPC mode streams events and can bridge extension UI prompts to non-TTY clients.
 
-Limits that AVA should not copy directly:
+External-baseline limits that AVA should not copy directly:
 
-- In-process extensions run with full user permissions. A bad extension can crash or compromise the process.
-- Implementing MCP as a plugin-only afterthought would bypass AVA's safety boundary; AVA keeps MCP host support explicit.
-- Broad UI customization, providers, and provider request interception should wait until safety, events, permissions, and sessions are stable.
+- In-process extensions run with full user permissions. That trust model is clear, but it means a bad extension can crash or compromise the process.
+- Native MCP support is not always part of the reference extension model, which pushes MCP through extension code instead.
+- Broad extension APIs can expose UI customization, providers, and provider request interception. AVA should start narrower until safety, events, permissions, and sessions are stable.
 
 ## AVA Direction
 

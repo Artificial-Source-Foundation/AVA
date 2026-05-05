@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/core/result.h"
+
 #include <cstddef>
 #include <functional>
 #include <map>
@@ -8,8 +10,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/core/result.h"
 
 namespace ava::provider {
 

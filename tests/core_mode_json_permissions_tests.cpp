@@ -1,5 +1,42 @@
-#include <sys/stat.h>
-#include <unistd.h>
+#include "ava/app/commands.h"
+#include "ava/app/events.h"
+#include "ava/app/headless_policy.h"
+#include "ava/app/print_mode.h"
+#include "ava/app/rpc_mode.h"
+#include "ava/app/runtime.h"
+
+#include "ava/agent/agent_loop.h"
+#include "ava/agent/mode.h"
+#include "ava/agent/tool_dispatcher.h"
+
+#include "ava/tools/bash_tool.h"
+#include "ava/tools/file_tools.h"
+#include "ava/tools/search_tools.h"
+
+#include "ava/tui/composer.h"
+#include "ava/tui/terminal.h"
+
+#include "ava/config/auth.h"
+#include "ava/config/model_config.h"
+#include "ava/config/openai_oauth.h"
+#include "ava/config/prompt_config.h"
+#include "ava/config/xdg_paths.h"
+
+#include "ava/session/compaction.h"
+#include "ava/session/export.h"
+#include "ava/session/session_store.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/provider/openai_provider.h"
+
+#include "ava/context/context_loader.h"
+
+#include "ava/core/ids.h"
+#include "ava/core/json.h"
+
+#include "tests/support/fake_transport.h"
+#include "tests/support/test_harness.h"
 
 #include <algorithm>
 #include <chrono>
@@ -16,36 +53,8 @@
 #include <utility>
 #include <vector>
 
-#include "ava/agent/agent_loop.h"
-#include "ava/agent/mode.h"
-#include "ava/agent/tool_dispatcher.h"
-#include "ava/app/commands.h"
-#include "ava/app/events.h"
-#include "ava/app/headless_policy.h"
-#include "ava/app/print_mode.h"
-#include "ava/app/rpc_mode.h"
-#include "ava/app/runtime.h"
-#include "ava/config/auth.h"
-#include "ava/config/model_config.h"
-#include "ava/config/openai_oauth.h"
-#include "ava/config/prompt_config.h"
-#include "ava/config/xdg_paths.h"
-#include "ava/context/context_loader.h"
-#include "ava/core/ids.h"
-#include "ava/core/json.h"
-#include "ava/permissions/command_policy.h"
-#include "ava/permissions/permission.h"
-#include "ava/provider/openai_provider.h"
-#include "ava/session/compaction.h"
-#include "ava/session/export.h"
-#include "ava/session/session_store.h"
-#include "ava/tools/bash_tool.h"
-#include "ava/tools/file_tools.h"
-#include "ava/tools/search_tools.h"
-#include "ava/tui/composer.h"
-#include "ava/tui/terminal.h"
-#include "tests/support/fake_transport.h"
-#include "tests/support/test_harness.h"
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace {
 
@@ -102,22 +111,6 @@ void test_core_json_top_level_lookup()
   expect(!ava::core::json::string_field("{\"text\":\"\\u12xz\"}", "text"),
          "JSON string_field rejects malformed unicode escapes");
   expect(!ava::core::json::string_field("{\"text\":\"\\q\"}", "text"), "JSON string_field rejects invalid escapes");
-}
-
-void test_permission_command_policy_helpers()
-{
-  expect(ava::permissions::classify_command("git status --short").action == ava::permissions::PermissionAction::Allow,
-         "permission command policy allows safe git status");
-  expect(ava::permissions::classify_command("git diff --output=/tmp/out").action ==
-             ava::permissions::PermissionAction::Ask,
-         "permission command policy asks on path-carrying git output options");
-  expect(ava::permissions::classify_command("rg --pre ./filter pattern src").action ==
-             ava::permissions::PermissionAction::Deny,
-         "permission command policy denies rg preprocessors");
-  expect(ava::permissions::classify_command("bash -lc ls").action == ava::permissions::PermissionAction::Deny,
-         "permission command policy denies arbitrary script shells");
-  expect(ava::permissions::classify_command("sleep 0.1").action == ava::permissions::PermissionAction::Allow,
-         "permission command policy allows simple numeric sleep");
 }
 
 void test_permission_defaults()
@@ -257,6 +250,5 @@ void run_core_json_permission_tests()
 {
   test_json_escape_control_characters();
   test_core_json_top_level_lookup();
-  test_permission_command_policy_helpers();
   test_permission_defaults();
 }

@@ -1,8 +1,10 @@
 #include "ava/session/validation_fields.h"
 
-#include <cctype>
+#include "ava/session/session_store.h"
 
 #include "ava/core/json.h"
+
+#include <cctype>
 
 namespace ava::session {
 namespace {
@@ -13,6 +15,11 @@ bool is_json_value_delimiter(char ch)
 }
 
 }  // namespace
+
+bool supported_entry_version(long long version)
+{
+  return version == 0 || (version >= 1 && version <= kCurrentSessionEntryVersion);
+}
 
 bool bool_field_is_true(std::string_view object, std::string_view key)
 {

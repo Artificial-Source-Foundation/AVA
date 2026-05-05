@@ -1,12 +1,14 @@
 #pragma once
 
+#include "ava/config/xdg_paths.h"
+
+#include "ava/provider/provider.h"
+
+#include "ava/core/result.h"
+
 #include <optional>
 #include <string>
 #include <vector>
-
-#include "ava/config/xdg_paths.h"
-#include "ava/core/result.h"
-#include "ava/provider/provider.h"
 
 namespace ava::config {
 

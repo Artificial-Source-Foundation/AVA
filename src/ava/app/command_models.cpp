@@ -1,14 +1,16 @@
 #include "ava/app/command_models.h"
 
+#include "ava/app/command_format.h"
+
+#include "ava/config/reasoning_profiles.h"
+
+#include "ava/provider/registry.h"
+
 #include <algorithm>
 #include <cctype>
 #include <optional>
 #include <string_view>
 #include <vector>
-
-#include "ava/app/command_format.h"
-#include "ava/config/reasoning_profiles.h"
-#include "ava/provider/registry.h"
 
 namespace ava::app {
 namespace {

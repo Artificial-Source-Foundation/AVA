@@ -1,11 +1,11 @@
 #pragma once
 
+#include "ava/core/result.h"
+
 #include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
-
-#include "ava/core/result.h"
 
 namespace ava::tui {
 

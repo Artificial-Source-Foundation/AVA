@@ -1,8 +1,8 @@
 #pragma once
 
-#include <string_view>
-
 #include "ava/app/commands.h"
+
+#include <string_view>
 
 namespace ava::app {
 

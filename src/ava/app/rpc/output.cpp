@@ -1,10 +1,11 @@
 #include "ava/app/rpc/output.h"
 
-#include <utility>
-
 #include "ava/app/rpc/protocol.h"
 #include "ava/app/rpc/serialization.h"
+
 #include "ava/core/ids.h"
+
+#include <utility>
 
 namespace ava::app::rpc {
 
@@ -92,6 +93,16 @@ ava::core::VoidResult write_skipped_queue_events(RpcOutput& output, RuntimeSessi
         !written) {
       return written;
     }
+  }
+  return {};
+}
+
+ava::core::VoidResult write_follow_up_errors(RpcOutput& output, std::vector<QueuedRpcMessage> const& follow_ups,
+                                             std::string_view reason)
+{
+  for (auto const& queued : follow_ups) {
+    auto const error = reason == "canceled" ? canceled_error() : skipped_follow_up_error(reason);
+    if (auto written = write_error(output, queued.request_id, error); !written) return written;
   }
   return {};
 }

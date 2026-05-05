@@ -1,12 +1,13 @@
 #pragma once
 
+#include "ava/config/xdg_paths.h"
+
+#include "ava/core/result.h"
+
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
-
-#include "ava/config/xdg_paths.h"
-#include "ava/core/result.h"
 
 namespace ava::provider {
 class Transport;

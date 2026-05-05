@@ -1,12 +1,13 @@
 #pragma once
 
+#include "ava/app/events.h"
+
+#include "ava/tui/composer.h"
+
 #include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
-
-#include "ava/app/events.h"
-#include "ava/tui/composer.h"
 
 namespace ava::tui {
 

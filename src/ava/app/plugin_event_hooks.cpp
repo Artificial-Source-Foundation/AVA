@@ -1,5 +1,14 @@
 #include "ava/app/plugin_event_hooks.h"
 
+#include "ava/app/runtime.h"
+
+#include "ava/plugin/diagnostics.h"
+#include "ava/plugin/discovery.h"
+#include "ava/plugin/enablement.h"
+#include "ava/plugin/runner.h"
+
+#include "ava/core/ids.h"
+
 #include <algorithm>
 #include <cctype>
 #include <memory>
@@ -7,13 +16,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#include "ava/app/runtime.h"
-#include "ava/core/ids.h"
-#include "ava/plugin/diagnostics.h"
-#include "ava/plugin/discovery.h"
-#include "ava/plugin/enablement.h"
-#include "ava/plugin/runner.h"
 
 namespace ava::app {
 namespace {

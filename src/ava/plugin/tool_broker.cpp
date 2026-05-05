@@ -1,19 +1,21 @@
 #include "ava/plugin/tool_broker.h"
 
+#include "ava/plugin/diagnostics.h"
+#include "ava/plugin/discovery.h"
+#include "ava/plugin/enablement.h"
+#include "ava/plugin/runner.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/core/error.h"
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <utility>
-
-#include "ava/core/error.h"
-#include "ava/core/json.h"
-#include "ava/permissions/permission.h"
-#include "ava/plugin/diagnostics.h"
-#include "ava/plugin/discovery.h"
-#include "ava/plugin/enablement.h"
-#include "ava/plugin/runner.h"
 
 namespace ava::plugin {
 namespace {

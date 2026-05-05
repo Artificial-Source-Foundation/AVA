@@ -1,13 +1,13 @@
 #include "ava/context/context_loader.h"
 
+#include "ava/core/error.h"
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <array>
 #include <fstream>
 #include <set>
 #include <string_view>
-
-#include "ava/core/error.h"
-#include "ava/core/json.h"
 
 namespace ava::context {
 namespace {

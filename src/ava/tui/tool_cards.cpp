@@ -1,8 +1,8 @@
 #include "ava/tui/tool_cards.h"
 
-#include <algorithm>
-
 #include "ava/tui/composer_internal.h"
+
+#include <algorithm>
 
 namespace ava::tui {
 namespace {

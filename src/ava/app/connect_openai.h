@@ -1,10 +1,10 @@
 #pragma once
 
+#include "ava/config/xdg_paths.h"
+
 #include <iosfwd>
 #include <optional>
 #include <string>
-
-#include "ava/config/xdg_paths.h"
 
 namespace ava::app {
 

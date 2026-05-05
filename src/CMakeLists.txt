@@ -1,0 +1,24 @@
+add_subdirectory(ava)
+
+add_executable(ava
+  "main.cpp"
+)
+
+# Prevent multi-config generators from trying to write the executable to CMAKE_CURRENT_BINARY_DIR:
+# that is obviously not possible since we already have a directory called `ava` here.
+set_target_properties(ava PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_BINARY_DIR}"
+)
+
+target_link_libraries(ava
+  PRIVATE
+    ${AVA_FRONTEND_LIBRARIES}
+    ${AVA_BACKEND_LIBRARIES}
+)
+
+ava_apply_warnings(ava)
+ava_apply_sanitizers(ava)

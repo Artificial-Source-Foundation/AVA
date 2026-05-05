@@ -4,6 +4,7 @@
 
 namespace ava::session {
 
+[[nodiscard]] bool supported_entry_version(long long version);
 [[nodiscard]] bool bool_field_is_true(std::string_view object, std::string_view key);
 [[nodiscard]] bool bool_field_is_false(std::string_view object, std::string_view key);
 [[nodiscard]] bool valid_status(std::string_view status);

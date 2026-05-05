@@ -1,14 +1,16 @@
 #pragma once
 
-#include <span>
-#include <string>
-#include <vector>
-
 #include "ava/agent/tool_metadata.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_types.h"
-#include "ava/core/result.h"
+
 #include "ava/tools/file_tools.h"
+
+#include "ava/core/result.h"
+
+#include <span>
+#include <string>
+#include <vector>
 
 namespace ava::agent {
 

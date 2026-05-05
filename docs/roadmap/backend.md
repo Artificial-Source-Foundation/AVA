@@ -65,7 +65,7 @@ AVA already has important backend pieces:
 
 - CLI/runtime orchestration in `src/ava/app/`.
 - OpenAI auth, model config, prompt config, and curl transport.
-- OpenAI Responses/Codex provider path in `src/ava/provider/`.
+- OpenAI Responses provider path in `src/ava/provider/`.
 - Sequential agent loop in `src/ava/agent/`.
 - Built-in tools for read, write, edit, glob, grep, bash, apply_patch, question, webfetch, and capability-gated LSP diagnostics.
 - Build/plan permission policy in `src/ava/permissions/`.

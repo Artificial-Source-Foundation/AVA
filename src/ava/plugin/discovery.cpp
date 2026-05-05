@@ -1,9 +1,9 @@
 #include "ava/plugin/discovery.h"
 
+#include "ava/config/xdg_paths.h"
+
 #include <algorithm>
 #include <system_error>
-
-#include "ava/config/xdg_paths.h"
 
 namespace ava::plugin {
 namespace {

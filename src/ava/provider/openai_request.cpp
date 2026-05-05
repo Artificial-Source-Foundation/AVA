@@ -1,11 +1,12 @@
 #include "ava/provider/openai_request.h"
 
-#include <string>
-#include <utility>
-
-#include "ava/core/json.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/provider_utils.h"
+
+#include "ava/core/json.h"
+
+#include <string>
+#include <utility>
 
 namespace ava::provider {
 namespace detail {

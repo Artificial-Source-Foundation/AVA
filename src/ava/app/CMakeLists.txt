@@ -1,0 +1,48 @@
+add_library(ava_app
+  "app.cpp"
+  "command_catalog.cpp"
+  "command_connect.cpp"
+  "command_format.cpp"
+  "command_help.cpp"
+  "command_mcp.cpp"
+  "command_models.cpp"
+  "command_palette.cpp"
+  "command_plugins.cpp"
+  "command_sessions.cpp"
+  "command_tools.cpp"
+  "commands.cpp"
+  "connect_openai.cpp"
+  "events.cpp"
+  "headless_policy.cpp"
+  "interactive_run_queue.cpp"
+  "line_shell.cpp"
+  "plugin_event_hooks.cpp"
+  "print_mode.cpp"
+  "reasoning_controls.cpp"
+  "rpc/handlers.cpp"
+  "rpc/output.cpp"
+  "rpc/prompt_worker.cpp"
+  "rpc/protocol.cpp"
+  "rpc/resolvers.cpp"
+  "rpc/run_state.cpp"
+  "rpc/serialization.cpp"
+  "rpc/session_commands.cpp"
+  "rpc_mode.cpp"
+  "runtime.cpp"
+  "runtime_compaction.cpp"
+  "runtime_json.cpp"
+  "runtime_model.cpp"
+  "runtime_prompt.cpp"
+  "runtime_reasoning.cpp"
+  "runtime_retry.cpp"
+  "runtime_session.cpp"
+)
+
+target_include_directories(ava_app
+  PRIVATE
+    "${CMAKE_SOURCE_DIR}/src"
+    "${AVA_GENERATED_INCLUDE_DIR}"
+)
+
+ava_apply_warnings(ava_app)
+ava_apply_sanitizers(ava_app)

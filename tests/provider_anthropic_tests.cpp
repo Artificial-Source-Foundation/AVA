@@ -1,22 +1,23 @@
+#include "ava/agent/agent_loop.h"
+
+#include "ava/config/auth.h"
+#include "ava/config/xdg_paths.h"
+
+#include "ava/session/session_store.h"
+
+#include "ava/provider/anthropic_provider.h"
+#include "ava/provider/provider_utils.h"
+#include "ava/provider/registry.h"
+
+#include "tests/support/fake_transport.h"
+#include "tests/support/test_harness.h"
+
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
-
-#include "ava/agent/agent_loop.h"
-#include "ava/config/auth.h"
-#include "ava/config/xdg_paths.h"
-#include "ava/provider/anthropic_provider.h"
-#include "ava/provider/anthropic_request.h"
-#include "ava/provider/anthropic_response.h"
-#include "ava/provider/anthropic_response_support.h"
-#include "ava/provider/provider_utils.h"
-#include "ava/provider/registry.h"
-#include "ava/session/session_store.h"
-#include "tests/support/fake_transport.h"
-#include "tests/support/test_harness.h"
 
 namespace {
 
@@ -43,93 +44,8 @@ void test_json_object_validator()
          "JSON validator rejects non-JSON whitespace");
 }
 
-void test_anthropic_response_support_helpers()
-{
-  expect(ava::provider::detail::normalized_anthropic_stop_reason("end_turn") == "completed" &&
-             ava::provider::detail::normalized_anthropic_stop_reason("tool_use") == "tool_calls" &&
-             ava::provider::detail::normalized_anthropic_stop_reason("custom_stop") == "custom_stop",
-         "Anthropic response support normalizes known stop reasons and preserves unknown reasons");
-
-  auto const sanitized = ava::provider::detail::sanitized_anthropic_body_snippet(
-      R"({"thinking":"secret-thought","signature":"secret-sig","data":"opaque","message":"safe"})");
-  expect(sanitized.find("secret-thought") == std::string::npos && sanitized.find("secret-sig") == std::string::npos &&
-             sanitized.find("opaque") == std::string::npos && sanitized.find("[redacted]") != std::string::npos,
-         "Anthropic response support redacts private reasoning fields from snippets");
-
-  auto const stop_details = R"({"stop_details":{"explanation":"blocked by policy"}})";
-  expect(ava::provider::detail::has_stop_details(stop_details) &&
-             ava::provider::detail::stop_details_explanation(stop_details) == "blocked by policy",
-         "Anthropic response support extracts refusal stop details");
-
-  auto const non_negative = ava::provider::detail::non_negative_integer_field(R"({"ok":7,"bad":-1})", "ok");
-  auto const negative = ava::provider::detail::non_negative_integer_field(R"({"ok":7,"bad":-1})", "bad");
-  expect(non_negative && *non_negative == 7 && !negative,
-         "Anthropic response support accepts only non-negative integer fields");
-
-  ava::provider::TokenUsage target;
-  target.input_tokens = 1;
-  ava::provider::TokenUsage source;
-  source.output_tokens = 2;
-  source.cache_read_tokens = 3;
-  source.total_tokens = 6;
-  ava::provider::detail::merge_usage(target, source);
-  expect(target.input_tokens && *target.input_tokens == 1 && target.output_tokens && *target.output_tokens == 2 &&
-             target.cache_read_tokens && *target.cache_read_tokens == 3 && target.total_tokens &&
-             *target.total_tokens == 6,
-         "Anthropic response support merges present usage fields without clearing existing fields");
-
-  std::vector<ava::provider::StreamEvent> events;
-  ava::provider::detail::append_stream_error(events, "");
-  expect(events.size() == 1 && events[0].type == ava::provider::StreamEventType::Error &&
-             events[0].error_message == "unrecognized Anthropic stream event",
-         "Anthropic response support shapes default stream errors");
-}
-
 void test_anthropic_provider_contract()
 {
-  auto const direct_body = ava::provider::anthropic_request_body_json(ava::provider::ProviderRequest{
-      .provider_id = "anthropic",
-      .model_id = "claude-sonnet-4-5",
-      .system_prompt = "cached system",
-      .messages = {ava::provider::ChatMessage{
-          .role = "user",
-          .content = "cached user",
-          .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text,
-                                                       .text = "cached user",
-                                                       .tool_call_id = "",
-                                                       .tool_name = "",
-                                                       .input_json = "",
-                                                       .is_error = false,
-                                                       .cache_control_ttl = "5m"}}}},
-      .tools_json = {R"({"name":"read_file","description":"Read","parameters":{"type":"object"}})"},
-      .stream = false,
-      .reasoning =
-          ava::provider::ProviderReasoningOptions{.type = "enabled", .budget_tokens = 1024, .display = "summarized"},
-      .system_prompt_cache_ttl = "1h"});
-  expect(direct_body && direct_body->find(R"("cache_control":{"type":"ephemeral","ttl":"1h"})") != std::string::npos &&
-             direct_body->find(R"("cache_control":{"type":"ephemeral","ttl":"5m"})") != std::string::npos &&
-             direct_body->find(R"("thinking":{"type":"enabled","budget_tokens":1024,"display":"summarized"})") !=
-                 std::string::npos &&
-             direct_body->find(R"("input_schema":{"type":"object"})") != std::string::npos,
-         "Anthropic request body helper is directly testable for cache, reasoning, and tool schema mapping");
-  auto invalid_body = ava::provider::anthropic_request_body_json(ava::provider::ProviderRequest{
-      .provider_id = "anthropic",
-      .model_id = "claude-sonnet-4-5",
-      .system_prompt = "system",
-      .messages = {ava::provider::ChatMessage{
-          .role = "assistant",
-          .content = "",
-          .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
-                                                       .text = "",
-                                                       .tool_call_id = "toolu_1",
-                                                       .tool_name = "read_file",
-                                                       .input_json = "{\"path\":\"note.txt\"}",
-                                                       .is_error = false}}}},
-      .tools_json = {},
-      .stream = false});
-  expect(!invalid_body && invalid_body.error().format().find("matching tool_result") != std::string::npos,
-         "Anthropic request body helper rejects unmatched native tool_use content");
-
   ava::provider::AnthropicProvider const provider("https://anthropic.example.test/");
   auto const request = provider.build_request(
       ava::provider::ProviderRequest{
@@ -840,14 +756,6 @@ void test_anthropic_native_content_parts_request()
 
 void test_anthropic_parsing()
 {
-  auto const usage = ava::provider::parse_anthropic_usage(
-      R"({"usage":{"input_tokens":5,"cache_read_input_tokens":2,"cache_creation_input_tokens":3,"output_tokens":7}})");
-  expect(usage && usage->input_tokens == 10 && usage->cache_read_tokens == 2 && usage->cache_write_tokens == 3 &&
-             usage->output_tokens == 7 && usage->total_tokens == 17,
-         "Anthropic response helper accumulates regular, cached, and output token usage");
-  expect(!ava::provider::parse_anthropic_usage(R"({"usage":{"input_tokens":-1}})"),
-         "Anthropic response helper rejects negative-only usage");
-
   std::string const sse =
       "event: message_start\n"
       "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,"
@@ -1496,7 +1404,6 @@ void test_anthropic_agent_non_stream_tool_loop_native_replay()
 void run_provider_anthropic_tests()
 {
   test_json_object_validator();
-  test_anthropic_response_support_helpers();
   test_anthropic_provider_contract();
   test_anthropic_native_content_parts_request();
   test_anthropic_parsing();

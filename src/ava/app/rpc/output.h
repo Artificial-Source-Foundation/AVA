@@ -1,13 +1,15 @@
 #pragma once
 
-#include <mutex>
-#include <string>
-#include <string_view>
-
 #include "ava/app/events.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/runtime.h"
+
 #include "ava/core/result.h"
+
+#include <mutex>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace ava::app::rpc {
 
@@ -29,5 +31,8 @@ void subscribe_event_envelope_writer(EventBus& bus, RpcOutput& output);
                                                                std::mutex& session_mutex,
                                                                ClearedRpcQueues const& cleared,
                                                                std::string_view reason);
+[[nodiscard]] ava::core::VoidResult write_follow_up_errors(RpcOutput& output,
+                                                           std::vector<QueuedRpcMessage> const& follow_ups,
+                                                           std::string_view reason);
 
 }  // namespace ava::app::rpc

@@ -1,11 +1,12 @@
 #include "ava/tui/event_state.h"
 
+#include "ava/config/model_profiles.h"
+
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <string_view>
 #include <utility>
-
-#include "ava/config/model_profiles.h"
-#include "ava/core/json.h"
 
 namespace ava::tui {
 namespace {

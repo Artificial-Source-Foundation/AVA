@@ -12,6 +12,7 @@ set(INPUT_FILE "${TEST_ROOT}/rpc-input.jsonl")
 
 file(REMOVE_RECURSE "${TEST_ROOT}")
 file(MAKE_DIRECTORY "${WORKSPACE}" "${TEST_ROOT}/home" "${TEST_ROOT}/config" "${TEST_ROOT}/state" "${TEST_ROOT}/data")
+file(REAL_PATH "${WORKSPACE}" REAL_WORKSPACE)
 file(WRITE "${WORKSPACE}/AGENTS.md" "# Headless Context\n\ncontext export smoke marker\n")
 file(WRITE "${INPUT_FILE}"
      "{\"id\":\"state\",\"type\":\"get_state\",\"protocol_version\":1}\n"
@@ -41,15 +42,15 @@ endif()
 foreach(NEEDLE
         "\"id\":\"state\""
         "\"success\":true"
-        "\"workspace_dir\":\"${WORKSPACE}\""
+        "\"workspace_dir\":\"${REAL_WORKSPACE}\""
         "\"context_source_count\":1"
         "\"context_sources\":["
         "\"source_type\":\"workspace\""
-        "\"path\":\"${WORKSPACE}/AGENTS.md\""
+        "\"path\":\"${REAL_WORKSPACE}/AGENTS.md\""
         "\"id\":\"ctx\""
         "\"handled\":true"
         "\"quit\":false"
-        "workspace  ${WORKSPACE}/AGENTS.md"
+        "workspace  ${REAL_WORKSPACE}/AGENTS.md"
         "\"id\":\"exp\""
         "# AVA Session Export"
         "## Session Start"

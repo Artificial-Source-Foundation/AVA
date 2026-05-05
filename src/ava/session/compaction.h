@@ -1,14 +1,16 @@
 #pragma once
 
+#include "ava/config/xdg_paths.h"
+
+#include "ava/session/session_store.h"
+
+#include "ava/core/result.h"
+
 #include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/config/xdg_paths.h"
-#include "ava/core/result.h"
-#include "ava/session/session_store.h"
 
 namespace ava::session {
 

@@ -1,9 +1,9 @@
 #pragma once
 
+#include "ava/agent/tool_types.h"
+
 #include <string>
 #include <string_view>
-
-#include "ava/agent/tool_types.h"
 
 namespace ava::agent {
 

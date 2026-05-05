@@ -1,11 +1,11 @@
 #include "ava/agent/tool_summaries.h"
 
+#include "ava/core/json.h"
+
 #include <cstddef>
 #include <string>
 #include <string_view>
 #include <utility>
-
-#include "ava/core/json.h"
 
 namespace ava::agent {
 namespace {

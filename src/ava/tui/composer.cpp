@@ -1,6 +1,6 @@
 #include "ava/tui/composer.h"
 
-#include <curses.h>
+#include "ava/tui/composer_internal.h"
 
 #include <algorithm>
 #include <array>
@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-#include "ava/tui/composer_internal.h"
+#include <curses.h>
 
 namespace ava::tui {
 namespace {

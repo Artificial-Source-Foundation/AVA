@@ -1,12 +1,12 @@
 #pragma once
 
+#include "ava/tui/composer.h"
+
 #include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/tui/composer.h"
 
 namespace ava::tui::detail {
 

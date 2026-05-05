@@ -20,7 +20,7 @@ The test suite is built as one `ava_tests` CTest target from focused test source
 
 ## Headless Tool Smoke
 
-After provider streaming, tool schema, permission, or dispatcher changes, run a live headless smoke with configured OpenAI auth. Keep the workspace isolated under `/tmp/ava-live-smoke` so mutating tools do not touch the repository.
+After provider streaming, tool schema, permission, or dispatcher changes, run a live headless smoke with configured OpenAI auth. Keep the workspace isolated under a temporary directory outside the repository so mutating tools do not touch the checkout.
 
 Recommended coverage:
 

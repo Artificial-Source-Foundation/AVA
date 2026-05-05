@@ -1,5 +1,16 @@
 #pragma once
 
+#include "ava/app/rpc/output.h"
+#include "ava/app/rpc/run_state.h"
+#include "ava/app/runtime.h"
+
+#include "ava/agent/mode.h"
+#include "ava/agent/question.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/core/result.h"
+
 #include <condition_variable>
 #include <filesystem>
 #include <map>
@@ -9,14 +20,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/agent/mode.h"
-#include "ava/agent/question.h"
-#include "ava/app/rpc/output.h"
-#include "ava/app/rpc/run_state.h"
-#include "ava/app/runtime.h"
-#include "ava/core/result.h"
-#include "ava/permissions/permission.h"
 
 namespace ava::app::rpc {
 
@@ -31,7 +34,7 @@ struct PendingPermissionRequest {
   std::string command;
   std::string reason;
   ava::permissions::PermissionRisk risk = ava::permissions::PermissionRisk::Low;
-  std::optional<ava::permissions::PermissionResolution> resolution;
+  std::optional<ava::permissions::PermissionResolutionDecision> resolution;
   std::optional<ava::core::Error> error;
 };
 
@@ -50,6 +53,7 @@ struct PermissionSessionGrant {
 struct PendingQuestionRequest {
   bool resolved = false;
   std::string correlation_id;
+  bool multiple = false;
   bool allow_custom = false;
   std::vector<ava::agent::QuestionOption> options;
   std::optional<ava::agent::QuestionAnswer> answer;
@@ -81,11 +85,11 @@ struct PendingResolverState {
 
 [[nodiscard]] ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_state,
                                                              std::string_view request_id,
-                                                             std::string_view correlation_id,
-                                                             std::string_view decision);
-[[nodiscard]] ava::core::VoidResult resolve_question_reply(PendingResolverState& pending_state,
-                                                           std::string_view request_id, std::string_view correlation_id,
-                                                           std::optional<std::string> const& answer,
-                                                           std::optional<std::string> const& selected);
+                                                             std::string_view correlation_id, std::string_view decision,
+                                                             std::optional<std::string> const& reason = std::nullopt);
+[[nodiscard]] ava::core::VoidResult resolve_question_reply(
+    PendingResolverState& pending_state, std::string_view request_id, std::string_view correlation_id,
+    std::optional<std::string> const& answer, std::optional<std::string> const& selected,
+    std::optional<std::vector<std::string>> const& selected_options = std::nullopt);
 
 }  // namespace ava::app::rpc

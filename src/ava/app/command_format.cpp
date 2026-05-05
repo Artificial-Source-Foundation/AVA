@@ -1,10 +1,10 @@
 #include "ava/app/command_format.h"
 
+#include "ava/app/commands.h"
+
 #include <cctype>
 #include <system_error>
 #include <utility>
-
-#include "ava/app/commands.h"
 
 namespace ava::app {
 

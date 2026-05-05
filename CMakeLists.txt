@@ -54,6 +54,7 @@ add_library(ava_core
   src/ava/agent/tool_arguments.cpp
   src/ava/agent/tool_dispatch_support.cpp
   src/ava/agent/tool_dispatcher.cpp
+  src/ava/agent/tool_lsp_dispatch.cpp
   src/ava/agent/tool_registry.cpp
   src/ava/agent/tool_result.cpp
   src/ava/agent/tool_result_json.cpp

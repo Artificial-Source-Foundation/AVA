@@ -210,6 +210,7 @@ add_library(ava_app
   src/ava/app/command_tools.cpp
   src/ava/app/commands.cpp
   src/ava/app/connect_openai.cpp
+  src/ava/app/event_json_support.cpp
   src/ava/app/events.cpp
   src/ava/app/event_payload.cpp
   src/ava/app/headless_policy.cpp
@@ -282,6 +283,7 @@ if(AVA_BUILD_TESTS)
 
   add_executable(ava_tests
     tests/app_command_plugin_support_tests.cpp
+    tests/app_event_json_support_tests.cpp
     tests/agent_tool_dispatcher_tests.cpp
     tests/app_rpc_command_tests.cpp
     tests/app_rpc_control_tests.cpp
@@ -359,6 +361,7 @@ if(AVA_BUILD_TESTS)
     config_context_auth_oauth
     config_model_config_support
     config_openai_oauth_support
+    app_event_json_support
     app_event_serialization
     app_event_bus
     app_rpc_command

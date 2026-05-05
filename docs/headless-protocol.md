@@ -113,7 +113,7 @@ RPC mode reads strict LF-delimited JSON objects from stdin and writes LF-delimit
 
 RPC requests may include `"protocol_version":1`. Omitting the field keeps current-version behavior. Present values must be JSON integers. Unsupported or malformed protocol versions produce an in-band error response and do not terminate the loop.
 
-Request ids are client-owned non-empty strings capped at 256 bytes. Resolver `request_id` and `correlation_id` fields are also capped at 256 bytes; over-limit identifiers produce an in-band `success:false` response when a response id can be parsed, or `"id":""` for malformed/no-id records. Successful command responses use:
+Request ids are client-owned non-empty strings capped at 256 bytes. Resolver `request_id` and `correlation_id` fields are also capped at 256 bytes; over-limit identifiers produce an in-band `success:false` response when a response id can be parsed, or `"id":""` for malformed/no-id records. Permission reply `reason` text is optional, capped at 1024 bytes, and rejects control bytes before the resolver event is emitted. Successful command responses use:
 
 ```json
 {"id":"req_1","type":"response","success":true,"result":{}}
@@ -306,13 +306,13 @@ The event top-level `request_id` remains the prompt command id. The client must 
 ```json
 {"id":"perm_reply_1","type":"permission_reply","request_id":"permission_...","correlation_id":"prompt_req","decision":"allow"}
 {"id":"perm_reply_1b","type":"permission_reply","request_id":"permission_...","correlation_id":"prompt_req","decision":"allow_session"}
-{"id":"perm_reply_2","type":"permission_reply","request_id":"permission_...","correlation_id":"prompt_req","decision":"deny"}
+{"id":"perm_reply_2","type":"permission_reply","request_id":"permission_...","correlation_id":"prompt_req","decision":"deny","reason":"not approved for this run"}
 ```
 
-`decision` must be exactly `allow`, `allow_session`, or `deny`. `allow_session` resolves the current prompt as allow and records an in-memory exact-match grant for later permission prompts with the same operation, mode, tool name, target path, and command. A successful reply emits `permission_replied` before the in-band response:
+`decision` must be exactly `allow`, `allow_session`, or `deny`. `allow_session` resolves the current prompt as allow and records an in-memory exact-match grant for later permission prompts with the same operation, mode, tool name, target path, and command. `reason` is optional free text for clients to explain the resolution, especially denials. A successful reply emits `permission_replied` before the in-band response:
 
 ```json
-{"schema_version":1,"name":"permission_replied","type":"permission_replied","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","decision":"allow"}}
+{"schema_version":1,"name":"permission_replied","type":"permission_replied","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","decision":"deny","reason":"not approved for this run"}}
 ```
 
 Missing, unknown, or wrong-correlation resolver ids return in-band errors. Cancellation unblocks pending permission requests fail-closed.

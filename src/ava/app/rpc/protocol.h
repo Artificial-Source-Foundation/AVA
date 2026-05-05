@@ -26,6 +26,7 @@ struct RpcCommand {
   std::optional<std::string> correlation_id;
   std::optional<std::string> grant_id;
   std::optional<std::string> decision;
+  std::optional<std::string> reason;
   std::optional<std::string> answer;
   std::optional<std::string> selected;
   std::optional<std::string> plugin_id;
@@ -50,6 +51,7 @@ inline constexpr std::size_t kMaxRpcQueuedMessages = 64;
 inline constexpr std::size_t kMaxRpcQueuedMessageBytes = 64 * 1024;
 inline constexpr std::size_t kMaxRpcQueueEventMessageBytes = 512;
 inline constexpr std::size_t kMaxRpcIdentifierBytes = 256;
+inline constexpr std::size_t kMaxRpcReasonBytes = 1024;
 inline constexpr long long kRpcProtocolVersion = 1;
 
 [[nodiscard]] ava::core::Error invalid_rpc(std::string message);

@@ -41,8 +41,8 @@ namespace ava::app::rpc {
                                                           ava::permissions::PermissionPrompt const& prompt);
 [[nodiscard]] std::string question_request_payload_json(std::string_view resolver_request_id,
                                                         ava::agent::QuestionPrompt const& prompt);
-[[nodiscard]] std::string permission_reply_payload_json(std::string_view resolver_request_id,
-                                                        std::string_view decision);
+[[nodiscard]] std::string permission_reply_payload_json(std::string_view resolver_request_id, std::string_view decision,
+                                                        std::optional<std::string> const& reason = std::nullopt);
 [[nodiscard]] std::string question_reply_payload_json(std::string_view resolver_request_id,
                                                       std::optional<std::string> const& answer,
                                                       std::optional<std::string> const& selected);

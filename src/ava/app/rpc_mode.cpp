@@ -373,10 +373,10 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
         if (auto written = rpc::write_error(output, command->id, resolved.error()); !written) return written;
         continue;
       }
-      auto envelope =
-          rpc::resolver_event_envelope("permission_replied", *command->correlation_id, *command->correlation_id,
-                                       rpc::session_id_snapshot(session, session_mutex),
-                                       rpc::permission_reply_payload_json(*command->request_id, *command->decision));
+      auto envelope = rpc::resolver_event_envelope(
+          "permission_replied", *command->correlation_id, *command->correlation_id,
+          rpc::session_id_snapshot(session, session_mutex),
+          rpc::permission_reply_payload_json(*command->request_id, *command->decision, command->reason));
       if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
       if (auto written = rpc::write_success(output, command->id, "{}"); !written) return written;
       continue;

@@ -140,6 +140,29 @@ ava::core::VoidResult validate_optional_rpc_identifier(std::optional<std::string
   return validate_rpc_identifier(*value, field_name);
 }
 
+ava::core::VoidResult validate_optional_rpc_text(std::optional<std::string> const& value, std::string_view field_name,
+                                                 std::size_t max_bytes)
+{
+  if (!value) return {};
+  if (value->size() > max_bytes) {
+    auto error = invalid_rpc("RPC text field is too long");
+    error.with_context("field", std::string(field_name));
+    error.with_context("max_bytes", std::to_string(max_bytes));
+    return std::unexpected(std::move(error));
+  }
+
+  for (char const ch : *value) {
+    auto const byte = static_cast<unsigned char>(ch);
+    if (byte < 0x20 || byte == 0x7F) {
+      auto error = invalid_rpc("RPC text field contains invalid character");
+      error.with_context("field", std::string(field_name));
+      return std::unexpected(std::move(error));
+    }
+  }
+
+  return {};
+}
+
 }  // namespace
 
 ava::core::Error invalid_rpc(std::string message)
@@ -247,6 +270,10 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   }
   auto reasoning_budget_tokens = rpc::exact_optional_integer_field(line, "reasoning_budget_tokens");
   if (!reasoning_budget_tokens) return std::unexpected(std::move(reasoning_budget_tokens.error()));
+  auto reason = ava::core::json::string_field(line, "reason");
+  if (auto valid = rpc::validate_optional_rpc_text(reason, "reason", rpc::kMaxRpcReasonBytes); !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
 
   return RpcCommand{.id = std::move(*id),
                     .type = std::move(*type),
@@ -263,6 +290,7 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
                     .correlation_id = std::move(correlation_id),
                     .grant_id = std::move(grant_id),
                     .decision = ava::core::json::string_field(line, "decision"),
+                    .reason = std::move(reason),
                     .answer = ava::core::json::string_field(line, "answer"),
                     .selected = ava::core::json::string_field(line, "selected"),
                     .plugin_id = std::move(plugin_id),

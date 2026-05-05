@@ -688,12 +688,17 @@ std::string question_request_payload_json(std::string_view resolver_request_id,
   return json;
 }
 
-std::string permission_reply_payload_json(std::string_view resolver_request_id, std::string_view decision)
+std::string permission_reply_payload_json(std::string_view resolver_request_id, std::string_view decision,
+                                          std::optional<std::string> const& reason)
 {
   std::string json = "{";
   json += string_field_json("resolver_request_id", resolver_request_id);
   json += ',';
   json += string_field_json("decision", decision);
+  if (reason && !reason->empty()) {
+    json += ',';
+    json += string_field_json("reason", *reason);
+  }
   json += '}';
   return json;
 }

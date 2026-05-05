@@ -580,6 +580,13 @@ void test_app_rpc_prompt_payload_serialization()
              question_json.find("\"modal\":true") != std::string::npos &&
              question_json.find("\"searchable\":true") != std::string::npos,
          "RPC question request payload preserves options, selection metadata, and local prompt flags");
+
+  auto const permission_reply_json =
+      ava::app::rpc::permission_reply_payload_json("permission_1", "deny", std::optional<std::string>{"not approved"});
+  expect(permission_reply_json.find("\"resolver_request_id\":\"permission_1\"") != std::string::npos &&
+             permission_reply_json.find("\"decision\":\"deny\"") != std::string::npos &&
+             permission_reply_json.find("\"reason\":\"not approved\"") != std::string::npos,
+         "RPC permission reply payload preserves client-supplied resolution reasons");
 }
 
 void test_app_runtime_open_session_and_context_prompt()
@@ -2705,6 +2712,23 @@ void test_app_rpc_parsing_and_response_serialization()
              *command->message == "hello\nava" && command->instructions && *command->instructions == "keep",
          "RPC parser extracts string envelope fields and unescapes JSON strings");
 
+  auto reply = ava::app::parse_rpc_command_line(
+      R"JSON({"id":"reply","type":"permission_reply","request_id":"permission_1",)JSON"
+      R"JSON("correlation_id":"prompt_1","decision":"deny","reason":"not approved for this run"})JSON");
+  expect(reply && reply->reason && *reply->reason == "not approved for this run",
+         "RPC parser preserves optional permission reply reasons");
+
+  auto oversized_reason =
+      ava::app::parse_rpc_command_line("{\"id\":\"reply\",\"type\":\"permission_reply\",\"reason\":\"" +
+                                       std::string(ava::app::rpc::kMaxRpcReasonBytes + 1, 'x') + "\"}");
+  expect(!oversized_reason && oversized_reason.error().message() == "RPC text field is too long",
+         "RPC parser rejects oversized text fields before emitting resolver events");
+
+  auto control_reason =
+      ava::app::parse_rpc_command_line(R"JSON({"id":"reply","type":"permission_reply","reason":"bad\u001b"})JSON");
+  expect(!control_reason && control_reason.error().message() == "RPC text field contains invalid character",
+         "RPC parser rejects control bytes in free-text resolver reasons");
+
   auto malformed = ava::app::parse_rpc_command_line("{\"id\":\"bad\",\"type\":\"prompt\"");
   expect(!malformed && malformed.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "RPC parser rejects malformed JSON object lines");
@@ -4575,8 +4599,11 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
         output_buffer.wait_contains("\"resolver_request_id\":\"permission_", std::chrono::seconds(2));
     auto const resolver_request_id = extract_json_string_field(output_buffer.str(), "resolver_request_id");
     expect(requested && !resolver_request_id.empty(), "RPC permission reply test observes resolver request id");
+    auto const reply_reason_json =
+        decision == "deny" ? std::string(",\"reason\":\"not approved for this run\"") : std::string();
     input_buffer.push("{\"id\":\"reply\",\"type\":\"permission_reply\",\"request_id\":\"" + resolver_request_id +
-                      "\",\"correlation_id\":\"p1\",\"decision\":\"" + decision_text + "\"}\n");
+                      "\",\"correlation_id\":\"p1\",\"decision\":\"" + decision_text + "\"" + reply_reason_json +
+                      "}\n");
     bool const completed = output_buffer.wait_contains("after " + decision_text, std::chrono::seconds(2));
     input_buffer.close();
     rpc_thread.join();
@@ -4588,6 +4615,10 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
                jsonl.find("\"name\":\"permission_replied\"") != std::string::npos &&
                jsonl.find("\"decision\":\"" + decision_text + "\"") != std::string::npos,
            "RPC permission " + decision_text + " reply emits a reply event and unblocks the run");
+    if (decision == "deny") {
+      expect(jsonl.find("\"reason\":\"not approved for this run\"") != std::string::npos,
+             "RPC permission deny reply preserves the client resolution reason in the event stream");
+    }
   }
 }
 

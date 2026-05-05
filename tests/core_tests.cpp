@@ -6,6 +6,7 @@
 
 void run_core_mode_tests();
 void run_session_tests();
+void run_session_validation_compaction_tests();
 void run_session_validation_model_tests();
 void run_session_validation_permission_tests();
 void run_session_validation_tool_tests();
@@ -41,6 +42,7 @@ struct TestSuite {
 constexpr std::array kTestSuites{
     TestSuite{"core_mode", run_core_mode_tests},
     TestSuite{"session", run_session_tests},
+    TestSuite{"session_validation_compaction", run_session_validation_compaction_tests},
     TestSuite{"session_validation_model", run_session_validation_model_tests},
     TestSuite{"session_validation_permission", run_session_validation_permission_tests},
     TestSuite{"session_validation_tool", run_session_validation_tool_tests},

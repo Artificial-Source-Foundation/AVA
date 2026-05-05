@@ -122,6 +122,7 @@ add_library(ava_core
   src/ava/session/session_store.cpp
   src/ava/session/stats.cpp
   src/ava/session/validation.cpp
+  src/ava/session/validation_compaction.cpp
   src/ava/session/validation_fields.cpp
   src/ava/session/validation_issue.cpp
   src/ava/session/validation_model.cpp
@@ -266,6 +267,7 @@ if(AVA_BUILD_TESTS)
     tests/provider_anthropic_tests.cpp
     tests/provider_openai_tests.cpp
     tests/provider_transport_tests.cpp
+    tests/session_validation_compaction_tests.cpp
     tests/session_validation_permission_tests.cpp
     tests/session_validation_tool_tests.cpp
     tests/session_validation_model_tests.cpp
@@ -283,6 +285,7 @@ if(AVA_BUILD_TESTS)
   set(AVA_TEST_SUITES
     core_mode
     session
+    session_validation_compaction
     session_validation_model
     session_validation_permission
     session_validation_tool

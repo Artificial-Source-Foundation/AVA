@@ -67,7 +67,6 @@ git --no-pager diff --check
 - Keep public headers focused on APIs needed across modules. Move test-only or implementation-only helpers out of production interfaces when practical.
 - Add regression tests for safety-sensitive fixes, permission behavior, session persistence, provider parsing, and tool execution.
 - Format changed C++ with the repo `.clang-format` and keep `.clang-tidy` warnings actionable.
-- Use 'East-const' everywhere.
 
 ## Reference Code
 

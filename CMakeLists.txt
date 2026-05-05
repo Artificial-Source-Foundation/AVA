@@ -148,6 +148,7 @@ add_library(ava_core
   src/ava/tools/lsp_tools.cpp
   src/ava/tools/mutation_queue.cpp
   src/ava/tools/search_tools.cpp
+  src/ava/tools/search_tools_support.cpp
   src/ava/tools/spill_files.cpp
   src/ava/tools/tool_permissions.cpp
   src/ava/tools/webfetch_tool.cpp
@@ -285,6 +286,7 @@ if(AVA_BUILD_TESTS)
     tests/provider_openai_tests.cpp
     tests/provider_openai_compatible_response_tests.cpp
     tests/provider_transport_tests.cpp
+    tests/search_tools_support_tests.cpp
     tests/session_validation_compaction_tests.cpp
     tests/session_validation_permission_tests.cpp
     tests/session_validation_tool_tests.cpp
@@ -313,6 +315,7 @@ if(AVA_BUILD_TESTS)
     bash_tool_support
     tools
     file_tools_support
+    search_tools_support
     config_context_auth_oauth
     app_event_serialization
     app_event_bus

@@ -18,6 +18,7 @@
 #include "ava/app/rpc/query_handlers.h"
 #include "ava/app/rpc/resolvers.h"
 #include "ava/app/rpc/run_state.h"
+#include "ava/app/rpc/runtime_handlers.h"
 #include "ava/app/rpc/serialization.h"
 #include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
@@ -149,68 +150,14 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     }
 
     if (command->type == "set_model" || command->type == "cycle_model") {
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      std::lock_guard lock(session_mutex);
-      ava::core::Result<ava::config::ModelInfo> selected = command->type == "set_model"
-                                                               ? rpc::resolve_requested_model(session, *command)
-                                                               : rpc::next_runtime_model(session);
-      if (!selected) {
-        if (auto written = rpc::write_error(output, command->id, selected.error()); !written) return written;
-        continue;
-      }
-      auto switched = switch_runtime_model(session, std::move(*selected));
-      if (!switched) {
-        if (auto written = rpc::write_error(output, command->id, switched.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_success(output, command->id,
-                                            rpc::state_result_json(session, rpc::cancel_requested(run_state)));
-          !written) {
+      if (auto written = rpc::handle_model_command(output, session, session_mutex, run_state, *command); !written)
         return written;
-      }
       continue;
     }
 
     if (command->type == "set_reasoning" || command->type == "clear_reasoning") {
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      std::optional<RuntimeReasoningSelection> selection = std::nullopt;
-      if (command->type == "set_reasoning") {
-        if (!command->reasoning_level || command->reasoning_level->empty()) {
-          if (auto written =
-                  rpc::write_error(output, command->id, rpc::invalid_rpc("set_reasoning requires reasoning_level"));
-              !written) {
-            return written;
-          }
-          continue;
-        }
-        selection = RuntimeReasoningSelection{.level = *command->reasoning_level,
-                                              .budget_tokens = command->reasoning_budget_tokens,
-                                              .display = command->reasoning_display.value_or("")};
-      }
-
-      std::lock_guard lock(session_mutex);
-      auto changed = set_runtime_reasoning(session, std::move(selection));
-      if (!changed) {
-        if (auto written = rpc::write_error(output, command->id, changed.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_success(output, command->id,
-                                            rpc::state_result_json(session, rpc::cancel_requested(run_state)));
-          !written) {
+      if (auto written = rpc::handle_reasoning_command(output, session, session_mutex, run_state, *command); !written)
         return written;
-      }
       continue;
     }
 

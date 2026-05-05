@@ -9,6 +9,7 @@ namespace terminal {
 struct Window::Impl
 {
   WINDOW* ncurses_window_;
+  WINDOW* ncurses_subwindow_ = nullptr;
 
   // Construct an Impl representing stdscr.
   Impl() : ncurses_window_(stdscr)
@@ -27,6 +28,7 @@ struct Window::Impl
 
   ~Impl()
   {
+    delete_subwindow();
     if (ncurses_window_ == stdscr)
       return;
     // From https://docs.oracle.com/cd/E86824_01/html/E54767/delwin-3xcurses.html
@@ -34,6 +36,71 @@ struct Window::Impl
     // The delwin() function deletes the specified window, freeing up the memory associated with it.
     // Deleting a parent window without deleting its subwindows and then trying to manipulate the subwindows will have undefined results.
     ::delwin(ncurses_window_);
+  }
+
+  // Return the ncurses window that write operations should target.
+  // When no subwindow has been installed this is the top-level window, preserving existing Window behavior.
+  // After a derived subwindow is installed, callers can use this accessor to keep writes inside the subwindow's
+  // bounds while operations that intentionally affect the whole Window continue to use ncurses_window_ directly.
+  WINDOW* writable_window() const
+  {
+    return ncurses_subwindow_ ? ncurses_subwindow_ : ncurses_window_;
+  }
+
+  // Create or replace the derived ncurses subwindow used for margin-aware writes.
+  // `size` is the writable area's height and width, and `pos` is the writable area's top-left cell relative to
+  // ncurses_window_. The old subwindow is deleted first because ncurses requires subwindows to be destroyed before
+  // their parent; if derwin fails, no subwindow remains and write operations fall back to the parent window.
+  // The returned pointer is owned by this Impl and is valid until the next create_subwindow, delete_subwindow, or
+  // destructor call.
+  WINDOW* create_subwindow(Dimension size, Position pos)
+  {
+    delete_subwindow();
+    ncurses_subwindow_ = ::derwin(ncurses_window_, size.height(), size.width(), pos.row(), pos.col());
+    return ncurses_subwindow_;
+  }
+
+  // Delete the currently installed derived subwindow, if any.
+  // This releases only the subwindow object; ncurses subwindows share backing storage with their parent, so screen
+  // contents are not erased and the parent remains valid. The method is idempotent to make margin reset and
+  // destructor paths safe to call even when no subwindow was created.
+  void delete_subwindow()
+  {
+    if (!ncurses_subwindow_)
+      return;
+    ::delwin(ncurses_subwindow_);
+    ncurses_subwindow_ = nullptr;
+  }
+
+  // Move an existing derived subwindow within its parent without changing its dimensions.
+  // `pos` is relative to ncurses_window_. ncurses returns ERR if the moved subwindow would not fit in the parent;
+  // callers can use the return value to decide whether to recreate the subwindow or report an invalid margin.
+  int move_subwindow(Position pos)
+  {
+    if (!ncurses_subwindow_)
+      return ERR;
+    return ::mvderwin(ncurses_subwindow_, pos.row(), pos.col());
+  }
+
+  // Mark parent cells touched after writes through the derived subwindow.
+  // Subwindows and parents share character storage but not all refresh bookkeeping; wsyncup propagates touch state
+  // from the writable subwindow to ancestors so a later parent refresh knows which cells changed. It is a no-op when
+  // no subwindow is active.
+  void sync_subwindow_to_parent()
+  {
+    if (!ncurses_subwindow_)
+      return;
+    ::wsyncup(ncurses_subwindow_);
+  }
+
+  // Enable or disable ncurses automatic synchronization from the subwindow to its parent after each change.
+  // The boolean controls ncurses syncok for the active subwindow only. The return value is ncurses OK/ERR so callers
+  // can preserve error context when subwindow creation failed or ncurses rejects the request.
+  int set_subwindow_sync(bool enabled)
+  {
+    if (!ncurses_subwindow_)
+      return ERR;
+    return ::syncok(ncurses_subwindow_, enabled);
   }
 
   void erase()
@@ -171,6 +238,31 @@ Window::Window(Dimension size, Position pos) : impl_(std::make_unique<Impl>(size
 
 Window::~Window()
 {
+}
+
+bool Window::create_writable_subwindow(Dimension size, Position pos)
+{
+  return impl_->create_subwindow(size, pos) != nullptr;
+}
+
+void Window::delete_writable_subwindow()
+{
+  impl_->delete_subwindow();
+}
+
+bool Window::move_writable_subwindow(Position pos)
+{
+  return impl_->move_subwindow(pos) != ERR;
+}
+
+void Window::sync_writable_subwindow_to_parent()
+{
+  impl_->sync_subwindow_to_parent();
+}
+
+bool Window::set_writable_subwindow_sync(bool enabled)
+{
+  return impl_->set_subwindow_sync(enabled) != ERR;
 }
 
 void Window::set_background(ComplexChar background, bool erase)

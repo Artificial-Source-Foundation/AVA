@@ -6,13 +6,12 @@
 #include <ostream>
 #include <thread>
 #include <utility>
-#include <vector>
 
-#include "ava/app/events.h"
 #include "ava/app/rpc/command_handlers.h"
 #include "ava/app/rpc/control_handlers.h"
 #include "ava/app/rpc/handlers.h"
 #include "ava/app/rpc/output.h"
+#include "ava/app/rpc/prompt_handlers.h"
 #include "ava/app/rpc/protocol.h"
 #include "ava/app/rpc/query_handlers.h"
 #include "ava/app/rpc/resolvers.h"
@@ -225,159 +224,11 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     }
 
     if (command->type == "prompt") {
-      if (!command->message) {
-        if (auto written = rpc::write_error(output, command->id, rpc::invalid_rpc("prompt requires message"));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-
-      reap_finished_prompt();
-      ava::config::XdgPaths paths;
-      {
-        std::lock_guard lock(session_mutex);
-        paths = session.paths;
-      }
-      rpc::set_active_run(run_state, true, command->id);
-      auto prompt_base_options = runtime_options;
-      auto const prompt_id = command->id;
-      auto const prompt_message = *command->message;
-      prompt_worker.emplace([&, prompt_id, prompt_message, prompt_base_options = std::move(prompt_base_options),
-                             paths = std::move(paths)](std::stop_token stop_token) mutable {
-        auto finish_with_queue_cleanup = [&](std::string_view reason) {
-          auto cleared = rpc::deactivate_and_clear_queued_messages(run_state);
-          if (auto written = rpc::write_skipped_queue_events(output, session, session_mutex, cleared, reason);
-              !written) {
-            rpc::record_async_error(run_state, std::move(written.error()));
-          }
-          if (auto written = rpc::write_follow_up_errors(output, cleared.follow_up_messages, reason); !written) {
-            rpc::record_async_error(run_state, std::move(written.error()));
-          }
-        };
-
-        std::string prompt_provider_id;
-        {
-          std::lock_guard lock(session_mutex);
-          prompt_provider_id = session.model.provider_id;
-        }
-        auto prompt_options = rpc::ensure_prompt_runtime_options(
-            paths, prompt_provider_id, std::move(prompt_base_options), auth_transport, "prompt");
-        if (!prompt_options) {
-          if (auto written = rpc::write_error(output, prompt_id, prompt_options.error()); !written) {
-            rpc::record_async_error(run_state, std::move(written.error()));
-          }
-          finish_with_queue_cleanup("prompt_start_failed");
-          return;
-        }
-        auto policy_permission_resolver = prompt_options->permission_resolver;
-        auto run_one_prompt = [&](std::string const& request_id, std::string const& message) -> ava::core::VoidResult {
-          rpc::set_active_request_id(run_state, request_id);
-          prompt_options->cancel_requested = [&run_state, stop_token] {
-            return stop_token.stop_requested() || rpc::cancel_requested(run_state);
-          };
-          prompt_options->session_mutex = &session_mutex;
-          prompt_options->permission_resolver = rpc::make_rpc_permission_resolver(
-              pending_state, output, run_state, session, session_mutex, policy_permission_resolver, request_id);
-          prompt_options->question_resolver =
-              rpc::make_rpc_question_resolver(pending_state, output, run_state, session, session_mutex, request_id);
-          prompt_options->take_steering_messages = [&, request_id]() -> ava::core::Result<std::vector<std::string>> {
-            auto queued = rpc::take_queued_steering_messages(run_state, request_id);
-            std::vector<std::string> messages;
-            messages.reserve(queued.size());
-            for (auto const& item : queued) {
-              if (auto written = rpc::write_queue_event(output, session, session_mutex, "steer_applied", item);
-                  !written) {
-                return std::unexpected(std::move(written.error()));
-              }
-              messages.push_back(item.message);
-            }
-            return messages;
-          };
-
-          EventBus event_bus;
-          rpc::subscribe_event_envelope_writer(event_bus, output);
-          prompt_options->event_sink = make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(request_id));
-
-          rpc::ProviderHandle prompt_provider;
-          {
-            std::lock_guard lock(session_mutex);
-            auto selected_provider = rpc::provider_for_session_model(session, injected_provider_id, provider);
-            if (!selected_provider) return std::unexpected(std::move(selected_provider.error()));
-            prompt_provider = std::move(*selected_provider);
-          }
-
-          auto result = run_prompt(session, message, prompt_provider.get(), transport, *prompt_options);
-          rpc::ClearedRpcQueues skipped_steering;
-          skipped_steering.steering_messages = rpc::clear_queued_steering_messages(run_state);
-          if (auto written = rpc::write_skipped_queue_events(output, session, session_mutex, skipped_steering,
-                                                             "run_completed_before_safe_point");
-              !written) {
-            return std::unexpected(std::move(written.error()));
-          }
-          if (!result) {
-            if (auto written = rpc::write_error(output, request_id, result.error()); !written) {
-              return std::unexpected(std::move(written.error()));
-            }
-            return {};
-          }
-          if (auto written = rpc::write_success(
-                  output, request_id,
-                  rpc::prompt_result_json(rpc::session_id_snapshot(session, session_mutex), *result));
-              !written) {
-            return std::unexpected(std::move(written.error()));
-          }
-          return {};
-        };
-
-        auto prompt_run = run_one_prompt(prompt_id, prompt_message);
-        if (!prompt_run) {
-          rpc::record_async_error(run_state, std::move(prompt_run.error()));
-          finish_with_queue_cleanup("prompt_start_failed");
-          return;
-        }
-
-        while (!rpc::cancel_requested(run_state)) {
-          auto follow_up = rpc::take_next_follow_up_message(run_state);
-          if (!follow_up) break;
-          rpc::set_active_request_id(run_state, follow_up->request_id);
-          auto started_event = *follow_up;
-          started_event.correlation_id = follow_up->request_id;
-          if (auto written = rpc::write_queue_event(output, session, session_mutex, "follow_up_started", started_event);
-              !written) {
-            rpc::record_async_error(run_state, std::move(written.error()));
-            finish_with_queue_cleanup("prompt_start_failed");
-            return;
-          }
-          auto follow_up_run = run_one_prompt(follow_up->request_id, follow_up->message);
-          if (!follow_up_run) {
-            rpc::record_async_error(run_state, std::move(follow_up_run.error()));
-            finish_with_queue_cleanup("prompt_start_failed");
-            return;
-          }
-        }
-
-        bool const canceled = rpc::cancel_requested(run_state);
-        auto cleared = rpc::deactivate_and_clear_queued_messages(run_state);
-        if (auto written = rpc::write_skipped_queue_events(output, session, session_mutex, cleared,
-                                                           canceled ? "canceled" : "run_completed_before_safe_point");
-            !written) {
-          rpc::record_async_error(run_state, std::move(written.error()));
-        }
-        if (auto written = rpc::write_follow_up_errors(output, cleared.follow_up_messages,
-                                                       canceled ? "canceled" : "run_completed_before_safe_point");
-            !written) {
-          rpc::record_async_error(run_state, std::move(written.error()));
-        }
-      });
+      if (auto written = rpc::handle_prompt_command(output, session, session_mutex, run_state, pending_state,
+                                                    prompt_worker, *command, runtime_options, provider, transport,
+                                                    auth_transport, injected_provider_id);
+          !written)
+        return written;
       continue;
     }
 

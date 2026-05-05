@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <optional>
 
 namespace ava::tui {
 namespace detail {
@@ -216,9 +217,38 @@ std::vector<std::size_t> matching_option_indices(QuestionPromptView const& promp
   return indices;
 }
 
+std::optional<std::size_t> option_index_for_shortcut(QuestionPromptInputResult const& result, char character)
+{
+  auto const wanted = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+  if (wanted == '\0') return std::nullopt;
+  for (std::size_t index = 0; index < result.options.size(); ++index) {
+    auto const text = result.options[index].label.empty() ? result.options[index].value : result.options[index].label;
+    for (char const ch : text) {
+      auto const byte = static_cast<unsigned char>(ch);
+      if (std::isalnum(byte) == 0) continue;
+      if (static_cast<char>(std::tolower(byte)) == wanted) return index;
+      break;
+    }
+  }
+  return std::nullopt;
+}
+
 std::string modal_line(std::string content, std::size_t width)
 {
   return composer_surface_line("  " + std::move(content), width);
+}
+
+std::vector<std::string> modal_wrapped_lines(std::string_view text, std::size_t width)
+{
+  std::vector<std::string> lines;
+  auto const content_width = width > 4 ? width - 4 : width;
+  for (auto const& raw_line : split_lines(text)) {
+    for (auto const& wrapped : wrap_transcript_text(raw_line, content_width)) {
+      lines.push_back(modal_line(wrapped, width));
+    }
+  }
+  if (lines.empty()) lines.push_back(modal_line("", width));
+  return lines;
 }
 
 std::string modal_title_line(QuestionPromptView const& prompt, std::size_t width)
@@ -254,8 +284,12 @@ std::string modal_option_line(QuestionPromptView const& prompt, std::size_t inde
 std::string modal_keys_line(QuestionPromptView const& prompt, std::size_t width)
 {
   auto const search = prompt.searchable ? std::string("  Type to search  ") : std::string("  ");
+  auto const shortcuts = !prompt.searchable && !prompt.allow_custom && !prompt.options.empty()
+                             ? std::string("  Letter shortcut  ")
+                             : std::string("");
   return modal_line(
-      std::string(kSgrMuted) + "↑/↓ select  Enter confirm" + search + "Esc cancel" + std::string(kSgrReset), width);
+      std::string(kSgrMuted) + "↑/↓ select  Enter confirm" + shortcuts + search + "Esc cancel" + std::string(kSgrReset),
+      width);
 }
 
 std::string question_dock_keys(QuestionPromptView const& prompt, std::size_t width)
@@ -360,7 +394,17 @@ std::vector<std::string> render_question_modal(QuestionPromptView const& prompt,
     lines.push_back(composer_surface_line("", width));
     if (lines.size() >= max_lines) return lines;
   } else if (!prompt.question.empty() && prompt.question != prompt.header) {
-    lines.push_back(modal_line(sanitize_terminal_text(prompt.question), width));
+    auto const question_lines = modal_wrapped_lines(prompt.question, width);
+    auto const reserved = std::size_t{4};
+    std::size_t rendered = 0;
+    for (auto const& line : question_lines) {
+      if (lines.size() + reserved >= max_lines) break;
+      lines.push_back(line);
+      ++rendered;
+    }
+    if (rendered < question_lines.size() && lines.size() + reserved < max_lines) {
+      lines.push_back(modal_line(std::string(kSgrMuted) + "..." + std::string(kSgrReset), width));
+    }
     if (lines.size() >= max_lines) return lines;
     lines.push_back(composer_surface_line("", width));
     if (lines.size() >= max_lines) return lines;
@@ -536,6 +580,14 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
           return result;
         }
         break;
+      }
+      if (!prompt.allow_custom && has_options) {
+        if (auto shortcut_index = detail::option_index_for_shortcut(result, event.character)) {
+          result.selected_option_index = *shortcut_index;
+          toggle_selected();
+          result.action = prompt.multiple ? QuestionPromptInputAction::Redraw : QuestionPromptInputAction::Resolve;
+          return result;
+        }
       }
       if (event.character >= '1' && event.character <= '9') {
         auto const index = static_cast<std::size_t>(event.character - '1');

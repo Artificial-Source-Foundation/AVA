@@ -599,6 +599,8 @@ void test_app_command_dispatcher()
   auto const* mcp_item = find_slash_item("/mcp");
   auto const* plugin_item = find_slash_item("/plugin");
   expect(has_completion(connect_item, 0, "openai") && has_completion(connect_item, 1, "api-key") &&
+             has_completion(connect_item, 1, "browser-oauth", {"openai"}) &&
+             has_completion(connect_item, 1, "headless-oauth", {"openai"}) &&
              has_completion(models_item, 0, "openai/gpt-5.5") &&
              has_completion(sessions_item, 0, session->store.session_id()) &&
              has_completion(context_item, 0, (workspace / "AGENTS.md").generic_string()) &&
@@ -714,6 +716,25 @@ void test_app_command_dispatcher()
   expect(slash_anthropic && slash_anthropic->has_value() && (*slash_anthropic)->access_token == "slash-api-key" &&
              (*slash_anthropic)->credential_type == "api_key",
          "slash provider connect modal writes loadable API key credential");
+
+  bool saw_openai_secret_prompt = false;
+  auto connect_openai_api = ava::app::run_command(
+      *session,
+      ava::app::CommandRequest{
+          .command = "/connect openai api-key", .question_resolver = [&](ava::agent::QuestionPrompt const& prompt) {
+            saw_openai_secret_prompt = prompt.modal && prompt.secret && prompt.allow_custom &&
+                                       prompt.question.find("openai") != std::string::npos;
+            return ava::agent::QuestionAnswer{.selected_options = {}, .custom_text = "slash-openai-api-key"};
+          }});
+  expect(connect_openai_api && connect_openai_api->handled && saw_openai_secret_prompt &&
+             !connect_openai_api->output.empty() &&
+             connect_openai_api->output[0].find("Stored openai API key credential") != std::string::npos,
+         "command dispatcher /connect openai api-key prompts once and stores OpenAI API key credential");
+  auto slash_openai = ava::config::load_openai_credential(session->paths);
+  expect(slash_openai && slash_openai->has_value() &&
+             (*slash_openai)->type == ava::config::OpenAICredentialType::ApiKey &&
+             (*slash_openai)->access_token == "slash-openai-api-key",
+         "slash OpenAI API key connect writes loadable OpenAI credential");
 
   auto connect_without_tui = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/connect anthropic"});
   expect(connect_without_tui && connect_without_tui->handled && !connect_without_tui->output.empty() &&

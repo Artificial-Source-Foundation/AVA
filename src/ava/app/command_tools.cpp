@@ -64,6 +64,7 @@ ava::core::VoidResult emit_tool_event(RuntimeSession const& session, RuntimeEven
   event.diff = entry.diff;
   event.diff_truncated = entry.diff_truncated;
   event.changed_paths = entry.changed_paths;
+  event.permission_request_ids = entry.permission_request_ids;
   event.truncated = entry.truncated;
   event.spill_path = entry.spill_path;
   event.spill_truncated = entry.spill_truncated;
@@ -110,6 +111,7 @@ ava::agent::ToolTimelineEntry command_result_entry(std::string const& call_id, s
       .diff = payload.diff,
       .diff_truncated = payload.diff_truncated,
       .changed_paths = payload.changed_paths,
+      .permission_request_ids = payload.permission_request_ids,
       .truncated = payload.truncated,
       .output_bytes = payload.output_bytes,
       .total_bytes = payload.total_bytes,

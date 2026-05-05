@@ -547,6 +547,41 @@ void test_app_connect_provider_credentials_headlessly()
   expect(wizard_anthropic && wizard_anthropic->has_value() && (*wizard_anthropic)->access_token == "wizard-api-key",
          "interactive provider wizard stores a loadable credential");
 
+  auto const openai_wizard_root = temp_root() / "app-connect-openai-wizard";
+  std::error_code openai_wizard_remove_error;
+  std::filesystem::remove_all(openai_wizard_root, openai_wizard_remove_error);
+  auto const openai_wizard_paths = app_test_paths(openai_wizard_root);
+  std::istringstream openai_wizard_input("3\nwizard-openai-api-key\n");
+  std::ostringstream openai_wizard_out;
+  std::ostringstream openai_wizard_err;
+  auto const openai_wizard_exit = ava::app::run_connect_openai_wizard(
+      openai_wizard_paths,
+      ava::app::ConnectProviderWizardOptions{
+          .provider_id = "openai", .credential_type = std::nullopt, .stdin_is_tty = true},
+      openai_wizard_input, openai_wizard_out, openai_wizard_err);
+  expect(openai_wizard_exit == 0 && openai_wizard_err.str().empty() &&
+             openai_wizard_out.str().find("OpenAI login method") != std::string::npos &&
+             openai_wizard_out.str().find("ChatGPT Pro/Plus (headless OAuth)") != std::string::npos &&
+             openai_wizard_out.str().find("Stored openai API key credential") != std::string::npos,
+         "interactive OpenAI connect command opens method picker and stores selected API key credential");
+  auto openai_wizard_credential = ava::config::load_openai_credential(openai_wizard_paths);
+  expect(openai_wizard_credential && openai_wizard_credential->has_value() &&
+             (*openai_wizard_credential)->type == ava::config::OpenAICredentialType::ApiKey &&
+             (*openai_wizard_credential)->access_token == "wizard-openai-api-key",
+         "interactive OpenAI connect command writes a loadable OpenAI credential");
+
+  std::istringstream non_tty_openai_wizard_input;
+  std::ostringstream non_tty_openai_wizard_out;
+  std::ostringstream non_tty_openai_wizard_err;
+  auto const non_tty_openai_wizard_exit = ava::app::run_connect_openai_wizard(
+      openai_wizard_paths,
+      ava::app::ConnectProviderWizardOptions{
+          .provider_id = "openai", .credential_type = std::nullopt, .stdin_is_tty = false},
+      non_tty_openai_wizard_input, non_tty_openai_wizard_out, non_tty_openai_wizard_err);
+  expect(non_tty_openai_wizard_exit == 2 && non_tty_openai_wizard_out.str().empty() &&
+             non_tty_openai_wizard_err.str().find("--headless-oauth") != std::string::npos,
+         "interactive OpenAI connect command points non-tty callers at headless OAuth");
+
   std::istringstream cancelled_wizard_input("\x1b");
   std::ostringstream cancelled_wizard_out;
   std::ostringstream cancelled_wizard_err;

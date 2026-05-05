@@ -59,6 +59,7 @@ struct RuntimeEvent {
   std::string reasoning_format;
   std::string diff;
   std::vector<std::string> changed_paths;
+  std::vector<std::string> permission_request_ids;
   std::string spill_path;
   bool reasoning_redacted = false;
   bool reasoning_signature_present = false;

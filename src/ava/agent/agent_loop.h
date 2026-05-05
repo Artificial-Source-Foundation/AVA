@@ -47,6 +47,7 @@ struct ToolTimelineEntry {
   std::string diff = {};
   bool diff_truncated = false;
   std::vector<std::string> changed_paths = {};
+  std::vector<std::string> permission_request_ids = {};
   bool truncated = false;
   std::optional<std::size_t> output_bytes = std::nullopt;
   std::optional<std::size_t> total_bytes = std::nullopt;

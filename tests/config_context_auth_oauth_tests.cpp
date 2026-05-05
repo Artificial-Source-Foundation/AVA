@@ -716,6 +716,57 @@ void test_openai_oauth_helpers()
                requests.front().body.find("code_verifier=" + verifier) != std::string::npos,
            "OpenAI OAuth code exchange form-encodes authorization code and verifier");
   }
+
+  ava::tests::FakeTransport device_start_transport({ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = "{\"device_auth_id\":\"device-123\",\"user_code\":\"ABCD-EFGH\",\"interval\":\"1\"}",
+  }});
+  auto device = ava::config::start_openai_oauth_device_authorization(device_start_transport);
+  expect(device && device->device_auth_id == "device-123" && device->user_code == "ABCD-EFGH" &&
+             device->verification_url == "https://auth.openai.com/codex/device" && device->interval_seconds == 1,
+         "OpenAI headless OAuth device authorization parses user code and polling interval");
+  auto const& device_start_requests = device_start_transport.requests();
+  expect(device_start_requests.size() == 1 &&
+             device_start_requests.front().url == "https://auth.openai.com/api/accounts/deviceauth/usercode" &&
+             device_start_requests.front().body.find("app_EMoamEEZ73f0CkXaXp7hrann") != std::string::npos,
+         "OpenAI headless OAuth starts device authorization with the compatibility client id");
+
+  if (device) {
+    ava::tests::FakeTransport pending_transport({ava::provider::HttpResponse{
+        .status_code = 403,
+        .headers = {},
+        .body = "{}",
+    }});
+    auto pending = ava::config::poll_openai_oauth_device_authorization(*device, pending_transport, 1000);
+    expect(pending && !pending->has_value(), "OpenAI headless OAuth treats 403 polling response as pending");
+
+    ava::tests::FakeTransport approved_transport({ava::provider::HttpResponse{
+                                                      .status_code = 200,
+                                                      .headers = {},
+                                                      .body = "{\"authorization_code\":\"device code\","
+                                                              "\"code_verifier\":\"device-verifier\"}",
+                                                  },
+                                                  ava::provider::HttpResponse{
+                                                      .status_code = 200,
+                                                      .headers = {},
+                                                      .body = "{\"access_token\":\"device-access\","
+                                                              "\"refresh_token\":\"device-refresh\","
+                                                              "\"expires_in\":90,\"account_id\":\"acct_device\"}",
+                                                  }});
+    auto approved = ava::config::poll_openai_oauth_device_authorization(*device, approved_transport, 1000);
+    expect(approved && approved->has_value() && (*approved)->access_token == "device-access" &&
+               (*approved)->refresh_token == "device-refresh" && (*approved)->expires_at == 1090 &&
+               (*approved)->account_id == "acct_device",
+           "OpenAI headless OAuth exchanges approved device code for an OAuth credential");
+    auto const& approved_requests = approved_transport.requests();
+    expect(approved_requests.size() == 2 &&
+               approved_requests[0].url == "https://auth.openai.com/api/accounts/deviceauth/token" &&
+               approved_requests[1].url == "https://auth.openai.com/oauth/token" &&
+               approved_requests[1].body.find("redirect_uri=https%3A%2F%2Fauth.openai.com%2Fdeviceauth%2Fcallback") !=
+                   std::string::npos,
+           "OpenAI headless OAuth uses the device callback redirect during token exchange");
+  }
 }
 
 void test_openai_oauth_refresh()

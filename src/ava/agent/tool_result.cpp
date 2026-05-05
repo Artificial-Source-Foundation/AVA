@@ -37,6 +37,14 @@ void add_changed_path(ToolResultPayload& payload, std::string path)
   }
 }
 
+void add_permission_request_id(ToolResultPayload& payload, std::string id)
+{
+  if (id.empty()) return;
+  if (std::ranges::find(payload.permission_request_ids, id) == payload.permission_request_ids.end()) {
+    payload.permission_request_ids.push_back(std::move(id));
+  }
+}
+
 void assign_size_field(std::optional<std::size_t>& target, std::string_view object, std::string_view key)
 {
   if (auto value = optional_size_field(object, key)) target = *value;
@@ -125,6 +133,9 @@ ToolResultPayload merge_payload_defaults(ToolResultPayload payload, std::string_
   if (payload.error_details.empty()) payload.error_details = std::move(parsed.error_details);
   if (payload.diff.empty()) payload.diff = std::move(parsed.diff);
   if (payload.changed_paths.empty()) payload.changed_paths = std::move(parsed.changed_paths);
+  if (payload.permission_request_ids.empty()) {
+    payload.permission_request_ids = std::move(parsed.permission_request_ids);
+  }
   payload.diff_truncated = payload.diff_truncated || parsed.diff_truncated;
   payload.truncated = payload.truncated || parsed.truncated;
   if (!payload.output_bytes) payload.output_bytes = parsed.output_bytes;
@@ -170,6 +181,10 @@ ToolResultPayload parse_tool_result_payload(std::string_view tool_name, bool suc
   }
   for (auto const& edit : ava::core::json::objects_in_array_field(result_text, "edits")) {
     add_changed_path(payload, ava::core::json::string_field(edit, "path").value_or(""));
+  }
+  add_permission_request_id(payload, ava::core::json::string_field(result_text, "permission_request_id").value_or(""));
+  for (auto const& id : ava::core::json::strings_in_array_field(result_text, "permission_request_ids")) {
+    add_permission_request_id(payload, id);
   }
 
   payload.diff = ava::core::json::string_field(result_text, "diff").value_or("");
@@ -238,6 +253,7 @@ std::string serialize_tool_result_payload_json(ToolDispatchResult const& result)
   append_string_field(out, "diff", payload.diff);
   if (!payload.diff.empty() || payload.diff_truncated) append_bool_field(out, "diff_truncated", payload.diff_truncated);
   append_string_array_field(out, "changed_paths", payload.changed_paths);
+  append_string_array_field(out, "permission_request_ids", payload.permission_request_ids);
   append_bool_field(out, "truncated", payload.truncated);
   append_optional_number_field(out, "output_bytes", payload.output_bytes);
   append_optional_number_field(out, "total_bytes", payload.total_bytes);

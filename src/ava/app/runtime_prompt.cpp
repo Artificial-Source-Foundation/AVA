@@ -153,6 +153,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
             event.diff = entry.diff;
             event.diff_truncated = entry.diff_truncated;
             event.changed_paths = entry.changed_paths;
+            event.permission_request_ids = entry.permission_request_ids;
             event.truncated = entry.truncated;
             event.spill_path = entry.spill_path;
             event.spill_truncated = entry.spill_truncated;

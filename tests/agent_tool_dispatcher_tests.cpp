@@ -236,9 +236,46 @@ void test_tool_dispatcher()
       .name = "read_file",
       .arguments_json = "{\"path\":\"" + ava::core::json::escape(canceled_outside_path.generic_string()) + "\"}"});
   expect(canceled_outside_read && !canceled_outside_read->success &&
-             canceled_outside_read->payload.status == ava::agent::ToolResultStatus::Canceled &&
-             canceled_permission_prompts == 0,
-         "tool dispatcher cancellation prevents permission prompts for file tools");
+              canceled_outside_read->payload.status == ava::agent::ToolResultStatus::Canceled &&
+              canceled_permission_prompts == 0,
+          "tool dispatcher cancellation prevents permission prompts for file tools");
+
+  auto const linked_permission_path = root / "dispatcher-linked-permission.txt";
+  {
+    std::ofstream file(linked_permission_path, std::ios::binary | std::ios::trunc);
+    file << "linked permission";
+  }
+  std::vector<ava::tools::PermissionAuditEvent> linked_permission_audits;
+  std::string linked_prompt_request_id;
+  ava::agent::ToolDispatcher const linked_permission_dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&linked_prompt_request_id](ava::permissions::PermissionPrompt const& prompt)
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        linked_prompt_request_id = prompt.permission_request_id;
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .permission_audit_sink = [&linked_permission_audits](ava::tools::PermissionAuditEvent const& event)
+          -> ava::core::VoidResult {
+        linked_permission_audits.push_back(event);
+        return {};
+      }});
+  auto linked_permission_read = linked_permission_dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_linked_permission_read",
+                                   .name = "read_file",
+                                   .arguments_json = "{\"path\":\"" +
+                                                     ava::core::json::escape(linked_permission_path.generic_string()) +
+                                                     "\"}"});
+  auto const linked_permission_structured =
+      linked_permission_read ? ava::agent::serialize_tool_result_payload_json(*linked_permission_read) : std::string{};
+  auto const linked_permission_ids =
+      ava::core::json::strings_in_array_field(linked_permission_structured, "permission_request_ids");
+  expect(linked_permission_read && linked_permission_read->success && linked_permission_audits.size() == 2 &&
+             !linked_prompt_request_id.empty() && linked_permission_ids.size() == 1 &&
+             linked_permission_ids[0] == linked_prompt_request_id &&
+             linked_permission_audits[0].permission_request_id == linked_prompt_request_id &&
+             linked_permission_audits[1].permission_request_id == linked_prompt_request_id,
+         "tool dispatcher links structured tool results to permission audit request ids");
 
   auto malformed_args = dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "call_bad_args", .name = "read_file", .arguments_json = "{not-json}"});

@@ -412,7 +412,13 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(ProviderToolCall 
   if (tool != nullptr) {
     if (is_canceled(context_))
       return with_tool_result_payload(tool_error_result(normalized, canceled_error(normalized)));
-    return with_tool_result_payload(tool->executor(context_, normalized));
+    auto context = context_;
+    context.permission_request_ids = std::make_shared<std::vector<std::string>>();
+    auto result = tool->executor(context, normalized);
+    if (context.permission_request_ids && !context.permission_request_ids->empty()) {
+      result.payload.permission_request_ids = *context.permission_request_ids;
+    }
+    return with_tool_result_payload(std::move(result));
   }
   return with_tool_result_payload(simple_error_result(normalized, ava::core::ErrorCategory::Tool, "unknown tool"));
 }

@@ -357,13 +357,24 @@ void test_agent_loop_permission_resolver_threads_to_tools()
           ? ava::core::json::string_field(resolver_audits[0].data_json, "permission_request_id").value_or("")
           : "";
   expect(resolver_audits.size() == 2 && resolver_permission_request_id.starts_with("permreq_") &&
-             ava::core::json::string_field(resolver_audits[0].data_json, "action") == "ask" &&
-             ava::core::json::string_field(resolver_audits[0].data_json, "resolution_source") == "policy" &&
-             ava::core::json::string_field(resolver_audits[1].data_json, "permission_request_id") ==
-                 resolver_permission_request_id &&
-             ava::core::json::string_field(resolver_audits[1].data_json, "resolution") == "allow" &&
-             ava::core::json::string_field(resolver_audits[1].data_json, "resolution_source") == "resolver",
-         "agent loop persists linked ask and resolver permission audit entries");
+              ava::core::json::string_field(resolver_audits[0].data_json, "action") == "ask" &&
+              ava::core::json::string_field(resolver_audits[0].data_json, "resolution_source") == "policy" &&
+              ava::core::json::string_field(resolver_audits[1].data_json, "permission_request_id") ==
+                  resolver_permission_request_id &&
+              ava::core::json::string_field(resolver_audits[1].data_json, "resolution") == "allow" &&
+              ava::core::json::string_field(resolver_audits[1].data_json, "resolution_source") == "resolver",
+          "agent loop persists linked ask and resolver permission audit entries");
+  auto const resolver_structured_permission_ids =
+      result && !result->tool_timeline.empty()
+          ? ava::core::json::strings_in_array_field(result->tool_timeline.front().structured_result_json,
+                                                    "permission_request_ids")
+          : std::vector<std::string>{};
+  expect(resolver_structured_permission_ids.size() == 1 &&
+             resolver_structured_permission_ids[0] == resolver_permission_request_id,
+         "agent loop links structured tool result to permission audit request id");
+  expect(result && !result->tool_timeline.empty() && result->tool_timeline.front().permission_request_ids.size() == 1 &&
+             result->tool_timeline.front().permission_request_ids[0] == resolver_permission_request_id,
+         "agent loop exposes permission request ids on tool timeline entries");
 
   {
     auto const bash_root = temp_root() / "agent-bash-ask-allow";

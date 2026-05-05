@@ -10,6 +10,7 @@
 
 #include "ava/core/result.h"
 
+#include <functional>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -23,6 +24,7 @@ struct CommandRequest {
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;
   CompactionSummaryGenerator compaction_summary_generator = nullptr;
+  std::function<bool()> cancel_requested = nullptr;
   std::mutex* session_mutex = nullptr;
   bool propagate_compaction_errors = false;
   std::vector<CommandHotkey> hotkeys = {};

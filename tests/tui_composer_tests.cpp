@@ -190,6 +190,19 @@ void test_tui_composer_rendering_and_input()
   expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && question_input.custom_text.empty(),
          "question prompt backspace edits custom text");
 
+  auto continue_question = ava::tui::QuestionPromptView{
+      .header = "Connect",
+      .question = "Open URL",
+      .options = {ava::tui::QuestionPromptOptionView{.value = "continue", .label = "C Continue"}},
+      .multiple = false,
+      .allow_custom = false,
+      .selected_option_index = 0,
+      .custom_text = ""};
+  question_input = ava::tui::handle_question_prompt_input(
+      continue_question, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'c'});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Resolve && question_input.options[0].selected,
+         "question prompt letter shortcut resolves a single-select option");
+
   auto multi_question =
       ava::tui::QuestionPromptView{.header = "Choose",
                                    .question = "Pick many",
@@ -1664,6 +1677,44 @@ void test_tui_composer_rendering_and_input()
                  modal_question_frame,
                  [](std::string const& line) { return strip_sgr(line).find("OpenAI") != std::string::npos; }),
          "tui renders searchable provider questions as centered filtered modals");
+
+  auto const oauth_modal_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "question required",
+      .transcript = {},
+      .question_prompt =
+          ava::tui::QuestionPromptView{
+              .header = "Connect OpenAI",
+              .question = "Open this URL to connect AVA to OpenAI:\n"
+                          "https://auth.openai.com/oauth/authorize?client_id="
+                          "app_EMoamEEZ73f0CkXaXp7hrann&redirect_uri=http%3A%2F%2Flocalhost%3A1455"
+                          "%2Fauth%2Fcallback&code_challenge=longchallengevalue&state=state\n"
+                          "\nAVA is listening on http://localhost:1455/auth/callback.",
+              .options = {ava::tui::QuestionPromptOptionView{.value = "continue", .label = "C Continue"}},
+              .multiple = false,
+              .allow_custom = false,
+              .secret = false,
+              .modal = true,
+              .searchable = false,
+              .selected_option_index = 0,
+              .custom_text = ""},
+      .width = 80,
+      .height = 20});
+  expect(std::ranges::any_of(oauth_modal_frame,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("https://auth.openai.com") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(
+                 oauth_modal_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("C Continue") != std::string::npos; }) &&
+             std::ranges::any_of(
+                 oauth_modal_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("Letter shortcut") != std::string::npos; }),
+         "tui renders OpenAI OAuth modal with wrapped link and C shortcut");
 
   auto searchable_question = ava::tui::QuestionPromptView{
       .header = "Connect a provider",

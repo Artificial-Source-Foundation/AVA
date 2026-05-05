@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace ava::lsp {
 class DiagnosticsProvider;
@@ -59,6 +60,7 @@ struct ToolContext {
   std::string permission_tool_name = {};
   std::string current_tool_name = {};
   std::string current_call_id = {};
+  std::shared_ptr<std::vector<std::string>> permission_request_ids = nullptr;
   std::shared_ptr<MutationQueue> mutation_queue = nullptr;
   std::shared_ptr<ava::lsp::DiagnosticsProvider> lsp_diagnostics_provider = nullptr;
   std::filesystem::path plugin_global_plugins_dir = {};

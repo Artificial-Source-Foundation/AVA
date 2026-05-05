@@ -395,7 +395,7 @@ std::size_t modal_width_for(std::size_t width)
 std::size_t modal_height_for(std::size_t height)
 {
   if (height < 10) return height;
-  return std::min<std::size_t>(18, height > 4 ? height - 4 : height);
+  return std::min<std::size_t>(22, height > 4 ? height - 4 : height);
 }
 
 std::vector<std::string> overlay_question_modal(std::vector<std::string> lines, QuestionPromptView const& prompt,

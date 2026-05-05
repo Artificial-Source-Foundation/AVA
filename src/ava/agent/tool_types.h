@@ -30,6 +30,7 @@ struct ToolResultPayload {
   std::string error_details;
   std::string diff;
   std::vector<std::string> changed_paths;
+  std::vector<std::string> permission_request_ids;
   bool diff_truncated = false;
   bool truncated = false;
   std::optional<std::size_t> output_bytes = std::nullopt;

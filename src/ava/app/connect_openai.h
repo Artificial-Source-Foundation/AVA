@@ -1,7 +1,11 @@
 #pragma once
 
+#include "ava/config/openai_oauth.h"
 #include "ava/config/xdg_paths.h"
 
+#include "ava/provider/provider.h"
+
+#include <functional>
 #include <iosfwd>
 #include <optional>
 #include <string>
@@ -26,11 +30,22 @@ struct ConnectProviderWizardOptions {
 };
 
 [[nodiscard]] int run_connect_openai(ava::config::XdgPaths const& paths);
+[[nodiscard]] int run_connect_openai_browser(ava::config::XdgPaths const& paths, std::ostream& out, std::ostream& err);
+[[nodiscard]] int run_connect_openai_headless(ava::config::XdgPaths const& paths, std::ostream& out, std::ostream& err);
+[[nodiscard]] int run_connect_openai_wizard(ava::config::XdgPaths const& paths,
+                                            ConnectProviderWizardOptions const& options, std::istream& in,
+                                            std::ostream& out, std::ostream& err);
 [[nodiscard]] int run_connect_provider_wizard(ava::config::XdgPaths const& paths,
                                               ConnectProviderWizardOptions const& options, std::istream& in,
                                               std::ostream& out, std::ostream& err);
 [[nodiscard]] int run_connect_provider_credential(ava::config::XdgPaths const& paths,
                                                   ConnectProviderCredentialOptions const& options, std::istream& in,
                                                   std::ostream& out, std::ostream& err);
+[[nodiscard]] ava::core::Result<ava::config::OpenAICredential> complete_openai_browser_oauth(
+    ava::config::OpenAIOAuthSession const& session, ava::provider::Transport& transport, long long now_seconds,
+    std::function<bool()> cancel_requested = nullptr);
+[[nodiscard]] ava::core::Result<ava::config::OpenAICredential> wait_for_openai_device_oauth(
+    ava::config::OpenAIOAuthDeviceAuthorization const& authorization, ava::provider::Transport& transport,
+    long long now_seconds, std::function<bool()> cancel_requested = nullptr);
 
 }  // namespace ava::app

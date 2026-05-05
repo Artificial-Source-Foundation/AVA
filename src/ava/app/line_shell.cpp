@@ -254,6 +254,7 @@ LineResult handle_line(ShellState& state, std::string const& line,
                                                    state.session, entries, config, instructions, estimated_tokens,
                                                    provider, transport, run_options);
                                              },
+                                         .cancel_requested = cancel_requested,
                                          .hotkeys = hotkeys});
             if (!command_result) {
               LineResult compact_result;
@@ -269,6 +270,7 @@ LineResult handle_line(ShellState& state, std::string const& line,
         ava::app::run_command(state.session, ava::app::CommandRequest{.command = line,
                                                                       .permission_resolver = permission_resolver,
                                                                       .question_resolver = question_resolver,
+                                                                      .cancel_requested = cancel_requested,
                                                                       .hotkeys = hotkeys});
     if (!command_result) {
       add_output(line_result, command_result.error().format());

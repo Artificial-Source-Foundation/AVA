@@ -175,6 +175,7 @@ std::string payload_json_for_runtime_event(RuntimeEvent const& event)
   append_payload_string_field(out, has_field, "reasoning_format", event.reasoning_format);
   append_payload_string_field(out, has_field, "diff", event.diff);
   append_payload_string_array_field(out, has_field, "changed_paths", event.changed_paths);
+  append_payload_string_array_field(out, has_field, "permission_request_ids", event.permission_request_ids);
   append_payload_string_field(out, has_field, "spill_path", event.spill_path);
   append_payload_bool_field(out, has_field, "reasoning_redacted", event.reasoning_redacted);
   append_payload_bool_field(out, has_field, "reasoning_signature_present", event.reasoning_signature_present);
@@ -299,6 +300,7 @@ std::string serialize_event_json(RuntimeEvent const& event)
   append_string_field(out, "reasoning_format", event.reasoning_format);
   append_string_field(out, "diff", event.diff);
   append_string_array_field(out, "changed_paths", event.changed_paths);
+  append_string_array_field(out, "permission_request_ids", event.permission_request_ids);
   append_string_field(out, "spill_path", event.spill_path);
   append_bool_field(out, "reasoning_redacted", event.reasoning_redacted);
   append_bool_field(out, "reasoning_signature_present", event.reasoning_signature_present);

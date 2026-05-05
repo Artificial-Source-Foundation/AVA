@@ -23,6 +23,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -40,9 +41,9 @@ constexpr std::size_t max_connect_secret_bytes = 64 * 1024;
 
 sig_atomic_t volatile terminal_mode_signal_number = 0;
 bool terminal_mode_signal_handlers_installed = false;
-struct sigaction previous_sigint_action{};
-struct sigaction previous_sigterm_action{};
-struct sigaction previous_sighup_action{};
+struct sigaction previous_sigint_action {};
+struct sigaction previous_sigterm_action {};
+struct sigaction previous_sighup_action {};
 
 void terminal_mode_signal_handler(int signal_number)
 {
@@ -52,7 +53,7 @@ void terminal_mode_signal_handler(int signal_number)
 bool install_terminal_mode_signal_handlers()
 {
   terminal_mode_signal_number = 0;
-  struct sigaction action{};
+  struct sigaction action {};
   action.sa_handler = terminal_mode_signal_handler;
   sigemptyset(&action.sa_mask);
   action.sa_flags = 0;
@@ -180,6 +181,13 @@ struct ConnectProviderMenuItem {
 };
 
 enum class MenuInputKind { Character, Enter, Escape, Backspace, Up, Down, Other };
+
+enum class OpenAIConnectMethod {
+  BrowserOAuth,
+  HeadlessOAuth,
+  ApiKey,
+  OAuthToken,
+};
 
 struct MenuInput {
   MenuInputKind kind = MenuInputKind::Other;
@@ -357,7 +365,8 @@ void send_callback_response(int fd, std::string_view body)
   static_cast<void>(send_all_to_socket(fd, response));
 }
 
-ava::core::Result<OAuthCallback> wait_for_oauth_callback(std::string_view expected_state)
+ava::core::Result<OAuthCallback> wait_for_oauth_callback(std::string_view expected_state,
+                                                         std::function<bool()> const& cancel_requested)
 {
   ScopedSocket const server(::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0));
   if (server.get() < 0) {
@@ -386,14 +395,18 @@ ava::core::Result<OAuthCallback> wait_for_oauth_callback(std::string_view expect
 
   auto const deadline = std::chrono::steady_clock::now() + std::chrono::minutes(5);
   while (std::chrono::steady_clock::now() < deadline) {
+    if (cancel_requested && cancel_requested()) {
+      return std::unexpected(connect_error(ava::core::ErrorCategory::InvalidArgument, "OpenAI OAuth login cancelled"));
+    }
     auto const remaining =
         std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
     pollfd descriptor{.fd = server.get(), .events = POLLIN, .revents = 0};
     int ready = 0;
     do {
-      ready = ::poll(&descriptor, 1, static_cast<int>(std::max<long long>(1, remaining.count())));
+      ready =
+          ::poll(&descriptor, 1, static_cast<int>(std::min<long long>(500, std::max<long long>(1, remaining.count()))));
     } while (ready < 0 && errno == EINTR);
-    if (ready == 0) break;
+    if (ready == 0) continue;
     if (ready < 0) {
       auto error = connect_error(ava::core::ErrorCategory::Io, "failed while waiting for OAuth callback");
       error.with_context("cause", errno_message());
@@ -443,6 +456,21 @@ std::string credential_type_value(ConnectCredentialType type)
 std::string credential_type_label(ConnectCredentialType type)
 {
   return type == ConnectCredentialType::OAuthToken ? "OAuth bearer token" : "API key";
+}
+
+std::string openai_connect_method_label(OpenAIConnectMethod method)
+{
+  switch (method) {
+    case OpenAIConnectMethod::BrowserOAuth:
+      return "ChatGPT Pro/Plus (browser OAuth)";
+    case OpenAIConnectMethod::HeadlessOAuth:
+      return "ChatGPT Pro/Plus (headless OAuth)";
+    case OpenAIConnectMethod::ApiKey:
+      return "OpenAI API key";
+    case OpenAIConnectMethod::OAuthToken:
+      return "OAuth bearer token";
+  }
+  return "OpenAI login";
 }
 
 std::string lower_ascii(std::string_view text)
@@ -614,6 +642,28 @@ std::optional<ConnectCredentialType> parse_connect_credential_type(std::string_v
   return std::nullopt;
 }
 
+std::optional<OpenAIConnectMethod> parse_openai_connect_method(std::string_view value)
+{
+  auto const lowered = lower_ascii(value);
+  if (lowered == "1" || lowered == "browser" || lowered == "browser-oauth" || lowered == "browser_oauth" ||
+      lowered == "chatgpt" || lowered == "oauth") {
+    return OpenAIConnectMethod::BrowserOAuth;
+  }
+  if (lowered == "2" || lowered == "headless" || lowered == "headless-oauth" || lowered == "headless_oauth" ||
+      lowered == "device" || lowered == "device-oauth" || lowered == "device_oauth") {
+    return OpenAIConnectMethod::HeadlessOAuth;
+  }
+  if (lowered == "3" || lowered == "api" || lowered == "api-key" || lowered == "apikey" || lowered == "key" ||
+      lowered == "api_key") {
+    return OpenAIConnectMethod::ApiKey;
+  }
+  if (lowered == "4" || lowered == "oauth-token" || lowered == "oauth_token" || lowered == "bearer" ||
+      lowered == "token") {
+    return OpenAIConnectMethod::OAuthToken;
+  }
+  return std::nullopt;
+}
+
 std::string trim_stdin_secret(std::string secret)
 {
   auto is_edge_space = [](char ch) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; };
@@ -726,37 +776,148 @@ ava::core::Result<std::string> read_connect_secret(ConnectProviderCredentialOpti
 
 }  // namespace
 
-int run_connect_openai(ava::config::XdgPaths const& paths)
+ava::core::Result<ava::config::OpenAICredential> complete_openai_browser_oauth(
+    ava::config::OpenAIOAuthSession const& session, ava::provider::Transport& transport, long long now_seconds,
+    std::function<bool()> cancel_requested)
+{
+  auto callback = wait_for_oauth_callback(session.state, cancel_requested);
+  if (!callback) return std::unexpected(std::move(callback.error()));
+  return ava::config::exchange_openai_oauth_code(callback->code, session.code_verifier, transport, now_seconds);
+}
+
+ava::core::Result<ava::config::OpenAICredential> wait_for_openai_device_oauth(
+    ava::config::OpenAIOAuthDeviceAuthorization const& authorization, ava::provider::Transport& transport,
+    long long now_seconds, std::function<bool()> cancel_requested)
+{
+  auto const deadline = std::chrono::steady_clock::now() + std::chrono::minutes(10);
+  auto const interval = std::chrono::seconds(std::max(1, authorization.interval_seconds) + 3);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (cancel_requested && cancel_requested()) {
+      return std::unexpected(connect_error(ava::core::ErrorCategory::InvalidArgument, "OpenAI OAuth login cancelled"));
+    }
+    auto credential = ava::config::poll_openai_oauth_device_authorization(authorization, transport, now_seconds);
+    if (!credential) return std::unexpected(std::move(credential.error()));
+    if (*credential) return std::move(**credential);
+    auto const sleep_until = std::min(deadline, std::chrono::steady_clock::now() + interval);
+    while (std::chrono::steady_clock::now() < sleep_until) {
+      if (cancel_requested && cancel_requested()) {
+        return std::unexpected(
+            connect_error(ava::core::ErrorCategory::InvalidArgument, "OpenAI OAuth login cancelled"));
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    }
+  }
+  return std::unexpected(connect_error(ava::core::ErrorCategory::Io, "timed out waiting for OpenAI device OAuth"));
+}
+
+int run_connect_openai_browser(ava::config::XdgPaths const& paths, std::ostream& out, std::ostream& err)
 {
   auto session = ava::config::make_openai_oauth_session();
   if (!session) {
-    std::cerr << ava::tui::sanitize_terminal_text(session.error().format()) << '\n';
+    err << ava::tui::sanitize_terminal_text(session.error().format()) << '\n';
     return 1;
   }
-  std::cout << "Open this URL to connect AVA to OpenAI:\n\n" << session->authorization_url << "\n\n";
-  std::cout << "Waiting for browser callback on http://localhost:1455/auth/callback ...\n";
-
-  auto callback = wait_for_oauth_callback(session->state);
-  if (!callback) {
-    std::cerr << ava::tui::sanitize_terminal_text(callback.error().format()) << '\n';
-    return 1;
-  }
+  out << "Open this URL to connect AVA to OpenAI:\n\n" << session->authorization_url << "\n\n";
+  out << "Waiting for browser callback on http://localhost:1455/auth/callback ...\n";
 
   ava::provider::CurlCliTransport transport;
-  auto credential =
-      ava::config::exchange_openai_oauth_code(callback->code, session->code_verifier, transport, unix_time_seconds());
+  auto credential = complete_openai_browser_oauth(*session, transport, unix_time_seconds());
   if (!credential) {
-    std::cerr << ava::tui::sanitize_terminal_text(credential.error().format()) << '\n';
+    err << ava::tui::sanitize_terminal_text(credential.error().format()) << '\n';
     return 1;
   }
   auto stored = ava::config::store_openai_credential(paths, *credential);
   if (!stored) {
-    std::cerr << ava::tui::sanitize_terminal_text(stored.error().format()) << '\n';
+    err << ava::tui::sanitize_terminal_text(stored.error().format()) << '\n';
     return 1;
   }
-  std::cout << "OpenAI OAuth credential stored at " << ava::tui::sanitize_terminal_text(paths.auth_file.string())
-            << '\n';
+  out << "OpenAI OAuth credential stored at " << ava::tui::sanitize_terminal_text(paths.auth_file.string()) << '\n';
   return 0;
+}
+
+int run_connect_openai_headless(ava::config::XdgPaths const& paths, std::ostream& out, std::ostream& err)
+{
+  ava::provider::CurlCliTransport transport;
+  auto authorization = ava::config::start_openai_oauth_device_authorization(transport);
+  if (!authorization) {
+    err << ava::tui::sanitize_terminal_text(authorization.error().format()) << '\n';
+    return 1;
+  }
+  out << "Open this URL on any device:\n\n" << authorization->verification_url << "\n\n";
+  out << "Enter this code: " << ava::tui::sanitize_terminal_text(authorization->user_code) << "\n\n";
+  out << "Waiting for OpenAI authorization ...\n";
+
+  auto credential = wait_for_openai_device_oauth(*authorization, transport, unix_time_seconds());
+  if (!credential) {
+    err << ava::tui::sanitize_terminal_text(credential.error().format()) << '\n';
+    return 1;
+  }
+  auto stored = ava::config::store_openai_credential(paths, *credential);
+  if (!stored) {
+    err << ava::tui::sanitize_terminal_text(stored.error().format()) << '\n';
+    return 1;
+  }
+  out << "OpenAI OAuth credential stored at " << ava::tui::sanitize_terminal_text(paths.auth_file.string()) << '\n';
+  return 0;
+}
+
+int run_connect_openai(ava::config::XdgPaths const& paths)
+{
+  return run_connect_openai_browser(paths, std::cout, std::cerr);
+}
+
+int run_connect_openai_wizard(ava::config::XdgPaths const& paths, ConnectProviderWizardOptions const& options,
+                              std::istream& in, std::ostream& out, std::ostream& err)
+{
+  if (options.credential_type) {
+    return run_connect_provider_wizard(paths,
+                                       ConnectProviderWizardOptions{.provider_id = std::string("openai"),
+                                                                    .credential_type = options.credential_type,
+                                                                    .stdin_is_tty = options.stdin_is_tty},
+                                       in, out, err);
+  }
+
+  if (!options.stdin_is_tty) {
+    err << "interactive OpenAI login requires a terminal; use --browser-oauth, --headless-oauth, --api-key-stdin, "
+           "--api-key-env, --oauth-token-stdin, or --oauth-token-env\n";
+    return 2;
+  }
+
+  out << "OpenAI login method:\n";
+  out << "  1. " << openai_connect_method_label(OpenAIConnectMethod::BrowserOAuth) << '\n';
+  out << "  2. " << openai_connect_method_label(OpenAIConnectMethod::HeadlessOAuth) << '\n';
+  out << "  3. " << openai_connect_method_label(OpenAIConnectMethod::ApiKey) << '\n';
+  out << "  4. " << openai_connect_method_label(OpenAIConnectMethod::OAuthToken) << '\n';
+  auto method_text = read_prompt_line(in, out, "Select method [1-4]: ", false, options.stdin_is_tty);
+  if (!method_text) {
+    err << ava::tui::sanitize_terminal_text(method_text.error().format()) << '\n';
+    return 1;
+  }
+  auto method = parse_openai_connect_method(*method_text);
+  if (!method) {
+    err << "OpenAI login method must be 1, 2, 3, or 4\n";
+    return 2;
+  }
+  switch (*method) {
+    case OpenAIConnectMethod::BrowserOAuth:
+      return run_connect_openai_browser(paths, out, err);
+    case OpenAIConnectMethod::HeadlessOAuth:
+      return run_connect_openai_headless(paths, out, err);
+    case OpenAIConnectMethod::ApiKey:
+      return run_connect_provider_wizard(paths,
+                                         ConnectProviderWizardOptions{.provider_id = std::string("openai"),
+                                                                      .credential_type = ConnectCredentialType::ApiKey,
+                                                                      .stdin_is_tty = options.stdin_is_tty},
+                                         in, out, err);
+    case OpenAIConnectMethod::OAuthToken:
+      return run_connect_provider_wizard(
+          paths,
+          ConnectProviderWizardOptions{.provider_id = std::string("openai"),
+                                       .credential_type = ConnectCredentialType::OAuthToken,
+                                       .stdin_is_tty = options.stdin_is_tty},
+          in, out, err);
+  }
+  return 2;
 }
 
 int run_connect_provider_wizard(ava::config::XdgPaths const& paths, ConnectProviderWizardOptions const& options,
@@ -783,6 +944,11 @@ int run_connect_provider_wizard(ava::config::XdgPaths const& paths, ConnectProvi
   if (!is_valid_connect_provider_id(provider_id)) {
     err << "provider id must contain only letters, numbers, '-' or '_'\n";
     return 2;
+  }
+  if (provider_id == "openai" && !options.credential_type) {
+    return run_connect_openai_wizard(
+        paths, ConnectProviderWizardOptions{.provider_id = provider_id, .stdin_is_tty = options.stdin_is_tty}, in, out,
+        err);
   }
 
   ConnectCredentialType credential_type = ConnectCredentialType::ApiKey;
@@ -816,7 +982,7 @@ int run_connect_provider_wizard(ava::config::XdgPaths const& paths, ConnectProvi
   out << "Stored " << ava::tui::sanitize_terminal_text(provider_id) << ' ' << credential_type_label(credential_type)
       << " credential at " << ava::tui::sanitize_terminal_text(paths.auth_file.string()) << '\n';
   if (provider_id == "openai") {
-    out << "Tip: `ava connect openai` still runs the browser OAuth flow.\n";
+    out << "Tip: `ava connect openai` opens the OpenAI login method picker.\n";
   }
   return 0;
 }

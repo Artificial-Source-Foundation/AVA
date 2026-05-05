@@ -7,6 +7,7 @@
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <fstream>
@@ -37,6 +38,11 @@ std::string effective_tool_name(ToolContext const& context, ava::permissions::Op
 
 ava::core::VoidResult record_permission_audit(ToolContext const& context, PermissionAuditEvent const& event)
 {
+  if (context.permission_request_ids && !event.permission_request_id.empty() &&
+      std::ranges::find(*context.permission_request_ids, event.permission_request_id) ==
+          context.permission_request_ids->end()) {
+    context.permission_request_ids->push_back(event.permission_request_id);
+  }
   if (!context.permission_audit_sink) return {};
   return context.permission_audit_sink(event);
 }

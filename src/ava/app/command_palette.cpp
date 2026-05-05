@@ -129,6 +129,8 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     }
     add_completion(item, 1, "api-key", "Store an API key credential", "Credential");
     add_completion(item, 1, "oauth", "Store an OAuth bearer token credential", "Credential");
+    add_completion(item, 1, "browser-oauth", "Start OpenAI ChatGPT Pro/Plus browser OAuth", "OpenAI", {"openai"});
+    add_completion(item, 1, "headless-oauth", "Start OpenAI ChatGPT Pro/Plus device OAuth", "OpenAI", {"openai"});
   }
 
   if (auto index = find_item_index(items, "/models")) {

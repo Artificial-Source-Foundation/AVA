@@ -69,6 +69,7 @@ void populate_tool_timeline_metadata(ToolTimelineEntry& entry, ToolDispatchResul
   entry.visible_matches = payload.visible_matches;
   entry.total_matches = payload.total_matches;
   entry.changed_paths = payload.changed_paths;
+  entry.permission_request_ids = payload.permission_request_ids;
 }
 
 bool is_canceled(AgentLoopOptions const& options)

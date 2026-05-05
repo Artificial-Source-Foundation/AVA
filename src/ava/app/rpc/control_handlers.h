@@ -17,6 +17,22 @@ namespace ava::app::rpc {
                                                            std::vector<QueuedRpcMessage> const& follow_ups,
                                                            std::string_view reason);
 
+[[nodiscard]] ava::core::VoidResult handle_permission_grants_command(RpcOutput& output,
+                                                                     PendingResolverState& pending_state,
+                                                                     RpcCommand const& command);
+
+[[nodiscard]] ava::core::VoidResult handle_permission_grant_revoke_command(RpcOutput& output,
+                                                                           RuntimeSession const& session,
+                                                                           std::mutex& session_mutex,
+                                                                           PendingResolverState& pending_state,
+                                                                           RpcCommand const& command);
+
+[[nodiscard]] ava::core::VoidResult handle_permission_grants_clear_command(RpcOutput& output,
+                                                                           RuntimeSession const& session,
+                                                                           std::mutex& session_mutex,
+                                                                           PendingResolverState& pending_state,
+                                                                           RpcCommand const& command);
+
 [[nodiscard]] ava::core::VoidResult handle_steer_command(RpcOutput& output, RuntimeSession const& session,
                                                          std::mutex& session_mutex, RpcRunState& run_state,
                                                          RpcCommand const& command);

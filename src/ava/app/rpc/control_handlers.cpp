@@ -17,6 +17,41 @@ ava::core::VoidResult write_follow_up_errors(RpcOutput& output, std::vector<Queu
   return {};
 }
 
+ava::core::VoidResult handle_permission_grants_command(RpcOutput& output, PendingResolverState& pending_state,
+                                                       RpcCommand const& command)
+{
+  return write_success(output, command.id, permission_session_grants_result_json(pending_state));
+}
+
+ava::core::VoidResult handle_permission_grant_revoke_command(RpcOutput& output, RuntimeSession const& session,
+                                                             std::mutex& session_mutex,
+                                                             PendingResolverState& pending_state,
+                                                             RpcCommand const& command)
+{
+  if (!command.grant_id || command.grant_id->empty()) {
+    return write_error(output, command.id, invalid_rpc("permission_grant_revoke requires grant_id"));
+  }
+  auto revoked = permission_session_grant_revoke_result_json(pending_state, *command.grant_id);
+  if (!revoked) return write_error(output, command.id, revoked.error());
+
+  auto envelope = resolver_event_envelope("permission_grant_revoked", command.id, command.id,
+                                          session_id_snapshot(session, session_mutex), *revoked);
+  if (auto written = write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
+  return write_success(output, command.id, *revoked);
+}
+
+ava::core::VoidResult handle_permission_grants_clear_command(RpcOutput& output, RuntimeSession const& session,
+                                                             std::mutex& session_mutex,
+                                                             PendingResolverState& pending_state,
+                                                             RpcCommand const& command)
+{
+  auto const cleared = permission_session_grants_clear_result_json(pending_state);
+  auto envelope = resolver_event_envelope("permission_grants_cleared", command.id, command.id,
+                                          session_id_snapshot(session, session_mutex), cleared);
+  if (auto written = write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
+  return write_success(output, command.id, cleared);
+}
+
 ava::core::VoidResult handle_steer_command(RpcOutput& output, RuntimeSession const& session, std::mutex& session_mutex,
                                            RpcRunState& run_state, RpcCommand const& command)
 {

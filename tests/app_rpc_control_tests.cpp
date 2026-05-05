@@ -57,6 +57,64 @@ ava::app::RpcCommand rpc_command(std::string id, std::string type, std::optional
   return command;
 }
 
+ava::app::rpc::PermissionSessionGrant test_permission_grant(std::string grant_id,
+                                                            ava::app::RuntimeSession const& session)
+{
+  ava::app::rpc::PermissionSessionGrant grant;
+  grant.grant_id = std::move(grant_id);
+  grant.permission_request_id = "perm-" + grant.grant_id;
+  grant.operation = ava::permissions::Operation::EditFile;
+  grant.mode = ava::agent::Mode::Build;
+  grant.tool_name = "edit_file";
+  grant.target_path = session.workspace_dir / (grant.grant_id + ".txt");
+  grant.reason = "test grant";
+  return grant;
+}
+
+void test_rpc_permission_grant_control_handlers()
+{
+  auto session = make_rpc_control_session();
+  std::mutex session_mutex;
+  std::ostringstream stream;
+  ava::app::rpc::RpcOutput output(stream);
+  ava::app::rpc::PendingResolverState pending_state;
+  {
+    std::lock_guard lock(pending_state.mutex);
+    pending_state.permission_session_grants.push_back(test_permission_grant("grant-1", session));
+    pending_state.permission_session_grants.push_back(test_permission_grant("grant-2", session));
+  }
+
+  auto list = rpc_command("grant-list", "permission_grants");
+  auto handled_list = ava::app::rpc::handle_permission_grants_command(output, pending_state, list);
+  auto revoke = rpc_command("grant-revoke", "permission_grant_revoke");
+  revoke.grant_id = "grant-1";
+  auto handled_revoke =
+      ava::app::rpc::handle_permission_grant_revoke_command(output, session, session_mutex, pending_state, revoke);
+  auto clear = rpc_command("grant-clear", "permission_grants_clear");
+  auto handled_clear =
+      ava::app::rpc::handle_permission_grants_clear_command(output, session, session_mutex, pending_state, clear);
+  auto missing = rpc_command("grant-missing", "permission_grant_revoke");
+  auto handled_missing =
+      ava::app::rpc::handle_permission_grant_revoke_command(output, session, session_mutex, pending_state, missing);
+  auto const jsonl = stream.str();
+
+  {
+    std::lock_guard lock(pending_state.mutex);
+    expect(handled_list && handled_revoke && handled_clear && handled_missing &&
+               pending_state.permission_session_grants.empty(),
+           "RPC permission grant handlers list, revoke, and clear session grants");
+  }
+  expect(jsonl.find("\"id\":\"grant-list\"") != std::string::npos &&
+             jsonl.find("\"grant_id\":\"grant-1\"") != std::string::npos &&
+             jsonl.find("\"grant_id\":\"grant-2\"") != std::string::npos &&
+             jsonl.find("\"name\":\"permission_grant_revoked\"") != std::string::npos &&
+             jsonl.find("\"revoked\":true") != std::string::npos &&
+             jsonl.find("\"name\":\"permission_grants_cleared\"") != std::string::npos &&
+             jsonl.find("\"cleared\":1") != std::string::npos &&
+             jsonl.find("permission_grant_revoke requires grant_id") != std::string::npos,
+         "RPC permission grant handlers emit list results, lifecycle events, and validation errors");
+}
+
 void test_rpc_queue_control_handlers()
 {
   auto session = make_rpc_control_session();
@@ -209,6 +267,7 @@ void test_rpc_cancel_handler_clears_queues_and_reports_follow_up_errors()
 
 void run_app_rpc_control_tests()
 {
+  test_rpc_permission_grant_control_handlers();
   test_rpc_queue_control_handlers();
   test_rpc_resolver_reply_control_handlers();
   test_rpc_cancel_handler_clears_queues_and_reports_follow_up_errors();

@@ -41,6 +41,7 @@
 #include "ava/session/session_store.h"
 #include "ava/session/stats.h"
 #include "ava/session/validation.h"
+#include "ava/session/validation_fields.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/search_tools.h"
@@ -112,6 +113,48 @@ void test_session_entry_codec_helpers()
       "/tmp/session.jsonl");
   expect(!future && ava::session::is_unsupported_session_version_error(future.error()),
          "session entry codec exposes unsupported-version errors for session listing");
+}
+
+void test_session_validation_field_helpers()
+{
+  expect(ava::session::bool_field_is_true("{\"enabled\":true}", "enabled"),
+         "session validation fields parse true booleans");
+  expect(!ava::session::bool_field_is_true("{\"enabled\":trueish}", "enabled"),
+         "session validation fields reject true prefixes");
+  expect(ava::session::bool_field_is_false("{\"enabled\":false}", "enabled"),
+         "session validation fields parse false booleans");
+  expect(!ava::session::bool_field_is_false("{\"enabled\":\"false\"}", "enabled"),
+         "session validation fields reject string booleans");
+
+  expect(ava::session::valid_status("success") && ava::session::valid_status("error") &&
+             !ava::session::valid_status("pending"),
+         "session validation fields constrain tool result statuses");
+  expect(ava::session::valid_operation("read") && ava::session::valid_operation("mcp.tool.call") &&
+             !ava::session::valid_operation("unknown"),
+         "session validation fields constrain permission operations");
+  expect(ava::session::valid_mode("build") && ava::session::valid_mode("plan") && !ava::session::valid_mode("review"),
+         "session validation fields constrain session modes");
+  expect(ava::session::valid_action("allow") && ava::session::valid_resolution("deny") &&
+             ava::session::valid_resolution_source("session_grant") && ava::session::valid_risk("critical") &&
+             !ava::session::valid_risk("extreme"),
+         "session validation fields constrain permission decision enums");
+
+  expect(ava::session::present_non_empty_string("{}", "reason") &&
+             ava::session::present_non_empty_string("{\"reason\":\"ok\"}", "reason") &&
+             !ava::session::present_non_empty_string("{\"reason\":\"\"}", "reason"),
+         "session validation fields allow missing optional strings but reject empty present strings");
+  expect(ava::session::present_boolean("{}", "redacted") &&
+             ava::session::present_boolean("{\"redacted\":false}", "redacted") &&
+             !ava::session::present_boolean("{\"redacted\":\"false\"}", "redacted"),
+         "session validation fields allow missing optional booleans but reject non-boolean values");
+  expect(ava::session::required_boolean("{\"enabled\":true}", "enabled") &&
+             !ava::session::required_boolean("{}", "enabled"),
+         "session validation fields require booleans when requested");
+  expect(ava::session::present_integer_matching("{}", "tokens", false) &&
+             ava::session::present_integer_matching("{\"tokens\":0}", "tokens", false) &&
+             !ava::session::present_integer_matching("{\"tokens\":0}", "tokens", true) &&
+             !ava::session::present_integer_matching("{\"tokens\":1.5}", "tokens", false),
+         "session validation fields constrain optional integer metadata");
 }
 
 void test_session_store_round_trip()
@@ -1725,6 +1768,7 @@ void test_tool_content_parts_reconstruction()
 void run_session_tests()
 {
   test_session_entry_codec_helpers();
+  test_session_validation_field_helpers();
   test_session_store_round_trip();
   test_session_stats_helper();
   test_session_stats_omits_incomplete_cost_total();

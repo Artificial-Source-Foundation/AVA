@@ -156,10 +156,42 @@ void test_rpc_prompt_handler_runs_prompt_worker()
          "RPC prompt handler writes prompt result JSON from the worker");
 }
 
+void test_rpc_prompt_worker_close_cleans_queues()
+{
+  auto session = make_rpc_prompt_session();
+  std::mutex session_mutex;
+  std::ostringstream stream;
+  ava::app::rpc::RpcOutput output(stream);
+  ava::app::rpc::RpcRunState run_state;
+  ava::app::rpc::PendingResolverState pending_state;
+  std::optional<std::jthread> prompt_worker;
+  prompt_worker.emplace([](std::stop_token stop_token) {
+    while (!stop_token.stop_requested()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  });
+  ava::app::rpc::set_active_run(run_state, true, "prompt-close");
+  auto queued = ava::app::rpc::queue_rpc_message(run_state.follow_up_messages, run_state, "follow_up", "follow-close",
+                                                 "queued follow-up");
+  expect(queued.has_value(), "RPC prompt close test queues a follow-up");
+
+  auto closed = ava::app::rpc::close_prompt_worker(output, session, session_mutex, run_state, pending_state,
+                                                   prompt_worker, "canceled");
+  auto const jsonl = stream.str();
+
+  expect(closed && !prompt_worker, "RPC prompt close helper stops the prompt worker");
+  expect(!ava::app::rpc::active_run(run_state), "RPC prompt close helper clears active run state");
+  expect(jsonl.find("\"name\":\"follow_up_skipped\"") != std::string::npos &&
+             jsonl.find("agent loop canceled") != std::string::npos &&
+             jsonl.find("\"reason\":\"canceled\"") != std::string::npos,
+         "RPC prompt close helper emits skipped follow-up events and errors");
+}
+
 }  // namespace
 
 void run_app_rpc_prompt_tests()
 {
   test_rpc_prompt_handler_validation_and_active_rejection();
   test_rpc_prompt_handler_runs_prompt_worker();
+  test_rpc_prompt_worker_close_cleans_queues();
 }

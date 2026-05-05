@@ -10,14 +10,11 @@
 #include "ava/app/rpc/serialization.h"
 
 namespace ava::app::rpc {
-namespace {
 
-void reap_finished_prompt_worker(std::optional<std::jthread>& prompt_worker, RpcRunState& run_state)
+void reap_prompt_worker(std::optional<std::jthread>& prompt_worker, RpcRunState& run_state)
 {
   if (prompt_worker && !active_run(run_state)) prompt_worker.reset();
 }
-
-}  // namespace
 
 ava::core::VoidResult handle_prompt_command(RpcOutput& output, RuntimeSession& session, std::mutex& session_mutex,
                                             RpcRunState& run_state, PendingResolverState& pending_state,
@@ -32,7 +29,7 @@ ava::core::VoidResult handle_prompt_command(RpcOutput& output, RuntimeSession& s
 
   if (active_run(run_state)) return write_error(output, command.id, active_run_reject_error(command.type));
 
-  reap_finished_prompt_worker(prompt_worker, run_state);
+  reap_prompt_worker(prompt_worker, run_state);
   ava::config::XdgPaths paths;
   {
     std::lock_guard lock(session_mutex);
@@ -166,6 +163,23 @@ ava::core::VoidResult handle_prompt_command(RpcOutput& output, RuntimeSession& s
       record_async_error(run_state, std::move(written.error()));
     }
   });
+  return {};
+}
+
+ava::core::VoidResult close_prompt_worker(RpcOutput& output, RuntimeSession& session, std::mutex& session_mutex,
+                                          RpcRunState& run_state, PendingResolverState& pending_state,
+                                          std::optional<std::jthread>& prompt_worker, std::string_view reason)
+{
+  if (!prompt_worker) return {};
+
+  auto cleared = close_input_and_cancel(run_state);
+  static_cast<void>(cancel_pending_resolvers(pending_state));
+  if (auto written = write_skipped_queue_events(output, session, session_mutex, cleared, reason); !written) {
+    return written;
+  }
+  if (auto written = write_follow_up_errors(output, cleared.follow_up_messages, reason); !written) return written;
+  set_active_run(run_state, false);
+  prompt_worker.reset();
   return {};
 }
 

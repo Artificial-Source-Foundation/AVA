@@ -39,12 +39,6 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
   }
   std::string const injected_provider_id = session.model.provider_id;
 
-  auto reap_finished_prompt = [&] {
-    if (prompt_worker && !rpc::active_run(run_state)) {
-      prompt_worker.reset();
-    }
-  };
-
   output.on_write_failure = [&] {
     static_cast<void>(rpc::close_input_and_cancel(run_state));
     static_cast<void>(rpc::cancel_pending_resolvers(pending_state));
@@ -63,7 +57,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       break;
     }
     if (!*read_line) break;
-    reap_finished_prompt();
+    rpc::reap_prompt_worker(prompt_worker, run_state);
     if (auto async_error = rpc::take_async_error(run_state)) return std::unexpected(std::move(*async_error));
     auto command = parse_rpc_command_line(line);
     if (!command) {
@@ -237,16 +231,10 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     if (auto written = rpc::write_error(output, command->id, error); !written) return written;
   }
 
-  if (prompt_worker) {
-    auto cleared = rpc::close_input_and_cancel(run_state);
-    static_cast<void>(rpc::cancel_pending_resolvers(pending_state));
-    if (auto written = rpc::write_skipped_queue_events(output, session, session_mutex, cleared, "canceled"); !written) {
-      return written;
-    }
-    if (auto written = rpc::write_follow_up_errors(output, cleared.follow_up_messages, "canceled"); !written)
-      return written;
-    prompt_worker.reset();
-  }
+  if (auto closed =
+          rpc::close_prompt_worker(output, session, session_mutex, run_state, pending_state, prompt_worker, "canceled");
+      !closed)
+    return closed;
   if (auto async_error = rpc::take_async_error(run_state)) return std::unexpected(std::move(*async_error));
   if (input_read_error) return std::unexpected(std::move(*input_read_error));
 

@@ -102,6 +102,7 @@ add_library(ava_core
   src/ava/plugin/discovery.cpp
   src/ava/plugin/enablement.cpp
   src/ava/plugin/manifest.cpp
+  src/ava/plugin/manifest_support.cpp
   src/ava/plugin/process_support.cpp
   src/ava/plugin/protocol.cpp
   src/ava/plugin/resources.cpp
@@ -298,6 +299,7 @@ if(AVA_BUILD_TESTS)
     tests/message_builder_support_tests.cpp
     tests/mcp_config_support_tests.cpp
     tests/mcp_tests.cpp
+    tests/plugin_manifest_support_tests.cpp
     tests/plugin_tests.cpp
     tests/provider_anthropic_tests.cpp
     tests/provider_anthropic_request_support_tests.cpp
@@ -368,6 +370,7 @@ if(AVA_BUILD_TESTS)
     agent_tool_dispatcher
     lsp
     message_builder_support
+    plugin_manifest_support
     plugin
     mcp_config_support
     mcp

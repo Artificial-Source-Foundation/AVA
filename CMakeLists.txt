@@ -115,6 +115,7 @@ add_library(ava_core
   src/ava/plugin/resources.cpp
   src/ava/plugin/runner.cpp
   src/ava/plugin/runner_io.cpp
+  src/ava/plugin/runner_lifecycle.cpp
   src/ava/plugin/runner_requests.cpp
   src/ava/plugin/runner_support.cpp
   src/ava/plugin/stream_buffers.cpp
@@ -332,6 +333,7 @@ if(AVA_BUILD_TESTS)
     tests/mcp_tests.cpp
     tests/plugin_enablement_support_tests.cpp
     tests/plugin_manifest_support_tests.cpp
+    tests/plugin_runner_lifecycle_tests.cpp
     tests/plugin_tests.cpp
     tests/permissions_command_policy_support_tests.cpp
     tests/provider_anthropic_tests.cpp
@@ -429,6 +431,7 @@ if(AVA_BUILD_TESTS)
     message_builder_support
     plugin_enablement_support
     plugin_manifest_support
+    plugin_runner_lifecycle
     plugin
     permissions_command_policy_support
     mcp_config_support

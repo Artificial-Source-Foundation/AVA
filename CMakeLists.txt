@@ -163,6 +163,7 @@ add_library(ava_app
   src/ava/app/rpc/resolvers.cpp
   src/ava/app/rpc/run_state.cpp
   src/ava/app/rpc/serialization.cpp
+  src/ava/app/rpc/session_commands.cpp
   src/ava/app/rpc_mode.cpp
   src/ava/app/runtime.cpp
   src/ava/app/runtime_compaction.cpp

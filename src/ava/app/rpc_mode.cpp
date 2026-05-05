@@ -9,6 +9,7 @@
 #include "ava/app/rpc/resolvers.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/rpc/serialization.h"
+#include "ava/app/rpc/session_commands.h"
 
 #include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
@@ -43,12 +44,6 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     if (prompt_worker && !rpc::active_run(run_state)) {
       prompt_worker.reset();
     }
-  };
-
-  auto write_state_response = [&](std::string_view id) -> ava::core::VoidResult {
-    bool const canceled = rpc::cancel_requested(run_state);
-    std::lock_guard lock(session_mutex);
-    return rpc::write_success(output, id, rpc::state_result_json(session, canceled));
   };
 
   output.on_write_failure = [&] {
@@ -90,10 +85,15 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       continue;
     }
 
-    if (command->type == "get_state") {
-      if (auto written = write_state_response(command->id); !written) return written;
-      continue;
-    }
+    auto session_command =
+        rpc::handle_session_rpc_command(rpc::RpcSessionCommandContext{.command = *command,
+                                                                      .session = session,
+                                                                      .open_options = open_options,
+                                                                      .output = output,
+                                                                      .run_state = run_state,
+                                                                      .session_mutex = session_mutex});
+    if (!session_command) return std::unexpected(std::move(session_command.error()));
+    if (*session_command) continue;
 
     if (command->type == "permission_grants") {
       if (auto written =
@@ -131,206 +131,6 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
                                                    rpc::session_id_snapshot(session, session_mutex), cleared);
       if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
       if (auto written = rpc::write_success(output, command->id, cleared); !written) return written;
-      continue;
-    }
-
-    if (command->type == "list_sessions") {
-      std::lock_guard lock(session_mutex);
-      auto sessions_json = rpc::list_sessions_result_json(session);
-      if (!sessions_json) {
-        if (auto written = rpc::write_error(output, command->id, sessions_json.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_success(output, command->id, *sessions_json); !written) return written;
-      continue;
-    }
-
-    if (command->type == "list_models") {
-      std::lock_guard lock(session_mutex);
-      auto models_json = rpc::list_models_result_json(session);
-      if (!models_json) {
-        if (auto written = rpc::write_error(output, command->id, models_json.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_success(output, command->id, *models_json); !written) return written;
-      continue;
-    }
-
-    if (command->type == "get_messages") {
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      std::lock_guard lock(session_mutex);
-      auto messages_json = rpc::messages_result_json(session);
-      if (!messages_json) {
-        if (auto written = rpc::write_error(output, command->id, messages_json.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_success(output, command->id, *messages_json); !written) return written;
-      continue;
-    }
-
-    if (command->type == "get_session_stats") {
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      std::lock_guard lock(session_mutex);
-      auto stats_json = rpc::session_stats_result_json(session);
-      if (!stats_json) {
-        if (auto written = rpc::write_error(output, command->id, stats_json.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_success(output, command->id, *stats_json); !written) return written;
-      continue;
-    }
-
-    if (command->type == "validate_session") {
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      std::lock_guard lock(session_mutex);
-      auto validation_json = rpc::session_validation_result_json(session);
-      if (!validation_json) {
-        if (auto written = rpc::write_error(output, command->id, validation_json.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_success(output, command->id, *validation_json); !written) return written;
-      continue;
-    }
-
-    if (command->type == "set_model" || command->type == "cycle_model") {
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      std::lock_guard lock(session_mutex);
-      ava::core::Result<ava::config::ModelInfo> selected = command->type == "set_model"
-                                                               ? rpc::resolve_requested_model(session, *command)
-                                                               : rpc::next_runtime_model(session);
-      if (!selected) {
-        if (auto written = rpc::write_error(output, command->id, selected.error()); !written) return written;
-        continue;
-      }
-      auto switched = switch_runtime_model(session, std::move(*selected));
-      if (!switched) {
-        if (auto written = rpc::write_error(output, command->id, switched.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_success(output, command->id,
-                                            rpc::state_result_json(session, rpc::cancel_requested(run_state)));
-          !written) {
-        return written;
-      }
-      continue;
-    }
-
-    if (command->type == "set_reasoning" || command->type == "clear_reasoning") {
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      std::optional<RuntimeReasoningSelection> selection = std::nullopt;
-      if (command->type == "set_reasoning") {
-        if (!command->reasoning_level || command->reasoning_level->empty()) {
-          if (auto written =
-                  rpc::write_error(output, command->id, rpc::invalid_rpc("set_reasoning requires reasoning_level"));
-              !written) {
-            return written;
-          }
-          continue;
-        }
-        selection = RuntimeReasoningSelection{.level = *command->reasoning_level,
-                                              .budget_tokens = command->reasoning_budget_tokens,
-                                              .display = command->reasoning_display.value_or("")};
-      }
-
-      std::lock_guard lock(session_mutex);
-      auto changed = set_runtime_reasoning(session, std::move(selection));
-      if (!changed) {
-        if (auto written = rpc::write_error(output, command->id, changed.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_success(output, command->id,
-                                            rpc::state_result_json(session, rpc::cancel_requested(run_state)));
-          !written) {
-        return written;
-      }
-      continue;
-    }
-
-    if (command->type == "new_session") {
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      std::lock_guard lock(session_mutex);
-      auto created = rpc::create_new_session(session, open_options);
-      if (!created) {
-        if (auto written = rpc::write_error(output, command->id, created.error()); !written) return written;
-        continue;
-      }
-      session = std::move(*created);
-      {
-        std::lock_guard state_lock(run_state.mutex);
-        run_state.cancel_requested.store(false, std::memory_order_relaxed);
-      }
-      if (auto written = rpc::write_success(output, command->id, rpc::state_result_json(session, false)); !written) {
-        return written;
-      }
-      continue;
-    }
-
-    if (command->type == "open_session" || command->type == "switch_session") {
-      if (!command->session_id || command->session_id->empty()) {
-        if (auto written =
-                rpc::write_error(output, command->id, rpc::invalid_rpc(command->type + " requires session_id"));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      std::lock_guard lock(session_mutex);
-      auto opened = rpc::open_requested_session(session, open_options, *command->session_id);
-      if (!opened) {
-        if (auto written = rpc::write_error(output, command->id, opened.error()); !written) return written;
-        continue;
-      }
-      session = std::move(*opened);
-      {
-        std::lock_guard state_lock(run_state.mutex);
-        run_state.cancel_requested.store(false, std::memory_order_relaxed);
-      }
-      if (auto written = rpc::write_success(output, command->id, rpc::state_result_json(session, false)); !written) {
-        return written;
-      }
       continue;
     }
 

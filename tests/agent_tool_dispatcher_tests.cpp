@@ -27,6 +27,7 @@
 #include "ava/agent/tool_dispatch_support.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_file_dispatch.h"
+#include "ava/agent/tool_process_dispatch.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
 #include "ava/agent/tool_result_json.h"
@@ -472,6 +473,32 @@ void test_search_tool_dispatch_helpers()
   expect(!no_ignore.success && no_ignore.result_text.find("\"ok\":false") != std::string::npos &&
              no_ignore.result_text.find("explicit local control") != std::string::npos,
          "search dispatch helper rejects provider no_ignore opt-outs");
+}
+
+void test_process_tool_dispatch_helpers()
+{
+  auto const root = temp_root() / "process-tool-dispatch";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  std::filesystem::create_directories(root);
+
+  ava::tools::ToolContext const context{.workspace_dir = root, .mode = ava::agent::Mode::Build};
+  auto pwd = ava::agent::detail::bash_result(
+      context,
+      ava::agent::ProviderToolCall{.id = "call_bash",
+                                   .name = "bash",
+                                   .arguments_json = "{\"command\":\"pwd\",\"timeout_ms\":1000,\"max_bytes\":4096}"});
+  auto const output = ava::core::json::string_field(pwd.result_text, "output");
+  expect(pwd.success && pwd.payload.status == ava::agent::ToolResultStatus::Success && output &&
+             output->find(root.generic_string()) != std::string::npos &&
+             pwd.result_text.find("\"exit_code\":0") != std::string::npos,
+         "process dispatch helper runs safe commands in the workspace and returns exit metadata");
+
+  auto missing_command = ava::agent::detail::bash_result(
+      context, ava::agent::ProviderToolCall{.id = "call_bash_missing", .name = "bash", .arguments_json = "{}"});
+  expect(!missing_command.success && missing_command.result_text.find("\"ok\":false") != std::string::npos &&
+             missing_command.result_text.find("command") != std::string::npos,
+         "process dispatch helper maps missing provider command arguments to tool errors");
 }
 
 void test_question_answer_validation_helpers()
@@ -2768,6 +2795,7 @@ void run_agent_tool_dispatcher_tests()
   test_tool_dispatch_support_helpers();
   test_file_tool_dispatch_helpers();
   test_search_tool_dispatch_helpers();
+  test_process_tool_dispatch_helpers();
   test_question_answer_validation_helpers();
   test_session_recorder_helpers();
   test_tool_dispatcher();

@@ -22,6 +22,7 @@
 #include "ava/agent/mode.h"
 #include "ava/agent/patch_staging.h"
 #include "ava/agent/question_answer_validation.h"
+#include "ava/agent/session_recorder.h"
 #include "ava/agent/tool_arguments.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
@@ -298,6 +299,117 @@ void test_question_answer_validation_helpers()
   expect(!oversized_custom && oversized_custom.error().message().find("custom text is too long") != std::string::npos &&
              oversized_custom.error().format().find("custom_text") != std::string::npos,
          "question answer validation rejects oversized custom text with field context");
+}
+
+void test_session_recorder_helpers()
+{
+  auto const root = temp_root() / "session-recorder";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{
+      .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "record"});
+
+  auto user_id = ava::agent::append_user_message(store, "hello\nuser");
+  expect(user_id && !user_id->empty(), "session recorder appends user messages and returns entry id");
+  auto replayed =
+      user_id ? ava::agent::append_replay_user_message(store, "hello\nuser", *user_id) : ava::core::VoidResult{};
+  expect(replayed.has_value(), "session recorder appends replay user messages");
+
+  ava::provider::TokenUsage usage;
+  usage.input_tokens = 3;
+  usage.output_tokens = 2;
+  usage.total_tokens = 5;
+  usage.estimated = false;
+  expect(ava::agent::append_assistant_message(store, "assistant text", 1, usage, 0.001L).has_value(),
+         "session recorder appends assistant messages with usage");
+
+  auto reasoning_json = ava::agent::reasoning_block_data_json(
+      ava::agent::ParsedReasoningBlock{
+          .text = "visible", .format = "reasoning_content", .signature = "sig", .redacted_data = "", .redacted = true},
+      "provider", "model");
+  expect(reasoning_json.find("\"provider\":\"provider\"") != std::string::npos &&
+             reasoning_json.find("\"redacted\":true") != std::string::npos,
+         "session recorder formats reasoning block data");
+  ava::agent::ParsedReasoningBlock visible_reasoning;
+  visible_reasoning.text = "visible";
+  visible_reasoning.format = "reasoning_content";
+  expect(ava::agent::append_reasoning_block(store, visible_reasoning, "provider", "model").has_value(),
+         "session recorder appends non-empty reasoning blocks");
+  expect(ava::agent::append_reasoning_block(store, ava::agent::ParsedReasoningBlock{}, "provider", "model").has_value(),
+         "session recorder skips empty reasoning blocks without failing");
+
+  expect(ava::agent::append_tool_call(
+             store,
+             ava::agent::ProviderToolCall{.id = "call_read", .name = "read_file", .arguments_json = "{\"path\":\"a\"}"})
+             .has_value(),
+         "session recorder appends tool calls");
+  ava::agent::ToolResultPayload payload;
+  payload.status = ava::agent::ToolResultStatus::Success;
+  payload.summary = "read 13 bytes";
+  payload.content = "file contents";
+  payload.content_type = "text/plain";
+  payload.changed_paths = {"a.txt"};
+  payload.output_bytes = 13;
+  payload.total_bytes = 13;
+  expect(ava::agent::append_tool_result(store, ava::agent::ToolDispatchResult{.call_id = "call_read",
+                                                                              .name = "read_file",
+                                                                              .success = true,
+                                                                              .result_text = "file contents",
+                                                                              .payload = payload})
+             .has_value(),
+         "session recorder appends structured tool results");
+  expect(ava::agent::append_permission_decision(
+             store, ava::tools::PermissionAuditEvent{.permission_request_id = "perm_read",
+                                                     .operation = ava::permissions::Operation::ReadFile,
+                                                     .mode = ava::agent::Mode::Build,
+                                                     .tool_name = "read_file",
+                                                     .action = ava::permissions::PermissionAction::Allow,
+                                                     .reason = "read allowed",
+                                                     .risk = ava::permissions::PermissionRisk::Low,
+                                                     .target_path = workspace / "a.txt",
+                                                     .command = "",
+                                                     .resolution = "allow",
+                                                     .resolution_source = "policy"})
+             .has_value(),
+         "session recorder appends permission decisions");
+  auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "provider failed");
+  error.with_context("status", "500");
+  expect(ava::agent::append_error(store, error).has_value(), "session recorder appends error entries");
+  expect(ava::agent::append_cancel(store, "before_provider_call").has_value(),
+         "session recorder appends cancel entries");
+
+  auto entries = store.load();
+  expect(entries && entries->size() == 9, "session recorder persists expected entry count");
+  if (!entries || entries->size() != 9) return;
+  expect((*entries)[0].type == ava::session::EntryType::UserMessage &&
+             ava::core::json::string_field((*entries)[0].data_json, "text") == "hello\nuser",
+         "session recorder user message text round trips");
+  expect((*entries)[1].type == ava::session::EntryType::UserMessage &&
+             ava::core::json::string_field((*entries)[1].data_json, "replay_of") == *user_id &&
+             (*entries)[1].data_json.find("\"internal_replay\":true") != std::string::npos,
+         "session recorder replay user message references original entry");
+  expect((*entries)[2].type == ava::session::EntryType::AssistantMessage &&
+             ava::core::json::integer_field((*entries)[2].data_json, "tool_calls") == 1 &&
+             (*entries)[2].data_json.find("\"cost_usd\"") != std::string::npos,
+         "session recorder assistant message stores usage and tool count");
+  expect((*entries)[4].type == ava::session::EntryType::ToolCall &&
+             ava::core::json::string_field((*entries)[4].data_json, "call_id") == "call_read",
+         "session recorder tool call stores call id");
+  expect((*entries)[5].type == ava::session::EntryType::ToolResult &&
+             (*entries)[5].data_json.find("\"structured_result\"") != std::string::npos &&
+             (*entries)[5].data_json.find("\"changed_paths\"") != std::string::npos,
+         "session recorder tool result stores structured payload metadata");
+  expect((*entries)[6].type == ava::session::EntryType::PermissionDecision &&
+             ava::core::json::string_field((*entries)[6].data_json, "permission_request_id") == "perm_read",
+         "session recorder permission decision stores semantic request id");
+  expect((*entries)[7].type == ava::session::EntryType::Error &&
+             ava::core::json::string_field((*entries)[7].data_json, "message") == "provider failed",
+         "session recorder error entry stores message");
+  expect((*entries)[8].type == ava::session::EntryType::Cancel &&
+             ava::core::json::string_field((*entries)[8].data_json, "boundary") == "before_provider_call",
+         "session recorder cancel entry stores boundary");
 }
 
 void test_tool_dispatcher()
@@ -2452,6 +2564,7 @@ void run_agent_tool_dispatcher_tests()
   test_patch_staging_helpers();
   test_tool_result_json_helpers();
   test_question_answer_validation_helpers();
+  test_session_recorder_helpers();
   test_tool_dispatcher();
   test_tool_dispatcher_plan_mode_denies_mutation();
   test_agent_loop_text_only_turn();

@@ -78,6 +78,7 @@ add_library(ava_core
   src/ava/plugin/discovery.cpp
   src/ava/plugin/enablement.cpp
   src/ava/plugin/manifest.cpp
+  src/ava/plugin/process_support.cpp
   src/ava/plugin/protocol.cpp
   src/ava/plugin/runner.cpp
   src/ava/plugin/stream_buffers.cpp

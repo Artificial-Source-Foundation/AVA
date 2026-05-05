@@ -48,6 +48,7 @@ add_library(ava_core
   src/ava/agent/provider_output_validation.cpp
   src/ava/agent/question.cpp
   src/ava/agent/stream_bridge.cpp
+  src/ava/agent/tool_arguments.cpp
   src/ava/agent/tool_dispatcher.cpp
   src/ava/agent/tool_registry.cpp
   src/ava/agent/tool_result.cpp

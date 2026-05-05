@@ -19,6 +19,7 @@
 
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
+#include "ava/agent/tool_arguments.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
@@ -125,6 +126,56 @@ class OverflowOnceProvider final : public ava::provider::Provider {
   ava::provider::OpenAIProvider delegate_;
   mutable int build_calls_ = 0;
 };
+
+void test_provider_tool_argument_helpers()
+{
+  auto required = ava::agent::required_string_arg("{\"path\":\"src/main.cpp\"}", "path", "read_file");
+  expect(required && *required == "src/main.cpp",
+         required ? "tool arguments parse required strings"
+                  : "tool arguments parse required strings: " + required.error().format());
+
+  auto missing = ava::agent::required_string_arg("{}", "path", "read_file");
+  expect(!missing && missing.error().message().find("required") != std::string::npos &&
+             missing.error().format().find("path") != std::string::npos,
+         "tool arguments reject missing required strings with context");
+
+  auto safe = ava::agent::required_safe_string_arg("{\"path\":\"src/main.cpp\"}", "path", "read_file");
+  expect(safe && *safe == "src/main.cpp", "tool arguments accept safe provider strings");
+
+  auto control = ava::agent::required_safe_string_arg("{\"path\":\"bad\\npath\"}", "path", "read_file");
+  expect(!control && control.error().message().find("control byte") != std::string::npos,
+         "tool arguments reject control bytes in safe strings");
+
+  auto text = ava::agent::required_text_arg("{\"content\":\"line\\nline\"}", "content", "write_file");
+  expect(text && *text == "line\nline", "tool arguments allow newlines in text strings");
+
+  auto nul_text = ava::agent::required_text_arg("{\"content\":\"bad\\u0000text\"}", "content", "write_file");
+  expect(!nul_text && nul_text.error().message().find("NUL") != std::string::npos,
+         "tool arguments reject NUL bytes in text strings");
+
+  expect(ava::agent::optional_size_arg("{\"max_bytes\":999999}", "max_bytes", 10, 100) == 100 &&
+             ava::agent::optional_size_arg("{\"max_bytes\":0}", "max_bytes", 10, 100) == 10 &&
+             ava::agent::optional_size_arg("{}", "max_bytes", 10, 100) == 10,
+         "tool arguments clamp optional sizes and preserve fallbacks");
+
+  auto default_bool = ava::agent::optional_bool_arg("{}", "no_ignore", false, "glob");
+  auto true_bool = ava::agent::optional_bool_arg("{\"no_ignore\":true}", "no_ignore", false, "glob");
+  auto invalid_bool = ava::agent::optional_bool_arg("{\"no_ignore\":\"true\"}", "no_ignore", false, "glob");
+  expect(default_bool && !*default_bool && true_bool && *true_bool && !invalid_bool,
+         "tool arguments parse strict optional booleans");
+
+  auto rejected_no_ignore = ava::agent::reject_provider_no_ignore("{\"no_ignore\":true}", "glob");
+  expect(
+      !rejected_no_ignore && rejected_no_ignore.error().message().find("explicit local control") != std::string::npos,
+      "tool arguments reject provider no_ignore opt-out");
+
+  ava::tools::ToolContext context;
+  context.workspace_dir = "/tmp/ava-workspace";
+  expect(
+      ava::agent::workspace_path(context, "relative.txt") == std::filesystem::path("/tmp/ava-workspace/relative.txt") &&
+          ava::agent::workspace_path(context, "/absolute.txt") == std::filesystem::path("/absolute.txt"),
+      "tool arguments resolve workspace-relative paths");
+}
 
 void test_tool_dispatcher()
 {
@@ -2274,6 +2325,7 @@ void test_agent_loop_max_iteration_guard()
 
 void run_agent_tool_dispatcher_tests()
 {
+  test_provider_tool_argument_helpers();
   test_tool_dispatcher();
   test_tool_dispatcher_plan_mode_denies_mutation();
   test_agent_loop_text_only_turn();

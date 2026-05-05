@@ -15,6 +15,7 @@
 #include "ava/plugin/enablement.h"
 #include "ava/plugin/manifest.h"
 #include "ava/plugin/protocol.h"
+#include "ava/plugin/resources.h"
 #include "ava/plugin/runner.h"
 #include "ava/plugin/stream_buffers.h"
 #include "ava/plugin/tool_broker.h"
@@ -205,6 +206,54 @@ void test_plugin_manifest_parsing()
       {});
   expect(!bad_resource_path && bad_resource_path.error().message().find("safe relative path") != std::string::npos,
          "plugin manifest rejects prompt and skill paths that escape the plugin directory");
+}
+
+void test_plugin_resource_helpers()
+{
+  auto const root = temp_root() / "plugin-resources";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const plugin_dir = root / "plugin";
+  auto const manifest_path = plugin_dir / "plugin.json";
+  write_text(manifest_path, valid_manifest_json("com.example.resources"));
+  write_text(plugin_dir / "prompts" / "review.md", "review prompt");
+  write_text(plugin_dir / "skills" / "triage.md", "triage skill");
+
+  auto manifest = ava::plugin::load_plugin_manifest(manifest_path);
+  expect(manifest.has_value(), manifest ? "plugin resource helper test manifest loads"
+                                        : "plugin resource helper test manifest loads: " + manifest.error().format());
+  if (!manifest) return;
+
+  auto const* prompt = ava::plugin::find_plugin_resource(manifest->contributes.prompts, "review");
+  auto const* missing = ava::plugin::find_plugin_resource(manifest->contributes.prompts, "missing");
+  expect(prompt != nullptr && missing == nullptr, "plugin resource helper finds resources by contribution name");
+  if (prompt) {
+    auto path = ava::plugin::resolve_plugin_resource_path(*manifest, *prompt);
+    expect(path && *path == std::filesystem::weakly_canonical(plugin_dir / "prompts" / "review.md"),
+           "plugin resource helper resolves resource paths inside the plugin directory");
+    auto content = ava::plugin::read_plugin_resource_text(*manifest, *prompt);
+    expect(content && *content == "review prompt", "plugin resource helper reads bounded resource text");
+  }
+
+  ava::plugin::PluginManifest unsafe_manifest;
+  unsafe_manifest.id = "com.example.resources";
+  unsafe_manifest.directory = plugin_dir;
+  auto escape = ava::plugin::resolve_plugin_resource_path(
+      unsafe_manifest, ava::plugin::PluginResourceContribution{.name = "escape", .description = "", .path = "../x"});
+  expect(!escape && escape.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "plugin resource helper rejects paths that escape the plugin directory");
+
+  auto directory_resource = ava::plugin::read_plugin_resource_text(
+      *manifest, ava::plugin::PluginResourceContribution{.name = "dir", .description = "", .path = "prompts"});
+  expect(!directory_resource && directory_resource.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "plugin resource helper rejects directories as resource files");
+
+  write_text(plugin_dir / "prompts" / "too-large.md", std::string(ava::plugin::kMaxPluginResourceBytes + 1, 'x'));
+  auto oversized = ava::plugin::read_plugin_resource_text(
+      *manifest,
+      ava::plugin::PluginResourceContribution{.name = "too-large", .description = "", .path = "prompts/too-large.md"});
+  expect(!oversized && oversized.error().message().find("size cap") != std::string::npos,
+         "plugin resource helper rejects oversized resource files before returning content");
 }
 
 void test_plugin_discovery()
@@ -1126,6 +1175,7 @@ void test_plugin_tool_registry_skips_name_collisions()
 void run_plugin_tests()
 {
   test_plugin_manifest_parsing();
+  test_plugin_resource_helpers();
   test_plugin_discovery();
   test_plugin_enablement();
   test_plugin_protocol_helpers();

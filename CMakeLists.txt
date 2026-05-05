@@ -86,6 +86,7 @@ add_library(ava_core
   src/ava/plugin/manifest.cpp
   src/ava/plugin/process_support.cpp
   src/ava/plugin/protocol.cpp
+  src/ava/plugin/resources.cpp
   src/ava/plugin/runner.cpp
   src/ava/plugin/stream_buffers.cpp
   src/ava/plugin/tool_broker.cpp

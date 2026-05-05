@@ -1,10 +1,8 @@
 #include "ava/app/command_plugins.h"
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <filesystem>
-#include <fstream>
 #include <optional>
 #include <sstream>
 #include <utility>
@@ -16,6 +14,7 @@
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/enablement.h"
 #include "ava/plugin/manifest.h"
+#include "ava/plugin/resources.h"
 #include "ava/plugin/runner.h"
 
 namespace ava::app {
@@ -76,113 +75,6 @@ ava::plugin::PluginCommandContribution const* find_plugin_command(ava::plugin::P
     if (command.name == command_name) return &command;
   }
   return nullptr;
-}
-
-ava::plugin::PluginResourceContribution const* find_plugin_resource(
-    std::vector<ava::plugin::PluginResourceContribution> const& resources, std::string_view name)
-{
-  for (auto const& resource : resources) {
-    if (resource.name == name) return &resource;
-  }
-  return nullptr;
-}
-
-bool path_is_within(std::filesystem::path const& base, std::filesystem::path const& target)
-{
-  if (target == base) return true;
-  std::error_code relative_error;
-  auto const relative = std::filesystem::relative(target, base, relative_error);
-  if (relative_error || relative.empty()) return false;
-  return *relative.begin() != "..";
-}
-
-ava::core::Result<std::filesystem::path> plugin_resource_path(ava::plugin::PluginManifest const& manifest,
-                                                              ava::plugin::PluginResourceContribution const& resource)
-{
-  std::error_code base_error;
-  auto const canonical_base = std::filesystem::weakly_canonical(manifest.directory, base_error);
-  auto const base_path = base_error ? std::filesystem::absolute(manifest.directory).lexically_normal() : canonical_base;
-  auto const raw_target = manifest.directory / resource.path;
-  std::error_code target_error;
-  auto const canonical_target = std::filesystem::weakly_canonical(raw_target, target_error);
-  auto const target_path = target_error ? std::filesystem::absolute(raw_target).lexically_normal() : canonical_target;
-  if (!path_is_within(base_path, target_path)) {
-    auto error =
-        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin resource path escapes plugin directory");
-    error.with_context("plugin", manifest.id);
-    error.with_context("resource", resource.name);
-    error.with_context("path", resource.path);
-    return std::unexpected(std::move(error));
-  }
-  return target_path;
-}
-
-ava::core::Result<std::string> read_plugin_resource(ava::plugin::PluginManifest const& manifest,
-                                                    ava::plugin::PluginResourceContribution const& resource)
-{
-  constexpr std::size_t max_resource_bytes = 64 * 1024;
-  auto path = plugin_resource_path(manifest, resource);
-  if (!path) return std::unexpected(std::move(path.error()));
-
-  std::error_code type_error;
-  if (!std::filesystem::is_regular_file(*path, type_error)) {
-    auto error = ava::core::Error(type_error ? ava::core::ErrorCategory::Io : ava::core::ErrorCategory::InvalidArgument,
-                                  "plugin resource must be a regular file");
-    error.with_context("plugin", manifest.id);
-    error.with_context("resource", resource.name);
-    error.with_context("path", path->string());
-    if (type_error) error.with_context("cause", type_error.message());
-    return std::unexpected(std::move(error));
-  }
-
-  std::error_code size_error;
-  auto const size = std::filesystem::file_size(*path, size_error);
-  if (size_error) {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect plugin resource size")
-                               .with_context("plugin", manifest.id)
-                               .with_context("resource", resource.name)
-                               .with_context("path", path->string())
-                               .with_context("cause", size_error.message()));
-  }
-  if (size > max_resource_bytes) {
-    return std::unexpected(
-        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin resource exceeds size cap")
-            .with_context("plugin", manifest.id)
-            .with_context("resource", resource.name)
-            .with_context("path", path->string())
-            .with_context("max_bytes", std::to_string(max_resource_bytes)));
-  }
-
-  std::ifstream file(*path, std::ios::binary);
-  if (!file) {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to open plugin resource")
-                               .with_context("plugin", manifest.id)
-                               .with_context("resource", resource.name)
-                               .with_context("path", path->string()));
-  }
-  std::string contents;
-  std::array<char, 4096> buffer{};
-  while (file) {
-    file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-    auto const count = file.gcount();
-    if (count <= 0) continue;
-    if (contents.size() + static_cast<std::size_t>(count) > max_resource_bytes) {
-      return std::unexpected(
-          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin resource exceeds size cap while reading")
-              .with_context("plugin", manifest.id)
-              .with_context("resource", resource.name)
-              .with_context("path", path->string())
-              .with_context("max_bytes", std::to_string(max_resource_bytes)));
-    }
-    contents.append(buffer.data(), static_cast<std::size_t>(count));
-  }
-  if (file.bad()) {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read plugin resource")
-                               .with_context("plugin", manifest.id)
-                               .with_context("resource", resource.name)
-                               .with_context("path", path->string()));
-  }
-  return contents;
 }
 
 std::string format_plugin_resource_list_text(ava::plugin::PluginStatus const& status, RuntimeSession const& session,
@@ -485,12 +377,12 @@ ava::core::Result<CommandResult> run_plugins_command(RuntimeSession& session, Co
     }
     auto const& resources = subcommand == "prompt" ? status->plugin.manifest.contributes.prompts
                                                    : status->plugin.manifest.contributes.skills;
-    auto const* resource = find_plugin_resource(resources, args[2]);
+    auto const* resource = ava::plugin::find_plugin_resource(resources, args[2]);
     if (!resource) {
       add_output(result, std::string(subcommand) + " not found: " + sanitize_inline_text(args[2]));
       return result;
     }
-    auto content = read_plugin_resource(status->plugin.manifest, *resource);
+    auto content = ava::plugin::read_plugin_resource_text(status->plugin.manifest, *resource);
     if (!content) {
       add_output(result, content.error().format());
       return result;

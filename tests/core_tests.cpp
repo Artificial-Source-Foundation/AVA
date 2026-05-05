@@ -26,6 +26,7 @@ void run_app_rpc_prompt_tests();
 void run_app_rpc_query_tests();
 void run_app_rpc_runtime_control_tests();
 void run_app_rpc_session_tests();
+void run_app_runtime_compaction_support_tests();
 void run_app_runtime_tests();
 void run_app_event_bus_tests();
 void run_provider_openai_tests();
@@ -72,6 +73,7 @@ constexpr std::array kTestSuites{
     TestSuite{"app_rpc_query", run_app_rpc_query_tests},
     TestSuite{"app_rpc_runtime_control", run_app_rpc_runtime_control_tests},
     TestSuite{"app_rpc_session", run_app_rpc_session_tests},
+    TestSuite{"app_runtime_compaction_support", run_app_runtime_compaction_support_tests},
     TestSuite{"app_runtime", run_app_runtime_tests},
     TestSuite{"provider_openai", run_provider_openai_tests},
     TestSuite{"provider_anthropic", run_provider_anthropic_tests},

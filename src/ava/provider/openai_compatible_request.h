@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "ava/core/result.h"
+#include "ava/provider/openai_compatible_tool_schema.h"
 #include "ava/provider/provider.h"
 
 namespace ava::provider {
@@ -24,8 +25,6 @@ struct OpenAICompatibleProviderOptions {
 
 [[nodiscard]] std::string openai_compatible_join_url(std::string_view base_url, std::string_view path);
 [[nodiscard]] std::string openai_compatible_temperature_json(double value);
-[[nodiscard]] ava::core::VoidResult validate_openai_compatible_tools_json(ProviderRequest const& request);
-[[nodiscard]] ava::core::Result<std::string> chat_completion_tool_json(std::string_view schema);
 [[nodiscard]] std::vector<std::string> openai_compatible_chat_messages_for_message(ChatMessage const& message,
                                                                                    std::string_view reasoning_format,
                                                                                    bool preserve_reasoning_content);

@@ -24,6 +24,7 @@
 #include "ava/agent/question_answer_validation.h"
 #include "ava/agent/session_recorder.h"
 #include "ava/agent/tool_arguments.h"
+#include "ava/agent/tool_dispatch_support.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
@@ -328,6 +329,49 @@ void test_tool_timeline_helpers()
              timeline.total_matches == 4 && timeline.spill_path == "/tmp/ava-spill/result.jsonl" &&
              timeline.spill_truncated,
          "tool timeline helpers project structured dispatch metadata");
+}
+
+void test_tool_dispatch_support_helpers()
+{
+  ava::agent::ProviderToolCall const call{.id = "call_read", .name = "read_file", .arguments_json = ""};
+  auto normalized = ava::agent::detail::normalize_provider_tool_call(call);
+  expect(normalized.id == "call_read" && normalized.name == "read_file" && normalized.arguments_json == "{}",
+         "tool dispatch support normalizes empty provider arguments to an object");
+  expect(ava::agent::detail::validate_provider_tool_call(normalized).has_value(),
+         "tool dispatch support accepts bounded provider call ids");
+
+  auto missing_id = ava::agent::detail::validate_provider_tool_call(
+      ava::agent::ProviderToolCall{.id = "", .name = "read_file", .arguments_json = "{}"});
+  expect(!missing_id && missing_id.error().message().find("id is required") != std::string::npos,
+         "tool dispatch support rejects missing provider call ids");
+
+  auto long_id = ava::agent::detail::validate_provider_tool_call(
+      ava::agent::ProviderToolCall{.id = std::string(257, 'x'), .name = "read_file", .arguments_json = "{}"});
+  expect(!long_id && long_id.error().format().find("max_bytes: 256") != std::string::npos,
+         "tool dispatch support rejects overlong provider call ids");
+
+  auto control_id = ava::agent::detail::validate_provider_tool_call(
+      ava::agent::ProviderToolCall{.id = std::string("call\nbad", 8), .name = "read_file", .arguments_json = "{}"});
+  expect(!control_id && control_id.error().message().find("control byte") != std::string::npos,
+         "tool dispatch support rejects control bytes in provider call ids");
+
+  ava::tools::ToolContext const context{.workspace_dir = temp_root(), .mode = ava::agent::Mode::Build};
+  auto tool_context = ava::agent::detail::context_for_provider_tool(context, normalized);
+  expect(tool_context.permission_tool_name == "read_file" && tool_context.current_tool_name == "read_file" &&
+             tool_context.current_call_id == "call_read",
+         "tool dispatch support threads provider call metadata into tool context");
+
+  auto canceled = ava::agent::detail::tool_error_result(normalized, ava::agent::detail::canceled_error(normalized));
+  expect(!canceled.success && canceled.payload.status == ava::agent::ToolResultStatus::Canceled &&
+             canceled.result_text.find("\"ok\":false") != std::string::npos,
+         "tool dispatch support maps cancellation errors to semantic canceled payloads");
+
+  auto raw_lsp_error = ava::core::Error(ava::core::ErrorCategory::Io, "raw server detail");
+  auto lsp_error = ava::agent::detail::lsp_error_result(
+      ava::agent::ProviderToolCall{.id = "call_lsp", .name = "lsp_diagnostics", .arguments_json = "{}"}, raw_lsp_error);
+  expect(lsp_error.result_text.find("LSP diagnostics failed") != std::string::npos &&
+             lsp_error.result_text.find("raw server detail") == std::string::npos,
+         "tool dispatch support redacts non-policy LSP diagnostics failures");
 }
 
 void test_question_answer_validation_helpers()
@@ -2621,6 +2665,7 @@ void run_agent_tool_dispatcher_tests()
   test_patch_staging_helpers();
   test_tool_result_json_helpers();
   test_tool_timeline_helpers();
+  test_tool_dispatch_support_helpers();
   test_question_answer_validation_helpers();
   test_session_recorder_helpers();
   test_tool_dispatcher();

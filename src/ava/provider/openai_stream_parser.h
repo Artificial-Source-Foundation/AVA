@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "ava/core/result.h"
+#include "ava/provider/openai_stream_events.h"
 #include "ava/provider/provider.h"
 
 namespace ava::provider {
@@ -17,17 +18,8 @@ class OpenAIStreamParser final : public StreamParser {
 
  private:
   std::string pending_line_;
-  std::string data_;
   std::size_t scan_offset_ = 0;
-  bool saw_content_ = false;
-  bool reasoning_open_ = false;
-  bool reasoning_text_seen_ = false;
-  std::string active_reasoning_item_id_;
-  std::string active_reasoning_text_;
-  std::vector<std::string> completed_reasoning_item_ids_;
-  std::vector<std::string> completed_reasoning_texts_;
-  bool done_seen_ = false;
-  bool error_seen_ = false;
+  detail::OpenAIStreamEventState event_state_;
 };
 
 }  // namespace ava::provider

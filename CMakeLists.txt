@@ -97,6 +97,7 @@ add_library(ava_core
   src/ava/mcp/stdio_client.cpp
   src/ava/mcp/stdio_client_io.cpp
   src/ava/mcp/stdio_support.cpp
+  src/ava/mcp/tool_list_parser.cpp
   src/ava/mcp/tool_broker.cpp
   src/ava/permissions/command_policy.cpp
   src/ava/permissions/command_policy_support.cpp
@@ -322,6 +323,7 @@ if(AVA_BUILD_TESTS)
     tests/lsp_tests.cpp
     tests/message_builder_support_tests.cpp
     tests/mcp_config_support_tests.cpp
+    tests/mcp_tool_list_parser_tests.cpp
     tests/mcp_tests.cpp
     tests/plugin_enablement_support_tests.cpp
     tests/plugin_manifest_support_tests.cpp
@@ -421,6 +423,7 @@ if(AVA_BUILD_TESTS)
     plugin
     permissions_command_policy_support
     mcp_config_support
+    mcp_tool_list_parser
     mcp
     tui_composer
   )

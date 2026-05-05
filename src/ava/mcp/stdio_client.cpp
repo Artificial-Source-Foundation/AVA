@@ -16,6 +16,7 @@
 #include "ava/mcp/process_support.h"
 #include "ava/mcp/protocol.h"
 #include "ava/mcp/stdio_support.h"
+#include "ava/mcp/tool_list_parser.h"
 
 namespace ava::mcp {
 namespace {
@@ -190,33 +191,7 @@ ava::core::Result<std::vector<McpToolDescription>> McpStdioClient::list_tools(Ca
   auto response =
       request("tools/list", "{}", options_.request_timeout, "timed out waiting for MCP tools/list", cancel_requested);
   if (!response) return std::unexpected(std::move(response.error()));
-  auto const tools_start = ava::core::json::field_value_start(response->result_json, "tools");
-  if (tools_start && (*tools_start >= response->result_json.size() || response->result_json[*tools_start] != '[')) {
-    auto error = protocol_error("MCP tools/list result has invalid tools field", server_);
-    error.with_context("response", response->raw_json.substr(0, 512));
-    return std::unexpected(std::move(error));
-  }
-
-  std::vector<McpToolDescription> tools;
-  for (auto const& tool_json : ava::core::json::objects_in_array_field(response->result_json, "tools")) {
-    auto name = ava::core::json::string_field(tool_json, "name");
-    if (!name || !is_valid_mcp_tool_name(*name)) {
-      auto error = protocol_error("MCP tool has invalid name", server_);
-      error.with_context("response", tool_json.substr(0, 512));
-      return std::unexpected(std::move(error));
-    }
-    auto input_schema = ava::core::json::object_field(tool_json, "inputSchema").value_or("{\"type\":\"object\"}");
-    if (!ava::core::json::is_valid_object(input_schema)) {
-      auto error = protocol_error("MCP tool inputSchema is invalid", server_);
-      error.with_context("tool", *name);
-      return std::unexpected(std::move(error));
-    }
-    tools.push_back(
-        McpToolDescription{.name = std::move(*name),
-                           .description = ava::core::json::string_field(tool_json, "description").value_or(""),
-                           .input_schema_json = std::move(input_schema)});
-  }
-  return tools;
+  return parse_mcp_tool_list_result(response->result_json, response->raw_json, server_);
 }
 
 ava::core::Result<McpToolCallResult> McpStdioClient::call_tool(std::string_view tool_name,

@@ -1,4 +1,5 @@
 add_subdirectory(ava)
+add_subdirectory(experimental)
 
 add_executable(ava
   "main.cpp"

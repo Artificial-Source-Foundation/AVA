@@ -20,16 +20,6 @@ find_library(CURSES_PANELW_LIBRARY
   REQUIRED
 )
 
-add_subdirectory(terminal)
-
-add_executable(linux00 linux00-initialization.cpp)
-target_include_directories(linux00 PRIVATE ${CURSES_INCLUDE_DIRS})
-target_link_libraries(linux00 PRIVATE ${CURSES_LIBRARIES})
-
-add_executable(linux01 linux01-screen-size.cpp)
-target_include_directories(linux01 PRIVATE ${CURSES_INCLUDE_DIRS})
-target_link_libraries(linux01 PRIVATE ${CURSES_LIBRARIES})
-
 add_executable(linux02 linux02-screen-resizing.cpp)
 target_include_directories(linux02 PRIVATE ${CURSES_INCLUDE_DIRS})
 target_link_libraries(linux02 PRIVATE ${CURSES_LIBRARIES})

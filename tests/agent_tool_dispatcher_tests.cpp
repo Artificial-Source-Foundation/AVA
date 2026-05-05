@@ -10,6 +10,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -19,6 +20,7 @@
 
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
+#include "ava/agent/patch_staging.h"
 #include "ava/agent/tool_arguments.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
@@ -175,6 +177,66 @@ void test_provider_tool_argument_helpers()
       ava::agent::workspace_path(context, "relative.txt") == std::filesystem::path("/tmp/ava-workspace/relative.txt") &&
           ava::agent::workspace_path(context, "/absolute.txt") == std::filesystem::path("/absolute.txt"),
       "tool arguments resolve workspace-relative paths");
+}
+
+void test_patch_staging_helpers()
+{
+  auto const root = temp_root() / "patch-staging";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  std::filesystem::create_directories(root);
+  auto const target = root / "target.txt";
+  {
+    std::ofstream file(target, std::ios::binary | std::ios::trunc);
+    file << "old";
+  }
+  std::filesystem::permissions(target, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+                               std::filesystem::perm_options::replace);
+
+  auto const permission_bits = [](std::filesystem::path const& permission_path) {
+    constexpr auto mask =
+        std::filesystem::perms::owner_all | std::filesystem::perms::group_all | std::filesystem::perms::others_all;
+    std::error_code status_error;
+    return std::filesystem::status(permission_path, status_error).permissions() & mask;
+  };
+
+  auto staged = ava::agent::stage_patch_writes(
+      ava::tools::ToolContext{.workspace_dir = root, .mode = ava::agent::Mode::Build}, std::vector{target},
+      std::map<std::filesystem::path, std::string>{{target, "new"}});
+  auto staged_target_read =
+      ava::tools::read_file(ava::tools::ToolContext{.workspace_dir = root, .mode = ava::agent::Mode::Build}, target);
+  expect(staged && staged->size() == 1 && (*staged)[0].target == target && (*staged)[0].bytes_written == 3 &&
+             std::filesystem::exists((*staged)[0].temp) && staged_target_read && staged_target_read->content == "old" &&
+             permission_bits((*staged)[0].temp) == permission_bits(target),
+         "patch staging writes temp files first and preserves target permissions");
+
+  auto committed = ava::agent::commit_staged_patch_writes(*staged);
+  auto committed_read =
+      ava::tools::read_file(ava::tools::ToolContext{.workspace_dir = root, .mode = ava::agent::Mode::Build}, target);
+  expect(committed && committed_read && committed_read->content == "new" && !std::filesystem::exists((*staged)[0].temp),
+         "patch staging commits staged temp file into target");
+
+  auto const first = root / "first.txt";
+  auto const second = root / "second.txt";
+  {
+    std::ofstream file(first, std::ios::binary | std::ios::trunc);
+    file << "first old";
+  }
+  {
+    std::ofstream file(second, std::ios::binary | std::ios::trunc);
+    file << "second old";
+  }
+  auto failed_stage = ava::agent::stage_patch_writes(
+      ava::tools::ToolContext{.workspace_dir = root, .mode = ava::agent::Mode::Build}, std::vector{first, second},
+      std::map<std::filesystem::path, std::string>{{first, "first new"}});
+  bool has_leftover_stage_temp = false;
+  for (auto it = std::filesystem::directory_iterator(root); it != std::filesystem::directory_iterator(); ++it) {
+    has_leftover_stage_temp =
+        has_leftover_stage_temp || it->path().filename().string().find(".ava-patch-") != std::string::npos;
+  }
+  expect(!failed_stage && failed_stage.error().message().find("missing staged patch content") != std::string::npos &&
+             !has_leftover_stage_temp,
+         "patch staging cleans earlier temp writes when later staging fails");
 }
 
 void test_tool_dispatcher()
@@ -2326,6 +2388,7 @@ void test_agent_loop_max_iteration_guard()
 void run_agent_tool_dispatcher_tests()
 {
   test_provider_tool_argument_helpers();
+  test_patch_staging_helpers();
   test_tool_dispatcher();
   test_tool_dispatcher_plan_mode_denies_mutation();
   test_agent_loop_text_only_turn();

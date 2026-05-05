@@ -103,6 +103,7 @@ add_library(ava_core
   src/ava/provider/provider.cpp
   src/ava/provider/provider_utils.cpp
   src/ava/provider/registry.cpp
+  src/ava/provider/retry_policy.cpp
   src/ava/session/compaction.cpp
   src/ava/session/session_entry_codec.cpp
   src/ava/session/export.cpp

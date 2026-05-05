@@ -1,6 +1,8 @@
 #include <string>
+#include <vector>
 
 #include "ava/provider/curl_transport_protocol.h"
+#include "ava/provider/retry_policy.h"
 #include "tests/support/test_harness.h"
 
 namespace {
@@ -72,6 +74,63 @@ void test_parse_curl_output_missing_status()
          "curl output parser rejects output without a status marker");
 }
 
+void test_retry_policy_helpers()
+{
+  expect(ava::provider::detail::is_retryable_kind(ava::provider::ProviderErrorKind::RateLimited) &&
+             ava::provider::detail::is_retryable_kind(ava::provider::ProviderErrorKind::Transient) &&
+             !ava::provider::detail::is_retryable_kind(ava::provider::ProviderErrorKind::InvalidRequest),
+         "retry policy helper classifies retryable provider errors");
+  expect(ava::provider::detail::is_retryable_transport_error(ava::core::Error(ava::core::ErrorCategory::Io, "io")) &&
+             !ava::provider::detail::is_retryable_transport_error(
+                 ava::core::Error(ava::core::ErrorCategory::Provider, "provider")),
+         "retry policy helper retries transport IO errors only");
+
+  ava::provider::RetryOptions options;
+  options.base_delay_ms = 125;
+  expect(ava::provider::detail::exponential_delay_ms(options, 1) == 125 &&
+             ava::provider::detail::exponential_delay_ms(options, 4) == 1000,
+         "retry policy helper computes exponential delays");
+  options.base_delay_ms = 0;
+  expect(ava::provider::detail::exponential_delay_ms(options, 3) == 0, "retry policy helper honors disabled delay");
+
+  auto capped_retry_after = ava::provider::detail::retry_after_ms(
+      ava::provider::HttpResponse{.status_code = 429, .headers = {{"Retry-After", " 120 "}}, .body = ""}, 60'000);
+  auto missing_retry_after = ava::provider::detail::retry_after_ms(
+      ava::provider::HttpResponse{.status_code = 429, .headers = {{"Retry-After", "soon"}}, .body = ""}, 60'000);
+  expect(capped_retry_after && *capped_retry_after == 60'000 && !missing_retry_after,
+         "retry policy helper parses and caps Retry-After seconds");
+
+  bool option_canceled = false;
+  bool transport_canceled = false;
+  ava::provider::RetryOptions cancel_options;
+  cancel_options.cancel_requested = [&] { return option_canceled; };
+  expect(!ava::provider::detail::retry_cancel_requested(cancel_options, [&] { return transport_canceled; }),
+         "retry policy helper reports no cancellation when both callbacks are false");
+  transport_canceled = true;
+  expect(ava::provider::detail::retry_cancel_requested(cancel_options, [&] { return transport_canceled; }),
+         "retry policy helper honors per-call cancellation");
+  transport_canceled = false;
+  option_canceled = true;
+  expect(ava::provider::detail::retry_cancel_requested(cancel_options, nullptr),
+         "retry policy helper honors retry option cancellation");
+
+  std::vector<ava::provider::RetryOptions::Event> events;
+  ava::provider::RetryOptions event_options;
+  event_options.on_retry = [&](ava::provider::RetryOptions::Event const& event) -> ava::core::VoidResult {
+    events.push_back(event);
+    return {};
+  };
+  auto published =
+      ava::provider::detail::publish_retry_event(event_options, 2, 4, -5, 0, "rate_limited", 429, true, true);
+  expect(published.has_value() && events.size() == 1 && events[0].attempt == 2 && events[0].max_attempts == 4 &&
+             events[0].delay_ms == 0 && events[0].reason == "rate_limited" && events[0].status_code == 429 &&
+             events[0].streaming && events[0].countdown_tick,
+         "retry policy helper publishes normalized retry events");
+
+  auto no_sleep = ava::provider::detail::sleep_before_retry(event_options, 2, 4, 0, "rate_limited", 429, false);
+  expect(no_sleep.has_value(), "retry policy helper returns immediately for zero delay");
+}
+
 }  // namespace
 
 void run_provider_transport_tests()
@@ -81,4 +140,5 @@ void run_provider_transport_tests()
   test_parse_curl_output_without_headers();
   test_parse_curl_output_with_headers();
   test_parse_curl_output_missing_status();
+  test_retry_policy_helpers();
 }

@@ -217,6 +217,9 @@ if(AVA_BUILD_TESTS)
     tests/provider_anthropic_tests.cpp
     tests/provider_openai_tests.cpp
     tests/session_tests.cpp
+    tests/tools_file_tests.cpp
+    tests/tools_process_network_tests.cpp
+    tests/tools_search_tests.cpp
     tests/tools_tests.cpp
     tests/tui_composer_tests.cpp
   )

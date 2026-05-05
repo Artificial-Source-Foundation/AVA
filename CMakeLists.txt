@@ -122,6 +122,7 @@ add_library(ava_core
   src/ava/provider/anthropic_provider.cpp
   src/ava/provider/anthropic_request.cpp
   src/ava/provider/anthropic_request_support.cpp
+  src/ava/provider/anthropic_request_validation.cpp
   src/ava/provider/anthropic_response.cpp
   src/ava/provider/anthropic_response_support.cpp
   src/ava/provider/openai_compatible_provider.cpp
@@ -320,6 +321,7 @@ if(AVA_BUILD_TESTS)
     tests/plugin_tests.cpp
     tests/provider_anthropic_tests.cpp
     tests/provider_anthropic_request_support_tests.cpp
+    tests/provider_anthropic_request_validation_tests.cpp
     tests/provider_anthropic_stream_events_tests.cpp
     tests/provider_event_buffer_tests.cpp
     tests/provider_openai_tests.cpp
@@ -389,6 +391,7 @@ if(AVA_BUILD_TESTS)
     provider_openai
     provider_anthropic
     provider_anthropic_request_support
+    provider_anthropic_request_validation
     provider_anthropic_stream_events
     provider_event_buffer
     provider_openai_compatible_response

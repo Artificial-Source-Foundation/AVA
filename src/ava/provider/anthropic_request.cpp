@@ -3,6 +3,7 @@
 #include <utility>
 
 #include "ava/provider/anthropic_request_support.h"
+#include "ava/provider/anthropic_request_validation.h"
 
 namespace ava::provider {
 

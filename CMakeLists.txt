@@ -46,6 +46,7 @@ add_library(ava_core
   src/ava/agent/message_builder.cpp
   src/ava/agent/mode.cpp
   src/ava/agent/patch_staging.cpp
+  src/ava/agent/provider_event_buffer.cpp
   src/ava/agent/provider_output_validation.cpp
   src/ava/agent/question.cpp
   src/ava/agent/question_answer_validation.cpp
@@ -273,6 +274,7 @@ if(AVA_BUILD_TESTS)
     tests/mcp_tests.cpp
     tests/plugin_tests.cpp
     tests/provider_anthropic_tests.cpp
+    tests/provider_event_buffer_tests.cpp
     tests/provider_openai_tests.cpp
     tests/provider_transport_tests.cpp
     tests/session_validation_compaction_tests.cpp
@@ -312,6 +314,7 @@ if(AVA_BUILD_TESTS)
     app_runtime
     provider_openai
     provider_anthropic
+    provider_event_buffer
     provider_transport
     agent_tool_dispatcher
     lsp

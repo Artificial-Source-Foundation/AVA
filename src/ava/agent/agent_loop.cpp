@@ -1,7 +1,5 @@
 #include "ava/agent/agent_loop.h"
 
-#include <algorithm>
-#include <map>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -9,7 +7,7 @@
 
 #include "ava/agent/assistant_turn.h"
 #include "ava/agent/message_builder.h"
-#include "ava/agent/provider_output_validation.h"
+#include "ava/agent/provider_event_buffer.h"
 #include "ava/agent/session_recorder.h"
 #include "ava/agent/stream_bridge.h"
 #include "ava/agent/tool_dispatcher.h"
@@ -294,62 +292,18 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
     if (result.provider_iterations == 0) {
       result.initial_context_messages = provider_request.messages.size();
     }
-    std::vector<ava::provider::StreamEvent> provider_events;
-    std::size_t streamed_assistant_text_bytes = 0;
-    std::map<std::string, std::size_t> streamed_tool_argument_bytes;
+    auto const provider_output_limits =
+        ProviderOutputLimits{.max_events = options_.max_provider_events,
+                             .max_assistant_text_bytes = options_.max_assistant_text_bytes,
+                             .max_tool_argument_bytes = options_.max_tool_argument_bytes};
+    ProviderEventBuffer provider_events(provider_output_limits);
     bool processed_stream_chunks = false;
+    auto publish_provider_event = [&](ava::provider::StreamEvent const& event) -> ava::core::VoidResult {
+      return publish_stream_event(options_, event);
+    };
     auto append_stream_events = [&](std::vector<ava::provider::StreamEvent> new_events,
                                     bool publish_all_events = true) -> ava::core::VoidResult {
-      for (auto& event : new_events) {
-        if (options_.max_provider_events > 0 && provider_events.size() >= options_.max_provider_events) {
-          return std::unexpected(output_limit_error("provider output event limit exceeded", "max_provider_events",
-                                                    options_.max_provider_events));
-        }
-        if (event.type == ava::provider::StreamEventType::TextDelta) {
-          if (would_exceed(streamed_assistant_text_bytes, event.text.size(), options_.max_assistant_text_bytes)) {
-            return std::unexpected(output_limit_error("assistant text byte limit exceeded", "max_assistant_text_bytes",
-                                                      options_.max_assistant_text_bytes));
-          }
-          streamed_assistant_text_bytes += event.text.size();
-        } else if (event.type == ava::provider::StreamEventType::ReasoningStart ||
-                   event.type == ava::provider::StreamEventType::ReasoningDelta ||
-                   event.type == ava::provider::StreamEventType::ReasoningEnd) {
-          auto const event_bytes =
-              event.type == ava::provider::StreamEventType::ReasoningEnd
-                  ? event.reasoning_signature.size() + event.reasoning_redacted_data.size()
-                  : event.text.size() + event.reasoning_signature.size() + event.reasoning_redacted_data.size();
-          if (would_exceed(streamed_assistant_text_bytes, event_bytes, options_.max_assistant_text_bytes)) {
-            return std::unexpected(output_limit_error("reasoning byte limit exceeded", "max_assistant_text_bytes",
-                                                      options_.max_assistant_text_bytes));
-          }
-          streamed_assistant_text_bytes += event_bytes;
-        } else if (event.type == ava::provider::StreamEventType::ToolCallStart) {
-          if (auto valid_id = validate_provider_tool_call_id(event.tool_call_id); !valid_id) {
-            return std::unexpected(std::move(valid_id.error()));
-          }
-        } else if (event.type == ava::provider::StreamEventType::ToolCallDelta) {
-          if (auto valid_id = validate_provider_tool_call_id(event.tool_call_id); !valid_id) {
-            return std::unexpected(std::move(valid_id.error()));
-          }
-          auto& bytes = streamed_tool_argument_bytes[event.tool_call_id];
-          if (would_exceed(bytes, event.text.size(), options_.max_tool_argument_bytes)) {
-            return std::unexpected(output_limit_error("tool argument byte limit exceeded", "max_tool_argument_bytes",
-                                                      options_.max_tool_argument_bytes));
-          }
-          bytes += event.text.size();
-        }
-        bool const should_publish = publish_all_events ||
-                                    event.type == ava::provider::StreamEventType::ReasoningStart ||
-                                    event.type == ava::provider::StreamEventType::ReasoningDelta ||
-                                    event.type == ava::provider::StreamEventType::ReasoningEnd;
-        if (should_publish) {
-          if (auto published = publish_stream_event(options_, event); !published) {
-            return std::unexpected(std::move(published.error()));
-          }
-        }
-        provider_events.push_back(std::move(event));
-      }
-      return {};
+      return provider_events.append(std::move(new_events), publish_provider_event, publish_all_events);
     };
 
     if (provider_request.stream && transport.supports_streaming()) {
@@ -494,10 +448,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       }
     }
 
-    auto turn = parse_assistant_turn(provider_events,
-                                     ProviderOutputLimits{.max_events = options_.max_provider_events,
-                                                          .max_assistant_text_bytes = options_.max_assistant_text_bytes,
-                                                          .max_tool_argument_bytes = options_.max_tool_argument_bytes});
+    auto turn = parse_assistant_turn(provider_events.events(), provider_output_limits);
     if (!turn) {
       if (auto retry = prepare_context_overflow_retry(turn.error()); !retry) {
         return std::unexpected(std::move(retry.error()));

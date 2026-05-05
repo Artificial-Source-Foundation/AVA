@@ -41,6 +41,134 @@ function(ava_apply_sanitizers target)
 endfunction()
 
 add_library(ava_core
+  src/ava/core/error.cpp
+  src/ava/core/ids.cpp
+  src/ava/core/json.cpp
+)
+
+target_include_directories(ava_core PUBLIC src)
+ava_apply_warnings(ava_core)
+ava_apply_sanitizers(ava_core)
+
+add_library(ava_permissions
+  src/ava/permissions/permission.cpp
+)
+
+target_include_directories(ava_permissions PUBLIC src)
+ava_apply_warnings(ava_permissions)
+ava_apply_sanitizers(ava_permissions)
+
+add_library(ava_config
+  src/ava/config/auth.cpp
+  src/ava/config/auth_file_store.cpp
+  src/ava/config/auth_record.cpp
+  src/ava/config/model_config.cpp
+  src/ava/config/model_profiles.cpp
+  src/ava/config/openai_oauth.cpp
+  src/ava/config/provider_profiles.cpp
+  src/ava/config/prompt_config.cpp
+  src/ava/config/reasoning_profiles.cpp
+  src/ava/config/xdg_paths.cpp
+)
+
+target_include_directories(ava_config PUBLIC src)
+ava_apply_warnings(ava_config)
+ava_apply_sanitizers(ava_config)
+
+add_library(ava_context
+  src/ava/context/context_loader.cpp
+)
+
+target_include_directories(ava_context PUBLIC src)
+ava_apply_warnings(ava_context)
+ava_apply_sanitizers(ava_context)
+
+add_library(ava_lsp
+  src/ava/lsp/lsp_client.cpp
+)
+
+target_include_directories(ava_lsp PUBLIC src)
+ava_apply_warnings(ava_lsp)
+ava_apply_sanitizers(ava_lsp)
+
+add_library(ava_mcp
+  src/ava/mcp/config.cpp
+  src/ava/mcp/protocol.cpp
+  src/ava/mcp/stdio_client.cpp
+  src/ava/mcp/stdio_client_support.cpp
+  src/ava/mcp/tool_broker.cpp
+)
+
+target_include_directories(ava_mcp PUBLIC src PRIVATE "${AVA_GENERATED_INCLUDE_DIR}")
+ava_apply_warnings(ava_mcp)
+ava_apply_sanitizers(ava_mcp)
+
+add_library(ava_plugin
+  src/ava/plugin/diagnostics.cpp
+  src/ava/plugin/discovery.cpp
+  src/ava/plugin/enablement.cpp
+  src/ava/plugin/manifest.cpp
+  src/ava/plugin/runner.cpp
+  src/ava/plugin/runner_protocol.cpp
+  src/ava/plugin/runner_support.cpp
+  src/ava/plugin/tool_broker.cpp
+)
+
+target_include_directories(ava_plugin PUBLIC src)
+ava_apply_warnings(ava_plugin)
+ava_apply_sanitizers(ava_plugin)
+
+add_library(ava_provider
+  src/ava/provider/curl_transport.cpp
+  src/ava/provider/anthropic_provider.cpp
+  src/ava/provider/anthropic_request.cpp
+  src/ava/provider/openai_compatible_provider.cpp
+  src/ava/provider/openai_compatible_request.cpp
+  src/ava/provider/openai_provider.cpp
+  src/ava/provider/openai_request.cpp
+  src/ava/provider/openai_response_parser.cpp
+  src/ava/provider/openai_stream_parser.cpp
+  src/ava/provider/provider.cpp
+  src/ava/provider/provider_utils.cpp
+  src/ava/provider/registry.cpp
+)
+
+target_include_directories(ava_provider PUBLIC src)
+ava_apply_warnings(ava_provider)
+ava_apply_sanitizers(ava_provider)
+
+add_library(ava_session
+  src/ava/session/compaction.cpp
+  src/ava/session/export.cpp
+  src/ava/session/record.cpp
+  src/ava/session/session_store.cpp
+  src/ava/session/stats.cpp
+  src/ava/session/validation.cpp
+  src/ava/session/validation_fields.cpp
+)
+
+target_include_directories(ava_session PUBLIC src)
+ava_apply_warnings(ava_session)
+ava_apply_sanitizers(ava_session)
+
+add_library(ava_tools
+  src/ava/tools/bash_tool.cpp
+  src/ava/tools/diff_utils.cpp
+  src/ava/tools/edit_match.cpp
+  src/ava/tools/file_tools.cpp
+  src/ava/tools/ignore_rules.cpp
+  src/ava/tools/lsp_tools.cpp
+  src/ava/tools/mutation_queue.cpp
+  src/ava/tools/search_tools.cpp
+  src/ava/tools/spill_files.cpp
+  src/ava/tools/webfetch_tool.cpp
+)
+
+target_include_directories(ava_tools PUBLIC src)
+ava_apply_warnings(ava_tools)
+ava_apply_sanitizers(ava_tools)
+
+add_library(ava_agent
   src/ava/agent/agent_loop.cpp
   src/ava/agent/agent_loop_session.cpp
   src/ava/agent/assistant_turn.cpp
@@ -56,69 +184,25 @@ add_library(ava_core
   src/ava/agent/tool_result.cpp
   src/ava/agent/tool_summaries.cpp
   src/ava/agent/usage_accounting.cpp
-  src/ava/config/auth.cpp
-  src/ava/config/auth_file_store.cpp
-  src/ava/config/auth_record.cpp
-  src/ava/config/model_config.cpp
-  src/ava/config/model_profiles.cpp
-  src/ava/config/openai_oauth.cpp
-  src/ava/config/provider_profiles.cpp
-  src/ava/config/prompt_config.cpp
-  src/ava/config/reasoning_profiles.cpp
-  src/ava/config/xdg_paths.cpp
-  src/ava/context/context_loader.cpp
-  src/ava/core/error.cpp
-  src/ava/core/ids.cpp
-  src/ava/core/json.cpp
-  src/ava/lsp/lsp_client.cpp
-  src/ava/mcp/config.cpp
-  src/ava/mcp/protocol.cpp
-  src/ava/mcp/stdio_client.cpp
-  src/ava/mcp/stdio_client_support.cpp
-  src/ava/mcp/tool_broker.cpp
-  src/ava/permissions/permission.cpp
-  src/ava/plugin/diagnostics.cpp
-  src/ava/plugin/discovery.cpp
-  src/ava/plugin/enablement.cpp
-  src/ava/plugin/manifest.cpp
-  src/ava/plugin/runner.cpp
-  src/ava/plugin/runner_protocol.cpp
-  src/ava/plugin/runner_support.cpp
-  src/ava/plugin/tool_broker.cpp
-  src/ava/provider/curl_transport.cpp
-  src/ava/provider/anthropic_provider.cpp
-  src/ava/provider/anthropic_request.cpp
-  src/ava/provider/openai_compatible_provider.cpp
-  src/ava/provider/openai_compatible_request.cpp
-  src/ava/provider/openai_provider.cpp
-  src/ava/provider/openai_request.cpp
-  src/ava/provider/openai_response_parser.cpp
-  src/ava/provider/openai_stream_parser.cpp
-  src/ava/provider/provider.cpp
-  src/ava/provider/provider_utils.cpp
-  src/ava/provider/registry.cpp
-  src/ava/session/compaction.cpp
-  src/ava/session/export.cpp
-  src/ava/session/record.cpp
-  src/ava/session/session_store.cpp
-  src/ava/session/stats.cpp
-  src/ava/session/validation.cpp
-  src/ava/session/validation_fields.cpp
-  src/ava/tools/bash_tool.cpp
-  src/ava/tools/diff_utils.cpp
-  src/ava/tools/edit_match.cpp
-  src/ava/tools/file_tools.cpp
-  src/ava/tools/ignore_rules.cpp
-  src/ava/tools/lsp_tools.cpp
-  src/ava/tools/mutation_queue.cpp
-  src/ava/tools/search_tools.cpp
-  src/ava/tools/spill_files.cpp
-  src/ava/tools/webfetch_tool.cpp
 )
 
-target_include_directories(ava_core PUBLIC src "${AVA_GENERATED_INCLUDE_DIR}")
-ava_apply_warnings(ava_core)
-ava_apply_sanitizers(ava_core)
+target_include_directories(ava_agent PUBLIC src)
+ava_apply_warnings(ava_agent)
+ava_apply_sanitizers(ava_agent)
+
+set(AVA_BACKEND_LIBRARIES
+  ava_agent
+  ava_config
+  ava_context
+  ava_core
+  ava_lsp
+  ava_mcp
+  ava_permissions
+  ava_plugin
+  ava_provider
+  ava_session
+  ava_tools
+)
 
 add_library(ava_tui
   src/ava/tui/composer.cpp
@@ -136,8 +220,8 @@ add_library(ava_tui
   src/ava/tui/tool_cards.cpp
 )
 
-target_link_libraries(ava_tui PUBLIC ava_core PRIVATE ${CURSES_LIBRARIES})
-target_include_directories(ava_tui PUBLIC src PRIVATE ${CURSES_INCLUDE_DIRS})
+target_link_libraries(ava_tui PRIVATE ${CURSES_LIBRARIES})
+target_include_directories(ava_tui PUBLIC src "${AVA_GENERATED_INCLUDE_DIR}" PRIVATE ${CURSES_INCLUDE_DIRS})
 ava_apply_warnings(ava_tui)
 ava_apply_sanitizers(ava_tui)
 
@@ -181,13 +265,12 @@ add_library(ava_app
   src/ava/app/runtime_session.cpp
 )
 
-target_link_libraries(ava_app PUBLIC ava_core ava_tui)
-target_include_directories(ava_app PUBLIC src)
+target_include_directories(ava_app PRIVATE src "${AVA_GENERATED_INCLUDE_DIR}")
 ava_apply_warnings(ava_app)
 ava_apply_sanitizers(ava_app)
 
 add_executable(ava src/main.cpp)
-target_link_libraries(ava PRIVATE ava_app)
+target_link_libraries(ava PRIVATE ava_app ava_tui ${AVA_BACKEND_LIBRARIES})
 ava_apply_warnings(ava)
 ava_apply_sanitizers(ava)
 
@@ -198,18 +281,18 @@ if(AVA_BUILD_TESTS)
     tests/support/fake_transport.cpp
     tests/support/test_harness.cpp
   )
-  target_link_libraries(ava_test_support PUBLIC ava_core)
-  target_include_directories(ava_test_support PUBLIC .)
+  target_link_libraries(ava_test_support PUBLIC ${AVA_BACKEND_LIBRARIES})
+  target_include_directories(ava_test_support PUBLIC ${CMAKE_SOURCE_DIR})
   ava_apply_warnings(ava_test_support)
   ava_apply_sanitizers(ava_test_support)
 
   add_executable(ava_fake_lsp_server tests/support/fake_lsp_server.cpp)
-  target_link_libraries(ava_fake_lsp_server PRIVATE ava_core)
+  target_link_libraries(ava_fake_lsp_server PRIVATE ${AVA_BACKEND_LIBRARIES})
   ava_apply_warnings(ava_fake_lsp_server)
   ava_apply_sanitizers(ava_fake_lsp_server)
 
   add_executable(ava_fake_mcp_server tests/support/fake_mcp_server.cpp)
-  target_link_libraries(ava_fake_mcp_server PRIVATE ava_core)
+  target_link_libraries(ava_fake_mcp_server PRIVATE ${AVA_BACKEND_LIBRARIES})
   ava_apply_warnings(ava_fake_mcp_server)
   ava_apply_sanitizers(ava_fake_mcp_server)
 
@@ -243,7 +326,7 @@ if(AVA_BUILD_TESTS)
     tests/tools_tests.cpp
     tests/tui_composer_tests.cpp
   )
-  target_link_libraries(ava_tests PRIVATE ava_core ava_tui ava_app ava_test_support)
+  target_link_libraries(ava_tests PRIVATE ${AVA_BACKEND_LIBRARIES} ava_tui ava_app ava_test_support)
   add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_provider_server)
   target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")
   target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_FILE:ava_fake_mcp_server>")

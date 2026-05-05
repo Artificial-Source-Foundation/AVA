@@ -139,6 +139,7 @@ add_library(ava_core
   src/ava/provider/retry_policy.cpp
   src/ava/session/compaction.cpp
   src/ava/session/session_entry_codec.cpp
+  src/ava/session/session_entry_codec_support.cpp
   src/ava/session/export.cpp
   src/ava/session/session_store.cpp
   src/ava/session/session_store_support.cpp
@@ -315,6 +316,7 @@ if(AVA_BUILD_TESTS)
     tests/provider_error_support_tests.cpp
     tests/provider_transport_tests.cpp
     tests/search_tools_support_tests.cpp
+    tests/session_entry_codec_support_tests.cpp
     tests/session_validation_compaction_tests.cpp
     tests/session_validation_permission_tests.cpp
     tests/session_validation_tool_tests.cpp
@@ -347,6 +349,7 @@ if(AVA_BUILD_TESTS)
     tools
     file_tools_support
     search_tools_support
+    session_entry_codec_support
     webfetch_support
     json_support
     config_context_auth_oauth

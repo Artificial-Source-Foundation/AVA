@@ -1,13 +1,10 @@
 #include "ava/session/session_store.h"
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cstdint>
-#include <cstdlib>
 #include <fstream>
 #include <iomanip>
-#include <optional>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -15,76 +12,11 @@
 #include "ava/config/xdg_paths.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/session/session_entry_codec.h"
 
 namespace ava::session {
 
 namespace {
-
-constexpr std::size_t max_session_line_bytes = 1024 * 1024;
-
-int hex_value(char ch)
-{
-  if (ch >= '0' && ch <= '9') return ch - '0';
-  if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
-  if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
-  return -1;
-}
-
-void append_utf8(std::string& out, int codepoint)
-{
-  if (codepoint <= 0x7F) {
-    out.push_back(static_cast<char>(codepoint));
-  } else if (codepoint <= 0x7FF) {
-    out.push_back(static_cast<char>(0xC0 | ((codepoint >> 6) & 0x1F)));
-    out.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
-  } else {
-    out.push_back(static_cast<char>(0xE0 | ((codepoint >> 12) & 0x0F)));
-    out.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
-    out.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
-  }
-}
-
-void append_utf8_codepoint(std::string& out, int codepoint)
-{
-  if (codepoint <= 0xFFFF) {
-    append_utf8(out, codepoint);
-  } else {
-    out.push_back(static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07)));
-    out.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
-    out.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
-    out.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
-  }
-}
-
-ava::core::Result<bool> read_limited_line(std::ifstream& file, std::string& line)
-{
-  line.clear();
-  bool saw_character = false;
-  char ch = '\0';
-  while (file.get(ch)) {
-    saw_character = true;
-    if (ch == '\n') {
-      if (!line.empty() && line.back() == '\r') {
-        line.pop_back();
-      }
-      return true;
-    }
-    if (line.size() + 1 >= max_session_line_bytes) {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session entry line is too large");
-      error.with_context("max_bytes", std::to_string(max_session_line_bytes));
-      return std::unexpected(std::move(error));
-    }
-    line.push_back(ch);
-  }
-  if (!file.eof() && file.fail()) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed while reading session file");
-    return std::unexpected(std::move(error));
-  }
-  if (saw_character && !line.empty() && line.back() == '\r') {
-    line.pop_back();
-  }
-  return saw_character;
-}
 
 std::string project_key(std::filesystem::path const& workspace_dir)
 {
@@ -97,251 +29,6 @@ std::string project_key(std::filesystem::path const& workspace_dir)
   std::ostringstream out;
   out << std::hex << hash;
   return out.str();
-}
-
-ava::core::VoidResult validate_session_id(std::string_view session_id)
-{
-  if (session_id.empty() || session_id == "." || session_id == "..") {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid session id");
-    error.with_context("reason", "empty or reserved path segment");
-    return std::unexpected(std::move(error));
-  }
-
-  for (char const ch : session_id) {
-    auto const byte = static_cast<unsigned char>(ch);
-    if (ch == '/' || ch == '\\' || byte < 0x20 || byte == 0x7F) {
-      auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid session id");
-      error.with_context("reason", "contains a path separator or control character");
-      return std::unexpected(std::move(error));
-    }
-  }
-
-  return {};
-}
-
-ava::core::VoidResult validate_parent_id(std::string_view parent_id, std::string_view entry_id)
-{
-  if (parent_id.empty()) return {};
-  if (parent_id == "." || parent_id == "..") {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid session parent_id");
-    error.with_context("entry_id", std::string(entry_id));
-    error.with_context("reason", "reserved path segment");
-    return std::unexpected(std::move(error));
-  }
-
-  for (char const ch : parent_id) {
-    auto const byte = static_cast<unsigned char>(ch);
-    if (ch == '/' || ch == '\\' || byte < 0x20 || byte == 0x7F) {
-      auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid session parent_id");
-      error.with_context("entry_id", std::string(entry_id));
-      error.with_context("reason", "contains a path separator or control character");
-      return std::unexpected(std::move(error));
-    }
-  }
-
-  return {};
-}
-
-bool is_json_value_delimiter(char ch)
-{
-  return ch == ',' || ch == '}' || std::isspace(static_cast<unsigned char>(ch)) != 0;
-}
-
-ava::core::Result<std::optional<long long>> extract_entry_version(std::string_view line)
-{
-  auto const start = ava::core::json::field_value_start(line, "version");
-  if (!start) return std::optional<long long>{};
-  if (*start >= line.size()) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "invalid session entry version");
-    error.with_context("reason", "missing version value");
-    return std::unexpected(std::move(error));
-  }
-
-  std::size_t index = *start;
-  if (line[index] == '-') ++index;
-  auto const digits_start = index;
-  while (index < line.size() && std::isdigit(static_cast<unsigned char>(line[index])) != 0) ++index;
-  if (index == digits_start || (index < line.size() && !is_json_value_delimiter(line[index]))) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "invalid session entry version");
-    error.with_context("reason", "version must be an integer");
-    return std::unexpected(std::move(error));
-  }
-
-  try {
-    return std::stoll(std::string(line.substr(*start, index - *start)));
-  } catch (...) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "invalid session entry version");
-    error.with_context("reason", "version is outside supported integer range");
-    return std::unexpected(std::move(error));
-  }
-}
-
-ava::core::Result<long long> read_supported_entry_version(std::string_view line, std::filesystem::path const& path)
-{
-  auto version = extract_entry_version(line);
-  if (!version) {
-    auto error = std::move(version.error());
-    error.with_context("path", path.string());
-    return std::unexpected(std::move(error));
-  }
-  if (!*version) return 0;
-  if (**version >= 1 && **version <= kCurrentSessionEntryVersion) return **version;
-
-  auto error = ava::core::Error(ava::core::ErrorCategory::Session, "unsupported session entry version");
-  error.with_context("path", path.string());
-  error.with_context("version", std::to_string(**version));
-  error.with_context("supported_version", std::to_string(kCurrentSessionEntryVersion));
-  return std::unexpected(std::move(error));
-}
-
-bool is_unsupported_session_version_error(ava::core::Error const& error)
-{
-  return error.category() == ava::core::ErrorCategory::Session &&
-         error.message() == "unsupported session entry version";
-}
-
-std::string extract_json_string(std::string_view line, std::string_view key)
-{
-  auto const start = ava::core::json::field_value_start(line, key);
-  if (!start || *start >= line.size() || line[*start] != '"') {
-    return {};
-  }
-  auto const value_start = *start + 1;
-  std::string result;
-  bool escaped = false;
-  bool closed = false;
-  for (auto index = value_start; index < line.size(); ++index) {
-    char const ch = line[index];
-    if (escaped) {
-      switch (ch) {
-        case '"':
-          result.push_back('"');
-          break;
-        case '\\':
-          result.push_back('\\');
-          break;
-        case 'n':
-          result.push_back('\n');
-          break;
-        case 'r':
-          result.push_back('\r');
-          break;
-        case 't':
-          result.push_back('\t');
-          break;
-        case 'b':
-          result.push_back('\b');
-          break;
-        case 'f':
-          result.push_back('\f');
-          break;
-        case 'u':
-          if (index + 4 < line.size()) {
-            int const a = hex_value(line[index + 1]);
-            int const b = hex_value(line[index + 2]);
-            int const c = hex_value(line[index + 3]);
-            int const d = hex_value(line[index + 4]);
-            if (a >= 0 && b >= 0 && c >= 0 && d >= 0) {
-              int const codepoint = (a << 12) | (b << 8) | (c << 4) | d;
-              if (codepoint >= 0xD800 && codepoint <= 0xDBFF && index + 10 < line.size() && line[index + 5] == '\\' &&
-                  line[index + 6] == 'u') {
-                int const e = hex_value(line[index + 7]);
-                int const f = hex_value(line[index + 8]);
-                int const g = hex_value(line[index + 9]);
-                int const h = hex_value(line[index + 10]);
-                if (e >= 0 && f >= 0 && g >= 0 && h >= 0) {
-                  int const low = (e << 12) | (f << 8) | (g << 4) | h;
-                  if (low >= 0xDC00 && low <= 0xDFFF) {
-                    append_utf8_codepoint(result, ((codepoint - 0xD800) << 10) + (low - 0xDC00) + 0x10000);
-                    index += 10;
-                  } else {
-                    append_utf8(result, 0xFFFD);
-                    index += 4;
-                  }
-                } else {
-                  append_utf8(result, 0xFFFD);
-                  index += 4;
-                }
-              } else if (codepoint >= 0xD800 && codepoint <= 0xDFFF) {
-                append_utf8(result, 0xFFFD);
-                index += 4;
-              } else {
-                append_utf8(result, codepoint);
-                index += 4;
-              }
-            } else {
-              return {};
-            }
-          } else {
-            return {};
-          }
-          break;
-        case '/':
-          result.push_back('/');
-          break;
-        default:
-          return {};
-      }
-      escaped = false;
-      continue;
-    }
-    if (ch == '\\') {
-      escaped = true;
-      continue;
-    }
-    if (ch == '"') {
-      closed = true;
-      break;
-    }
-    result.push_back(ch);
-  }
-  if (escaped || !closed) {
-    return {};
-  }
-  return result;
-}
-
-std::string extract_json_object(std::string_view line, std::string_view key)
-{
-  auto const start = ava::core::json::field_value_start(line, key);
-  if (!start) {
-    return "{}";
-  }
-  auto const value_start = *start;
-  if (value_start >= line.size() || line[value_start] != '{') {
-    return "{}";
-  }
-
-  bool in_string = false;
-  bool escaped = false;
-  int depth = 0;
-  for (auto index = value_start; index < line.size(); ++index) {
-    char const ch = line[index];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (ch == '\\') {
-      escaped = in_string;
-      continue;
-    }
-    if (ch == '"') {
-      in_string = !in_string;
-      continue;
-    }
-    if (in_string) {
-      continue;
-    }
-    if (ch == '{') {
-      ++depth;
-    } else if (ch == '}') {
-      --depth;
-      if (depth == 0) {
-        return std::string(line.substr(value_start, index - value_start + 1));
-      }
-    }
-  }
-  return "{}";
 }
 
 }  // namespace
@@ -366,21 +53,8 @@ ava::core::VoidResult SessionStore::append(SessionEntry const& entry)
     return valid_session_id;
   }
 
-  if (entry.data_json.empty() || entry.data_json.front() != '{' || entry.data_json.back() != '}') {
-    auto error =
-        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session entry data must be a JSON object");
-    error.with_context("entry_id", entry.id);
-    return std::unexpected(std::move(error));
-  }
-  if (entry.data_json.find('\n') != std::string::npos || entry.data_json.find('\r') != std::string::npos) {
-    auto error =
-        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session entry data must not contain raw newlines");
-    error.with_context("entry_id", entry.id);
-    return std::unexpected(std::move(error));
-  }
-  if (auto valid_parent_id = validate_parent_id(entry.parent_id, entry.id); !valid_parent_id) {
-    return valid_parent_id;
-  }
+  auto line = encode_session_entry_line(entry);
+  if (!line) return std::unexpected(std::move(line.error()));
 
   auto const path = session_path();
   std::error_code mkdir_error;
@@ -443,20 +117,7 @@ ava::core::VoidResult SessionStore::append(SessionEntry const& entry)
     return std::unexpected(std::move(error));
   }
 
-  std::string line = "{\"version\":" + std::to_string(kCurrentSessionEntryVersion) + ",";
-  line += "\"id\":\"" + json_escape(entry.id) + "\",";
-  line += "\"parent_id\":\"" + json_escape(entry.parent_id) + "\",";
-  line += "\"type\":\"" + std::string(to_string(entry.type)) + "\",";
-  line += "\"timestamp\":\"" + json_escape(entry.timestamp) + "\",";
-  line += "\"data\":" + entry.data_json + "}";
-  if (line.size() >= max_session_line_bytes) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session entry line is too large");
-    error.with_context("max_bytes", std::to_string(max_session_line_bytes));
-    error.with_context("entry_type", std::string(to_string(entry.type)));
-    return std::unexpected(std::move(error));
-  }
-
-  file << line << '\n';
+  file << *line << '\n';
   file.flush();
 
   if (!file) {
@@ -503,49 +164,16 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const
   std::vector<SessionEntry> entries;
   std::string line;
   while (true) {
-    auto line_read = read_limited_line(file, line);
+    auto line_read = read_limited_session_line(file, line);
     if (!line_read) {
       return std::unexpected(line_read.error());
     }
     if (!*line_read) {
       break;
     }
-    auto version = read_supported_entry_version(line, session_path());
-    if (!version) {
-      return std::unexpected(std::move(version.error()));
-    }
-    auto const id = extract_json_string(line, "id");
-    auto const type_text = extract_json_string(line, "type");
-    auto const timestamp = extract_json_string(line, "timestamp");
-    if (id.empty() || type_text.empty() || timestamp.empty()) {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "malformed session entry");
-      error.with_context("path", session_path().string());
-      return std::unexpected(std::move(error));
-    }
-    auto const data_start = ava::core::json::field_value_start(line, "data");
-    if (!data_start || *data_start >= line.size() || line[*data_start] != '{') {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session entry data must be a JSON object");
-      error.with_context("path", session_path().string());
-      return std::unexpected(std::move(error));
-    }
-    auto type = parse_entry_type(type_text);
-    if (!type) {
-      return std::unexpected(type.error());
-    }
-    auto const parent_id = extract_json_string(line, "parent_id");
-    if (auto valid_parent_id = validate_parent_id(parent_id, id); !valid_parent_id) {
-      auto error = std::move(valid_parent_id.error());
-      error.with_context("path", session_path().string());
-      return std::unexpected(std::move(error));
-    }
-    entries.push_back(SessionEntry{
-        .id = id,
-        .parent_id = parent_id,
-        .type = *type,
-        .timestamp = timestamp,
-        .data_json = extract_json_object(line, "data"),
-        .version = *version,
-    });
+    auto entry = decode_session_entry_line(line, session_path());
+    if (!entry) return std::unexpected(std::move(entry.error()));
+    entries.push_back(std::move(*entry));
   }
   return entries;
 }

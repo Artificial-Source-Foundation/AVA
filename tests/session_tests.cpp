@@ -37,6 +37,7 @@
 #include "ava/provider/openai_provider.h"
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
+#include "ava/session/session_entry_codec.h"
 #include "ava/session/session_store.h"
 #include "ava/session/stats.h"
 #include "ava/session/validation.h"
@@ -55,6 +56,62 @@ bool has_replay_issue(ava::session::SessionReplayValidation const& validation,
 {
   return std::ranges::any_of(validation.issues,
                              [kind](ava::session::SessionReplayIssue const& issue) { return issue.kind == kind; });
+}
+
+void test_session_entry_codec_helpers()
+{
+  auto line = ava::session::encode_session_entry_line(ava::session::SessionEntry{
+      .id = "entry_\n",
+      .parent_id = "parent",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-04-27T00:00:00Z",
+      .data_json = "{\"text\":\"hello\"}",
+  });
+  auto const current_version_json = "\"version\":" + std::to_string(ava::session::kCurrentSessionEntryVersion);
+  expect(line && line->find(current_version_json) != std::string::npos,
+         "session entry codec encodes current entry version");
+  if (line) {
+    auto decoded = ava::session::decode_session_entry_line(*line, "/tmp/session.jsonl");
+    expect(decoded && decoded->id == "entry_\n" && decoded->parent_id == "parent" &&
+               decoded->type == ava::session::EntryType::UserMessage && decoded->timestamp == "2026-04-27T00:00:00Z" &&
+               decoded->data_json == "{\"text\":\"hello\"}" &&
+               decoded->version == ava::session::kCurrentSessionEntryVersion,
+           "session entry codec decodes encoded JSONL line");
+  }
+
+  std::istringstream crlf_stream("first\r\nsecond");
+  std::string limited;
+  auto first = ava::session::read_limited_session_line(crlf_stream, limited);
+  expect(first && *first && limited == "first", "session entry codec trims CRLF while reading bounded lines");
+  auto second = ava::session::read_limited_session_line(crlf_stream, limited);
+  expect(second && *second && limited == "second", "session entry codec reads final unterminated line");
+  auto eof = ava::session::read_limited_session_line(crlf_stream, limited);
+  expect(eof && !*eof, "session entry codec reports clean EOF");
+
+  auto invalid_session_id = ava::session::validate_session_id("../escape");
+  expect(!invalid_session_id && invalid_session_id.error().message().find("invalid session id") != std::string::npos,
+         "session entry codec rejects unsafe session ids");
+  auto invalid_parent = ava::session::validate_parent_id("bad/parent", "entry");
+  expect(!invalid_parent && invalid_parent.error().message().find("invalid session parent_id") != std::string::npos,
+         "session entry codec rejects unsafe parent ids");
+
+  auto bad_data = ava::session::encode_session_entry_line(ava::session::SessionEntry{
+      .id = "entry_bad_data",
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-04-27T00:00:00Z",
+      .data_json = "{\"text\":\"bad\nsplit\"}",
+  });
+  expect(!bad_data && bad_data.error().message().find("raw newlines") != std::string::npos,
+         "session entry codec rejects raw newlines inside JSONL data objects");
+
+  auto future = ava::session::decode_session_entry_line(
+      "{\"version\":999,\"id\":\"entry_future\",\"parent_id\":\"\","
+      "\"type\":\"user_message\",\"timestamp\":\"2026-04-27T00:00:00Z\","
+      "\"data\":{\"text\":\"hello\"}}",
+      "/tmp/session.jsonl");
+  expect(!future && ava::session::is_unsupported_session_version_error(future.error()),
+         "session entry codec exposes unsupported-version errors for session listing");
 }
 
 void test_session_store_round_trip()
@@ -1667,6 +1724,7 @@ void test_tool_content_parts_reconstruction()
 
 void run_session_tests()
 {
+  test_session_entry_codec_helpers();
   test_session_store_round_trip();
   test_session_stats_helper();
   test_session_stats_omits_incomplete_cost_total();

@@ -1,6 +1,6 @@
 # AVA Product Plan
 
-AVA is a lean C++ agentic coding tool. It should feel as fast and direct as pi, while carrying the practical built-in tool quality expected from OpenCode.
+AVA is a lean C++ agentic coding tool. It should feel fast and direct while carrying practical built-in tool quality.
 
 This document defines the product before implementation. It is intentionally biased toward a small first version.
 
@@ -19,7 +19,7 @@ AVA should not start as a platform, plugin marketplace, desktop app, web app, or
 
 ## Reference Products
 
-### pi-mono Lessons
+### Runtime Lessons
 
 Useful product ideas:
 
@@ -38,7 +38,7 @@ What AVA should not copy initially:
 - Deep theme/custom UI system.
 - Broad SDK surface before the CLI is stable.
 
-### OpenCode Lessons
+### Frontend Lessons
 
 Useful product ideas:
 
@@ -272,10 +272,10 @@ Deferred:
 ### Planned 0.2 Focus
 
 - Polish the interactive TUI until it is comfortable for daily coding sessions.
-- Use OpenCode as the primary TUI visual/interaction reference; use pi-mono and old Rust AVA only as secondary references for compact tool cards and permission prompts.
+- Use external behavior references and old Rust AVA only as secondary references for compact tool cards and permission prompts.
 - Decide whether to keep the custom terminal path or adopt FTXUI before adding a new TUI dependency.
 - Make agent tool calls, results, failures, and truncation visible in the transcript.
-- Add OpenCode-like slash command palette discovery and readable thinking/progress visibility.
+- Add slash command palette discovery and readable thinking/progress visibility.
 - Add interactive permission prompts for `ask` decisions while keeping non-interactive mode fail-closed.
 - Verify the existing 0.1 tools through real agent workflows before adding more providers or automation modes.
 - Keep additional providers, MCP/plugins, subagents, LSP, web fetch, and automation beyond the current print/RPC MVP deferred to later versions.

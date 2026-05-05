@@ -1,37 +1,29 @@
 # AVA Plugin And MCP Foundation
 
-This document defines AVA's current 1.0 plugin and MCP foundation. It is grounded in PI's extension model, but adapted for AVA's constraints: native C++23, one binary, explicit permission boundaries, inspectable local files, and a core that keeps working when plugins fail.
+This document defines AVA's current 1.0 plugin and MCP foundation. It is grounded in external extension lessons, but adapted for AVA's constraints: native C++23, one binary, explicit permission boundaries, inspectable local files, and a core that keeps working when plugins fail.
 
 Advanced extension features remain 1.1+ roadmap work.
 
-## PI Reference Lessons
+## Extension Reference Lessons
 
-PI uses trusted TypeScript extensions loaded in-process. The relevant reference files are:
+The external extension reference uses trusted TypeScript extensions loaded in-process. Relevant local material is under `docs/reference-code/`.
 
-- `docs/reference-code/pi-mono/packages/coding-agent/docs/extensions.md`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/core/extensions/types.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/core/extensions/loader.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/core/extensions/runner.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/core/extensions/wrapper.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/docs/packages.md`
-- `docs/reference-code/pi-mono/packages/coding-agent/docs/skills.md`
-
-PI's useful ideas:
+Useful ideas:
 
 - Extensions are easy to author: a small module gets an API object and calls `registerTool`, `registerCommand`, or `on` for events.
 - Extension resources are discovered from global, project, package, and explicit CLI/config paths.
-- Packages can bundle extensions, skills, prompts, and themes through a `pi` field in `package.json`.
+- Packages can bundle extensions, skills, prompts, and themes through package metadata.
 - Tools have names, descriptions, schemas, execution modes, optional prompt snippets, and optional UI rendering.
 - Runtime events cover session, input, agent, turn, provider request/response, message streaming, tool call/result, compaction, and model selection.
 - Tool hooks can block calls or transform results, which lets extensions implement custom permission gates.
 - Skills and prompt templates are filesystem resources, not compiled code.
 - RPC mode streams events and can bridge extension UI prompts to non-TTY clients.
 
-PI's limits that AVA should not copy directly:
+Limits that AVA should not copy directly:
 
-- PI extensions run in-process with full user permissions. PI documents this trust model clearly, but it means a bad extension can crash or compromise the process.
-- PI has no native MCP support. Its README explicitly says "No MCP" and recommends building MCP as an extension.
-- PI's extension APIs expose broad UI customization, providers, and provider request interception. AVA should start narrower until safety, events, permissions, and sessions are stable.
+- In-process extensions run with full user permissions. A bad extension can crash or compromise the process.
+- Implementing MCP as a plugin-only afterthought would bypass AVA's safety boundary; AVA keeps MCP host support explicit.
+- Broad UI customization, providers, and provider request interception should wait until safety, events, permissions, and sessions are stable.
 
 ## AVA Direction
 

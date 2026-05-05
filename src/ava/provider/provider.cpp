@@ -1,5 +1,7 @@
 #include "ava/provider/provider.h"
 
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -9,8 +11,6 @@
 #include <string_view>
 #include <thread>
 #include <utility>
-
-#include "ava/core/json.h"
 
 namespace ava::provider {
 namespace {

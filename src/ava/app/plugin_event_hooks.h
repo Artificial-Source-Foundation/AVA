@@ -1,15 +1,19 @@
 #pragma once
 
+#include "ava/app/events.h"
+
+#include "ava/agent/mode.h"
+
+#include "ava/tools/file_tools.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/core/error.h"
+
 #include <filesystem>
 #include <functional>
 #include <mutex>
 #include <string_view>
-
-#include "ava/agent/mode.h"
-#include "ava/app/events.h"
-#include "ava/core/error.h"
-#include "ava/permissions/permission.h"
-#include "ava/tools/file_tools.h"
 
 namespace ava::app {
 

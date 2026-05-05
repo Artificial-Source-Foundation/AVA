@@ -1,9 +1,9 @@
 #include "ava/app/events.h"
 
-#include <utility>
-
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+
+#include <utility>
 
 namespace ava::app {
 namespace {

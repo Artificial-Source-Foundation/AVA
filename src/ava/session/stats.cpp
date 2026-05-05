@@ -1,12 +1,12 @@
 #include "ava/session/stats.h"
 
+#include "ava/core/json.h"
+
 #include <cctype>
 #include <initializer_list>
 #include <optional>
 #include <string>
 #include <string_view>
-
-#include "ava/core/json.h"
 
 namespace ava::session {
 namespace {

@@ -1,3 +1,14 @@
+#include "ava/agent/tool_dispatcher.h"
+
+#include "ava/tools/file_tools.h"
+#include "ava/tools/lsp_tools.h"
+
+#include "ava/lsp/lsp_client.h"
+
+#include "ava/core/json.h"
+
+#include "tests/support/test_harness.h"
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -5,13 +16,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/agent/tool_dispatcher.h"
-#include "ava/core/json.h"
-#include "ava/lsp/lsp_client.h"
-#include "ava/tools/file_tools.h"
-#include "ava/tools/lsp_tools.h"
-#include "tests/support/test_harness.h"
 
 namespace {
 

@@ -1,8 +1,8 @@
 #pragma once
 
-#include <expected>
-
 #include "ava/core/error.h"
+
+#include <expected>
 
 namespace ava::core {
 

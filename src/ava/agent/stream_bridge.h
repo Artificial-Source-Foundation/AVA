@@ -1,8 +1,10 @@
 #pragma once
 
 #include "ava/agent/agent_loop.h"
-#include "ava/core/result.h"
+
 #include "ava/provider/provider.h"
+
+#include "ava/core/result.h"
 
 namespace ava::agent {
 

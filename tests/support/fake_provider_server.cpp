@@ -1,8 +1,3 @@
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -15,6 +10,11 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 namespace {
 

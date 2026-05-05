@@ -1,5 +1,9 @@
 #pragma once
 
+#include "ava/mcp/config.h"
+
+#include "ava/core/result.h"
+
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -9,9 +13,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/core/result.h"
-#include "ava/mcp/config.h"
 
 namespace ava::mcp {
 

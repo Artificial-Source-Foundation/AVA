@@ -1,5 +1,16 @@
 #pragma once
 
+#include "ava/app/rpc/output.h"
+#include "ava/app/rpc/run_state.h"
+#include "ava/app/runtime.h"
+
+#include "ava/agent/mode.h"
+#include "ava/agent/question.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/core/result.h"
+
 #include <condition_variable>
 #include <filesystem>
 #include <map>
@@ -9,14 +20,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/agent/mode.h"
-#include "ava/agent/question.h"
-#include "ava/app/rpc/output.h"
-#include "ava/app/rpc/run_state.h"
-#include "ava/app/runtime.h"
-#include "ava/core/result.h"
-#include "ava/permissions/permission.h"
 
 namespace ava::app::rpc {
 

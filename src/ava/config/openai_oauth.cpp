@@ -1,7 +1,6 @@
 #include "ava/config/openai_oauth.h"
 
-#include <fcntl.h>
-#include <unistd.h>
+#include "ava/core/json.h"
 
 #include <array>
 #include <bit>
@@ -13,7 +12,8 @@
 #include <utility>
 #include <vector>
 
-#include "ava/core/json.h"
+#include <fcntl.h>
+#include <unistd.h>
 
 namespace ava::config {
 namespace {

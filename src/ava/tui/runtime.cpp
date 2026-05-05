@@ -1,6 +1,11 @@
 #include "ava/tui/runtime.h"
 
-#include <curses.h>
+#include "ava/tui/composer.h"
+#include "ava/tui/composer_editor.h"
+#include "ava/tui/composer_internal.h"
+#include "ava/tui/event_state.h"
+#include "ava/tui/keybindings.h"
+#include "ava/tui/terminal.h"
 
 #include <algorithm>
 #include <atomic>
@@ -22,12 +27,7 @@
 #include <utility>
 #include <vector>
 
-#include "ava/tui/composer.h"
-#include "ava/tui/composer_editor.h"
-#include "ava/tui/composer_internal.h"
-#include "ava/tui/event_state.h"
-#include "ava/tui/keybindings.h"
-#include "ava/tui/terminal.h"
+#include <curses.h>
 
 namespace ava::tui {
 namespace {

@@ -1,6 +1,19 @@
 #include "ava/app/app.h"
 
-#include <unistd.h>
+#include "ava/app/connect_openai.h"
+#include "ava/app/headless_policy.h"
+#include "ava/app/line_shell.h"
+#include "ava/app/print_mode.h"
+#include "ava/app/rpc_mode.h"
+#include "ava/app/runtime.h"
+
+#include "ava/agent/mode.h"
+
+#include "ava/tui/composer.h"
+
+#include "ava/config/xdg_paths.h"
+
+#include "ava/core/version.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -10,16 +23,7 @@
 #include <string_view>
 #include <utility>
 
-#include "ava/agent/mode.h"
-#include "ava/app/connect_openai.h"
-#include "ava/app/headless_policy.h"
-#include "ava/app/line_shell.h"
-#include "ava/app/print_mode.h"
-#include "ava/app/rpc_mode.h"
-#include "ava/app/runtime.h"
-#include "ava/config/xdg_paths.h"
-#include "ava/core/version.h"
-#include "ava/tui/composer.h"
+#include <unistd.h>
 
 namespace {
 

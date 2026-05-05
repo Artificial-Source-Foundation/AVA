@@ -1,11 +1,13 @@
 #pragma once
 
-#include <cstddef>
-#include <vector>
+#include "ava/session/session_store.h"
+
+#include "ava/provider/provider.h"
 
 #include "ava/core/result.h"
-#include "ava/provider/provider.h"
-#include "ava/session/session_store.h"
+
+#include <cstddef>
+#include <vector>
 
 namespace ava::agent {
 

@@ -1,8 +1,8 @@
 #pragma once
 
-#include <string>
-
 #include "ava/core/result.h"
+
+#include <string>
 
 namespace ava::agent {
 

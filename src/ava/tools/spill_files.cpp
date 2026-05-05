@@ -1,10 +1,10 @@
 #include "ava/tools/spill_files.h"
 
+#include "ava/core/ids.h"
+
 #include <algorithm>
 #include <fstream>
 #include <system_error>
-
-#include "ava/core/ids.h"
 
 namespace ava::tools {
 namespace {

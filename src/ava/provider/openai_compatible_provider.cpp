@@ -1,5 +1,10 @@
 #include "ava/provider/openai_compatible_provider.h"
 
+#include "ava/provider/openai_provider.h"
+#include "ava/provider/provider_utils.h"
+
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <cctype>
 #include <initializer_list>
@@ -8,10 +13,6 @@
 #include <optional>
 #include <sstream>
 #include <utility>
-
-#include "ava/core/json.h"
-#include "ava/provider/openai_provider.h"
-#include "ava/provider/provider_utils.h"
 
 namespace ava::provider {
 namespace {

@@ -1,5 +1,15 @@
 #include "ava/app/command_sessions.h"
 
+#include "ava/app/command_format.h"
+
+#include "ava/session/compaction.h"
+#include "ava/session/export.h"
+#include "ava/session/stats.h"
+
+#include "ava/context/context_loader.h"
+
+#include "ava/core/ids.h"
+
 #include <algorithm>
 #include <cctype>
 #include <iomanip>
@@ -7,13 +17,6 @@
 #include <optional>
 #include <sstream>
 #include <utility>
-
-#include "ava/app/command_format.h"
-#include "ava/context/context_loader.h"
-#include "ava/core/ids.h"
-#include "ava/session/compaction.h"
-#include "ava/session/export.h"
-#include "ava/session/stats.h"
 
 namespace ava::app {
 namespace {

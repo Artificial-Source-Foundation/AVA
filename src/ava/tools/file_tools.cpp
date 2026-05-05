@@ -1,5 +1,12 @@
 #include "ava/tools/file_tools.h"
 
+#include "ava/tools/diff_utils.h"
+#include "ava/tools/edit_match.h"
+#include "ava/tools/mutation_queue.h"
+
+#include "ava/core/ids.h"
+#include "ava/core/json.h"
+
 #include <array>
 #include <cerrno>
 #include <fstream>
@@ -8,12 +15,6 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
-
-#include "ava/core/ids.h"
-#include "ava/core/json.h"
-#include "ava/tools/diff_utils.h"
-#include "ava/tools/edit_match.h"
-#include "ava/tools/mutation_queue.h"
 
 namespace ava::tools {
 

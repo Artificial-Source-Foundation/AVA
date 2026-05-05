@@ -1,5 +1,9 @@
 #include "ava/mcp/config.h"
 
+#include "ava/config/xdg_paths.h"
+
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -7,9 +11,6 @@
 #include <optional>
 #include <sstream>
 #include <string_view>
-
-#include "ava/config/xdg_paths.h"
-#include "ava/core/json.h"
 
 namespace ava::mcp {
 namespace {

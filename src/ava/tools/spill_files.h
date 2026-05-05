@@ -1,12 +1,13 @@
 #pragma once
 
+#include "ava/tools/file_tools.h"
+
+#include "ava/core/result.h"
+
 #include <cstddef>
 #include <filesystem>
 #include <string>
 #include <string_view>
-
-#include "ava/core/result.h"
-#include "ava/tools/file_tools.h"
 
 namespace ava::tools {
 

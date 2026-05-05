@@ -1,19 +1,23 @@
+#include "ava/agent/agent_loop.h"
+
+#include "ava/config/auth.h"
+#include "ava/config/xdg_paths.h"
+
+#include "ava/session/session_store.h"
+
+#include "ava/provider/anthropic_provider.h"
+#include "ava/provider/provider_utils.h"
+#include "ava/provider/registry.h"
+
+#include "tests/support/fake_transport.h"
+#include "tests/support/test_harness.h"
+
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
-
-#include "ava/agent/agent_loop.h"
-#include "ava/config/auth.h"
-#include "ava/config/xdg_paths.h"
-#include "ava/provider/anthropic_provider.h"
-#include "ava/provider/provider_utils.h"
-#include "ava/provider/registry.h"
-#include "ava/session/session_store.h"
-#include "tests/support/fake_transport.h"
-#include "tests/support/test_harness.h"
 
 namespace {
 

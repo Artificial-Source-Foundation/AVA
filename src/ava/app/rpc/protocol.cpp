@@ -1,12 +1,12 @@
 #include "ava/app/rpc/protocol.h"
 
+#include "ava/core/json.h"
+
 #include <cctype>
 #include <istream>
 #include <optional>
 #include <string>
 #include <utility>
-
-#include "ava/core/json.h"
 
 namespace ava::app::rpc {
 namespace {

@@ -1,5 +1,9 @@
 #pragma once
 
+#include "ava/plugin/manifest.h"
+
+#include "ava/core/result.h"
+
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -7,9 +11,6 @@
 #include <memory>
 #include <string>
 #include <string_view>
-
-#include "ava/core/result.h"
-#include "ava/plugin/manifest.h"
 
 namespace ava::plugin {
 

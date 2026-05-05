@@ -1,3 +1,21 @@
+#include "ava/app/plugin_event_hooks.h"
+
+#include "ava/agent/tool_dispatcher.h"
+
+#include "ava/tools/file_tools.h"
+
+#include "ava/plugin/discovery.h"
+#include "ava/plugin/enablement.h"
+#include "ava/plugin/manifest.h"
+#include "ava/plugin/runner.h"
+#include "ava/plugin/tool_broker.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/core/json.h"
+
+#include "tests/support/test_harness.h"
+
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
@@ -6,18 +24,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/agent/tool_dispatcher.h"
-#include "ava/app/plugin_event_hooks.h"
-#include "ava/core/json.h"
-#include "ava/permissions/permission.h"
-#include "ava/plugin/discovery.h"
-#include "ava/plugin/enablement.h"
-#include "ava/plugin/manifest.h"
-#include "ava/plugin/runner.h"
-#include "ava/plugin/tool_broker.h"
-#include "ava/tools/file_tools.h"
-#include "tests/support/test_harness.h"
 
 namespace {
 

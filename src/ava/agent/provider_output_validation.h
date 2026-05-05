@@ -1,11 +1,11 @@
 #pragma once
 
+#include "ava/core/error.h"
+#include "ava/core/result.h"
+
 #include <cstddef>
 #include <string>
 #include <string_view>
-
-#include "ava/core/error.h"
-#include "ava/core/result.h"
 
 namespace ava::agent {
 

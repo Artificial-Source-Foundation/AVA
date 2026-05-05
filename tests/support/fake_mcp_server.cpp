@@ -1,3 +1,5 @@
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -6,8 +8,6 @@
 #include <string>
 #include <string_view>
 #include <thread>
-
-#include "ava/core/json.h"
 
 namespace {
 

@@ -1,15 +1,17 @@
 #pragma once
 
+#include "ava/agent/mode.h"
+#include "ava/agent/question.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/core/result.h"
+
 #include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
-
-#include "ava/agent/mode.h"
-#include "ava/agent/question.h"
-#include "ava/core/result.h"
-#include "ava/permissions/permission.h"
 
 namespace ava::lsp {
 class DiagnosticsProvider;

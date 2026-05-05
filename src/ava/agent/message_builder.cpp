@@ -1,5 +1,13 @@
 #include "ava/agent/message_builder.h"
 
+#include "ava/agent/provider_output_validation.h"
+
+#include "ava/session/session_store.h"
+
+#include "ava/provider/provider_utils.h"
+
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <iterator>
 #include <optional>
@@ -7,11 +15,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#include "ava/agent/provider_output_validation.h"
-#include "ava/core/json.h"
-#include "ava/provider/provider_utils.h"
-#include "ava/session/session_store.h"
 
 namespace ava::agent {
 namespace {

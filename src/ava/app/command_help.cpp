@@ -1,8 +1,8 @@
 #include "ava/app/command_help.h"
 
-#include <algorithm>
-
 #include "ava/tui/keybindings.h"
+
+#include <algorithm>
 
 namespace ava::app {
 namespace {

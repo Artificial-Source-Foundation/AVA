@@ -1,16 +1,20 @@
 #include "ava/app/command_tools.h"
 
+#include "ava/app/command_format.h"
+
+#include "ava/agent/tool_result.h"
+
+#include "ava/tools/bash_tool.h"
+#include "ava/tools/search_tools.h"
+
+#include "ava/session/session_store.h"
+
+#include "ava/core/ids.h"
+#include "ava/core/json.h"
+
 #include <cstddef>
 #include <filesystem>
 #include <utility>
-
-#include "ava/agent/tool_result.h"
-#include "ava/app/command_format.h"
-#include "ava/core/ids.h"
-#include "ava/core/json.h"
-#include "ava/session/session_store.h"
-#include "ava/tools/bash_tool.h"
-#include "ava/tools/search_tools.h"
 
 namespace ava::app {
 namespace {

@@ -1,10 +1,10 @@
 #include "ava/plugin/diagnostics.h"
 
+#include "ava/plugin/enablement.h"
+
 #include <algorithm>
 #include <system_error>
 #include <utility>
-
-#include "ava/plugin/enablement.h"
 
 namespace ava::plugin {
 namespace {

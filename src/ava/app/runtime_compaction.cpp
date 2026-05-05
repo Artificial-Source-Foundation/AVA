@@ -1,13 +1,15 @@
 #include "ava/app/runtime_compaction.h"
 
+#include "ava/app/runtime_json.h"
+#include "ava/app/runtime_retry.h"
+
+#include "ava/agent/message_builder.h"
+
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <optional>
 #include <utility>
-
-#include "ava/agent/message_builder.h"
-#include "ava/app/runtime_json.h"
-#include "ava/app/runtime_retry.h"
-#include "ava/core/json.h"
 
 namespace ava::app {
 namespace {

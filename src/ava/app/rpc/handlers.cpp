@@ -1,13 +1,15 @@
 #include "ava/app/rpc/handlers.h"
 
-#include <utility>
-#include <vector>
-
 #include "ava/app/rpc/protocol.h"
 #include "ava/app/rpc/serialization.h"
+
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
+
 #include "ava/provider/registry.h"
+
+#include <utility>
+#include <vector>
 
 namespace ava::app::rpc {
 

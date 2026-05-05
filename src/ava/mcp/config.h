@@ -1,11 +1,11 @@
 #pragma once
 
+#include "ava/core/result.h"
+
 #include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/core/result.h"
 
 namespace ava::mcp {
 

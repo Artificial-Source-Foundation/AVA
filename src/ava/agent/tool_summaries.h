@@ -1,8 +1,8 @@
 #pragma once
 
-#include <string>
-
 #include "ava/agent/tool_types.h"
+
+#include <string>
 
 namespace ava::agent {
 

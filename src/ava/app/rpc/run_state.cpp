@@ -1,8 +1,8 @@
 #include "ava/app/rpc/run_state.h"
 
-#include <utility>
-
 #include "ava/app/rpc/protocol.h"
+
+#include <utility>
 
 namespace ava::app::rpc {
 namespace {

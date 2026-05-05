@@ -1,11 +1,13 @@
 #pragma once
 
-#include <string>
-
 #include "ava/agent/mode.h"
+
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
+
 #include "ava/core/result.h"
+
+#include <string>
 
 namespace ava::config {
 

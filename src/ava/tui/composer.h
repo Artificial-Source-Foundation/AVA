@@ -1,13 +1,13 @@
 #pragma once
 
+#include "ava/tui/terminal.h"
+#include "ava/tui/text.h"
+
 #include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/tui/terminal.h"
-#include "ava/tui/text.h"
 
 namespace ava::tui {
 

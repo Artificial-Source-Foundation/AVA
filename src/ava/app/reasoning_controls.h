@@ -1,10 +1,11 @@
 #pragma once
 
+#include "ava/app/runtime.h"
+
+#include "ava/core/result.h"
+
 #include <optional>
 #include <string>
-
-#include "ava/app/runtime.h"
-#include "ava/core/result.h"
 
 namespace ava::app {
 

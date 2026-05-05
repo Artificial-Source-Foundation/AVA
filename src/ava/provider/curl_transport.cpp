@@ -1,13 +1,5 @@
 #include "ava/provider/curl_transport.h"
 
-#include <fcntl.h>
-#include <poll.h>
-#include <signal.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -17,6 +9,14 @@
 #include <string_view>
 #include <thread>
 #include <vector>
+
+#include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace ava::provider {
 namespace {

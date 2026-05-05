@@ -1,10 +1,6 @@
 #include "ava/tools/bash_tool.h"
 
-#include <fcntl.h>
-#include <signal.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
+#include "ava/tools/spill_files.h"
 
 #include <array>
 #include <cctype>
@@ -16,7 +12,11 @@
 #include <thread>
 #include <vector>
 
-#include "ava/tools/spill_files.h"
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace ava::tools {
 

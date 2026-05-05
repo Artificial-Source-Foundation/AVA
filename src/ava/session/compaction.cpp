@@ -1,13 +1,13 @@
 #include "ava/session/compaction.h"
 
+#include "ava/core/ids.h"
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>
 #include <utility>
-
-#include "ava/core/ids.h"
-#include "ava/core/json.h"
 
 namespace ava::session {
 namespace {

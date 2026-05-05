@@ -1,11 +1,12 @@
 #include "ava/app/command_connect.h"
 
-#include <algorithm>
-#include <cctype>
-
 #include "ava/app/command_format.h"
+
 #include "ava/config/auth.h"
 #include "ava/config/provider_profiles.h"
+
+#include <algorithm>
+#include <cctype>
 
 namespace ava::app {
 namespace {

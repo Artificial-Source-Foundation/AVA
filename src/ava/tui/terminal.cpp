@@ -7,6 +7,8 @@
 #error "AVA requires ncursesw with wide-character support."
 #endif
 
+#include "ava/core/error.h"
+
 #include <clocale>
 #include <csignal>
 #include <cstdio>
@@ -14,8 +16,6 @@
 #include <optional>
 #include <string_view>
 #include <utility>
-
-#include "ava/core/error.h"
 
 namespace ava::tui {
 namespace {

@@ -1,5 +1,9 @@
 #pragma once
 
+#include "ava/app/events.h"
+
+#include "ava/core/result.h"
+
 #include <cstddef>
 #include <deque>
 #include <functional>
@@ -7,9 +11,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-
-#include "ava/app/events.h"
-#include "ava/core/result.h"
 
 namespace ava::app {
 

@@ -1,5 +1,9 @@
 #include "ava/config/model_config.h"
 
+#include "ava/config/model_profiles.h"
+
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -10,9 +14,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#include "ava/config/model_profiles.h"
-#include "ava/core/json.h"
 
 namespace ava::config {
 namespace {

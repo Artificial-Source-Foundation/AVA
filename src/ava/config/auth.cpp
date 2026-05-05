@@ -1,9 +1,8 @@
 #include "ava/config/auth.h"
 
-#include <fcntl.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include "ava/config/openai_oauth.h"
+
+#include "ava/core/json.h"
 
 #include <algorithm>
 #include <array>
@@ -17,8 +16,10 @@
 #include <utility>
 #include <vector>
 
-#include "ava/config/openai_oauth.h"
-#include "ava/core/json.h"
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace ava::config {
 namespace {

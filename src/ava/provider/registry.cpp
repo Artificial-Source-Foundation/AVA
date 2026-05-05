@@ -1,12 +1,13 @@
 #include "ava/provider/registry.h"
 
-#include <cstdlib>
-#include <utility>
-
 #include "ava/config/provider_profiles.h"
+
 #include "ava/provider/anthropic_provider.h"
 #include "ava/provider/openai_compatible_provider.h"
 #include "ava/provider/openai_provider.h"
+
+#include <cstdlib>
+#include <utility>
 
 namespace ava::provider {
 namespace {

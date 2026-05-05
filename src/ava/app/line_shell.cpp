@@ -1,5 +1,26 @@
 #include "ava/app/line_shell.h"
 
+#include "ava/app/command_palette.h"
+#include "ava/app/commands.h"
+#include "ava/app/interactive_run_queue.h"
+#include "ava/app/reasoning_controls.h"
+
+#include "ava/tui/composer.h"
+#include "ava/tui/keybindings.h"
+#include "ava/tui/runtime.h"
+#include "ava/tui/terminal.h"
+
+#include "ava/config/auth.h"
+#include "ava/config/model_profiles.h"
+
+#include "ava/session/stats.h"
+
+#include "ava/provider/curl_transport.h"
+#include "ava/provider/registry.h"
+
+#include "ava/core/ids.h"
+#include "ava/core/version.h"
+
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -14,22 +35,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#include "ava/app/command_palette.h"
-#include "ava/app/commands.h"
-#include "ava/app/interactive_run_queue.h"
-#include "ava/app/reasoning_controls.h"
-#include "ava/config/auth.h"
-#include "ava/config/model_profiles.h"
-#include "ava/core/ids.h"
-#include "ava/core/version.h"
-#include "ava/provider/curl_transport.h"
-#include "ava/provider/registry.h"
-#include "ava/session/stats.h"
-#include "ava/tui/composer.h"
-#include "ava/tui/keybindings.h"
-#include "ava/tui/runtime.h"
-#include "ava/tui/terminal.h"
 
 namespace {
 

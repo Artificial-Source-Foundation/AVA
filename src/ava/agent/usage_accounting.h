@@ -1,11 +1,12 @@
 #pragma once
 
+#include "ava/agent/assistant_turn.h"
+
+#include "ava/provider/provider.h"
+
 #include <optional>
 #include <string>
 #include <string_view>
-
-#include "ava/agent/assistant_turn.h"
-#include "ava/provider/provider.h"
 
 namespace ava::agent {
 

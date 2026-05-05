@@ -1,13 +1,15 @@
 #pragma once
 
+#include "ava/agent/tool_types.h"
+
+#include "ava/provider/provider.h"
+
+#include "ava/core/result.h"
+
 #include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
-
-#include "ava/agent/tool_types.h"
-#include "ava/core/result.h"
-#include "ava/provider/provider.h"
 
 namespace ava::agent {
 

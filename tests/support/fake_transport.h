@@ -1,8 +1,8 @@
 #pragma once
 
-#include <vector>
-
 #include "ava/provider/provider.h"
+
+#include <vector>
 
 namespace ava::tests {
 

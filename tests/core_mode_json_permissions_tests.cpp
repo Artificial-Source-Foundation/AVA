@@ -1,5 +1,42 @@
-#include <sys/stat.h>
-#include <unistd.h>
+#include "ava/app/commands.h"
+#include "ava/app/events.h"
+#include "ava/app/headless_policy.h"
+#include "ava/app/print_mode.h"
+#include "ava/app/rpc_mode.h"
+#include "ava/app/runtime.h"
+
+#include "ava/agent/agent_loop.h"
+#include "ava/agent/mode.h"
+#include "ava/agent/tool_dispatcher.h"
+
+#include "ava/tools/bash_tool.h"
+#include "ava/tools/file_tools.h"
+#include "ava/tools/search_tools.h"
+
+#include "ava/tui/composer.h"
+#include "ava/tui/terminal.h"
+
+#include "ava/config/auth.h"
+#include "ava/config/model_config.h"
+#include "ava/config/openai_oauth.h"
+#include "ava/config/prompt_config.h"
+#include "ava/config/xdg_paths.h"
+
+#include "ava/session/compaction.h"
+#include "ava/session/export.h"
+#include "ava/session/session_store.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/provider/openai_provider.h"
+
+#include "ava/context/context_loader.h"
+
+#include "ava/core/ids.h"
+#include "ava/core/json.h"
+
+#include "tests/support/fake_transport.h"
+#include "tests/support/test_harness.h"
 
 #include <algorithm>
 #include <chrono>
@@ -16,35 +53,8 @@
 #include <utility>
 #include <vector>
 
-#include "ava/agent/agent_loop.h"
-#include "ava/agent/mode.h"
-#include "ava/agent/tool_dispatcher.h"
-#include "ava/app/commands.h"
-#include "ava/app/events.h"
-#include "ava/app/headless_policy.h"
-#include "ava/app/print_mode.h"
-#include "ava/app/rpc_mode.h"
-#include "ava/app/runtime.h"
-#include "ava/config/auth.h"
-#include "ava/config/model_config.h"
-#include "ava/config/openai_oauth.h"
-#include "ava/config/prompt_config.h"
-#include "ava/config/xdg_paths.h"
-#include "ava/context/context_loader.h"
-#include "ava/core/ids.h"
-#include "ava/core/json.h"
-#include "ava/permissions/permission.h"
-#include "ava/provider/openai_provider.h"
-#include "ava/session/compaction.h"
-#include "ava/session/export.h"
-#include "ava/session/session_store.h"
-#include "ava/tools/bash_tool.h"
-#include "ava/tools/file_tools.h"
-#include "ava/tools/search_tools.h"
-#include "ava/tui/composer.h"
-#include "ava/tui/terminal.h"
-#include "tests/support/fake_transport.h"
-#include "tests/support/test_harness.h"
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace {
 

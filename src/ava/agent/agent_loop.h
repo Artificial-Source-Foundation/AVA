@@ -1,5 +1,19 @@
 #pragma once
 
+#include "ava/agent/message_builder.h"
+#include "ava/agent/mode.h"
+#include "ava/agent/question.h"
+
+#include "ava/config/model_config.h"
+
+#include "ava/session/session_store.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/provider/provider.h"
+
+#include "ava/core/result.h"
+
 #include <cstddef>
 #include <filesystem>
 #include <functional>
@@ -7,15 +21,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-
-#include "ava/agent/message_builder.h"
-#include "ava/agent/mode.h"
-#include "ava/agent/question.h"
-#include "ava/config/model_config.h"
-#include "ava/core/result.h"
-#include "ava/permissions/permission.h"
-#include "ava/provider/provider.h"
-#include "ava/session/session_store.h"
 
 namespace ava::agent {
 

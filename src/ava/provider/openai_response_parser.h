@@ -1,12 +1,13 @@
 #pragma once
 
+#include "ava/provider/provider.h"
+
+#include "ava/core/result.h"
+
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/core/result.h"
-#include "ava/provider/provider.h"
 
 namespace ava::provider {
 

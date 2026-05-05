@@ -1,11 +1,11 @@
 #pragma once
 
+#include "ava/core/result.h"
+
 #include <cstddef>
 #include <filesystem>
 #include <string>
 #include <string_view>
-
-#include "ava/core/result.h"
 
 namespace ava::tools {
 

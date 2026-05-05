@@ -1,10 +1,6 @@
 #include "ava/lsp/lsp_client.h"
 
-#include <fcntl.h>
-#include <poll.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <unistd.h>
+#include "ava/core/json.h"
 
 #include <algorithm>
 #include <array>
@@ -19,7 +15,11 @@
 #include <thread>
 #include <utility>
 
-#include "ava/core/json.h"
+#include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace ava::lsp {
 namespace {

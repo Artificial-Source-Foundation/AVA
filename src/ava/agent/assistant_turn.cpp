@@ -1,11 +1,11 @@
 #include "ava/agent/assistant_turn.h"
 
+#include "ava/agent/provider_output_validation.h"
+#include "ava/agent/usage_accounting.h"
+
 #include <optional>
 #include <string_view>
 #include <utility>
-
-#include "ava/agent/provider_output_validation.h"
-#include "ava/agent/usage_accounting.h"
 
 namespace ava::agent {
 namespace {

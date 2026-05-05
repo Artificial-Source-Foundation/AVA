@@ -1,13 +1,14 @@
 #pragma once
 
-#include <mutex>
-#include <string>
-#include <string_view>
-
 #include "ava/app/events.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/runtime.h"
+
 #include "ava/core/result.h"
+
+#include <mutex>
+#include <string>
+#include <string_view>
 
 namespace ava::app::rpc {
 

@@ -1,10 +1,10 @@
 #include "ava/provider/openai_provider.h"
 
+#include "ava/provider/openai_response_parser_detail.h"
+
 #include <memory>
 #include <utility>
 #include <vector>
-
-#include "ava/provider/openai_response_parser_detail.h"
 
 namespace ava::provider {
 

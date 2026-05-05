@@ -1,12 +1,5 @@
 #include "ava/agent/agent_loop.h"
 
-#include <algorithm>
-#include <map>
-#include <optional>
-#include <string_view>
-#include <utility>
-#include <vector>
-
 #include "ava/agent/assistant_turn.h"
 #include "ava/agent/message_builder.h"
 #include "ava/agent/provider_output_validation.h"
@@ -15,8 +8,16 @@
 #include "ava/agent/tool_result.h"
 #include "ava/agent/tool_summaries.h"
 #include "ava/agent/usage_accounting.h"
+
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+
+#include <algorithm>
+#include <map>
+#include <optional>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace ava::agent {
 namespace {

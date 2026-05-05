@@ -1,9 +1,6 @@
 #include "ava/tools/webfetch_tool.h"
 
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
+#include "ava/provider/curl_transport.h"
 
 #include <algorithm>
 #include <cctype>
@@ -13,7 +10,10 @@
 #include <span>
 #include <string_view>
 
-#include "ava/provider/curl_transport.h"
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
 namespace ava::tools {
 namespace {

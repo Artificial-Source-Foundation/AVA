@@ -1,12 +1,12 @@
 #pragma once
 
+#include "ava/core/result.h"
+
 #include <cstddef>
 #include <iosfwd>
 #include <optional>
 #include <string>
 #include <string_view>
-
-#include "ava/core/result.h"
 
 namespace ava::app {
 

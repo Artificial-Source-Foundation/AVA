@@ -1,13 +1,13 @@
 #include "ava/plugin/manifest.h"
 
+#include "ava/core/json.h"
+
 #include <array>
 #include <cctype>
 #include <fstream>
 #include <optional>
 #include <sstream>
 #include <string_view>
-
-#include "ava/core/json.h"
 
 namespace ava::plugin {
 namespace {

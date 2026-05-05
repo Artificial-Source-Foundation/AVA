@@ -1,11 +1,14 @@
 #include "ava/app/connect_openai.h"
 
-#include <netinet/in.h>
-#include <poll.h>
-#include <signal.h>
-#include <sys/socket.h>
-#include <termios.h>
-#include <unistd.h>
+#include "ava/tui/composer.h"
+
+#include "ava/config/auth.h"
+#include "ava/config/openai_oauth.h"
+#include "ava/config/provider_profiles.h"
+
+#include "ava/provider/curl_transport.h"
+
+#include "ava/core/result.h"
 
 #include <algorithm>
 #include <array>
@@ -23,12 +26,12 @@
 #include <utility>
 #include <vector>
 
-#include "ava/config/auth.h"
-#include "ava/config/openai_oauth.h"
-#include "ava/config/provider_profiles.h"
-#include "ava/core/result.h"
-#include "ava/provider/curl_transport.h"
-#include "ava/tui/composer.h"
+#include <netinet/in.h>
+#include <poll.h>
+#include <signal.h>
+#include <sys/socket.h>
+#include <termios.h>
+#include <unistd.h>
 
 namespace ava::app {
 namespace {

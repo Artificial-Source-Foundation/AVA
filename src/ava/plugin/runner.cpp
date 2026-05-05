@@ -7,7 +7,7 @@
 #ifdef __linux__
 #include <sys/syscall.h>
 #endif
-#include <unistd.h>
+#include "ava/core/json.h"
 
 #include <algorithm>
 #include <array>
@@ -21,7 +21,7 @@
 #include <utility>
 #include <vector>
 
-#include "ava/core/json.h"
+#include <unistd.h>
 
 namespace ava::plugin {
 namespace {

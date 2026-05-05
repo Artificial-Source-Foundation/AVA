@@ -1,14 +1,5 @@
 #include "ava/app/rpc_mode.h"
 
-#include <atomic>
-#include <istream>
-#include <mutex>
-#include <optional>
-#include <ostream>
-#include <thread>
-#include <utility>
-#include <vector>
-
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/rpc/handlers.h"
@@ -17,8 +8,18 @@
 #include "ava/app/rpc/resolvers.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/rpc/serialization.h"
+
 #include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
+
+#include <atomic>
+#include <istream>
+#include <mutex>
+#include <optional>
+#include <ostream>
+#include <thread>
+#include <utility>
+#include <vector>
 
 namespace ava::app {
 

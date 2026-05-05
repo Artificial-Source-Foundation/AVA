@@ -1,10 +1,10 @@
 #include "ava/app/runtime_json.h"
 
-#include <cctype>
-#include <utility>
-
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+
+#include <cctype>
+#include <utility>
 
 namespace ava::app::runtime {
 namespace {

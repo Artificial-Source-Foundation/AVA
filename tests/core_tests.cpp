@@ -1,8 +1,8 @@
+#include "tests/support/test_harness.h"
+
 #include <array>
 #include <iostream>
 #include <string_view>
-
-#include "tests/support/test_harness.h"
 
 void run_core_mode_tests();
 void run_session_tests();

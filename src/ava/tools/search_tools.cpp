@@ -1,5 +1,8 @@
 #include "ava/tools/search_tools.h"
 
+#include "ava/tools/ignore_rules.h"
+#include "ava/tools/spill_files.h"
+
 #include <algorithm>
 #include <fstream>
 #include <optional>
@@ -7,9 +10,6 @@
 #include <string>
 #include <system_error>
 #include <utility>
-
-#include "ava/tools/ignore_rules.h"
-#include "ava/tools/spill_files.h"
 
 namespace ava::tools {
 

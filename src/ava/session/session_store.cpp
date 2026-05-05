@@ -1,5 +1,10 @@
 #include "ava/session/session_store.h"
 
+#include "ava/config/xdg_paths.h"
+
+#include "ava/core/ids.h"
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -11,10 +16,6 @@
 #include <sstream>
 #include <string_view>
 #include <utility>
-
-#include "ava/config/xdg_paths.h"
-#include "ava/core/ids.h"
-#include "ava/core/json.h"
 
 namespace ava::session {
 

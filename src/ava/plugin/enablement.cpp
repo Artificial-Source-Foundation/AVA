@@ -1,6 +1,8 @@
 #include "ava/plugin/enablement.h"
 
-#include <unistd.h>
+#include "ava/config/xdg_paths.h"
+
+#include "ava/core/json.h"
 
 #include <algorithm>
 #include <cctype>
@@ -12,8 +14,7 @@
 #include <utility>
 #include <vector>
 
-#include "ava/config/xdg_paths.h"
-#include "ava/core/json.h"
+#include <unistd.h>
 
 namespace ava::plugin {
 namespace {

@@ -1,19 +1,23 @@
 #pragma once
 
+#include "ava/app/commands.h"
+#include "ava/app/runtime.h"
+
+#include "ava/agent/agent_loop.h"
+#include "ava/agent/question.h"
+
+#include "ava/config/model_config.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/core/result.h"
+
 #include <cstddef>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/agent/agent_loop.h"
-#include "ava/agent/question.h"
-#include "ava/app/commands.h"
-#include "ava/app/runtime.h"
-#include "ava/config/model_config.h"
-#include "ava/core/result.h"
-#include "ava/permissions/permission.h"
 
 namespace ava::app::rpc {
 

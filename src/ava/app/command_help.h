@@ -1,9 +1,9 @@
 #pragma once
 
+#include "ava/app/command_catalog.h"
+
 #include <string>
 #include <vector>
-
-#include "ava/app/command_catalog.h"
 
 namespace ava::app {
 

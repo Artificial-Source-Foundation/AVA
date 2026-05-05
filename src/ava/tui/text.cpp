@@ -1,8 +1,8 @@
 #include "ava/tui/text.h"
 
-#include <utility>
-
 #include "ava/core/error.h"
+
+#include <utility>
 
 namespace ava::tui {
 namespace {

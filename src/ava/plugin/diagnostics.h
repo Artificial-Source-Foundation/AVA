@@ -1,10 +1,10 @@
 #pragma once
 
+#include "ava/plugin/discovery.h"
+
 #include <filesystem>
 #include <string>
 #include <vector>
-
-#include "ava/plugin/discovery.h"
 
 namespace ava::plugin {
 

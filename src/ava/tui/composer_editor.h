@@ -1,11 +1,11 @@
 #pragma once
 
+#include "ava/tui/keybindings.h"
+
 #include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/tui/keybindings.h"
 
 namespace ava::tui {
 

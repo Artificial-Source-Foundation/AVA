@@ -1,11 +1,11 @@
 #include "ava/app/headless_policy.h"
 
+#include "ava/core/error.h"
+
 #include <algorithm>
 #include <set>
 #include <string>
 #include <utility>
-
-#include "ava/core/error.h"
 
 namespace ava::app {
 namespace {

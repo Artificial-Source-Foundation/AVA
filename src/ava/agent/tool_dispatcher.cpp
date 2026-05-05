@@ -1,5 +1,24 @@
 #include "ava/agent/tool_dispatcher.h"
 
+#include "ava/agent/question.h"
+#include "ava/agent/tool_registry.h"
+#include "ava/agent/tool_result.h"
+
+#include "ava/tools/bash_tool.h"
+#include "ava/tools/diff_utils.h"
+#include "ava/tools/edit_match.h"
+#include "ava/tools/lsp_tools.h"
+#include "ava/tools/mutation_queue.h"
+#include "ava/tools/search_tools.h"
+#include "ava/tools/webfetch_tool.h"
+
+#include "ava/plugin/tool_broker.h"
+
+#include "ava/mcp/tool_broker.h"
+
+#include "ava/core/ids.h"
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -11,21 +30,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#include "ava/agent/question.h"
-#include "ava/agent/tool_registry.h"
-#include "ava/agent/tool_result.h"
-#include "ava/core/ids.h"
-#include "ava/core/json.h"
-#include "ava/mcp/tool_broker.h"
-#include "ava/plugin/tool_broker.h"
-#include "ava/tools/bash_tool.h"
-#include "ava/tools/diff_utils.h"
-#include "ava/tools/edit_match.h"
-#include "ava/tools/lsp_tools.h"
-#include "ava/tools/mutation_queue.h"
-#include "ava/tools/search_tools.h"
-#include "ava/tools/webfetch_tool.h"
 
 namespace ava::agent {
 namespace {

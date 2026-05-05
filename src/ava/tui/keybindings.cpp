@@ -1,12 +1,12 @@
 #include "ava/tui/keybindings.h"
 
+#include "ava/core/error.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <fstream>
 #include <iterator>
-
-#include "ava/core/error.h"
 
 namespace ava::tui {
 namespace {

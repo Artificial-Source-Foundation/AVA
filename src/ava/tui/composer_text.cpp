@@ -1,8 +1,8 @@
+#include "ava/tui/composer_internal.h"
+
 #include <algorithm>
 #include <climits>
 #include <cwchar>
-
-#include "ava/tui/composer_internal.h"
 
 namespace ava::tui {
 

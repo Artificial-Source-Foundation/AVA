@@ -1,7 +1,6 @@
 #include "tests/support/test_harness.h"
 
-#include <sys/stat.h>
-#include <unistd.h>
+#include "ava/core/ids.h"
 
 #include <climits>
 #include <cstdlib>
@@ -11,7 +10,8 @@
 #include <string>
 #include <utility>
 
-#include "ava/core/ids.h"
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace ava::test {
 namespace {

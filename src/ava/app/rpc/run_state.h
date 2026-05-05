@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/core/result.h"
+
 #include <atomic>
 #include <deque>
 #include <functional>
@@ -9,8 +11,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "ava/core/result.h"
 
 namespace ava::app::rpc {
 

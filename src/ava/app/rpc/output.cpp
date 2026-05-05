@@ -1,10 +1,11 @@
 #include "ava/app/rpc/output.h"
 
-#include <utility>
-
 #include "ava/app/rpc/protocol.h"
 #include "ava/app/rpc/serialization.h"
+
 #include "ava/core/ids.h"
+
+#include <utility>
 
 namespace ava::app::rpc {
 

@@ -1,18 +1,23 @@
+#include "ava/agent/tool_dispatcher.h"
+
+#include "ava/tools/file_tools.h"
+
+#include "ava/mcp/config.h"
+#include "ava/mcp/stdio_client.h"
+#include "ava/mcp/tool_broker.h"
+
+#include "ava/permissions/permission.h"
+
+#include "ava/core/json.h"
+
+#include "tests/support/test_harness.h"
+
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
-
-#include "ava/agent/tool_dispatcher.h"
-#include "ava/core/json.h"
-#include "ava/mcp/config.h"
-#include "ava/mcp/stdio_client.h"
-#include "ava/mcp/tool_broker.h"
-#include "ava/permissions/permission.h"
-#include "ava/tools/file_tools.h"
-#include "tests/support/test_harness.h"
 
 #ifndef AVA_FAKE_MCP_SERVER_PATH
 #define AVA_FAKE_MCP_SERVER_PATH ""

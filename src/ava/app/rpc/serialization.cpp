@@ -1,16 +1,19 @@
 #include "ava/app/rpc/serialization.h"
 
+#include "ava/app/rpc/protocol.h"
+
+#include "ava/session/stats.h"
+#include "ava/session/validation.h"
+
+#include "ava/provider/registry.h"
+
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <cctype>
 #include <iomanip>
 #include <sstream>
 #include <utility>
-
-#include "ava/app/rpc/protocol.h"
-#include "ava/core/json.h"
-#include "ava/provider/registry.h"
-#include "ava/session/stats.h"
-#include "ava/session/validation.h"
 
 namespace ava::app::rpc {
 namespace {

@@ -1,12 +1,15 @@
+#include "ava/app/events.h"
+#include "ava/app/interactive_run_queue.h"
+
+#include "ava/agent/mode.h"
+
+#include "ava/core/json.h"
+
+#include "tests/support/test_harness.h"
+
 #include <iostream>
 #include <string>
 #include <vector>
-
-#include "ava/agent/mode.h"
-#include "ava/app/events.h"
-#include "ava/app/interactive_run_queue.h"
-#include "ava/core/json.h"
-#include "tests/support/test_harness.h"
 
 namespace {
 

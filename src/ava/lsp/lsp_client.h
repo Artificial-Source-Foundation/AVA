@@ -1,6 +1,6 @@
 #pragma once
 
-#include <sys/types.h>
+#include "ava/core/result.h"
 
 #include <chrono>
 #include <filesystem>
@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "ava/core/result.h"
+#include <sys/types.h>
 
 namespace ava::lsp {
 

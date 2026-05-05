@@ -1,11 +1,12 @@
+#include "ava/tui/composer_internal.h"
+
+#include "ava/config/model_profiles.h"
+#include "ava/config/provider_profiles.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <string>
-
-#include "ava/config/model_profiles.h"
-#include "ava/config/provider_profiles.h"
-#include "ava/tui/composer_internal.h"
 
 namespace ava::tui::detail {
 namespace {

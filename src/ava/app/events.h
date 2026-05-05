@@ -1,13 +1,14 @@
 #pragma once
 
+#include "ava/agent/mode.h"
+
+#include "ava/core/result.h"
+
 #include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
 #include <vector>
-
-#include "ava/agent/mode.h"
-#include "ava/core/result.h"
 
 namespace ava::app {
 

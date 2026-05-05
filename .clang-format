@@ -9,3 +9,44 @@ BreakBeforeBraces: Custom
 BraceWrapping:
   AfterFunction: true
 AllowShortFunctionsOnASingleLine: InlineOnly
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^"sys.h"'
+    Priority: 1
+  - Regex: '^"ava/app'
+    Priority: 3
+  - Regex: '^"ava/agent'
+    Priority: 4
+  - Regex: '^"ava/tools'
+    Priority: 5
+  - Regex: '^"ava/tui'
+    Priority: 6
+  - Regex: '^"ava/plugin'
+    Priority: 7
+  - Regex: '^"ava/mcp'
+    Priority: 8
+  - Regex: '^"ava/config'
+    Priority: 9
+  - Regex: '^"ava/session'
+    Priority: 10
+  - Regex: '^"ava/permissions'
+    Priority: 11
+  - Regex: '^"ava/provider'
+    Priority: 12
+  - Regex: '^"ava/context'
+    Priority: 13
+  - Regex: '^"ava/lsp'
+    Priority: 14
+  - Regex: '^"ava/core'
+    Priority: 15
+  - Regex: '^"ava/'
+    Priority: 2
+  - Regex: '^"debug.h"'
+    Priority: 19
+  - Regex: '^"'
+    Priority: 16
+  - Regex: '^<[^.]*>'
+    Priority: 17
+  - Regex: '^<.*\..*>'
+    Priority: 18

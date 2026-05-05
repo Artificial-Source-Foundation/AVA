@@ -7,7 +7,8 @@
 #ifdef __linux__
 #include <sys/syscall.h>
 #endif
-#include <unistd.h>
+#include "ava/core/json.h"
+#include "ava/core/version.h"
 
 #include <algorithm>
 #include <array>
@@ -20,8 +21,7 @@
 #include <thread>
 #include <utility>
 
-#include "ava/core/json.h"
-#include "ava/core/version.h"
+#include <unistd.h>
 
 namespace ava::mcp {
 namespace {

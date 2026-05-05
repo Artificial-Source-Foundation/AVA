@@ -1,11 +1,11 @@
 #include "ava/agent/question.h"
 
+#include "ava/core/json.h"
+
 #include <cctype>
 #include <optional>
 #include <string>
 #include <utility>
-
-#include "ava/core/json.h"
 
 namespace ava::agent {
 namespace {

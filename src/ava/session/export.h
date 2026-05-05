@@ -1,9 +1,9 @@
 #pragma once
 
+#include "ava/session/session_store.h"
+
 #include <string>
 #include <vector>
-
-#include "ava/session/session_store.h"
 
 namespace ava::session {
 

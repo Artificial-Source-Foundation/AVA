@@ -1,12 +1,12 @@
 #include "ava/app/runtime_prompt.h"
 
-#include <optional>
-#include <utility>
-
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/app/runtime_compaction.h"
 #include "ava/app/runtime_reasoning.h"
 #include "ava/app/runtime_retry.h"
+
+#include <optional>
+#include <utility>
 
 namespace ava::app::runtime {
 

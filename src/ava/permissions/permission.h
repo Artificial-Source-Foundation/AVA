@@ -1,12 +1,13 @@
 #pragma once
 
+#include "ava/agent/mode.h"
+
+#include "ava/core/result.h"
+
 #include <filesystem>
 #include <functional>
 #include <string>
 #include <string_view>
-
-#include "ava/agent/mode.h"
-#include "ava/core/result.h"
 
 namespace ava::permissions {
 

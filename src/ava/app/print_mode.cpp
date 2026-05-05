@@ -1,15 +1,17 @@
 #include "ava/app/print_mode.h"
 
+#include "ava/config/auth.h"
+#include "ava/config/openai_oauth.h"
+
+#include "ava/provider/curl_transport.h"
+#include "ava/provider/registry.h"
+
+#include "ava/core/error.h"
+
 #include <iterator>
 #include <ostream>
 #include <string_view>
 #include <utility>
-
-#include "ava/config/auth.h"
-#include "ava/config/openai_oauth.h"
-#include "ava/core/error.h"
-#include "ava/provider/curl_transport.h"
-#include "ava/provider/registry.h"
 
 namespace ava::app {
 namespace {

@@ -1,11 +1,12 @@
 #pragma once
 
+#include "ava/agent/mode.h"
+
+#include "ava/core/result.h"
+
 #include <filesystem>
 #include <string>
 #include <vector>
-
-#include "ava/agent/mode.h"
-#include "ava/core/result.h"
 
 namespace ava::session {
 

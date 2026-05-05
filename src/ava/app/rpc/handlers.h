@@ -1,13 +1,15 @@
 #pragma once
 
+#include "ava/app/rpc/protocol.h"
+#include "ava/app/runtime.h"
+
+#include "ava/provider/provider.h"
+
+#include "ava/core/result.h"
+
 #include <memory>
 #include <string>
 #include <string_view>
-
-#include "ava/app/rpc/protocol.h"
-#include "ava/app/runtime.h"
-#include "ava/core/result.h"
-#include "ava/provider/provider.h"
 
 namespace ava::app::rpc {
 

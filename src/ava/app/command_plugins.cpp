@@ -1,5 +1,16 @@
 #include "ava/app/command_plugins.h"
 
+#include "ava/app/command_format.h"
+#include "ava/app/command_tools.h"
+
+#include "ava/plugin/diagnostics.h"
+#include "ava/plugin/enablement.h"
+#include "ava/plugin/manifest.h"
+#include "ava/plugin/runner.h"
+
+#include "ava/core/ids.h"
+#include "ava/core/json.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -8,15 +19,6 @@
 #include <optional>
 #include <sstream>
 #include <utility>
-
-#include "ava/app/command_format.h"
-#include "ava/app/command_tools.h"
-#include "ava/core/ids.h"
-#include "ava/core/json.h"
-#include "ava/plugin/diagnostics.h"
-#include "ava/plugin/enablement.h"
-#include "ava/plugin/manifest.h"
-#include "ava/plugin/runner.h"
 
 namespace ava::app {
 namespace {

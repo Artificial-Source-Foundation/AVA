@@ -284,6 +284,7 @@ if(AVA_BUILD_TESTS)
     tests/mcp_tests.cpp
     tests/plugin_tests.cpp
     tests/provider_anthropic_tests.cpp
+    tests/provider_anthropic_stream_events_tests.cpp
     tests/provider_event_buffer_tests.cpp
     tests/provider_openai_tests.cpp
     tests/provider_openai_compatible_response_tests.cpp
@@ -331,6 +332,7 @@ if(AVA_BUILD_TESTS)
     app_runtime
     provider_openai
     provider_anthropic
+    provider_anthropic_stream_events
     provider_event_buffer
     provider_openai_compatible_response
     provider_transport

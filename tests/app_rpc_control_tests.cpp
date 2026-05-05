@@ -3,6 +3,7 @@
 #include <mutex>
 #include <optional>
 #include <sstream>
+#include <string>
 #include <utility>
 
 #include "ava/agent/mode.h"
@@ -44,6 +45,49 @@ ava::app::RuntimeSession make_rpc_control_session()
       .system_prompt = {},
       .reasoning = std::nullopt,
       .created = false};
+}
+
+ava::app::RpcCommand rpc_command(std::string id, std::string type, std::optional<std::string> message = std::nullopt)
+{
+  ava::app::RpcCommand command;
+  command.id = std::move(id);
+  command.type = std::move(type);
+  command.message = std::move(message);
+  return command;
+}
+
+void test_rpc_queue_control_handlers()
+{
+  auto session = make_rpc_control_session();
+  std::mutex session_mutex;
+  std::ostringstream stream;
+  ava::app::rpc::RpcOutput output(stream);
+  ava::app::rpc::RpcRunState run_state;
+  ava::app::rpc::set_active_run(run_state, true, "prompt-queue");
+
+  auto steer = rpc_command("steer-1", "steer", "steer message");
+  auto handled_steer = ava::app::rpc::handle_steer_command(output, session, session_mutex, run_state, steer);
+  auto steering = ava::app::rpc::take_queued_steering_messages(run_state, "prompt-queue");
+  auto follow_up = rpc_command("follow-1", "follow_up", "follow message");
+  auto handled_follow_up =
+      ava::app::rpc::handle_follow_up_command(output, session, session_mutex, run_state, follow_up);
+  auto queued_follow_up = ava::app::rpc::take_next_follow_up_message(run_state);
+  auto missing = rpc_command("follow-missing", "follow_up");
+  auto handled_missing = ava::app::rpc::handle_follow_up_command(output, session, session_mutex, run_state, missing);
+  auto const jsonl = stream.str();
+
+  expect(handled_steer && steering.size() == 1 && steering[0].request_id == "steer-1" &&
+             steering[0].correlation_id == "prompt-queue" && steering[0].message == "steer message",
+         "RPC steer handler queues steering messages against the active prompt");
+  expect(handled_follow_up && queued_follow_up && queued_follow_up->request_id == "follow-1" &&
+             queued_follow_up->correlation_id == "prompt-queue" && queued_follow_up->message == "follow message",
+         "RPC follow_up handler queues follow-up messages against the active prompt");
+  expect(handled_missing && jsonl.find("\"name\":\"steer_queued\"") != std::string::npos &&
+             jsonl.find("\"name\":\"follow_up_queued\"") != std::string::npos &&
+             jsonl.find("\"queued\":true") != std::string::npos &&
+             jsonl.find("\"correlation_id\":\"prompt-queue\"") != std::string::npos &&
+             jsonl.find("follow_up requires message") != std::string::npos,
+         "RPC queue handlers emit queue events, steer success responses, and validation errors");
 }
 
 void test_rpc_cancel_handler_clears_queues_and_reports_follow_up_errors()
@@ -95,5 +139,6 @@ void test_rpc_cancel_handler_clears_queues_and_reports_follow_up_errors()
 
 void run_app_rpc_control_tests()
 {
+  test_rpc_queue_control_handlers();
   test_rpc_cancel_handler_clears_queues_and_reports_follow_up_errors();
 }

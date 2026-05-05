@@ -406,47 +406,14 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     }
 
     if (command->type == "steer") {
-      if (!command->message) {
-        if (auto written = rpc::write_error(output, command->id, rpc::invalid_rpc("steer requires message"));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      auto queued =
-          rpc::queue_rpc_message(run_state.steering_messages, run_state, command->type, command->id, *command->message);
-      if (!queued) {
-        if (auto written = rpc::write_error(output, command->id, queued.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_queue_event(output, session, session_mutex, "steer_queued", *queued); !written) {
+      if (auto written = rpc::handle_steer_command(output, session, session_mutex, run_state, *command); !written) {
         return written;
       }
-      std::string json = "{";
-      json += rpc::bool_field_json("queued", true);
-      json += ',';
-      json += rpc::string_field_json("correlation_id", queued->correlation_id);
-      json += '}';
-      if (auto written = rpc::write_success(output, command->id, json); !written) return written;
       continue;
     }
 
     if (command->type == "follow_up") {
-      if (!command->message) {
-        if (auto written = rpc::write_error(output, command->id, rpc::invalid_rpc("follow_up requires message"));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      auto queued = rpc::queue_rpc_message(run_state.follow_up_messages, run_state, command->type, command->id,
-                                           *command->message);
-      if (!queued) {
-        if (auto written = rpc::write_error(output, command->id, queued.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_queue_event(output, session, session_mutex, "follow_up_queued", *queued);
-          !written) {
+      if (auto written = rpc::handle_follow_up_command(output, session, session_mutex, run_state, *command); !written) {
         return written;
       }
       continue;

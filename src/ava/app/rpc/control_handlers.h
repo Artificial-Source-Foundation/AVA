@@ -17,6 +17,14 @@ namespace ava::app::rpc {
                                                            std::vector<QueuedRpcMessage> const& follow_ups,
                                                            std::string_view reason);
 
+[[nodiscard]] ava::core::VoidResult handle_steer_command(RpcOutput& output, RuntimeSession const& session,
+                                                         std::mutex& session_mutex, RpcRunState& run_state,
+                                                         RpcCommand const& command);
+
+[[nodiscard]] ava::core::VoidResult handle_follow_up_command(RpcOutput& output, RuntimeSession const& session,
+                                                             std::mutex& session_mutex, RpcRunState& run_state,
+                                                             RpcCommand const& command);
+
 [[nodiscard]] ava::core::VoidResult handle_cancel_command(RpcOutput& output, RuntimeSession const& session,
                                                           std::mutex& session_mutex, RpcRunState& run_state,
                                                           PendingResolverState& pending_state,

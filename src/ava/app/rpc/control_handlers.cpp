@@ -17,6 +17,38 @@ ava::core::VoidResult write_follow_up_errors(RpcOutput& output, std::vector<Queu
   return {};
 }
 
+ava::core::VoidResult handle_steer_command(RpcOutput& output, RuntimeSession const& session, std::mutex& session_mutex,
+                                           RpcRunState& run_state, RpcCommand const& command)
+{
+  if (!command.message) {
+    return write_error(output, command.id, invalid_rpc("steer requires message"));
+  }
+  auto queued = queue_rpc_message(run_state.steering_messages, run_state, command.type, command.id, *command.message);
+  if (!queued) return write_error(output, command.id, queued.error());
+  if (auto written = write_queue_event(output, session, session_mutex, "steer_queued", *queued); !written) {
+    return written;
+  }
+
+  std::string json = "{";
+  json += bool_field_json("queued", true);
+  json += ',';
+  json += string_field_json("correlation_id", queued->correlation_id);
+  json += '}';
+  return write_success(output, command.id, json);
+}
+
+ava::core::VoidResult handle_follow_up_command(RpcOutput& output, RuntimeSession const& session,
+                                               std::mutex& session_mutex, RpcRunState& run_state,
+                                               RpcCommand const& command)
+{
+  if (!command.message) {
+    return write_error(output, command.id, invalid_rpc("follow_up requires message"));
+  }
+  auto queued = queue_rpc_message(run_state.follow_up_messages, run_state, command.type, command.id, *command.message);
+  if (!queued) return write_error(output, command.id, queued.error());
+  return write_queue_event(output, session, session_mutex, "follow_up_queued", *queued);
+}
+
 ava::core::VoidResult handle_cancel_command(RpcOutput& output, RuntimeSession const& session, std::mutex& session_mutex,
                                             RpcRunState& run_state, PendingResolverState& pending_state,
                                             RpcCommand const& command)

@@ -3,6 +3,7 @@
 #include "ava/tools/file_tools.h"
 
 #include "ava/mcp/config.h"
+#include "ava/mcp/protocol.h"
 #include "ava/mcp/stdio_client.h"
 #include "ava/mcp/tool_broker.h"
 
@@ -59,6 +60,15 @@ ava::mcp::McpStdioClientOptions fake_client_options(std::filesystem::path const&
   return options;
 }
 
+std::string nested_arrays_json(std::size_t depth)
+{
+  std::string text;
+  text.reserve(depth * 2);
+  for (std::size_t index = 0; index < depth; ++index) text += '[';
+  for (std::size_t index = 0; index < depth; ++index) text += ']';
+  return text;
+}
+
 void test_mcp_config_parsing()
 {
   auto global =
@@ -91,6 +101,52 @@ void test_mcp_config_parsing()
       .workspace_dir = root / "workspace", .global_config_file = global_path, .project_config_file = project_path});
   expect(!duplicate && duplicate.error().message().find("duplicate") != std::string::npos,
          "MCP config rejects duplicate server ids across scopes");
+}
+
+void test_mcp_protocol_parsing()
+{
+  auto const server = fake_server_config("/tmp/mcp-protocol");
+
+  auto content_length =
+      ava::mcp::parse_mcp_content_length("X-Test: ignored\r\n content-length : 42\r\n\r\n", server, 64);
+  expect(content_length && *content_length == 42,
+         content_length
+             ? "MCP protocol parses trimmed case-insensitive Content-Length"
+             : "MCP protocol parses trimmed case-insensitive Content-Length: " + content_length.error().format());
+
+  auto invalid_length = ava::mcp::parse_mcp_content_length("Content-Length: 4x\r\n\r\n", server, 64);
+  expect(!invalid_length && invalid_length.error().message().find("invalid") != std::string::npos,
+         "MCP protocol rejects invalid Content-Length values");
+
+  auto oversized_length = ava::mcp::parse_mcp_content_length("Content-Length: 65\r\n\r\n", server, 64);
+  expect(!oversized_length && oversized_length.error().message().find("size cap") != std::string::npos,
+         "MCP protocol rejects oversized Content-Length values");
+
+  expect(ava::mcp::mcp_header_end_offset("Content-Length: 2\r\n\r\n{}").value_or(0) == 21 &&
+             ava::mcp::mcp_header_end_offset("Content-Length: 2\n\n{}").value_or(0) == 19,
+         "MCP protocol finds CRLF and LF header terminators");
+
+  expect(ava::mcp::mcp_response_id("{\"jsonrpc\":\"2.0\",\"id\":\"abc\",\"result\":{}}").value_or("") == "abc" &&
+             ava::mcp::mcp_response_id("{\"jsonrpc\":\"2.0\",\"id\":42,\"result\":{}}").value_or("") == "42",
+         "MCP protocol parses string and numeric response IDs");
+
+  expect(ava::mcp::mcp_bool_field("{\"isError\":false}", "isError").value_or(true) == false,
+         "MCP protocol parses boolean result fields");
+
+  expect(ava::mcp::is_valid_mcp_tool_name("server.tool") && !ava::mcp::is_valid_mcp_tool_name("") &&
+             !ava::mcp::is_valid_mcp_tool_name("bad\nname"),
+         "MCP protocol validates model-facing tool names");
+
+  auto text_content = ava::mcp::mcp_text_content_from_result(
+      "{\"content\":[{\"type\":\"text\",\"text\":\"one\"},{\"type\":\"image\",\"data\":\"ignored\"},"
+      "{\"type\":\"text\",\"text\":\"two\"}]}");
+  expect(text_content == "one\ntwo", "MCP protocol joins text content blocks");
+
+  auto structured_content = ava::mcp::mcp_text_content_from_result("{\"structuredContent\":{\"ok\":true}}");
+  expect(structured_content == "{\"ok\":true}", "MCP protocol falls back to structuredContent JSON");
+
+  expect(!ava::mcp::mcp_json_depth_within_limit("{\"deep\":" + nested_arrays_json(130) + "}"),
+         "MCP protocol rejects excessively deep JSON records");
 }
 
 void test_mcp_stdio_client_lists_and_calls_tools()
@@ -328,6 +384,7 @@ void test_mcp_tool_dispatcher_contains_tool_errors()
 void run_mcp_tests()
 {
   test_mcp_config_parsing();
+  test_mcp_protocol_parsing();
   test_mcp_stdio_client_lists_and_calls_tools();
   test_mcp_tool_dispatcher();
   test_mcp_tool_dispatcher_contains_tool_errors();

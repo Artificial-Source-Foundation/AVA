@@ -67,6 +67,7 @@ add_library(ava_core
   src/ava/core/json.cpp
   src/ava/lsp/lsp_client.cpp
   src/ava/mcp/config.cpp
+  src/ava/mcp/protocol.cpp
   src/ava/mcp/stdio_client.cpp
   src/ava/mcp/tool_broker.cpp
   src/ava/permissions/permission.cpp

@@ -44,6 +44,7 @@ void run_agent_tool_dispatcher_tests();
 void run_lsp_tests();
 void run_message_builder_support_tests();
 void run_plugin_tests();
+void run_mcp_config_support_tests();
 void run_mcp_tests();
 void run_tui_composer_tests();
 
@@ -95,6 +96,7 @@ constexpr std::array kTestSuites{
     TestSuite{"lsp", run_lsp_tests},
     TestSuite{"message_builder_support", run_message_builder_support_tests},
     TestSuite{"plugin", run_plugin_tests},
+    TestSuite{"mcp_config_support", run_mcp_config_support_tests},
     TestSuite{"mcp", run_mcp_tests},
     TestSuite{"tui_composer", run_tui_composer_tests},
 };

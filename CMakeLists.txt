@@ -89,6 +89,7 @@ add_library(ava_core
   src/ava/lsp/lsp_client_io.cpp
   src/ava/lsp/lsp_client_support.cpp
   src/ava/mcp/config.cpp
+  src/ava/mcp/config_support.cpp
   src/ava/mcp/process_support.cpp
   src/ava/mcp/protocol.cpp
   src/ava/mcp/stdio_client.cpp
@@ -293,6 +294,7 @@ if(AVA_BUILD_TESTS)
     tests/json_support_tests.cpp
     tests/lsp_tests.cpp
     tests/message_builder_support_tests.cpp
+    tests/mcp_config_support_tests.cpp
     tests/mcp_tests.cpp
     tests/plugin_tests.cpp
     tests/provider_anthropic_tests.cpp
@@ -361,6 +363,7 @@ if(AVA_BUILD_TESTS)
     lsp
     message_builder_support
     plugin
+    mcp_config_support
     mcp
     tui_composer
   )

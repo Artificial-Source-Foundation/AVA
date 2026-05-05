@@ -125,6 +125,7 @@ add_library(ava_core
   src/ava/session/validation_fields.cpp
   src/ava/session/validation_issue.cpp
   src/ava/session/validation_model.cpp
+  src/ava/session/validation_permission.cpp
   src/ava/tools/bash_tool.cpp
   src/ava/tools/diff_utils.cpp
   src/ava/tools/edit_match.cpp
@@ -264,6 +265,7 @@ if(AVA_BUILD_TESTS)
     tests/provider_anthropic_tests.cpp
     tests/provider_openai_tests.cpp
     tests/provider_transport_tests.cpp
+    tests/session_validation_permission_tests.cpp
     tests/session_validation_model_tests.cpp
     tests/session_tests.cpp
     tests/tools_tests.cpp
@@ -280,6 +282,7 @@ if(AVA_BUILD_TESTS)
     core_mode
     session
     session_validation_model
+    session_validation_permission
     core_json_permission
     app_command_classification
     tools

@@ -186,6 +186,7 @@ add_library(ava_app
   src/ava/app/print_mode.cpp
   src/ava/app/reasoning_controls.cpp
   src/ava/app/rpc/handlers.cpp
+  src/ava/app/rpc/control_handlers.cpp
   src/ava/app/rpc/output.cpp
   src/ava/app/rpc/protocol.cpp
   src/ava/app/rpc/resolvers.cpp
@@ -239,6 +240,7 @@ if(AVA_BUILD_TESTS)
 
   add_executable(ava_tests
     tests/agent_tool_dispatcher_tests.cpp
+    tests/app_rpc_control_tests.cpp
     tests/app_runtime_tests.cpp
     tests/config_context_auth_oauth_tests.cpp
     tests/core_tests.cpp
@@ -270,6 +272,7 @@ if(AVA_BUILD_TESTS)
     config_context_auth_oauth
     app_event_serialization
     app_event_bus
+    app_rpc_control
     app_runtime
     provider_openai
     provider_anthropic

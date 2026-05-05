@@ -33,6 +33,12 @@ struct ClearedRpcQueues {
   std::vector<QueuedRpcMessage> follow_up_messages;
 };
 
+struct CancelRunSnapshot {
+  bool was_active = false;
+  std::string active_request_id;
+  ClearedRpcQueues cleared;
+};
+
 struct RpcRunState {
   std::mutex mutex;
   std::atomic_bool cancel_requested = false;
@@ -61,6 +67,7 @@ void set_active_request_id(RpcRunState& state, std::string request_id);
                                                                           std::string_view correlation_id);
 [[nodiscard]] std::optional<QueuedRpcMessage> take_next_follow_up_message(RpcRunState& state);
 [[nodiscard]] std::vector<QueuedRpcMessage> clear_queued_steering_messages(RpcRunState& state);
+[[nodiscard]] CancelRunSnapshot request_cancel_and_clear_queued_messages(RpcRunState& state);
 [[nodiscard]] ClearedRpcQueues deactivate_and_clear_queued_messages(RpcRunState& state);
 [[nodiscard]] ClearedRpcQueues close_input_and_cancel(RpcRunState& state);
 

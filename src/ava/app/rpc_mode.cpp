@@ -11,6 +11,7 @@
 
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
+#include "ava/app/rpc/control_handlers.h"
 #include "ava/app/rpc/handlers.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/protocol.h"
@@ -47,15 +48,6 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     bool const canceled = rpc::cancel_requested(run_state);
     std::lock_guard lock(session_mutex);
     return rpc::write_success(output, id, rpc::state_result_json(session, canceled));
-  };
-
-  auto write_follow_up_errors = [&](std::vector<rpc::QueuedRpcMessage> const& follow_ups,
-                                    std::string_view reason) -> ava::core::VoidResult {
-    for (auto const& queued : follow_ups) {
-      auto const error = reason == "canceled" ? rpc::canceled_error() : rpc::skipped_follow_up_error(reason);
-      if (auto written = rpc::write_error(output, queued.request_id, error); !written) return written;
-    }
-    return {};
   };
 
   output.on_write_failure = [&] {
@@ -461,49 +453,10 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     }
 
     if (command->type == "cancel") {
-      bool was_active = false;
-      std::string active_request_id;
-      rpc::ClearedRpcQueues cleared;
-      {
-        std::lock_guard lock(run_state.mutex);
-        run_state.cancel_requested.store(true, std::memory_order_relaxed);
-        was_active = run_state.active_run;
-        active_request_id = run_state.active_request_id;
-        cleared.steering_messages.reserve(run_state.steering_messages.size());
-        while (!run_state.steering_messages.empty()) {
-          cleared.steering_messages.push_back(std::move(run_state.steering_messages.front()));
-          run_state.steering_messages.pop_front();
-        }
-        cleared.follow_up_messages.reserve(run_state.follow_up_messages.size());
-        while (!run_state.follow_up_messages.empty()) {
-          cleared.follow_up_messages.push_back(std::move(run_state.follow_up_messages.front()));
-          run_state.follow_up_messages.pop_front();
-        }
-      }
-      static_cast<void>(rpc::cancel_pending_resolvers(pending_state));
-      if (auto written = rpc::write_skipped_queue_events(output, session, session_mutex, cleared, "canceled");
+      if (auto written = rpc::handle_cancel_command(output, session, session_mutex, run_state, pending_state, *command);
           !written) {
         return written;
       }
-      auto cancel_event = rpc::resolver_event_envelope(
-          "cancel_requested", command->id, active_request_id.empty() ? command->id : active_request_id,
-          rpc::session_id_snapshot(session, session_mutex),
-          rpc::cancel_requested_payload_json(was_active, cleared.steering_messages.size(),
-                                             cleared.follow_up_messages.size(), active_request_id));
-      if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(cancel_event)); !written) {
-        return written;
-      }
-      std::string json = "{";
-      json += rpc::bool_field_json("cancel_requested", true);
-      json += ',';
-      json += rpc::bool_field_json("active_run", was_active);
-      json += ',';
-      json += rpc::number_field_json("cleared_steer", cleared.steering_messages.size());
-      json += ',';
-      json += rpc::number_field_json("cleared_follow_up", cleared.follow_up_messages.size());
-      json += '}';
-      if (auto written = rpc::write_success(output, command->id, json); !written) return written;
-      if (auto written = write_follow_up_errors(cleared.follow_up_messages, "canceled"); !written) return written;
       continue;
     }
 
@@ -650,7 +603,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
               !written) {
             rpc::record_async_error(run_state, std::move(written.error()));
           }
-          if (auto written = write_follow_up_errors(cleared.follow_up_messages, reason); !written) {
+          if (auto written = rpc::write_follow_up_errors(output, cleared.follow_up_messages, reason); !written) {
             rpc::record_async_error(run_state, std::move(written.error()));
           }
         };
@@ -763,8 +716,8 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
             !written) {
           rpc::record_async_error(run_state, std::move(written.error()));
         }
-        if (auto written = write_follow_up_errors(cleared.follow_up_messages,
-                                                  canceled ? "canceled" : "run_completed_before_safe_point");
+        if (auto written = rpc::write_follow_up_errors(output, cleared.follow_up_messages,
+                                                       canceled ? "canceled" : "run_completed_before_safe_point");
             !written) {
           rpc::record_async_error(run_state, std::move(written.error()));
         }
@@ -783,7 +736,8 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     if (auto written = rpc::write_skipped_queue_events(output, session, session_mutex, cleared, "canceled"); !written) {
       return written;
     }
-    if (auto written = write_follow_up_errors(cleared.follow_up_messages, "canceled"); !written) return written;
+    if (auto written = rpc::write_follow_up_errors(output, cleared.follow_up_messages, "canceled"); !written)
+      return written;
     prompt_worker.reset();
   }
   if (auto async_error = rpc::take_async_error(run_state)) return std::unexpected(std::move(*async_error));

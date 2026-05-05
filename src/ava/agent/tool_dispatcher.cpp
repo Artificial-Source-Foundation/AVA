@@ -16,6 +16,7 @@
 #include "ava/agent/tool_arguments.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
+#include "ava/agent/tool_result_json.h"
 #include "ava/core/json.h"
 #include "ava/mcp/tool_broker.h"
 #include "ava/plugin/tool_broker.h"
@@ -38,11 +39,6 @@ constexpr std::size_t kMaxLspProviderDiagnostics = 200;
 constexpr std::size_t kMaxLspProviderJsonBytes = 64 * 1024;
 constexpr std::size_t kMaxLspProviderPathBytes = 4096;
 
-std::string json_bool(bool value)
-{
-  return value ? "true" : "false";
-}
-
 ava::tools::ToolContext context_for_provider_tool(ava::tools::ToolContext const& context, ProviderToolCall const& call)
 {
   auto tool_context = context;
@@ -50,21 +46,6 @@ ava::tools::ToolContext context_for_provider_tool(ava::tools::ToolContext const&
   tool_context.current_tool_name = call.name;
   tool_context.current_call_id = call.id;
   return tool_context;
-}
-
-void append_spill_fields(std::string& text, std::filesystem::path const& path, bool spill_truncated)
-{
-  if (path.empty()) return;
-  text += ",\"spill_file\":\"" + ava::core::json::escape(path.filename().generic_string()) + "\"";
-  text += ",\"spill_truncated\":" + json_bool(spill_truncated);
-}
-
-std::string error_json(std::string_view tool, ava::core::Error const& error)
-{
-  return "{\"tool\":\"" + ava::core::json::escape(tool) + "\",\"ok\":false,\"error\":{\"category\":\"" +
-         ava::core::json::escape(ava::core::to_string(error.category())) + "\",\"message\":\"" +
-         ava::core::json::escape(error.message()) + "\",\"details\":\"" + ava::core::json::escape(error.format()) +
-         "\"}}";
 }
 
 bool is_lsp_diagnostics_metadata(ToolMetadata const& tool)
@@ -77,7 +58,7 @@ ToolDispatchResult tool_error_result(ProviderToolCall const& call, ava::core::Er
   return ToolDispatchResult{.call_id = call.id,
                             .name = call.name,
                             .success = false,
-                            .result_text = error_json(call.name, error),
+                            .result_text = tool_error_result_json(call.name, error),
                             .payload = [&] {
                               ava::agent::ToolResultPayload payload;
                               if (error.message().find("canceled") != std::string::npos ||
@@ -159,22 +140,6 @@ ava::core::VoidResult validate_question_answer(QuestionAnswer const& answer, std
   return {};
 }
 
-void append_changed_files_json(std::string& text, std::vector<std::filesystem::path> const& paths)
-{
-  text += ",\"changed_files\":[";
-  for (std::size_t index = 0; index < paths.size(); ++index) {
-    if (index > 0) text += ',';
-    text += "\"" + ava::core::json::escape(paths[index].generic_string()) + "\"";
-  }
-  text += ']';
-}
-
-void append_diff_json(std::string& text, std::string_view diff, bool truncated)
-{
-  text += ",\"diff\":\"" + ava::core::json::escape(diff) + "\"";
-  text += ",\"diff_truncated\":" + json_bool(truncated);
-}
-
 ToolDispatchResult read_file_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
 {
   auto path = required_safe_string_arg(call.arguments_json, "path", call.name);
@@ -190,7 +155,7 @@ ToolDispatchResult read_file_result(ava::tools::ToolContext const& context, Prov
       .success = true,
       .result_text = "{\"tool\":\"read_file\",\"ok\":true,\"path\":\"" + ava::core::json::escape(*path) +
                      "\",\"content\":\"" + ava::core::json::escape(result->content) + "\",\"truncated\":" +
-                     json_bool(result->truncated) + ",\"total_bytes\":" + std::to_string(result->total_bytes) +
+                     json_bool_literal(result->truncated) + ",\"total_bytes\":" + std::to_string(result->total_bytes) +
                      ",\"output_bytes\":" + std::to_string(result->output_bytes) + "}"};
 }
 
@@ -229,9 +194,9 @@ ToolDispatchResult edit_file_result(ava::tools::ToolContext const& context, Prov
                                            ava::core::json::escape(result->path.generic_string()) +
                                            "\",\"bytes_written\":" + std::to_string(result->bytes_written) +
                                            ",\"diff\":\"" + ava::core::json::escape(result->diff) +
-                                           "\",\"diff_truncated\":" + json_bool(result->diff_truncated) +
+                                           "\",\"diff_truncated\":" + json_bool_literal(result->diff_truncated) +
                                            ",\"line_endings\":\"" + ava::core::json::escape(result->line_endings) +
-                                           "\",\"utf8_bom\":" + json_bool(result->had_utf8_bom) + "}"};
+                                           "\",\"utf8_bom\":" + json_bool_literal(result->had_utf8_bom) + "}"};
 }
 
 ToolDispatchResult glob_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
@@ -252,9 +217,9 @@ ToolDispatchResult glob_result(ava::tools::ToolContext const& context, ProviderT
     if (index > 0) text += ',';
     text += "\"" + ava::core::json::escape(result->paths[index].generic_string()) + "\"";
   }
-  text +=
-      "],\"truncated\":" + json_bool(result->truncated) + ",\"total_matches\":" + std::to_string(result->total_matches);
-  append_spill_fields(text, result->spill_path, result->spill_truncated);
+  text += "],\"truncated\":" + json_bool_literal(result->truncated) +
+          ",\"total_matches\":" + std::to_string(result->total_matches);
+  append_tool_result_spill_fields(text, result->spill_path, result->spill_truncated);
   text += "}";
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text};
 }
@@ -285,11 +250,12 @@ ToolDispatchResult grep_result(ava::tools::ToolContext const& context, ProviderT
     if (index > 0) text += ',';
     text += "{\"path\":\"" + ava::core::json::escape(match.path.generic_string()) +
             "\",\"line_number\":" + std::to_string(match.line_number) + ",\"line\":\"" +
-            ava::core::json::escape(match.line) + "\",\"line_truncated\":" + json_bool(match.line_truncated) + "}";
+            ava::core::json::escape(match.line) + "\",\"line_truncated\":" + json_bool_literal(match.line_truncated) +
+            "}";
   }
-  text +=
-      "],\"truncated\":" + json_bool(result->truncated) + ",\"total_matches\":" + std::to_string(result->total_matches);
-  append_spill_fields(text, result->spill_path, result->spill_truncated);
+  text += "],\"truncated\":" + json_bool_literal(result->truncated) +
+          ",\"total_matches\":" + std::to_string(result->total_matches);
+  append_tool_result_spill_fields(text, result->spill_path, result->spill_truncated);
   text += "}";
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text};
 }
@@ -305,31 +271,31 @@ ToolDispatchResult bash_result(ava::tools::ToolContext const& context, ProviderT
           .timeout = std::chrono::milliseconds(optional_size_arg(call.arguments_json, "timeout_ms", 30000, 120000)),
           .max_bytes = optional_size_arg(call.arguments_json, "max_bytes", 50 * 1024, 512 * 1024)});
   if (!result) return tool_error_result(call, result.error());
-  return ToolDispatchResult{.call_id = call.id,
-                            .name = call.name,
-                            .success = result->exit_code == 0 && !result->timed_out && !result->canceled,
-                            .result_text =
-                                [&] {
-                                  std::string text =
-                                      "{\"tool\":\"bash\",\"ok\":" +
-                                      json_bool(result->exit_code == 0 && !result->timed_out && !result->canceled) +
-                                      ",\"exit_code\":" + std::to_string(result->exit_code) +
-                                      ",\"timed_out\":" + json_bool(result->timed_out) +
-                                      ",\"canceled\":" + json_bool(result->canceled) +
-                                      ",\"truncated\":" + json_bool(result->truncated) +
-                                      ",\"total_bytes\":" + std::to_string(result->total_bytes) + ",\"output\":\"" +
-                                      ava::core::json::escape(result->output) + "\"";
-                                  append_spill_fields(text, result->spill_path, result->spill_truncated);
-                                  text += "}";
-                                  return text;
-                                }(),
-                            .payload =
-                                [&] {
-                                  ava::agent::ToolResultPayload payload;
-                                  payload.status = result->canceled ? ava::agent::ToolResultStatus::Canceled
-                                                                    : ava::agent::ToolResultStatus::Success;
-                                  return payload;
-                                }()};
+  return ToolDispatchResult{
+      .call_id = call.id,
+      .name = call.name,
+      .success = result->exit_code == 0 && !result->timed_out && !result->canceled,
+      .result_text =
+          [&] {
+            std::string text = "{\"tool\":\"bash\",\"ok\":" +
+                               json_bool_literal(result->exit_code == 0 && !result->timed_out && !result->canceled) +
+                               ",\"exit_code\":" + std::to_string(result->exit_code) +
+                               ",\"timed_out\":" + json_bool_literal(result->timed_out) +
+                               ",\"canceled\":" + json_bool_literal(result->canceled) +
+                               ",\"truncated\":" + json_bool_literal(result->truncated) +
+                               ",\"total_bytes\":" + std::to_string(result->total_bytes) + ",\"output\":\"" +
+                               ava::core::json::escape(result->output) + "\"";
+            append_tool_result_spill_fields(text, result->spill_path, result->spill_truncated);
+            text += "}";
+            return text;
+          }(),
+      .payload =
+          [&] {
+            ava::agent::ToolResultPayload payload;
+            payload.status =
+                result->canceled ? ava::agent::ToolResultStatus::Canceled : ava::agent::ToolResultStatus::Success;
+            return payload;
+          }()};
 }
 
 ToolDispatchResult webfetch_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
@@ -351,8 +317,8 @@ ToolDispatchResult webfetch_result(ava::tools::ToolContext const& context, Provi
       .result_text = "{\"tool\":\"webfetch\",\"ok\":true,\"url\":\"" + ava::core::json::escape(result->url) +
                      "\",\"status_code\":" + std::to_string(result->status_code) + ",\"content_type\":\"" +
                      ava::core::json::escape(result->content_type) + "\",\"content\":\"" +
-                     ava::core::json::escape(result->content) + "\",\"truncated\":" + json_bool(result->truncated) +
-                     ",\"total_bytes\":" + std::to_string(result->total_bytes) +
+                     ava::core::json::escape(result->content) + "\",\"truncated\":" +
+                     json_bool_literal(result->truncated) + ",\"total_bytes\":" + std::to_string(result->total_bytes) +
                      ",\"output_bytes\":" + std::to_string(result->output_bytes) + "}"};
 }
 
@@ -390,8 +356,8 @@ ToolDispatchResult lsp_diagnostics_result(ava::tools::ToolContext const& context
     if (index > 0) text += ',';
     text += std::move(entry);
   }
-  text +=
-      "],\"truncated\":" + json_bool(truncated) + ",\"total_diagnostics\":" + std::to_string(total_diagnostics) + "}";
+  text += "],\"truncated\":" + json_bool_literal(truncated) +
+          ",\"total_diagnostics\":" + std::to_string(total_diagnostics) + "}";
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
 }
 

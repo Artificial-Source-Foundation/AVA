@@ -25,6 +25,7 @@
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
+#include "ava/agent/tool_result_json.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
@@ -237,6 +238,37 @@ void test_patch_staging_helpers()
   expect(!failed_stage && failed_stage.error().message().find("missing staged patch content") != std::string::npos &&
              !has_leftover_stage_temp,
          "patch staging cleans earlier temp writes when later staging fails");
+}
+
+void test_tool_result_json_helpers()
+{
+  expect(ava::agent::json_bool_literal(true) == "true" && ava::agent::json_bool_literal(false) == "false",
+         "tool result JSON helpers format boolean literals");
+
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "bad \"argument\"");
+  error.with_context("field", "path");
+  auto error_json = ava::agent::tool_error_result_json("read_file", error);
+  expect(error_json.find("\"tool\":\"read_file\"") != std::string::npos &&
+             error_json.find("\"ok\":false") != std::string::npos &&
+             error_json.find("\"category\":\"invalid_argument\"") != std::string::npos &&
+             error_json.find("bad \\\"argument\\\"") != std::string::npos &&
+             error_json.find("field: path") != std::string::npos,
+         "tool result JSON helpers format structured error payloads");
+
+  std::string result = "{\"ok\":true";
+  ava::agent::append_changed_files_json(result,
+                                        {std::filesystem::path("src/a.cpp"), std::filesystem::path("src/b b.cpp")});
+  ava::agent::append_diff_json(result, "-old\n+new", true);
+  ava::agent::append_tool_result_spill_fields(result, "/tmp/ava-spill/result.jsonl", true);
+  result += '}';
+
+  auto const changed_files = ava::core::json::strings_in_array_field(result, "changed_files");
+  auto const diff = ava::core::json::string_field(result, "diff");
+  auto const spill_file = ava::core::json::string_field(result, "spill_file");
+  expect(changed_files.size() == 2 && changed_files[0] == "src/a.cpp" && changed_files[1] == "src/b b.cpp" && diff &&
+             *diff == "-old\n+new" && result.find("\"diff_truncated\":true") != std::string::npos && spill_file &&
+             *spill_file == "result.jsonl" && result.find("\"spill_truncated\":true") != std::string::npos,
+         "tool result JSON helpers append changed files, diffs, and spill metadata");
 }
 
 void test_tool_dispatcher()
@@ -2389,6 +2421,7 @@ void run_agent_tool_dispatcher_tests()
 {
   test_provider_tool_argument_helpers();
   test_patch_staging_helpers();
+  test_tool_result_json_helpers();
   test_tool_dispatcher();
   test_tool_dispatcher_plan_mode_denies_mutation();
   test_agent_loop_text_only_turn();

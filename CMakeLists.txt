@@ -158,6 +158,7 @@ add_library(ava_core
   src/ava/tools/spill_files.cpp
   src/ava/tools/tool_permissions.cpp
   src/ava/tools/webfetch_tool.cpp
+  src/ava/tools/webfetch_support.cpp
 )
 
 target_include_directories(ava_core PUBLIC src "${AVA_GENERATED_INCLUDE_DIR}")
@@ -310,6 +311,7 @@ if(AVA_BUILD_TESTS)
     tests/session_store_support_tests.cpp
     tests/tools_tests.cpp
     tests/tui_composer_tests.cpp
+    tests/webfetch_support_tests.cpp
   )
   target_link_libraries(ava_tests PRIVATE ava_core ava_tui ava_app ava_test_support)
   add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_provider_server)
@@ -333,6 +335,7 @@ if(AVA_BUILD_TESTS)
     tools
     file_tools_support
     search_tools_support
+    webfetch_support
     json_support
     config_context_auth_oauth
     config_model_config_support

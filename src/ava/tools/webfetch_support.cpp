@@ -1,0 +1,275 @@
+#include "ava/tools/webfetch_support.h"
+
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <charconv>
+#include <cstring>
+#include <memory>
+#include <span>
+#include <utility>
+
+namespace ava::tools::detail {
+namespace {
+
+bool all_decimal_digits(std::string_view value)
+{
+  return !value.empty() && std::ranges::all_of(value, [](unsigned char ch) { return std::isdigit(ch); });
+}
+
+bool hex_literal(std::string_view value)
+{
+  if (value.size() <= 2 || value[0] != '0' || (value[1] != 'x' && value[1] != 'X')) return false;
+  return std::ranges::all_of(value.substr(2), [](unsigned char ch) { return std::isxdigit(ch); });
+}
+
+bool private_or_non_global_ipv6(in6_addr const& address)
+{
+  auto const* bytes = address.s6_addr;
+  bool const ipv4_mapped = std::ranges::all_of(std::span(bytes, 10), [](unsigned char byte) { return byte == 0; }) &&
+                           bytes[10] == 0xFF && bytes[11] == 0xFF;
+  bool const nat64_well_known =
+      bytes[0] == 0x00 && bytes[1] == 0x64 && bytes[2] == 0xFF && bytes[3] == 0x9B &&
+      std::ranges::all_of(std::span(bytes + 4, 8), [](unsigned char byte) { return byte == 0; });
+  bool const nat64_local_use = bytes[0] == 0x00 && bytes[1] == 0x64 && bytes[2] == 0xFF && bytes[3] == 0x9B &&
+                               bytes[4] == 0x00 && bytes[5] == 0x01;
+  bool const unspecified = std::ranges::all_of(std::span(bytes, 16), [](unsigned char byte) { return byte == 0; });
+  bool const loopback =
+      std::ranges::all_of(std::span(bytes, 15), [](unsigned char byte) { return byte == 0; }) && bytes[15] == 1;
+  return ipv4_mapped || nat64_well_known || nat64_local_use || unspecified || loopback || bytes[0] == 0xFF ||
+         (bytes[0] & 0xFE) == 0xFC || (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0x80) ||
+         (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0xC0) ||
+         (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0D && bytes[3] == 0xB8);
+}
+
+}  // namespace
+
+std::string lowercase(std::string_view value)
+{
+  std::string result(value);
+  std::ranges::transform(result, result.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  return result;
+}
+
+bool starts_with_case_insensitive(std::string_view value, std::string_view prefix)
+{
+  if (value.size() < prefix.size()) return false;
+  for (std::size_t index = 0; index < prefix.size(); ++index) {
+    if (std::tolower(static_cast<unsigned char>(value[index])) !=
+        std::tolower(static_cast<unsigned char>(prefix[index]))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool numeric_ipv4_literal_or_alias(std::string_view host)
+{
+  if (host.empty() || !std::isdigit(static_cast<unsigned char>(host.front()))) return false;
+  if (all_decimal_digits(host) || hex_literal(host)) return true;
+  if (host.find('.') == std::string_view::npos) return false;
+  std::size_t part_start = 0;
+  while (part_start <= host.size()) {
+    auto const dot = host.find('.', part_start);
+    auto const part =
+        host.substr(part_start, dot == std::string_view::npos ? std::string_view::npos : dot - part_start);
+    if (!all_decimal_digits(part) && !hex_literal(part)) return false;
+    if (dot == std::string_view::npos) break;
+    part_start = dot + 1;
+  }
+  return true;
+}
+
+bool private_or_non_global_ipv4(unsigned long address)
+{
+  auto const first = static_cast<unsigned char>((address >> 24) & 0xFF);
+  auto const second = static_cast<unsigned char>((address >> 16) & 0xFF);
+  auto const third = static_cast<unsigned char>((address >> 8) & 0xFF);
+  return first == 0 || first == 10 || first == 127 || first >= 224 || (first == 100 && second >= 64 && second <= 127) ||
+         (first == 169 && second == 254) || (first == 172 && second >= 16 && second <= 31) ||
+         (first == 192 && second == 168) || (first == 192 && second == 0 && third == 0) ||
+         (first == 192 && second == 0 && third == 2) || (first == 198 && second >= 18 && second <= 19) ||
+         (first == 198 && second == 51 && third == 100) || (first == 203 && second == 0 && third == 113);
+}
+
+ava::core::Result<ValidatedWebFetchUrl> validate_webfetch_url(std::string_view url)
+{
+  if (url.empty() || url.size() > 4096) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch URL is empty or too long");
+    error.with_context("max_bytes", "4096");
+    return std::unexpected(std::move(error));
+  }
+  for (char const ch : url) {
+    auto const byte = static_cast<unsigned char>(ch);
+    if (byte < 0x20 || byte == 0x7F) {
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch URL contains a control byte"));
+    }
+  }
+
+  bool const https = starts_with_case_insensitive(url, "https://");
+  bool const http = starts_with_case_insensitive(url, "http://");
+  if (!https && !http) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch only supports http and https URLs"));
+  }
+  auto const authority_start = https ? std::string_view("https://").size() : std::string_view("http://").size();
+  auto const path_start = url.find_first_of("/?#", authority_start);
+  auto authority = url.substr(
+      authority_start, path_start == std::string_view::npos ? std::string_view::npos : path_start - authority_start);
+  if (authority.empty()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch URL host is empty"));
+  }
+  if (authority.find('@') != std::string_view::npos) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch URL must not include userinfo"));
+  }
+  if (!authority.empty() && authority.front() == '[') {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch does not allow IP literal hosts"));
+  }
+  std::string port = https ? "443" : "80";
+  if (auto const colon = authority.rfind(':'); colon != std::string_view::npos) {
+    port = std::string(authority.substr(colon + 1));
+    if (port.empty() || !std::ranges::all_of(port, [](unsigned char ch) { return std::isdigit(ch); })) {
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch URL port is invalid"));
+    }
+    authority = authority.substr(0, colon);
+  }
+
+  auto const host = lowercase(authority);
+  if (host == "localhost" || host == "localhost." || host.ends_with(".localhost") || host.ends_with(".local")) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch blocks local hostnames"));
+  }
+  if (numeric_ipv4_literal_or_alias(host)) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch does not allow IP literal hosts"));
+  }
+
+  int octets[4] = {0, 0, 0, 0};
+  std::size_t part_start = 0;
+  bool ipv4 = true;
+  for (int part = 0; part < 4; ++part) {
+    auto const dot = part == 3 ? host.size() : host.find('.', part_start);
+    if (dot == std::string::npos || dot == part_start) {
+      ipv4 = false;
+      break;
+    }
+    auto const text = std::string_view(host).substr(part_start, dot - part_start);
+    int value = 0;
+    auto const [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (ec != std::errc{} || ptr != text.data() + text.size() || value < 0 || value > 255) {
+      ipv4 = false;
+      break;
+    }
+    octets[part] = value;
+    part_start = dot + 1;
+  }
+  if (ipv4 && part_start == host.size() + 1) {
+    bool const private_or_local =
+        octets[0] == 10 || octets[0] == 127 || octets[0] == 0 || (octets[0] == 169 && octets[1] == 254) ||
+        (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31) || (octets[0] == 192 && octets[1] == 168);
+    if (private_or_local) {
+      return std::unexpected(
+          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch blocks private IP hosts"));
+    }
+  }
+
+  return ValidatedWebFetchUrl{.url = std::string(url), .host = host, .port = std::move(port)};
+}
+
+ava::core::Result<std::string> validate_resolved_webfetch_host(std::string_view host)
+{
+  addrinfo hints{};
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_family = AF_UNSPEC;
+  addrinfo* raw_results = nullptr;
+  auto const query_host = std::string(host);
+  int const rc = getaddrinfo(query_host.c_str(), nullptr, &hints, &raw_results);
+  if (rc != 0) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch failed to resolve URL host");
+    error.with_context("host", query_host);
+    error.with_context("cause", gai_strerror(rc));
+    return std::unexpected(std::move(error));
+  }
+  std::unique_ptr<addrinfo, decltype(&freeaddrinfo)> results(raw_results, freeaddrinfo);
+  std::string first_global_address;
+  for (auto const* item = results.get(); item != nullptr; item = item->ai_next) {
+    if (item->ai_family == AF_INET) {
+      auto address = reinterpret_cast<sockaddr_in const*>(item->ai_addr)->sin_addr;
+      auto const host_order = ntohl(address.s_addr);
+      if (private_or_non_global_ipv4(host_order)) {
+        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                      "webfetch blocks private or non-global resolved hosts");
+        error.with_context("host", query_host);
+        return std::unexpected(std::move(error));
+      }
+      if (first_global_address.empty()) {
+        std::array<char, INET_ADDRSTRLEN> text{};
+        if (inet_ntop(AF_INET, &address, text.data(), text.size()) != nullptr) first_global_address = text.data();
+      }
+    } else if (item->ai_family == AF_INET6) {
+      auto const& address = reinterpret_cast<sockaddr_in6 const*>(item->ai_addr)->sin6_addr;
+      if (private_or_non_global_ipv6(address)) {
+        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                      "webfetch blocks private or non-global resolved hosts");
+        error.with_context("host", query_host);
+        return std::unexpected(std::move(error));
+      }
+      if (first_global_address.empty()) {
+        std::array<char, INET6_ADDRSTRLEN> text{};
+        if (inet_ntop(AF_INET6, &address, text.data(), text.size()) != nullptr) {
+          first_global_address = "[";
+          first_global_address += text.data();
+          first_global_address += "]";
+        }
+      }
+    }
+  }
+  if (first_global_address.empty()) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "webfetch host has no global address");
+    error.with_context("host", query_host);
+    return std::unexpected(std::move(error));
+  }
+  return first_global_address;
+}
+
+std::size_t normalized_webfetch_max_bytes(std::size_t requested_bytes)
+{
+  return std::min(requested_bytes == 0 ? std::size_t{1024 * 1024} : requested_bytes, kMaxWebFetchBytes);
+}
+
+int normalized_webfetch_timeout_ms(int requested_timeout_ms)
+{
+  return std::clamp(requested_timeout_ms <= 0 ? 30000 : requested_timeout_ms, 1000, kMaxWebFetchTimeoutMs);
+}
+
+std::string webfetch_header_value(std::map<std::string, std::string> const& headers, std::string_view name)
+{
+  auto const wanted = lowercase(name);
+  for (auto const& [key, value] : headers) {
+    if (lowercase(key) == wanted) return value;
+  }
+  return {};
+}
+
+bool webfetch_looks_binary(std::string_view body, std::string_view content_type)
+{
+  auto const type = lowercase(content_type);
+  if (!type.empty() &&
+      !(type.starts_with("text/") || type.find("json") != std::string::npos || type.find("xml") != std::string::npos ||
+        type.find("html") != std::string::npos || type.find("javascript") != std::string::npos ||
+        type.find("ecmascript") != std::string::npos)) {
+    return true;
+  }
+  return body.find('\0') != std::string_view::npos;
+}
+
+}  // namespace ava::tools::detail

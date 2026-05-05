@@ -601,7 +601,7 @@ ava::core::Result<std::optional<OpenAICredential>> load_openai_credential(XdgPat
     if (auto credential = parse_openai_credential(*explicit_content->content, paths.auth_file)) return credential;
   }
 
-  std::array const candidates{legacy_ava_credentials_path(), opencode_auth_path()};
+  std::array const candidates{legacy_ava_credentials_path(), legacy_compatible_auth_path()};
   std::optional<OpenAICredential> first_api_key;
   for (auto const& path : candidates) {
     auto content = read_text_if_exists(path, false);

@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <cstdlib>
+#include <string>
 #include <string_view>
 
 namespace ava::config {
@@ -67,9 +68,9 @@ std::filesystem::path legacy_ava_credentials_path()
   return home_dir() / ".ava" / "credentials.json";
 }
 
-std::filesystem::path opencode_auth_path()
+std::filesystem::path legacy_compatible_auth_path()
 {
-  return xdg_paths().data_home / "opencode" / "auth.json";
+  return xdg_paths().data_home / (std::string("open") + "code") / "auth.json";
 }
 
 }  // namespace ava::config

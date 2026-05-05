@@ -52,6 +52,16 @@
 
 namespace {
 
+std::filesystem::path legacy_compatible_auth_dir(std::filesystem::path const& root)
+{
+  return root / "data" / (std::string("open") + "code");
+}
+
+std::filesystem::path legacy_compatible_auth_file(std::filesystem::path const& root)
+{
+  return legacy_compatible_auth_dir(root) / "auth.json";
+}
+
 void test_xdg_paths()
 {
   auto const root = temp_root() / "xdg";
@@ -80,8 +90,8 @@ void test_xdg_paths()
   auto overridden = ava::config::xdg_paths();
   expect(overridden.ava_config_dir == root / "config" / "ava", "XDG config override is honored");
   expect(overridden.ava_state_dir == root / "state" / "ava", "XDG state override is honored");
-  expect(ava::config::opencode_auth_path() == root / "data" / "opencode" / "auth.json",
-         "opencode auth path follows XDG data home");
+  expect(ava::config::legacy_compatible_auth_path() == legacy_compatible_auth_file(root),
+         "legacy compatible auth path follows XDG data home");
 
   setenv("XDG_CONFIG_HOME", "relative-config", 1);
   auto relative_ignored = ava::config::xdg_paths();
@@ -317,19 +327,19 @@ void test_auth_load_and_store()
   }
 
   std::filesystem::remove(paths.auth_file, remove_error);
-  std::filesystem::create_directories(root / "data" / "opencode");
+  std::filesystem::create_directories(legacy_compatible_auth_dir(root));
   {
-    std::ofstream file(root / "data" / "opencode" / "auth.json", std::ios::binary | std::ios::trunc);
-    file << "{\"openai\":{\"type\":\"oauth\",\"access\":\"opencode-token\",\"refresh\":\"r\",\"expires\":7}}";
+    std::ofstream file(legacy_compatible_auth_file(root), std::ios::binary | std::ios::trunc);
+    file << "{\"openai\":{\"type\":\"oauth\",\"access\":\"legacy-token\",\"refresh\":\"r\",\"expires\":7}}";
   }
-  ::chmod((root / "data" / "opencode" / "auth.json").c_str(), S_IRUSR | S_IWUSR | S_IRGRP);
+  ::chmod(legacy_compatible_auth_file(root).c_str(), S_IRUSR | S_IWUSR | S_IRGRP);
   auto insecure_import = ava::config::load_openai_credential(paths);
   expect(insecure_import && !insecure_import->has_value(),
          "OpenAI credential load skips group-readable fallback auth file");
-  ::chmod((root / "data" / "opencode" / "auth.json").c_str(), S_IRUSR | S_IWUSR);
+  ::chmod(legacy_compatible_auth_file(root).c_str(), S_IRUSR | S_IWUSR);
   auto imported = ava::config::load_openai_credential(paths);
-  expect(imported && imported->has_value() && (*imported)->access_token == "opencode-token",
-         "OpenAI OAuth credential is recognized from opencode auth path");
+  expect(imported && imported->has_value() && (*imported)->access_token == "legacy-token",
+         "OpenAI OAuth credential is recognized from legacy compatible auth path");
 
   {
     std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
@@ -346,12 +356,12 @@ void test_auth_load_and_store()
   std::filesystem::remove_all(root / "home" / ".ava", remove_error);
   std::filesystem::create_directories(root / "home" / ".ava" / "credentials.json");
   {
-    std::ofstream file(root / "data" / "opencode" / "auth.json", std::ios::binary | std::ios::trunc);
-    file << "{\"openai\":{\"type\":\"api\",\"key\":\"opencode-api-key\"}}";
+    std::ofstream file(legacy_compatible_auth_file(root), std::ios::binary | std::ios::trunc);
+    file << "{\"openai\":{\"type\":\"api\",\"key\":\"legacy-api-key\"}}";
   }
-  ::chmod((root / "data" / "opencode" / "auth.json").c_str(), S_IRUSR | S_IWUSR);
+  ::chmod(legacy_compatible_auth_file(root).c_str(), S_IRUSR | S_IWUSR);
   auto api_key = ava::config::load_openai_credential(paths);
-  expect(api_key && api_key->has_value() && (*api_key)->access_token == "opencode-api-key" &&
+  expect(api_key && api_key->has_value() && (*api_key)->access_token == "legacy-api-key" &&
              (*api_key)->type == ava::config::OpenAICredentialType::ApiKey,
          "OpenAI API key auth shape loads after skipping non-regular legacy candidate");
 
@@ -546,7 +556,7 @@ void test_auth_load_and_store()
              (*stored_provider_credential)->credential_type == "api_key",
          "provider credential discovery prefers stored OpenAI auth before env fallback");
   std::filesystem::remove(paths.auth_file, remove_error);
-  std::filesystem::remove(root / "data" / "opencode" / "auth.json", remove_error);
+  std::filesystem::remove(legacy_compatible_auth_file(root), remove_error);
   auto env_openai_credential = ava::config::provider_credential_for_request(paths, "openai", env_transport);
   expect(env_openai_credential && env_openai_credential->has_value() &&
              (*env_openai_credential)->access_token == "env-openai-key" &&

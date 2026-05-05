@@ -401,7 +401,7 @@ void test_tui_composer_rendering_and_input()
                                return visible.find("Build · GPT-5.5 OpenAI · low") != std::string::npos &&
                                       visible.find("reasoning") == std::string::npos;
                              }),
-         "tui shows selected reasoning level in the composer as OpenCode-style metadata");
+         "tui shows selected reasoning level in the composer as compact metadata");
 
   auto const default_reasoning_lines =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -2219,7 +2219,7 @@ void test_tui_composer_rendering_and_input()
              std::ranges::none_of(sidebar_frame,
                                   [](std::string const& line) { return line.find("\x1b[31m") != std::string::npos; }) &&
              std::ranges::all_of(sidebar_frame, [](std::string const& line) { return visible_columns(line) <= 128; }),
-         "tui renders an OpenCode-style sidebar with activity, modified files, session metadata, and version");
+         "tui renders the sidebar with activity, modified files, session metadata, and version");
   expect(std::ranges::any_of(sidebar_frame,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
@@ -2657,7 +2657,7 @@ void test_tui_event_state_reduces_runtime_events()
                              [](std::string const& line) {
                                return strip_sgr(line).find("Thinking: checking options") != std::string::npos;
                              }),
-         "tui renders reasoning content as an inline thinking transcript block with an OpenCode-style prefix");
+         "tui renders reasoning content as an inline thinking transcript block with a compact prefix");
   expect(std::ranges::any_of(thinking_render,
                              [](std::string const& line) {
                                return strip_sgr(line).find("Thinking:") != std::string::npos &&
@@ -2672,7 +2672,7 @@ void test_tui_event_state_reduces_runtime_events()
                                        visible.find("╭─ You") != std::string::npos ||
                                        visible.find("You:") != std::string::npos;
                               }),
-         "tui transcript role headers stay hidden for OpenCode-style chat rendering");
+         "tui transcript role headers stay hidden for compact chat rendering");
   expect(std::ranges::none_of(
              thinking_render,
              [](std::string const& line) { return strip_sgr(line).find("╭─ Thinking") != std::string::npos; }),

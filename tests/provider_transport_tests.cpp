@@ -1,7 +1,9 @@
+#include <algorithm>
 #include <string>
 #include <vector>
 
 #include "ava/provider/curl_transport_protocol.h"
+#include "ava/provider/default_provider_parser.h"
 #include "ava/provider/retry_policy.h"
 #include "tests/support/test_harness.h"
 
@@ -131,6 +133,54 @@ void test_retry_policy_helpers()
   expect(no_sleep.has_value(), "retry policy helper returns immediately for zero delay");
 }
 
+void test_default_provider_parser_helpers()
+{
+  auto non_stream = ava::provider::detail::parse_default_provider_response(
+      ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"text\":\"hello\"}"}, false);
+  expect(non_stream && non_stream->size() == 2 && (*non_stream)[0].type == ava::provider::StreamEventType::TextDelta &&
+             (*non_stream)[0].text == "hello" && (*non_stream)[1].type == ava::provider::StreamEventType::Done,
+         "default provider parser extracts non-stream text and done events");
+
+  auto stream = ava::provider::detail::parse_default_provider_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "data: {\"output_text\":\"one\"}\r\n"
+                                          "data: {\"delta\":\"two\"}\n"
+                                          "data: [DONE]\n"},
+      true);
+  expect(stream && stream->size() == 3 && (*stream)[0].text == "one" && (*stream)[1].text == "two" &&
+             (*stream)[2].type == ava::provider::StreamEventType::Done,
+         "default provider parser extracts simple SSE text deltas and done events");
+
+  auto missing_text = ava::provider::detail::parse_default_provider_response(
+      ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"ok\":true}"}, false);
+  expect(!missing_text && missing_text.error().category() == ava::core::ErrorCategory::Provider,
+         "default provider parser rejects non-stream responses without text");
+
+  auto failed = ava::provider::detail::parse_default_provider_response(
+      ava::provider::HttpResponse{
+          .status_code = 429, .headers = {{"retry-after", "7"}}, .body = "{\"error\":\"rate limit\"}"},
+      false);
+  auto has_context = [](ava::core::Error const& error, std::string_view key, std::string_view value) {
+    return std::ranges::any_of(
+        error.context(), [&](ava::core::ErrorContext const& item) { return item.key == key && item.value == value; });
+  };
+  expect(!failed && failed.error().category() == ava::core::ErrorCategory::Provider &&
+             has_context(failed.error(), "provider_error_kind", "rate_limited") &&
+             has_context(failed.error(), "retry_after", "7"),
+         "default provider parser reports HTTP failures with semantic provider metadata");
+
+  auto parser = ava::provider::detail::make_default_stream_parser();
+  expect(parser != nullptr, "default provider parser factory returns a parser");
+  if (parser) {
+    auto first = parser->append("data: {\"text\":\"hel");
+    auto second = parser->append("lo\"}\n");
+    auto finished = parser->finish();
+    expect(first && second && finished && finished->size() == 1 && (*finished)[0].text == "hello",
+           "default stream parser buffers chunks until finish");
+  }
+}
+
 }  // namespace
 
 void run_provider_transport_tests()
@@ -141,4 +191,5 @@ void run_provider_transport_tests()
   test_parse_curl_output_with_headers();
   test_parse_curl_output_missing_status();
   test_retry_policy_helpers();
+  test_default_provider_parser_helpers();
 }

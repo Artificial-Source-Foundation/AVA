@@ -3787,7 +3787,7 @@ void test_app_rpc_mcp_command_responses()
   std::vector<ava::permissions::PermissionPrompt> prompts;
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
-      -> ava::core::Result<ava::permissions::PermissionResolution> {
+      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
@@ -4618,6 +4618,13 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
     if (decision == "deny") {
       expect(jsonl.find("\"reason\":\"not approved for this run\"") != std::string::npos,
              "RPC permission deny reply preserves the client resolution reason in the event stream");
+      auto entries = session->store.load();
+      auto audits = entries ? permission_entries(*entries) : std::vector<ava::session::SessionEntry>{};
+      expect(audits.size() >= 2 && ava::core::json::string_field(audits.back().data_json, "resolution") == "deny" &&
+                 ava::core::json::string_field(audits.back().data_json, "resolution_source") == "resolver" &&
+                 ava::core::json::string_field(audits.back().data_json, "resolution_reason") ==
+                     "not approved for this run",
+             "RPC permission deny reply preserves the client resolution reason in durable audit entries");
     }
   }
 }

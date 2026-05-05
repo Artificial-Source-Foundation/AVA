@@ -28,7 +28,8 @@ std::string read_all(std::istream& in)
 
 ava::permissions::PermissionResolver deny_permission_resolver()
 {
-  return [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+  return [](ava::permissions::PermissionPrompt const&)
+             -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     return ava::permissions::PermissionResolution::Deny;
   };
 }

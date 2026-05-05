@@ -309,7 +309,7 @@ The event top-level `request_id` remains the prompt command id. The client must 
 {"id":"perm_reply_2","type":"permission_reply","request_id":"permission_...","correlation_id":"prompt_req","decision":"deny","reason":"not approved for this run"}
 ```
 
-`decision` must be exactly `allow`, `allow_session`, or `deny`. `allow_session` resolves the current prompt as allow and records an in-memory exact-match grant for later permission prompts with the same operation, mode, tool name, target path, and command. `reason` is optional free text for clients to explain the resolution, especially denials. A successful reply emits `permission_replied` before the in-band response:
+`decision` must be exactly `allow`, `allow_session`, or `deny`. `allow_session` resolves the current prompt as allow and records an in-memory exact-match grant for later permission prompts with the same operation, mode, tool name, target path, and command. `reason` is optional free text for clients to explain the resolution, especially denials. Denial reasons are also preserved in permission-denied tool errors and durable permission audit entries as `resolution_reason`. A successful reply emits `permission_replied` before the in-band response:
 
 ```json
 {"schema_version":1,"name":"permission_replied","type":"permission_replied","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","decision":"deny","reason":"not approved for this run"}}

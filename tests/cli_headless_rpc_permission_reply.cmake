@@ -174,6 +174,7 @@ foreach(NEEDLE
         "\"name\":\"permission_replied\""
         "\"decision\":\"deny\""
         "\"reason\":\"not approved by headless client\""
+        "resolution_reason: not approved by headless client"
         "\"id\":\"prompt\""
         "after permission deny"
         "\"id\":\"messages-after\""

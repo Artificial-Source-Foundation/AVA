@@ -34,7 +34,7 @@ struct PendingPermissionRequest {
   std::string command;
   std::string reason;
   ava::permissions::PermissionRisk risk = ava::permissions::PermissionRisk::Low;
-  std::optional<ava::permissions::PermissionResolution> resolution;
+  std::optional<ava::permissions::PermissionResolutionDecision> resolution;
   std::optional<ava::core::Error> error;
 };
 
@@ -84,8 +84,8 @@ struct PendingResolverState {
 
 [[nodiscard]] ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_state,
                                                              std::string_view request_id,
-                                                             std::string_view correlation_id,
-                                                             std::string_view decision);
+                                                             std::string_view correlation_id, std::string_view decision,
+                                                             std::optional<std::string> const& reason = std::nullopt);
 [[nodiscard]] ava::core::VoidResult resolve_question_reply(PendingResolverState& pending_state,
                                                            std::string_view request_id, std::string_view correlation_id,
                                                            std::optional<std::string> const& answer,

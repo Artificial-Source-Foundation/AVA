@@ -8,6 +8,26 @@
 
 namespace ava::permissions {
 
+PermissionResolutionDecision::PermissionResolutionDecision(PermissionResolution resolution_in)
+    : resolution(resolution_in)
+{
+}
+
+PermissionResolutionDecision::PermissionResolutionDecision(PermissionResolution resolution_in, std::string reason_in)
+    : resolution(resolution_in), reason(std::move(reason_in))
+{
+}
+
+bool operator==(PermissionResolutionDecision const& decision, PermissionResolution resolution)
+{
+  return decision.resolution == resolution;
+}
+
+bool operator==(PermissionResolution resolution, PermissionResolutionDecision const& decision)
+{
+  return decision == resolution;
+}
+
 namespace {
 
 struct ParsedCommand {
@@ -452,6 +472,11 @@ std::string to_string(PermissionResolution resolution)
       return "deny";
   }
   return "deny";
+}
+
+std::string to_string(PermissionResolutionDecision const& decision)
+{
+  return to_string(decision.resolution);
 }
 
 std::string to_string(PermissionRisk risk)

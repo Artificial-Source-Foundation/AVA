@@ -80,7 +80,8 @@ bool cancel_pending_resolvers(PendingResolverState& pending_state)
   for (auto& [request_id, request] : pending_state.permission_requests) {
     static_cast<void>(request_id);
     request->resolved = true;
-    request->resolution = ava::permissions::PermissionResolution::Deny;
+    request->resolution =
+        ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Deny, "canceled"};
     request->error = canceled_error();
   }
   for (auto& [request_id, request] : pending_state.question_requests) {
@@ -163,7 +164,7 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(
 {
   return [&pending_state, &output, &run_state, &session, &session_mutex, policy_resolver = std::move(policy_resolver),
           prompt_request_id = std::move(prompt_request_id)](ava::permissions::PermissionPrompt const& prompt)
-             -> ava::core::Result<ava::permissions::PermissionResolution> {
+             -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     if (cancel_requested(run_state)) return std::unexpected(canceled_error());
     if (input_closed(run_state)) return std::unexpected(canceled_error());
 
@@ -269,7 +270,8 @@ ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pe
 }
 
 ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_state, std::string_view request_id,
-                                               std::string_view correlation_id, std::string_view decision)
+                                               std::string_view correlation_id, std::string_view decision,
+                                               std::optional<std::string> const& reason)
 {
   ava::permissions::PermissionResolution resolution = ava::permissions::PermissionResolution::Deny;
   bool create_session_grant = false;
@@ -309,7 +311,7 @@ ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_sta
       if (!duplicate) pending_state.permission_session_grants.push_back(std::move(grant));
     }
     pending->resolved = true;
-    pending->resolution = resolution;
+    pending->resolution = ava::permissions::PermissionResolutionDecision{resolution, reason.value_or("")};
   }
   pending_state.cv.notify_all();
   return {};

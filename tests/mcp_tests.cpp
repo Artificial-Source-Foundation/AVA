@@ -224,7 +224,7 @@ void test_mcp_tool_dispatcher()
   context.mcp_global_config_file = root / "missing-global-mcp.json";
   context.mcp_project_config_file = project_config;
   context.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
-      -> ava::core::Result<ava::permissions::PermissionResolution> {
+      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
@@ -304,7 +304,7 @@ void test_mcp_tool_dispatcher_contains_tool_errors()
   context.mcp_global_config_file = root / "missing-global-mcp.json";
   context.mcp_project_config_file = project_config;
   context.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
-      -> ava::core::Result<ava::permissions::PermissionResolution> {
+      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };

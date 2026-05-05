@@ -368,7 +368,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
         continue;
       }
       auto resolved = rpc::resolve_permission_reply(pending_state, *command->request_id, *command->correlation_id,
-                                                    *command->decision);
+                                                    *command->decision, command->reason);
       if (!resolved) {
         if (auto written = rpc::write_error(output, command->id, resolved.error()); !written) return written;
         continue;

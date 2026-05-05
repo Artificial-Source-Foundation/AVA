@@ -290,7 +290,7 @@ void test_tool_dispatcher()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&canceled_permission_prompts](ava::permissions::PermissionPrompt const&)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++canceled_permission_prompts;
         return ava::permissions::PermissionResolution::Allow;
       },
@@ -509,7 +509,7 @@ void test_tool_dispatcher()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&dispatcher_prompts](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++dispatcher_prompts;
         expect(prompt.tool_name == "read_file", "dispatcher threads provider tool prompt metadata");
         return ava::permissions::PermissionResolution::Allow;
@@ -532,7 +532,7 @@ void test_tool_dispatcher()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&apply_patch_prompts](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         apply_patch_prompts.push_back(prompt);
         expect(prompt.tool_name == "apply_patch", "apply_patch resolver receives tool name");
         return ava::permissions::PermissionResolution::Allow;
@@ -582,7 +582,7 @@ void test_tool_dispatcher()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&denied_patch_prompts](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++denied_patch_prompts;
         expect(prompt.operation == ava::permissions::Operation::ReadFile,
                "apply_patch resolver sees read operation before denied external patch");
@@ -611,7 +611,7 @@ void test_tool_dispatcher()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&edit_denied_patch_prompts](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         edit_denied_patch_prompts.push_back(prompt);
         if (prompt.operation == ava::permissions::Operation::ReadFile) {
           return ava::permissions::PermissionResolution::Allow;
@@ -646,8 +646,8 @@ void test_tool_dispatcher()
   ava::agent::ToolDispatcher const patch_failing_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver =
-          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&)
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "resolver failed"));
       }});
   auto outside_patch_failed = patch_failing_dispatcher.dispatch(ava::agent::ProviderToolCall{
@@ -1304,7 +1304,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
       .system_prompt = "system prompt",
       .access_token = "token",
       .permission_resolver = [&prompts, &outside_path](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++prompts;
         expect(prompt.target_path == outside_path, "agent loop resolver sees tool target path");
         return ava::permissions::PermissionResolution::Allow;
@@ -1357,7 +1357,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
         .system_prompt = "system prompt",
         .access_token = "token",
         .permission_resolver = [&bash_allow_prompts](ava::permissions::PermissionPrompt const& prompt)
-            -> ava::core::Result<ava::permissions::PermissionResolution> {
+            -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
           ++bash_allow_prompts;
           expect(prompt.operation == ava::permissions::Operation::RunCommand,
                  "agent bash allow resolver sees run command");
@@ -1396,7 +1396,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
         .system_prompt = "system prompt",
         .access_token = "token",
         .permission_resolver = [&bash_deny_prompts](ava::permissions::PermissionPrompt const& prompt)
-            -> ava::core::Result<ava::permissions::PermissionResolution> {
+            -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
           ++bash_deny_prompts;
           expect(prompt.operation == ava::permissions::Operation::RunCommand,
                  "agent bash deny resolver sees run command");
@@ -1440,7 +1440,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
         .system_prompt = "system prompt",
         .access_token = "token",
         .permission_resolver = [&bash_fail_prompts](ava::permissions::PermissionPrompt const& prompt)
-            -> ava::core::Result<ava::permissions::PermissionResolution> {
+            -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
           ++bash_fail_prompts;
           expect(prompt.operation == ava::permissions::Operation::RunCommand,
                  "agent bash fail resolver sees run command");

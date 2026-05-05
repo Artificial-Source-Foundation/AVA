@@ -184,7 +184,7 @@ Missing or incomplete:
 
 - Persistent allow/deny rules.
 - Broader session-wide grants and durable grant storage beyond the initial headless exact-match path.
-- Deny reasons surfaced consistently across interactive, headless event, tool-error, and audit paths. RPC permission reply events now preserve optional client-supplied resolution reasons, but the same explanation is not yet wired through every user-facing and durable audit path.
+- Deny reasons surfaced consistently across interactive, headless event, tool-error, and audit paths. RPC permission reply events, permission-denied tool errors, and durable permission audit entries now preserve optional client-supplied resolution reasons; persistent rule-specific denial messages remain future work with persistent permission rules.
 - Richer permission-prompt UX beyond the current TUI and RPC resolver flows.
 - Richer audit views that connect request, decision, actor, and executed operation.
 - Policy categories for delete/move, plugin tools, and external directories. `network.fetch` and `lsp.query` now exist for the Phase 4 web/LSP tools.

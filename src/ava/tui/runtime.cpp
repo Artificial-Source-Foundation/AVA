@@ -83,7 +83,7 @@ struct PendingPermissionRequest {
   ava::permissions::PermissionPrompt prompt;
   std::mutex mutex;
   std::condition_variable ready;
-  std::optional<ava::core::Result<ava::permissions::PermissionResolution>> result;
+  std::optional<ava::core::Result<ava::permissions::PermissionResolutionDecision>> result;
 };
 
 struct PendingQuestionRequest {
@@ -636,9 +636,10 @@ int run_interactive_composer(TuiRuntimeOptions options)
     static_cast<void>(insert_composer_draft_text(draft, "\n"));
   };
 
-  auto resolve_permission_prompt =
-      [&](ava::permissions::PermissionPrompt const& prompt, std::function<bool()> const& stop_requested = {},
-          std::function<bool()> const& request_stop = {}) -> ava::core::Result<ava::permissions::PermissionResolution> {
+  auto resolve_permission_prompt = [&](ava::permissions::PermissionPrompt const& prompt,
+                                       std::function<bool()> const& stop_requested = {},
+                                       std::function<bool()> const& request_stop = {})
+      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     auto permission_label = std::string("permission requested");
     if (!prompt.tool_name.empty()) permission_label += ": " + prompt.tool_name;
     if (!prompt.command.empty()) permission_label += " " + prompt.command;
@@ -656,7 +657,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
 
     auto resolve_choice =
-        [&](PermissionPromptChoice selected) -> ava::core::Result<ava::permissions::PermissionResolution> {
+        [&](PermissionPromptChoice selected) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
       if (selected == PermissionPromptChoice::Allow) {
         emit_prompt_audit("tui:permission_allow", "permission allowed: " + prompt.tool_name);
         {
@@ -842,7 +843,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   };
 
   auto complete_permission_request = [](std::shared_ptr<PendingPermissionRequest> const& request,
-                                        ava::core::Result<ava::permissions::PermissionResolution> result) {
+                                        ava::core::Result<ava::permissions::PermissionResolutionDecision> result) {
     {
       std::lock_guard<std::mutex> lock(request->mutex);
       request->result = std::move(result);
@@ -907,7 +908,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   };
 
   ava::permissions::PermissionResolver permission_resolver = [&](ava::permissions::PermissionPrompt const& prompt)
-      -> ava::core::Result<ava::permissions::PermissionResolution> {
+      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     if (!accept_prompt_requests.load()) return ava::permissions::PermissionResolution::Deny;
     auto request = std::make_shared<PendingPermissionRequest>(prompt);
     {

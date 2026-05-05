@@ -360,7 +360,7 @@ void test_file_tools()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&canceled_file_prompts](ava::permissions::PermissionPrompt const&)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++canceled_file_prompts;
         return ava::permissions::PermissionResolution::Allow;
       },
@@ -405,7 +405,7 @@ void test_file_tools()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&allow_prompts, &outside_path](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++allow_prompts;
         expect(prompt.operation == ava::permissions::Operation::ReadFile, "file resolver receives read operation");
         expect(prompt.target_path == outside_path, "file resolver receives target path");
@@ -415,22 +415,25 @@ void test_file_tools()
   expect(outside_allowed && outside_allowed->content == "outside content" && allow_prompts == 1,
          "read_file allows ask decisions when resolver allows once");
 
-  ava::tools::ToolContext deny_context{
-      .workspace_dir = workspace,
-      .mode = ava::agent::Mode::Build,
-      .permission_resolver =
-          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
-        return ava::permissions::PermissionResolution::Deny;
-      }};
+  ava::tools::ToolContext deny_context{.workspace_dir = workspace,
+                                       .mode = ava::agent::Mode::Build,
+                                       .permission_resolver = [](ava::permissions::PermissionPrompt const&)
+                                           -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+                                         return ava::permissions::PermissionResolutionDecision{
+                                             ava::permissions::PermissionResolution::Deny,
+                                             "not approved by test resolver"};
+                                       }};
   auto outside_denied = ava::tools::read_file(deny_context, outside_path);
-  expect(!outside_denied && outside_denied.error().format().find("resolution: deny") != std::string::npos,
-         "read_file fails closed when resolver denies ask decisions");
+  expect(
+      !outside_denied && outside_denied.error().format().find("resolution: deny") != std::string::npos &&
+          outside_denied.error().format().find("resolution_reason: not approved by test resolver") != std::string::npos,
+      "read_file fails closed with resolver denial reasons when resolver denies ask decisions");
 
   ava::tools::ToolContext failing_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver =
-          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&)
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "resolver failed"));
       }};
   auto outside_failed = ava::tools::read_file(failing_context, outside_path);
@@ -448,7 +451,7 @@ void test_file_tools()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&write_denials](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         write_denials.push_back(prompt);
         return ava::permissions::PermissionResolution::Deny;
       }};
@@ -472,7 +475,7 @@ void test_file_tools()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&existing_write_denials](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         existing_write_denials.push_back(prompt);
         return ava::permissions::PermissionResolution::Deny;
       }};
@@ -491,7 +494,7 @@ void test_file_tools()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&write_fail_prompts](ava::permissions::PermissionPrompt const&)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++write_fail_prompts;
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "resolver failed"));
       }};
@@ -512,7 +515,7 @@ void test_file_tools()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&edit_prompts](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++edit_prompts;
         expect(prompt.operation == ava::permissions::Operation::ReadFile,
                "edit_file resolver sees read operation before denied external edit");
@@ -530,7 +533,7 @@ void test_file_tools()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&edit_fail_prompts](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++edit_fail_prompts;
         expect(prompt.operation == ava::permissions::Operation::ReadFile,
                "edit_file failure resolver sees read operation before external edit");
@@ -548,7 +551,7 @@ void test_file_tools()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&edit_diff_denials](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         edit_diff_denials.push_back(prompt);
         if (prompt.operation == ava::permissions::Operation::ReadFile) {
           return ava::permissions::PermissionResolution::Allow;
@@ -575,7 +578,7 @@ void test_file_tools()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&edit_allow_prompts](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         edit_allow_prompts.push_back(prompt.operation);
         return ava::permissions::PermissionResolution::Allow;
       }};
@@ -660,7 +663,7 @@ void test_permission_audit_persistence()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&prompts, &prompt_permission_request_id](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++prompts;
         prompt_permission_request_id = prompt.permission_request_id;
         return ava::permissions::PermissionResolution::Allow;
@@ -705,11 +708,33 @@ void test_permission_audit_persistence()
            "bash audit records command risk without path-only target field");
   }
 
+  ava::tools::ToolContext const denying_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&)
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Deny,
+                                                              "manual resolver denial"};
+      },
+      .permission_audit_sink = sink};
+  auto resolver_denied = ava::tools::read_file(denying_context, outside_path);
+  expect(!resolver_denied, "permission audit preserves resolver denial behavior");
+  loaded = store.load();
+  audits = loaded ? permission_entries(*loaded) : std::vector<ava::session::SessionEntry>{};
+  expect(audits.size() == 7, "resolver denial appends ask and outcome audit entries");
+  if (audits.size() >= 7) {
+    expect(ava::core::json::string_field(audits[6].data_json, "resolution") == "deny" &&
+               ava::core::json::string_field(audits[6].data_json, "resolution_source") == "resolver" &&
+               ava::core::json::string_field(audits[6].data_json, "resolution_reason") == "manual resolver denial",
+           "resolver denial audit records the client-supplied resolution reason");
+  }
+
   auto const exported = ava::session::format_session_markdown(audits);
   expect(exported.find("## Permission Decision") != std::string::npos &&
              exported.find("\"operation\":\"read\"") != std::string::npos &&
              exported.find("\"risk\":\"high\"") != std::string::npos &&
-             exported.find("\"resolution_source\":\"resolver\"") != std::string::npos,
+             exported.find("\"resolution_source\":\"resolver\"") != std::string::npos &&
+             exported.find("\"resolution_reason\":\"manual resolver denial\"") != std::string::npos,
          "session export includes permission decision audit data");
 }
 
@@ -865,7 +890,7 @@ void test_search_tools()
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
         .permission_resolver = [&search_prompts, &outside_search_link](ava::permissions::PermissionPrompt const& prompt)
-            -> ava::core::Result<ava::permissions::PermissionResolution> {
+            -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
           ++search_prompts;
           expect(prompt.operation == ava::permissions::Operation::ReadFile,
                  "search resolver receives read operation for symlink escapes");
@@ -896,7 +921,7 @@ void test_search_tools()
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
         .permission_resolver = [&denied_search_prompts](ava::permissions::PermissionPrompt const&)
-            -> ava::core::Result<ava::permissions::PermissionResolution> {
+            -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
           ++denied_search_prompts;
           return ava::permissions::PermissionResolution::Deny;
         }};
@@ -912,7 +937,7 @@ void test_search_tools()
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
         .permission_resolver = [&failing_search_prompts](ava::permissions::PermissionPrompt const&)
-            -> ava::core::Result<ava::permissions::PermissionResolution> {
+            -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
           ++failing_search_prompts;
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "search resolver failed"));
         }};
@@ -1160,8 +1185,8 @@ void test_bash_tool()
       .workspace_dir = temp_root(),
       .spill_dir = bash_spill_dir,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver =
-          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&)
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Allow;
       },
       .current_tool_name = "bash",
@@ -1227,7 +1252,7 @@ void test_bash_tool()
       .workspace_dir = temp_root(),
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&timeout_tree_prompts](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++timeout_tree_prompts;
         expect(prompt.operation == ava::permissions::Operation::RunCommand,
                "bash process-tree timeout resolver receives run operation");
@@ -1262,7 +1287,7 @@ void test_bash_tool()
       .workspace_dir = temp_root(),
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&bash_prompts](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++bash_prompts;
         expect(prompt.operation == ava::permissions::Operation::RunCommand, "bash resolver receives run operation");
         expect(prompt.command == "true", "bash resolver receives command text");
@@ -1272,13 +1297,12 @@ void test_bash_tool()
   expect(ask_allowed && ask_allowed->exit_code == 0 && bash_prompts == 1,
          "run_bash allows ask decisions when resolver allows once");
 
-  ava::tools::ToolContext deny_context{
-      .workspace_dir = temp_root(),
-      .mode = ava::agent::Mode::Build,
-      .permission_resolver =
-          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
-        return ava::permissions::PermissionResolution::Deny;
-      }};
+  ava::tools::ToolContext deny_context{.workspace_dir = temp_root(),
+                                       .mode = ava::agent::Mode::Build,
+                                       .permission_resolver = [](ava::permissions::PermissionPrompt const&)
+                                           -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+                                         return ava::permissions::PermissionResolution::Deny;
+                                       }};
   auto ask_denied = ava::tools::run_bash(deny_context, "true");
   expect(!ask_denied && ask_denied.error().format().find("resolution: deny") != std::string::npos,
          "run_bash fails closed when resolver denies ask decisions");
@@ -1286,8 +1310,8 @@ void test_bash_tool()
   ava::tools::ToolContext failing_context{
       .workspace_dir = temp_root(),
       .mode = ava::agent::Mode::Build,
-      .permission_resolver =
-          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&)
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "resolver failed"));
       }};
   auto ask_failed = ava::tools::run_bash(failing_context, "true");
@@ -1310,7 +1334,7 @@ void test_webfetch_tool()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++prompts;
         expect(prompt.operation == ava::permissions::Operation::NetworkFetch,
                "webfetch resolver receives network operation");
@@ -1354,7 +1378,7 @@ void test_webfetch_tool()
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .permission_resolver = [](ava::permissions::PermissionPrompt const& prompt)
-          -> ava::core::Result<ava::permissions::PermissionResolution> {
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         expect(prompt.operation == ava::permissions::Operation::NetworkFetch,
                "digit-leading domain still requests network permission");
         return ava::permissions::PermissionResolution::Allow;
@@ -1383,8 +1407,8 @@ void test_webfetch_tool()
   ava::tools::ToolContext const cancel_during_transport_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver =
-          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&)
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Allow;
       },
       .cancel_requested =

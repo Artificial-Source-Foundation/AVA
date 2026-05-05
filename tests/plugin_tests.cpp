@@ -740,7 +740,7 @@ void test_enabled_plugin_event_hooks_observe_runtime_events()
           .plugin_enablement_file = state_file,
           .mode = ava::agent::Mode::Build,
           .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
-              -> ava::core::Result<ava::permissions::PermissionResolution> {
+              -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
             prompts.push_back(prompt);
             return ava::permissions::PermissionResolution::Allow;
           }},
@@ -812,7 +812,7 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
           .plugin_enablement_file = state_file,
           .mode = ava::agent::Mode::Build,
           .permission_resolver = [](ava::permissions::PermissionPrompt const&)
-              -> ava::core::Result<ava::permissions::PermissionResolution> {
+              -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
             return ava::permissions::PermissionResolution::Allow;
           },
           .hook_failure_sink =
@@ -884,7 +884,7 @@ void test_plugin_tool_dispatcher()
   context.plugin_project_plugins_dir = project_plugins;
   context.plugin_enablement_file = state_file;
   context.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
-      -> ava::core::Result<ava::permissions::PermissionResolution> {
+      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
@@ -935,7 +935,7 @@ void test_plugin_tool_dispatcher()
   std::vector<ava::permissions::PermissionPrompt> denied_prompts;
   auto denied_context = context;
   denied_context.permission_resolver = [&denied_prompts](ava::permissions::PermissionPrompt const& prompt)
-      -> ava::core::Result<ava::permissions::PermissionResolution> {
+      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     denied_prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Deny;
   };
@@ -983,8 +983,8 @@ void test_plugin_tool_dispatcher_rejects_invalid_result()
   context.plugin_global_plugins_dir = root / "global-plugins";
   context.plugin_project_plugins_dir = project_plugins;
   context.plugin_enablement_file = state_file;
-  context.permission_resolver =
-      [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolution> {
+  context.permission_resolver = [](ava::permissions::PermissionPrompt const&)
+      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     return ava::permissions::PermissionResolution::Allow;
   };
 

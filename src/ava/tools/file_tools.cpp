@@ -56,13 +56,14 @@ PermissionAuditEvent audit_event(ToolContext const& context, std::string permiss
                               .target_path = target_path,
                               .command = std::string(command),
                               .resolution = "",
-                              .resolution_source = "policy"};
+                              .resolution_source = "policy",
+                              .resolution_reason = ""};
 }
 
 ava::core::Error permission_denied_error(std::string_view error_message,
                                          ava::permissions::PermissionDecision const& decision,
                                          std::filesystem::path const& target_path, std::string_view command,
-                                         std::string_view resolution_context)
+                                         std::string_view resolution_context, std::string_view resolution_reason = {})
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, std::string(error_message));
   error.with_context("action", ava::permissions::to_string(decision.action));
@@ -75,6 +76,7 @@ ava::core::Error permission_denied_error(std::string_view error_message,
   }
   if (decision.action == ava::permissions::PermissionAction::Ask) {
     error.with_context("resolution", std::string(resolution_context));
+    if (!resolution_reason.empty()) error.with_context("resolution_reason", std::string(resolution_reason));
   }
   return error;
 }
@@ -442,6 +444,7 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
                                                                                              : "resolver";
   if (!resolution) outcome_event.resolution_source = "resolver_failed";
   outcome_event.resolution = resolution ? ava::permissions::to_string(*resolution) : "deny";
+  if (resolution) outcome_event.resolution_reason = resolution->reason;
   if (auto audited = record_permission_audit(context, outcome_event); !audited) {
     return std::unexpected(std::move(audited.error()));
   }
@@ -452,7 +455,9 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
 
   auto const resolution_context =
       resolution ? ava::permissions::to_string(*resolution) : std::string("resolver_failed");
-  return std::unexpected(permission_denied_error(error_message, decision, target_path, command, resolution_context));
+  auto const resolution_reason = resolution ? std::string_view(resolution->reason) : std::string_view{};
+  return std::unexpected(
+      permission_denied_error(error_message, decision, target_path, command, resolution_context, resolution_reason));
 }
 
 std::string permission_audit_data_json(PermissionAuditEvent const& event)
@@ -479,6 +484,9 @@ std::string permission_audit_data_json(PermissionAuditEvent const& event)
   }
   if (!event.resolution_source.empty()) {
     data += ",\"resolution_source\":\"" + ava::core::json::escape(event.resolution_source) + "\"";
+  }
+  if (!event.resolution_reason.empty()) {
+    data += ",\"resolution_reason\":\"" + ava::core::json::escape(event.resolution_reason) + "\"";
   }
   data += '}';
   return data;

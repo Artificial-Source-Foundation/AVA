@@ -33,6 +33,7 @@ struct PermissionAuditEvent {
   std::string command;
   std::string resolution;
   std::string resolution_source;
+  std::string resolution_reason;
 };
 
 using PermissionAuditSink = std::function<ava::core::VoidResult(PermissionAuditEvent const&)>;

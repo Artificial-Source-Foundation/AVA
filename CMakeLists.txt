@@ -42,6 +42,7 @@ endfunction()
 
 add_library(ava_core
   src/ava/agent/agent_loop.cpp
+  src/ava/agent/agent_loop_session.cpp
   src/ava/agent/assistant_turn.cpp
   src/ava/agent/message_builder.cpp
   src/ava/agent/mode.cpp

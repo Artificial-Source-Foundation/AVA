@@ -44,6 +44,7 @@ add_library(ava_core
   src/ava/agent/agent_loop.cpp
   src/ava/agent/assistant_turn.cpp
   src/ava/agent/message_builder.cpp
+  src/ava/agent/message_builder_support.cpp
   src/ava/agent/mode.cpp
   src/ava/agent/patch_staging.cpp
   src/ava/agent/provider_event_buffer.cpp
@@ -281,6 +282,7 @@ if(AVA_BUILD_TESTS)
     tests/file_tools_support_tests.cpp
     tests/json_support_tests.cpp
     tests/lsp_tests.cpp
+    tests/message_builder_support_tests.cpp
     tests/mcp_tests.cpp
     tests/plugin_tests.cpp
     tests/provider_anthropic_tests.cpp
@@ -338,6 +340,7 @@ if(AVA_BUILD_TESTS)
     provider_transport
     agent_tool_dispatcher
     lsp
+    message_builder_support
     plugin
     mcp
     tui_composer

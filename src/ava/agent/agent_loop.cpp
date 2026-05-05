@@ -7,6 +7,7 @@
 
 #include "ava/agent/agent_loop_active_turn.h"
 #include "ava/agent/agent_loop_cancellation.h"
+#include "ava/agent/agent_loop_context_retry.h"
 #include "ava/agent/assistant_turn.h"
 #include "ava/agent/message_builder.h"
 #include "ava/agent/provider_event_buffer.h"
@@ -113,33 +114,13 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
   auto replay_active_turn_user_messages_locked = [&]() -> ava::core::VoidResult {
     return active_turn_user_messages.replay_user_messages(store, options_.session_mutex);
   };
-  bool context_overflow_retry_used = false;
-  bool skip_auto_compaction_after_overflow_retry = false;
+  ContextOverflowRetryState context_overflow_retry;
   auto prepare_context_overflow_retry = [&](ava::core::Error const& error) -> ava::core::Result<bool> {
-    if (!ava::provider::is_context_overflow_error(error) || context_overflow_retry_used || !options_.compact_context) {
-      return false;
-    }
-    context_overflow_retry_used = true;
-    if (auto not_canceled = check_canceled_locked("before_context_overflow_compaction"); !not_canceled) {
-      return std::unexpected(std::move(not_canceled.error()));
-    }
-    auto compacted = compact_context("context_overflow");
-    if (!compacted) {
-      auto compact_error = ava::core::Error(ava::core::ErrorCategory::Provider, "context overflow compaction failed");
-      compact_error.with_context("provider_error", error.format());
-      compact_error.with_context("compaction_error", compacted.error().format());
-      return std::unexpected(std::move(compact_error));
-    }
-    if (*compacted) {
-      if (auto replayed = replay_active_turn_user_messages_locked(); !replayed) {
-        return std::unexpected(std::move(replayed.error()));
-      }
-      skip_auto_compaction_after_overflow_retry = true;
-    }
-    if (auto not_canceled = check_canceled_locked("after_context_overflow_compaction"); !not_canceled) {
-      return std::unexpected(std::move(not_canceled.error()));
-    }
-    return true;
+    return prepare_context_overflow_retry_attempt(
+        error, options_.compact_context != nullptr, context_overflow_retry,
+        ContextOverflowRetryCallbacks{.check_canceled = check_canceled_locked,
+                                      .compact_context = compact_context,
+                                      .replay_active_turn_user_messages = replay_active_turn_user_messages_locked});
   };
 
   if (auto not_canceled = check_canceled_locked("before_turn_start"); !not_canceled) {
@@ -198,8 +179,8 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       }
     }
 
-    if (skip_auto_compaction_after_overflow_retry) {
-      skip_auto_compaction_after_overflow_retry = false;
+    if (context_overflow_retry.skip_next_auto_compaction) {
+      context_overflow_retry.skip_next_auto_compaction = false;
     } else if (options_.compact_context && result.provider_iterations == 0 && !pre_turn_compacted) {
       auto compacted = compact_context("auto");
       if (!compacted) return std::unexpected(std::move(compacted.error()));

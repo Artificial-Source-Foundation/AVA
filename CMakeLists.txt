@@ -108,6 +108,7 @@ add_library(ava_core
   src/ava/provider/curl_transport.cpp
   src/ava/provider/curl_transport_protocol.cpp
   src/ava/provider/curl_transport_process.cpp
+  src/ava/provider/curl_transport_streaming.cpp
   src/ava/provider/default_provider_parser.cpp
   src/ava/provider/anthropic_provider.cpp
   src/ava/provider/anthropic_request.cpp

@@ -26,6 +26,7 @@
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/app/command_catalog.h"
 #include "ava/app/command_palette.h"
+#include "ava/app/command_session_format.h"
 #include "ava/app/commands.h"
 #include "ava/app/connect_openai.h"
 #include "ava/app/events.h"
@@ -1906,6 +1907,18 @@ void test_app_command_dispatcher()
   auto status = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/status"});
   expect(status && status->handled && !status->output.empty() && status->output[0] == stats->output[0],
          "command dispatcher /status aliases the backend-backed session stats surface");
+
+  ava::session::SessionStats incomplete_cost_stats;
+  incomplete_cost_stats.entry_count = 2;
+  incomplete_cost_stats.known_cost_usd = 0.25L;
+  incomplete_cost_stats.cost_complete = false;
+  incomplete_cost_stats.unknown_cost_entries = 3;
+  auto const incomplete_stats_text = ava::app::format_session_stats_text(*session, incomplete_cost_stats);
+  expect(incomplete_stats_text.find("tokens: unavailable") != std::string::npos &&
+             incomplete_stats_text.find("est bytes: unavailable") != std::string::npos &&
+             incomplete_stats_text.find("cost: at least $0.250000 (3 unknown)") != std::string::npos &&
+             incomplete_stats_text.find("path:") == std::string::npos,
+         "session stats formatter is directly testable for unavailable usage and incomplete cost text");
 
   auto quit = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/quit"});
   expect(quit && quit->handled && quit->quit, "command dispatcher /quit requests shell exit");

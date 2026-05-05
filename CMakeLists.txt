@@ -138,6 +138,7 @@ add_library(ava_app
   src/ava/app/command_models.cpp
   src/ava/app/command_palette.cpp
   src/ava/app/command_plugins.cpp
+  src/ava/app/command_session_format.cpp
   src/ava/app/command_sessions.cpp
   src/ava/app/command_tools.cpp
   src/ava/app/commands.cpp

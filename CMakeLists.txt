@@ -57,6 +57,7 @@ add_library(ava_core
   src/ava/agent/tool_summaries.cpp
   src/ava/agent/usage_accounting.cpp
   src/ava/config/auth.cpp
+  src/ava/config/auth_file_store.cpp
   src/ava/config/auth_record.cpp
   src/ava/config/model_config.cpp
   src/ava/config/model_profiles.cpp

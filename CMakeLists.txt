@@ -225,6 +225,7 @@ add_library(ava_app
   src/ava/app/rpc/prompt_handlers.cpp
   src/ava/app/rpc/protocol.cpp
   src/ava/app/rpc/query_handlers.cpp
+  src/ava/app/rpc/resolver_support.cpp
   src/ava/app/rpc/resolvers.cpp
   src/ava/app/rpc/run_state.cpp
   src/ava/app/rpc/runtime_handlers.cpp
@@ -286,6 +287,7 @@ if(AVA_BUILD_TESTS)
     tests/app_rpc_control_tests.cpp
     tests/app_rpc_prompt_tests.cpp
     tests/app_rpc_query_tests.cpp
+    tests/app_rpc_resolver_support_tests.cpp
     tests/app_rpc_runtime_control_tests.cpp
     tests/app_rpc_session_tests.cpp
     tests/app_runtime_compaction_support_tests.cpp
@@ -363,6 +365,7 @@ if(AVA_BUILD_TESTS)
     app_rpc_control
     app_rpc_prompt
     app_rpc_query
+    app_rpc_resolver_support
     app_rpc_runtime_control
     app_rpc_session
     app_runtime_compaction_support

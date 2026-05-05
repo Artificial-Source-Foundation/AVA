@@ -3,74 +3,10 @@
 #include <utility>
 
 #include "ava/app/rpc/protocol.h"
+#include "ava/app/rpc/resolver_support.h"
 #include "ava/app/rpc/serialization.h"
-#include "ava/core/ids.h"
 
 namespace ava::app::rpc {
-namespace {
-
-ava::core::Error no_pending_request_error(std::string_view request_id)
-{
-  auto error = invalid_rpc("RPC resolver reply has no matching pending request");
-  error.with_context("request_id", std::string(request_id));
-  return error;
-}
-
-std::string next_resolver_request_id(std::string_view prefix)
-{
-  return ava::core::make_id(prefix);
-}
-
-bool grant_matches(PermissionSessionGrant const& grant, ava::permissions::PermissionPrompt const& prompt)
-{
-  return grant.operation == prompt.operation && grant.mode == prompt.mode && grant.tool_name == prompt.tool_name &&
-         grant.target_path == prompt.target_path && grant.command == prompt.command;
-}
-
-bool grant_matches(PermissionSessionGrant const& grant, PendingPermissionRequest const& request)
-{
-  return grant.operation == request.operation && grant.mode == request.mode && grant.tool_name == request.tool_name &&
-         grant.target_path == request.target_path && grant.command == request.command;
-}
-
-PermissionSessionGrant grant_from_request(PendingPermissionRequest const& request)
-{
-  return PermissionSessionGrant{.grant_id = ava::core::make_id("permgrant"),
-                                .permission_request_id = request.permission_request_id,
-                                .operation = request.operation,
-                                .mode = request.mode,
-                                .tool_name = request.tool_name,
-                                .target_path = request.target_path,
-                                .command = request.command,
-                                .reason = request.reason,
-                                .risk = request.risk};
-}
-
-std::string permission_session_grant_json(PermissionSessionGrant const& grant)
-{
-  std::string json = "{";
-  json += string_field_json("grant_id", grant.grant_id);
-  json += ',';
-  json += string_field_json("permission_request_id", grant.permission_request_id);
-  json += ',';
-  json += string_field_json("operation", ava::permissions::to_string(grant.operation));
-  json += ',';
-  json += string_field_json("mode", ava::agent::to_string(grant.mode));
-  json += ',';
-  json += string_field_json("tool_name", grant.tool_name);
-  json += ',';
-  json += string_field_json("target_path", grant.target_path.string());
-  json += ',';
-  json += string_field_json("command", grant.command);
-  json += ',';
-  json += string_field_json("reason", grant.reason);
-  json += ',';
-  json += string_field_json("risk", ava::permissions::to_string(grant.risk));
-  json += '}';
-  return json;
-}
-
-}  // namespace
 
 bool cancel_pending_resolvers(PendingResolverState& pending_state)
 {
@@ -104,7 +40,7 @@ std::string permission_session_grants_result_json(PendingResolverState& pending_
   std::string json = "{\"grants\":[";
   for (std::size_t index = 0; index < grants.size(); ++index) {
     if (index > 0) json += ',';
-    json += permission_session_grant_json(grants[index]);
+    json += detail::permission_session_grant_json(grants[index]);
   }
   json += "]}";
   return json;
@@ -136,7 +72,7 @@ ava::core::Result<std::string> permission_session_grant_revoke_result_json(Pendi
   std::string json = "{";
   json += bool_field_json("revoked", true);
   json += ",\"grant\":";
-  json += permission_session_grant_json(grant);
+  json += detail::permission_session_grant_json(grant);
   json += '}';
   return json;
 }
@@ -176,7 +112,7 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(
     {
       std::lock_guard lock(pending_state.mutex);
       for (auto const& grant : pending_state.permission_session_grants) {
-        if (grant_matches(grant, prompt)) return ava::permissions::PermissionResolution::AllowSessionGrant;
+        if (detail::grant_matches(grant, prompt)) return ava::permissions::PermissionResolution::AllowSessionGrant;
       }
     }
 
@@ -193,7 +129,7 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(
     std::string request_id;
     {
       std::lock_guard lock(pending_state.mutex);
-      request_id = next_resolver_request_id("permission");
+      request_id = detail::next_resolver_request_id("permission");
       pending_state.permission_requests[request_id] = pending;
     }
 
@@ -240,7 +176,7 @@ ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pe
         std::string request_id;
         {
           std::lock_guard lock(pending_state.mutex);
-          request_id = next_resolver_request_id("question");
+          request_id = detail::next_resolver_request_id("question");
           pending_state.question_requests[request_id] = pending;
         }
 
@@ -271,26 +207,16 @@ ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_sta
                                                std::string_view correlation_id, std::string_view decision)
 {
   ava::permissions::PermissionResolution resolution = ava::permissions::PermissionResolution::Deny;
-  bool create_session_grant = false;
-  if (decision == "allow") {
-    resolution = ava::permissions::PermissionResolution::Allow;
-  } else if (decision == "allow_session") {
-    resolution = ava::permissions::PermissionResolution::Allow;
-    create_session_grant = true;
-  } else if (decision == "deny") {
-    resolution = ava::permissions::PermissionResolution::Deny;
-  } else {
-    auto error = invalid_rpc("permission_reply decision must be allow, allow_session, or deny");
-    error.with_context("decision", std::string(decision));
-    return std::unexpected(std::move(error));
-  }
+  auto parsed_decision = detail::parse_permission_reply_decision(decision);
+  if (!parsed_decision) return std::unexpected(std::move(parsed_decision.error()));
+  resolution = parsed_decision->resolution;
 
   std::shared_ptr<PendingPermissionRequest> pending;
   {
     std::lock_guard lock(pending_state.mutex);
     auto found = pending_state.permission_requests.find(std::string(request_id));
     if (found == pending_state.permission_requests.end()) {
-      return std::unexpected(no_pending_request_error(request_id));
+      return std::unexpected(detail::no_pending_request_error(request_id));
     }
     pending = found->second;
     if (pending->correlation_id != correlation_id) {
@@ -299,11 +225,11 @@ ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_sta
       return std::unexpected(std::move(error));
     }
     pending_state.permission_requests.erase(found);
-    if (create_session_grant) {
-      auto grant = grant_from_request(*pending);
+    if (parsed_decision->create_session_grant) {
+      auto grant = detail::grant_from_request(*pending);
       bool duplicate = false;
       for (auto const& existing : pending_state.permission_session_grants) {
-        duplicate = duplicate || grant_matches(existing, *pending);
+        duplicate = duplicate || detail::grant_matches(existing, *pending);
       }
       if (!duplicate) pending_state.permission_session_grants.push_back(std::move(grant));
     }
@@ -321,12 +247,13 @@ ava::core::VoidResult resolve_question_reply(PendingResolverState& pending_state
   if (answer && selected) return std::unexpected(invalid_rpc("question_reply requires answer or selected, not both"));
 
   std::shared_ptr<PendingQuestionRequest> pending;
-  ava::agent::QuestionAnswer parsed;
+  ava::core::Result<ava::agent::QuestionAnswer> parsed =
+      std::unexpected(invalid_rpc("question_reply requires answer or selected"));
   {
     std::lock_guard lock(pending_state.mutex);
     auto found = pending_state.question_requests.find(std::string(request_id));
     if (found == pending_state.question_requests.end()) {
-      return std::unexpected(no_pending_request_error(request_id));
+      return std::unexpected(detail::no_pending_request_error(request_id));
     }
     pending = found->second;
     if (pending->correlation_id != correlation_id) {
@@ -335,25 +262,12 @@ ava::core::VoidResult resolve_question_reply(PendingResolverState& pending_state
       return std::unexpected(std::move(error));
     }
 
-    if (answer) {
-      if (!pending->allow_custom) {
-        return std::unexpected(invalid_rpc("question_reply answer is not allowed for this request"));
-      }
-      parsed.custom_text = *answer;
-    } else if (selected) {
-      bool valid_option = false;
-      for (auto const& option : pending->options) valid_option = valid_option || option.value == *selected;
-      if (!valid_option) {
-        return std::unexpected(invalid_rpc("question_reply selected option is not valid for this request"));
-      }
-      parsed.selected_options.push_back(*selected);
-    } else {
-      return std::unexpected(invalid_rpc("question_reply requires answer or selected"));
-    }
+    parsed = detail::parse_question_reply(*pending, answer, selected);
+    if (!parsed) return std::unexpected(std::move(parsed.error()));
 
     pending_state.question_requests.erase(found);
     pending->resolved = true;
-    pending->answer = std::move(parsed);
+    pending->answer = std::move(*parsed);
   }
   pending_state.cv.notify_all();
   return {};

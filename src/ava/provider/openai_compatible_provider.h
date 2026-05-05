@@ -1,24 +1,12 @@
 #pragma once
 
 #include <map>
-#include <optional>
 #include <string>
 
+#include "ava/provider/openai_compatible_request.h"
 #include "ava/provider/provider.h"
 
 namespace ava::provider {
-
-struct OpenAICompatibleProviderOptions {
-  std::string base_url = "https://api.openai.com";
-  std::string chat_completions_path = "/v1/chat/completions";
-  std::string provider_name = "OpenAI-compatible";
-  std::string reasoning_format = "reasoning_content";
-  std::string user_agent = {};
-  std::optional<double> default_temperature = std::nullopt;
-  std::string reasoning_request_field = "thinking";
-  bool preserve_reasoning_content = false;
-  bool include_stream_usage = false;
-};
 
 class OpenAICompatibleStreamParser final : public StreamParser {
  public:

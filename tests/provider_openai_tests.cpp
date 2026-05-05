@@ -36,6 +36,7 @@
 #include "ava/core/json.h"
 #include "ava/permissions/permission.h"
 #include "ava/provider/openai_compatible_provider.h"
+#include "ava/provider/openai_compatible_request.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/registry.h"
 #include "ava/session/compaction.h"
@@ -706,6 +707,112 @@ void test_openai_incremental_sse_parser()
   }
 }
 
+void test_openai_compatible_request_helpers()
+{
+  expect(ava::provider::openai_compatible_join_url("https://compat.example.test///", "/v1/chat") ==
+             "https://compat.example.test/v1/chat",
+         "OpenAI-compatible URL join trims duplicate slashes");
+  expect(ava::provider::openai_compatible_join_url("https://compat.example.test/root", "v1/chat") ==
+             "https://compat.example.test/root/v1/chat",
+         "OpenAI-compatible URL join inserts a missing separator");
+  expect(ava::provider::openai_compatible_join_url("https://compat.example.test/root///", "") ==
+             "https://compat.example.test/root",
+         "OpenAI-compatible URL join handles empty paths");
+  expect(ava::provider::openai_compatible_temperature_json(1.25) == "1.25",
+         "OpenAI-compatible temperature serialization is locale-stable");
+
+  auto const converted = ava::provider::chat_completion_tool_json(
+      "{\"type\":\"function\",\"name\":\"strict_tool\",\"description\":\"Strict tool\","
+      "\"strict\":true,\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}}");
+  expect(converted &&
+             converted->find("\"type\":\"function\",\"function\":{\"name\":\"strict_tool\"") != std::string::npos &&
+             converted->find("\"strict\":true") != std::string::npos,
+         "OpenAI-compatible request helper converts bare tool schemas and preserves strict mode");
+
+  auto const wrapped = ava::provider::chat_completion_tool_json(
+      "{\"type\":\"function\",\"function\":{\"name\":\"wrapped_tool\",\"parameters\":{\"type\":\"object\"}}}");
+  expect(wrapped && *wrapped ==
+                        "{\"type\":\"function\",\"function\":{\"name\":\"wrapped_tool\","
+                        "\"parameters\":{\"type\":\"object\"}}}",
+         "OpenAI-compatible request helper preserves already wrapped chat tools");
+
+  auto const malformed_parameters = ava::provider::chat_completion_tool_json(
+      "{\"type\":\"function\",\"name\":\"bad_params\",\"parameters\":{\"type\":\"object\"");
+  expect(!malformed_parameters && malformed_parameters.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "OpenAI-compatible request helper rejects malformed parameters");
+
+  auto const missing_name = ava::provider::chat_completion_tool_json("{\"type\":\"function\"}");
+  expect(!missing_name && missing_name.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "OpenAI-compatible request helper rejects tools without names");
+
+  auto const invalid_tools = ava::provider::validate_openai_compatible_tools_json(ava::provider::ProviderRequest{
+      .provider_id = "", .model_id = "", .system_prompt = "", .messages = {}, .tools_json = {"not-json"}});
+  expect(!invalid_tools && invalid_tools.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "OpenAI-compatible request helper rejects invalid tool JSON before request construction");
+
+  ava::provider::ChatMessage const assistant{
+      .role = "assistant",
+      .content = "fallback",
+      .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Reasoning,
+                                                   .text = "visible reasoning",
+                                                   .reasoning_format = "reasoning_content"},
+                        ava::provider::ContentPart{.type = ava::provider::ContentPartType::Reasoning,
+                                                   .text = "redacted reasoning",
+                                                   .reasoning_format = "reasoning_content",
+                                                   .redacted = true},
+                        ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text, .text = "answer text"},
+                        ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
+                                                   .tool_call_id = "call_read",
+                                                   .tool_name = "read_file",
+                                                   .input_json = "{\"path\":\"README.md\"}"}}};
+  auto const preserved =
+      ava::provider::openai_compatible_chat_messages_for_message(assistant, "reasoning_content", true);
+  expect(preserved.size() == 1 &&
+             preserved[0].find("\"reasoning_content\":\"visible reasoning\"") != std::string::npos &&
+             preserved[0].find("redacted reasoning") == std::string::npos &&
+             preserved[0].find("\"tool_calls\":[{\"id\":\"call_read\"") != std::string::npos,
+         "OpenAI-compatible message helper projects replayable reasoning and tool calls semantically");
+
+  auto const not_preserved =
+      ava::provider::openai_compatible_chat_messages_for_message(assistant, "reasoning_content", false);
+  expect(not_preserved.size() == 1 && not_preserved[0].find("visible reasoning") == std::string::npos,
+         "OpenAI-compatible message helper omits reasoning replay unless enabled");
+
+  ava::provider::ChatMessage const tool_result{
+      .role = "user",
+      .content = "fallback tool output",
+      .content_parts = {ava::provider::ContentPart{
+          .type = ava::provider::ContentPartType::ToolResult, .text = "tool output", .tool_call_id = "call_read"}}};
+  auto const tool_messages =
+      ava::provider::openai_compatible_chat_messages_for_message(tool_result, "reasoning_content", true);
+  expect(tool_messages.size() == 1 &&
+             tool_messages[0].find("\"role\":\"tool\",\"tool_call_id\":\"call_read\"") != std::string::npos &&
+             tool_messages[0].find("fallback tool output") == std::string::npos,
+         "OpenAI-compatible message helper serializes native tool results without fallback text");
+
+  ava::provider::OpenAICompatibleProviderOptions const options{
+      .default_temperature = 0.5, .preserve_reasoning_content = true, .include_stream_usage = true};
+  auto const body = ava::provider::openai_compatible_request_body_json(
+      ava::provider::ProviderRequest{
+          .provider_id = "compatible",
+          .model_id = "model-compatible",
+          .system_prompt = "system prompt",
+          .messages = {assistant, tool_result},
+          .tools_json = {"{\"type\":\"function\",\"name\":\"read_file\",\"parameters\":{\"type\":\"object\"}}"},
+          .stream = true,
+          .max_output_tokens = 512,
+          .reasoning = ava::provider::ProviderReasoningOptions{.type = "enabled", .budget_tokens = 128}},
+      options);
+  expect(
+      body.find("\"model\":\"model-compatible\"") != std::string::npos &&
+          body.find("\"role\":\"system\",\"content\":\"system prompt\"") != std::string::npos &&
+          body.find("\"max_tokens\":512") != std::string::npos &&
+          body.find("\"temperature\":0.5") != std::string::npos &&
+          body.find("\"stream_options\":{\"include_usage\":true}") != std::string::npos &&
+          body.find("\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":128,\"keep\":\"all\"}") != std::string::npos,
+      "OpenAI-compatible request body helper serializes session, generation, and reasoning options");
+}
+
 void test_openai_compatible_provider_contract()
 {
   ava::provider::OpenAICompatibleProvider const provider(
@@ -1038,6 +1145,7 @@ void run_provider_openai_tests()
 {
   test_openai_provider_contract();
   test_openai_incremental_sse_parser();
+  test_openai_compatible_request_helpers();
   test_openai_compatible_provider_contract();
   test_openai_compatible_parsing();
   test_builtin_provider_registry();

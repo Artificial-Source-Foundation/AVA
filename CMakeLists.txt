@@ -90,6 +90,7 @@ add_library(ava_core
   src/ava/plugin/stream_buffers.cpp
   src/ava/plugin/tool_broker.cpp
   src/ava/provider/curl_transport.cpp
+  src/ava/provider/curl_transport_protocol.cpp
   src/ava/provider/anthropic_provider.cpp
   src/ava/provider/anthropic_request.cpp
   src/ava/provider/openai_compatible_provider.cpp
@@ -233,6 +234,7 @@ if(AVA_BUILD_TESTS)
     tests/plugin_tests.cpp
     tests/provider_anthropic_tests.cpp
     tests/provider_openai_tests.cpp
+    tests/provider_transport_tests.cpp
     tests/session_tests.cpp
     tests/tools_tests.cpp
     tests/tui_composer_tests.cpp
@@ -256,6 +258,7 @@ if(AVA_BUILD_TESTS)
     app_runtime
     provider_openai
     provider_anthropic
+    provider_transport
     agent_tool_dispatcher
     lsp
     plugin

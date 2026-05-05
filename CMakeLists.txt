@@ -141,6 +141,7 @@ add_library(ava_core
   src/ava/session/session_entry_codec.cpp
   src/ava/session/session_entry_codec_support.cpp
   src/ava/session/export.cpp
+  src/ava/session/export_markdown_support.cpp
   src/ava/session/session_store.cpp
   src/ava/session/session_store_support.cpp
   src/ava/session/stats.cpp
@@ -323,6 +324,7 @@ if(AVA_BUILD_TESTS)
     tests/provider_transport_tests.cpp
     tests/search_tools_support_tests.cpp
     tests/session_entry_codec_support_tests.cpp
+    tests/session_export_markdown_support_tests.cpp
     tests/session_validation_compaction_tests.cpp
     tests/session_validation_permission_tests.cpp
     tests/session_validation_tool_tests.cpp
@@ -348,6 +350,7 @@ if(AVA_BUILD_TESTS)
     session_validation_permission
     session_validation_tool
     session_store_support
+    session_export_markdown_support
     core_json_permission
     app_command_classification
     app_command_plugin_support

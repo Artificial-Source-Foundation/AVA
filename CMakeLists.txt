@@ -78,6 +78,7 @@ add_library(ava_core
   src/ava/plugin/tool_broker.cpp
   src/ava/provider/curl_transport.cpp
   src/ava/provider/anthropic_provider.cpp
+  src/ava/provider/anthropic_request.cpp
   src/ava/provider/openai_compatible_provider.cpp
   src/ava/provider/openai_provider.cpp
   src/ava/provider/openai_request.cpp

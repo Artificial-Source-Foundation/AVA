@@ -1,15 +1,10 @@
 #include "ava/app/line_shell.h"
 
-#include <algorithm>
-#include <filesystem>
-#include <fstream>
 #include <functional>
-#include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <memory>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -18,6 +13,7 @@
 #include "ava/app/command_palette.h"
 #include "ava/app/commands.h"
 #include "ava/app/interactive_run_queue.h"
+#include "ava/app/line_shell_support.h"
 #include "ava/app/reasoning_controls.h"
 #include "ava/config/auth.h"
 #include "ava/config/model_profiles.h"
@@ -25,7 +21,6 @@
 #include "ava/core/version.h"
 #include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
-#include "ava/session/stats.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
@@ -38,18 +33,6 @@ namespace version = ava::core::version;
 void print_shell_help()
 {
   std::cout << ava::app::command_help_text() << '\n';
-}
-
-std::string git_branch_for_sidebar(std::filesystem::path const& workspace)
-{
-  auto const head_path = workspace / ".git" / "HEAD";
-  std::ifstream input(head_path);
-  if (!input) return {};
-  std::string head;
-  std::getline(input, head);
-  constexpr std::string_view ref_prefix = "ref: refs/heads/";
-  if (head.rfind(ref_prefix, 0) == 0) return head.substr(ref_prefix.size());
-  return head.size() > 12 ? head.substr(0, 12) : head;
 }
 
 std::vector<ava::app::CommandHotkey> command_hotkeys_from_key_bindings(ava::tui::TuiKeyBindings const& key_bindings)
@@ -91,82 +74,6 @@ std::vector<ava::tui::ToolTimelineItem> tui_tool_timeline(std::vector<ava::agent
 void print_resume_command(ava::session::SessionStore const& store)
 {
   std::cout << "Resume this session with: ava --session " << store.session_id() << '\n';
-}
-
-bool is_compact_command(std::string_view line) noexcept
-{
-  return line == "/compact" || (line.starts_with("/compact") && line.size() > 8 && line[8] == ' ');
-}
-
-void add_token_component(std::optional<long long>& total, std::optional<long long> value)
-{
-  if (!value) return;
-  if (!total) total = 0;
-  *total += *value;
-}
-
-std::optional<long long> compact_token_total(ava::session::SessionStats const& stats)
-{
-  if (stats.total_tokens) return stats.total_tokens;
-
-  std::optional<long long> total;
-  add_token_component(total, stats.input_tokens);
-  add_token_component(total, stats.output_tokens);
-  add_token_component(total, stats.reasoning_tokens);
-  add_token_component(total, stats.cache_read_tokens);
-  add_token_component(total, stats.cache_write_tokens);
-  return total;
-}
-
-std::string format_compact_token_count(long long value)
-{
-  if (value < 1000) return std::to_string(value);
-
-  auto const format_scaled = [](long long tenths, std::string_view suffix) {
-    std::ostringstream output;
-    output << (tenths / 10);
-    if (tenths % 10 != 0) output << '.' << (tenths % 10);
-    output << suffix;
-    return output.str();
-  };
-
-  if (value < 1'000'000) return format_scaled(value / 100, "k");
-  return format_scaled(value / 100'000, "m");
-}
-
-std::optional<std::string> format_context_window_percent(long long tokens,
-                                                         std::optional<long long> context_window_tokens)
-{
-  if (!context_window_tokens || *context_window_tokens <= 0) return std::nullopt;
-  if (tokens <= 0) return std::string("0.0%");
-
-  auto const percent = (static_cast<long double>(tokens) * 100.0L) / static_cast<long double>(*context_window_tokens);
-  if (percent > 0.0L && percent < 0.1L) return std::string("<0.1%");
-
-  std::ostringstream output;
-  output << std::fixed << std::setprecision(1) << percent << '%';
-  return output.str();
-}
-
-std::optional<std::string> compact_token_status(ava::session::SessionStats const& stats,
-                                                std::optional<long long> context_window_tokens)
-{
-  auto const tokens = compact_token_total(stats);
-  if (!tokens) return std::nullopt;
-
-  std::ostringstream output;
-  output << format_compact_token_count(*tokens);
-  if (auto const percent = format_context_window_percent(*tokens, context_window_tokens)) {
-    output << " (" << *percent << ')';
-  }
-  return output.str();
-}
-
-std::optional<std::string> token_status_for_session(ava::app::RuntimeSession const& session)
-{
-  auto entries = session.store.load();
-  if (!entries) return std::nullopt;
-  return compact_token_status(ava::session::compute_session_stats(*entries), session.model.context_window_tokens);
 }
 
 struct ShellState {
@@ -228,7 +135,7 @@ LineResult handle_line(ShellState& state, std::string const& line,
   LineResult line_result;
   if (line.empty()) return line_result;
   if (ava::app::is_backend_command(line)) {
-    if (is_compact_command(line)) {
+    if (ava::app::line_shell::detail::is_compact_command(line)) {
       return with_provider_runtime(
           state, "\nother slash tool commands still work offline.",
           [&](ava::provider::Provider const& provider, ava::provider::Transport& transport,
@@ -348,13 +255,14 @@ int run_tui(ShellState state)
       .session_id = state.session.store.session_id(),
       .workspace =
           state.session.current_dir.empty() ? state.session.workspace_dir.string() : state.session.current_dir.string(),
-      .git_branch = git_branch_for_sidebar(state.session.workspace_dir),
+      .git_branch = ava::app::line_shell::detail::git_branch_for_workspace(state.session.workspace_dir),
       .app_version = std::string(version::kDisplayVersion),
       .context_source_count = state.session.context_sources.size(),
       .initial_status = keybind_status,
       .slash_commands = ava::app::command_catalog_slash_items(state.session, hotkeys),
       .key_bindings = key_bindings,
-      .token_status_provider = [&state]() { return token_status_for_session(state.session); },
+      .token_status_provider =
+          [&state]() { return ava::app::line_shell::detail::token_status_for_session(state.session); },
       .reasoning_status_provider = [&state]() { return ava::app::reasoning_status_for_session(state.session); },
       .create_active_run_queues =
           [&state](ava::app::EventEnvelopeSink event_sink) {

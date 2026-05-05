@@ -11,6 +11,7 @@
 #include "ava/provider/anthropic_provider.h"
 #include "ava/provider/anthropic_request.h"
 #include "ava/provider/anthropic_response.h"
+#include "ava/provider/anthropic_response_support.h"
 #include "ava/provider/provider_utils.h"
 #include "ava/provider/registry.h"
 #include "ava/session/session_store.h"
@@ -40,6 +41,48 @@ void test_json_object_validator()
   expect(!ava::provider::is_valid_json_object(R"({"bad":"\x"})"), "JSON validator rejects invalid escapes");
   expect(!ava::provider::is_valid_json_object(std::string(R"({"path":"note.txt"})") + '\f'),
          "JSON validator rejects non-JSON whitespace");
+}
+
+void test_anthropic_response_support_helpers()
+{
+  expect(ava::provider::detail::normalized_anthropic_stop_reason("end_turn") == "completed" &&
+             ava::provider::detail::normalized_anthropic_stop_reason("tool_use") == "tool_calls" &&
+             ava::provider::detail::normalized_anthropic_stop_reason("custom_stop") == "custom_stop",
+         "Anthropic response support normalizes known stop reasons and preserves unknown reasons");
+
+  auto const sanitized = ava::provider::detail::sanitized_anthropic_body_snippet(
+      R"({"thinking":"secret-thought","signature":"secret-sig","data":"opaque","message":"safe"})");
+  expect(sanitized.find("secret-thought") == std::string::npos && sanitized.find("secret-sig") == std::string::npos &&
+             sanitized.find("opaque") == std::string::npos && sanitized.find("[redacted]") != std::string::npos,
+         "Anthropic response support redacts private reasoning fields from snippets");
+
+  auto const stop_details = R"({"stop_details":{"explanation":"blocked by policy"}})";
+  expect(ava::provider::detail::has_stop_details(stop_details) &&
+             ava::provider::detail::stop_details_explanation(stop_details) == "blocked by policy",
+         "Anthropic response support extracts refusal stop details");
+
+  auto const non_negative = ava::provider::detail::non_negative_integer_field(R"({"ok":7,"bad":-1})", "ok");
+  auto const negative = ava::provider::detail::non_negative_integer_field(R"({"ok":7,"bad":-1})", "bad");
+  expect(non_negative && *non_negative == 7 && !negative,
+         "Anthropic response support accepts only non-negative integer fields");
+
+  ava::provider::TokenUsage target;
+  target.input_tokens = 1;
+  ava::provider::TokenUsage source;
+  source.output_tokens = 2;
+  source.cache_read_tokens = 3;
+  source.total_tokens = 6;
+  ava::provider::detail::merge_usage(target, source);
+  expect(target.input_tokens && *target.input_tokens == 1 && target.output_tokens && *target.output_tokens == 2 &&
+             target.cache_read_tokens && *target.cache_read_tokens == 3 && target.total_tokens &&
+             *target.total_tokens == 6,
+         "Anthropic response support merges present usage fields without clearing existing fields");
+
+  std::vector<ava::provider::StreamEvent> events;
+  ava::provider::detail::append_stream_error(events, "");
+  expect(events.size() == 1 && events[0].type == ava::provider::StreamEventType::Error &&
+             events[0].error_message == "unrecognized Anthropic stream event",
+         "Anthropic response support shapes default stream errors");
 }
 
 void test_anthropic_provider_contract()
@@ -1453,6 +1496,7 @@ void test_anthropic_agent_non_stream_tool_loop_native_replay()
 void run_provider_anthropic_tests()
 {
   test_json_object_validator();
+  test_anthropic_response_support_helpers();
   test_anthropic_provider_contract();
   test_anthropic_native_content_parts_request();
   test_anthropic_parsing();

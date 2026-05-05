@@ -33,6 +33,7 @@
 #include "ava/context/context_loader.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/permissions/command_policy.h"
 #include "ava/permissions/permission.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/session/compaction.h"
@@ -101,6 +102,45 @@ void test_core_json_top_level_lookup()
   expect(!ava::core::json::string_field("{\"text\":\"\\u12xz\"}", "text"),
          "JSON string_field rejects malformed unicode escapes");
   expect(!ava::core::json::string_field("{\"text\":\"\\q\"}", "text"), "JSON string_field rejects invalid escapes");
+}
+
+void test_permission_command_policy_helpers()
+{
+  auto parsed = ava::permissions::detail::parse_command_argv("git diff \"src/main.cpp\" docs\\ plan.md");
+  expect(parsed.ok && parsed.argv.size() == 4 && parsed.argv[0] == "git" && parsed.argv[2] == "src/main.cpp" &&
+             parsed.argv[3] == "docs plan.md",
+         "permission command policy parses safe quotes and escapes");
+
+  auto meta = ava::permissions::detail::parse_command_argv("git status; rm -rf build");
+  expect(!meta.ok && meta.reason.find("metacharacters") != std::string::npos,
+         "permission command policy rejects shell metacharacters");
+
+  auto control = ava::permissions::detail::parse_command_argv(std::string("git\ndiff", 8));
+  expect(!control.ok && control.reason.find("control byte") != std::string::npos,
+         "permission command policy rejects control bytes");
+
+  auto unterminated = ava::permissions::detail::parse_command_argv("git diff \"src");
+  expect(!unterminated.ok && unterminated.reason.find("unterminated") != std::string::npos,
+         "permission command policy rejects unterminated quotes");
+
+  expect(ava::permissions::detail::is_safe_relative_path_arg("src/main.cpp") &&
+             !ava::permissions::detail::is_safe_relative_path_arg("../outside") &&
+             !ava::permissions::detail::is_safe_relative_path_arg("/tmp/outside") &&
+             !ava::permissions::detail::is_safe_relative_path_arg(".ssh/id_ed25519"),
+         "permission command policy identifies safe relative command path arguments");
+
+  expect(ava::permissions::classify_command("git status --short").action == ava::permissions::PermissionAction::Allow,
+         "permission command policy allows safe git status");
+  expect(ava::permissions::classify_command("git diff --output=/tmp/out").action ==
+             ava::permissions::PermissionAction::Ask,
+         "permission command policy asks on path-carrying git output options");
+  expect(ava::permissions::classify_command("rg --pre ./filter pattern src").action ==
+             ava::permissions::PermissionAction::Deny,
+         "permission command policy denies rg preprocessors");
+  expect(ava::permissions::classify_command("bash -lc ls").action == ava::permissions::PermissionAction::Deny,
+         "permission command policy denies arbitrary script shells");
+  expect(ava::permissions::classify_command("sleep 0.1").action == ava::permissions::PermissionAction::Allow,
+         "permission command policy allows simple numeric sleep");
 }
 
 void test_permission_defaults()
@@ -240,5 +280,6 @@ void run_core_json_permission_tests()
 {
   test_json_escape_control_characters();
   test_core_json_top_level_lookup();
+  test_permission_command_policy_helpers();
   test_permission_defaults();
 }

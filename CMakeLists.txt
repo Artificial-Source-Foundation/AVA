@@ -79,6 +79,7 @@ add_library(ava_core
   src/ava/mcp/protocol.cpp
   src/ava/mcp/stdio_client.cpp
   src/ava/mcp/tool_broker.cpp
+  src/ava/permissions/command_policy.cpp
   src/ava/permissions/permission.cpp
   src/ava/plugin/diagnostics.cpp
   src/ava/plugin/discovery.cpp

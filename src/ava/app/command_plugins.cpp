@@ -5,6 +5,7 @@
 #include "ava/app/command_format.h"
 #include "ava/app/command_plugin_support.h"
 #include "ava/app/command_tools.h"
+#include "ava/app/plugin_command_arguments.h"
 #include "ava/core/ids.h"
 #include "ava/plugin/enablement.h"
 #include "ava/plugin/manifest.h"

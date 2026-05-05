@@ -1,7 +1,6 @@
 #pragma once
 
 #include <filesystem>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -13,12 +12,6 @@
 #include "ava/plugin/resources.h"
 
 namespace ava::app::detail {
-
-struct PluginRunArguments {
-  std::string plugin_id;
-  std::string command_name;
-  std::string arguments_json = "{}";
-};
 
 [[nodiscard]] std::string plugin_display_path(std::filesystem::path const& path, RuntimeSession const& session);
 [[nodiscard]] ava::plugin::PluginDiscoveryOptions plugin_discovery_options(RuntimeSession const& session);
@@ -54,9 +47,5 @@ struct PluginRunArguments {
 [[nodiscard]] std::string format_valid_plugin_manifest_text(ava::plugin::PluginManifest const& manifest,
                                                             RuntimeSession const& session);
 [[nodiscard]] std::filesystem::path plugin_validate_path(RuntimeSession const& session, std::string_view path_text);
-[[nodiscard]] std::string trim_ascii_whitespace(std::string_view text);
-[[nodiscard]] std::string plugin_validate_argument(std::string_view plugins_argument);
-[[nodiscard]] std::optional<std::string_view> consume_token(std::string_view& text);
-[[nodiscard]] ava::core::Result<PluginRunArguments> parse_plugin_run_arguments(std::string_view argument);
 
 }  // namespace ava::app::detail

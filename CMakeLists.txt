@@ -221,6 +221,7 @@ add_library(ava_app
   src/ava/app/interactive_run_queue.cpp
   src/ava/app/line_shell.cpp
   src/ava/app/line_shell_support.cpp
+  src/ava/app/plugin_command_arguments.cpp
   src/ava/app/plugin_event_hooks.cpp
   src/ava/app/print_mode.cpp
   src/ava/app/reasoning_controls.cpp
@@ -291,6 +292,7 @@ if(AVA_BUILD_TESTS)
     tests/app_connect_cli_options_tests.cpp
     tests/app_event_json_support_tests.cpp
     tests/app_line_shell_support_tests.cpp
+    tests/app_plugin_command_arguments_tests.cpp
     tests/agent_tool_dispatcher_tests.cpp
     tests/app_rpc_command_tests.cpp
     tests/app_rpc_control_tests.cpp
@@ -376,6 +378,7 @@ if(AVA_BUILD_TESTS)
     config_provider_credential_support
     app_event_json_support
     app_line_shell_support
+    app_plugin_command_arguments
     app_event_serialization
     app_event_bus
     app_rpc_command

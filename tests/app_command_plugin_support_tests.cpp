@@ -1,5 +1,3 @@
-#include <string_view>
-
 #include "ava/app/command_plugin_support.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/manifest.h"
@@ -19,46 +17,6 @@ ava::plugin::PluginManifest manifest_with_command()
   manifest.contributes.commands.push_back(
       ava::plugin::PluginCommandContribution{.name = "hello", .description = "Say hello"});
   return manifest;
-}
-
-void test_plugin_command_support_parses_run_arguments()
-{
-  auto parsed = ava::app::detail::parse_plugin_run_arguments(
-      R"( run com.example.plugin hello {"name":"ava","nested":{"ok":true}})");
-
-  expect(parsed.has_value(), "plugin command support parses /plugin run arguments");
-  if (parsed) {
-    expect(parsed->plugin_id == "com.example.plugin" && parsed->command_name == "hello" &&
-               parsed->arguments_json == R"({"name":"ava","nested":{"ok":true}})",
-           "plugin command support preserves plugin id, command name, and JSON arguments");
-  }
-
-  auto default_args = ava::app::detail::parse_plugin_run_arguments("run com.example.plugin hello");
-  expect(default_args && default_args->arguments_json == "{}",
-         "plugin command support defaults missing command arguments to an empty JSON object");
-
-  auto invalid_json = ava::app::detail::parse_plugin_run_arguments("run com.example.plugin hello [bad]");
-  expect(!invalid_json && invalid_json.error().message() == "plugin command arguments must be a JSON object",
-         "plugin command support rejects non-object JSON command arguments");
-
-  auto missing = ava::app::detail::parse_plugin_run_arguments("run com.example.plugin");
-  expect(!missing && missing.error().message().find("usage: /plugin run") != std::string::npos,
-         "plugin command support reports usage for incomplete run arguments");
-}
-
-void test_plugin_command_support_token_helpers()
-{
-  expect(ava::app::detail::trim_ascii_whitespace(" \tvalue\r\n") == "value",
-         "plugin command support trims ASCII whitespace");
-  expect(ava::app::detail::plugin_validate_argument(" validate   ./plugin.json  ") == "./plugin.json",
-         "plugin command support extracts validate paths after the subcommand");
-
-  std::string_view tokens = "  one two";
-  auto first = ava::app::detail::consume_token(tokens);
-  auto second = ava::app::detail::consume_token(tokens);
-  auto third = ava::app::detail::consume_token(tokens);
-  expect(first && *first == "one" && second && *second == "two" && !third,
-         "plugin command support consumes whitespace-delimited tokens");
 }
 
 void test_plugin_command_support_manifest_helpers()
@@ -96,8 +54,6 @@ void test_plugin_command_support_not_found_text()
 
 void run_app_command_plugin_support_tests()
 {
-  test_plugin_command_support_parses_run_arguments();
-  test_plugin_command_support_token_helpers();
   test_plugin_command_support_manifest_helpers();
   test_plugin_command_support_not_found_text();
 }

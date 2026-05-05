@@ -10,6 +10,7 @@
 #include "ava/core/result.h"
 #include "ava/plugin/manifest.h"
 #include "ava/plugin/protocol.h"
+#include "ava/plugin/stream_buffers.h"
 
 namespace ava::plugin {
 
@@ -75,7 +76,6 @@ class PluginProcess final {
   [[nodiscard]] ava::core::VoidResult drain_stderr();
   [[nodiscard]] ava::core::VoidResult reap_child();
   [[nodiscard]] ava::core::VoidResult set_pipe_nonblocking(int fd, std::string_view pipe_name);
-  void append_stderr(std::string_view chunk);
   void close_fds() noexcept;
   void terminate_child() noexcept;
   void drain_available_noexcept() noexcept;
@@ -90,10 +90,9 @@ class PluginProcess final {
   int child_status_ = 0;
   bool child_exited_ = false;
   bool can_signal_group_ = false;
-  bool stderr_truncated_ = false;
   std::size_t next_request_id_ = 2;
-  std::string stdout_buffer_;
-  std::string stderr_tail_;
+  PluginRecordBuffer stdout_buffer_;
+  PluginStderrTail stderr_tail_;
 };
 
 }  // namespace ava::plugin

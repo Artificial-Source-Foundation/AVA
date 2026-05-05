@@ -16,6 +16,7 @@
 #include "ava/plugin/manifest.h"
 #include "ava/plugin/protocol.h"
 #include "ava/plugin/runner.h"
+#include "ava/plugin/stream_buffers.h"
 #include "ava/plugin/tool_broker.h"
 #include "ava/tools/file_tools.h"
 #include "tests/support/test_harness.h"
@@ -403,6 +404,35 @@ void test_plugin_protocol_helpers()
   auto const wrong_id = ava::plugin::parse_plugin_tool_result_response(
       "{\"id\":\"wrong\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"Added\"}", "ava_tool_call_1");
   expect(!wrong_id, "plugin protocol rejects response id mismatches");
+}
+
+void test_plugin_stream_buffers()
+{
+  ava::plugin::PluginRecordBuffer records(8);
+  records.append("one\r\n");
+  auto first = records.take_record();
+  expect(first && *first == "one" && records.empty(), "plugin record buffer extracts CRLF-delimited records");
+
+  records.append("two\nthree");
+  auto second = records.take_record();
+  expect(second && *second == "two" && records.size() == 5 && !records.exceeds_limit(),
+         "plugin record buffer preserves buffered partial records after a newline");
+
+  records.append("xxxx");
+  expect(records.exceeds_limit(), "plugin record buffer reports newline-free records over the byte cap");
+  records.trim_front_to_limit();
+  expect(records.size() == 8, "plugin record buffer trims retained stdout to the configured cap");
+
+  ava::plugin::PluginRecordBuffer oversized_line(4);
+  oversized_line.append("12345\n");
+  expect(oversized_line.exceeds_limit(), "plugin record buffer reports oversized delimited records");
+
+  ava::plugin::PluginStderrTail tail(6);
+  tail.append("abc");
+  tail.append("defg");
+  expect(tail.text() == "bcdefg" && tail.truncated(), "plugin stderr tail keeps only the newest bytes");
+  tail.append("123456789");
+  expect(tail.text() == "456789" && tail.truncated(), "plugin stderr tail bounds chunks larger than the cap");
 }
 
 void test_plugin_runner_initializes_and_shuts_down()
@@ -1099,6 +1129,7 @@ void run_plugin_tests()
   test_plugin_discovery();
   test_plugin_enablement();
   test_plugin_protocol_helpers();
+  test_plugin_stream_buffers();
   test_plugin_runner_initializes_and_shuts_down();
   test_plugin_runner_accepts_buffered_extra_records();
   test_plugin_runner_contained_failures();

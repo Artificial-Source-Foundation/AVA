@@ -225,7 +225,10 @@ std::filesystem::path child_working_dir(PluginManifest const& manifest, PluginRu
 }  // namespace
 
 PluginProcess::PluginProcess(PluginManifest manifest, PluginRunnerOptions options)
-    : manifest_(std::move(manifest)), options_(std::move(options))
+    : manifest_(std::move(manifest)),
+      options_(std::move(options)),
+      stdout_buffer_(options_.max_record_bytes),
+      stderr_tail_(options_.max_stderr_bytes)
 {
 }
 
@@ -286,12 +289,12 @@ PluginInitialization const& PluginProcess::initialization() const noexcept
 
 std::string const& PluginProcess::stderr_tail() const noexcept
 {
-  return stderr_tail_;
+  return stderr_tail_.text();
 }
 
 bool PluginProcess::stderr_truncated() const noexcept
 {
-  return stderr_truncated_;
+  return stderr_tail_.truncated();
 }
 
 ava::core::VoidResult PluginProcess::launch()
@@ -567,19 +570,16 @@ ava::core::Result<std::string> PluginProcess::read_record(std::chrono::steady_cl
       terminate_child();
       return std::unexpected(canceled_error("plugin request canceled", manifest_));
     }
-    if (auto const newline = stdout_buffer_.find('\n'); newline != std::string::npos) {
-      auto record = stdout_buffer_.substr(0, newline);
-      stdout_buffer_.erase(0, newline + 1);
-      if (!record.empty() && record.back() == '\r') record.pop_back();
-      if (record.size() > options_.max_record_bytes) {
+    if (auto record = stdout_buffer_.take_record()) {
+      if (record->size() > options_.max_record_bytes) {
         auto error = protocol_error("plugin protocol record exceeds size cap", manifest_);
         error.with_context("max_bytes", std::to_string(options_.max_record_bytes));
         terminate_child();
         return std::unexpected(std::move(error));
       }
-      return record;
+      return *record;
     }
-    if (stdout_buffer_.size() > options_.max_record_bytes) {
+    if (stdout_buffer_.exceeds_limit()) {
       auto error = protocol_error("plugin protocol record exceeds size cap", manifest_);
       error.with_context("max_bytes", std::to_string(options_.max_record_bytes));
       terminate_child();
@@ -596,14 +596,14 @@ ava::core::Result<std::string> PluginProcess::read_record(std::chrono::steady_cl
           stdout_buffer_.empty() ? std::string(closed_message) : "plugin protocol record ended without newline",
           manifest_);
       if (child_exited_) error.with_context("status", exit_detail(child_status_));
-      if (!stderr_tail_.empty()) error.with_context("stderr_tail", stderr_tail_);
+      if (!stderr_tail_.text().empty()) error.with_context("stderr_tail", stderr_tail_.text());
       return std::unexpected(std::move(error));
     }
     if (auto reaped = reap_child(); !reaped) return std::unexpected(std::move(reaped.error()));
     if (std::chrono::steady_clock::now() >= deadline) {
       auto error = protocol_error(std::string(timeout_message), manifest_);
       error.with_context("timeout_ms", std::to_string(timeout.count()));
-      if (!stderr_tail_.empty()) error.with_context("stderr_tail", stderr_tail_);
+      if (!stderr_tail_.text().empty()) error.with_context("stderr_tail", stderr_tail_.text());
       terminate_child();
       return std::unexpected(std::move(error));
     }
@@ -658,7 +658,7 @@ ava::core::VoidResult PluginProcess::wait_for_writable(std::chrono::steady_clock
     if ((fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
       auto error = protocol_error("plugin request pipe closed", manifest_);
       if (child_exited_) error.with_context("status", exit_detail(child_status_));
-      if (!stderr_tail_.empty()) error.with_context("stderr_tail", stderr_tail_);
+      if (!stderr_tail_.text().empty()) error.with_context("stderr_tail", stderr_tail_.text());
       return std::unexpected(std::move(error));
     }
   }
@@ -672,10 +672,8 @@ ava::core::VoidResult PluginProcess::drain_stdout()
   while (true) {
     auto const bytes = read_retry(stdout_fd_, buffer.data(), buffer.size());
     if (bytes > 0) {
-      stdout_buffer_.append(buffer.data(), static_cast<std::size_t>(bytes));
-      auto const newline = stdout_buffer_.find('\n');
-      if ((newline == std::string::npos && stdout_buffer_.size() > options_.max_record_bytes) ||
-          (newline != std::string::npos && newline > options_.max_record_bytes)) {
+      stdout_buffer_.append(std::string_view(buffer.data(), static_cast<std::size_t>(bytes)));
+      if (stdout_buffer_.exceeds_limit()) {
         auto error = protocol_error("plugin protocol record exceeds size cap", manifest_);
         error.with_context("max_bytes", std::to_string(options_.max_record_bytes));
         terminate_child();
@@ -702,7 +700,7 @@ ava::core::VoidResult PluginProcess::drain_stderr()
   while (true) {
     auto const bytes = read_retry(stderr_fd_, buffer.data(), buffer.size());
     if (bytes > 0) {
-      append_stderr(std::string_view(buffer.data(), static_cast<std::size_t>(bytes)));
+      stderr_tail_.append(std::string_view(buffer.data(), static_cast<std::size_t>(bytes)));
       ++reads;
       if (reads >= kMaxDrainReadsPerPoll) return {};
       continue;
@@ -744,23 +742,6 @@ ava::core::VoidResult PluginProcess::set_pipe_nonblocking(int fd, std::string_vi
     return std::unexpected(std::move(error));
   }
   return {};
-}
-
-void PluginProcess::append_stderr(std::string_view chunk)
-{
-  if (chunk.empty()) return;
-  auto const max_bytes = options_.max_stderr_bytes;
-  if (chunk.size() >= max_bytes) {
-    stderr_tail_.assign(chunk.substr(chunk.size() - max_bytes));
-    stderr_truncated_ = true;
-    return;
-  }
-  auto const next_size = stderr_tail_.size() + chunk.size();
-  if (next_size > max_bytes) {
-    stderr_tail_.erase(0, next_size - max_bytes);
-    stderr_truncated_ = true;
-  }
-  stderr_tail_.append(chunk);
 }
 
 ava::core::VoidResult PluginProcess::shutdown(std::chrono::milliseconds grace)
@@ -832,10 +813,8 @@ void PluginProcess::drain_available_noexcept() noexcept
       for (int reads = 0; reads < kMaxDrainReadsPerPoll; ++reads) {
         auto const bytes = read_retry(stdout_fd_, buffer.data(), buffer.size());
         if (bytes > 0) {
-          stdout_buffer_.append(buffer.data(), static_cast<std::size_t>(bytes));
-          if (stdout_buffer_.size() > options_.max_record_bytes) {
-            stdout_buffer_.erase(0, stdout_buffer_.size() - options_.max_record_bytes);
-          }
+          stdout_buffer_.append(std::string_view(buffer.data(), static_cast<std::size_t>(bytes)));
+          stdout_buffer_.trim_front_to_limit();
           continue;
         }
         if (bytes == 0) close_fd(stdout_fd_);
@@ -847,7 +826,7 @@ void PluginProcess::drain_available_noexcept() noexcept
       for (int reads = 0; reads < kMaxDrainReadsPerPoll; ++reads) {
         auto const bytes = read_retry(stderr_fd_, buffer.data(), buffer.size());
         if (bytes > 0) {
-          append_stderr(std::string_view(buffer.data(), static_cast<std::size_t>(bytes)));
+          stderr_tail_.append(std::string_view(buffer.data(), static_cast<std::size_t>(bytes)));
           continue;
         }
         if (bytes == 0) close_fd(stderr_fd_);

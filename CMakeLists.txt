@@ -152,6 +152,7 @@ add_library(ava_app
   src/ava/app/reasoning_controls.cpp
   src/ava/app/rpc/handlers.cpp
   src/ava/app/rpc/output.cpp
+  src/ava/app/rpc/prompt_worker.cpp
   src/ava/app/rpc/protocol.cpp
   src/ava/app/rpc/resolvers.cpp
   src/ava/app/rpc/run_state.cpp

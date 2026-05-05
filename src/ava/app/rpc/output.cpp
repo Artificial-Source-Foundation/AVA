@@ -97,4 +97,14 @@ ava::core::VoidResult write_skipped_queue_events(RpcOutput& output, RuntimeSessi
   return {};
 }
 
+ava::core::VoidResult write_follow_up_errors(RpcOutput& output, std::vector<QueuedRpcMessage> const& follow_ups,
+                                             std::string_view reason)
+{
+  for (auto const& queued : follow_ups) {
+    auto const error = reason == "canceled" ? canceled_error() : skipped_follow_up_error(reason);
+    if (auto written = write_error(output, queued.request_id, error); !written) return written;
+  }
+  return {};
+}
+
 }  // namespace ava::app::rpc

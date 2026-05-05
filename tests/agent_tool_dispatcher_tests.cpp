@@ -30,6 +30,7 @@
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
 #include "ava/agent/tool_result_json.h"
+#include "ava/agent/tool_search_dispatch.h"
 #include "ava/agent/tool_timeline.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
@@ -424,6 +425,53 @@ void test_file_tool_dispatch_helpers()
   expect(!missing_path.success && missing_path.result_text.find("\"ok\":false") != std::string::npos &&
              missing_path.result_text.find("path") != std::string::npos,
          "file dispatch helper maps missing provider path arguments to tool errors");
+}
+
+void test_search_tool_dispatch_helpers()
+{
+  auto const root = temp_root() / "search-tool-dispatch";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  std::filesystem::create_directories(root / "src");
+  std::filesystem::create_directories(root / "docs");
+  {
+    std::ofstream file(root / "src" / "main.cpp", std::ios::binary | std::ios::trunc);
+    file << "int main() { return 0; }\n";
+  }
+  {
+    std::ofstream file(root / "docs" / "readme.md", std::ios::binary | std::ios::trunc);
+    file << "needle docs\n";
+  }
+
+  ava::tools::ToolContext const context{.workspace_dir = root, .mode = ava::agent::Mode::Build};
+  auto glob = ava::agent::detail::glob_result(
+      context,
+      ava::agent::ProviderToolCall{
+          .id = "call_glob", .name = "glob", .arguments_json = "{\"pattern\":\"**/*.cpp\",\"max_results\":10}"});
+  expect(glob.success && glob.result_text.find("\"tool\":\"glob\"") != std::string::npos &&
+             glob.result_text.find("src/main.cpp") != std::string::npos &&
+             glob.result_text.find("\"total_matches\":1") != std::string::npos,
+         "search dispatch helper returns bounded glob JSON");
+
+  auto grep = ava::agent::detail::grep_result(
+      context, ava::agent::ProviderToolCall{
+                   .id = "call_grep",
+                   .name = "grep",
+                   .arguments_json = "{\"pattern\":\"needle\",\"include\":\"**/*.md\",\"max_matches\":5}"});
+  expect(grep.success && grep.result_text.find("\"tool\":\"grep\"") != std::string::npos &&
+             grep.result_text.find("\"include\":\"**/*.md\"") != std::string::npos &&
+             grep.result_text.find("docs/readme.md") != std::string::npos &&
+             grep.result_text.find("\"line_number\":1") != std::string::npos &&
+             grep.result_text.find("\"total_matches\":1") != std::string::npos,
+         "search dispatch helper returns grep match metadata");
+
+  auto no_ignore = ava::agent::detail::glob_result(
+      context,
+      ava::agent::ProviderToolCall{
+          .id = "call_glob_no_ignore", .name = "glob", .arguments_json = "{\"pattern\":\"**/*\",\"no_ignore\":true}"});
+  expect(!no_ignore.success && no_ignore.result_text.find("\"ok\":false") != std::string::npos &&
+             no_ignore.result_text.find("explicit local control") != std::string::npos,
+         "search dispatch helper rejects provider no_ignore opt-outs");
 }
 
 void test_question_answer_validation_helpers()
@@ -2719,6 +2767,7 @@ void run_agent_tool_dispatcher_tests()
   test_tool_timeline_helpers();
   test_tool_dispatch_support_helpers();
   test_file_tool_dispatch_helpers();
+  test_search_tool_dispatch_helpers();
   test_question_answer_validation_helpers();
   test_session_recorder_helpers();
   test_tool_dispatcher();

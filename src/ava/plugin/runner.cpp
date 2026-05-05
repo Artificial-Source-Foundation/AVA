@@ -11,23 +11,21 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
-#include <optional>
 #include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
 
 #include "ava/core/json.h"
+#include "ava/plugin/protocol.h"
 
 namespace ava::plugin {
 namespace {
 
 constexpr char kTrustedExecPath[] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-constexpr int kMaxPluginJsonDepth = 128;
 constexpr int kMaxDrainReadsPerPoll = 16;
 
 class UniqueFd {
@@ -64,7 +62,7 @@ class ScopedSignalIgnore {
  public:
   explicit ScopedSignalIgnore(int signal) : signal_(signal)
   {
-    struct sigaction action{};
+    struct sigaction action {};
     action.sa_handler = SIG_IGN;
     sigemptyset(&action.sa_mask);
     if (sigaction(signal_, &action, &previous_) == 0) installed_ = true;
@@ -82,7 +80,7 @@ class ScopedSignalIgnore {
 
  private:
   int signal_ = 0;
-  struct sigaction previous_{};
+  struct sigaction previous_ {};
   bool installed_ = false;
 };
 
@@ -201,24 +199,6 @@ void close_nonstandard_fds()
   for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd) close(fd);
 }
 
-std::string json_string(std::string_view value)
-{
-  return "\"" + ava::core::json::escape(value) + "\"";
-}
-
-std::optional<bool> bool_field(std::string_view object, std::string_view key)
-{
-  auto const start = ava::core::json::field_value_start(object, key);
-  if (!start) return std::nullopt;
-  auto const valid_terminator = [](std::string_view value, std::size_t offset) {
-    while (offset < value.size() && std::isspace(static_cast<unsigned char>(value[offset])) != 0) ++offset;
-    return offset >= value.size() || value[offset] == ',' || value[offset] == '}';
-  };
-  if (object.substr(*start, 4) == "true" && valid_terminator(object, *start + 4)) return true;
-  if (object.substr(*start, 5) == "false" && valid_terminator(object, *start + 5)) return false;
-  return std::nullopt;
-}
-
 std::string exit_detail(int status)
 {
   if (WIFEXITED(status)) return "exit " + std::to_string(WEXITSTATUS(status));
@@ -240,106 +220,6 @@ std::filesystem::path child_working_dir(PluginManifest const& manifest, PluginRu
   if (!manifest.directory.empty()) return manifest.directory;
   if (!options.workspace_dir.empty()) return options.workspace_dir;
   return std::filesystem::current_path();
-}
-
-bool json_depth_within_limit(std::string_view value, int max_depth)
-{
-  bool in_string = false;
-  bool escaped = false;
-  int depth = 0;
-  for (char const ch : value) {
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (ch == '\\' && in_string) {
-      escaped = true;
-      continue;
-    }
-    if (ch == '"') {
-      in_string = !in_string;
-      continue;
-    }
-    if (in_string) continue;
-    if (ch == '{' || ch == '[') {
-      ++depth;
-      if (depth > max_depth) return false;
-    } else if (ch == '}' || ch == ']') {
-      --depth;
-      if (depth < 0) return false;
-    }
-  }
-  return true;
-}
-
-std::optional<PluginInitialization> parse_initialized_response(std::string_view record)
-{
-  if (!json_depth_within_limit(record, kMaxPluginJsonDepth)) return std::nullopt;
-  if (!ava::core::json::is_valid_object(record)) return std::nullopt;
-  auto id = ava::core::json::string_field(record, "id");
-  auto type = ava::core::json::string_field(record, "type");
-  auto api_version = ava::core::json::string_field(record, "api_version");
-  auto plugin_version = ava::core::json::string_field(record, "plugin_version");
-  auto contributions = ava::core::json::object_field(record, "contributions");
-  if (!id || *id != "ava_1" || !type || *type != "initialized" || !api_version || !plugin_version ||
-      plugin_version->empty() || !contributions) {
-    return std::nullopt;
-  }
-  if (*api_version != kPluginApiVersion) return std::nullopt;
-  return PluginInitialization{.api_version = std::move(*api_version),
-                              .plugin_version = std::move(*plugin_version),
-                              .contributions_json = std::move(*contributions),
-                              .raw_json = std::string(record)};
-}
-
-std::optional<PluginToolCallResult> parse_tool_result_response(std::string_view record, std::string_view request_id)
-{
-  if (!json_depth_within_limit(record, kMaxPluginJsonDepth)) return std::nullopt;
-  if (!ava::core::json::is_valid_object(record)) return std::nullopt;
-  auto id = ava::core::json::string_field(record, "id");
-  auto type = ava::core::json::string_field(record, "type");
-  auto ok = bool_field(record, "ok");
-  auto content = ava::core::json::string_field(record, "content");
-  if (!id || *id != request_id || !type || *type != "tool.result" || !ok || !content) return std::nullopt;
-  auto metadata = ava::core::json::object_field(record, "metadata");
-  return PluginToolCallResult{.ok = *ok,
-                              .content = std::move(*content),
-                              .metadata_json = metadata.value_or(std::string{}),
-                              .raw_json = std::string(record)};
-}
-
-std::optional<PluginCommandCallResult> parse_command_result_response(std::string_view record,
-                                                                     std::string_view request_id)
-{
-  if (!json_depth_within_limit(record, kMaxPluginJsonDepth)) return std::nullopt;
-  if (!ava::core::json::is_valid_object(record)) return std::nullopt;
-  auto id = ava::core::json::string_field(record, "id");
-  auto type = ava::core::json::string_field(record, "type");
-  auto ok = bool_field(record, "ok");
-  auto content = ava::core::json::string_field(record, "content");
-  if (!id || *id != request_id || !type || *type != "command.result" || !ok || !content) return std::nullopt;
-  auto metadata = ava::core::json::object_field(record, "metadata");
-  return PluginCommandCallResult{.ok = *ok,
-                                 .content = std::move(*content),
-                                 .metadata_json = metadata.value_or(std::string{}),
-                                 .raw_json = std::string(record)};
-}
-
-std::optional<PluginEventObserveResult> parse_event_observed_response(std::string_view record,
-                                                                      std::string_view request_id)
-{
-  if (!json_depth_within_limit(record, kMaxPluginJsonDepth)) return std::nullopt;
-  if (!ava::core::json::is_valid_object(record)) return std::nullopt;
-  auto id = ava::core::json::string_field(record, "id");
-  auto type = ava::core::json::string_field(record, "type");
-  auto ok = bool_field(record, "ok");
-  if (!id || *id != request_id || !type || *type != "event.observed" || !ok) return std::nullopt;
-  auto content = ava::core::json::string_field(record, "content").value_or("");
-  auto metadata = ava::core::json::object_field(record, "metadata");
-  return PluginEventObserveResult{.ok = *ok,
-                                  .content = std::move(content),
-                                  .metadata_json = metadata.value_or(std::string{}),
-                                  .raw_json = std::string(record)};
 }
 
 }  // namespace
@@ -490,9 +370,7 @@ ava::core::VoidResult PluginProcess::initialize(CancelCallback cancel_requested)
 {
   auto const deadline = std::chrono::steady_clock::now() + options_.startup_timeout;
   std::string const request =
-      "{\"id\":\"ava_1\",\"type\":\"initialize\",\"api_version\":" + json_string(kPluginApiVersion) +
-      ",\"plugin_id\":" + json_string(manifest_.id) + ",\"workspace\":" + json_string(options_.workspace_dir.string()) +
-      "}";
+      plugin_initialize_request_json(kPluginApiVersion, manifest_.id, options_.workspace_dir.string());
   if (auto written = write_record(request, deadline, options_.startup_timeout,
                                   "timed out writing plugin initialization", cancel_requested);
       !written) {
@@ -502,7 +380,7 @@ ava::core::VoidResult PluginProcess::initialize(CancelCallback cancel_requested)
   auto record = read_record(deadline, options_.startup_timeout, "timed out waiting for plugin initialization",
                             "plugin process closed stdout before initialization", cancel_requested);
   if (!record) return std::unexpected(std::move(record.error()));
-  auto initialized = parse_initialized_response(*record);
+  auto initialized = parse_plugin_initialized_response(*record);
   if (!initialized) {
     auto error = protocol_error("plugin initialize response is malformed or unsupported", manifest_);
     error.with_context("response", record->substr(0, 512));
@@ -537,9 +415,7 @@ ava::core::Result<PluginToolCallResult> PluginProcess::call_tool(std::string_vie
   std::string const request_id =
       call_id.empty() ? "ava_" + std::to_string(next_request_id_++) : "ava_tool_" + std::string(call_id);
   std::string request =
-      "{\"id\":" + json_string(request_id) + ",\"type\":\"tool.call\",\"tool\":" + json_string(tool_name) +
-      ",\"arguments\":" + std::string(arguments_json) + ",\"context\":{\"call_id\":" + json_string(call_id) +
-      ",\"workspace\":" + json_string(options_.workspace_dir.string()) + "}}";
+      plugin_tool_call_request_json(request_id, tool_name, arguments_json, call_id, options_.workspace_dir.string());
   if (auto written = write_record(request, deadline, options_.request_timeout, "timed out writing plugin tool request",
                                   cancel_requested);
       !written) {
@@ -549,7 +425,7 @@ ava::core::Result<PluginToolCallResult> PluginProcess::call_tool(std::string_vie
   auto record = read_record(deadline, options_.request_timeout, "timed out waiting for plugin tool result",
                             "plugin process closed stdout before plugin tool result", cancel_requested);
   if (!record) return std::unexpected(std::move(record.error()));
-  auto result = parse_tool_result_response(*record, request_id);
+  auto result = parse_plugin_tool_result_response(*record, request_id);
   if (!result) {
     auto error = protocol_error("plugin tool result is malformed", manifest_);
     error.with_context("tool", std::string(tool_name));
@@ -583,10 +459,8 @@ ava::core::Result<PluginCommandCallResult> PluginProcess::call_command(std::stri
   auto const deadline = std::chrono::steady_clock::now() + options_.request_timeout;
   std::string const request_id =
       call_id.empty() ? "ava_" + std::to_string(next_request_id_++) : "ava_command_" + std::string(call_id);
-  std::string request =
-      "{\"id\":" + json_string(request_id) + ",\"type\":\"command.call\",\"command\":" + json_string(command_name) +
-      ",\"arguments\":" + std::string(arguments_json) + ",\"context\":{\"call_id\":" + json_string(call_id) +
-      ",\"workspace\":" + json_string(options_.workspace_dir.string()) + "}}";
+  std::string request = plugin_command_call_request_json(request_id, command_name, arguments_json, call_id,
+                                                         options_.workspace_dir.string());
   if (auto written = write_record(request, deadline, options_.request_timeout,
                                   "timed out writing plugin command request", cancel_requested);
       !written) {
@@ -596,7 +470,7 @@ ava::core::Result<PluginCommandCallResult> PluginProcess::call_command(std::stri
   auto record = read_record(deadline, options_.request_timeout, "timed out waiting for plugin command result",
                             "plugin process closed stdout before plugin command result", cancel_requested);
   if (!record) return std::unexpected(std::move(record.error()));
-  auto result = parse_command_result_response(*record, request_id);
+  auto result = parse_plugin_command_result_response(*record, request_id);
   if (!result) {
     auto error = protocol_error("plugin command result is malformed", manifest_);
     error.with_context("command", std::string(command_name));
@@ -631,9 +505,7 @@ ava::core::Result<PluginEventObserveResult> PluginProcess::observe_event(std::st
   std::string const request_id =
       call_id.empty() ? "ava_" + std::to_string(next_request_id_++) : "ava_event_" + std::string(call_id);
   std::string request =
-      "{\"id\":" + json_string(request_id) + ",\"type\":\"event.observe\",\"event\":" + json_string(event_name) +
-      ",\"payload\":" + std::string(payload_json) + ",\"context\":{\"call_id\":" + json_string(call_id) +
-      ",\"workspace\":" + json_string(options_.workspace_dir.string()) + "}}";
+      plugin_event_observe_request_json(request_id, event_name, payload_json, call_id, options_.workspace_dir.string());
   if (auto written = write_record(request, deadline, options_.request_timeout, "timed out writing plugin event request",
                                   cancel_requested);
       !written) {
@@ -643,7 +515,7 @@ ava::core::Result<PluginEventObserveResult> PluginProcess::observe_event(std::st
   auto record = read_record(deadline, options_.request_timeout, "timed out waiting for plugin event response",
                             "plugin process closed stdout before plugin event response", cancel_requested);
   if (!record) return std::unexpected(std::move(record.error()));
-  auto result = parse_event_observed_response(*record, request_id);
+  auto result = parse_plugin_event_observed_response(*record, request_id);
   if (!result) {
     auto error = protocol_error("plugin event response is malformed", manifest_);
     error.with_context("event", std::string(event_name));

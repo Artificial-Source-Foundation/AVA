@@ -14,6 +14,7 @@
 #include "ava/plugin/discovery.h"
 #include "ava/plugin/enablement.h"
 #include "ava/plugin/manifest.h"
+#include "ava/plugin/protocol.h"
 #include "ava/plugin/runner.h"
 #include "ava/plugin/tool_broker.h"
 #include "ava/tools/file_tools.h"
@@ -334,6 +335,74 @@ void test_plugin_enablement()
   expect(escaped && escaped->size() == 1 && escaped->front().workspace == std::filesystem::path("/tmp/work{\"q\"}") &&
              escaped->front().enabled,
          "plugin enablement parses escaped keys and braces inside strings");
+}
+
+void test_plugin_protocol_helpers()
+{
+  auto const init_request =
+      ava::plugin::plugin_initialize_request_json(ava::plugin::kPluginApiVersion, "com.example.todo", "/tmp/work");
+  expect(init_request.find("\"type\":\"initialize\"") != std::string::npos &&
+             init_request.find("\"plugin_id\":\"com.example.todo\"") != std::string::npos &&
+             init_request.find("\"workspace\":\"/tmp/work\"") != std::string::npos,
+         "plugin protocol formats initialize requests");
+
+  auto const tool_request = ava::plugin::plugin_tool_call_request_json("ava_tool_call_1", "todo_add",
+                                                                       "{\"text\":\"hi\"}", "call_1", "/tmp/work");
+  expect(tool_request.find("\"type\":\"tool.call\"") != std::string::npos &&
+             tool_request.find("\"tool\":\"todo_add\"") != std::string::npos &&
+             tool_request.find("\"call_id\":\"call_1\"") != std::string::npos,
+         "plugin protocol formats tool call requests");
+
+  auto const command_request = ava::plugin::plugin_command_call_request_json(
+      "ava_command_cmd_1", "todo", "{\"filter\":\"open\"}", "cmd_1", "/tmp/work");
+  expect(command_request.find("\"type\":\"command.call\"") != std::string::npos &&
+             command_request.find("\"command\":\"todo\"") != std::string::npos,
+         "plugin protocol formats command call requests");
+
+  auto const event_request = ava::plugin::plugin_event_observe_request_json(
+      "ava_event_event_1", "tool_result", "{\"tool\":\"demo\"}", "event_1", "/tmp/work");
+  expect(event_request.find("\"type\":\"event.observe\"") != std::string::npos &&
+             event_request.find("\"event\":\"tool_result\"") != std::string::npos,
+         "plugin protocol formats event observe requests");
+
+  auto const initialized = ava::plugin::parse_plugin_initialized_response(
+      "{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava.plugin.v1\",\"plugin_version\":\"0.1.0\","
+      "\"contributions\":{\"tools\":[]}}");
+  expect(initialized && initialized->plugin_version == "0.1.0" &&
+             initialized->contributions_json.find("\"tools\":[]") != std::string::npos,
+         initialized ? "plugin protocol parses initialized responses" : "plugin protocol parses initialized responses");
+
+  auto const unsupported = ava::plugin::parse_plugin_initialized_response(
+      "{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"wrong\",\"plugin_version\":\"0.1.0\","
+      "\"contributions\":{}}");
+  expect(!unsupported, "plugin protocol rejects unsupported initialized responses");
+
+  expect(ava::plugin::plugin_json_depth_within_limit("{\"a\":[1]}", 2) &&
+             !ava::plugin::plugin_json_depth_within_limit("{\"a\":[{\"b\":[]}]}", 2),
+         "plugin protocol enforces JSON depth limits");
+
+  auto const tool_result = ava::plugin::parse_plugin_tool_result_response(
+      "{\"id\":\"ava_tool_call_1\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"Added\","
+      "\"metadata\":{\"count\":1}}",
+      "ava_tool_call_1");
+  expect(tool_result && tool_result->ok && tool_result->content == "Added" &&
+             tool_result->metadata_json.find("\"count\":1") != std::string::npos,
+         "plugin protocol parses tool results");
+
+  auto const command_result = ava::plugin::parse_plugin_command_result_response(
+      "{\"id\":\"ava_command_cmd_1\",\"type\":\"command.result\",\"ok\":true,\"content\":\"Done\"}",
+      "ava_command_cmd_1");
+  expect(command_result && command_result->ok && command_result->content == "Done",
+         "plugin protocol parses command results");
+
+  auto const event_result = ava::plugin::parse_plugin_event_observed_response(
+      "{\"id\":\"ava_event_event_1\",\"type\":\"event.observed\",\"ok\":true}", "ava_event_event_1");
+  expect(event_result && event_result->ok && event_result->content.empty(),
+         "plugin protocol parses event observed responses with optional content");
+
+  auto const wrong_id = ava::plugin::parse_plugin_tool_result_response(
+      "{\"id\":\"wrong\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"Added\"}", "ava_tool_call_1");
+  expect(!wrong_id, "plugin protocol rejects response id mismatches");
 }
 
 void test_plugin_runner_initializes_and_shuts_down()
@@ -1029,6 +1098,7 @@ void run_plugin_tests()
   test_plugin_manifest_parsing();
   test_plugin_discovery();
   test_plugin_enablement();
+  test_plugin_protocol_helpers();
   test_plugin_runner_initializes_and_shuts_down();
   test_plugin_runner_accepts_buffered_extra_records();
   test_plugin_runner_contained_failures();

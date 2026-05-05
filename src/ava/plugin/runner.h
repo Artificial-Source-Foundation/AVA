@@ -5,11 +5,11 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
-#include <string>
 #include <string_view>
 
 #include "ava/core/result.h"
 #include "ava/plugin/manifest.h"
+#include "ava/plugin/protocol.h"
 
 namespace ava::plugin {
 
@@ -21,34 +21,6 @@ struct PluginRunnerOptions {
   std::chrono::milliseconds request_timeout{5000};
   std::size_t max_record_bytes = 64 * 1024;
   std::size_t max_stderr_bytes = 64 * 1024;
-};
-
-struct PluginInitialization {
-  std::string api_version;
-  std::string plugin_version;
-  std::string contributions_json;
-  std::string raw_json;
-};
-
-struct PluginToolCallResult {
-  bool ok = false;
-  std::string content;
-  std::string metadata_json;
-  std::string raw_json;
-};
-
-struct PluginCommandCallResult {
-  bool ok = false;
-  std::string content;
-  std::string metadata_json;
-  std::string raw_json;
-};
-
-struct PluginEventObserveResult {
-  bool ok = false;
-  std::string content;
-  std::string metadata_json;
-  std::string raw_json;
 };
 
 class PluginProcess final {

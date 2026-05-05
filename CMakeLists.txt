@@ -81,6 +81,7 @@ add_library(ava_core
   src/ava/core/ids.cpp
   src/ava/core/json.cpp
   src/ava/lsp/lsp_client.cpp
+  src/ava/lsp/lsp_client_io.cpp
   src/ava/lsp/lsp_client_support.cpp
   src/ava/mcp/config.cpp
   src/ava/mcp/process_support.cpp

@@ -8,6 +8,7 @@
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/core/json.h"
 #include "ava/mcp/config.h"
+#include "ava/mcp/protocol.h"
 #include "ava/mcp/stdio_client.h"
 #include "ava/mcp/tool_broker.h"
 #include "ava/permissions/permission.h"
@@ -86,6 +87,56 @@ void test_mcp_config_parsing()
       .workspace_dir = root / "workspace", .global_config_file = global_path, .project_config_file = project_path});
   expect(!duplicate && duplicate.error().message().find("duplicate") != std::string::npos,
          "MCP config rejects duplicate server ids across scopes");
+}
+
+void test_mcp_protocol_helpers()
+{
+  auto const request = ava::mcp::mcp_request_json("ava_mcp_1", "tools/list", "{}");
+  expect(request.find("\"id\":\"ava_mcp_1\"") != std::string::npos &&
+             request.find("\"method\":\"tools/list\"") != std::string::npos,
+         "MCP protocol formats JSON-RPC requests");
+
+  auto const params = ava::mcp::mcp_tool_call_params_json("echo", "{\"text\":\"hello\"}");
+  expect(params == "{\"name\":\"echo\",\"arguments\":{\"text\":\"hello\"}}", "MCP protocol formats tool call params");
+
+  auto const header_end = ava::mcp::mcp_header_end_offset("Content-Length: 2\r\n\r\n{}");
+  expect(header_end && *header_end == 21, "MCP protocol finds CRLF frame header boundary");
+
+  auto const content_length = ava::mcp::parse_mcp_content_length("Content-Length: 7\r\n\r\n", 16);
+  expect(content_length && *content_length == 7,
+         content_length ? "MCP protocol parses Content-Length"
+                        : "MCP protocol parses Content-Length: " + content_length.error().format());
+
+  auto const invalid_length = ava::mcp::parse_mcp_content_length("Content-Length: nope\r\n\r\n", 16);
+  expect(!invalid_length && invalid_length.error().message().find("invalid") != std::string::npos,
+         "MCP protocol rejects invalid Content-Length");
+
+  auto const capped_length = ava::mcp::parse_mcp_content_length("Content-Length: 17\r\n\r\n", 16);
+  expect(!capped_length && capped_length.error().message().find("size cap") != std::string::npos,
+         "MCP protocol rejects oversized frames");
+
+  expect(ava::mcp::mcp_response_id("{\"jsonrpc\":\"2.0\",\"id\":\"abc\",\"result\":{}}").value_or("") == "abc",
+         "MCP protocol parses string response ids");
+  expect(ava::mcp::mcp_response_id("{\"jsonrpc\":\"2.0\",\"id\":42,\"result\":{}}").value_or("") == "42",
+         "MCP protocol parses numeric response ids");
+
+  expect(ava::mcp::mcp_bool_field("{\"isError\":true}", "isError").value_or(false),
+         "MCP protocol parses boolean result fields");
+  expect(ava::mcp::mcp_json_depth_within_limit("{\"a\":[1]}", 2) &&
+             !ava::mcp::mcp_json_depth_within_limit("{\"a\":[{\"b\":[]}]}", 2),
+         "MCP protocol enforces JSON depth limits");
+
+  expect(ava::mcp::is_valid_mcp_tool_name("server.tool") && !ava::mcp::is_valid_mcp_tool_name("") &&
+             !ava::mcp::is_valid_mcp_tool_name("bad\nname"),
+         "MCP protocol validates tool names");
+
+  auto const text_content = ava::mcp::mcp_text_content_from_result(
+      "{\"content\":[{\"type\":\"text\",\"text\":\"one\"},"
+      "{\"type\":\"text\",\"text\":\"two\"}]}");
+  expect(text_content == "one\ntwo", "MCP protocol extracts text content from tool results");
+
+  auto const structured_content = ava::mcp::mcp_text_content_from_result("{\"structuredContent\":{\"ok\":true}}");
+  expect(structured_content == "{\"ok\":true}", "MCP protocol falls back to structured tool content");
 }
 
 void test_mcp_stdio_client_lists_and_calls_tools()
@@ -323,6 +374,7 @@ void test_mcp_tool_dispatcher_contains_tool_errors()
 void run_mcp_tests()
 {
   test_mcp_config_parsing();
+  test_mcp_protocol_helpers();
   test_mcp_stdio_client_lists_and_calls_tools();
   test_mcp_tool_dispatcher();
   test_mcp_tool_dispatcher_contains_tool_errors();

@@ -22,14 +22,13 @@
 
 #include "ava/core/json.h"
 #include "ava/core/version.h"
+#include "ava/mcp/protocol.h"
 
 namespace ava::mcp {
 namespace {
 
 constexpr char kTrustedExecPath[] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-constexpr int kMaxMcpJsonDepth = 128;
 constexpr int kMaxDrainReadsPerPoll = 16;
-constexpr std::size_t kMaxMcpHeaderBytes = 16 * 1024;
 
 class UniqueFd {
  public:
@@ -65,7 +64,7 @@ class ScopedSignalIgnore {
  public:
   explicit ScopedSignalIgnore(int signal) : signal_(signal)
   {
-    struct sigaction action{};
+    struct sigaction action {};
     action.sa_handler = SIG_IGN;
     sigemptyset(&action.sa_mask);
     if (sigaction(signal_, &action, &previous_) == 0) installed_ = true;
@@ -81,16 +80,20 @@ class ScopedSignalIgnore {
 
  private:
   int signal_ = 0;
-  struct sigaction previous_{};
+  struct sigaction previous_ {};
   bool installed_ = false;
 };
 
-ava::core::Error mcp_error(ava::core::ErrorCategory category, std::string message, McpServerConfig const& server)
+ava::core::Error with_mcp_server_context(ava::core::Error error, McpServerConfig const& server)
 {
-  auto error = ava::core::Error(category, std::move(message));
   error.with_context("mcp_server", server.id);
   if (!server.source_path.empty()) error.with_context("config", server.source_path.string());
   return error;
+}
+
+ava::core::Error mcp_error(ava::core::ErrorCategory category, std::string message, McpServerConfig const& server)
+{
+  return with_mcp_server_context(ava::core::Error(category, std::move(message)), server);
 }
 
 ava::core::Error errno_error(std::string message, McpServerConfig const& server)
@@ -200,88 +203,6 @@ void close_nonstandard_fds()
   for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd) close(fd);
 }
 
-std::string json_string(std::string_view value)
-{
-  return "\"" + ava::core::json::escape(value) + "\"";
-}
-
-std::optional<bool> bool_field(std::string_view object, std::string_view key)
-{
-  auto const start = ava::core::json::field_value_start(object, key);
-  if (!start) return std::nullopt;
-  auto const valid_terminator = [](std::string_view value, std::size_t offset) {
-    while (offset < value.size() && std::isspace(static_cast<unsigned char>(value[offset])) != 0) ++offset;
-    return offset >= value.size() || value[offset] == ',' || value[offset] == '}';
-  };
-  if (object.substr(*start, 4) == "true" && valid_terminator(object, *start + 4)) return true;
-  if (object.substr(*start, 5) == "false" && valid_terminator(object, *start + 5)) return false;
-  return std::nullopt;
-}
-
-std::optional<std::size_t> field_value_start_any_depth(std::string_view object, std::string_view key)
-{
-  std::string const needle = "\"" + ava::core::json::escape(key) + "\"";
-  bool in_string = false;
-  bool escaped = false;
-  for (std::size_t index = 0; index < object.size(); ++index) {
-    char const ch = object[index];
-    if (in_string) {
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch == '\\') {
-        escaped = true;
-        continue;
-      }
-      if (ch == '"') in_string = false;
-      continue;
-    }
-    if (ch != '"') continue;
-    if (object.substr(index, needle.size()) == needle) {
-      auto colon = index + needle.size();
-      while (colon < object.size() && std::isspace(static_cast<unsigned char>(object[colon])) != 0) ++colon;
-      if (colon < object.size() && object[colon] == ':') {
-        ++colon;
-        while (colon < object.size() && std::isspace(static_cast<unsigned char>(object[colon])) != 0) ++colon;
-        return colon;
-      }
-    }
-    in_string = true;
-  }
-  return std::nullopt;
-}
-
-bool json_depth_within_limit(std::string_view value, int max_depth)
-{
-  bool in_string = false;
-  bool escaped = false;
-  int depth = 0;
-  for (char const ch : value) {
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (ch == '\\' && in_string) {
-      escaped = true;
-      continue;
-    }
-    if (ch == '"') {
-      in_string = !in_string;
-      continue;
-    }
-    if (in_string) continue;
-    if (ch == '{' || ch == '[') {
-      ++depth;
-      if (depth > max_depth) return false;
-    } else if (ch == '}' || ch == ']') {
-      --depth;
-      if (depth < 0) return false;
-    }
-  }
-  return true;
-}
-
 std::string exit_detail(int status)
 {
   if (WIFEXITED(status)) return "exit " + std::to_string(WEXITSTATUS(status));
@@ -302,109 +223,6 @@ std::filesystem::path child_working_dir(McpStdioClientOptions const& options)
 {
   if (!options.workspace_dir.empty()) return options.workspace_dir;
   return std::filesystem::current_path();
-}
-
-std::string trim_ascii(std::string text)
-{
-  auto first = text.begin();
-  while (first != text.end() && std::isspace(static_cast<unsigned char>(*first)) != 0) ++first;
-  auto last = text.end();
-  while (last != first && std::isspace(static_cast<unsigned char>(*(last - 1))) != 0) --last;
-  return std::string(first, last);
-}
-
-std::string lowercase_ascii(std::string text)
-{
-  for (auto& ch : text) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-  return text;
-}
-
-ava::core::Result<std::size_t> parse_content_length(std::string_view headers, McpServerConfig const& server,
-                                                    std::size_t max_message_bytes)
-{
-  std::optional<std::size_t> content_length;
-  std::size_t line_start = 0;
-  while (line_start <= headers.size()) {
-    auto const line_end = headers.find('\n', line_start);
-    auto line = headers.substr(
-        line_start, line_end == std::string_view::npos ? headers.size() - line_start : line_end - line_start);
-    if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
-    auto const colon = line.find(':');
-    if (colon != std::string_view::npos) {
-      auto key = lowercase_ascii(trim_ascii(std::string(line.substr(0, colon))));
-      if (key == "content-length") {
-        auto value = trim_ascii(std::string(line.substr(colon + 1)));
-        if (value.empty() ||
-            !std::ranges::all_of(value, [](char ch) { return std::isdigit(static_cast<unsigned char>(ch)) != 0; })) {
-          return std::unexpected(protocol_error("MCP Content-Length header is invalid", server));
-        }
-        try {
-          content_length = static_cast<std::size_t>(std::stoull(value));
-        } catch (...) {
-          return std::unexpected(protocol_error("MCP Content-Length header is out of range", server));
-        }
-      }
-    }
-    if (line_end == std::string_view::npos) break;
-    line_start = line_end + 1;
-  }
-  if (!content_length) return std::unexpected(protocol_error("MCP message is missing Content-Length", server));
-  if (*content_length > max_message_bytes) {
-    auto error = protocol_error("MCP message exceeds size cap", server);
-    error.with_context("max_bytes", std::to_string(max_message_bytes));
-    return std::unexpected(std::move(error));
-  }
-  return *content_length;
-}
-
-std::optional<std::size_t> header_end_offset(std::string_view buffer)
-{
-  if (auto const crlf = buffer.find("\r\n\r\n"); crlf != std::string_view::npos) return crlf + 4;
-  if (auto const lf = buffer.find("\n\n"); lf != std::string_view::npos) return lf + 2;
-  return std::nullopt;
-}
-
-std::optional<std::string> response_id(std::string_view message)
-{
-  auto id = ava::core::json::string_field(message, "id");
-  if (id) return id;
-  auto const numeric_start = field_value_start_any_depth(message, "id");
-  if (!numeric_start) return std::nullopt;
-  std::size_t end = *numeric_start;
-  while (end < message.size() && std::isdigit(static_cast<unsigned char>(message[end])) != 0) ++end;
-  if (end == *numeric_start) return std::nullopt;
-  return std::string(message.substr(*numeric_start, end - *numeric_start));
-}
-
-std::optional<std::string> error_message_from_response(std::string_view error_json)
-{
-  return ava::core::json::string_field(error_json, "message");
-}
-
-bool is_valid_mcp_tool_name(std::string_view name)
-{
-  if (name.empty() || name.size() > 128) return false;
-  for (char const ch : name) {
-    auto const byte = static_cast<unsigned char>(ch);
-    if (byte < 0x20 || byte == 0x7F) return false;
-  }
-  return true;
-}
-
-std::string text_content_from_result(std::string_view result_json)
-{
-  std::string content;
-  for (auto const& item : ava::core::json::objects_in_array_field(result_json, "content")) {
-    auto const type = ava::core::json::string_field(item, "type");
-    auto const text = ava::core::json::string_field(item, "text");
-    if (type && *type == "text" && text) {
-      if (!content.empty()) content += '\n';
-      content += *text;
-    }
-  }
-  if (!content.empty()) return content;
-  if (auto const structured = ava::core::json::object_field(result_json, "structuredContent")) return *structured;
-  return {};
 }
 
 }  // namespace
@@ -551,10 +369,7 @@ ava::core::VoidResult McpStdioClient::launch()
 
 ava::core::VoidResult McpStdioClient::initialize(CancelCallback cancel_requested)
 {
-  std::string const params =
-      "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"ava\","
-      "\"version\":\"" +
-      std::string(ava::core::version::kFullVersion) + "\"}}";
+  std::string const params = mcp_initialize_params_json(ava::core::version::kFullVersion);
   auto response = request("initialize", params, options_.startup_timeout, "timed out waiting for MCP initialization",
                           cancel_requested);
   if (!response) return std::unexpected(std::move(response.error()));
@@ -571,7 +386,7 @@ ava::core::VoidResult McpStdioClient::initialize(CancelCallback cancel_requested
                         .capabilities_json = capabilities,
                         .raw_json = response->raw_json};
 
-  std::string const notification = "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}";
+  std::string const notification = mcp_initialized_notification_json();
   auto const deadline = std::chrono::steady_clock::now() + options_.request_timeout;
   return write_message(notification, deadline, options_.request_timeout,
                        "timed out writing MCP initialized notification", cancel_requested);
@@ -632,13 +447,12 @@ ava::core::Result<McpToolCallResult> McpStdioClient::call_tool(std::string_view 
     error.with_context("tool", std::string(tool_name));
     return std::unexpected(std::move(error));
   }
-  std::string const params =
-      "{\"name\":" + json_string(tool_name) + ",\"arguments\":" + std::string(arguments_json) + "}";
+  std::string const params = mcp_tool_call_params_json(tool_name, arguments_json);
   auto response =
       request("tools/call", params, options_.request_timeout, "timed out waiting for MCP tools/call", cancel_requested);
   if (!response) return std::unexpected(std::move(response.error()));
-  return McpToolCallResult{.is_error = bool_field(response->result_json, "isError").value_or(false),
-                           .content = text_content_from_result(response->result_json),
+  return McpToolCallResult{.is_error = mcp_bool_field(response->result_json, "isError").value_or(false),
+                           .content = mcp_text_content_from_result(response->result_json),
                            .raw_json = response->raw_json};
 }
 
@@ -650,9 +464,7 @@ ava::core::Result<McpStdioClient::JsonRpcResponse> McpStdioClient::request(std::
 {
   auto const deadline = std::chrono::steady_clock::now() + timeout;
   auto const request_id = "ava_mcp_" + std::to_string(next_request_id_++);
-  std::string const request_json = "{\"jsonrpc\":\"2.0\",\"id\":" + json_string(request_id) +
-                                   ",\"method\":" + json_string(method) + ",\"params\":" + std::string(params_json) +
-                                   "}";
+  std::string const request_json = mcp_request_json(request_id, method, params_json);
   if (auto written = write_message(request_json, deadline, timeout, "timed out writing MCP request", cancel_requested);
       !written) {
     return std::unexpected(std::move(written.error()));
@@ -662,12 +474,12 @@ ava::core::Result<McpStdioClient::JsonRpcResponse> McpStdioClient::request(std::
     auto message =
         read_message(deadline, timeout, timeout_message, "MCP server closed stdout before response", cancel_requested);
     if (!message) return std::unexpected(std::move(message.error()));
-    if (!json_depth_within_limit(*message, kMaxMcpJsonDepth) || !ava::core::json::is_valid_object(*message)) {
+    if (!mcp_json_depth_within_limit(*message, kMcpMaxJsonDepth) || !ava::core::json::is_valid_object(*message)) {
       auto error = protocol_error("MCP response is not a valid JSON object", server_);
       error.with_context("response", message->substr(0, 512));
       return std::unexpected(std::move(error));
     }
-    auto const id = response_id(*message);
+    auto const id = mcp_response_id(*message);
     if (!id) continue;
     if (*id != request_id) {
       auto error = protocol_error("MCP response id did not match request", server_);
@@ -676,7 +488,7 @@ ava::core::Result<McpStdioClient::JsonRpcResponse> McpStdioClient::request(std::
       return std::unexpected(std::move(error));
     }
     if (auto error_json = ava::core::json::object_field(*message, "error")) {
-      auto error = protocol_error(error_message_from_response(*error_json).value_or("MCP request failed"), server_);
+      auto error = protocol_error(mcp_error_message_from_response(*error_json).value_or("MCP request failed"), server_);
       error.with_context("method", std::string(method));
       error.with_context("mcp_error", error_json->substr(0, 512));
       return std::unexpected(std::move(error));
@@ -725,28 +537,29 @@ ava::core::VoidResult McpStdioClient::write_message(std::string_view message,
 
 ava::core::Result<std::optional<std::string>> McpStdioClient::try_extract_message()
 {
-  auto const header_end = header_end_offset(stdout_buffer_);
+  auto const header_end = mcp_header_end_offset(stdout_buffer_);
   if (!header_end) {
-    if (stdout_buffer_.size() > kMaxMcpHeaderBytes) {
+    if (stdout_buffer_.size() > kMcpMaxHeaderBytes) {
       auto error = protocol_error("MCP message header exceeds size cap", server_);
-      error.with_context("max_bytes", std::to_string(kMaxMcpHeaderBytes));
+      error.with_context("max_bytes", std::to_string(kMcpMaxHeaderBytes));
       terminate_child();
       return std::unexpected(std::move(error));
     }
     return std::optional<std::string>{};
   }
   auto const header_size = *header_end;
-  if (header_size > kMaxMcpHeaderBytes) {
+  if (header_size > kMcpMaxHeaderBytes) {
     auto error = protocol_error("MCP message header exceeds size cap", server_);
-    error.with_context("max_bytes", std::to_string(kMaxMcpHeaderBytes));
+    error.with_context("max_bytes", std::to_string(kMcpMaxHeaderBytes));
     terminate_child();
     return std::unexpected(std::move(error));
   }
-  auto content_length = parse_content_length(std::string_view(stdout_buffer_).substr(0, header_size), server_,
-                                             options_.max_message_bytes);
+  auto content_length =
+      parse_mcp_content_length(std::string_view(stdout_buffer_).substr(0, header_size), options_.max_message_bytes);
   if (!content_length) {
+    auto error = with_mcp_server_context(std::move(content_length.error()), server_);
     terminate_child();
-    return std::unexpected(std::move(content_length.error()));
+    return std::unexpected(std::move(error));
   }
   if (stdout_buffer_.size() < header_size + *content_length) return std::optional<std::string>{};
   auto message = stdout_buffer_.substr(header_size, *content_length);

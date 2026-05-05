@@ -235,6 +235,7 @@ add_library(ava_app
   src/ava/app/runtime_compaction.cpp
   src/ava/app/runtime_compaction_support.cpp
   src/ava/app/runtime_json.cpp
+  src/ava/app/runtime_json_support.cpp
   src/ava/app/runtime_model.cpp
   src/ava/app/runtime_prompt.cpp
   src/ava/app/runtime_reasoning.cpp
@@ -288,6 +289,7 @@ if(AVA_BUILD_TESTS)
     tests/app_rpc_runtime_control_tests.cpp
     tests/app_rpc_session_tests.cpp
     tests/app_runtime_compaction_support_tests.cpp
+    tests/app_runtime_json_support_tests.cpp
     tests/app_runtime_tests.cpp
     tests/bash_tool_support_tests.cpp
     tests/config_context_auth_oauth_tests.cpp
@@ -364,6 +366,7 @@ if(AVA_BUILD_TESTS)
     app_rpc_runtime_control
     app_rpc_session
     app_runtime_compaction_support
+    app_runtime_json_support
     app_runtime
     provider_openai
     provider_anthropic

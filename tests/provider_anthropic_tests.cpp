@@ -9,6 +9,7 @@
 #include "ava/config/auth.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/provider/anthropic_provider.h"
+#include "ava/provider/anthropic_request.h"
 #include "ava/provider/provider_utils.h"
 #include "ava/provider/registry.h"
 #include "ava/session/session_store.h"
@@ -42,6 +43,49 @@ void test_json_object_validator()
 
 void test_anthropic_provider_contract()
 {
+  auto const direct_body = ava::provider::anthropic_request_body_json(ava::provider::ProviderRequest{
+      .provider_id = "anthropic",
+      .model_id = "claude-sonnet-4-5",
+      .system_prompt = "cached system",
+      .messages = {ava::provider::ChatMessage{
+          .role = "user",
+          .content = "cached user",
+          .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text,
+                                                       .text = "cached user",
+                                                       .tool_call_id = "",
+                                                       .tool_name = "",
+                                                       .input_json = "",
+                                                       .is_error = false,
+                                                       .cache_control_ttl = "5m"}}}},
+      .tools_json = {R"({"name":"read_file","description":"Read","parameters":{"type":"object"}})"},
+      .stream = false,
+      .reasoning =
+          ava::provider::ProviderReasoningOptions{.type = "enabled", .budget_tokens = 1024, .display = "summarized"},
+      .system_prompt_cache_ttl = "1h"});
+  expect(direct_body && direct_body->find(R"("cache_control":{"type":"ephemeral","ttl":"1h"})") != std::string::npos &&
+             direct_body->find(R"("cache_control":{"type":"ephemeral","ttl":"5m"})") != std::string::npos &&
+             direct_body->find(R"("thinking":{"type":"enabled","budget_tokens":1024,"display":"summarized"})") !=
+                 std::string::npos &&
+             direct_body->find(R"("input_schema":{"type":"object"})") != std::string::npos,
+         "Anthropic request body helper is directly testable for cache, reasoning, and tool schema mapping");
+  auto invalid_body = ava::provider::anthropic_request_body_json(ava::provider::ProviderRequest{
+      .provider_id = "anthropic",
+      .model_id = "claude-sonnet-4-5",
+      .system_prompt = "system",
+      .messages = {ava::provider::ChatMessage{
+          .role = "assistant",
+          .content = "",
+          .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::ToolUse,
+                                                       .text = "",
+                                                       .tool_call_id = "toolu_1",
+                                                       .tool_name = "read_file",
+                                                       .input_json = "{\"path\":\"note.txt\"}",
+                                                       .is_error = false}}}},
+      .tools_json = {},
+      .stream = false});
+  expect(!invalid_body && invalid_body.error().format().find("matching tool_result") != std::string::npos,
+         "Anthropic request body helper rejects unmatched native tool_use content");
+
   ava::provider::AnthropicProvider const provider("https://anthropic.example.test/");
   auto const request = provider.build_request(
       ava::provider::ProviderRequest{

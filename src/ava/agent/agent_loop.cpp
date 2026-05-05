@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "ava/agent/agent_loop_active_turn.h"
 #include "ava/agent/agent_loop_cancellation.h"
 #include "ava/agent/assistant_turn.h"
 #include "ava/agent/message_builder.h"
@@ -43,13 +44,6 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
 {
   auto check_canceled_locked = [&](std::string_view boundary) -> ava::core::VoidResult {
     return check_agent_loop_canceled(options_.cancel_requested, store, options_.session_mutex, boundary);
-  };
-  auto append_user_message_locked = [&](std::string const& text) -> ava::core::Result<std::string> {
-    if (options_.session_mutex) {
-      std::lock_guard lock(*options_.session_mutex);
-      return append_user_message(store, text);
-    }
-    return append_user_message(store, text);
   };
   auto build_messages_locked = [&]() -> ava::core::Result<BuiltProviderMessages> {
     if (options_.session_mutex) {
@@ -103,44 +97,21 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
     }
     return append_error(store, error);
   };
-  struct ActiveTurnUserMessage {
-    std::string id;
-    std::string text;
-  };
-  std::vector<ActiveTurnUserMessage> active_turn_user_messages;
-  auto replayable_active_turn_texts = [&]() {
-    std::vector<std::string> messages;
-    messages.reserve(active_turn_user_messages.size());
-    for (auto const& message : active_turn_user_messages) messages.push_back(message.text);
-    return messages;
-  };
+  ActiveTurnMessages active_turn_user_messages;
   auto compact_context = [&](std::string_view trigger) -> ava::core::Result<bool> {
     if (!options_.compact_context) {
       auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "context compaction is unavailable");
       error.with_context("trigger", std::string(trigger));
       return std::unexpected(std::move(error));
     }
-    auto const replayed_messages = replayable_active_turn_texts();
+    auto const replayed_messages = active_turn_user_messages.replayable_texts();
     return options_.compact_context(store, trigger, replayed_messages);
   };
   auto append_active_turn_user_message_locked = [&](std::string const& text) -> ava::core::VoidResult {
-    auto appended = append_user_message_locked(text);
-    if (!appended) return std::unexpected(std::move(appended.error()));
-    active_turn_user_messages.push_back(ActiveTurnUserMessage{.id = *appended, .text = text});
-    return {};
+    return active_turn_user_messages.append_user_message(store, options_.session_mutex, text);
   };
   auto replay_active_turn_user_messages_locked = [&]() -> ava::core::VoidResult {
-    for (auto const& message : active_turn_user_messages) {
-      auto replayed = [&]() -> ava::core::VoidResult {
-        if (options_.session_mutex) {
-          std::lock_guard lock(*options_.session_mutex);
-          return append_replay_user_message(store, message.text, message.id);
-        }
-        return append_replay_user_message(store, message.text, message.id);
-      }();
-      if (!replayed) return replayed;
-    }
-    return {};
+    return active_turn_user_messages.replay_user_messages(store, options_.session_mutex);
   };
   bool context_overflow_retry_used = false;
   bool skip_auto_compaction_after_overflow_retry = false;

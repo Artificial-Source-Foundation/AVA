@@ -42,6 +42,7 @@ endfunction()
 
 add_library(ava_core
   src/ava/agent/agent_loop.cpp
+  src/ava/agent/agent_loop_active_turn.cpp
   src/ava/agent/agent_loop_cancellation.cpp
   src/ava/agent/assistant_turn.cpp
   src/ava/agent/message_builder.cpp
@@ -302,6 +303,7 @@ if(AVA_BUILD_TESTS)
     tests/app_event_json_support_tests.cpp
     tests/app_line_shell_support_tests.cpp
     tests/app_plugin_command_arguments_tests.cpp
+    tests/agent_loop_active_turn_tests.cpp
     tests/agent_loop_cancellation_tests.cpp
     tests/agent_tool_dispatcher_tests.cpp
     tests/app_rpc_command_tests.cpp
@@ -399,6 +401,7 @@ if(AVA_BUILD_TESTS)
     app_event_json_support
     app_line_shell_support
     app_plugin_command_arguments
+    agent_loop_active_turn
     agent_loop_cancellation
     app_event_serialization
     app_event_bus

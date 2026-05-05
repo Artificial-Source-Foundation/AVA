@@ -11,6 +11,7 @@
 #include "ava/mcp/process_support.h"
 #include "ava/mcp/protocol.h"
 #include "ava/mcp/stdio_client.h"
+#include "ava/mcp/stdio_support.h"
 #include "ava/mcp/tool_broker.h"
 #include "ava/permissions/permission.h"
 #include "ava/tools/file_tools.h"
@@ -169,6 +170,38 @@ void test_mcp_process_support_helpers()
   auto const future = ava::mcp::detail::remaining_ms(now + std::chrono::milliseconds(250));
   expect(ava::mcp::detail::remaining_ms(now - std::chrono::milliseconds(1)) == 0 && future > 0 && future <= 250,
          "MCP process support computes bounded remaining timeout milliseconds");
+}
+
+void test_mcp_stdio_support_helpers()
+{
+  auto const root = temp_root() / "mcp-stdio-support";
+  auto server = fake_server_config(root);
+  server.command = "/bin/sh";
+  server.args = {"server.sh", "--stdio"};
+
+  auto const argv = ava::mcp::detail::mcp_argv(server);
+  expect(argv.size() == 3 && argv[0] == "/bin/sh" && argv[1] == "server.sh" && argv[2] == "--stdio",
+         "MCP stdio support builds child argv from server config");
+
+  ava::mcp::McpStdioClientOptions options;
+  options.workspace_dir = root / "workspace";
+  expect(ava::mcp::detail::child_working_dir(options) == options.workspace_dir,
+         "MCP stdio support uses configured workspace cwd");
+
+  ava::mcp::McpStdioClientOptions default_options;
+  auto valid = ava::mcp::detail::validate_start_request(server, default_options, nullptr);
+  expect(valid && !default_options.workspace_dir.empty(),
+         "MCP stdio support validates defaults and fills workspace cwd");
+
+  auto bad_timeout_options = default_options;
+  bad_timeout_options.request_timeout = std::chrono::milliseconds(1);
+  auto bad_timeout = ava::mcp::detail::validate_start_request(server, bad_timeout_options, nullptr);
+  expect(!bad_timeout && bad_timeout.error().message().find("request timeout") != std::string::npos,
+         "MCP stdio support rejects request timeouts below the safe bound");
+
+  auto canceled = ava::mcp::detail::validate_start_request(server, default_options, [] { return true; });
+  expect(!canceled && canceled.error().message() == "MCP startup canceled",
+         "MCP stdio support preserves fail-closed startup cancellation");
 }
 
 void test_mcp_stdio_client_lists_and_calls_tools()
@@ -408,6 +441,7 @@ void run_mcp_tests()
   test_mcp_config_parsing();
   test_mcp_protocol_helpers();
   test_mcp_process_support_helpers();
+  test_mcp_stdio_support_helpers();
   test_mcp_stdio_client_lists_and_calls_tools();
   test_mcp_tool_dispatcher();
   test_mcp_tool_dispatcher_contains_tool_errors();

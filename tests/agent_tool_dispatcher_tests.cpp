@@ -27,6 +27,7 @@
 #include "ava/agent/tool_dispatch_support.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_file_dispatch.h"
+#include "ava/agent/tool_network_dispatch.h"
 #include "ava/agent/tool_process_dispatch.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
@@ -499,6 +500,24 @@ void test_process_tool_dispatch_helpers()
   expect(!missing_command.success && missing_command.result_text.find("\"ok\":false") != std::string::npos &&
              missing_command.result_text.find("command") != std::string::npos,
          "process dispatch helper maps missing provider command arguments to tool errors");
+}
+
+void test_network_tool_dispatch_helpers()
+{
+  ava::tools::ToolContext const context{.workspace_dir = temp_root(), .mode = ava::agent::Mode::Build};
+  auto invalid_scheme = ava::agent::detail::webfetch_result(
+      context,
+      ava::agent::ProviderToolCall{
+          .id = "call_webfetch_file", .name = "webfetch", .arguments_json = "{\"url\":\"file:///etc/passwd\"}"});
+  expect(!invalid_scheme.success && invalid_scheme.result_text.find("\"ok\":false") != std::string::npos &&
+             invalid_scheme.result_text.find("http") != std::string::npos,
+         "network dispatch helper rejects unsupported URL schemes before network access");
+
+  auto missing_url = ava::agent::detail::webfetch_result(
+      context, ava::agent::ProviderToolCall{.id = "call_webfetch_missing", .name = "webfetch", .arguments_json = "{}"});
+  expect(!missing_url.success && missing_url.result_text.find("\"ok\":false") != std::string::npos &&
+             missing_url.result_text.find("url") != std::string::npos,
+         "network dispatch helper maps missing provider URL arguments to tool errors");
 }
 
 void test_question_answer_validation_helpers()
@@ -2796,6 +2815,7 @@ void run_agent_tool_dispatcher_tests()
   test_file_tool_dispatch_helpers();
   test_search_tool_dispatch_helpers();
   test_process_tool_dispatch_helpers();
+  test_network_tool_dispatch_helpers();
   test_question_answer_validation_helpers();
   test_session_recorder_helpers();
   test_tool_dispatcher();

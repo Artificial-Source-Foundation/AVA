@@ -1,90 +1,15 @@
 #include "ava/provider/openai_stream_events.h"
 
-#include <algorithm>
 #include <optional>
 #include <utility>
 
 #include "ava/core/json.h"
 #include "ava/provider/openai_response_parser.h"
 #include "ava/provider/openai_response_parser_detail.h"
+#include "ava/provider/openai_stream_reasoning.h"
 #include "ava/provider/provider_utils.h"
 
 namespace ava::provider::detail {
-namespace {
-
-bool contains_string(std::vector<std::string> const& values, std::string_view value)
-{
-  return std::ranges::find(values, value) != values.end();
-}
-
-void remember_string(std::vector<std::string>& values, std::string value)
-{
-  if (value.empty() || contains_string(values, value)) return;
-  values.push_back(std::move(value));
-}
-
-std::string reasoning_item_id_from_event(std::string_view data, std::optional<std::string_view> item = std::nullopt)
-{
-  if (auto id = detail::first_string_field(data, {"item_id", "output_item_id"})) return *id;
-  if (item) {
-    if (auto id = detail::first_string_field(*item, {"id", "item_id"})) return *id;
-  }
-  return {};
-}
-
-void set_active_reasoning_item_id(OpenAIStreamEventState& state, std::string_view item_id)
-{
-  if (item_id.empty() || !state.active_reasoning_item_id.empty()) return;
-  state.active_reasoning_item_id = std::string(item_id);
-}
-
-void append_start_reasoning_if_needed(std::vector<StreamEvent>& events, OpenAIStreamEventState& state)
-{
-  if (state.reasoning_open) return;
-  state.reasoning_open = true;
-  events.push_back(StreamEvent{.type = StreamEventType::ReasoningStart,
-                               .text = "",
-                               .tool_call_id = "",
-                               .tool_name = "",
-                               .error_message = "",
-                               .usage = std::nullopt,
-                               .reasoning_format = std::string(detail::kOpenAIResponsesReasoningFormat)});
-}
-
-void append_reasoning_delta(std::vector<StreamEvent>& events, OpenAIStreamEventState& state, std::string_view text)
-{
-  append_start_reasoning_if_needed(events, state);
-  if (text.empty()) return;
-  state.reasoning_text_seen = true;
-  state.active_reasoning_text += text;
-  events.push_back(StreamEvent{.type = StreamEventType::ReasoningDelta,
-                               .text = std::string(text),
-                               .tool_call_id = "",
-                               .tool_name = "",
-                               .error_message = "",
-                               .usage = std::nullopt,
-                               .reasoning_format = std::string(detail::kOpenAIResponsesReasoningFormat)});
-}
-
-void append_finish_reasoning_if_open(std::vector<StreamEvent>& events, OpenAIStreamEventState& state)
-{
-  if (!state.reasoning_open) return;
-  state.reasoning_open = false;
-  state.reasoning_text_seen = false;
-  remember_string(state.completed_reasoning_item_ids, std::move(state.active_reasoning_item_id));
-  remember_string(state.completed_reasoning_texts, std::move(state.active_reasoning_text));
-  state.active_reasoning_item_id.clear();
-  state.active_reasoning_text.clear();
-  events.push_back(StreamEvent{.type = StreamEventType::ReasoningEnd,
-                               .text = "",
-                               .tool_call_id = "",
-                               .tool_name = "",
-                               .error_message = "",
-                               .usage = std::nullopt,
-                               .reasoning_format = std::string(detail::kOpenAIResponsesReasoningFormat)});
-}
-
-}  // namespace
 
 void OpenAIStreamEventState::reset()
 {
@@ -114,7 +39,7 @@ void append_openai_event_for_data(std::vector<StreamEvent>& events, OpenAIStream
   if (data == "[DONE]") {
     if (state.done_seen) return;
     state.done_seen = true;
-    append_finish_reasoning_if_open(events, state);
+    append_openai_reasoning_end_if_open(events, state);
     events.push_back(StreamEvent{.type = StreamEventType::Done,
                                  .text = "",
                                  .tool_call_id = "",
@@ -125,7 +50,7 @@ void append_openai_event_for_data(std::vector<StreamEvent>& events, OpenAIStream
   }
   if (!is_json_object_shape(data)) {
     state.error_seen = true;
-    append_finish_reasoning_if_open(events, state);
+    append_openai_reasoning_end_if_open(events, state);
     events.push_back(StreamEvent{.type = StreamEventType::Error,
                                  .text = "",
                                  .tool_call_id = "",
@@ -139,14 +64,14 @@ void append_openai_event_for_data(std::vector<StreamEvent>& events, OpenAIStream
     auto const item = ava::core::json::object_field(data, "item");
     auto const item_type = item ? ava::core::json::string_field(*item, "type").value_or("") : "";
     if (item_type == "reasoning") {
-      auto const item_id = reasoning_item_id_from_event(data, *item);
-      if (contains_string(state.completed_reasoning_item_ids, item_id)) return;
+      auto const item_id = openai_reasoning_item_id_from_event(data, *item);
+      if (openai_stream_remembers(state.completed_reasoning_item_ids, item_id)) return;
       state.saw_content = true;
-      set_active_reasoning_item_id(state, item_id);
-      append_start_reasoning_if_needed(events, state);
+      set_active_openai_reasoning_item_id(state, item_id);
+      append_openai_reasoning_start_if_needed(events, state);
     } else if (item_type == "function_call") {
       state.saw_content = true;
-      append_finish_reasoning_if_open(events, state);
+      append_openai_reasoning_end_if_open(events, state);
       events.push_back(StreamEvent{
           .type = StreamEventType::ToolCallStart,
           .text = "",
@@ -164,57 +89,57 @@ void append_openai_event_for_data(std::vector<StreamEvent>& events, OpenAIStream
   if (type == "response.output_item.done") {
     auto const item = ava::core::json::object_field(data, "item");
     if (item && ava::core::json::string_field(*item, "type").value_or("") == "reasoning") {
-      auto const item_id = reasoning_item_id_from_event(data, *item);
+      auto const item_id = openai_reasoning_item_id_from_event(data, *item);
       auto const summary = detail::reasoning_summary_text_from_object(*item);
-      if (contains_string(state.completed_reasoning_item_ids, item_id) ||
-          contains_string(state.completed_reasoning_texts, summary)) {
+      if (openai_stream_remembers(state.completed_reasoning_item_ids, item_id) ||
+          openai_stream_remembers(state.completed_reasoning_texts, summary)) {
         return;
       }
       state.saw_content = true;
-      set_active_reasoning_item_id(state, item_id);
+      set_active_openai_reasoning_item_id(state, item_id);
       if (!state.reasoning_text_seen) {
-        append_reasoning_delta(events, state, summary);
+        append_openai_reasoning_delta(events, state, summary);
       }
-      append_finish_reasoning_if_open(events, state);
+      append_openai_reasoning_end_if_open(events, state);
     }
     return;
   }
   if (type == "response.reasoning_summary_part.added") {
-    auto const item_id = reasoning_item_id_from_event(data);
-    if (contains_string(state.completed_reasoning_item_ids, item_id)) return;
+    auto const item_id = openai_reasoning_item_id_from_event(data);
+    if (openai_stream_remembers(state.completed_reasoning_item_ids, item_id)) return;
     state.saw_content = true;
-    set_active_reasoning_item_id(state, item_id);
-    append_start_reasoning_if_needed(events, state);
+    set_active_openai_reasoning_item_id(state, item_id);
+    append_openai_reasoning_start_if_needed(events, state);
     return;
   }
   if (type == "response.reasoning_summary_text.delta" || type == "response.reasoning_text.delta") {
-    auto const item_id = reasoning_item_id_from_event(data);
-    if (contains_string(state.completed_reasoning_item_ids, item_id)) return;
+    auto const item_id = openai_reasoning_item_id_from_event(data);
+    if (openai_stream_remembers(state.completed_reasoning_item_ids, item_id)) return;
     state.saw_content = true;
-    set_active_reasoning_item_id(state, item_id);
-    append_reasoning_delta(events, state, detail::first_string_field(data, {"delta", "text"}).value_or(""));
+    set_active_openai_reasoning_item_id(state, item_id);
+    append_openai_reasoning_delta(events, state, detail::first_string_field(data, {"delta", "text"}).value_or(""));
     return;
   }
   if (type == "response.reasoning_summary_text.done" || type == "response.reasoning_summary_part.done" ||
       type == "response.reasoning_text.done") {
-    auto const item_id = reasoning_item_id_from_event(data);
+    auto const item_id = openai_reasoning_item_id_from_event(data);
     auto const summary = detail::reasoning_summary_text_from_object(data);
-    if (contains_string(state.completed_reasoning_item_ids, item_id) ||
-        contains_string(state.completed_reasoning_texts, summary)) {
+    if (openai_stream_remembers(state.completed_reasoning_item_ids, item_id) ||
+        openai_stream_remembers(state.completed_reasoning_texts, summary)) {
       return;
     }
     state.saw_content = true;
-    set_active_reasoning_item_id(state, item_id);
+    set_active_openai_reasoning_item_id(state, item_id);
     if (!state.reasoning_text_seen) {
-      append_reasoning_delta(events, state, summary);
+      append_openai_reasoning_delta(events, state, summary);
     }
-    append_finish_reasoning_if_open(events, state);
+    append_openai_reasoning_end_if_open(events, state);
     return;
   }
   if (is_ignored_openai_lifecycle_event(type)) return;
   if (type == "response.output_text.delta" || type == "response.text.delta") {
     state.saw_content = true;
-    append_finish_reasoning_if_open(events, state);
+    append_openai_reasoning_end_if_open(events, state);
     events.push_back(StreamEvent{.type = StreamEventType::TextDelta,
                                  .text = ava::core::json::string_field(data, "delta")
                                              .or_else([&data]() { return ava::core::json::string_field(data, "text"); })
@@ -227,7 +152,7 @@ void append_openai_event_for_data(std::vector<StreamEvent>& events, OpenAIStream
   }
   if (type == "response.function_call_arguments.delta") {
     state.saw_content = true;
-    append_finish_reasoning_if_open(events, state);
+    append_openai_reasoning_end_if_open(events, state);
     events.push_back(
         StreamEvent{.type = StreamEventType::ToolCallDelta,
                     .text = ava::core::json::string_field(data, "delta").value_or(""),
@@ -241,7 +166,7 @@ void append_openai_event_for_data(std::vector<StreamEvent>& events, OpenAIStream
   }
   if (type == "response.function_call.added") {
     state.saw_content = true;
-    append_finish_reasoning_if_open(events, state);
+    append_openai_reasoning_end_if_open(events, state);
     events.push_back(
         StreamEvent{.type = StreamEventType::ToolCallStart,
                     .text = "",
@@ -255,7 +180,7 @@ void append_openai_event_for_data(std::vector<StreamEvent>& events, OpenAIStream
   }
   if (type == "response.function_call.done" || type == "response.function_call.completed") {
     state.saw_content = true;
-    append_finish_reasoning_if_open(events, state);
+    append_openai_reasoning_end_if_open(events, state);
     events.push_back(
         StreamEvent{.type = StreamEventType::ToolCallEnd,
                     .text = "",
@@ -269,7 +194,7 @@ void append_openai_event_for_data(std::vector<StreamEvent>& events, OpenAIStream
   }
   if (type == "response.completed" || type == "response.incomplete") {
     state.done_seen = true;
-    append_finish_reasoning_if_open(events, state);
+    append_openai_reasoning_end_if_open(events, state);
     events.push_back(StreamEvent{.type = StreamEventType::Done,
                                  .text = "",
                                  .tool_call_id = "",
@@ -281,7 +206,7 @@ void append_openai_event_for_data(std::vector<StreamEvent>& events, OpenAIStream
   }
   if (type == "response.error" || type == "response.failed") {
     state.error_seen = true;
-    append_finish_reasoning_if_open(events, state);
+    append_openai_reasoning_end_if_open(events, state);
     auto const error_object = ava::core::json::object_field(data, "error");
     events.push_back(
         StreamEvent{.type = StreamEventType::Error,
@@ -317,7 +242,7 @@ void append_openai_events_for_sse_line(std::vector<StreamEvent>& events, OpenAIS
 
 void finish_openai_stream_events(std::vector<StreamEvent>& events, OpenAIStreamEventState& state)
 {
-  append_finish_reasoning_if_open(events, state);
+  append_openai_reasoning_end_if_open(events, state);
   if (state.saw_content && !state.done_seen && !state.error_seen) {
     events.push_back(StreamEvent{.type = StreamEventType::Error,
                                  .text = "",

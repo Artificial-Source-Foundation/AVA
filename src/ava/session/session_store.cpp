@@ -1,8 +1,6 @@
 #include "ava/session/session_store.h"
 
-#include <algorithm>
 #include <chrono>
-#include <cstdint>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -13,25 +11,9 @@
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 #include "ava/session/session_entry_codec.h"
+#include "ava/session/session_store_support.h"
 
 namespace ava::session {
-
-namespace {
-
-std::string project_key(std::filesystem::path const& workspace_dir)
-{
-  auto const normalized = std::filesystem::absolute(workspace_dir).lexically_normal().string();
-  std::uint64_t hash = 14695981039346656037ULL;
-  for (unsigned char const ch : normalized) {
-    hash ^= ch;
-    hash *= 1099511628211ULL;
-  }
-  std::ostringstream out;
-  out << std::hex << hash;
-  return out.str();
-}
-
-}  // namespace
 
 SessionStore::SessionStore(SessionStoreOptions options) : options_(std::move(options))
 {
@@ -44,7 +26,7 @@ std::string const& SessionStore::session_id() const noexcept
 
 std::filesystem::path SessionStore::session_path() const
 {
-  return options_.root_dir / project_key(options_.workspace_dir) / (options_.session_id + ".jsonl");
+  return detail::session_file_path(options_.root_dir, options_.workspace_dir, options_.session_id);
 }
 
 ava::core::VoidResult SessionStore::append(SessionEntry const& entry)
@@ -57,47 +39,13 @@ ava::core::VoidResult SessionStore::append(SessionEntry const& entry)
   if (!line) return std::unexpected(std::move(line.error()));
 
   auto const path = session_path();
-  std::error_code mkdir_error;
-  std::filesystem::create_directories(path.parent_path(), mkdir_error);
-  if (mkdir_error) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to create session directory");
-    error.with_context("path", path.parent_path().string());
-    error.with_context("cause", mkdir_error.message());
-    return std::unexpected(std::move(error));
+  if (auto directories = detail::create_private_session_directories(options_.root_dir, path.parent_path());
+      !directories) {
+    return std::unexpected(std::move(directories.error()));
   }
-
-  for (auto const& directory : {options_.root_dir, path.parent_path()}) {
-    std::error_code permissions_error;
-    std::filesystem::permissions(directory, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace,
-                                 permissions_error);
-    if (permissions_error) {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to set session directory permissions");
-      error.with_context("path", directory.string());
-      error.with_context("cause", permissions_error.message());
-      return std::unexpected(std::move(error));
-    }
-  }
-
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(path, status_error);
-  if (!status_error && std::filesystem::exists(status)) {
-    if (std::filesystem::is_symlink(status)) {
-      auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "session path must not be a symlink");
-      error.with_context("session_id", session_id());
-      error.with_context("path", path.string());
-      return std::unexpected(std::move(error));
-    }
-    if (!std::filesystem::is_regular_file(status)) {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session path is not a regular file");
-      error.with_context("session_id", session_id());
-      error.with_context("path", path.string());
-      return std::unexpected(std::move(error));
-    }
-  } else if (status_error && status_error != std::errc::no_such_file_or_directory) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect session file");
-    error.with_context("path", path.string());
-    error.with_context("cause", status_error.message());
-    return std::unexpected(std::move(error));
+  auto inspected = detail::inspect_session_file(path, session_id(), detail::MissingSessionFile::Allow);
+  if (!inspected) {
+    return std::unexpected(std::move(inspected.error()));
   }
 
   std::ofstream file(path, std::ios::app);
@@ -107,14 +55,8 @@ ava::core::VoidResult SessionStore::append(SessionEntry const& entry)
     return std::unexpected(std::move(error));
   }
 
-  std::error_code file_permissions_error;
-  std::filesystem::permissions(path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-                               std::filesystem::perm_options::replace, file_permissions_error);
-  if (file_permissions_error) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to set session file permissions");
-    error.with_context("path", path.string());
-    error.with_context("cause", file_permissions_error.message());
-    return std::unexpected(std::move(error));
+  if (auto permissions = detail::set_private_session_file_permissions(path); !permissions) {
+    return permissions;
   }
 
   file << *line << '\n';
@@ -135,47 +77,14 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const
     return std::unexpected(std::move(valid_session_id.error()));
   }
 
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(session_path(), status_error);
-  if (status_error || !std::filesystem::exists(status)) {
+  auto inspected = detail::inspect_session_file(session_path(), session_id(), detail::MissingSessionFile::Allow);
+  if (!inspected) {
+    return std::unexpected(std::move(inspected.error()));
+  }
+  if (!*inspected) {
     return std::vector<SessionEntry>{};
   }
-  if (std::filesystem::is_symlink(status)) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "session path must not be a symlink");
-    error.with_context("session_id", session_id());
-    error.with_context("path", session_path().string());
-    return std::unexpected(std::move(error));
-  }
-  if (!std::filesystem::is_regular_file(status)) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session path is not a regular file");
-    error.with_context("session_id", session_id());
-    error.with_context("path", session_path().string());
-    return std::unexpected(std::move(error));
-  }
-
-  std::ifstream file(session_path());
-  if (!file) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to open session file");
-    error.with_context("session_id", session_id());
-    error.with_context("path", session_path().string());
-    return std::unexpected(std::move(error));
-  }
-
-  std::vector<SessionEntry> entries;
-  std::string line;
-  while (true) {
-    auto line_read = read_limited_session_line(file, line);
-    if (!line_read) {
-      return std::unexpected(line_read.error());
-    }
-    if (!*line_read) {
-      break;
-    }
-    auto entry = decode_session_entry_line(line, session_path());
-    if (!entry) return std::unexpected(std::move(entry.error()));
-    entries.push_back(std::move(*entry));
-  }
-  return entries;
+  return detail::read_session_entries(session_path(), session_id());
 }
 
 ava::core::Result<SessionStore> SessionStore::create(std::filesystem::path const& workspace_dir,
@@ -200,25 +109,10 @@ ava::core::Result<SessionStore> SessionStore::open(std::filesystem::path const& 
       .workspace_dir = workspace_dir,
       .session_id = std::move(session_id),
   });
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(store.session_path(), status_error);
-  if (status_error || !std::filesystem::exists(status)) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::NotFound, "session not found");
-    error.with_context("session_id", store.session_id());
-    error.with_context("path", store.session_path().string());
-    return std::unexpected(std::move(error));
-  }
-  if (std::filesystem::is_symlink(status)) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "session path must not be a symlink");
-    error.with_context("session_id", store.session_id());
-    error.with_context("path", store.session_path().string());
-    return std::unexpected(std::move(error));
-  }
-  if (!std::filesystem::is_regular_file(status)) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session path is not a regular file");
-    error.with_context("session_id", store.session_id());
-    error.with_context("path", store.session_path().string());
-    return std::unexpected(std::move(error));
+  auto inspected =
+      detail::inspect_session_file(store.session_path(), store.session_id(), detail::MissingSessionFile::NotFoundError);
+  if (!inspected) {
+    return std::unexpected(std::move(inspected.error()));
   }
 
   return store;
@@ -227,7 +121,7 @@ ava::core::Result<SessionStore> SessionStore::open(std::filesystem::path const& 
 ava::core::Result<std::vector<SessionSummary>> SessionStore::list_sessions(std::filesystem::path const& workspace_dir,
                                                                            std::filesystem::path const& root_dir)
 {
-  auto const directory = root_dir / project_key(workspace_dir);
+  auto const directory = detail::session_project_directory(root_dir, workspace_dir);
   std::error_code exists_error;
   bool const directory_exists = std::filesystem::exists(directory, exists_error);
   if (exists_error) {
@@ -250,10 +144,7 @@ ava::core::Result<std::vector<SessionSummary>> SessionStore::list_sessions(std::
       return std::unexpected(std::move(error));
     }
     auto const& entry = *iter;
-    std::error_code entry_error;
-    auto const entry_status = entry.symlink_status(entry_error);
-    if (entry_error || std::filesystem::is_symlink(entry_status) || !std::filesystem::is_regular_file(entry_status) ||
-        entry.path().extension() != ".jsonl") {
+    if (!detail::is_listable_session_file(entry)) {
       continue;
     }
     auto const session_id = entry.path().stem().string();
@@ -280,16 +171,7 @@ ava::core::Result<std::vector<SessionSummary>> SessionStore::list_sessions(std::
                                        .entry_count = entries->size()});
   }
 
-  std::ranges::sort(summaries, [](SessionSummary const& left, SessionSummary const& right) {
-    std::error_code left_error;
-    std::error_code right_error;
-    auto const left_time = std::filesystem::last_write_time(left.path, left_error);
-    auto const right_time = std::filesystem::last_write_time(right.path, right_error);
-    if (!left_error && !right_error && left_time != right_time) {
-      return left_time > right_time;
-    }
-    return left.session_id > right.session_id;
-  });
+  detail::sort_session_summaries(summaries);
 
   return summaries;
 }

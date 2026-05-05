@@ -133,6 +133,7 @@ add_library(ava_core
   src/ava/session/session_entry_codec.cpp
   src/ava/session/export.cpp
   src/ava/session/session_store.cpp
+  src/ava/session/session_store_support.cpp
   src/ava/session/stats.cpp
   src/ava/session/validation.cpp
   src/ava/session/validation_compaction.cpp
@@ -301,6 +302,7 @@ if(AVA_BUILD_TESTS)
     tests/session_validation_tool_tests.cpp
     tests/session_validation_model_tests.cpp
     tests/session_tests.cpp
+    tests/session_store_support_tests.cpp
     tests/tools_tests.cpp
     tests/tui_composer_tests.cpp
   )
@@ -318,6 +320,7 @@ if(AVA_BUILD_TESTS)
     session_validation_model
     session_validation_permission
     session_validation_tool
+    session_store_support
     core_json_permission
     app_command_classification
     app_command_plugin_support

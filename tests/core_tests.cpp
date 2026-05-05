@@ -10,6 +10,7 @@ void run_session_validation_compaction_tests();
 void run_session_validation_model_tests();
 void run_session_validation_permission_tests();
 void run_session_validation_tool_tests();
+void run_session_store_support_tests();
 void run_core_json_permission_tests();
 void run_app_command_classification_tests();
 void run_app_command_plugin_support_tests();
@@ -57,6 +58,7 @@ constexpr std::array kTestSuites{
     TestSuite{"session_validation_model", run_session_validation_model_tests},
     TestSuite{"session_validation_permission", run_session_validation_permission_tests},
     TestSuite{"session_validation_tool", run_session_validation_tool_tests},
+    TestSuite{"session_store_support", run_session_store_support_tests},
     TestSuite{"core_json_permission", run_core_json_permission_tests},
     TestSuite{"app_command_classification", run_app_command_classification_tests},
     TestSuite{"app_command_plugin_support", run_app_command_plugin_support_tests},

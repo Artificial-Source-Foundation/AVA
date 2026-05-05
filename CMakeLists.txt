@@ -98,6 +98,7 @@ add_library(ava_core
   src/ava/plugin/resources.cpp
   src/ava/plugin/runner.cpp
   src/ava/plugin/runner_io.cpp
+  src/ava/plugin/runner_requests.cpp
   src/ava/plugin/runner_support.cpp
   src/ava/plugin/stream_buffers.cpp
   src/ava/plugin/tool_broker.cpp

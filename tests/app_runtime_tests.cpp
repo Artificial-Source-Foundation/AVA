@@ -1796,10 +1796,17 @@ void test_app_command_dispatcher()
              glob->tool_timeline[1].structured_result_json.find("\"status\":\"success\"") != std::string::npos &&
              glob->tool_timeline[1].total_matches,
          "command dispatcher records running and completed timeline entries with structured result metadata");
+  expect(command_tool_events.size() == 2 && command_tool_events[0].type == ava::app::RuntimeEventType::ToolStart &&
+             command_tool_events[0].tool_name == "glob" && command_tool_events[0].status == "running" &&
+             command_tool_events[0].text == "**/*.cpp" &&
+             command_tool_events[0].call_id == glob->tool_timeline[0].call_id,
+         "command dispatcher emits semantic tool start runtime events");
   expect(command_tool_events.size() == 2 && command_tool_events[1].type == ava::app::RuntimeEventType::ToolResult &&
+             command_tool_events[1].call_id == glob->tool_timeline[1].call_id &&
+             command_tool_events[1].tool_name == "glob" && command_tool_events[1].status == "success" &&
              !command_tool_events[1].tool_structured_result_json.empty() &&
              command_tool_events[1].tool_structured_result_json.find("\"tool\":\"glob\"") != std::string::npos &&
-             command_tool_events[1].total_matches > 0,
+             command_tool_events[1].content_type == "application/json" && command_tool_events[1].total_matches > 0,
          "command dispatcher emits structured tool result runtime events");
 
   std::size_t compact_generator_calls = 0;

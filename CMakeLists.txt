@@ -140,6 +140,7 @@ add_library(ava_app
   src/ava/app/command_plugins.cpp
   src/ava/app/command_session_format.cpp
   src/ava/app/command_sessions.cpp
+  src/ava/app/command_tool_events.cpp
   src/ava/app/command_tools.cpp
   src/ava/app/commands.cpp
   src/ava/app/connect_openai.cpp

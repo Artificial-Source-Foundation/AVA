@@ -11,6 +11,7 @@ void run_app_command_classification_tests();
 void run_tools_tests();
 void run_config_context_auth_oauth_tests();
 void run_app_event_serialization_tests();
+void run_app_rpc_command_tests();
 void run_app_rpc_control_tests();
 void run_app_rpc_query_tests();
 void run_app_rpc_runtime_control_tests();
@@ -42,6 +43,7 @@ constexpr std::array kTestSuites{
     TestSuite{"config_context_auth_oauth", run_config_context_auth_oauth_tests},
     TestSuite{"app_event_serialization", run_app_event_serialization_tests},
     TestSuite{"app_event_bus", run_app_event_bus_tests},
+    TestSuite{"app_rpc_command", run_app_rpc_command_tests},
     TestSuite{"app_rpc_control", run_app_rpc_control_tests},
     TestSuite{"app_rpc_query", run_app_rpc_query_tests},
     TestSuite{"app_rpc_runtime_control", run_app_rpc_runtime_control_tests},

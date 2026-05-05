@@ -1,6 +1,5 @@
 #include "ava/app/rpc_mode.h"
 
-#include <atomic>
 #include <istream>
 #include <mutex>
 #include <optional>
@@ -9,8 +8,8 @@
 #include <utility>
 #include <vector>
 
-#include "ava/app/commands.h"
 #include "ava/app/events.h"
+#include "ava/app/rpc/command_handlers.h"
 #include "ava/app/rpc/control_handlers.h"
 #include "ava/app/rpc/handlers.h"
 #include "ava/app/rpc/output.h"
@@ -216,111 +215,12 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       continue;
     }
 
-    if (command->type == "context" || command->type == "export" || command->type == "compact" ||
-        rpc::is_plugin_rpc_command(command->type) || rpc::is_mcp_rpc_command(command->type)) {
-      bool compact_active_run = false;
-      {
-        std::lock_guard lock(run_state.mutex);
-        if (run_state.active_run) {
-          if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-              !written) {
-            return written;
-          }
-          continue;
-        }
-        if (command->type == "compact") {
-          run_state.active_run = true;
-          run_state.active_request_id = command->id;
-          run_state.cancel_requested.store(false, std::memory_order_relaxed);
-          compact_active_run = true;
-        }
-      }
-      auto clear_compact_active_run = [&] {
-        if (compact_active_run) {
-          rpc::set_active_run(run_state, false);
-          compact_active_run = false;
-        }
-      };
-      auto write_command_error = [&](ava::core::Error error) -> ava::core::VoidResult {
-        clear_compact_active_run();
-        return rpc::write_error(output, command->id, std::move(error));
-      };
-      auto write_command_success = [&](std::string json) -> ava::core::VoidResult {
-        clear_compact_active_run();
-        return rpc::write_success(output, command->id, std::move(json));
-      };
-      std::string slash_command;
-      if (command->type == "context") {
-        slash_command = "/context";
-      } else if (command->type == "export") {
-        slash_command = "/export";
-      } else if (command->type == "compact") {
-        slash_command = "/compact";
-        if (command->instructions) slash_command += " " + *command->instructions;
-      } else if (rpc::is_plugin_rpc_command(command->type)) {
-        auto plugin_command = rpc::plugin_rpc_slash_command(*command);
-        if (!plugin_command) {
-          if (auto written = write_command_error(plugin_command.error()); !written) return written;
-          continue;
-        }
-        slash_command = std::move(*plugin_command);
-      } else {
-        auto mcp_command = rpc::mcp_rpc_slash_command(*command);
-        if (!mcp_command) {
-          if (auto written = write_command_error(mcp_command.error()); !written) return written;
-          continue;
-        }
-        slash_command = std::move(*mcp_command);
-      }
-      std::optional<RuntimeRunOptions> compact_runtime_options;
-      std::optional<rpc::ProviderHandle> compact_provider;
-      if (command->type == "compact") {
-        ava::config::XdgPaths paths;
-        std::string provider_id;
-        {
-          std::lock_guard lock(session_mutex);
-          paths = session.paths;
-          provider_id = session.model.provider_id;
-          auto selected_provider = rpc::provider_for_session_model(session, injected_provider_id, provider);
-          if (!selected_provider) {
-            if (auto written = write_command_error(selected_provider.error()); !written) return written;
-            continue;
-          }
-          compact_provider = std::move(*selected_provider);
-        }
-        auto ensured =
-            rpc::ensure_prompt_runtime_options(paths, provider_id, runtime_options, auth_transport, "compact");
-        if (!ensured) {
-          if (auto written = write_command_error(ensured.error()); !written) return written;
-          continue;
-        }
-        compact_runtime_options = std::move(*ensured);
-      }
-      EventBus event_bus;
-      rpc::subscribe_event_envelope_writer(event_bus, output);
-      std::unique_lock lock(session_mutex, std::defer_lock);
-      if (command->type != "compact") lock.lock();
-      auto summary_generator =
-          command->type == "compact"
-              ? CompactionSummaryGenerator([&](std::vector<ava::session::SessionEntry> const& entries,
-                                               ava::session::CompactionConfig const& config,
-                                               std::string_view instructions, std::size_t estimated_tokens) {
-                  return generate_compaction_summary(session, entries, config, instructions, estimated_tokens,
-                                                     compact_provider->get(), transport, *compact_runtime_options);
-                })
-              : CompactionSummaryGenerator{};
-      auto result = run_command(session, CommandRequest{.command = std::move(slash_command),
-                                                        .event_sink = make_runtime_event_bus_adapter(
-                                                            event_bus, rpc::rpc_event_context(command->id)),
-                                                        .permission_resolver = runtime_options.permission_resolver,
-                                                        .compaction_summary_generator = std::move(summary_generator),
-                                                        .session_mutex = &session_mutex,
-                                                        .propagate_compaction_errors = command->type == "compact"});
-      if (!result) {
-        if (auto written = write_command_error(result.error()); !written) return written;
-        continue;
-      }
-      if (auto written = write_command_success(rpc::command_result_json(*result)); !written) return written;
+    if (rpc::is_command_bridge_command(command->type)) {
+      if (auto written =
+              rpc::handle_command_bridge_command(output, session, session_mutex, run_state, *command, runtime_options,
+                                                 provider, transport, auth_transport, injected_provider_id);
+          !written)
+        return written;
       continue;
     }
 

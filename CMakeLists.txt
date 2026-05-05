@@ -185,6 +185,7 @@ add_library(ava_app
   src/ava/app/plugin_event_hooks.cpp
   src/ava/app/print_mode.cpp
   src/ava/app/reasoning_controls.cpp
+  src/ava/app/rpc/command_handlers.cpp
   src/ava/app/rpc/handlers.cpp
   src/ava/app/rpc/control_handlers.cpp
   src/ava/app/rpc/output.cpp
@@ -243,6 +244,7 @@ if(AVA_BUILD_TESTS)
 
   add_executable(ava_tests
     tests/agent_tool_dispatcher_tests.cpp
+    tests/app_rpc_command_tests.cpp
     tests/app_rpc_control_tests.cpp
     tests/app_rpc_query_tests.cpp
     tests/app_rpc_runtime_control_tests.cpp
@@ -278,6 +280,7 @@ if(AVA_BUILD_TESTS)
     config_context_auth_oauth
     app_event_serialization
     app_event_bus
+    app_rpc_command
     app_rpc_control
     app_rpc_query
     app_rpc_runtime_control

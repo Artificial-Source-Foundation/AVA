@@ -8,6 +8,7 @@
 #include "ava/plugin/enablement.h"
 #include "ava/plugin/manifest.h"
 #include "ava/plugin/runner.h"
+#include "ava/plugin/runner_protocol.h"
 #include "ava/plugin/tool_broker.h"
 
 #include "ava/permissions/permission.h"
@@ -150,6 +151,15 @@ ava::plugin::PluginRunnerOptions runner_options(std::filesystem::path const& wor
   return options;
 }
 
+std::string nested_arrays_json(std::size_t depth)
+{
+  std::string text;
+  text.reserve(depth * 2);
+  for (std::size_t index = 0; index < depth; ++index) text += '[';
+  for (std::size_t index = 0; index < depth; ++index) text += ']';
+  return text;
+}
+
 void test_plugin_manifest_parsing()
 {
   auto parsed = ava::plugin::parse_plugin_manifest(valid_manifest_json(), "/tmp/plugin/plugin.json");
@@ -209,6 +219,49 @@ void test_plugin_manifest_parsing()
       {});
   expect(!bad_resource_path && bad_resource_path.error().message().find("safe relative path") != std::string::npos,
          "plugin manifest rejects prompt and skill paths that escape the plugin directory");
+}
+
+void test_plugin_runner_protocol_parsing()
+{
+  auto initialized = ava::plugin::parse_initialized_response(
+      "{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava.plugin.v1\",\"plugin_version\":\"0.1.0\","
+      "\"contributions\":{\"tools\":[],\"commands\":[]}}");
+  expect(initialized && initialized->plugin_version == "0.1.0" &&
+             initialized->contributions_json.find("\"tools\":[]") != std::string::npos,
+         "plugin runner protocol parses initialization responses");
+
+  auto unsupported = ava::plugin::parse_initialized_response(
+      "{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"wrong\",\"plugin_version\":\"0.1.0\","
+      "\"contributions\":{}}");
+  expect(!unsupported, "plugin runner protocol rejects unsupported API versions");
+
+  auto tool_result = ava::plugin::parse_tool_result_response(
+      "{\"id\":\"ava_tool_call_1\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"done\","
+      "\"metadata\":{\"count\":1}}",
+      "ava_tool_call_1");
+  expect(tool_result && tool_result->ok && tool_result->content == "done" &&
+             tool_result->metadata_json.find("\"count\":1") != std::string::npos,
+         "plugin runner protocol parses tool result metadata");
+
+  auto mismatched_tool_result = ava::plugin::parse_tool_result_response(
+      "{\"id\":\"ava_tool_other\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"done\"}", "ava_tool_call_1");
+  expect(!mismatched_tool_result, "plugin runner protocol rejects mismatched response IDs");
+
+  auto command_result = ava::plugin::parse_command_result_response(
+      "{\"id\":\"ava_command_1\",\"type\":\"command.result\",\"ok\":false,\"content\":\"failed\"}", "ava_command_1");
+  expect(command_result && !command_result->ok && command_result->content == "failed",
+         "plugin runner protocol parses command failures as structured results");
+
+  auto event_result = ava::plugin::parse_event_observed_response(
+      "{\"id\":\"ava_event_1\",\"type\":\"event.observed\",\"ok\":true}", "ava_event_1");
+  expect(event_result && event_result->ok && event_result->content.empty(),
+         "plugin runner protocol treats missing event content as empty text");
+
+  auto too_deep = ava::plugin::parse_tool_result_response(
+      "{\"id\":\"ava_tool_deep\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"x\",\"metadata\":" +
+          nested_arrays_json(130) + "}",
+      "ava_tool_deep");
+  expect(!too_deep, "plugin runner protocol rejects excessively deep JSON records");
 }
 
 void test_plugin_discovery()
@@ -1033,6 +1086,7 @@ void test_plugin_tool_registry_skips_name_collisions()
 void run_plugin_tests()
 {
   test_plugin_manifest_parsing();
+  test_plugin_runner_protocol_parsing();
   test_plugin_discovery();
   test_plugin_enablement();
   test_plugin_runner_initializes_and_shuts_down();

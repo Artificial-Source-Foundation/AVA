@@ -75,6 +75,7 @@ add_library(ava_core
   src/ava/plugin/enablement.cpp
   src/ava/plugin/manifest.cpp
   src/ava/plugin/runner.cpp
+  src/ava/plugin/runner_protocol.cpp
   src/ava/plugin/tool_broker.cpp
   src/ava/provider/curl_transport.cpp
   src/ava/provider/anthropic_provider.cpp

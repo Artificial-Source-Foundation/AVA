@@ -85,6 +85,7 @@ add_library(ava_core
   src/ava/mcp/process_support.cpp
   src/ava/mcp/protocol.cpp
   src/ava/mcp/stdio_client.cpp
+  src/ava/mcp/stdio_client_io.cpp
   src/ava/mcp/stdio_support.cpp
   src/ava/mcp/tool_broker.cpp
   src/ava/permissions/command_policy.cpp

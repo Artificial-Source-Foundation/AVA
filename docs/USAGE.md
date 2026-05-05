@@ -9,7 +9,7 @@ ava login anthropic
 ava auth login moonshot --api-key
 ava connect openai
 ava connect openai --headless-oauth
-ava connect kimi --oauth-token
+ava connect kimi --api-key-env KIMI_API_KEY
 printf '%s\n' "$OPENAI_API_KEY" | ava connect openai --api-key-stdin
 printf '%s\n' "$ANTHROPIC_API_KEY" | ava connect anthropic --api-key-stdin
 ava connect moonshot --api-key-env MOONSHOT_API_KEY
@@ -59,7 +59,7 @@ Use comma-separated strings for multiple keys. Current named actions include com
 
 The slash palette opens above the composer while typing `/`. Use arrows to move focus, Tab or Enter to insert the selected command or argument suggestion, and Esc to dismiss without clearing the draft. The selected item is visually highlighted with a `›` marker. Disabled planned commands remain visible with a reason and are not submitted as model prompts. Argument suggestions are only shown from backend/session data sources, such as configured models, resumable sessions, loaded context sources, configured MCP servers, and plugin metadata.
 
-`/connect` opens a centered provider login modal. Type to search providers, use arrows to move selection, press Enter to confirm, then choose a login method. OpenAI shows ChatGPT Pro/Plus browser OAuth, headless OAuth, API key, and bearer-token options; OAuth confirmation modals keep the URL and continue shortcut visible. `/login` is an alias.
+`/connect` opens a centered provider login modal. Type to search providers, use arrows to move selection, press Enter to confirm, then choose a login method. OpenAI shows ChatGPT Pro/Plus browser OAuth, headless OAuth, and API key options; OAuth waiting modals keep the URL and `C` copy shortcut visible, and browser OAuth opens the default browser automatically. `/login` is an alias.
 
 ## Permission Prompts
 
@@ -80,7 +80,7 @@ Interactive permission requests replace the composer with an approval dock. The 
 - `/mode`: toggle build/plan mode
 - `/details`: toggle tool detail expansion in the TUI
 - `/thinking`: toggle inline thinking block visibility in the TUI without changing provider reasoning mode
-- `/connect [provider] [api-key|oauth|browser-oauth|headless-oauth]`: open a provider login modal and store a credential or start OpenAI OAuth; `/login` is an alias
+- `/connect`: open provider and login method modals; `/login` is an alias
 - `/models [query|provider/model]`: list configured models and provider/model capabilities; `/model` is an alias
 - `/sessions [query|id]`: list sessions for this workspace, optionally filtered by session id or timestamp
 - `/context [query|source]`: list loaded context sources, optionally filtered by path or source type
@@ -121,6 +121,7 @@ Headless modes are fail-closed for permission prompts unless an explicit support
 ```sh
 ava --print "inspect this project" --allow read-only
 ava --print "read the README" --allow-tool read_file
+ava --print "list and search files" --allow-tool list_directory,glob,grep
 ava --print "fetch release notes" --allow-tool webfetch
 ava --rpc --allow read-only
 ```

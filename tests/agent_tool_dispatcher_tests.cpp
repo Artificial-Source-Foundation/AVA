@@ -90,6 +90,12 @@ void test_tool_dispatcher()
     std::ofstream file(workspace / "note.txt", std::ios::binary | std::ios::trunc);
     file << "hello dispatcher";
   }
+  {
+    std::ofstream file(workspace / "lines.txt", std::ios::binary | std::ios::trunc);
+    file << "one\n"
+            "Two\n"
+            "three\n";
+  }
 
   ava::agent::ToolDispatcher const dispatcher(
       ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build});
@@ -97,6 +103,44 @@ void test_tool_dispatcher()
       .id = "call_read", .name = "read_file", .arguments_json = "{\"path\":\"note.txt\",\"max_bytes\":5}"});
   expect(read && read->success && read->result_text.find("hello") != std::string::npos,
          "tool dispatcher maps read_file provider call to file tool");
+  auto const read_structured = read ? ava::agent::serialize_tool_result_payload_json(*read) : std::string{};
+  expect(read && read_structured.find("\"changed_paths\"") == std::string::npos,
+         "tool dispatcher keeps read-only file results out of changed_paths");
+  auto read_range = dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_read_range",
+                                   .name = "read_file",
+                                   .arguments_json = "{\"path\":\"lines.txt\",\"offset\":2,\"limit\":1}"});
+  expect(read_range && read_range->success && read_range->result_text.find("Two\\n") != std::string::npos &&
+             read_range->result_text.find("\"start_line\":2") != std::string::npos &&
+             read_range->result_text.find("\"next_offset\":3") != std::string::npos,
+         "tool dispatcher exposes read_file line offset and continuation metadata");
+
+  auto listed = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_list_directory", .name = "list_directory", .arguments_json = "{\"path\":\".\",\"max_entries\":20}"});
+  auto const listed_structured = listed ? ava::agent::serialize_tool_result_payload_json(*listed) : std::string{};
+  expect(listed && listed->success && listed->result_text.find("\"name\":\"note.txt\"") != std::string::npos &&
+             listed->result_text.find("\"type\":\"file\"") != std::string::npos,
+         "tool dispatcher maps list_directory provider call to directory listing tool");
+  expect(listed && listed_structured.find("\"changed_paths\"") == std::string::npos,
+         "tool dispatcher keeps directory listings out of changed_paths");
+
+  auto grep_case_insensitive = dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_grep_ci",
+                                   .name = "grep",
+                                   .arguments_json = "{\"pattern\":\"HELLO\",\"include\":\"note.txt\","
+                                                     "\"case_insensitive\":true}"});
+  expect(grep_case_insensitive && grep_case_insensitive->success &&
+             grep_case_insensitive->result_text.find("\"case_insensitive\":true") != std::string::npos &&
+             grep_case_insensitive->result_text.find("hello dispatcher") != std::string::npos,
+         "tool dispatcher passes case_insensitive grep through to search tools");
+  auto grep_regex = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_grep_regex",
+      .name = "grep",
+      .arguments_json = "{\"pattern\":\"hello (dispatcher|missing)\",\"include\":\"note.txt\","
+                        "\"literal\":false}"});
+  expect(grep_regex && grep_regex->success && grep_regex->result_text.find("\"literal\":false") != std::string::npos &&
+             grep_regex->result_text.find("hello dispatcher") != std::string::npos,
+         "tool dispatcher passes regex grep through to search tools");
 
   auto control_call_id = dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = std::string("call_") + '\x01' + "bad", .name = "read_file", .arguments_json = "{\"path\":\"note.txt\"}"});
@@ -186,6 +230,37 @@ void test_tool_dispatcher()
   expect(bad_webfetch && !bad_webfetch->success && bad_webfetch->result_text.find("http") != std::string::npos,
          "tool dispatcher rejects unsupported webfetch URL schemes before network access");
 
+  auto const skill_root = root / "project-skills";
+  std::filesystem::create_directories(skill_root / "debugging");
+  {
+    std::ofstream file(skill_root / "debugging" / "SKILL.md", std::ios::binary | std::ios::trunc);
+    file << "---\nname: debugging\ndescription: Debug failures\n---\nUse systematic debugging.\n";
+  }
+  int skill_permission_prompts = 0;
+  ava::agent::ToolDispatcher const skill_dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&skill_permission_prompts](ava::permissions::PermissionPrompt const& prompt)
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++skill_permission_prompts;
+        expect(prompt.operation == ava::permissions::Operation::SkillLoad, "skill tool requests skill-load permission");
+        expect(prompt.command == "debugging", "skill permission prompt carries skill name");
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .plugin_global_plugins_dir = root / "no-global-plugins",
+      .plugin_project_plugins_dir = root / "no-project-plugins",
+      .mcp_global_config_file = root / "no-global-mcp.json",
+      .mcp_project_config_file = root / "no-project-mcp.json",
+      .skill_global_dirs = {root / "no-global-skills"},
+      .skill_project_dirs = {skill_root}});
+  auto loaded_skill = skill_dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_skill", .name = "skill", .arguments_json = "{\"name\":\"debugging\"}"});
+  expect(loaded_skill && loaded_skill->success &&
+             loaded_skill->result_text.find("Use systematic debugging") != std::string::npos &&
+             loaded_skill->result_text.find("Base directory for this skill") != std::string::npos &&
+             skill_permission_prompts == 1,
+         "tool dispatcher exposes local SKILL.md content through the skill tool");
+
   ava::agent::ToolDispatcher const canceled_dispatcher(ava::tools::ToolContext{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
@@ -236,9 +311,9 @@ void test_tool_dispatcher()
       .name = "read_file",
       .arguments_json = "{\"path\":\"" + ava::core::json::escape(canceled_outside_path.generic_string()) + "\"}"});
   expect(canceled_outside_read && !canceled_outside_read->success &&
-              canceled_outside_read->payload.status == ava::agent::ToolResultStatus::Canceled &&
-              canceled_permission_prompts == 0,
-          "tool dispatcher cancellation prevents permission prompts for file tools");
+             canceled_outside_read->payload.status == ava::agent::ToolResultStatus::Canceled &&
+             canceled_permission_prompts == 0,
+         "tool dispatcher cancellation prevents permission prompts for file tools");
 
   auto const linked_permission_path = root / "dispatcher-linked-permission.txt";
   {
@@ -255,17 +330,15 @@ void test_tool_dispatcher()
         linked_prompt_request_id = prompt.permission_request_id;
         return ava::permissions::PermissionResolution::Allow;
       },
-      .permission_audit_sink = [&linked_permission_audits](ava::tools::PermissionAuditEvent const& event)
-          -> ava::core::VoidResult {
+      .permission_audit_sink =
+          [&linked_permission_audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
         linked_permission_audits.push_back(event);
         return {};
       }});
-  auto linked_permission_read = linked_permission_dispatcher.dispatch(
-      ava::agent::ProviderToolCall{.id = "call_linked_permission_read",
-                                   .name = "read_file",
-                                   .arguments_json = "{\"path\":\"" +
-                                                     ava::core::json::escape(linked_permission_path.generic_string()) +
-                                                     "\"}"});
+  auto linked_permission_read = linked_permission_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_linked_permission_read",
+      .name = "read_file",
+      .arguments_json = "{\"path\":\"" + ava::core::json::escape(linked_permission_path.generic_string()) + "\"}"});
   auto const linked_permission_structured =
       linked_permission_read ? ava::agent::serialize_tool_result_payload_json(*linked_permission_read) : std::string{};
   auto const linked_permission_ids =
@@ -944,10 +1017,16 @@ void test_tool_dispatcher()
   bool has_apply_patch = false;
   bool has_question = false;
   bool has_webfetch = false;
+  bool has_websearch = false;
+  bool has_skill = false;
+  bool has_list_directory = false;
   bool has_lsp_diagnostics = false;
   bool lsp_schema_exposes_command = false;
+  bool read_has_offset = false;
   bool glob_has_no_ignore = false;
   bool grep_has_no_ignore = false;
+  bool grep_has_literal = false;
+  bool grep_has_case_insensitive = false;
   bool question_has_allow_multiple = false;
   auto const default_has_lsp_schema = std::ranges::any_of(default_schemas, [](std::string const& schema) {
     return schema.find("\"name\":\"lsp_diagnostics\"") != std::string::npos;
@@ -967,7 +1046,13 @@ void test_tool_dispatcher()
            "tool schema export is derived from built-in metadata registry");
     auto const schema = std::string(tool.schema_json);
     has_apply_patch = has_apply_patch || schema.find("apply_patch") != std::string::npos;
+    has_list_directory = has_list_directory || schema.find("\"name\":\"list_directory\"") != std::string::npos;
     has_webfetch = has_webfetch || schema.find("webfetch") != std::string::npos;
+    has_websearch = has_websearch || schema.find("\"name\":\"websearch\"") != std::string::npos;
+    has_skill = has_skill || schema.find("\"name\":\"skill\"") != std::string::npos;
+    read_has_offset = read_has_offset ||
+                      (schema.find("\"name\":\"read_file\"") != std::string::npos &&
+                       schema.find("\"offset\"") != std::string::npos && schema.find("\"limit\"") != std::string::npos);
     bool const is_lsp_schema = schema.find("\"name\":\"lsp_diagnostics\"") != std::string::npos;
     has_lsp_diagnostics = has_lsp_diagnostics || is_lsp_schema;
     lsp_schema_exposes_command =
@@ -977,13 +1062,18 @@ void test_tool_dispatcher()
                                                 schema.find("no_ignore") != std::string::npos);
     grep_has_no_ignore = grep_has_no_ignore || (schema.find("\"name\":\"grep\"") != std::string::npos &&
                                                 schema.find("no_ignore") != std::string::npos);
+    grep_has_literal = grep_has_literal || (schema.find("\"name\":\"grep\"") != std::string::npos &&
+                                            schema.find("\"literal\"") != std::string::npos);
+    grep_has_case_insensitive = grep_has_case_insensitive || (schema.find("\"name\":\"grep\"") != std::string::npos &&
+                                                              schema.find("\"case_insensitive\"") != std::string::npos);
     bool const is_question_schema = schema.find("\"name\":\"question\"") != std::string::npos;
     has_question = has_question || is_question_schema;
     question_has_allow_multiple =
         question_has_allow_multiple || (is_question_schema && schema.find("allow_multiple") != std::string::npos);
   }
   expect(!schemas.empty() && schemas[0].find("read_file") != std::string::npos && has_apply_patch && has_question &&
-             has_webfetch && has_lsp_diagnostics,
+             has_webfetch && has_websearch && has_skill && has_list_directory && has_lsp_diagnostics &&
+             read_has_offset && grep_has_literal && grep_has_case_insensitive,
          "tool dispatcher exposes provider tool schemas");
   expect(!lsp_schema_exposes_command, "lsp_diagnostics schema keeps server command out of provider control");
   expect(!glob_has_no_ignore && !grep_has_no_ignore, "search tool schemas keep no_ignore out of provider control");

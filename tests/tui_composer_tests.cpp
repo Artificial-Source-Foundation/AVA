@@ -189,19 +189,39 @@ void test_tui_composer_rendering_and_input()
       ava::tui::handle_question_prompt_input(single_question, ava::tui::InputEvent{.key = ava::tui::Key::Backspace});
   expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && question_input.custom_text.empty(),
          "question prompt backspace edits custom text");
+  auto secret_question = ava::tui::QuestionPromptView{.header = "Connect",
+                                                      .question = "Paste API key",
+                                                      .options = {},
+                                                      .multiple = false,
+                                                      .allow_custom = true,
+                                                      .secret = true,
+                                                      .selected_option_index = 0,
+                                                      .custom_text = ""};
+  question_input =
+      ava::tui::handle_question_prompt_input(secret_question, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && question_input.custom_text.empty(),
+         "question prompt enter keeps an empty single custom answer open");
 
-  auto continue_question = ava::tui::QuestionPromptView{
+  auto copy_question = ava::tui::QuestionPromptView{
       .header = "Connect",
       .question = "Open URL",
-      .options = {ava::tui::QuestionPromptOptionView{.value = "continue", .label = "C Continue"}},
+      .options = {ava::tui::QuestionPromptOptionView{.value = "done", .label = "Done"},
+                  ava::tui::QuestionPromptOptionView{.value = "copy:https://auth.openai.com", .label = "C Copy"}},
       .multiple = false,
       .allow_custom = false,
       .selected_option_index = 0,
       .custom_text = ""};
   question_input = ava::tui::handle_question_prompt_input(
-      continue_question, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'c'});
+      copy_question, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'c'});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Copy &&
+             question_input.copy_text == "https://auth.openai.com" &&
+             std::ranges::none_of(question_input.options,
+                                  [](ava::tui::QuestionPromptOptionView const& option) { return option.selected; }),
+         "question prompt copy shortcut copies without resolving a single-select option");
+  question_input =
+      ava::tui::handle_question_prompt_input(copy_question, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
   expect(question_input.action == ava::tui::QuestionPromptInputAction::Resolve && question_input.options[0].selected,
-         "question prompt letter shortcut resolves a single-select option");
+         "question prompt enter confirms the selected non-copy option");
 
   auto multi_question =
       ava::tui::QuestionPromptView{.header = "Choose",
@@ -809,6 +829,13 @@ void test_tui_composer_rendering_and_input()
          "tui slash selection inserts explicit backend-provided argument completion text");
   expect(ava::tui::slash_command_selection_text("/mcp inspect f", argument_slash_commands, 0) == "/mcp inspect fs",
          "tui argument completion preserves required previous arguments for nested command forms");
+  std::vector<ava::tui::SlashCommandItem> const connect_slash_commands = {
+      ava::tui::SlashCommandItem{.command = "/connect", .description = "Connect a provider", .category = "General"}};
+  expect(!ava::tui::slash_palette_visible("/connect", connect_slash_commands) &&
+             !ava::tui::slash_palette_visible("/connect ", connect_slash_commands) &&
+             !ava::tui::slash_palette_visible("/connect openai", connect_slash_commands) &&
+             ava::tui::filter_slash_commands("/connect openai ", connect_slash_commands).empty(),
+         "tui slash palette lets /connect submit directly so provider and method choices stay in the centered modal");
   auto const argument_palette =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                            .provider = "openai",
@@ -1688,13 +1715,14 @@ void test_tui_composer_rendering_and_input()
       .transcript = {},
       .question_prompt =
           ava::tui::QuestionPromptView{
-              .header = "Connect OpenAI",
-              .question = "Open this URL to connect AVA to OpenAI:\n"
-                          "https://auth.openai.com/oauth/authorize?client_id="
+              .header = "ChatGPT Pro/Plus (browser)",
+              .question = "https://auth.openai.com/oauth/authorize?client_id="
                           "app_EMoamEEZ73f0CkXaXp7hrann&redirect_uri=http%3A%2F%2Flocalhost%3A1455"
                           "%2Fauth%2Fcallback&code_challenge=longchallengevalue&state=state\n"
-                          "\nAVA is listening on http://localhost:1455/auth/callback.",
-              .options = {ava::tui::QuestionPromptOptionView{.value = "continue", .label = "C Continue"}},
+                          "\nComplete authorization in your browser. This window will close automatically."
+                          "\n\nWaiting for authorization...",
+              .options = {ava::tui::QuestionPromptOptionView{.value = "copy:https://auth.openai.com/oauth/authorize",
+                                                             .label = "C Copy"}},
               .multiple = false,
               .allow_custom = false,
               .secret = false,
@@ -1710,11 +1738,61 @@ void test_tui_composer_rendering_and_input()
                              }) &&
              std::ranges::any_of(
                  oauth_modal_frame,
-                 [](std::string const& line) { return strip_sgr(line).find("C Continue") != std::string::npos; }) &&
+                 [](std::string const& line) { return strip_sgr(line).find("C Copy") != std::string::npos; }) &&
+             std::ranges::any_of(oauth_modal_frame,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("Waiting for authorization") != std::string::npos;
+                                 }) &&
              std::ranges::any_of(
                  oauth_modal_frame,
-                 [](std::string const& line) { return strip_sgr(line).find("Letter shortcut") != std::string::npos; }),
-         "tui renders OpenAI OAuth modal with wrapped link and C shortcut");
+                 [](std::string const& line) { return strip_sgr(line).find("C copy") != std::string::npos; }) &&
+             std::ranges::none_of(
+                 oauth_modal_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("Enter confirm") != std::string::npos; }),
+         "tui renders OpenAI OAuth modal with opencode-style waiting and C copy shortcut");
+
+  auto const sidebar_modal_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "question required",
+      .transcript = {},
+      .question_prompt = ava::tui::QuestionPromptView{.header = "Connect OpenAI",
+                                                      .question = "Choose login method",
+                                                      .options = {ava::tui::QuestionPromptOptionView{
+                                                          .value = "api_key", .label = "A OpenAI API key"}},
+                                                      .multiple = false,
+                                                      .allow_custom = false,
+                                                      .secret = false,
+                                                      .modal = true,
+                                                      .searchable = false,
+                                                      .selected_option_index = 0,
+                                                      .custom_text = ""},
+      .width = 128,
+      .height = 22,
+      .sidebar = ava::tui::SidebarSnapshot{.session_id = "session_test",
+                                           .mode = "build",
+                                           .provider = "openai",
+                                           .model = "gpt-5.5",
+                                           .workspace = "/workspace",
+                                           .git_branch = "develop",
+                                           .version = "0.32",
+                                           .context_source_count = 1}});
+  expect(std::ranges::any_of(sidebar_modal_frame,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("Connect OpenAI") != std::string::npos &&
+                                      visible.find("│") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(
+                 sidebar_modal_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("Modified Files") != std::string::npos; }) &&
+             std::ranges::any_of(
+                 sidebar_modal_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("Session") != std::string::npos; }),
+         "tui modal overlays the main pane without hiding the sidebar");
 
   auto searchable_question = ava::tui::QuestionPromptView{
       .header = "Connect a provider",

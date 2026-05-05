@@ -35,6 +35,7 @@
 #include "ava/provider/openai_provider.h"
 
 #include "ava/context/context_loader.h"
+#include "ava/context/skill_loader.h"
 
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -255,6 +256,78 @@ void test_context_loader()
   }
 }
 
+void test_skill_loader()
+{
+  auto const root = temp_root() / "skills";
+  auto const global = root / "global" / "skills";
+  auto const project = root / "workspace" / ".ava" / "skills";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  std::filesystem::create_directories(global / "release");
+  std::filesystem::create_directories(project / "release");
+  std::filesystem::create_directories(project / "debugging" / "scripts");
+
+  {
+    std::ofstream file(global / "release" / "SKILL.md", std::ios::binary | std::ios::trunc);
+    file << "---\nname: release\ndescription: Global release workflow\n---\nGlobal body\n";
+  }
+  {
+    std::ofstream file(project / "release" / "SKILL.md", std::ios::binary | std::ios::trunc);
+    file << "---\nname: release\ndescription: Project release workflow\n---\nProject body\n";
+  }
+  {
+    std::ofstream file(project / "debugging" / "SKILL.md", std::ios::binary | std::ios::trunc);
+    file << "---\nname: debugging\ndescription: Debug failures systematically\n---\nDebug body\n";
+  }
+  {
+    std::ofstream file(project / "debugging" / "scripts" / "triage.sh", std::ios::binary | std::ios::trunc);
+    file << "echo triage\n";
+  }
+
+  auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{.workspace_root = root / "workspace",
+                                                                         .global_skill_dirs = {global},
+                                                                         .project_skill_dirs = {project},
+                                                                         .max_file_bytes = 1024});
+  expect(loaded.skills.size() == 2, "skill loader discovers global and project SKILL.md files");
+  auto const release = std::ranges::find_if(
+      loaded.skills, [](ava::context::LoadedSkill const& skill) { return skill.name == "release"; });
+  expect(release != loaded.skills.end() && release->description == "Project release workflow" &&
+             release->content.find("Project body") != std::string::npos &&
+             release->source_type == ava::context::SkillSourceType::Project,
+         "project skills override global skills with the same name");
+  auto const prompt = ava::context::format_available_skills_for_prompt(loaded.skills);
+  expect(prompt.find("<available_skills>") != std::string::npos &&
+             prompt.find("<name>debugging</name>") != std::string::npos,
+         "skill prompt formatting exposes names, descriptions, and locations");
+
+  auto const debugging = std::ranges::find_if(
+      loaded.skills, [](ava::context::LoadedSkill const& skill) { return skill.name == "debugging"; });
+  expect(debugging != loaded.skills.end(), "debugging skill is discovered");
+  if (debugging != loaded.skills.end()) {
+    auto sampled = ava::context::sample_skill_files(debugging->directory);
+    auto const tool_content = ava::context::format_loaded_skill_for_tool(*debugging, sampled);
+    expect(tool_content.find("Debug body") != std::string::npos &&
+               tool_content.find("Relative paths in this skill") != std::string::npos &&
+               tool_content.find("triage.sh") != std::string::npos,
+           "loaded skill tool content includes body, base-dir guidance, and sampled files");
+  }
+
+  std::filesystem::create_directories(project / "invalid");
+  {
+    std::ofstream file(project / "invalid" / "SKILL.md", std::ios::binary | std::ios::trunc);
+    file << "---\nname: Bad Name\ndescription: Invalid\n---\n";
+  }
+  loaded = ava::context::load_skills(ava::context::SkillLoadOptions{.workspace_root = root / "workspace",
+                                                                    .global_skill_dirs = {},
+                                                                    .project_skill_dirs = {project},
+                                                                    .max_file_bytes = 1024});
+  expect(std::ranges::any_of(loaded.diagnostics,
+                             [](ava::context::SkillDiagnostic const& diagnostic) {
+                               return diagnostic.message.find("skill name is invalid") != std::string::npos;
+                             }),
+         "skill loader reports invalid skill files without blocking valid skills");
+}
+
 void test_auth_record_helpers()
 {
   expect(ava::config::is_valid_provider_id("openai") && ava::config::is_valid_provider_id("custom-provider_1"),
@@ -272,15 +345,15 @@ void test_auth_record_helpers()
              api_object->find("token\\\"with-quote") != std::string::npos,
          "auth record serializes provider API key credential object with JSON escaping");
 
-  auto const oauth_object =
+  auto const unsupported_provider_credential =
       ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "custom",
-                                                                                   .access_token = "oauth-token",
-                                                                                   .credential_type = "oauth",
+                                                                                   .access_token = "token",
+                                                                                   .credential_type = "token",
                                                                                    .account_id = "acct_123",
                                                                                    .source = "test"});
-  expect(oauth_object && oauth_object->find("\"type\": \"oauth\"") != std::string::npos &&
-             oauth_object->find("\"account_id\": \"acct_123\"") != std::string::npos,
-         "auth record serializes provider OAuth credential object with account metadata");
+  expect(!unsupported_provider_credential &&
+             unsupported_provider_credential.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "auth record rejects non-OpenAI provider credential types other than API key");
 
   auto const bad_provider =
       ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "bad provider",
@@ -436,19 +509,19 @@ void test_auth_load_and_store()
              (*stored_anthropic_api_credential)->credential_type == "api_key",
          "generic provider API key credential loads after storing");
 
-  auto stored_anthropic_oauth = ava::config::store_provider_credential(
+  auto stored_anthropic_unsupported = ava::config::store_provider_credential(
       paths, ava::config::ProviderCredential{.provider_id = "anthropic",
-                                             .access_token = "stored-anthropic-oauth-token",
-                                             .credential_type = "oauth",
+                                             .access_token = "stored-anthropic-token",
+                                             .credential_type = "token",
                                              .account_id = "",
                                              .source = "test"});
-  expect(stored_anthropic_oauth.has_value(), "generic provider OAuth bearer credential stores to auth file");
-  auto stored_anthropic_oauth_credential =
+  expect(!stored_anthropic_unsupported, "generic provider credential store rejects non-API-key credentials");
+  auto stored_anthropic_after_unsupported =
       ava::config::provider_credential_for_request(paths, "anthropic", generic_store_transport);
-  expect(stored_anthropic_oauth_credential && stored_anthropic_oauth_credential->has_value() &&
-             (*stored_anthropic_oauth_credential)->access_token == "stored-anthropic-oauth-token" &&
-             (*stored_anthropic_oauth_credential)->credential_type == "oauth",
-         "generic provider OAuth bearer credential replaces the prior provider API key");
+  expect(stored_anthropic_after_unsupported && stored_anthropic_after_unsupported->has_value() &&
+             (*stored_anthropic_after_unsupported)->access_token == "stored-anthropic-api-key" &&
+             (*stored_anthropic_after_unsupported)->credential_type == "api_key",
+         "generic provider credential store preserves API key after unsupported credential attempt");
 
   auto stored_moonshot_api = ava::config::store_provider_credential(
       paths, ava::config::ProviderCredential{.provider_id = "moonshot",
@@ -475,10 +548,10 @@ void test_auth_load_and_store()
   loaded_api = ava::config::load_openai_credential(paths);
   expect(loaded_api && loaded_api->has_value() && (*loaded_api)->access_token == "rotated-openai-api-key",
          "OpenAI credential update loads after provider credential merge");
-  stored_anthropic_oauth_credential =
+  stored_anthropic_after_unsupported =
       ava::config::provider_credential_for_request(paths, "anthropic", generic_store_transport);
-  expect(stored_anthropic_oauth_credential && stored_anthropic_oauth_credential->has_value() &&
-             (*stored_anthropic_oauth_credential)->access_token == "stored-anthropic-oauth-token",
+  expect(stored_anthropic_after_unsupported && stored_anthropic_after_unsupported->has_value() &&
+             (*stored_anthropic_after_unsupported)->access_token == "stored-anthropic-api-key",
          "OpenAI credential update preserves Anthropic provider credential");
   stored_moonshot_credential = ava::config::provider_credential_for_request(paths, "moonshot", generic_store_transport);
   expect(stored_moonshot_credential && stored_moonshot_credential->has_value() &&
@@ -547,7 +620,7 @@ void test_auth_load_and_store()
   expect(restored_after_malformed_auth.has_value(), "OpenAI credential stores after removing malformed auth file");
 
   expect(!ava::config::parse_openai_credential("{\"openai\":{\"type\":\"oauth\",\"api_key\":\"wrong\"}}"),
-         "OpenAI credential parser rejects typed OAuth without OAuth token");
+         "OpenAI credential parser rejects typed OAuth without access credential");
   expect(!ava::config::parse_openai_credential("{\"openai\":{\"type\":\"api_key\",\"access_token\":\"wrong\"}}"),
          "OpenAI credential parser rejects typed API key without key field");
   expect(!ava::config::parse_openai_credential("{\"openai\":{\"type\":\"unknown\",\"key\":\"wrong\"}}"),
@@ -1092,6 +1165,7 @@ void run_config_context_auth_oauth_tests()
 {
   test_xdg_paths();
   test_context_loader();
+  test_skill_loader();
   test_auth_record_helpers();
   test_auth_load_and_store();
   test_openai_oauth_helpers();

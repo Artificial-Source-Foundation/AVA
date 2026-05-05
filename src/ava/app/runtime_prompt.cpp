@@ -5,6 +5,8 @@
 #include "ava/app/runtime_reasoning.h"
 #include "ava/app/runtime_retry.h"
 
+#include "ava/context/skill_loader.h"
+
 #include <optional>
 #include <utility>
 
@@ -33,7 +35,10 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::Xdg
         ContextSourceMetadata{.path = file.path, .source_type = file.source_type, .byte_count = file.byte_count});
   }
 
-  auto system_prompt = prompt->text + ava::context::format_context_for_prompt(*loaded_context);
+  auto loaded_skills = ava::context::load_skills(ava::context::SkillLoadOptions{.workspace_root = workspace_dir});
+
+  auto system_prompt = prompt->text + ava::context::format_context_for_prompt(*loaded_context) +
+                       ava::context::format_available_skills_for_prompt(loaded_skills.skills);
   return RuntimePromptState{.mode = mode,
                             .prompt = std::move(*prompt),
                             .context_sources = std::move(context_sources),

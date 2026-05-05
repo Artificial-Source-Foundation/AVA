@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <climits>
 #include <condition_variable>
@@ -28,6 +29,7 @@
 #include <vector>
 
 #include <curses.h>
+#include <unistd.h>
 
 namespace ava::tui {
 namespace {
@@ -36,6 +38,8 @@ constexpr std::size_t kMaxBracketedPasteBytes = 1024 * 1024;
 constexpr std::size_t kMaxEscapeSequenceBytes = 16 * 1024;
 constexpr std::size_t kMaxTranscriptItems = 1000;
 constexpr auto kSpinnerFrameDelay = std::chrono::milliseconds(80);
+constexpr std::string_view kCopyOptionPrefix = "copy:";
+constexpr std::string_view kBase64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 class SignalBlockGuard {
  public:
@@ -234,6 +238,83 @@ std::optional<std::string> encode_wide_character(wchar_t character)
   auto const length = std::wcrtomb(buffer, character, &state);
   if (length == static_cast<std::size_t>(-1)) return std::nullopt;
   return std::string(buffer, length);
+}
+
+std::string base64_encode(std::string_view text)
+{
+  std::string output;
+  output.reserve(((text.size() + 2) / 3) * 4);
+  for (std::size_t index = 0; index < text.size(); index += 3) {
+    auto const first = static_cast<unsigned char>(text[index]);
+    auto const second = index + 1 < text.size() ? static_cast<unsigned char>(text[index + 1]) : 0;
+    auto const third = index + 2 < text.size() ? static_cast<unsigned char>(text[index + 2]) : 0;
+    auto const block = (static_cast<unsigned int>(first) << 16U) | (static_cast<unsigned int>(second) << 8U) |
+                       static_cast<unsigned int>(third);
+    output.push_back(kBase64Alphabet[(block >> 18U) & 0x3FU]);
+    output.push_back(kBase64Alphabet[(block >> 12U) & 0x3FU]);
+    output.push_back(index + 1 < text.size() ? kBase64Alphabet[(block >> 6U) & 0x3FU] : '=');
+    output.push_back(index + 2 < text.size() ? kBase64Alphabet[block & 0x3FU] : '=');
+  }
+  return output;
+}
+
+bool write_all_to_stdout(std::string_view text)
+{
+  std::size_t offset = 0;
+  while (offset < text.size()) {
+    auto const written = ::write(STDOUT_FILENO, text.data() + offset, text.size() - offset);
+    if (written < 0) {
+      if (errno == EINTR) continue;
+      return false;
+    }
+    if (written == 0) return false;
+    offset += static_cast<std::size_t>(written);
+  }
+  return true;
+}
+
+bool copy_text_to_terminal_clipboard(std::string_view text)
+{
+  if (text.empty()) return false;
+  auto sequence = std::string("\x1b]52;c;") + base64_encode(text) + "\x1b\\";
+  return write_all_to_stdout(sequence);
+}
+
+std::optional<std::string_view> copy_text_from_answer(ava::agent::QuestionAnswer const& answer)
+{
+  for (auto const& option : answer.selected_options) {
+    if (option.starts_with(kCopyOptionPrefix)) return std::string_view(option).substr(kCopyOptionPrefix.size());
+  }
+  return std::nullopt;
+}
+
+std::string question_answer_audit_detail(ava::agent::QuestionAnswer const& answer)
+{
+  auto detail = std::string("question answered");
+  if (!answer.selected_options.empty()) {
+    auto const first = std::string_view(answer.selected_options.front());
+    detail += first.starts_with(kCopyOptionPrefix) ? ": copy" : ": " + answer.selected_options.front();
+  }
+  if (!answer.custom_text.empty()) detail += answer.selected_options.empty() ? ": custom" : ", custom";
+  return detail;
+}
+
+std::string_view first_ascii_token(std::string_view text)
+{
+  auto const end = text.find_first_of(" \t\r\n");
+  return text.substr(0, end == std::string_view::npos ? text.size() : end);
+}
+
+bool should_echo_slash_command(std::string_view submitted)
+{
+  auto const token = first_ascii_token(submitted);
+  return token != "/connect" && token != "/login";
+}
+
+bool should_show_slash_command_output_as_status(std::string_view submitted)
+{
+  auto const token = first_ascii_token(submitted);
+  return token == "/connect" || token == "/login";
 }
 
 CursesInput character_input(std::string text, bool bracketed_paste = false)
@@ -741,6 +822,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto resolve_question_prompt =
       [&](ava::agent::QuestionPrompt const& prompt, std::function<bool()> const& stop_requested = {},
           std::function<bool()> const& request_stop = {}) -> ava::core::Result<ava::agent::QuestionAnswer> {
+    static_cast<void>(request_stop);
     emit_prompt_audit("tui:question_request", prompt.question.empty() ? std::string("question requested")
                                                                       : "question requested: " + prompt.question);
     {
@@ -766,8 +848,38 @@ int run_interactive_composer(TuiRuntimeOptions options)
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "question prompt canceled"));
     };
 
+    auto auto_resolve_question = [&]() -> std::optional<ava::core::Result<ava::agent::QuestionAnswer>> {
+      if (!prompt.auto_resolve || !prompt.auto_resolve()) return std::nullopt;
+      ava::agent::QuestionAnswer answer{.selected_options = {"done"}, .custom_text = ""};
+      {
+        std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+        snapshot.question_prompt.reset();
+        snapshot.status = "question answered";
+      }
+      if (!render()) {
+        return ava::core::Result<ava::agent::QuestionAnswer>{
+            std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to clear question prompt"))};
+      }
+      emit_prompt_audit("tui:question_answer", "auto");
+      return ava::core::Result<ava::agent::QuestionAnswer>{std::move(answer)};
+    };
+
+    auto read_question_input = [&]() {
+      if (!prompt.auto_resolve) return read_curses_input();
+      static_cast<void>(wtimeout(stdscr, 100));
+      auto input = read_curses_input();
+      static_cast<void>(wtimeout(stdscr, -1));
+      return input;
+    };
+
+    auto no_input = [](CursesInput const& input) {
+      return !input.resize && input.event.key == Key::Unknown && input.text.empty() && !input.bracketed_paste;
+    };
+
     while (true) {
-      auto const question_input = read_curses_input();
+      if (auto answer = auto_resolve_question()) return std::move(*answer);
+      auto const question_input = read_question_input();
+      if (auto answer = auto_resolve_question()) return std::move(*answer);
       if (stop_requested && stop_requested()) return cancel_question();
       if (terminal_signal_received()) {
         emit_prompt_audit("tui:question_cancel", "question canceled: interrupted");
@@ -785,11 +897,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
         continue;
       }
-
-      if (question_input.event.key == Key::Escape && request_stop) {
-        static_cast<void>(request_stop());
-        return cancel_question();
-      }
+      if (prompt.auto_resolve && no_input(question_input)) continue;
 
       auto input_result = snapshot.question_prompt
                               ? handle_question_prompt_input(*snapshot.question_prompt, question_input.event)
@@ -797,6 +905,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       if (input_result.action == QuestionPromptInputAction::Cancel) return cancel_question();
 
       if (snapshot.question_prompt && (input_result.action == QuestionPromptInputAction::Redraw ||
+                                       input_result.action == QuestionPromptInputAction::Copy ||
                                        input_result.action == QuestionPromptInputAction::Resolve)) {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
         if (snapshot.question_prompt) {
@@ -804,6 +913,19 @@ int run_interactive_composer(TuiRuntimeOptions options)
           snapshot.question_prompt->options = std::move(input_result.options);
           snapshot.question_prompt->custom_text = std::move(input_result.custom_text);
         }
+      }
+
+      if (input_result.action == QuestionPromptInputAction::Copy) {
+        {
+          std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+          snapshot.status =
+              copy_text_to_terminal_clipboard(input_result.copy_text) ? "copied to clipboard" : "clipboard copy failed";
+        }
+        emit_prompt_audit("tui:question_copy", "question copy");
+        if (!render()) {
+          return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render question prompt"));
+        }
+        continue;
       }
 
       if (input_result.action == QuestionPromptInputAction::Resolve) {
@@ -819,10 +941,15 @@ int run_interactive_composer(TuiRuntimeOptions options)
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to clear question prompt"));
         }
         if (answer) {
-          auto detail = std::string("question answered");
-          if (!answer->selected_options.empty()) detail += ": " + answer->selected_options.front();
-          if (!answer->custom_text.empty()) detail += answer->selected_options.empty() ? ": custom" : ", custom";
-          emit_prompt_audit("tui:question_answer", std::move(detail));
+          if (auto copy_text = copy_text_from_answer(*answer)) {
+            {
+              std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+              snapshot.status =
+                  copy_text_to_terminal_clipboard(*copy_text) ? "copied to clipboard" : "clipboard copy failed";
+            }
+            static_cast<void>(render());
+          }
+          emit_prompt_audit("tui:question_answer", question_answer_audit_detail(*answer));
         } else {
           emit_prompt_audit("tui:question_cancel", "question canceled");
         }
@@ -995,6 +1122,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   enum class InputLoopAction { None, ContinueLoop, BreakLoop };
   auto handle_submit = [&]() -> InputLoopAction {
     pending_escape_clear = false;
+    std::optional<std::string> immediate_slash_submission;
     if (!slash_palette_suppressed && slash_palette_visible(draft.text, snapshot.slash_commands)) {
       auto const matches = filter_slash_commands(draft.text, snapshot.slash_commands);
       if (!matches.empty()) {
@@ -1010,22 +1138,30 @@ int run_interactive_composer(TuiRuntimeOptions options)
           }
           return InputLoopAction::ContinueLoop;
         }
-        static_cast<void>(replace_composer_draft(
-            draft, slash_command_selection_text(draft.text, snapshot.slash_commands, selected_slash_command_index)));
-        selected_slash_command_index = 0;
-        draft_scroll_offset = 0;
-        history_index.reset();
-        draft_input.clear();
-        snapshot.status = "command selected - press Enter to run";
-        snapshot.selected_slash_command_index = selected_slash_command_index;
-        if (!render()) {
-          terminal_write_failed = true;
-          return InputLoopAction::BreakLoop;
+        auto const& selected_item = matches[selected_slash_command_index];
+        auto const selection_text =
+            slash_command_selection_text(draft.text, snapshot.slash_commands, selected_slash_command_index);
+        if (!selected_item.argument_completion && selected_item.command == "/connect") {
+          immediate_slash_submission = selection_text;
+        } else {
+          static_cast<void>(replace_composer_draft(draft, selection_text));
+          selected_slash_command_index = 0;
+          draft_scroll_offset = 0;
+          history_index.reset();
+          draft_input.clear();
+          snapshot.status = "command selected - press Enter to run";
+          snapshot.selected_slash_command_index = selected_slash_command_index;
+          if (!render()) {
+            terminal_write_failed = true;
+            return InputLoopAction::BreakLoop;
+          }
+          return InputLoopAction::ContinueLoop;
         }
-        return InputLoopAction::ContinueLoop;
+        selected_slash_command_index = 0;
+        snapshot.selected_slash_command_index = selected_slash_command_index;
       }
     }
-    auto const submitted = draft.text;
+    auto const submitted = immediate_slash_submission ? *immediate_slash_submission : draft.text;
     reset_composer_draft(draft);
     draft_scroll_offset = 0;
     history_index.reset();
@@ -1194,7 +1330,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         return render() ? RuntimeEventDrainResult::Rendered : RuntimeEventDrainResult::RenderFailed;
       };
 
-      if (is_slash_command) {
+      if (is_slash_command && should_echo_slash_command(submitted)) {
         auto command_item = TranscriptItem{.label = "cmd", .text = submitted};
         submitted_transcript.push_back(command_item);
         push_transcript(snapshot, std::move(command_item));
@@ -1422,6 +1558,16 @@ int run_interactive_composer(TuiRuntimeOptions options)
             request_close_after_submit();
             break;
           }
+          if (service_pending_prompt_request(cancel_requested, request_stop)) {
+            auto const drain_result = drain_runtime_events();
+            if (drain_result == RuntimeEventDrainResult::RenderFailed) {
+              terminal_write_failed = true;
+              render_failed = true;
+              fail_pending_prompt_requests();
+              break;
+            }
+            continue;
+          }
           if (auto active_input = poll_curses_input()) {
             if (!handle_active_input(*active_input)) {
               terminal_write_failed = true;
@@ -1489,18 +1635,24 @@ int run_interactive_composer(TuiRuntimeOptions options)
           for (auto const& tool : result.tool_timeline) {
             push_transcript(snapshot, TranscriptItem{.tool = tool});
           }
-          for (auto const& output : result.output) {
-            push_transcript(
-                snapshot,
-                TranscriptItem{.label = "ava", .text = output, .meta = assistant_meta_for_snapshot(snapshot)});
+          if (!should_show_slash_command_output_as_status(submitted)) {
+            for (auto const& output : result.output) {
+              push_transcript(
+                  snapshot,
+                  TranscriptItem{.label = "ava", .text = output, .meta = assistant_meta_for_snapshot(snapshot)});
+            }
           }
         }
       }
       transcript_scroll_offset = 0;
-      snapshot.status = events_received ? (event_state.run_status == TuiEventRunStatus::Error      ? "error"
-                                           : event_state.run_status == TuiEventRunStatus::Canceled ? "stopped"
-                                                                                                   : "done")
-                                        : (result.output.empty() ? "ok" : "done");
+      auto const show_command_status = !events_received && !run_cancel_requested.load() &&
+                                       should_show_slash_command_output_as_status(submitted) && !result.output.empty();
+      snapshot.status = show_command_status
+                            ? result.output.back()
+                            : (events_received ? (event_state.run_status == TuiEventRunStatus::Error      ? "error"
+                                                  : event_state.run_status == TuiEventRunStatus::Canceled ? "stopped"
+                                                                                                          : "done")
+                                               : (result.output.empty() ? "ok" : "done"));
       snapshot.processing = false;
       refresh_token_status();
       if (!render()) {

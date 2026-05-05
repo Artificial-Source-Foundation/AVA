@@ -393,7 +393,7 @@ ava::core::Result<HttpRequest> OpenAICompatibleProvider::build_request(ProviderR
   }
   if (access_token.empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
-                                            options_.provider_name + " bearer token is required"));
+                                            options_.provider_name + " credential is required"));
   }
   if (auto valid_tools = validate_openai_compatible_tools_json(request); !valid_tools)
     return std::unexpected(std::move(valid_tools.error()));

@@ -24,7 +24,7 @@ After provider streaming, tool schema, permission, or dispatcher changes, run a 
 
 Recommended coverage:
 
-- `ava --print ... --json --allow read-only` for `read_file`, `glob`, and `grep`. This verifies OpenAI tool-call streaming, read/search permission auto-allow, `.gitignore` behavior, and tool progress events.
+- `ava --print ... --json --allow read-only` for `read_file`, `list_directory`, `glob`, and `grep`. This verifies OpenAI tool-call streaming, read/search permission auto-allow, `.gitignore` behavior, and tool progress events.
 - `ava --print ... --json --allow-tool webfetch` for `webfetch`. This verifies the explicit `network.fetch` headless allow path and real bounded HTTP fetch behavior.
 - `ava --rpc` with a small JSONL harness that answers `permission_requested` with `permission_reply` for `write_file`, `edit_file`, `apply_patch`, and `bash`. The checked-in headless bash cleanup smoke verifies that timed-out shell process groups do not leave a child process behind.
 - `ava --rpc` with `question_reply` for the `question` tool.

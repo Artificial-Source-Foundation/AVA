@@ -73,6 +73,19 @@ void test_file_tools()
     expect(read->content == "hello", "read_file truncates head");
     expect(read->truncated, "read_file reports truncation");
   }
+  auto const ranged_path = workspace / "range.txt";
+  {
+    std::ofstream ranged_file(ranged_path, std::ios::binary | std::ios::trunc);
+    ranged_file << "one\n"
+                   "two\n"
+                   "three\n"
+                   "four\n";
+  }
+  auto ranged = ava::tools::read_file(build_context, ranged_path,
+                                      ava::tools::ReadOptions{.max_bytes = 1024, .offset_line = 2, .max_lines = 2});
+  expect(ranged && ranged->content == "two\nthree\n" && ranged->start_line == 2 && ranged->end_line == 3 &&
+             ranged->total_lines == 4 && ranged->line_limited && ranged->next_offset_line == 4,
+         "read_file supports line offset and limit continuation metadata");
 
   auto edit = ava::tools::edit_file(build_context, source_path, "world", "ava");
   expect(edit.has_value(), "edit_file edits unique text");

@@ -302,6 +302,8 @@ PermissionRisk default_allow_risk(Operation operation)
     case Operation::EditFile:
     case Operation::RunCommand:
     case Operation::NetworkFetch:
+    case Operation::NetworkSearch:
+    case Operation::SkillLoad:
     case Operation::PluginExecute:
     case Operation::PluginToolCall:
     case Operation::PluginCommandRun:
@@ -345,6 +347,14 @@ PermissionDecision decide(PermissionRequest const& request)
 
   if (request.operation == Operation::NetworkFetch) {
     return decision(PermissionAction::Ask, "network fetch requires explicit approval", PermissionRisk::Medium);
+  }
+
+  if (request.operation == Operation::NetworkSearch) {
+    return decision(PermissionAction::Ask, "network search requires explicit approval", PermissionRisk::Medium);
+  }
+
+  if (request.operation == Operation::SkillLoad) {
+    return decision(PermissionAction::Ask, "skill loading requires explicit approval", PermissionRisk::Medium);
   }
 
   if (request.operation == Operation::PluginExecute) {
@@ -507,8 +517,12 @@ std::string to_string(Operation operation)
       return "bash";
     case Operation::NetworkFetch:
       return "network.fetch";
+    case Operation::NetworkSearch:
+      return "network.search";
     case Operation::LspQuery:
       return "lsp.query";
+    case Operation::SkillLoad:
+      return "skill";
     case Operation::PluginExecute:
       return "plugin.execute";
     case Operation::PluginToolCall:

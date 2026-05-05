@@ -40,10 +40,7 @@ std::vector<std::string> provider_env_keys(std::string_view provider_id)
 {
   std::vector<std::string> keys;
   if (provider_id == "openai") keys.push_back("OPENAI_API_KEY");
-  if (provider_id == "anthropic") {
-    keys.push_back("ANTHROPIC_OAUTH_TOKEN");
-    keys.push_back("ANTHROPIC_API_KEY");
-  }
+  if (provider_id == "anthropic") keys.push_back("ANTHROPIC_API_KEY");
   auto const generic = env_key_from_provider_id(provider_id);
   if (!generic.empty() && std::find(keys.begin(), keys.end(), generic) == keys.end()) keys.push_back(generic);
   return keys;
@@ -56,7 +53,7 @@ std::optional<ProviderCredential> provider_credential_from_env(std::string_view 
     if (value == nullptr || std::string_view(value).empty()) continue;
     return ProviderCredential{.provider_id = std::string(provider_id),
                               .access_token = value,
-                              .credential_type = key.ends_with("_OAUTH_TOKEN") ? "oauth" : "api_key",
+                              .credential_type = "api_key",
                               .account_id = "",
                               .source = "env:" + key};
   }
@@ -95,16 +92,6 @@ std::optional<ProviderCredential> parse_provider_credential(std::string_view con
   std::string_view const scope(*provider);
   auto const type = ava::core::json::string_field(scope, "type");
   auto account_id = ava::core::json::string_field(scope, "account_id");
-
-  if (type && *type == "oauth") {
-    auto token = oauth_token_from(scope);
-    if (!token) return std::nullopt;
-    return ProviderCredential{.provider_id = std::string(provider_id),
-                              .access_token = *token,
-                              .credential_type = "oauth",
-                              .account_id = account_id.value_or(""),
-                              .source = source_path.string()};
-  }
 
   if (type && *type != "api" && *type != "api_key") return std::nullopt;
   auto key = generic_api_key_from(scope);

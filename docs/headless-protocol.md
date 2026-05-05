@@ -29,15 +29,15 @@ Headless modes are fail-closed by default for backend permission decisions whose
 
 Supported policy flags:
 
-- `--allow read-only`: allows read/search-style permission prompts (`read_file`, `glob`, and `grep` shapes) when the backend asks. Network, write, edit, patch, bash, and question prompts remain denied.
-- `--allow-tool glob,grep,read_file,webfetch`: allows only the listed exact tool names when those tools produce compatible ask prompts. Supported values are `glob`, `grep`, `read_file`, and `webfetch`; unsupported values such as `bash`, `write_file`, `edit_file`, `apply_patch`, `question`, or arbitrary strings are rejected as usage errors. `webfetch` only auto-allows exact `network.fetch` prompts produced by the `webfetch` tool; `--allow read-only` never allows network prompts.
+- `--allow read-only`: allows read/search-style permission prompts (`read_file`, `list_directory`, `glob`, and `grep` shapes) when the backend asks. Network, write, edit, patch, bash, and question prompts remain denied.
+- `--allow-tool glob,grep,list_directory,read_file,webfetch`: allows only the listed exact tool names when those tools produce compatible ask prompts. Supported values are `glob`, `grep`, `list_directory`, `read_file`, and `webfetch`; unsupported values such as `bash`, `write_file`, `edit_file`, `apply_patch`, `question`, or arbitrary strings are rejected as usage errors. `webfetch` only auto-allows exact `network.fetch` prompts produced by the `webfetch` tool; `--allow read-only` never allows network prompts.
 
 Examples:
 
 ```sh
 ava --print "summarize the repo" --allow read-only
 ava --print "inspect this file" --allow-tool read_file
-ava --print "find symbols" --allow-tool glob,grep
+ava --print "find symbols" --allow-tool glob,grep,list_directory
 ava --print "fetch release notes" --allow-tool webfetch
 ava --rpc --allow read-only
 ```
@@ -59,7 +59,7 @@ Invalid permission flag values exit with code `2` and write a usage error to std
 
 ## Provider Credentials
 
-Runtime provider calls resolve credentials for the active session provider. OpenAI keeps its existing stored OAuth/API-key behavior and falls back to `OPENAI_API_KEY` when no stored OpenAI credential exists. Non-OpenAI providers support provider-scoped API keys and bearer tokens in `auth.json`, for example `{"anthropic":{"type":"api_key","api_key":"..."}}`, and then provider environment variables such as `ANTHROPIC_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. Interactive setup is available with `ava login [provider]`, `ava auth login [provider]`, `ava connect [provider]`, and TUI `/connect`; omitting the provider opens a searchable provider picker, and TUI `/connect` uses a modal. OpenAI interactive setup offers browser OAuth, headless OAuth, API key, and bearer-token methods. Secrets are read with terminal echo disabled where possible and masked in TUI prompts. Headless setup can store credentials without a browser or TTY, for example `ava connect openai --headless-oauth`, `printf '%s\n' "$ANTHROPIC_API_KEY" | ava connect anthropic --api-key-stdin`, or `ava connect moonshot --api-key-env MOONSHOT_API_KEY`. AVA only reads credential files when they are owned by the current user and not readable by group/other users; manually-created files should use owner-only permissions such as `chmod 600 ~/.config/ava/auth.json`. Anthropic OAuth tokens are bearer tokens supplied by the environment or auth file; AVA does not refresh Anthropic OAuth tokens yet.
+Runtime provider calls resolve credentials for the active session provider. OpenAI keeps its existing stored OAuth/API-key behavior and falls back to `OPENAI_API_KEY` when no stored OpenAI credential exists. Non-OpenAI connect setup stores provider-scoped API keys in `auth.json`, for example `{"anthropic":{"type":"api_key","api_key":"..."}}`, and can also read provider API-key environment variables such as `ANTHROPIC_API_KEY`. Interactive setup is available with `ava login [provider]`, `ava auth login [provider]`, `ava connect [provider]`, and TUI `/connect`; omitting the provider opens a searchable provider picker, and TUI `/connect` uses a modal. OpenAI interactive setup offers browser OAuth, headless OAuth, and API key methods. Secrets are read with terminal echo disabled where possible and masked in TUI prompts. Headless setup can store credentials without a browser or TTY, for example `ava connect openai --headless-oauth`, `printf '%s\n' "$ANTHROPIC_API_KEY" | ava connect anthropic --api-key-stdin`, or `ava connect moonshot --api-key-env MOONSHOT_API_KEY`. AVA only reads credential files when they are owned by the current user and not readable by group/other users; manually-created files should use owner-only permissions such as `chmod 600 ~/.config/ava/auth.json`. OpenAI OAuth credentials refresh automatically before use when a refresh token is present.
 
 ## Event Envelope
 

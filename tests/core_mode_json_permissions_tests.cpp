@@ -198,6 +198,10 @@ void test_permission_defaults()
   expect(workspace_lsp.action == ava::permissions::PermissionAction::Allow, "workspace LSP diagnostics are allowed");
   expect(ava::permissions::to_string(ava::permissions::Operation::LspQuery) == "lsp.query",
          "LSP query operation string is stable");
+  expect(ava::permissions::to_string(ava::permissions::Operation::NetworkSearch) == "network.search",
+         "network search operation string is stable");
+  expect(ava::permissions::to_string(ava::permissions::Operation::SkillLoad) == "skill",
+         "skill operation string is stable");
   expect(ava::permissions::to_string(ava::permissions::PermissionRisk::Critical) == "critical",
          "permission risk string is stable");
 

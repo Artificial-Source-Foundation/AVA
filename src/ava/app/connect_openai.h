@@ -14,7 +14,6 @@ namespace ava::app {
 
 enum class ConnectCredentialType {
   ApiKey,
-  OAuthToken,
 };
 
 struct ConnectProviderCredentialOptions {

@@ -3,6 +3,7 @@
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/spill_files.h"
 #include "ava/tools/webfetch_tool.h"
+#include "ava/tools/websearch_tool.h"
 
 #include "ava/permissions/permission.h"
 
@@ -284,6 +285,21 @@ void test_webfetch_tool()
              transport.requests[0].include_response_headers,
          "webfetch requires permission and bounds fetched text content");
 
+  StaticTransport html_transport(ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {{"content-type", "text/html; charset=utf-8"}},
+      .body = "<html><body><h1>Title</h1><script>hidden()</script><p>A&amp;B</p></body></html>"});
+  auto html_text = ava::tools::webfetch(context, "https://example.com/page",
+                                        ava::tools::WebFetchOptions{.max_bytes = 1024,
+                                                                    .timeout_ms = 5000,
+                                                                    .format = ava::tools::WebFetchFormat::Text,
+                                                                    .transport = &html_transport});
+  expect(html_text && html_text->content.find("Title") != std::string::npos &&
+             html_text->content.find("A&B") != std::string::npos &&
+             html_text->content.find("hidden") == std::string::npos &&
+             html_transport.requests[0].headers.at("Accept").find("text/plain") != std::string::npos,
+         "webfetch supports text output for HTML responses with basic tag stripping");
+
   StaticTransport unused_transport(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "unused"});
   auto invalid_scheme =
       ava::tools::webfetch(context, "file:///etc/passwd", ava::tools::WebFetchOptions{.transport = &unused_transport});
@@ -356,10 +372,63 @@ void test_webfetch_tool()
              cancel_aware_transport.saw_cancel_callback && cancel_aware_transport.requests.size() == 1,
          "webfetch passes cancellation into the transport request boundary");
 }
+
+void test_websearch_tool()
+{
+  std::error_code remove_error;
+  std::filesystem::remove_all(temp_root(), remove_error);
+  auto const workspace = temp_root() / "websearch-workspace";
+  std::filesystem::create_directories(workspace);
+
+  StaticTransport transport(ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {{"content-type", "application/json"}},
+      .body = "{\"Heading\":\"AVA\",\"AbstractText\":\"Native C++ agent\",\"AbstractURL\":\"https://ava.example/\","
+              "\"RelatedTopics\":[{\"Text\":\"AVA docs\",\"FirstURL\":\"https://ava.example/docs\"},"
+              "{\"Topics\":[{\"Text\":\"AVA releases\",\"FirstURL\":\"https://ava.example/releases\"}]}]}"});
+  int prompts = 0;
+  ava::tools::ToolContext const context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++prompts;
+        expect(prompt.operation == ava::permissions::Operation::NetworkSearch,
+               "websearch resolver receives network search operation");
+        expect(prompt.command == "ava agent", "websearch resolver receives query as command target");
+        return ava::permissions::PermissionResolution::Allow;
+      }};
+
+  auto searched = ava::tools::websearch(
+      context, " ava agent ",
+      ava::tools::WebSearchOptions{
+          .max_results = 2, .context_max_chars = 10000, .timeout_ms = 7000, .transport = &transport});
+  expect(searched && searched->query == "ava agent" && searched->results.size() == 2 &&
+             searched->results[0].title == "AVA" && searched->results[1].url == "https://ava.example/docs" &&
+             searched->total_results == 3 && searched->truncated && prompts == 1 && transport.requests.size() == 1 &&
+             transport.requests[0].method == "GET" &&
+             transport.requests[0].url.find("q=ava+agent") != std::string::npos &&
+             transport.requests[0].timeout_ms == 7000 && transport.requests[0].follow_redirects,
+         "websearch requires permission, queries a bounded search endpoint, and parses structured results");
+
+  StaticTransport unused_transport(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{}"});
+  auto invalid_query =
+      ava::tools::websearch(context, "\n", ava::tools::WebSearchOptions{.transport = &unused_transport});
+  expect(!invalid_query && unused_transport.requests.empty(),
+         "websearch rejects empty/control queries before transport use");
+
+  ava::tools::ToolContext const no_resolver_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
+  auto no_resolver = ava::tools::websearch(no_resolver_context, "ava agent",
+                                           ava::tools::WebSearchOptions{.transport = &unused_transport});
+  expect(!no_resolver && no_resolver.error().format().find("no_resolver") != std::string::npos &&
+             unused_transport.requests.empty(),
+         "websearch fails closed without network search permission resolver");
+}
 }  // namespace
 
 void run_tools_process_network_tests()
 {
   test_bash_tool();
   test_webfetch_tool();
+  test_websearch_tool();
 }

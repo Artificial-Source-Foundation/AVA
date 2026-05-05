@@ -109,6 +109,36 @@ void test_search_tools()
     expect(grep->matches.size() == 2, "grep_files returns matching markdown lines");
     expect(grep->matches[0].line_number == 1, "grep_files records line numbers");
   }
+  auto ci_options = ava::tools::GrepOptions{};
+  ci_options.case_insensitive = true;
+  auto case_insensitive = ava::tools::grep_files(context, "HELLO", "**/*.md", ci_options);
+  expect(case_insensitive && case_insensitive->matches.size() == 2,
+         "grep_files supports explicit case-insensitive matching");
+  auto regex_options = ava::tools::GrepOptions{};
+  regex_options.literal = false;
+  auto regex = ava::tools::grep_files(context, "hello (ava|again)", "**/*.md", regex_options);
+  expect(regex && regex->matches.size() == 2, "grep_files supports provider-selected regex matching");
+  auto bad_regex = ava::tools::grep_files(context, "(", "**/*.md", regex_options);
+  expect(!bad_regex && bad_regex.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "grep_files reports invalid regex patterns as argument errors");
+
+  auto listed = ava::tools::list_directory(context, workspace, ava::tools::ListDirectoryOptions{.max_entries = 20});
+  auto const has_list_entry = [](ava::tools::ListDirectoryResult const& result, std::string const& name,
+                                 bool directory) {
+    return std::ranges::any_of(result.entries, [&name, directory](ava::tools::DirectoryEntry const& entry) {
+      return entry.name == name && entry.directory == directory;
+    });
+  };
+  expect(listed && has_list_entry(*listed, "docs", true) && has_list_entry(*listed, "root.cpp", false) &&
+             std::ranges::none_of(
+                 listed->entries,
+                 [](ava::tools::DirectoryEntry const& entry) { return entry.name == ".env" || entry.name == ".ssh"; }),
+         "list_directory returns readable entries and omits paths denied by read policy");
+  auto listed_capped =
+      ava::tools::list_directory(context, workspace, ava::tools::ListDirectoryOptions{.max_entries = 1});
+  expect(listed_capped && listed_capped->entries.size() == 1 && listed_capped->truncated &&
+             listed_capped->total_entries > listed_capped->entries.size(),
+         "list_directory reports entry-count truncation");
 
   ava::tools::ToolContext const spilling_grep_context{.workspace_dir = workspace,
                                                       .spill_dir = spill_dir,

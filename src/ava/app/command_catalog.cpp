@@ -34,7 +34,6 @@ std::vector<CommandCatalogEntry> const& command_catalog()
       CommandCatalogEntry{.command = "/connect",
                           .aliases = {"/login"},
                           .description = "Store provider credentials or start OpenAI OAuth",
-                          .hint = "[provider] [api-key|oauth|browser-oauth|headless-oauth]",
                           .category = "General"},
       CommandCatalogEntry{.command = "/quit", .aliases = {"/exit"}, .description = "Exit", .category = "General"},
       CommandCatalogEntry{.command = "/sessions",

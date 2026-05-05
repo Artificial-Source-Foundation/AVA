@@ -56,6 +56,11 @@ bool has_error_fields(ToolResultPayload const& payload)
          !payload.error_details.empty();
 }
 
+bool path_field_represents_mutation(std::string_view tool_name)
+{
+  return tool_name == "write_file" || tool_name == "edit_file" || tool_name == "apply_patch";
+}
+
 void append_string_field(std::string& out, std::string_view key, std::string_view value)
 {
   if (value.empty()) return;
@@ -172,7 +177,9 @@ ToolResultPayload parse_tool_result_payload(std::string_view tool_name, bool suc
   if (bool_field_is_true(result_text, "canceled")) payload.status = ToolResultStatus::Canceled;
   payload.content = std::string(result_text);
   payload.content_type = ava::core::json::is_valid_object(result_text) ? "application/json" : "text/plain";
-  add_changed_path(payload, ava::core::json::string_field(result_text, "path").value_or(""));
+  if (path_field_represents_mutation(tool_name)) {
+    add_changed_path(payload, ava::core::json::string_field(result_text, "path").value_or(""));
+  }
   for (auto const& path : ava::core::json::strings_in_array_field(result_text, "changed_paths")) {
     add_changed_path(payload, path);
   }

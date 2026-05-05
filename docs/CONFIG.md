@@ -18,16 +18,16 @@ ava connect openai
 
 The command opens an OpenAI login method picker. Browser OAuth prints an OpenAI authorization URL, waits for the callback on `http://localhost:1455/auth/callback`, and stores the resulting credential owner-only at the AVA auth path. Headless OAuth uses OpenAI's device-code flow and prints `https://auth.openai.com/codex/device` plus the code to enter.
 
-Interactive provider login is available for API keys and bearer tokens:
+Interactive provider login is available for API keys:
 
 ```sh
 ava auth login
 ava login anthropic
 ava auth login moonshot --api-key
-ava connect kimi --oauth-token
+ava connect kimi --api-key
 ```
 
-When the provider is omitted, `ava auth login`, `ava login`, and interactive `ava connect` open a searchable terminal provider picker before asking for login method and secret. Secrets are read without terminal echo when stdin is a TTY. In the TUI, use `/connect` or `/login` to open the same provider flow as a modal; OpenAI shows browser OAuth, headless OAuth, API key, and bearer-token options.
+When the provider is omitted, `ava auth login`, `ava login`, and interactive `ava connect` open a searchable terminal provider picker before asking for login method and secret. Secrets are read without terminal echo when stdin is a TTY. In the TUI, use `/connect` or `/login` to open the same provider flow as a modal; OpenAI shows browser OAuth, headless OAuth, and API key options.
 
 Headless API-key setup is available for OpenAI, Anthropic, Moonshot/Kimi, and other provider ids:
 
@@ -39,14 +39,7 @@ ava connect moonshot --api-key-env MOONSHOT_API_KEY
 ava connect kimi --api-key-env KIMI_API_KEY
 ```
 
-Bearer-token providers can use the OAuth-token variants:
-
-```sh
-printf '%s\n' "$ANTHROPIC_OAUTH_TOKEN" | ava connect anthropic --oauth-token-stdin
-ava connect anthropic --oauth-token-env ANTHROPIC_OAUTH_TOKEN
-```
-
-OAuth token format:
+OpenAI OAuth credential format:
 
 ```json
 {"openai":{"type":"oauth","access_token":"...","refresh_token":"...","expires_at":1893456000}}

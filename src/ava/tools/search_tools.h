@@ -5,6 +5,7 @@
 #include "ava/core/result.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -22,6 +23,12 @@ struct GrepOptions {
   std::size_t max_matches = 2000;
   std::size_t max_line_length = 500;
   bool no_ignore = false;
+  bool literal = true;
+  bool case_insensitive = false;
+};
+
+struct ListDirectoryOptions {
+  std::size_t max_entries = 500;
 };
 
 struct GlobResult {
@@ -47,10 +54,26 @@ struct GrepResult {
   std::filesystem::path spill_path;
 };
 
+struct DirectoryEntry {
+  std::string name;
+  bool directory = false;
+  std::uintmax_t size = 0;
+};
+
+struct ListDirectoryResult {
+  std::filesystem::path path;
+  std::vector<DirectoryEntry> entries;
+  bool truncated = false;
+  std::size_t total_entries = 0;
+};
+
 [[nodiscard]] ava::core::Result<GlobResult> glob_files(ToolContext const& context, std::string_view pattern,
                                                        GlobOptions options = {});
 [[nodiscard]] ava::core::Result<GrepResult> grep_files(ToolContext const& context, std::string_view literal_pattern,
                                                        std::string_view include_glob = "**/*",
                                                        GrepOptions options = {});
+[[nodiscard]] ava::core::Result<ListDirectoryResult> list_directory(ToolContext const& context,
+                                                                    std::filesystem::path const& path,
+                                                                    ListDirectoryOptions options = {});
 
 }  // namespace ava::tools

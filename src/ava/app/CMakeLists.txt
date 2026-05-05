@@ -1,5 +1,6 @@
 add_library(ava_app
   "app.cpp"
+  "browser_open.cpp"
   "command_catalog.cpp"
   "command_connect.cpp"
   "command_format.cpp"
@@ -11,6 +12,7 @@ add_library(ava_app
   "command_sessions.cpp"
   "command_tools.cpp"
   "commands.cpp"
+  "connect_oauth_callback.cpp"
   "connect_openai.cpp"
   "events.cpp"
   "headless_policy.cpp"

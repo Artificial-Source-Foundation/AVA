@@ -11,9 +11,16 @@
 
 namespace ava::tools {
 
+enum class WebFetchFormat {
+  Markdown,
+  Text,
+  Html,
+};
+
 struct WebFetchOptions {
   std::size_t max_bytes = 1024 * 1024;
   int timeout_ms = 30000;
+  WebFetchFormat format = WebFetchFormat::Markdown;
   ava::provider::Transport* transport = nullptr;
 };
 

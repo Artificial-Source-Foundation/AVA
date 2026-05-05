@@ -314,13 +314,13 @@ ava::core::Result<OpenAICredential> parse_openai_oauth_token_response(std::strin
 {
   if (!is_complete_json_object(body)) {
     return std::unexpected(
-        ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI OAuth token response was malformed JSON"));
+        ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI OAuth response was malformed JSON"));
   }
 
   auto access = ava::core::json::string_field(body, "access_token");
   if (!access || access->empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider,
-                                            "OpenAI OAuth token response did not include an access token"));
+                                            "OpenAI OAuth response did not include an access credential"));
   }
   auto refresh = ava::core::json::string_field(body, "refresh_token");
   auto account_id = token_response_account_id(body, *access);
@@ -483,7 +483,7 @@ ava::core::Result<OpenAICredential> exchange_openai_oauth_code(std::string_view 
   body += "&code_verifier=" + url_encode(verifier);
   body += "&redirect_uri=" + url_encode(redirect_uri);
 
-  auto response = post_openai_oauth_token_form(std::move(body), transport, "OpenAI OAuth token exchange failed");
+  auto response = post_openai_oauth_token_form(std::move(body), transport, "OpenAI OAuth exchange failed");
   if (!response) return std::unexpected(response.error());
   return parse_openai_oauth_token_response(response->body, now_seconds, "", "");
 }

@@ -9,6 +9,8 @@ namespace ava::tui {
 namespace detail {
 namespace {
 
+constexpr std::string_view kCopyOptionPrefix = "copy:";
+
 std::string render_permission_choice(std::string_view label, bool selected)
 {
   std::string text = selected ? "> " : "  ";
@@ -233,6 +235,12 @@ std::optional<std::size_t> option_index_for_shortcut(QuestionPromptInputResult c
   return std::nullopt;
 }
 
+std::optional<std::string_view> copy_text_for_option(QuestionPromptOptionView const& option)
+{
+  if (!option.value.starts_with(kCopyOptionPrefix)) return std::nullopt;
+  return std::string_view(option.value).substr(kCopyOptionPrefix.size());
+}
+
 std::string modal_line(std::string content, std::size_t width)
 {
   return composer_surface_line("  " + std::move(content), width);
@@ -283,6 +291,12 @@ std::string modal_option_line(QuestionPromptView const& prompt, std::size_t inde
 
 std::string modal_keys_line(QuestionPromptView const& prompt, std::size_t width)
 {
+  auto const copy_only = !prompt.options.empty() && std::ranges::all_of(prompt.options, [](auto const& option) {
+    return copy_text_for_option(option).has_value();
+  });
+  if (copy_only) {
+    return modal_line(std::string(kSgrMuted) + "C copy  Esc cancel" + std::string(kSgrReset), width);
+  }
   auto const search = prompt.searchable ? std::string("  Type to search  ") : std::string("  ");
   auto const shortcuts = !prompt.searchable && !prompt.allow_custom && !prompt.options.empty()
                              ? std::string("  Letter shortcut  ")
@@ -509,6 +523,7 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
   auto result = QuestionPromptInputResult{.selected_option_index = prompt.selected_option_index,
                                           .options = prompt.options,
                                           .custom_text = prompt.custom_text,
+                                          .copy_text = {},
                                           .action = QuestionPromptInputAction::None};
   auto const has_options = !result.options.empty();
   auto matching_indices = [&]() {
@@ -559,6 +574,19 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
       result.options[result.selected_option_index].selected = true;
     }
   };
+  auto activate_option = [&]() {
+    if (!has_options) return false;
+    clamp_selection();
+    if (prompt.searchable && matching_indices().empty()) return false;
+    if (auto copy_text = detail::copy_text_for_option(result.options[result.selected_option_index])) {
+      result.copy_text = std::string(*copy_text);
+      result.action = QuestionPromptInputAction::Copy;
+      return true;
+    }
+    toggle_selected();
+    result.action = prompt.multiple ? QuestionPromptInputAction::Redraw : QuestionPromptInputAction::Resolve;
+    return true;
+  };
   auto clear_single_selection_for_custom_text = [&]() {
     if (prompt.multiple) return;
     for (auto& option : result.options) option.selected = false;
@@ -584,8 +612,7 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
       if (!prompt.allow_custom && has_options) {
         if (auto shortcut_index = detail::option_index_for_shortcut(result, event.character)) {
           result.selected_option_index = *shortcut_index;
-          toggle_selected();
-          result.action = prompt.multiple ? QuestionPromptInputAction::Redraw : QuestionPromptInputAction::Resolve;
+          static_cast<void>(activate_option());
           return result;
         }
       }
@@ -593,8 +620,7 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
         auto const index = static_cast<std::size_t>(event.character - '1');
         if (index < result.options.size()) {
           result.selected_option_index = index;
-          toggle_selected();
-          result.action = prompt.multiple ? QuestionPromptInputAction::Redraw : QuestionPromptInputAction::Resolve;
+          static_cast<void>(activate_option());
           return result;
         }
       }
@@ -605,8 +631,7 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
           return result;
         }
         if (has_options) {
-          toggle_selected();
-          result.action = prompt.multiple ? QuestionPromptInputAction::Redraw : QuestionPromptInputAction::Resolve;
+          static_cast<void>(activate_option());
           return result;
         }
         if (prompt.allow_custom) {
@@ -659,11 +684,19 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
       break;
     case Key::Enter:
       if (prompt.searchable) {
-        if (has_options && !matching_indices().empty()) toggle_selected();
+        if (has_options && !matching_indices().empty()) {
+          if (activate_option()) return result;
+        }
         result.action = QuestionPromptInputAction::Resolve;
         return result;
       }
-      if (!prompt.multiple && (!prompt.allow_custom || result.custom_text.empty())) toggle_selected();
+      if (!prompt.multiple && (!prompt.allow_custom || result.custom_text.empty())) {
+        if (activate_option()) return result;
+      }
+      if (!prompt.multiple && prompt.allow_custom && result.custom_text.empty() && !has_options) {
+        result.action = QuestionPromptInputAction::Redraw;
+        return result;
+      }
       result.action = QuestionPromptInputAction::Resolve;
       return result;
     case Key::Escape:

@@ -8,6 +8,7 @@
 #include <cstring>
 #include <memory>
 #include <span>
+#include <string>
 #include <string_view>
 
 #include <arpa/inet.h>
@@ -49,6 +50,15 @@ bool starts_with_case_insensitive(std::string_view value, std::string_view prefi
 bool all_decimal_digits(std::string_view value)
 {
   return !value.empty() && std::ranges::all_of(value, [](unsigned char ch) { return std::isdigit(ch); });
+}
+
+std::string trim(std::string_view value)
+{
+  std::size_t start = 0;
+  while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start])) != 0) ++start;
+  auto end = value.size();
+  while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1])) != 0) --end;
+  return std::string(value.substr(start, end - start));
 }
 
 bool hex_literal(std::string_view value)
@@ -270,6 +280,142 @@ bool looks_binary(std::string_view body, std::string_view content_type)
   return body.find('\0') != std::string_view::npos;
 }
 
+std::string accept_header(WebFetchFormat format)
+{
+  switch (format) {
+    case WebFetchFormat::Markdown:
+      return "text/markdown;q=1.0,text/x-markdown;q=0.9,text/plain;q=0.8,text/html;q=0.7,*/*;q=0.1";
+    case WebFetchFormat::Text:
+      return "text/plain;q=1.0,text/markdown;q=0.9,text/html;q=0.8,*/*;q=0.1";
+    case WebFetchFormat::Html:
+      return "text/html;q=1.0,application/xhtml+xml;q=0.9,text/plain;q=0.8,*/*;q=0.1";
+  }
+  return "text/html,text/plain,application/json,application/xml;q=0.9,*/*;q=0.1";
+}
+
+std::string html_entity_decode(std::string_view text)
+{
+  std::string out;
+  out.reserve(text.size());
+  for (std::size_t index = 0; index < text.size();) {
+    if (text[index] != '&') {
+      out.push_back(text[index++]);
+      continue;
+    }
+    if (text.substr(index, 5) == "&amp;") {
+      out.push_back('&');
+      index += 5;
+    } else if (text.substr(index, 4) == "&lt;") {
+      out.push_back('<');
+      index += 4;
+    } else if (text.substr(index, 4) == "&gt;") {
+      out.push_back('>');
+      index += 4;
+    } else if (text.substr(index, 6) == "&quot;") {
+      out.push_back('"');
+      index += 6;
+    } else if (text.substr(index, 5) == "&#39;") {
+      out.push_back('\'');
+      index += 5;
+    } else if (text.substr(index, 6) == "&nbsp;") {
+      out.push_back(' ');
+      index += 6;
+    } else {
+      out.push_back(text[index++]);
+    }
+  }
+  return out;
+}
+
+bool tag_starts_with(std::string_view tag, std::string_view name)
+{
+  if (tag.size() < name.size()) return false;
+  for (std::size_t index = 0; index < name.size(); ++index) {
+    if (std::tolower(static_cast<unsigned char>(tag[index])) != std::tolower(static_cast<unsigned char>(name[index]))) {
+      return false;
+    }
+  }
+  return tag.size() == name.size() || std::isspace(static_cast<unsigned char>(tag[name.size()])) != 0 ||
+         tag[name.size()] == '>' || tag[name.size()] == '/';
+}
+
+std::string html_to_text(std::string_view html, bool markdown)
+{
+  std::string out;
+  out.reserve(html.size());
+  bool in_tag = false;
+  bool skipping = false;
+  std::string tag;
+  for (std::size_t index = 0; index < html.size(); ++index) {
+    char const ch = html[index];
+    if (in_tag) {
+      if (ch == '>') {
+        auto const trimmed = lowercase(tag);
+        bool const closing = !trimmed.empty() && trimmed.front() == '/';
+        auto const name = closing ? std::string_view(trimmed).substr(1) : std::string_view(trimmed);
+        if (!closing &&
+            (tag_starts_with(name, "script") || tag_starts_with(name, "style") || tag_starts_with(name, "noscript"))) {
+          skipping = true;
+        } else if (closing && (tag_starts_with(name, "script") || tag_starts_with(name, "style") ||
+                               tag_starts_with(name, "noscript"))) {
+          skipping = false;
+        } else if (!skipping) {
+          if (tag_starts_with(name, "br") || tag_starts_with(name, "p") || tag_starts_with(name, "div") ||
+              tag_starts_with(name, "li") || tag_starts_with(name, "tr")) {
+            out += '\n';
+          } else if (markdown && !closing &&
+                     (tag_starts_with(name, "h1") || tag_starts_with(name, "h2") || tag_starts_with(name, "h3"))) {
+            out += "\n\n";
+            if (tag_starts_with(name, "h1")) out += "# ";
+            if (tag_starts_with(name, "h2")) out += "## ";
+            if (tag_starts_with(name, "h3")) out += "### ";
+          }
+        }
+        tag.clear();
+        in_tag = false;
+        continue;
+      }
+      tag.push_back(ch);
+      continue;
+    }
+    if (ch == '<') {
+      in_tag = true;
+      tag.clear();
+      continue;
+    }
+    if (!skipping) out.push_back(ch);
+  }
+
+  auto decoded = html_entity_decode(out);
+  std::string compact;
+  compact.reserve(decoded.size());
+  int newlines = 0;
+  bool pending_space = false;
+  for (char const ch : decoded) {
+    if (ch == '\r') continue;
+    if (ch == '\n') {
+      pending_space = false;
+      if (newlines < 2) compact.push_back('\n');
+      ++newlines;
+      continue;
+    }
+    if (std::isspace(static_cast<unsigned char>(ch)) != 0) {
+      pending_space = true;
+      continue;
+    }
+    if (pending_space && !compact.empty() && compact.back() != '\n') compact.push_back(' ');
+    pending_space = false;
+    newlines = 0;
+    compact.push_back(ch);
+  }
+  return trim(std::string_view(compact));
+}
+
+bool is_html_content(std::string_view content_type)
+{
+  return lowercase(content_type).find("html") != std::string::npos;
+}
+
 }  // namespace
 
 ava::core::Result<WebFetchResult> webfetch(ToolContext const& context, std::string_view url, WebFetchOptions options)
@@ -302,18 +448,16 @@ ava::core::Result<WebFetchResult> webfetch(ToolContext const& context, std::stri
 
   ava::provider::CurlCliTransport default_transport;
   auto& transport = options.transport ? *options.transport : static_cast<ava::provider::Transport&>(default_transport);
-  auto response = transport.send(
-      ava::provider::HttpRequest{
-          .method = "GET",
-          .url = safe_url->url,
-          .headers = {{"Accept", "text/html,text/plain,application/json,application/xml;q=0.9,*/*;q=0.1"},
-                      {"User-Agent", "AVA/1.0 webfetch"}},
-          .body = "",
-          .timeout_ms = timeout_ms,
-          .follow_redirects = false,
-          .include_response_headers = true,
-          .resolve_hosts = std::move(resolve_hosts)},
-      context.cancel_requested);
+  auto response = transport.send(ava::provider::HttpRequest{.method = "GET",
+                                                            .url = safe_url->url,
+                                                            .headers = {{"Accept", accept_header(options.format)},
+                                                                        {"User-Agent", "AVA/1.0 webfetch"}},
+                                                            .body = "",
+                                                            .timeout_ms = timeout_ms,
+                                                            .follow_redirects = false,
+                                                            .include_response_headers = true,
+                                                            .resolve_hosts = std::move(resolve_hosts)},
+                                 context.cancel_requested);
   if (!response) return std::unexpected(std::move(response.error()));
   if (context.cancel_requested && context.cancel_requested()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled"));
@@ -336,10 +480,18 @@ ava::core::Result<WebFetchResult> webfetch(ToolContext const& context, std::stri
   result.url = safe_url->url;
   result.status_code = response->status_code;
   result.content_type = content_type;
-  result.total_bytes = response->body.size();
-  result.output_bytes = std::min(max_bytes, response->body.size());
+  std::string converted = response->body;
+  if (is_html_content(content_type)) {
+    if (options.format == WebFetchFormat::Markdown) {
+      converted = html_to_text(response->body, true);
+    } else if (options.format == WebFetchFormat::Text) {
+      converted = html_to_text(response->body, false);
+    }
+  }
+  result.total_bytes = converted.size();
+  result.output_bytes = std::min(max_bytes, converted.size());
   result.truncated = result.output_bytes < result.total_bytes;
-  result.content = response->body.substr(0, result.output_bytes);
+  result.content = converted.substr(0, result.output_bytes);
   return result;
 }
 

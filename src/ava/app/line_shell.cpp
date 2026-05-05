@@ -281,6 +281,12 @@ LineResult handle_line(ShellState& state, std::string const& line,
     line_result.tool_timeline = std::move(command_result->tool_timeline);
     return line_result;
   }
+  if (line.starts_with('/')) {
+    auto const end = line.find_first_of(" \t\r\n");
+    auto const command = line.substr(0, end == std::string::npos ? line.size() : end);
+    add_output(line_result, "Unknown command: " + command + ". Type /help to list commands.");
+    return line_result;
+  }
 
   return with_provider_runtime(state, "\nslash tool commands still work offline.",
                                [&](ava::provider::Provider const& provider, ava::provider::Transport& transport,

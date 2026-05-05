@@ -95,23 +95,6 @@ void test_anthropic_provider_contract()
              empty_system->body.find("\"messages\"") != std::string::npos,
          "Anthropic request omits empty system prompt without malformed separators");
 
-  auto oauth_request = provider.build_request(
-      ava::provider::ProviderRequest{.provider_id = "anthropic",
-                                     .model_id = "claude-sonnet-4-5",
-                                     .system_prompt = "system",
-                                     .messages = {},
-                                     .tools_json = {},
-                                     .stream = false},
-      ava::provider::ProviderAuthContext{.access_token = "oauth-token", .credential_type = "oauth", .account_id = ""});
-  expect(oauth_request.has_value(), "Anthropic request builds with OAuth token auth context");
-  if (oauth_request) {
-    expect(oauth_request->headers.find("x-api-key") == oauth_request->headers.end() &&
-               oauth_request->headers.at("Authorization") == "Bearer oauth-token",
-           "Anthropic OAuth request uses bearer header instead of x-api-key");
-    expect(oauth_request->headers.at("Accept") == "application/json" && !oauth_request->follow_redirects,
-           "Anthropic non-stream request asks for JSON and does not follow authenticated redirects");
-  }
-
   auto const collapsed = provider.build_request(
       ava::provider::ProviderRequest{.provider_id = "anthropic",
                                      .model_id = "claude-sonnet-4-5",
@@ -1033,13 +1016,6 @@ void test_anthropic_registry_and_env_auth()
   expect(api_credential && *api_credential && (*api_credential)->access_token == "api-key-value" &&
              (*api_credential)->credential_type == "api_key" && (*api_credential)->source == "env:ANTHROPIC_API_KEY",
          "Anthropic API key is discovered from environment");
-
-  ScopedEnvVar oauth_token("ANTHROPIC_OAUTH_TOKEN", "oauth-token-value");
-  auto oauth_credential = ava::config::provider_credential_for_request(paths, "anthropic", transport);
-  expect(oauth_credential && *oauth_credential && (*oauth_credential)->access_token == "oauth-token-value" &&
-             (*oauth_credential)->credential_type == "oauth" &&
-             (*oauth_credential)->source == "env:ANTHROPIC_OAUTH_TOKEN",
-         "Anthropic OAuth token environment variable takes precedence over API key");
 }
 
 void test_anthropic_agent_tool_loop_native_replay()

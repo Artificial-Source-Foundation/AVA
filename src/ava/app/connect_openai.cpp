@@ -1,5 +1,8 @@
 #include "ava/app/connect_openai.h"
 
+#include "ava/app/browser_open.h"
+#include "ava/app/connect_oauth_callback.h"
+
 #include "ava/tui/composer.h"
 
 #include "ava/config/auth.h"
@@ -11,15 +14,12 @@
 #include "ava/core/result.h"
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
-#include <cstring>
 #include <iostream>
-#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -27,10 +27,8 @@
 #include <utility>
 #include <vector>
 
-#include <netinet/in.h>
 #include <poll.h>
 #include <signal.h>
-#include <sys/socket.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -89,33 +87,6 @@ long long unix_time_seconds()
 {
   return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
-
-class ScopedSocket {
- public:
-  explicit ScopedSocket(int fd) : fd_(fd) {}
-  ScopedSocket(ScopedSocket const&) = delete;
-  ScopedSocket& operator=(ScopedSocket const&) = delete;
-  ScopedSocket(ScopedSocket&& other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
-  ScopedSocket& operator=(ScopedSocket&& other) noexcept
-  {
-    if (this != &other) {
-      close_if_open();
-      fd_ = std::exchange(other.fd_, -1);
-    }
-    return *this;
-  }
-  ~ScopedSocket() { close_if_open(); }
-
-  [[nodiscard]] int get() const noexcept { return fd_; }
-
- private:
-  void close_if_open() noexcept
-  {
-    if (fd_ >= 0) static_cast<void>(::close(fd_));
-  }
-
-  int fd_ = -1;
-};
 
 class ScopedTerminalEcho {
  public:
@@ -186,7 +157,6 @@ enum class OpenAIConnectMethod {
   BrowserOAuth,
   HeadlessOAuth,
   ApiKey,
-  OAuthToken,
 };
 
 struct MenuInput {
@@ -194,268 +164,21 @@ struct MenuInput {
   std::string text;
 };
 
-std::string errno_message()
-{
-  return std::strerror(errno);
-}
-
 ava::core::Error connect_error(ava::core::ErrorCategory category, std::string message)
 {
   return ava::core::Error(category, std::move(message));
 }
 
-ava::core::VoidResult send_all_to_socket(int fd, std::string_view text)
-{
-  std::size_t offset = 0;
-  while (offset < text.size()) {
-    auto const written = ::send(fd, text.data() + offset, text.size() - offset, MSG_NOSIGNAL);
-    if (written < 0) {
-      if (errno == EINTR) continue;
-      auto error = connect_error(ava::core::ErrorCategory::Io, "failed to write OAuth callback response");
-      error.with_context("cause", errno_message());
-      return std::unexpected(std::move(error));
-    }
-    if (written == 0) {
-      return std::unexpected(
-          connect_error(ava::core::ErrorCategory::Io, "OAuth callback response write made no progress"));
-    }
-    offset += static_cast<std::size_t>(written);
-  }
-  return {};
-}
-
-std::string url_decode(std::string_view value)
-{
-  auto hex_value = [](char ch) -> std::optional<unsigned char> {
-    if (ch >= '0' && ch <= '9') return static_cast<unsigned char>(ch - '0');
-    if (ch >= 'A' && ch <= 'F') return static_cast<unsigned char>(ch - 'A' + 10);
-    if (ch >= 'a' && ch <= 'f') return static_cast<unsigned char>(ch - 'a' + 10);
-    return std::nullopt;
-  };
-
-  std::string output;
-  output.reserve(value.size());
-  for (std::size_t index = 0; index < value.size(); ++index) {
-    if (value[index] == '+') {
-      output.push_back(' ');
-      continue;
-    }
-    if (value[index] == '%' && index + 2 < value.size()) {
-      auto const high = hex_value(value[index + 1]);
-      auto const low = hex_value(value[index + 2]);
-      if (high && low) {
-        output.push_back(static_cast<char>((*high << 4U) | *low));
-        index += 2;
-        continue;
-      }
-    }
-    output.push_back(value[index]);
-  }
-  return output;
-}
-
-std::map<std::string, std::string> parse_query(std::string_view query)
-{
-  std::map<std::string, std::string> fields;
-  std::size_t start = 0;
-  while (start <= query.size()) {
-    auto const end = query.find('&', start);
-    auto const part = query.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start);
-    auto const split = part.find('=');
-    if (split != std::string_view::npos) {
-      fields[url_decode(part.substr(0, split))] = url_decode(part.substr(split + 1));
-    }
-    if (end == std::string_view::npos) break;
-    start = end + 1;
-  }
-  return fields;
-}
-
-struct OAuthCallback {
-  std::string code;
-  std::string state;
-  std::string error;
-  std::string error_description;
-};
-
-ava::core::Result<OAuthCallback> parse_oauth_callback_request(std::string_view request)
-{
-  auto const request_line_end = request.find("\r\n");
-  auto const request_line = request.substr(0, request_line_end);
-  constexpr std::string_view prefix = "GET ";
-  if (!request_line.starts_with(prefix)) {
-    return std::unexpected(connect_error(ava::core::ErrorCategory::InvalidArgument, "OAuth callback was not a GET"));
-  }
-  auto const target_end = request_line.find(' ', prefix.size());
-  if (target_end == std::string_view::npos) {
-    return std::unexpected(
-        connect_error(ava::core::ErrorCategory::InvalidArgument, "OAuth callback request line was invalid"));
-  }
-  auto const target = request_line.substr(prefix.size(), target_end - prefix.size());
-  auto const query_start = target.find('?');
-  auto const path = target.substr(0, query_start);
-  if (path != "/auth/callback") {
-    auto error = connect_error(ava::core::ErrorCategory::InvalidArgument, "OAuth callback path was invalid");
-    error.with_context("path", std::string(path));
-    return std::unexpected(std::move(error));
-  }
-  if (query_start == std::string_view::npos) {
-    return std::unexpected(connect_error(ava::core::ErrorCategory::InvalidArgument, "OAuth callback query missing"));
-  }
-  auto const fields = parse_query(target.substr(query_start + 1));
-  OAuthCallback callback;
-  if (auto const state = fields.find("state"); state != fields.end()) callback.state = state->second;
-  if (auto const error = fields.find("error"); error != fields.end()) callback.error = error->second;
-  if (auto const description = fields.find("error_description"); description != fields.end()) {
-    callback.error_description = description->second;
-  }
-  if (!callback.error.empty()) return callback;
-
-  auto const code = fields.find("code");
-  if (code == fields.end() || code->second.empty() || callback.state.empty()) {
-    return std::unexpected(
-        connect_error(ava::core::ErrorCategory::InvalidArgument, "OAuth callback was missing code or state"));
-  }
-  callback.code = code->second;
-  return callback;
-}
-
-ava::core::Result<std::string> read_http_request_with_deadline(int fd, std::chrono::steady_clock::time_point deadline)
-{
-  std::string request;
-  std::array<char, 4096> buffer{};
-  while (request.find("\r\n\r\n") == std::string::npos && request.size() < 16384) {
-    auto const remaining =
-        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
-    if (remaining.count() <= 0) {
-      return std::unexpected(connect_error(ava::core::ErrorCategory::Io, "timed out reading OAuth callback"));
-    }
-    pollfd descriptor{.fd = fd, .events = POLLIN, .revents = 0};
-    int ready = 0;
-    do {
-      ready = ::poll(&descriptor, 1, static_cast<int>(std::min<long long>(5000, remaining.count())));
-    } while (ready < 0 && errno == EINTR);
-    if (ready == 0) {
-      return std::unexpected(connect_error(ava::core::ErrorCategory::Io, "timed out reading OAuth callback"));
-    }
-    if (ready < 0) {
-      auto error = connect_error(ava::core::ErrorCategory::Io, "failed while reading OAuth callback");
-      error.with_context("cause", errno_message());
-      return std::unexpected(std::move(error));
-    }
-
-    auto const count = ::read(fd, buffer.data(), buffer.size());
-    if (count < 0) {
-      if (errno == EINTR) continue;
-      auto error = connect_error(ava::core::ErrorCategory::Io, "failed to read OAuth callback");
-      error.with_context("cause", errno_message());
-      return std::unexpected(std::move(error));
-    }
-    if (count == 0) break;
-    request.append(buffer.data(), static_cast<std::size_t>(count));
-  }
-  return request;
-}
-
-void send_callback_response(int fd, std::string_view body)
-{
-  std::string const response =
-      "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: " + std::to_string(body.size()) +
-      "\r\nConnection: close\r\n\r\n" + std::string(body);
-  static_cast<void>(send_all_to_socket(fd, response));
-}
-
-ava::core::Result<OAuthCallback> wait_for_oauth_callback(std::string_view expected_state,
-                                                         std::function<bool()> const& cancel_requested)
-{
-  ScopedSocket const server(::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0));
-  if (server.get() < 0) {
-    auto error = connect_error(ava::core::ErrorCategory::Io, "failed to create OAuth callback socket");
-    error.with_context("cause", errno_message());
-    return std::unexpected(std::move(error));
-  }
-  int reuse = 1;
-  static_cast<void>(::setsockopt(server.get(), SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)));
-
-  sockaddr_in address{};
-  address.sin_family = AF_INET;
-  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  address.sin_port = htons(1455);
-  if (::bind(server.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
-    auto error = connect_error(ava::core::ErrorCategory::Io, "failed to bind OAuth callback server");
-    error.with_context("address", "127.0.0.1:1455");
-    error.with_context("cause", errno_message());
-    return std::unexpected(std::move(error));
-  }
-  if (::listen(server.get(), 1) != 0) {
-    auto error = connect_error(ava::core::ErrorCategory::Io, "failed to listen for OAuth callback");
-    error.with_context("cause", errno_message());
-    return std::unexpected(std::move(error));
-  }
-
-  auto const deadline = std::chrono::steady_clock::now() + std::chrono::minutes(5);
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (cancel_requested && cancel_requested()) {
-      return std::unexpected(connect_error(ava::core::ErrorCategory::InvalidArgument, "OpenAI OAuth login cancelled"));
-    }
-    auto const remaining =
-        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
-    pollfd descriptor{.fd = server.get(), .events = POLLIN, .revents = 0};
-    int ready = 0;
-    do {
-      ready =
-          ::poll(&descriptor, 1, static_cast<int>(std::min<long long>(500, std::max<long long>(1, remaining.count()))));
-    } while (ready < 0 && errno == EINTR);
-    if (ready == 0) continue;
-    if (ready < 0) {
-      auto error = connect_error(ava::core::ErrorCategory::Io, "failed while waiting for OAuth callback");
-      error.with_context("cause", errno_message());
-      return std::unexpected(std::move(error));
-    }
-
-    ScopedSocket const client(::accept4(server.get(), nullptr, nullptr, SOCK_CLOEXEC));
-    if (client.get() < 0) {
-      auto error = connect_error(ava::core::ErrorCategory::Io, "failed to accept OAuth callback");
-      error.with_context("cause", errno_message());
-      return std::unexpected(std::move(error));
-    }
-
-    auto const client_deadline = std::min(deadline, std::chrono::steady_clock::now() + std::chrono::seconds(5));
-    auto request = read_http_request_with_deadline(client.get(), client_deadline);
-    if (!request) {
-      send_callback_response(client.get(), "AVA could not read this OAuth callback. Return to the terminal.\n");
-      continue;
-    }
-    auto callback = parse_oauth_callback_request(*request);
-    if (!callback) {
-      send_callback_response(client.get(), "AVA ignored this OAuth callback. Return to the terminal.\n");
-      continue;
-    }
-    if (callback->state != expected_state) {
-      send_callback_response(client.get(), "AVA ignored an OAuth callback with the wrong state.\n");
-      continue;
-    }
-    if (!callback->error.empty()) {
-      send_callback_response(client.get(), "AVA could not complete OAuth. Return to the terminal.\n");
-      auto error = connect_error(ava::core::ErrorCategory::Provider, "OpenAI OAuth callback returned an error");
-      error.with_context("error", callback->error);
-      if (!callback->error_description.empty()) error.with_context("description", callback->error_description);
-      return std::unexpected(std::move(error));
-    }
-    send_callback_response(client.get(), "AVA connected. You can close this tab.\n");
-    return callback;
-  }
-  return std::unexpected(connect_error(ava::core::ErrorCategory::Io, "timed out waiting for OAuth callback"));
-}
-
 std::string credential_type_value(ConnectCredentialType type)
 {
-  return type == ConnectCredentialType::OAuthToken ? "oauth" : "api_key";
+  static_cast<void>(type);
+  return "api_key";
 }
 
 std::string credential_type_label(ConnectCredentialType type)
 {
-  return type == ConnectCredentialType::OAuthToken ? "OAuth bearer token" : "API key";
+  static_cast<void>(type);
+  return "API key";
 }
 
 std::string openai_connect_method_label(OpenAIConnectMethod method)
@@ -467,10 +190,14 @@ std::string openai_connect_method_label(OpenAIConnectMethod method)
       return "ChatGPT Pro/Plus (headless OAuth)";
     case OpenAIConnectMethod::ApiKey:
       return "OpenAI API key";
-    case OpenAIConnectMethod::OAuthToken:
-      return "OAuth bearer token";
   }
   return "OpenAI login";
+}
+
+std::string connect_provider_group_id(std::string_view provider_id)
+{
+  if (provider_id == "kimi" || provider_id == "moonshot") return "kimi-moonshot";
+  return std::string(provider_id);
 }
 
 std::string lower_ascii(std::string_view text)
@@ -484,11 +211,23 @@ std::string lower_ascii(std::string_view text)
 std::vector<ConnectProviderMenuItem> connect_provider_menu_items()
 {
   std::vector<ConnectProviderMenuItem> items;
+  std::vector<std::string> groups;
+  auto add = [&](ConnectProviderMenuItem item, std::string group) {
+    if (std::ranges::find(groups, group) != groups.end()) return;
+    groups.push_back(std::move(group));
+    items.push_back(std::move(item));
+  };
   for (auto const& profile : ava::config::builtin_provider_profiles()) {
-    items.push_back(
-        ConnectProviderMenuItem{.id = profile.provider_id,
+    if (profile.provider_id == "kimi") continue;
+    if (profile.provider_id == "moonshot") {
+      add(ConnectProviderMenuItem{.id = profile.provider_id, .label = "Kimi / Moonshot", .detail = "API key"},
+          connect_provider_group_id(profile.provider_id));
+      continue;
+    }
+    add(ConnectProviderMenuItem{.id = profile.provider_id,
                                 .label = profile.display_name,
-                                .detail = profile.connect_detail.empty() ? "API key" : profile.connect_detail});
+                                .detail = profile.connect_detail.empty() ? "API key" : profile.connect_detail},
+        connect_provider_group_id(profile.provider_id));
   }
   return items;
 }
@@ -631,17 +370,6 @@ ava::core::Result<std::string> select_provider_from_menu(std::istream& in, std::
   }
 }
 
-std::optional<ConnectCredentialType> parse_connect_credential_type(std::string_view value)
-{
-  if (value == "api" || value == "api-key" || value == "apikey" || value == "key" || value == "api_key") {
-    return ConnectCredentialType::ApiKey;
-  }
-  if (value == "oauth" || value == "oauth-token" || value == "oauth_token" || value == "bearer" || value == "token") {
-    return ConnectCredentialType::OAuthToken;
-  }
-  return std::nullopt;
-}
-
 std::optional<OpenAIConnectMethod> parse_openai_connect_method(std::string_view value)
 {
   auto const lowered = lower_ascii(value);
@@ -656,10 +384,6 @@ std::optional<OpenAIConnectMethod> parse_openai_connect_method(std::string_view 
   if (lowered == "3" || lowered == "api" || lowered == "api-key" || lowered == "apikey" || lowered == "key" ||
       lowered == "api_key") {
     return OpenAIConnectMethod::ApiKey;
-  }
-  if (lowered == "4" || lowered == "oauth-token" || lowered == "oauth_token" || lowered == "bearer" ||
-      lowered == "token") {
-    return OpenAIConnectMethod::OAuthToken;
   }
   return std::nullopt;
 }
@@ -818,6 +542,11 @@ int run_connect_openai_browser(ava::config::XdgPaths const& paths, std::ostream&
     return 1;
   }
   out << "Open this URL to connect AVA to OpenAI:\n\n" << session->authorization_url << "\n\n";
+  if (open_url_in_browser(session->authorization_url)) {
+    out << "Opened your browser.\n";
+  } else {
+    out << "Could not open your browser automatically.\n";
+  }
   out << "Waiting for browser callback on http://localhost:1455/auth/callback ...\n";
 
   ava::provider::CurlCliTransport transport;
@@ -879,7 +608,7 @@ int run_connect_openai_wizard(ava::config::XdgPaths const& paths, ConnectProvide
 
   if (!options.stdin_is_tty) {
     err << "interactive OpenAI login requires a terminal; use --browser-oauth, --headless-oauth, --api-key-stdin, "
-           "--api-key-env, --oauth-token-stdin, or --oauth-token-env\n";
+           "or --api-key-env\n";
     return 2;
   }
 
@@ -887,15 +616,14 @@ int run_connect_openai_wizard(ava::config::XdgPaths const& paths, ConnectProvide
   out << "  1. " << openai_connect_method_label(OpenAIConnectMethod::BrowserOAuth) << '\n';
   out << "  2. " << openai_connect_method_label(OpenAIConnectMethod::HeadlessOAuth) << '\n';
   out << "  3. " << openai_connect_method_label(OpenAIConnectMethod::ApiKey) << '\n';
-  out << "  4. " << openai_connect_method_label(OpenAIConnectMethod::OAuthToken) << '\n';
-  auto method_text = read_prompt_line(in, out, "Select method [1-4]: ", false, options.stdin_is_tty);
+  auto method_text = read_prompt_line(in, out, "Select method [1-3]: ", false, options.stdin_is_tty);
   if (!method_text) {
     err << ava::tui::sanitize_terminal_text(method_text.error().format()) << '\n';
     return 1;
   }
   auto method = parse_openai_connect_method(*method_text);
   if (!method) {
-    err << "OpenAI login method must be 1, 2, 3, or 4\n";
+    err << "OpenAI login method must be 1, 2, or 3\n";
     return 2;
   }
   switch (*method) {
@@ -909,13 +637,6 @@ int run_connect_openai_wizard(ava::config::XdgPaths const& paths, ConnectProvide
                                                                       .credential_type = ConnectCredentialType::ApiKey,
                                                                       .stdin_is_tty = options.stdin_is_tty},
                                          in, out, err);
-    case OpenAIConnectMethod::OAuthToken:
-      return run_connect_provider_wizard(
-          paths,
-          ConnectProviderWizardOptions{.provider_id = std::string("openai"),
-                                       .credential_type = ConnectCredentialType::OAuthToken,
-                                       .stdin_is_tty = options.stdin_is_tty},
-          in, out, err);
   }
   return 2;
 }
@@ -924,8 +645,7 @@ int run_connect_provider_wizard(ava::config::XdgPaths const& paths, ConnectProvi
                                 std::istream& in, std::ostream& out, std::ostream& err)
 {
   if (!options.stdin_is_tty) {
-    err << "interactive provider login requires a terminal; use --api-key-stdin, --api-key-env, --oauth-token-stdin, "
-           "or --oauth-token-env\n";
+    err << "interactive provider login requires a terminal; use --api-key-stdin or --api-key-env\n";
     return 2;
   }
 
@@ -954,18 +674,6 @@ int run_connect_provider_wizard(ava::config::XdgPaths const& paths, ConnectProvi
   ConnectCredentialType credential_type = ConnectCredentialType::ApiKey;
   if (options.credential_type) {
     credential_type = *options.credential_type;
-  } else {
-    auto method = read_prompt_line(in, out, "Credential type [api-key/oauth-token]: ", false, options.stdin_is_tty);
-    if (!method) {
-      err << ava::tui::sanitize_terminal_text(method.error().format()) << '\n';
-      return 1;
-    }
-    auto parsed = parse_connect_credential_type(*method);
-    if (!parsed) {
-      err << "credential type must be api-key or oauth-token\n";
-      return 2;
-    }
-    credential_type = *parsed;
   }
 
   auto secret = read_prompt_line(in, out, credential_type_label(credential_type) + " for " + provider_id + ": ", true,

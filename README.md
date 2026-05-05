@@ -73,7 +73,7 @@ AVA follows XDG paths on Linux:
 - Auth: `$XDG_CONFIG_HOME/ava/auth.json`, fallback `~/.config/ava/auth.json`
 - Sessions: `$XDG_STATE_HOME/ava/sessions/`, fallback `~/.local/state/ava/sessions/`
 
-OpenAI auth can be created with `ava connect openai`, which opens a login picker for ChatGPT Pro/Plus browser OAuth, ChatGPT Pro/Plus headless device OAuth, an OpenAI API key, or a bearer token. Browser OAuth listens on `http://localhost:1455/auth/callback`; headless OAuth prints `https://auth.openai.com/codex/device` plus a user code. OAuth credentials are refreshed automatically before use when a refresh token is available. Auth files also support OAuth-style tokens and API keys:
+OpenAI auth can be created with `ava connect openai`, which opens a login picker for ChatGPT Pro/Plus browser OAuth, ChatGPT Pro/Plus headless device OAuth, or an OpenAI API key. Browser OAuth opens the default browser and listens on `http://localhost:1455/auth/callback`; headless OAuth prints `https://auth.openai.com/codex/device` plus a user code. OAuth credentials are refreshed automatically before use when a refresh token is available. Auth files also support OAuth-style tokens and API keys:
 
 ```json
 {"openai":{"type":"oauth","access_token":"...","refresh_token":"...","expires_at":1893456000}}
@@ -92,7 +92,7 @@ The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME
 - `/mode`: toggle build/plan mode
 - `/details`: toggle TUI tool detail expansion
 - `/thinking`: toggle inline thinking block visibility without changing provider reasoning mode
-- `/connect [provider] [api-key|oauth|browser-oauth|headless-oauth]`: store a provider credential or start OpenAI OAuth; `/login` is an alias
+- `/connect`: open provider and login method modals; `/login` is an alias
 - `/models [query|provider/model]`: list configured models and capabilities; `/model` is an alias
 - `/sessions [query|id]`: list resumable sessions for the current workspace
 - `/context [query|source]`: list loaded context sources

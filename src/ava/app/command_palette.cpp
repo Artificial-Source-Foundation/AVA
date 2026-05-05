@@ -116,23 +116,6 @@ std::filesystem::path plugin_enablement_file(RuntimeSession const& session)
 
 void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, RuntimeSession const& session)
 {
-  if (auto index = find_item_index(items, "/connect")) {
-    auto& item = items[*index];
-    if (!session.model.provider_id.empty()) {
-      add_completion(item, 0, session.model.provider_id,
-                     ava::config::provider_display_name(session.model.provider_id) + " (current)", "Providers");
-    }
-    for (auto const& profile : ava::config::builtin_provider_profiles()) {
-      auto description = profile.display_name;
-      if (!profile.connect_detail.empty()) description += " - " + profile.connect_detail;
-      add_completion(item, 0, profile.provider_id, std::move(description), "Providers");
-    }
-    add_completion(item, 1, "api-key", "Store an API key credential", "Credential");
-    add_completion(item, 1, "oauth", "Store an OAuth bearer token credential", "Credential");
-    add_completion(item, 1, "browser-oauth", "Start OpenAI ChatGPT Pro/Plus browser OAuth", "OpenAI", {"openai"});
-    add_completion(item, 1, "headless-oauth", "Start OpenAI ChatGPT Pro/Plus device OAuth", "OpenAI", {"openai"});
-  }
-
   if (auto index = find_item_index(items, "/models")) {
     auto& item = items[*index];
     auto const providers = ava::provider::builtin_provider_registry();

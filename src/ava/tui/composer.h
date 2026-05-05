@@ -159,6 +159,7 @@ struct QuestionPromptOptionView {
 enum class QuestionPromptInputAction {
   None,
   Redraw,
+  Copy,
   Resolve,
   Cancel,
 };
@@ -167,6 +168,7 @@ struct QuestionPromptInputResult {
   std::size_t selected_option_index = 0;
   std::vector<QuestionPromptOptionView> options;
   std::string custom_text;
+  std::string copy_text;
   QuestionPromptInputAction action = QuestionPromptInputAction::None;
 };
 

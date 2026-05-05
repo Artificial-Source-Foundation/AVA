@@ -33,7 +33,7 @@ Status legend: `Done` means implemented with regression coverage, `Partial` mean
 | Frontend-visible reasoning events | Planned | Phase 5/5.5 | Required for 1.0. Runtime/RPC should emit reasoning start/delta/end events so clients can show what supported models are thinking without parsing provider-specific raw events. |
 | Mid-session model switching and model-change entries | Partial | Phase 5 | RPC model listing/switching and durable model-change entries exist; MVP still needs provider-history compatibility checks, reasoning-control entries, and edge-case tests. |
 | Reasoning/thinking controls | Planned | Phase 5/5.5 | Only for models whose metadata declares support, and only when provider request builders serialize the native fields. |
-| Anthropic OAuth refresh | Deferred | 1.1 candidate | OpenAI OAuth refresh is done; Anthropic bearer/OAuth tokens are currently treated as static credentials until provider-specific refresh support is designed and tested. |
+| Anthropic OAuth refresh | Deferred | 1.1 candidate | OpenAI OAuth refresh is done; Anthropic interactive setup currently uses API keys until provider-specific OAuth support is designed and tested. |
 | Stable local plugin foundation | Planned | Phase 6 | Out-of-process JSONL plugins with manifest, explicit enablement, diagnostics, permissions, audit identity, fake plugin tests, and sample docs. |
 | MCP servers through plugin/runtime safety model | Planned | Phase 6 | Stdio MCP tools are required first; resources/prompts are strongly desired but may defer to 1.1 if tool-host stability requires focus. |
 | HTTP/server daemon mode | Deferred | 1.1 candidate | Keep on the roadmap after stdio RPC maturity. |

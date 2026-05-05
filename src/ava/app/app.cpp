@@ -34,11 +34,10 @@ void print_help()
   std::cout << "AVA " << version::kDisplayVersion << "\n\n";
   std::cout << "Usage:\n";
   std::cout << "  ava [--help]\n";
-  std::cout << "  ava login [provider] [--api-key|--oauth-token|--browser-oauth|--headless-oauth]\n";
-  std::cout << "  ava auth login [provider] [--api-key|--oauth-token|--browser-oauth|--headless-oauth]\n";
-  std::cout << "  ava connect [provider] [--api-key|--oauth-token|--browser-oauth|--headless-oauth]\n";
+  std::cout << "  ava login [provider] [--api-key|--browser-oauth|--headless-oauth]\n";
+  std::cout << "  ava auth login [provider] [--api-key|--browser-oauth|--headless-oauth]\n";
+  std::cout << "  ava connect [provider] [--api-key|--browser-oauth|--headless-oauth]\n";
   std::cout << "  ava connect <provider> --api-key-stdin|--api-key-env <env>\n";
-  std::cout << "  ava connect <provider> --oauth-token-stdin|--oauth-token-env <env>\n";
   std::cout << "  ava --version\n";
   std::cout << "  ava --mode build|plan\n";
   std::cout << "  ava --session <id>\n";
@@ -148,32 +147,20 @@ int run(int argc, char** argv)
         if (!set_source(CredentialSource::Prompt, ava::app::ConnectCredentialType::ApiKey)) return 2;
         continue;
       }
-      if (option == "--oauth-token") {
-        if (!set_source(CredentialSource::Prompt, ava::app::ConnectCredentialType::OAuthToken)) return 2;
-        continue;
-      }
       if (option == "--browser-oauth") {
-        if (!set_source(CredentialSource::BrowserOAuth, ava::app::ConnectCredentialType::OAuthToken)) return 2;
+        if (!set_source(CredentialSource::BrowserOAuth, ava::app::ConnectCredentialType::ApiKey)) return 2;
         continue;
       }
       if (option == "--headless-oauth") {
-        if (!set_source(CredentialSource::HeadlessOAuth, ava::app::ConnectCredentialType::OAuthToken)) return 2;
+        if (!set_source(CredentialSource::HeadlessOAuth, ava::app::ConnectCredentialType::ApiKey)) return 2;
         continue;
       }
       if (option == "--api-key-stdin") {
         if (!set_source(CredentialSource::Stdin, ava::app::ConnectCredentialType::ApiKey)) return 2;
         continue;
       }
-      if (option == "--oauth-token-stdin") {
-        if (!set_source(CredentialSource::Stdin, ava::app::ConnectCredentialType::OAuthToken)) return 2;
-        continue;
-      }
-      if (option == "--api-key-env" || option == "--oauth-token-env") {
-        if (!set_source(option == "--oauth-token-env" ? CredentialSource::Env : CredentialSource::Env,
-                        option == "--oauth-token-env" ? ava::app::ConnectCredentialType::OAuthToken
-                                                      : ava::app::ConnectCredentialType::ApiKey)) {
-          return 2;
-        }
+      if (option == "--api-key-env") {
+        if (!set_source(CredentialSource::Env, ava::app::ConnectCredentialType::ApiKey)) return 2;
         if (index + 1 >= argc) {
           std::cerr << ava::tui::sanitize_terminal_text(std::string(option))
                     << " requires an environment variable name\n";

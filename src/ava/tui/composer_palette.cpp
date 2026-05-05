@@ -138,7 +138,44 @@ std::string completion_insert_text(SlashCommandItem const& command, SlashCommand
 bool slash_command_has_argument_completions(std::string_view input, std::vector<SlashCommandItem> const& commands)
 {
   auto const* command = find_slash_command_for_arguments(input, commands);
-  return command != nullptr && !command->argument_completions.empty();
+  if (!command || command->argument_completions.empty()) return false;
+
+  auto const args_text = argument_text(input);
+  auto const tokens = split_argument_tokens(args_text);
+  auto const argument_index = current_argument_index(args_text, tokens);
+  return std::ranges::any_of(command->argument_completions, [&](SlashCommandArgumentCompletion const& completion) {
+    return completion.argument_index == argument_index && completion_previous_args_match(completion, tokens);
+  });
+}
+
+bool slash_argument_completion_exact_submission_ready(std::string_view input,
+                                                      std::vector<SlashCommandItem> const& commands)
+{
+  auto const* command = find_slash_command_for_arguments(input, commands);
+  if (!command || !command->enabled || command->argument_completions.empty()) return false;
+
+  auto const args_text = argument_text(input);
+  auto const tokens = split_argument_tokens(args_text);
+  if (tokens.empty() || ends_with_ascii_space(args_text)) return false;
+
+  auto const argument_index = current_argument_index(args_text, tokens);
+  auto const prefix = current_argument_prefix(args_text, tokens);
+  for (auto const& completion : command->argument_completions) {
+    if (completion.argument_index != argument_index || !completion.enabled) continue;
+    if (!completion_previous_args_match(completion, tokens)) continue;
+    if (completion.value != prefix) continue;
+    if (!completion.append_space) return true;
+
+    auto accepted_tokens = tokens;
+    accepted_tokens[argument_index] = completion.value;
+    auto const next_argument_index = argument_index + 1;
+    auto const has_next_completions =
+        std::ranges::any_of(command->argument_completions, [&](SlashCommandArgumentCompletion const& next) {
+          return next.argument_index == next_argument_index && completion_previous_args_match(next, accepted_tokens);
+        });
+    return !has_next_completions;
+  }
+  return false;
 }
 
 std::string slash_command_display(SlashCommandItem const& item)
@@ -386,7 +423,10 @@ std::vector<SlashCommandItem> filter_slash_commands(std::string_view input,
 bool slash_palette_visible(std::string_view input, std::vector<SlashCommandItem> const& commands)
 {
   if (!input.starts_with('/') || commands.empty()) return false;
-  if (detail::has_argument_text(input)) return detail::slash_command_has_argument_completions(input, commands);
+  if (detail::has_argument_text(input)) {
+    if (detail::slash_argument_completion_exact_submission_ready(input, commands)) return false;
+    return detail::slash_command_has_argument_completions(input, commands);
+  }
 
   auto const prefix = detail::slash_command_prefix(input);
   for (auto const& command : commands) {

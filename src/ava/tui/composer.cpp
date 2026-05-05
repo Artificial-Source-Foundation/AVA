@@ -445,12 +445,6 @@ std::vector<std::string> render_composer(ComposerSnapshot const& snapshot)
 {
   auto const width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
   auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
-  if (snapshot.question_prompt && snapshot.question_prompt->modal) {
-    auto base = snapshot;
-    auto const prompt = *base.question_prompt;
-    base.question_prompt = std::nullopt;
-    return overlay_question_modal(render_composer(base), prompt, width, height);
-  }
   if (sidebar_visible(snapshot, width)) {
     auto const sidebar_width = std::min<std::size_t>(kSidebarWidth, width / 3);
     auto const main_width = main_width_for(snapshot, width);
@@ -465,6 +459,12 @@ std::vector<std::string> render_composer(ComposerSnapshot const& snapshot)
                          std::string(kSgrReset) + pad_line_to_width(sidebar_line, sidebar_width));
     }
     return combined;
+  }
+  if (snapshot.question_prompt && snapshot.question_prompt->modal) {
+    auto base = snapshot;
+    auto const prompt = *base.question_prompt;
+    base.question_prompt = std::nullopt;
+    return overlay_question_modal(render_composer(base), prompt, width, height);
   }
   std::vector<std::string> lines;
   lines.reserve(height);

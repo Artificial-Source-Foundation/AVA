@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "ava/agent/agent_loop_cancellation.h"
 #include "ava/agent/assistant_turn.h"
 #include "ava/agent/message_builder.h"
 #include "ava/agent/provider_event_buffer.h"
@@ -29,21 +30,6 @@ ava::core::VoidResult publish_tool_progress(AgentLoopOptions const& options, Too
   return options.on_tool_progress(event);
 }
 
-bool is_canceled(AgentLoopOptions const& options)
-{
-  return options.cancel_requested && options.cancel_requested();
-}
-
-ava::core::VoidResult check_canceled(AgentLoopOptions const& options, ava::session::SessionStore& store,
-                                     std::string_view boundary)
-{
-  if (!is_canceled(options)) return {};
-  static_cast<void>(append_cancel(store, boundary));
-  auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled");
-  error.with_context("boundary", std::string(boundary));
-  return std::unexpected(std::move(error));
-}
-
 }  // namespace
 
 AgentLoop::AgentLoop(AgentLoopOptions options) : options_(std::move(options))
@@ -56,11 +42,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
                                                        ava::provider::Transport& transport)
 {
   auto check_canceled_locked = [&](std::string_view boundary) -> ava::core::VoidResult {
-    if (options_.session_mutex) {
-      std::lock_guard lock(*options_.session_mutex);
-      return check_canceled(options_, store, boundary);
-    }
-    return check_canceled(options_, store, boundary);
+    return check_agent_loop_canceled(options_.cancel_requested, store, options_.session_mutex, boundary);
   };
   auto append_user_message_locked = [&](std::string const& text) -> ava::core::Result<std::string> {
     if (options_.session_mutex) {
@@ -312,16 +294,16 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
           *request,
           [&](std::string_view chunk) -> ava::core::VoidResult {
             processed_stream_chunks = true;
-            if (is_canceled(options_)) {
+            if (agent_loop_canceled(options_.cancel_requested)) {
               return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled"));
             }
             auto parsed = stream_parser->append(chunk);
             if (!parsed) return std::unexpected(std::move(parsed.error()));
             return append_stream_events(std::move(*parsed));
           },
-          [&options = options_]() { return is_canceled(options); });
+          [&options = options_]() { return agent_loop_canceled(options.cancel_requested); });
       if (!response) {
-        if (is_canceled(options_)) {
+        if (agent_loop_canceled(options_.cancel_requested)) {
           if (auto not_canceled = check_canceled_locked("during_provider_stream"); !not_canceled) {
             return std::unexpected(std::move(not_canceled.error()));
           }
@@ -369,7 +351,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
           return std::unexpected(events.error());
         }
         if (auto appended = append_stream_events(std::move(*events)); !appended) {
-          if (is_canceled(options_)) {
+          if (agent_loop_canceled(options_.cancel_requested)) {
             if (auto not_canceled = check_canceled_locked("during_provider_stream"); !not_canceled) {
               return std::unexpected(std::move(not_canceled.error()));
             }
@@ -394,7 +376,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
           return std::unexpected(parsed.error());
         }
         if (auto appended = append_stream_events(std::move(*parsed)); !appended) {
-          if (is_canceled(options_)) {
+          if (agent_loop_canceled(options_.cancel_requested)) {
             if (auto not_canceled = check_canceled_locked("during_provider_stream"); !not_canceled) {
               return std::unexpected(std::move(not_canceled.error()));
             }
@@ -409,9 +391,10 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
         }
       }
     } else {
-      auto response = transport.send(*request, [&options = options_]() { return is_canceled(options); });
+      auto response =
+          transport.send(*request, [&options = options_]() { return agent_loop_canceled(options.cancel_requested); });
       if (!response) {
-        if (is_canceled(options_)) {
+        if (agent_loop_canceled(options_.cancel_requested)) {
           if (auto not_canceled = check_canceled_locked("during_provider_request"); !not_canceled) {
             return std::unexpected(std::move(not_canceled.error()));
           }

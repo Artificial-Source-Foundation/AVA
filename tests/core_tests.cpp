@@ -30,6 +30,7 @@ void run_config_provider_credential_support_tests();
 void run_app_event_json_support_tests();
 void run_app_line_shell_support_tests();
 void run_app_plugin_command_arguments_tests();
+void run_agent_loop_cancellation_tests();
 void run_app_event_serialization_tests();
 void run_app_rpc_command_tests();
 void run_app_rpc_control_tests();
@@ -100,6 +101,7 @@ constexpr std::array kTestSuites{
     TestSuite{"app_event_json_support", run_app_event_json_support_tests},
     TestSuite{"app_line_shell_support", run_app_line_shell_support_tests},
     TestSuite{"app_plugin_command_arguments", run_app_plugin_command_arguments_tests},
+    TestSuite{"agent_loop_cancellation", run_agent_loop_cancellation_tests},
     TestSuite{"app_event_serialization", run_app_event_serialization_tests},
     TestSuite{"app_event_bus", run_app_event_bus_tests},
     TestSuite{"app_rpc_command", run_app_rpc_command_tests},

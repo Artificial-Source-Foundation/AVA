@@ -8,6 +8,7 @@
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/core/json.h"
 #include "ava/mcp/config.h"
+#include "ava/mcp/process_support.h"
 #include "ava/mcp/protocol.h"
 #include "ava/mcp/stdio_client.h"
 #include "ava/mcp/tool_broker.h"
@@ -137,6 +138,37 @@ void test_mcp_protocol_helpers()
 
   auto const structured_content = ava::mcp::mcp_text_content_from_result("{\"structuredContent\":{\"ok\":true}}");
   expect(structured_content == "{\"ok\":true}", "MCP protocol falls back to structured tool content");
+}
+
+void test_mcp_process_support_helpers()
+{
+  auto const root = temp_root() / "mcp-process-support";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  std::filesystem::create_directories(root);
+  auto pipe = ava::mcp::detail::make_mcp_pipe(fake_server_config(root));
+  expect(pipe && (*pipe)[0] > 2 && (*pipe)[1] > 2 && (*pipe)[0] != (*pipe)[1],
+         pipe ? "MCP process support creates non-standard pipe fds"
+              : "MCP process support creates non-standard pipe fds: " + pipe.error().format());
+
+  if (pipe) {
+    ava::mcp::detail::UniqueFd read_fd((*pipe)[0]);
+    ava::mcp::detail::UniqueFd write_fd((*pipe)[1]);
+    char const input = 'x';
+    char output = '\0';
+    auto const written = ava::mcp::detail::write_retry(write_fd.get(), &input, 1);
+    auto const read = ava::mcp::detail::read_retry(read_fd.get(), &output, 1);
+    expect(written == 1 && read == 1 && output == input, "MCP process support retries pipe read/write syscalls");
+
+    int released = read_fd.release();
+    ava::mcp::detail::close_fd(released);
+    expect(released == -1, "MCP process support close_fd resets fd references");
+  }
+
+  auto const now = std::chrono::steady_clock::now();
+  auto const future = ava::mcp::detail::remaining_ms(now + std::chrono::milliseconds(250));
+  expect(ava::mcp::detail::remaining_ms(now - std::chrono::milliseconds(1)) == 0 && future > 0 && future <= 250,
+         "MCP process support computes bounded remaining timeout milliseconds");
 }
 
 void test_mcp_stdio_client_lists_and_calls_tools()
@@ -375,6 +407,7 @@ void run_mcp_tests()
 {
   test_mcp_config_parsing();
   test_mcp_protocol_helpers();
+  test_mcp_process_support_helpers();
   test_mcp_stdio_client_lists_and_calls_tools();
   test_mcp_tool_dispatcher();
   test_mcp_tool_dispatcher_contains_tool_errors();

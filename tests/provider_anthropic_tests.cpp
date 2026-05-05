@@ -10,6 +10,7 @@
 #include "ava/config/xdg_paths.h"
 #include "ava/provider/anthropic_provider.h"
 #include "ava/provider/anthropic_request.h"
+#include "ava/provider/anthropic_response.h"
 #include "ava/provider/provider_utils.h"
 #include "ava/provider/registry.h"
 #include "ava/session/session_store.h"
@@ -796,6 +797,14 @@ void test_anthropic_native_content_parts_request()
 
 void test_anthropic_parsing()
 {
+  auto const usage = ava::provider::parse_anthropic_usage(
+      R"({"usage":{"input_tokens":5,"cache_read_input_tokens":2,"cache_creation_input_tokens":3,"output_tokens":7}})");
+  expect(usage && usage->input_tokens == 10 && usage->cache_read_tokens == 2 && usage->cache_write_tokens == 3 &&
+             usage->output_tokens == 7 && usage->total_tokens == 17,
+         "Anthropic response helper accumulates regular, cached, and output token usage");
+  expect(!ava::provider::parse_anthropic_usage(R"({"usage":{"input_tokens":-1}})"),
+         "Anthropic response helper rejects negative-only usage");
+
   std::string const sse =
       "event: message_start\n"
       "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,"

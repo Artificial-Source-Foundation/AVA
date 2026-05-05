@@ -25,6 +25,16 @@ namespace ava::app::rpc {
                                                              std::mutex& session_mutex, RpcRunState& run_state,
                                                              RpcCommand const& command);
 
+[[nodiscard]] ava::core::VoidResult handle_permission_reply_command(RpcOutput& output, RuntimeSession const& session,
+                                                                    std::mutex& session_mutex,
+                                                                    PendingResolverState& pending_state,
+                                                                    RpcCommand const& command);
+
+[[nodiscard]] ava::core::VoidResult handle_question_reply_command(RpcOutput& output, RuntimeSession const& session,
+                                                                  std::mutex& session_mutex,
+                                                                  PendingResolverState& pending_state,
+                                                                  RpcCommand const& command);
+
 [[nodiscard]] ava::core::VoidResult handle_cancel_command(RpcOutput& output, RuntimeSession const& session,
                                                           std::mutex& session_mutex, RpcRunState& run_state,
                                                           PendingResolverState& pending_state,

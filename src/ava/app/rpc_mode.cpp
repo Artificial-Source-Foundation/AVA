@@ -334,74 +334,18 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     }
 
     if (command->type == "permission_reply") {
-      if (!command->request_id || command->request_id->empty()) {
-        if (auto written =
-                rpc::write_error(output, command->id, rpc::invalid_rpc(command->type + " requires request_id"));
-            !written) {
-          return written;
-        }
-        continue;
+      if (auto written = rpc::handle_permission_reply_command(output, session, session_mutex, pending_state, *command);
+          !written) {
+        return written;
       }
-      if (!command->decision) {
-        if (auto written =
-                rpc::write_error(output, command->id, rpc::invalid_rpc("permission_reply requires decision"));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      if (!command->correlation_id || command->correlation_id->empty()) {
-        if (auto written =
-                rpc::write_error(output, command->id, rpc::invalid_rpc("permission_reply requires correlation_id"));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      auto resolved = rpc::resolve_permission_reply(pending_state, *command->request_id, *command->correlation_id,
-                                                    *command->decision);
-      if (!resolved) {
-        if (auto written = rpc::write_error(output, command->id, resolved.error()); !written) return written;
-        continue;
-      }
-      auto envelope =
-          rpc::resolver_event_envelope("permission_replied", *command->correlation_id, *command->correlation_id,
-                                       rpc::session_id_snapshot(session, session_mutex),
-                                       rpc::permission_reply_payload_json(*command->request_id, *command->decision));
-      if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
-      if (auto written = rpc::write_success(output, command->id, "{}"); !written) return written;
       continue;
     }
 
     if (command->type == "question_reply") {
-      if (!command->request_id || command->request_id->empty()) {
-        if (auto written =
-                rpc::write_error(output, command->id, rpc::invalid_rpc(command->type + " requires request_id"));
-            !written) {
-          return written;
-        }
-        continue;
+      if (auto written = rpc::handle_question_reply_command(output, session, session_mutex, pending_state, *command);
+          !written) {
+        return written;
       }
-      if (!command->correlation_id || command->correlation_id->empty()) {
-        if (auto written =
-                rpc::write_error(output, command->id, rpc::invalid_rpc("question_reply requires correlation_id"));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      auto resolved = rpc::resolve_question_reply(pending_state, *command->request_id, *command->correlation_id,
-                                                  command->answer, command->selected);
-      if (!resolved) {
-        if (auto written = rpc::write_error(output, command->id, resolved.error()); !written) return written;
-        continue;
-      }
-      auto envelope = rpc::resolver_event_envelope(
-          "question_replied", *command->correlation_id, *command->correlation_id,
-          rpc::session_id_snapshot(session, session_mutex),
-          rpc::question_reply_payload_json(*command->request_id, command->answer, command->selected));
-      if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
-      if (auto written = rpc::write_success(output, command->id, "{}"); !written) return written;
       continue;
     }
 

@@ -49,6 +49,51 @@ ava::core::VoidResult handle_follow_up_command(RpcOutput& output, RuntimeSession
   return write_queue_event(output, session, session_mutex, "follow_up_queued", *queued);
 }
 
+ava::core::VoidResult handle_permission_reply_command(RpcOutput& output, RuntimeSession const& session,
+                                                      std::mutex& session_mutex, PendingResolverState& pending_state,
+                                                      RpcCommand const& command)
+{
+  if (!command.request_id || command.request_id->empty()) {
+    return write_error(output, command.id, invalid_rpc(command.type + " requires request_id"));
+  }
+  if (!command.decision) {
+    return write_error(output, command.id, invalid_rpc("permission_reply requires decision"));
+  }
+  if (!command.correlation_id || command.correlation_id->empty()) {
+    return write_error(output, command.id, invalid_rpc("permission_reply requires correlation_id"));
+  }
+  auto resolved =
+      resolve_permission_reply(pending_state, *command.request_id, *command.correlation_id, *command.decision);
+  if (!resolved) return write_error(output, command.id, resolved.error());
+
+  auto envelope = resolver_event_envelope("permission_replied", *command.correlation_id, *command.correlation_id,
+                                          session_id_snapshot(session, session_mutex),
+                                          permission_reply_payload_json(*command.request_id, *command.decision));
+  if (auto written = write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
+  return write_success(output, command.id, "{}");
+}
+
+ava::core::VoidResult handle_question_reply_command(RpcOutput& output, RuntimeSession const& session,
+                                                    std::mutex& session_mutex, PendingResolverState& pending_state,
+                                                    RpcCommand const& command)
+{
+  if (!command.request_id || command.request_id->empty()) {
+    return write_error(output, command.id, invalid_rpc(command.type + " requires request_id"));
+  }
+  if (!command.correlation_id || command.correlation_id->empty()) {
+    return write_error(output, command.id, invalid_rpc("question_reply requires correlation_id"));
+  }
+  auto resolved = resolve_question_reply(pending_state, *command.request_id, *command.correlation_id, command.answer,
+                                         command.selected);
+  if (!resolved) return write_error(output, command.id, resolved.error());
+
+  auto envelope = resolver_event_envelope(
+      "question_replied", *command.correlation_id, *command.correlation_id, session_id_snapshot(session, session_mutex),
+      question_reply_payload_json(*command.request_id, command.answer, command.selected));
+  if (auto written = write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
+  return write_success(output, command.id, "{}");
+}
+
 ava::core::VoidResult handle_cancel_command(RpcOutput& output, RuntimeSession const& session, std::mutex& session_mutex,
                                             RpcRunState& run_state, PendingResolverState& pending_state,
                                             RpcCommand const& command)

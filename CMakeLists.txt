@@ -81,6 +81,7 @@ add_library(ava_core
   src/ava/core/error.cpp
   src/ava/core/ids.cpp
   src/ava/core/json.cpp
+  src/ava/core/json_support.cpp
   src/ava/lsp/lsp_client.cpp
   src/ava/lsp/lsp_client_io.cpp
   src/ava/lsp/lsp_client_support.cpp
@@ -278,6 +279,7 @@ if(AVA_BUILD_TESTS)
     tests/core_mode_json_permissions_tests.cpp
     tests/events_tests.cpp
     tests/file_tools_support_tests.cpp
+    tests/json_support_tests.cpp
     tests/lsp_tests.cpp
     tests/mcp_tests.cpp
     tests/plugin_tests.cpp
@@ -316,6 +318,7 @@ if(AVA_BUILD_TESTS)
     tools
     file_tools_support
     search_tools_support
+    json_support
     config_context_auth_oauth
     app_event_serialization
     app_event_bus

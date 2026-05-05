@@ -17,6 +17,7 @@ void run_bash_tool_support_tests();
 void run_tools_tests();
 void run_file_tools_support_tests();
 void run_search_tools_support_tests();
+void run_json_support_tests();
 void run_config_context_auth_oauth_tests();
 void run_app_event_serialization_tests();
 void run_app_rpc_command_tests();
@@ -59,6 +60,7 @@ constexpr std::array kTestSuites{
     TestSuite{"tools", run_tools_tests},
     TestSuite{"file_tools_support", run_file_tools_support_tests},
     TestSuite{"search_tools_support", run_search_tools_support_tests},
+    TestSuite{"json_support", run_json_support_tests},
     TestSuite{"config_context_auth_oauth", run_config_context_auth_oauth_tests},
     TestSuite{"app_event_serialization", run_app_event_serialization_tests},
     TestSuite{"app_event_bus", run_app_event_bus_tests},

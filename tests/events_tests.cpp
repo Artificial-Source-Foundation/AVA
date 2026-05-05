@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "ava/agent/mode.h"
+#include "ava/app/event_payload.h"
 #include "ava/app/events.h"
 #include "ava/app/interactive_run_queue.h"
 #include "ava/core/json.h"
@@ -63,6 +64,16 @@ void test_runtime_event_conversion_preserves_legacy_payload_shape()
   expect(envelope.payload_json ==
              "{\"text\":\"read ok\",\"call_id\":\"call_1\",\"tool\":\"read\",\"status\":\"completed\"}",
          "runtime event conversion maps legacy event fields into payload object");
+
+  auto const payload = ava::app::runtime_event_payload_json(event);
+  expect(payload == envelope.payload_json, "runtime event payload helper preserves event conversion payload shape");
+  std::string aliases = "{\"schema_version\":1";
+  ava::app::append_runtime_event_payload_aliases(aliases, payload);
+  aliases += '}';
+  expect(aliases.find("\"text\":\"read ok\"") != std::string::npos &&
+             aliases.find("\"call_id\":\"call_1\"") != std::string::npos &&
+             aliases.find("\"tool\":\"read\"") != std::string::npos,
+         "runtime event payload alias helper projects stable top-level stream aliases");
 }
 
 void test_runtime_event_bus_adapter_publishes_and_forwards()

@@ -145,6 +145,7 @@ add_library(ava_app
   src/ava/app/commands.cpp
   src/ava/app/connect_openai.cpp
   src/ava/app/events.cpp
+  src/ava/app/event_payload.cpp
   src/ava/app/headless_policy.cpp
   src/ava/app/interactive_run_queue.cpp
   src/ava/app/line_shell.cpp

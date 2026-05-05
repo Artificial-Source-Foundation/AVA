@@ -106,29 +106,6 @@ void test_core_json_top_level_lookup()
 
 void test_permission_command_policy_helpers()
 {
-  auto parsed = ava::permissions::detail::parse_command_argv("git diff \"src/main.cpp\" docs\\ plan.md");
-  expect(parsed.ok && parsed.argv.size() == 4 && parsed.argv[0] == "git" && parsed.argv[2] == "src/main.cpp" &&
-             parsed.argv[3] == "docs plan.md",
-         "permission command policy parses safe quotes and escapes");
-
-  auto meta = ava::permissions::detail::parse_command_argv("git status; rm -rf build");
-  expect(!meta.ok && meta.reason.find("metacharacters") != std::string::npos,
-         "permission command policy rejects shell metacharacters");
-
-  auto control = ava::permissions::detail::parse_command_argv(std::string("git\ndiff", 8));
-  expect(!control.ok && control.reason.find("control byte") != std::string::npos,
-         "permission command policy rejects control bytes");
-
-  auto unterminated = ava::permissions::detail::parse_command_argv("git diff \"src");
-  expect(!unterminated.ok && unterminated.reason.find("unterminated") != std::string::npos,
-         "permission command policy rejects unterminated quotes");
-
-  expect(ava::permissions::detail::is_safe_relative_path_arg("src/main.cpp") &&
-             !ava::permissions::detail::is_safe_relative_path_arg("../outside") &&
-             !ava::permissions::detail::is_safe_relative_path_arg("/tmp/outside") &&
-             !ava::permissions::detail::is_safe_relative_path_arg(".ssh/id_ed25519"),
-         "permission command policy identifies safe relative command path arguments");
-
   expect(ava::permissions::classify_command("git status --short").action == ava::permissions::PermissionAction::Allow,
          "permission command policy allows safe git status");
   expect(ava::permissions::classify_command("git diff --output=/tmp/out").action ==

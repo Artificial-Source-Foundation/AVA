@@ -98,6 +98,7 @@ add_library(ava_core
   src/ava/mcp/stdio_support.cpp
   src/ava/mcp/tool_broker.cpp
   src/ava/permissions/command_policy.cpp
+  src/ava/permissions/command_policy_support.cpp
   src/ava/permissions/permission.cpp
   src/ava/plugin/diagnostics.cpp
   src/ava/plugin/discovery.cpp
@@ -321,6 +322,7 @@ if(AVA_BUILD_TESTS)
     tests/plugin_enablement_support_tests.cpp
     tests/plugin_manifest_support_tests.cpp
     tests/plugin_tests.cpp
+    tests/permissions_command_policy_support_tests.cpp
     tests/provider_anthropic_tests.cpp
     tests/provider_anthropic_request_support_tests.cpp
     tests/provider_anthropic_request_validation_tests.cpp
@@ -408,6 +410,7 @@ if(AVA_BUILD_TESTS)
     plugin_enablement_support
     plugin_manifest_support
     plugin
+    permissions_command_policy_support
     mcp_config_support
     mcp
     tui_composer

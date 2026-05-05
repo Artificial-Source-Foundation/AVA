@@ -56,6 +56,7 @@ add_library(ava_core
   src/ava/agent/usage_accounting.cpp
   src/ava/config/auth.cpp
   src/ava/config/auth_file_json.cpp
+  src/ava/config/auth_storage.cpp
   src/ava/config/model_config.cpp
   src/ava/config/model_profiles.cpp
   src/ava/config/openai_oauth.cpp

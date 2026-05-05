@@ -27,6 +27,7 @@
 #include "ava/app/runtime.h"
 #include "ava/config/auth.h"
 #include "ava/config/auth_file_json.h"
+#include "ava/config/auth_storage.h"
 #include "ava/config/model_config.h"
 #include "ava/config/model_profiles.h"
 #include "ava/config/openai_oauth.h"
@@ -109,6 +110,51 @@ void test_xdg_paths()
   setenv("HOME", "", 1);
   auto empty_home = ava::config::xdg_paths();
   expect(empty_home.state_home.is_absolute(), "XDG state fallback remains absolute when HOME is empty");
+}
+
+void test_auth_storage_helpers()
+{
+  auto const root = temp_root() / "auth-storage";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  std::filesystem::create_directories(root);
+
+  setenv("HOME", (root / "home").c_str(), 1);
+  setenv("XDG_CONFIG_HOME", (root / "config").c_str(), 1);
+  setenv("XDG_STATE_HOME", (root / "state").c_str(), 1);
+  setenv("XDG_DATA_HOME", (root / "data").c_str(), 1);
+
+  auto const paths = ava::config::xdg_paths();
+  auto missing = ava::config::read_auth_text_if_exists(paths.auth_file, true);
+  expect(missing && !missing->content, "auth storage read treats missing explicit auth file as empty");
+
+  auto ensured = ava::config::ensure_auth_directory(paths);
+  expect(ensured.has_value(), "auth storage creates the auth directory");
+  auto lock = ava::config::acquire_auth_file_lock(paths);
+  expect(lock.has_value(), "auth storage acquires a regular lock file");
+
+  {
+    std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
+    file << "{\"openai\":{\"type\":\"api_key\",\"api_key\":\"stored\"}}";
+  }
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
+  auto private_read = ava::config::read_auth_text_if_exists(paths.auth_file, true);
+  expect(private_read && private_read->content && private_read->content->find("\"stored\"") != std::string::npos,
+         "auth storage reads private regular auth files");
+
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR | S_IRGRP);
+  auto broad_read = ava::config::read_auth_text_if_exists(paths.auth_file, true);
+  expect(!broad_read && broad_read.error().category() == ava::core::ErrorCategory::PermissionDenied &&
+             ava::config::auth_error_has_context(broad_read.error(), "reason", "broad_permissions"),
+         "auth storage rejects group-readable explicit auth files by default");
+  auto broad_allowed = ava::config::read_auth_text_if_exists(paths.auth_file, true, true);
+  expect(broad_allowed && broad_allowed->content, "auth storage can opt into broad-permission reads for migration");
+
+  auto written = ava::config::write_auth_file_atomic(paths.auth_file, "{\"openai\":{\"type\":\"api_key\"}}\n");
+  expect(written.has_value(), "auth storage writes auth files through atomic replacement");
+  auto rewritten = ava::config::read_auth_text_if_exists(paths.auth_file, true);
+  expect(rewritten && rewritten->content && *rewritten->content == "{\"openai\":{\"type\":\"api_key\"}}\n",
+         "auth storage atomic replacement preserves exact content");
 }
 
 void test_context_loader()
@@ -1016,6 +1062,7 @@ void test_model_and_prompt_config()
 void run_config_context_auth_oauth_tests()
 {
   test_xdg_paths();
+  test_auth_storage_helpers();
   test_context_loader();
   test_auth_file_json_helpers();
   test_auth_load_and_store();

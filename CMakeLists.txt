@@ -139,6 +139,7 @@ add_library(ava_core
   src/ava/session/validation_permission.cpp
   src/ava/session/validation_tool.cpp
   src/ava/tools/bash_tool.cpp
+  src/ava/tools/bash_tool_support.cpp
   src/ava/tools/diff_utils.cpp
   src/ava/tools/edit_match.cpp
   src/ava/tools/file_tools.cpp
@@ -270,6 +271,7 @@ if(AVA_BUILD_TESTS)
     tests/app_rpc_runtime_control_tests.cpp
     tests/app_rpc_session_tests.cpp
     tests/app_runtime_tests.cpp
+    tests/bash_tool_support_tests.cpp
     tests/config_context_auth_oauth_tests.cpp
     tests/core_tests.cpp
     tests/core_mode_json_permissions_tests.cpp
@@ -308,6 +310,7 @@ if(AVA_BUILD_TESTS)
     core_json_permission
     app_command_classification
     app_command_plugin_support
+    bash_tool_support
     tools
     file_tools_support
     config_context_auth_oauth

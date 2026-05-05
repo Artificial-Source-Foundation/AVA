@@ -211,6 +211,7 @@ add_library(ava_app
   src/ava/app/command_tool_events.cpp
   src/ava/app/command_tools.cpp
   src/ava/app/commands.cpp
+  src/ava/app/connect_cli_options.cpp
   src/ava/app/connect_openai.cpp
   src/ava/app/event_json_support.cpp
   src/ava/app/events.cpp
@@ -286,6 +287,7 @@ if(AVA_BUILD_TESTS)
 
   add_executable(ava_tests
     tests/app_command_plugin_support_tests.cpp
+    tests/app_connect_cli_options_tests.cpp
     tests/app_event_json_support_tests.cpp
     tests/app_line_shell_support_tests.cpp
     tests/agent_tool_dispatcher_tests.cpp
@@ -358,6 +360,7 @@ if(AVA_BUILD_TESTS)
     core_json_permission
     app_command_classification
     app_command_plugin_support
+    app_connect_cli_options
     bash_tool_support
     tools
     file_tools_support

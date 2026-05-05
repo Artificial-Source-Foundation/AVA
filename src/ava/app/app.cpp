@@ -9,9 +9,10 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "ava/agent/mode.h"
-#include "ava/app/connect_openai.h"
+#include "ava/app/connect_cli_options.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/line_shell.h"
 #include "ava/app/print_mode.h"
@@ -19,7 +20,6 @@
 #include "ava/app/runtime.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/core/version.h"
-#include "ava/tui/composer.h"
 
 namespace {
 
@@ -115,111 +115,34 @@ int run(int argc, char** argv)
   ava::app::HeadlessPermissionPolicyOptions headless_permission_policy;
 
   auto const paths = ava::config::xdg_paths();
+  std::vector<std::string_view> args;
+  args.reserve(static_cast<std::size_t>(argc));
+  for (int index = 0; index < argc; ++index) args.push_back(argv[index]);
 
-  auto parse_connect_like_command = [&](int& index, std::optional<std::string> provider,
-                                        bool preserve_openai_browser_default) -> int {
-    enum class CredentialSource {
-      None,
-      Stdin,
-      Env,
-      Prompt,
-    };
-    CredentialSource source = CredentialSource::None;
-    std::optional<ava::app::ConnectCredentialType> credential_type;
-    std::optional<std::string> env_var;
-
-    auto set_source = [&](CredentialSource next_source, ava::app::ConnectCredentialType next_type) -> bool {
-      if (source != CredentialSource::None) {
-        std::cerr << "connect accepts only one credential source\n";
-        return false;
-      }
-      source = next_source;
-      credential_type = next_type;
-      return true;
-    };
-
-    while (index + 1 < argc) {
-      std::string_view const option(argv[++index]);
-      if (option == "--api-key") {
-        if (!set_source(CredentialSource::Prompt, ava::app::ConnectCredentialType::ApiKey)) return 2;
-        continue;
-      }
-      if (option == "--oauth-token") {
-        if (!set_source(CredentialSource::Prompt, ava::app::ConnectCredentialType::OAuthToken)) return 2;
-        continue;
-      }
-      if (option == "--api-key-stdin") {
-        if (!set_source(CredentialSource::Stdin, ava::app::ConnectCredentialType::ApiKey)) return 2;
-        continue;
-      }
-      if (option == "--oauth-token-stdin") {
-        if (!set_source(CredentialSource::Stdin, ava::app::ConnectCredentialType::OAuthToken)) return 2;
-        continue;
-      }
-      if (option == "--api-key-env" || option == "--oauth-token-env") {
-        if (!set_source(option == "--oauth-token-env" ? CredentialSource::Env : CredentialSource::Env,
-                        option == "--oauth-token-env" ? ava::app::ConnectCredentialType::OAuthToken
-                                                      : ava::app::ConnectCredentialType::ApiKey)) {
-          return 2;
-        }
-        if (index + 1 >= argc) {
-          std::cerr << ava::tui::sanitize_terminal_text(std::string(option))
-                    << " requires an environment variable name\n";
-          return 2;
-        }
-        env_var = std::string(argv[++index]);
-        continue;
-      }
-      std::cerr << "unknown connect option\n";
+  auto run_connect_like_command = [&](std::size_t first_arg_index, bool preserve_openai_browser_default) -> int {
+    auto parsed = ava::app::detail::parse_connect_cli_invocation(args, first_arg_index);
+    if (!parsed) {
+      std::cerr << parsed.error().message() << '\n';
       return 2;
     }
-
-    if (source == CredentialSource::Stdin || source == CredentialSource::Env) {
-      if (!provider) {
-        std::cerr << "connect requires a provider with headless credential sources\n";
-        return 2;
-      }
-      return run_connect_provider_credential(
-          paths,
-          ava::app::ConnectProviderCredentialOptions{
-              .provider_id = *provider, .credential_type = credential_type.value(), .env_var = env_var},
-          std::cin, std::cout, std::cerr);
-    }
-
-    if (source == CredentialSource::Prompt) {
-      return run_connect_provider_wizard(
-          paths,
-          ava::app::ConnectProviderWizardOptions{
-              .provider_id = provider, .credential_type = credential_type, .stdin_is_tty = stdin_is_tty()},
-          std::cin, std::cout, std::cerr);
-    }
-
-    if (preserve_openai_browser_default && provider && *provider == "openai") return run_connect_openai(paths);
-    return run_connect_provider_wizard(
-        paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .stdin_is_tty = stdin_is_tty()},
-        std::cin, std::cout, std::cerr);
+    return ava::app::detail::run_connect_cli_invocation(paths, *parsed, preserve_openai_browser_default, stdin_is_tty(),
+                                                        std::cin, std::cout, std::cerr);
   };
 
   for (int index = 1; index < argc; ++index) {
     std::string_view const arg(argv[index]);
     if (arg == "connect") {
-      std::optional<std::string> provider;
-      if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--")) provider = argv[++index];
-      return parse_connect_like_command(index, provider, true);
+      return run_connect_like_command(static_cast<std::size_t>(index + 1), true);
     }
     if (arg == "login") {
-      std::optional<std::string> provider;
-      if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--")) provider = argv[++index];
-      return parse_connect_like_command(index, provider, false);
+      return run_connect_like_command(static_cast<std::size_t>(index + 1), false);
     }
     if (arg == "auth") {
       if (index + 1 >= argc || std::string_view(argv[++index]) != "login") {
         std::cerr << "auth requires login\n";
         return 2;
       }
-      std::optional<std::string> provider;
-      if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--")) provider = argv[++index];
-      return parse_connect_like_command(index, provider, false);
+      return run_connect_like_command(static_cast<std::size_t>(index + 1), false);
     }
     if (arg == "--help" || arg == "-h") {
       print_help();

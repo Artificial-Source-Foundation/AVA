@@ -88,6 +88,7 @@ add_library(ava_core
   src/ava/provider/anthropic_provider.cpp
   src/ava/provider/anthropic_request.cpp
   src/ava/provider/openai_compatible_provider.cpp
+  src/ava/provider/openai_compatible_request.cpp
   src/ava/provider/openai_provider.cpp
   src/ava/provider/openai_request.cpp
   src/ava/provider/openai_response_parser.cpp

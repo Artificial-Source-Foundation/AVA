@@ -28,6 +28,7 @@
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
 #include "ava/agent/tool_result_json.h"
+#include "ava/agent/tool_timeline.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
@@ -271,6 +272,62 @@ void test_tool_result_json_helpers()
              *diff == "-old\n+new" && result.find("\"diff_truncated\":true") != std::string::npos && spill_file &&
              *spill_file == "result.jsonl" && result.find("\"spill_truncated\":true") != std::string::npos,
          "tool result JSON helpers append changed files, diffs, and spill metadata");
+}
+
+void test_tool_timeline_helpers()
+{
+  expect(ava::agent::to_string(ava::agent::ToolTimelineStatus::Running) == "running" &&
+             ava::agent::to_string(ava::agent::ToolTimelineStatus::Success) == "success" &&
+             ava::agent::to_string(ava::agent::ToolTimelineStatus::Error) == "error",
+         "tool timeline helpers format status names");
+
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "bad argument");
+  error.with_context("field", "path");
+  auto failed = ava::agent::synthetic_failed_dispatch_result(
+      ava::agent::ProviderToolCall{.id = "call_bad", .name = "read_file", .arguments_json = "{\"path\":1}"}, error);
+  expect(failed.call_id == "call_bad" && failed.name == "read_file" && !failed.success &&
+             failed.result_text.find("\"ok\":false") != std::string::npos &&
+             failed.result_text.find("\"category\":\"invalid_argument\"") != std::string::npos &&
+             failed.payload.status == ava::agent::ToolResultStatus::Error &&
+             failed.payload.error_message == "bad argument",
+         "tool timeline helpers build synthetic failed dispatch results");
+
+  ava::agent::ToolResultPayload payload;
+  payload.status = ava::agent::ToolResultStatus::Error;
+  payload.summary = "patch failed";
+  payload.content_type = "application/json";
+  payload.error_category = "tool";
+  payload.error_code = "patch_failed";
+  payload.error_message = "patch failed";
+  payload.error_details = "hunk did not apply";
+  payload.diff = "-old\n+new";
+  payload.diff_truncated = true;
+  payload.changed_paths = {"src/a.cpp", "src/b.cpp"};
+  payload.truncated = true;
+  payload.output_bytes = 10;
+  payload.total_bytes = 20;
+  payload.omitted_bytes = 5;
+  payload.omitted_lines = 2;
+  payload.visible_matches = 3;
+  payload.total_matches = 4;
+  payload.spill_path = "/tmp/ava-spill/result.jsonl";
+  payload.spill_truncated = true;
+  ava::agent::ToolDispatchResult dispatch{.call_id = "call_patch",
+                                          .name = "apply_patch",
+                                          .success = false,
+                                          .result_text = "{\"ok\":false}",
+                                          .payload = payload};
+  ava::agent::ToolTimelineEntry timeline;
+  ava::agent::populate_tool_timeline_metadata(timeline, dispatch);
+  expect(timeline.result_json == "{\"ok\":false}" &&
+             timeline.structured_result_json.find("\"call_id\":\"call_patch\"") != std::string::npos &&
+             timeline.content_type == "application/json" && timeline.error_code == "patch_failed" &&
+             timeline.diff == "-old\n+new" && timeline.diff_truncated && timeline.changed_paths.size() == 2 &&
+             timeline.truncated && timeline.output_bytes == 10 && timeline.total_bytes == 20 &&
+             timeline.omitted_bytes == 5 && timeline.omitted_lines == 2 && timeline.visible_matches == 3 &&
+             timeline.total_matches == 4 && timeline.spill_path == "/tmp/ava-spill/result.jsonl" &&
+             timeline.spill_truncated,
+         "tool timeline helpers project structured dispatch metadata");
 }
 
 void test_question_answer_validation_helpers()
@@ -2563,6 +2620,7 @@ void run_agent_tool_dispatcher_tests()
   test_provider_tool_argument_helpers();
   test_patch_staging_helpers();
   test_tool_result_json_helpers();
+  test_tool_timeline_helpers();
   test_question_answer_validation_helpers();
   test_session_recorder_helpers();
   test_tool_dispatcher();

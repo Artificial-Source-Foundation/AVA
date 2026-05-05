@@ -26,6 +26,7 @@
 #include "ava/agent/tool_arguments.h"
 #include "ava/agent/tool_dispatch_support.h"
 #include "ava/agent/tool_dispatcher.h"
+#include "ava/agent/tool_file_dispatch.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
 #include "ava/agent/tool_result_json.h"
@@ -372,6 +373,57 @@ void test_tool_dispatch_support_helpers()
   expect(lsp_error.result_text.find("LSP diagnostics failed") != std::string::npos &&
              lsp_error.result_text.find("raw server detail") == std::string::npos,
          "tool dispatch support redacts non-policy LSP diagnostics failures");
+}
+
+void test_file_tool_dispatch_helpers()
+{
+  auto const root = temp_root() / "file-tool-dispatch";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  std::filesystem::create_directories(root);
+  {
+    std::ofstream file(root / "read.txt", std::ios::binary | std::ios::trunc);
+    file << "alpha\nbeta\n";
+  }
+
+  ava::tools::ToolContext const context{.workspace_dir = root, .mode = ava::agent::Mode::Build};
+  auto read = ava::agent::detail::read_file_result(
+      context,
+      ava::agent::ProviderToolCall{
+          .id = "call_read", .name = "read_file", .arguments_json = "{\"path\":\"read.txt\",\"max_bytes\":5}"});
+  auto const read_content = ava::core::json::string_field(read.result_text, "content");
+  expect(read.success && read_content && *read_content == "alpha" &&
+             read.result_text.find("\"truncated\":true") != std::string::npos &&
+             read.result_text.find("\"output_bytes\":5") != std::string::npos,
+         "file dispatch helper returns bounded read_file JSON");
+
+  auto write = ava::agent::detail::write_file_result(
+      context, ava::agent::ProviderToolCall{.id = "call_write",
+                                            .name = "write_file",
+                                            .arguments_json = "{\"path\":\"generated.txt\",\"content\":\"new body\"}"});
+  auto written = ava::tools::read_file(context, root / "generated.txt",
+                                       ava::tools::ReadOptions{.permission_already_checked = true});
+  expect(write.success && write.result_text.find("\"tool\":\"write_file\"") != std::string::npos &&
+             write.result_text.find("\"bytes_written\":8") != std::string::npos && written &&
+             written->content == "new body",
+         "file dispatch helper writes workspace files and returns byte metadata");
+
+  auto edit = ava::agent::detail::edit_file_result(
+      context, ava::agent::ProviderToolCall{.id = "call_edit",
+                                            .name = "edit_file",
+                                            .arguments_json = "{\"path\":\"generated.txt\",\"old_text\":\"new\","
+                                                              "\"new_text\":\"old\"}"});
+  auto edited = ava::tools::read_file(context, root / "generated.txt",
+                                      ava::tools::ReadOptions{.permission_already_checked = true});
+  expect(edit.success && edit.result_text.find("\"tool\":\"edit_file\"") != std::string::npos &&
+             edit.result_text.find("\"diff\"") != std::string::npos && edited && edited->content == "old body",
+         "file dispatch helper edits workspace files and returns diff metadata");
+
+  auto missing_path = ava::agent::detail::read_file_result(
+      context, ava::agent::ProviderToolCall{.id = "call_missing", .name = "read_file", .arguments_json = "{}"});
+  expect(!missing_path.success && missing_path.result_text.find("\"ok\":false") != std::string::npos &&
+             missing_path.result_text.find("path") != std::string::npos,
+         "file dispatch helper maps missing provider path arguments to tool errors");
 }
 
 void test_question_answer_validation_helpers()
@@ -2666,6 +2718,7 @@ void run_agent_tool_dispatcher_tests()
   test_tool_result_json_helpers();
   test_tool_timeline_helpers();
   test_tool_dispatch_support_helpers();
+  test_file_tool_dispatch_helpers();
   test_question_answer_validation_helpers();
   test_session_recorder_helpers();
   test_tool_dispatcher();

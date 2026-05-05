@@ -133,6 +133,7 @@ add_library(ava_core
   src/ava/provider/openai_stream_events.cpp
   src/ava/provider/openai_stream_parser.cpp
   src/ava/provider/provider.cpp
+  src/ava/provider/provider_error_support.cpp
   src/ava/provider/provider_utils.cpp
   src/ava/provider/registry.cpp
   src/ava/provider/retry_policy.cpp
@@ -311,6 +312,7 @@ if(AVA_BUILD_TESTS)
     tests/provider_openai_compatible_response_tests.cpp
     tests/provider_openai_compatible_response_support_tests.cpp
     tests/provider_openai_stream_events_tests.cpp
+    tests/provider_error_support_tests.cpp
     tests/provider_transport_tests.cpp
     tests/search_tools_support_tests.cpp
     tests/session_validation_compaction_tests.cpp
@@ -368,6 +370,7 @@ if(AVA_BUILD_TESTS)
     provider_openai_compatible_response
     provider_openai_compatible_response_support
     provider_openai_stream_events
+    provider_error_support
     provider_transport
     agent_tool_dispatcher
     lsp

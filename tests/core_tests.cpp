@@ -41,6 +41,7 @@ void run_provider_event_buffer_tests();
 void run_provider_openai_compatible_response_tests();
 void run_provider_openai_compatible_response_support_tests();
 void run_provider_openai_stream_events_tests();
+void run_provider_error_support_tests();
 void run_provider_transport_tests();
 void run_agent_tool_dispatcher_tests();
 void run_lsp_tests();
@@ -97,6 +98,7 @@ constexpr std::array kTestSuites{
     TestSuite{"provider_openai_compatible_response", run_provider_openai_compatible_response_tests},
     TestSuite{"provider_openai_compatible_response_support", run_provider_openai_compatible_response_support_tests},
     TestSuite{"provider_openai_stream_events", run_provider_openai_stream_events_tests},
+    TestSuite{"provider_error_support", run_provider_error_support_tests},
     TestSuite{"provider_transport", run_provider_transport_tests},
     TestSuite{"agent_tool_dispatcher", run_agent_tool_dispatcher_tests},
     TestSuite{"lsp", run_lsp_tests},

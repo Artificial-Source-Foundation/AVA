@@ -142,6 +142,7 @@ add_library(ava_core
   src/ava/tools/diff_utils.cpp
   src/ava/tools/edit_match.cpp
   src/ava/tools/file_tools.cpp
+  src/ava/tools/file_tools_support.cpp
   src/ava/tools/ignore_rules.cpp
   src/ava/tools/lsp_tools.cpp
   src/ava/tools/mutation_queue.cpp
@@ -273,6 +274,7 @@ if(AVA_BUILD_TESTS)
     tests/core_tests.cpp
     tests/core_mode_json_permissions_tests.cpp
     tests/events_tests.cpp
+    tests/file_tools_support_tests.cpp
     tests/lsp_tests.cpp
     tests/mcp_tests.cpp
     tests/plugin_tests.cpp
@@ -307,6 +309,7 @@ if(AVA_BUILD_TESTS)
     app_command_classification
     app_command_plugin_support
     tools
+    file_tools_support
     config_context_auth_oauth
     app_event_serialization
     app_event_bus

@@ -20,6 +20,7 @@
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/rpc/runtime_handlers.h"
 #include "ava/app/rpc/serialization.h"
+#include "ava/app/rpc/session_handlers.h"
 #include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
 
@@ -162,60 +163,18 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     }
 
     if (command->type == "new_session") {
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      std::lock_guard lock(session_mutex);
-      auto created = rpc::create_new_session(session, open_options);
-      if (!created) {
-        if (auto written = rpc::write_error(output, command->id, created.error()); !written) return written;
-        continue;
-      }
-      session = std::move(*created);
-      {
-        std::lock_guard state_lock(run_state.mutex);
-        run_state.cancel_requested.store(false, std::memory_order_relaxed);
-      }
-      if (auto written = rpc::write_success(output, command->id, rpc::state_result_json(session, false)); !written) {
+      if (auto written =
+              rpc::handle_new_session_command(output, session, open_options, session_mutex, run_state, *command);
+          !written)
         return written;
-      }
       continue;
     }
 
     if (command->type == "open_session" || command->type == "switch_session") {
-      if (!command->session_id || command->session_id->empty()) {
-        if (auto written =
-                rpc::write_error(output, command->id, rpc::invalid_rpc(command->type + " requires session_id"));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      std::lock_guard lock(session_mutex);
-      auto opened = rpc::open_requested_session(session, open_options, *command->session_id);
-      if (!opened) {
-        if (auto written = rpc::write_error(output, command->id, opened.error()); !written) return written;
-        continue;
-      }
-      session = std::move(*opened);
-      {
-        std::lock_guard state_lock(run_state.mutex);
-        run_state.cancel_requested.store(false, std::memory_order_relaxed);
-      }
-      if (auto written = rpc::write_success(output, command->id, rpc::state_result_json(session, false)); !written) {
+      if (auto written =
+              rpc::handle_open_session_command(output, session, open_options, session_mutex, run_state, *command);
+          !written)
         return written;
-      }
       continue;
     }
 

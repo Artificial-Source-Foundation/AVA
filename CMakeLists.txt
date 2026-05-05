@@ -193,6 +193,7 @@ add_library(ava_app
   src/ava/app/rpc/resolvers.cpp
   src/ava/app/rpc/run_state.cpp
   src/ava/app/rpc/runtime_handlers.cpp
+  src/ava/app/rpc/session_handlers.cpp
   src/ava/app/rpc/serialization.cpp
   src/ava/app/rpc_mode.cpp
   src/ava/app/runtime.cpp
@@ -245,6 +246,7 @@ if(AVA_BUILD_TESTS)
     tests/app_rpc_control_tests.cpp
     tests/app_rpc_query_tests.cpp
     tests/app_rpc_runtime_control_tests.cpp
+    tests/app_rpc_session_tests.cpp
     tests/app_runtime_tests.cpp
     tests/config_context_auth_oauth_tests.cpp
     tests/core_tests.cpp
@@ -279,6 +281,7 @@ if(AVA_BUILD_TESTS)
     app_rpc_control
     app_rpc_query
     app_rpc_runtime_control
+    app_rpc_session
     app_runtime
     provider_openai
     provider_anthropic

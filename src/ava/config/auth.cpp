@@ -1,5 +1,6 @@
 #include "ava/config/auth.h"
 
+#include "ava/config/auth_record.h"
 #include "ava/config/openai_oauth.h"
 
 #include "ava/core/json.h"
@@ -104,11 +105,6 @@ struct CandidateRead {
 ava::core::Result<CandidateRead> read_text_if_exists(std::filesystem::path const& path, bool explicit_ava_auth_file,
                                                      bool allow_broad_permissions = false);
 
-struct AuthMember {
-  std::string key;
-  std::string raw_value;
-};
-
 class TempPathCleanup {
  public:
   explicit TempPathCleanup(std::filesystem::path path) : path_(std::move(path)) {}
@@ -166,210 +162,6 @@ bool has_error_context(ava::core::Error const& error, std::string_view key, std:
 {
   return std::ranges::any_of(
       error.context(), [&](ava::core::ErrorContext const& item) { return item.key == key && item.value == value; });
-}
-
-bool is_json_ws(char ch)
-{
-  return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
-}
-
-void skip_json_ws(std::string_view text, std::size_t& index)
-{
-  while (index < text.size() && is_json_ws(text[index])) ++index;
-}
-
-bool is_hex_digit(char ch)
-{
-  return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
-}
-
-ava::core::Result<std::string> parse_auth_member_key(std::string_view text, std::size_t& index,
-                                                     std::filesystem::path const& path)
-{
-  if (index >= text.size() || text[index] != '"') {
-    return std::unexpected(
-        auth_file_error(ava::core::ErrorCategory::InvalidArgument, "auth file member key must be a JSON string", path));
-  }
-  ++index;
-  std::string key;
-  bool escaped = false;
-  for (; index < text.size(); ++index) {
-    char const ch = text[index];
-    if (escaped) {
-      switch (ch) {
-        case '"':
-        case '\\':
-        case '/':
-          key.push_back(ch);
-          break;
-        case 'b':
-          key.push_back('\b');
-          break;
-        case 'f':
-          key.push_back('\f');
-          break;
-        case 'n':
-          key.push_back('\n');
-          break;
-        case 'r':
-          key.push_back('\r');
-          break;
-        case 't':
-          key.push_back('\t');
-          break;
-        case 'u':
-          if (index + 4 >= text.size() || !is_hex_digit(text[index + 1]) || !is_hex_digit(text[index + 2]) ||
-              !is_hex_digit(text[index + 3]) || !is_hex_digit(text[index + 4])) {
-            return std::unexpected(auth_file_error(ava::core::ErrorCategory::InvalidArgument,
-                                                   "auth file member key has an invalid unicode escape", path));
-          }
-          key.push_back('?');
-          index += 4;
-          break;
-        default:
-          return std::unexpected(auth_file_error(ava::core::ErrorCategory::InvalidArgument,
-                                                 "auth file member key has an invalid escape", path));
-      }
-      escaped = false;
-      continue;
-    }
-    if (ch == '\\') {
-      escaped = true;
-      continue;
-    }
-    if (ch == '"') {
-      ++index;
-      return key;
-    }
-    if (static_cast<unsigned char>(ch) < 0x20) {
-      return std::unexpected(auth_file_error(ava::core::ErrorCategory::InvalidArgument,
-                                             "auth file member key contains a control character", path));
-    }
-    key.push_back(ch);
-  }
-  return std::unexpected(
-      auth_file_error(ava::core::ErrorCategory::InvalidArgument, "auth file member key is unterminated", path));
-}
-
-std::optional<std::size_t> raw_json_value_end(std::string_view text, std::size_t start)
-{
-  if (start >= text.size()) return std::nullopt;
-  char const first = text[start];
-  bool const valid_start = first == '"' || first == '{' || first == '[' || first == '-' || first == 't' ||
-                           first == 'f' || first == 'n' || (first >= '0' && first <= '9');
-  if (!valid_start) return std::nullopt;
-  bool in_string = false;
-  bool escaped = false;
-  int object_depth = 0;
-  int array_depth = 0;
-  std::size_t last_non_ws = start;
-  for (std::size_t index = start; index < text.size(); ++index) {
-    char const ch = text[index];
-    if (in_string) {
-      if (escaped) {
-        escaped = false;
-      } else if (ch == '\\') {
-        escaped = true;
-      } else if (ch == '"') {
-        in_string = false;
-      }
-      last_non_ws = index + 1;
-      continue;
-    }
-
-    if (ch == '"') {
-      in_string = true;
-      last_non_ws = index + 1;
-      continue;
-    }
-    if (ch == '{') {
-      ++object_depth;
-      last_non_ws = index + 1;
-      continue;
-    }
-    if (ch == '[') {
-      ++array_depth;
-      last_non_ws = index + 1;
-      continue;
-    }
-    if (ch == '}') {
-      if (object_depth == 0 && array_depth == 0) return last_non_ws;
-      --object_depth;
-      last_non_ws = index + 1;
-      if (object_depth == 0 && array_depth == 0) return index + 1;
-      continue;
-    }
-    if (ch == ']') {
-      if (array_depth == 0) return std::nullopt;
-      --array_depth;
-      last_non_ws = index + 1;
-      if (object_depth == 0 && array_depth == 0) return index + 1;
-      continue;
-    }
-    if (ch == ',' && object_depth == 0 && array_depth == 0) return last_non_ws;
-    if (!is_json_ws(ch)) last_non_ws = index + 1;
-  }
-  if (in_string || object_depth != 0 || array_depth != 0 || last_non_ws == start) return std::nullopt;
-  return last_non_ws;
-}
-
-ava::core::Result<std::vector<AuthMember>> parse_auth_members(std::string_view text, std::filesystem::path const& path)
-{
-  std::vector<AuthMember> members;
-  std::size_t index = 0;
-  skip_json_ws(text, index);
-  if (index >= text.size()) return members;
-  if (text[index] != '{') {
-    return std::unexpected(
-        auth_file_error(ava::core::ErrorCategory::InvalidArgument, "auth file must be a JSON object", path));
-  }
-  ++index;
-  skip_json_ws(text, index);
-  if (index < text.size() && text[index] == '}') {
-    ++index;
-    skip_json_ws(text, index);
-    if (index == text.size()) return members;
-    return std::unexpected(auth_file_error(ava::core::ErrorCategory::InvalidArgument,
-                                           "auth file has trailing content after JSON object", path));
-  }
-  while (index < text.size()) {
-    auto key = parse_auth_member_key(text, index, path);
-    if (!key) return std::unexpected(std::move(key.error()));
-    skip_json_ws(text, index);
-    if (index >= text.size() || text[index] != ':') {
-      return std::unexpected(
-          auth_file_error(ava::core::ErrorCategory::InvalidArgument, "auth file member is missing a colon", path));
-    }
-    ++index;
-    skip_json_ws(text, index);
-    auto const value_start = index;
-    auto const value_end = raw_json_value_end(text, value_start);
-    if (!value_end || *value_end <= value_start) {
-      return std::unexpected(
-          auth_file_error(ava::core::ErrorCategory::InvalidArgument, "auth file member has an invalid value", path));
-    }
-    members.push_back(AuthMember{.key = std::move(*key),
-                                 .raw_value = std::string(text.substr(value_start, *value_end - value_start))});
-    index = *value_end;
-    skip_json_ws(text, index);
-    if (index >= text.size()) break;
-    if (text[index] == ',') {
-      ++index;
-      skip_json_ws(text, index);
-      continue;
-    }
-    if (text[index] == '}') {
-      ++index;
-      skip_json_ws(text, index);
-      if (index == text.size()) return members;
-      return std::unexpected(auth_file_error(ava::core::ErrorCategory::InvalidArgument,
-                                             "auth file has trailing content after JSON object", path));
-    }
-    return std::unexpected(
-        auth_file_error(ava::core::ErrorCategory::InvalidArgument, "auth file object has an invalid separator", path));
-  }
-  return std::unexpected(
-      auth_file_error(ava::core::ErrorCategory::InvalidArgument, "auth file JSON object is unterminated", path));
 }
 
 ava::core::VoidResult ensure_auth_directory(XdgPaths const& paths)
@@ -465,7 +257,7 @@ ava::core::Result<ScopedFd> acquire_auth_lock(XdgPaths const& paths)
     return std::unexpected(std::move(error));
   }
 
-  struct stat opened_st{};
+  struct stat opened_st {};
   if (::fstat(fd.get(), &opened_st) != 0) {
     auto error = auth_file_error(ava::core::ErrorCategory::Io, "failed to inspect auth lock file", lock_path);
     error.with_context("cause", errno_message());
@@ -506,7 +298,7 @@ ava::core::VoidResult write_auth_file_atomic(std::filesystem::path const& path, 
       return std::unexpected(std::move(error));
     }
     TempPathCleanup cleanup(temp_path);
-    struct stat opened_st{};
+    struct stat opened_st {};
     if (::fstat(fd.get(), &opened_st) != 0) {
       auto error = auth_file_error(ava::core::ErrorCategory::Io, "failed to inspect temporary auth file", temp_path);
       error.with_context("cause", errno_message());
@@ -536,48 +328,6 @@ ava::core::VoidResult write_auth_file_atomic(std::filesystem::path const& path, 
       auth_file_error(ava::core::ErrorCategory::Io, "failed to create unique temporary auth file", path));
 }
 
-bool is_valid_provider_id(std::string_view provider_id)
-{
-  if (provider_id.empty() || provider_id.size() > 128) return false;
-  for (char const ch : provider_id) {
-    auto const uch = static_cast<unsigned char>(ch);
-    if (std::isalnum(uch) != 0 || ch == '-' || ch == '_') continue;
-    return false;
-  }
-  return true;
-}
-
-ava::core::Result<std::string> provider_credential_object_json(ProviderCredential const& credential)
-{
-  if (!is_valid_provider_id(credential.provider_id)) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider id is invalid");
-    error.with_context("provider", credential.provider_id);
-    return std::unexpected(std::move(error));
-  }
-  if (credential.access_token.empty()) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider credential token is empty");
-    error.with_context("provider", credential.provider_id);
-    return std::unexpected(std::move(error));
-  }
-  if (credential.credential_type == "api_key") {
-    return "{\n    \"type\": \"api_key\",\n    \"api_key\": \"" + ava::core::json::escape(credential.access_token) +
-           "\"\n  }";
-  }
-  if (credential.credential_type == "oauth") {
-    std::string body = "{\n    \"type\": \"oauth\",\n    \"access_token\": \"" +
-                       ava::core::json::escape(credential.access_token) + "\"";
-    if (!credential.account_id.empty()) {
-      body += ",\n    \"account_id\": \"" + ava::core::json::escape(credential.account_id) + "\"";
-    }
-    body += "\n  }";
-    return body;
-  }
-  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider credential type is unsupported");
-  error.with_context("provider", credential.provider_id);
-  error.with_context("credential_type", credential.credential_type);
-  return std::unexpected(std::move(error));
-}
-
 ava::core::VoidResult store_provider_object(XdgPaths const& paths, std::string_view provider_id, std::string raw_object)
 {
   if (auto ensured = ensure_auth_directory(paths); !ensured) return ensured;
@@ -590,32 +340,28 @@ ava::core::VoidResult store_provider_object(XdgPaths const& paths, std::string_v
     content = CandidateRead{};
   }
   if (!content) return std::unexpected(std::move(content.error()));
-  auto members = content->content ? parse_auth_members(*content->content, paths.auth_file)
-                                  : ava::core::Result<std::vector<AuthMember>>(std::vector<AuthMember>{});
+  auto members = content->content ? parse_auth_record_members(*content->content, paths.auth_file)
+                                  : ava::core::Result<std::vector<AuthRecordMember>>(std::vector<AuthRecordMember>{});
   if (!members) return std::unexpected(std::move(members.error()));
 
-  std::vector<AuthMember> merged;
+  std::vector<AuthRecordMember> merged;
   merged.reserve(members->size() + 1);
   bool replaced = false;
   for (auto& member : *members) {
     if (member.key == provider_id) {
       if (!replaced) {
-        merged.push_back(AuthMember{.key = std::string(provider_id), .raw_value = raw_object});
+        merged.push_back(AuthRecordMember{.key = std::string(provider_id), .raw_value = raw_object});
         replaced = true;
       }
       continue;
     }
     merged.push_back(std::move(member));
   }
-  if (!replaced) merged.push_back(AuthMember{.key = std::string(provider_id), .raw_value = std::move(raw_object)});
-
-  std::string body = "{\n";
-  for (std::size_t index = 0; index < merged.size(); ++index) {
-    body += "  \"" + ava::core::json::escape(merged[index].key) + "\": " + merged[index].raw_value;
-    body += index + 1 == merged.size() ? "\n" : ",\n";
+  if (!replaced) {
+    merged.push_back(AuthRecordMember{.key = std::string(provider_id), .raw_value = std::move(raw_object)});
   }
-  body += "}\n";
-  return write_auth_file_atomic(paths.auth_file, body);
+
+  return write_auth_file_atomic(paths.auth_file, serialize_auth_record_members(merged));
 }
 
 ava::core::Result<CandidateRead> missing_or_ignored_auth_file(std::filesystem::path const& path,
@@ -659,7 +405,7 @@ ava::core::Result<CandidateRead> read_text_if_exists(std::filesystem::path const
     return missing_or_ignored_auth_file(path, explicit_ava_auth_file, "failed to open auth file", errno_message());
   }
 
-  struct stat st{};
+  struct stat st {};
   if (::fstat(fd.get(), &st) != 0) {
     return missing_or_ignored_auth_file(path, explicit_ava_auth_file, "failed to inspect opened auth file",
                                         errno_message());
@@ -691,7 +437,7 @@ ava::core::Result<CandidateRead> read_text_if_exists(std::filesystem::path const
   }
 
 #ifndef O_NOFOLLOW
-  struct stat path_st{};
+  struct stat path_st {};
   if (::lstat(path.c_str(), &path_st) != 0) {
     return missing_or_ignored_auth_file(path, explicit_ava_auth_file, "failed to inspect auth file", errno_message());
   }

@@ -17,6 +17,7 @@
 #include "ava/tui/terminal.h"
 
 #include "ava/config/auth.h"
+#include "ava/config/auth_record.h"
 #include "ava/config/model_config.h"
 #include "ava/config/model_profiles.h"
 #include "ava/config/openai_oauth.h"
@@ -252,6 +253,75 @@ void test_context_loader()
   }
 }
 
+void test_auth_record_helpers()
+{
+  expect(ava::config::is_valid_provider_id("openai") && ava::config::is_valid_provider_id("custom-provider_1"),
+         "auth record provider id accepts provider-safe names");
+  expect(!ava::config::is_valid_provider_id("") && !ava::config::is_valid_provider_id("bad provider"),
+         "auth record provider id rejects empty and whitespace names");
+
+  auto const api_object =
+      ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "custom",
+                                                                                   .access_token = "token\"with-quote",
+                                                                                   .credential_type = "api_key",
+                                                                                   .account_id = "",
+                                                                                   .source = "test"});
+  expect(api_object && api_object->find("\"type\": \"api_key\"") != std::string::npos &&
+             api_object->find("token\\\"with-quote") != std::string::npos,
+         "auth record serializes provider API key credential object with JSON escaping");
+
+  auto const oauth_object =
+      ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "custom",
+                                                                                   .access_token = "oauth-token",
+                                                                                   .credential_type = "oauth",
+                                                                                   .account_id = "acct_123",
+                                                                                   .source = "test"});
+  expect(oauth_object && oauth_object->find("\"type\": \"oauth\"") != std::string::npos &&
+             oauth_object->find("\"account_id\": \"acct_123\"") != std::string::npos,
+         "auth record serializes provider OAuth credential object with account metadata");
+
+  auto const bad_provider =
+      ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "bad provider",
+                                                                                   .access_token = "token",
+                                                                                   .credential_type = "api_key",
+                                                                                   .account_id = "",
+                                                                                   .source = "test"});
+  expect(!bad_provider && bad_provider.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "auth record rejects invalid provider ids before serializing credentials");
+
+  auto const path = std::filesystem::path("/tmp/auth-record.json");
+  auto parsed = ava::config::parse_auth_record_members(
+      "{\n"
+      "  \"openai\": {\"type\":\"api_key\",\"api_key\":\"k\"},\n"
+      "  \"nested\": [1, {\"text\": \"value, with comma\"}],\n"
+      "  \"escaped\\nkey\": true\n"
+      "}\n",
+      path);
+  expect(parsed && parsed->size() == 3, "auth record parser preserves top-level JSON members");
+  if (parsed && parsed->size() == 3) {
+    expect((*parsed)[0].key == "openai" && (*parsed)[0].raw_value.find("\"api_key\":\"k\"") != std::string::npos,
+           "auth record parser captures object member raw JSON");
+    expect((*parsed)[1].key == "nested" && (*parsed)[1].raw_value.find("value, with comma") != std::string::npos,
+           "auth record parser handles nested arrays and string commas");
+    expect((*parsed)[2].key == "escaped\nkey" && (*parsed)[2].raw_value == "true",
+           "auth record parser decodes escaped member keys");
+
+    auto serialized = ava::config::serialize_auth_record_members(*parsed);
+    auto reparsed = ava::config::parse_auth_record_members(serialized, path);
+    expect(reparsed && reparsed->size() == parsed->size() && (*reparsed)[2].key == "escaped\nkey",
+           "auth record serialization round trips parser-visible members");
+  }
+
+  expect(ava::config::serialize_auth_record_members({}) == "{\n}\n",
+         "auth record serialization emits an empty JSON object for no members");
+  auto const trailing = ava::config::parse_auth_record_members("{\"openai\": true} trailing", path);
+  expect(!trailing && trailing.error().format().find("trailing content") != std::string::npos,
+         "auth record parser rejects trailing content");
+  auto const missing_value = ava::config::parse_auth_record_members("{\"openai\": }", path);
+  expect(!missing_value && missing_value.error().format().find("invalid value") != std::string::npos,
+         "auth record parser rejects missing member values");
+}
+
 void test_auth_load_and_store()
 {
   auto const root = temp_root() / "auth";
@@ -420,7 +490,7 @@ void test_auth_load_and_store()
                                              .account_id = "",
                                              .source = "test"});
   expect(repaired_broad_permissions.has_value(), "provider credential store repairs user-owned broad auth permissions");
-  struct stat auth_stat{};
+  struct stat auth_stat {};
   expect(::stat(paths.auth_file.c_str(), &auth_stat) == 0 && (auth_stat.st_mode & (S_IRWXG | S_IRWXO)) == 0,
          "provider credential store rewrites auth file with owner-only permissions");
   std::ifstream repaired_auth_file(paths.auth_file, std::ios::binary);
@@ -542,13 +612,13 @@ void test_auth_load_and_store()
                                            .account_id = "",
                                            .source_path = {}});
   expect(restored_api.has_value(), "OpenAI API key credential restores after env discovery checks");
-  struct stat st{};
+  struct stat st {};
   if (::stat(paths.auth_file.c_str(), &st) == 0) {
     expect((st.st_mode & 0777) == 0600, "auth file is owner-only");
   } else {
     expect(false, "auth file stat succeeds");
   }
-  struct stat dir_st{};
+  struct stat dir_st {};
   if (::stat(paths.auth_file.parent_path().c_str(), &dir_st) == 0) {
     expect((dir_st.st_mode & 0777) == 0700, "auth directory is owner-only");
   } else {
@@ -968,6 +1038,7 @@ void run_config_context_auth_oauth_tests()
 {
   test_xdg_paths();
   test_context_loader();
+  test_auth_record_helpers();
   test_auth_load_and_store();
   test_openai_oauth_helpers();
   test_openai_oauth_refresh();

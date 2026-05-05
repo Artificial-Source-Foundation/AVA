@@ -185,6 +185,7 @@ add_library(ava_app
   src/ava/app/command_mcp.cpp
   src/ava/app/command_models.cpp
   src/ava/app/command_palette.cpp
+  src/ava/app/command_plugin_support.cpp
   src/ava/app/command_plugins.cpp
   src/ava/app/command_session_format.cpp
   src/ava/app/command_sessions.cpp
@@ -259,6 +260,7 @@ if(AVA_BUILD_TESTS)
   ava_apply_sanitizers(ava_fake_provider_server)
 
   add_executable(ava_tests
+    tests/app_command_plugin_support_tests.cpp
     tests/agent_tool_dispatcher_tests.cpp
     tests/app_rpc_command_tests.cpp
     tests/app_rpc_control_tests.cpp
@@ -303,6 +305,7 @@ if(AVA_BUILD_TESTS)
     session_validation_tool
     core_json_permission
     app_command_classification
+    app_command_plugin_support
     tools
     config_context_auth_oauth
     app_event_serialization

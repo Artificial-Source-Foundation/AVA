@@ -12,6 +12,7 @@ void run_session_validation_permission_tests();
 void run_session_validation_tool_tests();
 void run_core_json_permission_tests();
 void run_app_command_classification_tests();
+void run_app_command_plugin_support_tests();
 void run_tools_tests();
 void run_config_context_auth_oauth_tests();
 void run_app_event_serialization_tests();
@@ -50,6 +51,7 @@ constexpr std::array kTestSuites{
     TestSuite{"session_validation_tool", run_session_validation_tool_tests},
     TestSuite{"core_json_permission", run_core_json_permission_tests},
     TestSuite{"app_command_classification", run_app_command_classification_tests},
+    TestSuite{"app_command_plugin_support", run_app_command_plugin_support_tests},
     TestSuite{"tools", run_tools_tests},
     TestSuite{"config_context_auth_oauth", run_config_context_auth_oauth_tests},
     TestSuite{"app_event_serialization", run_app_event_serialization_tests},

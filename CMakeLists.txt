@@ -203,6 +203,7 @@ if(AVA_BUILD_TESTS)
   ava_apply_sanitizers(ava_fake_provider_server)
 
   add_executable(ava_tests
+    tests/agent_loop_resilience_tests.cpp
     tests/agent_loop_tests.cpp
     tests/agent_tool_dispatcher_tests.cpp
     tests/app_compaction_tests.cpp
@@ -251,6 +252,7 @@ if(AVA_BUILD_TESTS)
     app_runtime
     provider_openai
     provider_anthropic
+    agent_loop_resilience
     agent_loop
     agent_tool_dispatcher
     lsp

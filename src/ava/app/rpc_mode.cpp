@@ -9,6 +9,7 @@
 #include "ava/app/rpc/resolvers.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/rpc/serialization.h"
+#include "ava/app/rpc/serialization_json.h"
 #include "ava/app/rpc/session_commands.h"
 
 #include "ava/provider/curl_transport.h"

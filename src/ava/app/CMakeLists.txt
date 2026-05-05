@@ -26,6 +26,8 @@ add_library(ava_app
   "rpc/resolvers.cpp"
   "rpc/run_state.cpp"
   "rpc/serialization.cpp"
+  "rpc/serialization_json.cpp"
+  "rpc/serialization_models.cpp"
   "rpc/session_commands.cpp"
   "rpc_mode.cpp"
   "runtime.cpp"

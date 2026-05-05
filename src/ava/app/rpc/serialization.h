@@ -21,13 +21,6 @@
 
 namespace ava::app::rpc {
 
-[[nodiscard]] std::string string_field_json(std::string_view key, std::string_view value);
-[[nodiscard]] std::string bool_field_json(std::string_view key, bool value);
-[[nodiscard]] std::string number_field_json(std::string_view key, std::size_t value);
-[[nodiscard]] std::string integer_field_json(std::string_view key, long long value);
-[[nodiscard]] std::string output_array_json(std::vector<std::string> const& output);
-[[nodiscard]] std::string string_array_json(std::vector<std::string> const& values);
-
 [[nodiscard]] std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry);
 
 [[nodiscard]] std::string state_result_json(RuntimeSession const& session, bool cancel_requested);

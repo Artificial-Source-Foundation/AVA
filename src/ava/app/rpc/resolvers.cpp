@@ -2,6 +2,7 @@
 
 #include "ava/app/rpc/protocol.h"
 #include "ava/app/rpc/serialization.h"
+#include "ava/app/rpc/serialization_json.h"
 
 #include "ava/core/ids.h"
 

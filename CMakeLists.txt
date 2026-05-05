@@ -205,6 +205,7 @@ if(AVA_BUILD_TESTS)
   add_executable(ava_tests
     tests/agent_loop_tests.cpp
     tests/agent_tool_dispatcher_tests.cpp
+    tests/app_compaction_tests.cpp
     tests/app_rpc_tests.cpp
     tests/app_runtime_tests.cpp
     tests/config_context_auth_oauth_tests.cpp
@@ -237,6 +238,7 @@ if(AVA_BUILD_TESTS)
     app_command_classification
     tools
     config_context_auth_oauth
+    app_compaction
     app_event_serialization
     app_event_bus
     app_rpc

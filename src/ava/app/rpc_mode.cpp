@@ -400,15 +400,16 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
         continue;
       }
       auto resolved = rpc::resolve_question_reply(pending_state, *command->request_id, *command->correlation_id,
-                                                  command->answer, command->selected);
+                                                  command->answer, command->selected, command->selected_options);
       if (!resolved) {
         if (auto written = rpc::write_error(output, command->id, resolved.error()); !written) return written;
         continue;
       }
-      auto envelope = rpc::resolver_event_envelope(
-          "question_replied", *command->correlation_id, *command->correlation_id,
-          rpc::session_id_snapshot(session, session_mutex),
-          rpc::question_reply_payload_json(*command->request_id, command->answer, command->selected));
+      auto envelope =
+          rpc::resolver_event_envelope("question_replied", *command->correlation_id, *command->correlation_id,
+                                       rpc::session_id_snapshot(session, session_mutex),
+                                       rpc::question_reply_payload_json(*command->request_id, command->answer,
+                                                                        command->selected, command->selected_options));
       if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
       if (auto written = rpc::write_success(output, command->id, "{}"); !written) return written;
       continue;

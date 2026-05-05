@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace ava::app {
 
@@ -29,6 +30,7 @@ struct RpcCommand {
   std::optional<std::string> reason;
   std::optional<std::string> answer;
   std::optional<std::string> selected;
+  std::optional<std::vector<std::string>> selected_options;
   std::optional<std::string> plugin_id;
   std::optional<std::string> name;
   std::optional<std::string> arguments;
@@ -52,6 +54,8 @@ inline constexpr std::size_t kMaxRpcQueuedMessageBytes = 64 * 1024;
 inline constexpr std::size_t kMaxRpcQueueEventMessageBytes = 512;
 inline constexpr std::size_t kMaxRpcIdentifierBytes = 256;
 inline constexpr std::size_t kMaxRpcReasonBytes = 1024;
+inline constexpr std::size_t kMaxRpcQuestionAnswerBytes = 8192;
+inline constexpr std::size_t kMaxRpcQuestionSelectedOptions = 64;
 inline constexpr long long kRpcProtocolVersion = 1;
 
 [[nodiscard]] ava::core::Error invalid_rpc(std::string message);

@@ -333,11 +333,12 @@ When an active prompt reaches the `question` tool, RPC emits:
 {"schema_version":1,"name":"question_requested","type":"question_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"question_...","header":"Choose","question":"Continue?","options":[{"value":"yes","label":"Yes"}],"multiple":false,"allow_custom":true,"secret":false,"modal":false,"searchable":false}}
 ```
 
-Question payloads carry prompt text, option metadata, single/multiple-selection capability, custom-text allowance, and local prompt flags such as `secret`, `modal`, and `searchable`. The client may answer with custom text when `allow_custom` is true, or one valid selected option value. Multi-select question prompts are not supported by RPC protocol version 1; AVA emits no resolver request for them and returns a failed `question` tool result to the active prompt.
+Question payloads carry prompt text, option metadata, single/multiple-selection capability, custom-text allowance, and local prompt flags such as `secret`, `modal`, and `searchable`. The client may answer with custom text when `allow_custom` is true, one valid selected option value through `selected`, or multiple valid option values through `selected_options` when `multiple` is true. Multi-select replies may also include `answer` when custom text is allowed.
 
 ```json
 {"id":"question_reply_1","type":"question_reply","request_id":"question_...","correlation_id":"prompt_req","answer":"text"}
 {"id":"question_reply_2","type":"question_reply","request_id":"question_...","correlation_id":"prompt_req","selected":"yes"}
+{"id":"question_reply_3","type":"question_reply","request_id":"question_...","correlation_id":"prompt_req","selected_options":["alpha","beta"],"answer":"Use both"}
 ```
 
 Successful replies emit `question_replied` with the submitted value before the in-band response:

@@ -179,6 +179,7 @@ ava_apply_sanitizers(ava)
 if(AVA_BUILD_TESTS)
   enable_testing()
   add_library(ava_test_support
+    tests/support/app_runtime_support.cpp
     tests/support/fake_transport.cpp
     tests/support/test_harness.cpp
   )
@@ -203,6 +204,7 @@ if(AVA_BUILD_TESTS)
 
   add_executable(ava_tests
     tests/agent_tool_dispatcher_tests.cpp
+    tests/app_rpc_tests.cpp
     tests/app_runtime_tests.cpp
     tests/config_context_auth_oauth_tests.cpp
     tests/core_tests.cpp
@@ -233,6 +235,7 @@ if(AVA_BUILD_TESTS)
     config_context_auth_oauth
     app_event_serialization
     app_event_bus
+    app_rpc
     app_runtime
     provider_openai
     provider_anthropic
@@ -314,6 +317,14 @@ if(AVA_BUILD_TESTS)
             -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
             -DAVA_CLI_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cli-headless-rpc-question-reply
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_question_reply.cmake)
+
+  add_test(
+    NAME ava_cli.headless_rpc_question_reply_multi
+    COMMAND ${CMAKE_COMMAND}
+            -DAVA_EXE=$<TARGET_FILE:ava>
+            -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+            -DAVA_CLI_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cli-headless-rpc-question-reply-multi
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_headless_rpc_question_reply_multi.cmake)
 
   add_test(
     NAME ava_cli.headless_rpc_provider_error

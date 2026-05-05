@@ -198,7 +198,7 @@ Missing or incomplete:
 
 ### Headless And Automation
 
-AVA has print mode and JSONL RPC protocol version 1. Print/RPC now share the event envelope for provider streaming, tool lifecycle/progress, permission requests, question requests, cancellation, queue lifecycle, retry countdown ticks, assistant messages, and terminal outcomes. Live headless smokes verified model-visible tool calls for read/search/webfetch in print mode and mutating/bash/question tools through RPC resolver replies.
+AVA has print mode and JSONL RPC protocol version 1. Print/RPC now share the event envelope for provider streaming, tool lifecycle/progress, permission requests, question requests, cancellation, queue lifecycle, retry countdown ticks, assistant messages, and terminal outcomes. Live headless smokes verified model-visible tool calls for read/search/webfetch in print mode and mutating/bash/question tools through RPC resolver replies, including single-select, multi-select, and custom question answers.
 
 Missing or incomplete:
 

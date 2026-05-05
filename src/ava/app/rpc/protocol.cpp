@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace ava::app::rpc {
 namespace {
@@ -163,6 +164,100 @@ ava::core::VoidResult validate_optional_rpc_text(std::optional<std::string> cons
   return {};
 }
 
+void skip_json_ws(std::string_view text, std::size_t& index)
+{
+  while (index < text.size() && std::isspace(static_cast<unsigned char>(text[index])) != 0) ++index;
+}
+
+ava::core::Result<std::optional<std::vector<std::string>>> optional_string_array_field(std::string_view object,
+                                                                                       std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start) return std::optional<std::vector<std::string>>{};
+  auto const field_name = std::string(key);
+  if (*start >= object.size() || object[*start] != '[') {
+    return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of strings"));
+  }
+
+  std::size_t index = *start + 1;
+  std::size_t string_count = 0;
+  skip_json_ws(object, index);
+  if (index < object.size() && object[index] != ']') {
+    while (index < object.size()) {
+      if (object[index] != '"') {
+        return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of strings"));
+      }
+      bool escaped = false;
+      bool closed = false;
+      for (++index; index < object.size(); ++index) {
+        char const ch = object[index];
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (ch == '\\') {
+          escaped = true;
+          continue;
+        }
+        if (ch == '"') {
+          closed = true;
+          ++index;
+          break;
+        }
+      }
+      if (!closed) return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of strings"));
+      ++string_count;
+
+      skip_json_ws(object, index);
+      if (index >= object.size()) {
+        return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of strings"));
+      }
+      if (object[index] == ',') {
+        ++index;
+        skip_json_ws(object, index);
+        continue;
+      }
+      if (object[index] == ']') break;
+      return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of strings"));
+    }
+  }
+
+  if (index >= object.size() || object[index] != ']') {
+    return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of strings"));
+  }
+  ++index;
+  skip_json_ws(object, index);
+  if (index < object.size() && object[index] != ',' && object[index] != '}') {
+    return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of strings"));
+  }
+
+  auto values = ava::core::json::strings_in_array_field(object, key);
+  if (values.size() != string_count) {
+    return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of strings"));
+  }
+  return std::optional<std::vector<std::string>>{std::move(values)};
+}
+
+ava::core::VoidResult validate_optional_rpc_text_array(std::optional<std::vector<std::string>> const& values,
+                                                       std::string_view field_name, std::size_t max_entries,
+                                                       std::size_t max_bytes)
+{
+  if (!values) return {};
+  if (values->size() > max_entries) {
+    auto error = invalid_rpc("RPC text array field has too many entries");
+    error.with_context("field", std::string(field_name));
+    error.with_context("max_entries", std::to_string(max_entries));
+    return std::unexpected(std::move(error));
+  }
+  for (auto const& value : *values) {
+    auto wrapped = std::optional<std::string>{value};
+    if (auto valid = validate_optional_rpc_text(wrapped, field_name, max_bytes); !valid) {
+      return valid;
+    }
+  }
+  return {};
+}
+
 }  // namespace
 
 ava::core::Error invalid_rpc(std::string message)
@@ -274,6 +369,21 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   if (auto valid = rpc::validate_optional_rpc_text(reason, "reason", rpc::kMaxRpcReasonBytes); !valid) {
     return std::unexpected(std::move(valid.error()));
   }
+  auto selected_options = rpc::optional_string_array_field(line, "selected_options");
+  if (!selected_options) return std::unexpected(std::move(selected_options.error()));
+  if (auto valid = rpc::validate_optional_rpc_text_array(
+          *selected_options, "selected_options", rpc::kMaxRpcQuestionSelectedOptions, rpc::kMaxRpcQuestionAnswerBytes);
+      !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
+  auto answer = ava::core::json::string_field(line, "answer");
+  if (auto valid = rpc::validate_optional_rpc_text(answer, "answer", rpc::kMaxRpcQuestionAnswerBytes); !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
+  auto selected = ava::core::json::string_field(line, "selected");
+  if (auto valid = rpc::validate_optional_rpc_text(selected, "selected", rpc::kMaxRpcQuestionAnswerBytes); !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
 
   return RpcCommand{.id = std::move(*id),
                     .type = std::move(*type),
@@ -291,8 +401,9 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
                     .grant_id = std::move(grant_id),
                     .decision = ava::core::json::string_field(line, "decision"),
                     .reason = std::move(reason),
-                    .answer = ava::core::json::string_field(line, "answer"),
-                    .selected = ava::core::json::string_field(line, "selected"),
+                    .answer = std::move(answer),
+                    .selected = std::move(selected),
+                    .selected_options = std::move(*selected_options),
                     .plugin_id = std::move(plugin_id),
                     .name = std::move(name),
                     .arguments = ava::core::json::object_field(line, "arguments"),

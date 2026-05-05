@@ -231,12 +231,10 @@ ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pe
           ava::agent::QuestionPrompt const& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
         if (cancel_requested(run_state)) return std::unexpected(canceled_error());
         if (input_closed(run_state)) return std::unexpected(canceled_error());
-        if (prompt.multiple) {
-          return std::unexpected(invalid_rpc("RPC question resolver does not support multiple selections yet"));
-        }
 
         auto pending = std::make_shared<PendingQuestionRequest>();
         pending->correlation_id = prompt_request_id;
+        pending->multiple = prompt.multiple;
         pending->allow_custom = prompt.allow_custom;
         pending->options = prompt.options;
         std::string request_id;
@@ -319,9 +317,12 @@ ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_sta
 
 ava::core::VoidResult resolve_question_reply(PendingResolverState& pending_state, std::string_view request_id,
                                              std::string_view correlation_id, std::optional<std::string> const& answer,
-                                             std::optional<std::string> const& selected)
+                                             std::optional<std::string> const& selected,
+                                             std::optional<std::vector<std::string>> const& selected_options)
 {
-  if (answer && selected) return std::unexpected(invalid_rpc("question_reply requires answer or selected, not both"));
+  if (selected && selected_options) {
+    return std::unexpected(invalid_rpc("question_reply requires selected or selected_options, not both"));
+  }
 
   std::shared_ptr<PendingQuestionRequest> pending;
   ava::agent::QuestionAnswer parsed;
@@ -343,15 +344,51 @@ ava::core::VoidResult resolve_question_reply(PendingResolverState& pending_state
         return std::unexpected(invalid_rpc("question_reply answer is not allowed for this request"));
       }
       parsed.custom_text = *answer;
-    } else if (selected) {
-      bool valid_option = false;
-      for (auto const& option : pending->options) valid_option = valid_option || option.value == *selected;
-      if (!valid_option) {
-        return std::unexpected(invalid_rpc("question_reply selected option is not valid for this request"));
+    }
+
+    std::vector<std::string> submitted_options;
+    if (selected) {
+      submitted_options.push_back(*selected);
+    } else if (selected_options) {
+      submitted_options = *selected_options;
+    }
+
+    if (!submitted_options.empty() || selected_options) {
+      if (!pending->multiple && submitted_options.size() != 1) {
+        return std::unexpected(
+            invalid_rpc("question_reply selected_options requires exactly one value for single-select requests"));
       }
-      parsed.selected_options.push_back(*selected);
-    } else {
-      return std::unexpected(invalid_rpc("question_reply requires answer or selected"));
+      if (!pending->multiple && answer) {
+        return std::unexpected(
+            invalid_rpc("question_reply requires answer or selected option, not both for single-select requests"));
+      }
+      if (submitted_options.size() > pending->options.size()) {
+        return std::unexpected(invalid_rpc("question_reply selected_options has too many values"));
+      }
+      for (auto const& submitted : submitted_options) {
+        bool valid_option = false;
+        for (auto const& option : pending->options) valid_option = valid_option || option.value == submitted;
+        if (!valid_option) {
+          return std::unexpected(invalid_rpc("question_reply selected option is not valid for this request"));
+        }
+        for (auto const& existing : parsed.selected_options) {
+          if (existing == submitted) {
+            return std::unexpected(invalid_rpc("question_reply selected_options contains duplicate values"));
+          }
+        }
+        parsed.selected_options.push_back(submitted);
+      }
+    }
+
+    if (!answer && !selected && !selected_options) {
+      return std::unexpected(invalid_rpc("question_reply requires answer, selected, or selected_options"));
+    }
+    if (!pending->multiple && selected_options && selected_options->empty()) {
+      return std::unexpected(
+          invalid_rpc("question_reply selected_options requires exactly one value for single-select requests"));
+    }
+    if (pending->multiple && !answer && selected_options && selected_options->empty()) {
+      parsed.selected_options.clear();
     }
 
     pending_state.question_requests.erase(found);

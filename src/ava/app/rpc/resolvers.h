@@ -53,6 +53,7 @@ struct PermissionSessionGrant {
 struct PendingQuestionRequest {
   bool resolved = false;
   std::string correlation_id;
+  bool multiple = false;
   bool allow_custom = false;
   std::vector<ava::agent::QuestionOption> options;
   std::optional<ava::agent::QuestionAnswer> answer;
@@ -86,9 +87,9 @@ struct PendingResolverState {
                                                              std::string_view request_id,
                                                              std::string_view correlation_id, std::string_view decision,
                                                              std::optional<std::string> const& reason = std::nullopt);
-[[nodiscard]] ava::core::VoidResult resolve_question_reply(PendingResolverState& pending_state,
-                                                           std::string_view request_id, std::string_view correlation_id,
-                                                           std::optional<std::string> const& answer,
-                                                           std::optional<std::string> const& selected);
+[[nodiscard]] ava::core::VoidResult resolve_question_reply(
+    PendingResolverState& pending_state, std::string_view request_id, std::string_view correlation_id,
+    std::optional<std::string> const& answer, std::optional<std::string> const& selected,
+    std::optional<std::vector<std::string>> const& selected_options = std::nullopt);
 
 }  // namespace ava::app::rpc

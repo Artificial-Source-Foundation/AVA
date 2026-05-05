@@ -704,7 +704,8 @@ std::string permission_reply_payload_json(std::string_view resolver_request_id, 
 }
 
 std::string question_reply_payload_json(std::string_view resolver_request_id, std::optional<std::string> const& answer,
-                                        std::optional<std::string> const& selected)
+                                        std::optional<std::string> const& selected,
+                                        std::optional<std::vector<std::string>> const& selected_options)
 {
   std::string json = "{";
   json += string_field_json("resolver_request_id", resolver_request_id);
@@ -715,6 +716,10 @@ std::string question_reply_payload_json(std::string_view resolver_request_id, st
   if (selected) {
     json += ',';
     json += string_field_json("selected", *selected);
+  }
+  if (selected_options) {
+    json += ",\"selected_options\":";
+    json += string_array_json(*selected_options);
   }
   json += '}';
   return json;

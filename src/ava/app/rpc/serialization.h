@@ -43,9 +43,10 @@ namespace ava::app::rpc {
                                                         ava::agent::QuestionPrompt const& prompt);
 [[nodiscard]] std::string permission_reply_payload_json(std::string_view resolver_request_id, std::string_view decision,
                                                         std::optional<std::string> const& reason = std::nullopt);
-[[nodiscard]] std::string question_reply_payload_json(std::string_view resolver_request_id,
-                                                      std::optional<std::string> const& answer,
-                                                      std::optional<std::string> const& selected);
+[[nodiscard]] std::string question_reply_payload_json(
+    std::string_view resolver_request_id, std::optional<std::string> const& answer,
+    std::optional<std::string> const& selected,
+    std::optional<std::vector<std::string>> const& selected_options = std::nullopt);
 [[nodiscard]] std::string cancel_requested_payload_json(bool active_run, std::size_t cleared_steer,
                                                         std::size_t cleared_follow_up,
                                                         std::string_view active_request_id = {});

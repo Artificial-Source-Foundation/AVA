@@ -71,6 +71,7 @@ add_library(ava_core
   src/ava/agent/usage_accounting.cpp
   src/ava/config/auth.cpp
   src/ava/config/auth_file_json.cpp
+  src/ava/config/auth_file_io.cpp
   src/ava/config/auth_storage.cpp
   src/ava/config/model_config.cpp
   src/ava/config/model_config_support.cpp
@@ -313,6 +314,7 @@ if(AVA_BUILD_TESTS)
     tests/app_runtime_json_support_tests.cpp
     tests/app_runtime_tests.cpp
     tests/bash_tool_support_tests.cpp
+    tests/config_auth_storage_tests.cpp
     tests/config_context_auth_oauth_tests.cpp
     tests/config_model_config_support_tests.cpp
     tests/config_oauth_crypto_support_tests.cpp
@@ -386,6 +388,7 @@ if(AVA_BUILD_TESTS)
     session_entry_codec_support
     webfetch_support
     json_support
+    config_auth_storage
     config_context_auth_oauth
     config_model_config_support
     config_oauth_crypto_support

@@ -12,6 +12,7 @@ set(INPUT_FILE "${TEST_ROOT}/rpc-input.jsonl")
 
 file(REMOVE_RECURSE "${TEST_ROOT}")
 file(MAKE_DIRECTORY "${WORKSPACE}" "${TEST_ROOT}/home" "${TEST_ROOT}/config" "${TEST_ROOT}/state" "${TEST_ROOT}/data")
+file(REAL_PATH "${WORKSPACE}" REAL_WORKSPACE)
 file(WRITE "${INPUT_FILE}"
      "{\"id\":\"proto\",\"type\":\"get_protocol\",\"protocol_version\":1}\n"
      "{\"id\":\"state\",\"type\":\"get_state\"}\n"
@@ -52,7 +53,7 @@ foreach(NEEDLE
         "\"id\":\"proto\""
         "\"protocol_version\":1"
         "\"id\":\"state\""
-        "\"workspace_dir\":\"${WORKSPACE}\""
+        "\"workspace_dir\":\"${REAL_WORKSPACE}\""
         "\"id\":\"models\""
         "\"models\":["
         "\"current_provider\":\"openai\""

@@ -18,6 +18,7 @@ set(PLUGIN_RAN_FILE "${PLUGIN_DIR}/ran.txt")
 file(REMOVE_RECURSE "${TEST_ROOT}")
 file(MAKE_DIRECTORY "${PLUGIN_DIR}/prompts" "${PLUGIN_DIR}/skills" "${BAD_PLUGIN_DIR}" "${TEST_ROOT}/home"
                     "${TEST_ROOT}/config" "${TEST_ROOT}/state" "${TEST_ROOT}/data")
+file(REAL_PATH "${WORKSPACE}" REAL_WORKSPACE)
 file(WRITE "${PLUGIN_MANIFEST}"
      [=[
 {
@@ -110,7 +111,7 @@ foreach(NEEDLE
         "Disabled project plugin com.example.rpc."
         "No plugin process was stopped."
         "\"id\":\"state\""
-        "\"workspace_dir\":\"${WORKSPACE}\"")
+        "\"workspace_dir\":\"${REAL_WORKSPACE}\"")
   string(FIND "${AVA_OUTPUT}" "${NEEDLE}" NEEDLE_INDEX)
   if(NEEDLE_INDEX EQUAL -1)
     message(FATAL_ERROR "ava --rpc output did not contain ${NEEDLE}\nstdout:\n${AVA_OUTPUT}\nstderr:\n${AVA_ERROR}")

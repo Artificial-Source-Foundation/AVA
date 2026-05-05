@@ -14,6 +14,8 @@ set(PROJECT_MCP_CONFIG "${WORKSPACE}/.ava/mcp.json")
 file(REMOVE_RECURSE "${TEST_ROOT}")
 file(MAKE_DIRECTORY "${WORKSPACE}/.ava" "${TEST_ROOT}/home" "${TEST_ROOT}/config" "${TEST_ROOT}/state"
                     "${TEST_ROOT}/data")
+file(REAL_PATH "${WORKSPACE}" REAL_WORKSPACE)
+set(EXPECTED_PROJECT_MCP_CONFIG "${REAL_WORKSPACE}/.ava/mcp.json")
 file(WRITE "${PROJECT_MCP_CONFIG}" "{\"servers\":[{\"id\":\"bad id\",\"command\":\"fake-mcp\"}]}\n")
 file(WRITE "${INPUT_FILE}"
      "{\"id\":\"mcp-list\",\"type\":\"list_mcp_servers\",\"protocol_version\":1}\n"
@@ -43,9 +45,9 @@ foreach(NEEDLE
         "\"id\":\"mcp-list\""
         "\"success\":true"
         "invalid_argument: MCP server requires a valid id"
-        "config: ${PROJECT_MCP_CONFIG}"
+        "config: ${EXPECTED_PROJECT_MCP_CONFIG}"
         "\"id\":\"state\""
-        "\"workspace_dir\":\"${WORKSPACE}\"")
+        "\"workspace_dir\":\"${REAL_WORKSPACE}\"")
   string(FIND "${AVA_OUTPUT}" "${NEEDLE}" NEEDLE_INDEX)
   if(NEEDLE_INDEX EQUAL -1)
     message(FATAL_ERROR "ava --rpc output did not contain ${NEEDLE}\nstdout:\n${AVA_OUTPUT}\nstderr:\n${AVA_ERROR}")

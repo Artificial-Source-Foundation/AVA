@@ -57,6 +57,7 @@ add_library(ava_core
   src/ava/agent/tool_file_dispatch.cpp
   src/ava/agent/tool_lsp_dispatch.cpp
   src/ava/agent/tool_network_dispatch.cpp
+  src/ava/agent/tool_patch_dispatch.cpp
   src/ava/agent/tool_process_dispatch.cpp
   src/ava/agent/tool_registry.cpp
   src/ava/agent/tool_result.cpp

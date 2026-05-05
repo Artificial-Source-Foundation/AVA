@@ -28,6 +28,7 @@
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_file_dispatch.h"
 #include "ava/agent/tool_network_dispatch.h"
+#include "ava/agent/tool_patch_dispatch.h"
 #include "ava/agent/tool_process_dispatch.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
@@ -518,6 +519,40 @@ void test_network_tool_dispatch_helpers()
   expect(!missing_url.success && missing_url.result_text.find("\"ok\":false") != std::string::npos &&
              missing_url.result_text.find("url") != std::string::npos,
          "network dispatch helper maps missing provider URL arguments to tool errors");
+}
+
+void test_patch_tool_dispatch_helpers()
+{
+  auto const root = temp_root() / "patch-tool-dispatch";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  std::filesystem::create_directories(root);
+  {
+    std::ofstream file(root / "note.txt", std::ios::binary | std::ios::trunc);
+    file << "alpha\nbeta\n";
+  }
+
+  ava::tools::ToolContext const context{.workspace_dir = root, .mode = ava::agent::Mode::Build};
+  auto patched = ava::agent::detail::apply_patch_result(
+      context,
+      ava::agent::ProviderToolCall{
+          .id = "call_patch_direct",
+          .name = "apply_patch",
+          .arguments_json = "{\"edits\":[{\"path\":\"note.txt\",\"old_text\":\"beta\",\"new_text\":\"gamma\"}]}"});
+  auto const diff = ava::core::json::string_field(patched.result_text, "diff");
+  auto read_back =
+      ava::tools::read_file(context, root / "note.txt", ava::tools::ReadOptions{.permission_already_checked = true});
+  expect(patched.success && patched.result_text.find("\"tool\":\"apply_patch\"") != std::string::npos && diff &&
+             diff->find("-beta") != std::string::npos && diff->find("+gamma") != std::string::npos && read_back &&
+             read_back->content == "alpha\ngamma\n",
+         "patch dispatch helper applies exact edits and returns diff metadata");
+
+  auto empty = ava::agent::detail::apply_patch_result(
+      context, ava::agent::ProviderToolCall{
+                   .id = "call_patch_empty", .name = "apply_patch", .arguments_json = "{\"edits\":[]}"});
+  expect(!empty.success && empty.result_text.find("\"ok\":false") != std::string::npos &&
+             empty.result_text.find("non-empty edits") != std::string::npos,
+         "patch dispatch helper rejects empty edit arrays");
 }
 
 void test_question_answer_validation_helpers()
@@ -2816,6 +2851,7 @@ void run_agent_tool_dispatcher_tests()
   test_search_tool_dispatch_helpers();
   test_process_tool_dispatch_helpers();
   test_network_tool_dispatch_helpers();
+  test_patch_tool_dispatch_helpers();
   test_question_answer_validation_helpers();
   test_session_recorder_helpers();
   test_tool_dispatcher();

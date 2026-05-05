@@ -17,6 +17,7 @@
 #include "ava/plugin/protocol.h"
 #include "ava/plugin/resources.h"
 #include "ava/plugin/runner.h"
+#include "ava/plugin/runner_support.h"
 #include "ava/plugin/stream_buffers.h"
 #include "ava/plugin/tool_broker.h"
 #include "ava/tools/file_tools.h"
@@ -482,6 +483,43 @@ void test_plugin_stream_buffers()
   expect(tail.text() == "bcdefg" && tail.truncated(), "plugin stderr tail keeps only the newest bytes");
   tail.append("123456789");
   expect(tail.text() == "456789" && tail.truncated(), "plugin stderr tail bounds chunks larger than the cap");
+}
+
+void test_plugin_runner_support_helpers()
+{
+  ava::plugin::PluginManifest manifest;
+  manifest.id = "com.example.support";
+  manifest.path = temp_root() / "support-plugin" / "plugin.json";
+  manifest.directory = manifest.path.parent_path();
+  manifest.entrypoint.command = "/bin/sh";
+  manifest.entrypoint.args = {"plugin.sh", "--safe"};
+
+  auto const argv = ava::plugin::detail::plugin_argv(manifest);
+  expect(argv.size() == 3 && argv[0] == "/bin/sh" && argv[1] == "plugin.sh" && argv[2] == "--safe",
+         "plugin runner support builds child argv from manifest entrypoint");
+
+  ava::plugin::PluginRunnerOptions options;
+  options.workspace_dir = temp_root() / "workspace";
+  expect(ava::plugin::detail::child_working_dir(manifest, options) == manifest.directory,
+         "plugin runner support prefers manifest directory for child cwd");
+  manifest.directory.clear();
+  expect(ava::plugin::detail::child_working_dir(manifest, options) == options.workspace_dir,
+         "plugin runner support falls back to workspace cwd");
+
+  ava::plugin::PluginRunnerOptions default_options;
+  auto valid = ava::plugin::detail::validate_start_request(manifest, default_options, nullptr);
+  expect(valid && !default_options.workspace_dir.empty(),
+         "plugin runner support validates defaults and fills workspace cwd");
+
+  auto bad_timeout_options = default_options;
+  bad_timeout_options.startup_timeout = std::chrono::milliseconds(1);
+  auto bad_timeout = ava::plugin::detail::validate_start_request(manifest, bad_timeout_options, nullptr);
+  expect(!bad_timeout && bad_timeout.error().message().find("startup timeout") != std::string::npos,
+         "plugin runner support rejects startup timeouts below the safe bound");
+
+  auto canceled = ava::plugin::detail::validate_start_request(manifest, default_options, [] { return true; });
+  expect(!canceled && canceled.error().message() == "plugin startup canceled",
+         "plugin runner support preserves fail-closed startup cancellation");
 }
 
 void test_plugin_runner_initializes_and_shuts_down()
@@ -1180,6 +1218,7 @@ void run_plugin_tests()
   test_plugin_enablement();
   test_plugin_protocol_helpers();
   test_plugin_stream_buffers();
+  test_plugin_runner_support_helpers();
   test_plugin_runner_initializes_and_shuts_down();
   test_plugin_runner_accepts_buffered_extra_records();
   test_plugin_runner_contained_failures();

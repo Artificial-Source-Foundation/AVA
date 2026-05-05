@@ -69,6 +69,7 @@ void run_plugin_runner_lifecycle_tests();
 void run_plugin_tests();
 void run_permissions_command_policy_support_tests();
 void run_mcp_config_support_tests();
+void run_mcp_stdio_client_lifecycle_tests();
 void run_mcp_tool_list_parser_tests();
 void run_mcp_tests();
 void run_tui_composer_tests();
@@ -146,6 +147,7 @@ constexpr std::array kTestSuites{
     TestSuite{"plugin", run_plugin_tests},
     TestSuite{"permissions_command_policy_support", run_permissions_command_policy_support_tests},
     TestSuite{"mcp_config_support", run_mcp_config_support_tests},
+    TestSuite{"mcp_stdio_client_lifecycle", run_mcp_stdio_client_lifecycle_tests},
     TestSuite{"mcp_tool_list_parser", run_mcp_tool_list_parser_tests},
     TestSuite{"mcp", run_mcp_tests},
     TestSuite{"tui_composer", run_tui_composer_tests},

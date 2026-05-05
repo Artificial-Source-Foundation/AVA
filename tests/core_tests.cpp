@@ -13,6 +13,7 @@ void run_config_context_auth_oauth_tests();
 void run_app_compaction_tests();
 void run_app_print_tests();
 void run_app_event_serialization_tests();
+void run_app_rpc_resolver_tests();
 void run_app_rpc_tests();
 void run_app_runtime_tests();
 void run_app_event_bus_tests();
@@ -43,6 +44,7 @@ constexpr std::array kTestSuites{
     TestSuite{"app_print", run_app_print_tests},
     TestSuite{"app_event_serialization", run_app_event_serialization_tests},
     TestSuite{"app_event_bus", run_app_event_bus_tests},
+    TestSuite{"app_rpc_resolver", run_app_rpc_resolver_tests},
     TestSuite{"app_rpc", run_app_rpc_tests},
     TestSuite{"app_runtime", run_app_runtime_tests},
     TestSuite{"provider_openai", run_provider_openai_tests},

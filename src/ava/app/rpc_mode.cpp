@@ -15,6 +15,7 @@
 #include "ava/app/rpc/handlers.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/protocol.h"
+#include "ava/app/rpc/query_handlers.h"
 #include "ava/app/rpc/resolvers.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/rpc/serialization.h"
@@ -42,12 +43,6 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     if (prompt_worker && !rpc::active_run(run_state)) {
       prompt_worker.reset();
     }
-  };
-
-  auto write_state_response = [&](std::string_view id) -> ava::core::VoidResult {
-    bool const canceled = rpc::cancel_requested(run_state);
-    std::lock_guard lock(session_mutex);
-    return rpc::write_success(output, id, rpc::state_result_json(session, canceled));
   };
 
   output.on_write_failure = [&] {
@@ -90,7 +85,8 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     }
 
     if (command->type == "get_state") {
-      if (auto written = write_state_response(command->id); !written) return written;
+      if (auto written = rpc::handle_get_state_command(output, session, session_mutex, run_state, *command); !written)
+        return written;
       continue;
     }
 
@@ -120,78 +116,35 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
     }
 
     if (command->type == "list_sessions") {
-      std::lock_guard lock(session_mutex);
-      auto sessions_json = rpc::list_sessions_result_json(session);
-      if (!sessions_json) {
-        if (auto written = rpc::write_error(output, command->id, sessions_json.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_success(output, command->id, *sessions_json); !written) return written;
+      if (auto written = rpc::handle_list_sessions_command(output, session, session_mutex, *command); !written)
+        return written;
       continue;
     }
 
     if (command->type == "list_models") {
-      std::lock_guard lock(session_mutex);
-      auto models_json = rpc::list_models_result_json(session);
-      if (!models_json) {
-        if (auto written = rpc::write_error(output, command->id, models_json.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_success(output, command->id, *models_json); !written) return written;
+      if (auto written = rpc::handle_list_models_command(output, session, session_mutex, *command); !written)
+        return written;
       continue;
     }
 
     if (command->type == "get_messages") {
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      std::lock_guard lock(session_mutex);
-      auto messages_json = rpc::messages_result_json(session);
-      if (!messages_json) {
-        if (auto written = rpc::write_error(output, command->id, messages_json.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_success(output, command->id, *messages_json); !written) return written;
+      if (auto written = rpc::handle_get_messages_command(output, session, session_mutex, run_state, *command);
+          !written)
+        return written;
       continue;
     }
 
     if (command->type == "get_session_stats") {
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      std::lock_guard lock(session_mutex);
-      auto stats_json = rpc::session_stats_result_json(session);
-      if (!stats_json) {
-        if (auto written = rpc::write_error(output, command->id, stats_json.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_success(output, command->id, *stats_json); !written) return written;
+      if (auto written = rpc::handle_get_session_stats_command(output, session, session_mutex, run_state, *command);
+          !written)
+        return written;
       continue;
     }
 
     if (command->type == "validate_session") {
-      if (rpc::active_run(run_state)) {
-        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
-            !written) {
-          return written;
-        }
-        continue;
-      }
-      std::lock_guard lock(session_mutex);
-      auto validation_json = rpc::session_validation_result_json(session);
-      if (!validation_json) {
-        if (auto written = rpc::write_error(output, command->id, validation_json.error()); !written) return written;
-        continue;
-      }
-      if (auto written = rpc::write_success(output, command->id, *validation_json); !written) return written;
+      if (auto written = rpc::handle_validate_session_command(output, session, session_mutex, run_state, *command);
+          !written)
+        return written;
       continue;
     }
 

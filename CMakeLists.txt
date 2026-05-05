@@ -207,6 +207,7 @@ if(AVA_BUILD_TESTS)
     tests/agent_tool_dispatcher_tests.cpp
     tests/app_compaction_tests.cpp
     tests/app_print_tests.cpp
+    tests/app_rpc_queue_tests.cpp
     tests/app_rpc_resolver_tests.cpp
     tests/app_rpc_tests.cpp
     tests/app_runtime_tests.cpp
@@ -244,6 +245,7 @@ if(AVA_BUILD_TESTS)
     app_print
     app_event_serialization
     app_event_bus
+    app_rpc_queue
     app_rpc_resolver
     app_rpc
     app_runtime

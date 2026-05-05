@@ -39,6 +39,7 @@ void run_provider_anthropic_request_support_tests();
 void run_provider_anthropic_stream_events_tests();
 void run_provider_event_buffer_tests();
 void run_provider_openai_compatible_response_tests();
+void run_provider_openai_compatible_response_support_tests();
 void run_provider_openai_stream_events_tests();
 void run_provider_transport_tests();
 void run_agent_tool_dispatcher_tests();
@@ -92,6 +93,7 @@ constexpr std::array kTestSuites{
     TestSuite{"provider_anthropic_stream_events", run_provider_anthropic_stream_events_tests},
     TestSuite{"provider_event_buffer", run_provider_event_buffer_tests},
     TestSuite{"provider_openai_compatible_response", run_provider_openai_compatible_response_tests},
+    TestSuite{"provider_openai_compatible_response_support", run_provider_openai_compatible_response_support_tests},
     TestSuite{"provider_openai_stream_events", run_provider_openai_stream_events_tests},
     TestSuite{"provider_transport", run_provider_transport_tests},
     TestSuite{"agent_tool_dispatcher", run_agent_tool_dispatcher_tests},

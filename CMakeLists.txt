@@ -246,6 +246,7 @@ ava_apply_sanitizers(ava)
 if(AVA_BUILD_TESTS)
   enable_testing()
   add_library(ava_test_support
+    tests/support/app_runtime_test_support.cpp
     tests/support/fake_transport.cpp
     tests/support/test_harness.cpp
   )

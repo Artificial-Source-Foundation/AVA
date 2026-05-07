@@ -1,6 +1,10 @@
 #include "Window.h"
 
+#include <array>
+#include <cstdarg>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "debug.h"
 
@@ -9,9 +13,42 @@
 
 namespace terminal {
 
-struct Window::Impl {
+struct Window::Impl
+{
  private:
   WINDOW* handle_;
+
+ private:
+  static int screen_max_row(Position screen_pos, Dimension screen_size)
+  {
+    ASSERT(screen_size.height() > 0);
+    return static_cast<int>(screen_pos.row() + screen_size.height() - 1);
+  }
+
+  static int screen_max_col(Position screen_pos, Dimension screen_size)
+  {
+    ASSERT(screen_size.width() > 0);
+    return static_cast<int>(screen_pos.col() + screen_size.width() - 1);
+  }
+
+  static std::vector<cchar_t> convert_to_cchar_vector(ComplexChar const* str, int n)
+  {
+    ASSERT(str);
+    ASSERT(n >= 0);
+    std::vector<cchar_t> result;
+    result.reserve(static_cast<size_t>(n) + 1);
+    for (int i = 0; i < n; ++i) result.push_back(convert_to_cchar(str[i]));
+    result.push_back({});
+    return result;
+  }
+
+  static void convert_from_cchar_array(cchar_t const* src, ComplexChar* dest, int n)
+  {
+    ASSERT(src);
+    ASSERT(dest);
+    ASSERT(n >= 0);
+    for (int i = 0; i < n; ++i) dest[i] = convert_to_ComplexChar(src[i]);
+  }
 
  private:
   void default_window_initialization()
@@ -34,6 +71,15 @@ struct Window::Impl {
   // Wrap an ncurses WINDOW handle returned by a window-creation function.
   // The pointer must be non-null and is owned by this Impl, except for stdscr which is owned by ncurses itself.
   explicit Impl(WINDOW* handle) : handle_(handle) { ASSERT(handle_); }
+
+  static WINDOW* newpad(Dimension size)
+  {
+    // https://invisible-island.net/ncurses/man/curs_pad.3x.html
+    //
+    // newpad creates and returns a pointer to a new pad data structure with the given number of lines and columns.
+    // A pad is not restricted by the screen size and is refreshed with explicit source and destination rectangles.
+    return ::newpad(size.height(), size.width());
+  }
 
   Impl(Dimension size, Position pos)
   {
@@ -96,6 +142,15 @@ struct Window::Impl {
     ::wsyncup(handle_);
   }
 
+  void cursyncup()
+  {
+    // https://invisible-island.net/ncurses/man/curs_window.3x.html
+    //
+    // wcursyncup updates the current cursor position of all ancestors of the window to reflect the current cursor
+    // position of this window.
+    ::wcursyncup(handle_);
+  }
+
   int syncok(bool enabled)
   {
     // https://invisible-island.net/ncurses/man/curs_window.3x.html
@@ -113,6 +168,30 @@ struct Window::Impl {
     ::werase(handle_);
   }
 
+  int clear()
+  {
+    // https://invisible-island.net/ncurses/man/curs_clear.3x.html
+    //
+    // wclear clears the window like werase and also arranges for the next refresh to clear and repaint the screen.
+    return ::wclear(handle_);
+  }
+
+  int clrtobot()
+  {
+    // https://invisible-island.net/ncurses/man/curs_clear.3x.html
+    //
+    // wclrtobot clears from the cursor to the end of the window, inclusive of the cursor line after the cursor.
+    return ::wclrtobot(handle_);
+  }
+
+  int clrtoeol()
+  {
+    // https://invisible-island.net/ncurses/man/curs_clear.3x.html
+    //
+    // wclrtoeol clears from the cursor to the end of the current line.
+    return ::wclrtoeol(handle_);
+  }
+
   void refresh()
   {
     // https://invisible-island.net/ncurses/man/curs_refresh.3x.html
@@ -121,6 +200,86 @@ struct Window::Impl {
     // terminal, as other routines merely manipulate data structures. The routine wrefresh copies the named window to
     // the physical terminal screen.
     ::wrefresh(handle_);
+  }
+
+  int wnoutrefresh()
+  {
+    // https://invisible-island.net/ncurses/man/curs_refresh.3x.html
+    //
+    // wnoutrefresh copies the window to the virtual screen without updating the physical terminal until doupdate.
+    return ::wnoutrefresh(handle_);
+  }
+
+  int redrawwin()
+  {
+    // https://invisible-island.net/ncurses/man/curs_refresh.3x.html
+    //
+    // redrawwin marks the entire window as changed so the next refresh repaints it completely.
+    return ::redrawwin(handle_);
+  }
+
+  int wredrawln(int beg_line, int num_lines)
+  {
+    // https://invisible-island.net/ncurses/man/curs_refresh.3x.html
+    //
+    // wredrawln marks a range of lines as changed so the next refresh repaints those lines.
+    return ::wredrawln(handle_, beg_line, num_lines);
+  }
+
+  int clearok(bool bf)
+  {
+    // https://invisible-island.net/ncurses/man/curs_outopts.3x.html
+    //
+    // clearok controls whether the next refresh clears and repaints the screen from scratch.
+    return ::clearok(handle_, bf);
+  }
+
+  void idcok(bool bf)
+  {
+    // https://invisible-island.net/ncurses/man/curs_outopts.3x.html
+    //
+    // idcok controls use of the terminal insert/delete character feature for this window.
+    ::idcok(handle_, bf);
+  }
+
+  int idlok(bool bf)
+  {
+    // https://invisible-island.net/ncurses/man/curs_outopts.3x.html
+    //
+    // idlok controls use of the terminal insert/delete line feature for this window.
+    return ::idlok(handle_, bf);
+  }
+
+  void immedok(bool bf)
+  {
+    // https://invisible-island.net/ncurses/man/curs_outopts.3x.html
+    //
+    // immedok controls whether each window change automatically refreshes the window immediately.
+    ::immedok(handle_, bf);
+  }
+
+  int leaveok(bool bf)
+  {
+    // https://invisible-island.net/ncurses/man/curs_outopts.3x.html
+    //
+    // leaveok controls whether refresh leaves the physical cursor where ncurses happens to leave it.
+    return ::leaveok(handle_, bf);
+  }
+
+  int scrollok(bool bf)
+  {
+    // https://invisible-island.net/ncurses/man/curs_outopts.3x.html
+    //
+    // scrollok controls whether output may scroll the window when the cursor moves past the bottom edge.
+    return ::scrollok(handle_, bf);
+  }
+
+  int setscrreg(int top, int bot)
+  {
+    // https://invisible-island.net/ncurses/man/curs_outopts.3x.html
+    //
+    // wsetscrreg sets the scrolling region, limiting line scroll operations to the given inclusive line range.
+    return ::wsetscrreg(handle_, top, bot);
   }
 
   void border_set(std::array<cchar_t, 8> const& b)
@@ -199,6 +358,89 @@ struct Window::Impl {
     return convert_to_ComplexChar(background);
   }
 
+  int attr_set(Rendition rendition)
+  {
+    // https://invisible-island.net/ncurses/man/curs_attr.3x.html
+    //
+    // wattr_set sets the window's current attributes and color pair; subsequent characters added to the window use
+    // this rendition until it is changed again.
+    int color_pair = rendition.color_pair().index();
+    return ::wattr_set(handle_, convert_to_attr(rendition.attributes()), 0, &color_pair);
+  }
+
+  int attr_get(Rendition& rendition) const
+  {
+    // https://invisible-island.net/ncurses/man/curs_attr.3x.html
+    //
+    // wattr_get returns the window's current attributes and color pair used for subsequent output.
+    attr_t attrs = A_NORMAL;
+    NCURSES_PAIRS_T pair = 0;
+    int extended_pair = 0;
+    int res = ::wattr_get(handle_, &attrs, &pair, &extended_pair);
+    ColorPair color_pair;
+    color_pair.index() = extended_pair;
+    rendition = Rendition{color_pair, convert_to_Attributes(attrs)};
+    return res;
+  }
+
+  int attr_on(Attributes attributes)
+  {
+    // https://invisible-island.net/ncurses/man/curs_attr.3x.html
+    //
+    // wattr_on turns on the named attributes of the window without disturbing other attributes or the color pair.
+    return ::wattr_on(handle_, convert_to_attr(attributes), nullptr);
+  }
+
+  int attr_off(Attributes attributes)
+  {
+    // https://invisible-island.net/ncurses/man/curs_attr.3x.html
+    //
+    // wattr_off turns off the named attributes of the window without disturbing other attributes or the color pair.
+    return ::wattr_off(handle_, convert_to_attr(attributes), nullptr);
+  }
+
+  int color_set(ColorPair color_pair)
+  {
+    // https://invisible-island.net/ncurses/man/curs_attr.3x.html
+    //
+    // wcolor_set sets the current color pair of the window for characters written after the call.
+    int extended_pair = color_pair.index();
+    return ::wcolor_set(handle_, 0, &extended_pair);
+  }
+
+  int chgat(int n, Rendition rendition)
+  {
+    // https://invisible-island.net/ncurses/man/curs_attr.3x.html
+    //
+    // wchgat changes the rendition of a given number of characters starting at the current cursor position; negative
+    // n changes characters through the end of the line.
+    return ::wchgat(handle_, n, convert_to_attr(rendition.attributes()), rendition.color_pair().index(), nullptr);
+  }
+
+  int chgat(Position pos, int n, Rendition rendition)
+  {
+    // https://invisible-island.net/ncurses/man/curs_attr.3x.html
+    //
+    // mvwchgat first moves the cursor to the requested window-relative position and then changes character rendition.
+    return ::mvwchgat(handle_, pos.row(), pos.col(), n, convert_to_attr(rendition.attributes()), rendition.color_pair().index(), nullptr);
+  }
+
+  int standout()
+  {
+    // https://invisible-island.net/ncurses/man/curs_attr.3x.html
+    //
+    // wstandout turns on the best highlighting mode of the terminal for the window's subsequent output.
+    return ::wstandout(handle_);
+  }
+
+  int standend()
+  {
+    // https://invisible-island.net/ncurses/man/curs_attr.3x.html
+    //
+    // wstandend turns off all attributes for subsequent output on the window.
+    return ::wstandend(handle_);
+  }
+
   void addstr(char const* str)
   {
     // https://invisible-island.net/ncurses/man/curs_addstr.3x.html
@@ -230,9 +472,81 @@ struct Window::Impl {
 
   void addstr(Position pos, char const* str, int n) { ::mvwaddnstr(handle_, pos.row(), pos.col(), str, n); }
 
-  void addstr(Position pos, char8_t const* utf8_str, int n)
+  void addstr(Position pos, char8_t const* utf8_str, int n) { ::mvwaddnstr(handle_, pos.row(), pos.col(), reinterpret_cast<char const*>(utf8_str), n); }
+
+  int addstr(ComplexChar const* str)
   {
-    ::mvwaddnstr(handle_, pos.row(), pos.col(), reinterpret_cast<char const*>(utf8_str), n);
+    // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
+    //
+    // wadd_wchstr copies an array of complex characters into the window at and after the cursor; the cursor position
+    // is not advanced and cells past the right edge are not wrapped.
+    ASSERT(str);
+    int n = 0;
+    while (str[n].cell_character().length() != 0) ++n;
+    auto converted = convert_to_cchar_vector(str, n);
+    return ::wadd_wchstr(handle_, converted.data());
+  }
+
+  int addstr(ComplexChar const* str, int n)
+  {
+    // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
+    //
+    // wadd_wchnstr copies at most n complex characters into the window at and after the cursor without advancing it.
+    auto converted = convert_to_cchar_vector(str, n);
+    return ::wadd_wchnstr(handle_, converted.data(), n);
+  }
+
+  int addstr(Position pos, ComplexChar const* str)
+  {
+    // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
+    //
+    // mvwadd_wchstr moves the cursor, then copies complex characters into the window without advancing it.
+    ASSERT(str);
+    int n = 0;
+    while (str[n].cell_character().length() != 0) ++n;
+    auto converted = convert_to_cchar_vector(str, n);
+    return ::mvwadd_wchstr(handle_, pos.row(), pos.col(), converted.data());
+  }
+
+  int addstr(Position pos, ComplexChar const* str, int n)
+  {
+    // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
+    //
+    // mvwadd_wchnstr moves the cursor, then copies at most n complex characters into the window.
+    auto converted = convert_to_cchar_vector(str, n);
+    return ::mvwadd_wchnstr(handle_, pos.row(), pos.col(), converted.data(), n);
+  }
+
+  int addstr(wchar_t const* str)
+  {
+    // https://invisible-island.net/ncurses/man/curs_addwstr.3x.html
+    //
+    // waddwstr writes a null-terminated wide-character string to the window starting at the cursor.
+    return ::waddwstr(handle_, str);
+  }
+
+  int addstr(wchar_t const* str, int n)
+  {
+    // https://invisible-island.net/ncurses/man/curs_addwstr.3x.html
+    //
+    // waddnwstr writes at most n wide characters to the window, stopping early at a terminating null wide character.
+    return ::waddnwstr(handle_, str, n);
+  }
+
+  int addstr(Position pos, wchar_t const* str)
+  {
+    // https://invisible-island.net/ncurses/man/curs_addwstr.3x.html
+    //
+    // mvwaddwstr moves the cursor, then writes a null-terminated wide-character string to the window.
+    return ::mvwaddwstr(handle_, pos.row(), pos.col(), str);
+  }
+
+  int addstr(Position pos, wchar_t const* str, int n)
+  {
+    // https://invisible-island.net/ncurses/man/curs_addwstr.3x.html
+    //
+    // mvwaddnwstr moves the cursor, then writes at most n wide characters to the window.
+    return ::mvwaddnwstr(handle_, pos.row(), pos.col(), str, n);
   }
 
   void addstr(cchar_t const* wchstr)
@@ -244,11 +558,20 @@ struct Window::Impl {
     ::wadd_wchstr(handle_, wchstr);
   }
 
-  void addstr(cchar_t const* wchstr, int n) { ::wadd_wchnstr(handle_, wchstr, n); }
+  void addstr(cchar_t const* wchstr, int n)
+  {
+    ::wadd_wchnstr(handle_, wchstr, n);
+  }
 
-  void addstr(Position pos, cchar_t const* wchstr) { ::mvwadd_wchstr(handle_, pos.row(), pos.col(), wchstr); }
+  void addstr(Position pos, cchar_t const* wchstr)
+  {
+    ::mvwadd_wchstr(handle_, pos.row(), pos.col(), wchstr);
+  }
 
-  void addstr(Position pos, cchar_t const* wchstr, int n) { ::mvwadd_wchnstr(handle_, pos.row(), pos.col(), wchstr, n); }
+  void addstr(Position pos, cchar_t const* wchstr, int n)
+  {
+    ::mvwadd_wchnstr(handle_, pos.row(), pos.col(), wchstr, n);
+  }
 
   void addch(ComplexChar const& complex_char)
   {
@@ -275,6 +598,309 @@ struct Window::Impl {
     ::wecho_wchar(handle_, &wch);
   }
 
+  int delch()
+  {
+    // https://invisible-island.net/ncurses/man/curs_delch.3x.html
+    //
+    // wdelch deletes the character under the cursor; characters to the right shift left and the last cell becomes
+    // blank.
+    return ::wdelch(handle_);
+  }
+
+  int delch(Position pos)
+  {
+    // https://invisible-island.net/ncurses/man/curs_delch.3x.html
+    //
+    // mvwdelch moves to the requested position and then deletes the character under the cursor.
+    return ::mvwdelch(handle_, pos.row(), pos.col());
+  }
+
+  int insdelln(int n)
+  {
+    // https://invisible-island.net/ncurses/man/curs_deleteln.3x.html
+    //
+    // winsdelln inserts n blank lines above the cursor line when positive, or deletes lines when negative.
+    return ::winsdelln(handle_, n);
+  }
+
+  int get_wch(wint_t& key)
+  {
+    // https://invisible-island.net/ncurses/man/curs_get_wch.3x.html
+    //
+    // wget_wch gets a wide character or function-key code from the window's input stream.
+    return ::wget_wch(handle_, &key);
+  }
+
+  static int unget_wch(wchar_t key)
+  {
+    // https://invisible-island.net/ncurses/man/curs_get_wch.3x.html
+    //
+    // unget_wch pushes a wide character back onto the input queue so it is returned by a subsequent input call.
+    return ::unget_wch(key);
+  }
+
+  int in_wch(ComplexChar& complex_char) const
+  {
+    // https://invisible-island.net/ncurses/man/curs_in_wch.3x.html
+    //
+    // win_wch extracts the complex character and rendition at the cursor without altering the window.
+    cchar_t wch;
+    int res = ::win_wch(handle_, &wch);
+    complex_char = convert_to_ComplexChar(wch);
+    return res;
+  }
+
+  int in_wch(Position pos, ComplexChar& complex_char) const
+  {
+    // https://invisible-island.net/ncurses/man/curs_in_wch.3x.html
+    //
+    // mvwin_wch moves to the requested position and extracts the complex character and rendition at that cell.
+    cchar_t wch;
+    int res = ::mvwin_wch(handle_, pos.row(), pos.col(), &wch);
+    complex_char = convert_to_ComplexChar(wch);
+    return res;
+  }
+
+  int instr(ComplexChar* str) const
+  {
+    // https://invisible-island.net/ncurses/man/curs_in_wchstr.3x.html
+    //
+    // win_wchstr reads complex characters from the cursor through the end of the line into the caller's buffer.
+    ASSERT(str);
+    int cols = getmaxx(handle_);
+    std::vector<cchar_t> tmp(static_cast<size_t>(cols) + 1);
+    int res = ::win_wchstr(handle_, tmp.data());
+    convert_from_cchar_array(tmp.data(), str, cols);
+    return res;
+  }
+
+  int instr(ComplexChar* str, int n) const
+  {
+    // https://invisible-island.net/ncurses/man/curs_in_wchstr.3x.html
+    //
+    // win_wchnstr reads at most n complex characters from the cursor into the caller's buffer.
+    std::vector<cchar_t> tmp(static_cast<size_t>(n) + 1);
+    int res = ::win_wchnstr(handle_, tmp.data(), n);
+    convert_from_cchar_array(tmp.data(), str, n);
+    return res;
+  }
+
+  int instr(Position pos, ComplexChar* str) const
+  {
+    // https://invisible-island.net/ncurses/man/curs_in_wchstr.3x.html
+    //
+    // mvwin_wchstr moves to the requested position and reads complex characters through the end of the line.
+    ASSERT(str);
+    int cols = getmaxx(handle_);
+    std::vector<cchar_t> tmp(static_cast<size_t>(cols) + 1);
+    int res = ::mvwin_wchstr(handle_, pos.row(), pos.col(), tmp.data());
+    convert_from_cchar_array(tmp.data(), str, cols);
+    return res;
+  }
+
+  int instr(Position pos, ComplexChar* str, int n) const
+  {
+    // https://invisible-island.net/ncurses/man/curs_in_wchstr.3x.html
+    //
+    // mvwin_wchnstr moves to the requested position and reads at most n complex characters from that cell.
+    std::vector<cchar_t> tmp(static_cast<size_t>(n) + 1);
+    int res = ::mvwin_wchnstr(handle_, pos.row(), pos.col(), tmp.data(), n);
+    convert_from_cchar_array(tmp.data(), str, n);
+    return res;
+  }
+
+  int ins_wch(ComplexChar const& complex_char)
+  {
+    // https://invisible-island.net/ncurses/man/curs_ins_wch.3x.html
+    //
+    // wins_wch inserts a complex character before the cursor and shifts following characters right.
+    cchar_t wch = convert_to_cchar(complex_char);
+    return ::wins_wch(handle_, &wch);
+  }
+
+  int ins_wch(Position pos, ComplexChar const& complex_char)
+  {
+    // https://invisible-island.net/ncurses/man/curs_ins_wch.3x.html
+    //
+    // mvwins_wch moves to the requested position and inserts a complex character before that cell.
+    cchar_t wch = convert_to_cchar(complex_char);
+    return ::mvwins_wch(handle_, pos.row(), pos.col(), &wch);
+  }
+
+  int insstr(wchar_t const* str)
+  {
+    // https://invisible-island.net/ncurses/man/curs_ins_wstr.3x.html
+    //
+    // wins_wstr inserts a wide-character string before the cursor, shifting existing cells right.
+    return ::wins_wstr(handle_, str);
+  }
+
+  int insstr(wchar_t const* str, int n)
+  {
+    // https://invisible-island.net/ncurses/man/curs_ins_wstr.3x.html
+    //
+    // wins_nwstr inserts at most n wide characters before the cursor, stopping at a null wide character.
+    return ::wins_nwstr(handle_, str, n);
+  }
+
+  int insstr(Position pos, wchar_t const* str)
+  {
+    // https://invisible-island.net/ncurses/man/curs_ins_wstr.3x.html
+    //
+    // mvwins_wstr moves to the requested position and inserts a wide-character string before that cell.
+    return ::mvwins_wstr(handle_, pos.row(), pos.col(), str);
+  }
+
+  int insstr(Position pos, wchar_t const* str, int n)
+  {
+    // https://invisible-island.net/ncurses/man/curs_ins_wstr.3x.html
+    //
+    // mvwins_nwstr moves to the requested position and inserts at most n wide characters before that cell.
+    return ::mvwins_nwstr(handle_, pos.row(), pos.col(), str, n);
+  }
+
+  int insstr(char const* str)
+  {
+    // https://invisible-island.net/ncurses/man/curs_insstr.3x.html
+    //
+    // winsstr inserts a narrow string before the cursor, shifting existing characters right until the line fills.
+    return ::winsstr(handle_, str);
+  }
+
+  int insstr(char const* str, int n)
+  {
+    // https://invisible-island.net/ncurses/man/curs_insstr.3x.html
+    //
+    // winsnstr inserts at most n narrow bytes before the cursor, shifting existing characters right.
+    return ::winsnstr(handle_, str, n);
+  }
+
+  int insstr(Position pos, char const* str)
+  {
+    // https://invisible-island.net/ncurses/man/curs_insstr.3x.html
+    //
+    // mvwinsstr moves to the requested position and inserts a narrow string before that cell.
+    return ::mvwinsstr(handle_, pos.row(), pos.col(), str);
+  }
+
+  int insstr(Position pos, char const* str, int n)
+  {
+    // https://invisible-island.net/ncurses/man/curs_insstr.3x.html
+    //
+    // mvwinsnstr moves to the requested position and inserts at most n narrow bytes before that cell.
+    return ::mvwinsnstr(handle_, pos.row(), pos.col(), str, n);
+  }
+
+  int inwstr(wchar_t* str) const
+  {
+    // https://invisible-island.net/ncurses/man/curs_inwstr.3x.html
+    //
+    // winwstr extracts wide characters from the cursor through the end of the line into the caller's buffer.
+    return ::winwstr(handle_, str);
+  }
+
+  int inwstr(wchar_t* str, int n) const
+  {
+    // https://invisible-island.net/ncurses/man/curs_inwstr.3x.html
+    //
+    // winnwstr extracts at most n wide characters from the cursor into the caller's buffer.
+    return ::winnwstr(handle_, str, n);
+  }
+
+  int inwstr(Position pos, wchar_t* str) const
+  {
+    // https://invisible-island.net/ncurses/man/curs_inwstr.3x.html
+    //
+    // mvwinwstr moves to the requested position and extracts wide characters through the end of the line.
+    return ::mvwinwstr(handle_, pos.row(), pos.col(), str);
+  }
+
+  int inwstr(Position pos, wchar_t* str, int n) const
+  {
+    // https://invisible-island.net/ncurses/man/curs_inwstr.3x.html
+    //
+    // mvwinnwstr moves to the requested position and extracts at most n wide characters from that cell.
+    return ::mvwinnwstr(handle_, pos.row(), pos.col(), str, n);
+  }
+
+  static int curs_set(int visibility)
+  {
+    // https://invisible-island.net/ncurses/man/curs_kernel.3x.html
+    //
+    // curs_set changes the terminal cursor visibility and returns the previous visibility setting when supported.
+    return ::curs_set(visibility);
+  }
+
+  int printw(char const* fmt, va_list args)
+  {
+    // https://invisible-island.net/ncurses/man/curs_printw.3x.html
+    //
+    // vw_printw performs printf-style formatted output to the window using a va_list.
+    return ::vw_printw(handle_, fmt, args);
+  }
+
+  int printw(Position pos, char const* fmt, va_list args)
+  {
+    // https://invisible-island.net/ncurses/man/curs_printw.3x.html
+    //
+    // mvwprintw first moves the cursor to the requested position and then performs printf-style output.
+    int res = ::wmove(handle_, pos.row(), pos.col());
+    if (res == ERR)
+      return res;
+    return ::vw_printw(handle_, fmt, args);
+  }
+
+  WINDOW* subpad(Dimension size, Position pos)
+  {
+    // https://invisible-island.net/ncurses/man/curs_pad.3x.html
+    //
+    // subpad creates a subwindow within a pad; its position is relative to the parent pad and storage is shared.
+    return ::subpad(handle_, size.height(), size.width(), pos.row(), pos.col());
+  }
+
+  int prefresh(Position pad_pos, Position screen_pos, Dimension screen_size)
+  {
+    // https://invisible-island.net/ncurses/man/curs_pad.3x.html
+    //
+    // prefresh copies a rectangle from the pad, starting at pad_pos, to an inclusive rectangle on the physical screen.
+    return ::prefresh(handle_, pad_pos.row(), pad_pos.col(), screen_pos.row(), screen_pos.col(), screen_max_row(screen_pos, screen_size),
+                      screen_max_col(screen_pos, screen_size));
+  }
+
+  int pnoutrefresh(Position pad_pos, Position screen_pos, Dimension screen_size)
+  {
+    // https://invisible-island.net/ncurses/man/curs_pad.3x.html
+    //
+    // pnoutrefresh stages a pad rectangle on the virtual screen; doupdate performs the physical update later.
+    return ::pnoutrefresh(handle_, pad_pos.row(), pad_pos.col(), screen_pos.row(), screen_pos.col(), screen_max_row(screen_pos, screen_size),
+                          screen_max_col(screen_pos, screen_size));
+  }
+
+  int pechochar(ComplexChar const& complex_char)
+  {
+    // https://invisible-island.net/ncurses/man/curs_pad.3x.html
+    //
+    // pecho_wchar adds a complex character to a pad and refreshes the pad using the viewport remembered by ncurses.
+    cchar_t wch = convert_to_cchar(complex_char);
+    return ::pecho_wchar(handle_, &wch);
+  }
+
+  int scrl(int n)
+  {
+    // https://invisible-island.net/ncurses/man/curs_scroll.3x.html
+    //
+    // wscrl scrolls the window up for positive n or down for negative n, subject to scrollok and scrolling region.
+    return ::wscrl(handle_, n);
+  }
+
+  static char const* key_name(wint_t key)
+  {
+    // https://invisible-island.net/ncurses/man/curs_util.3x.html
+    //
+    // key_name returns a printable name for a wide character or function-key code.
+    return ::key_name(key);
+  }
+
   void move(Position pos)
   {
     // https://invisible-island.net/ncurses/man/curs_move.3x.html
@@ -287,17 +913,6 @@ struct Window::Impl {
   }
 };
 
-Window::Window()
-{
-}
-
-void Window::init_as_stdscr()
-{
-  // Only call this function once and only on a default constructed Window. This should only be called from Session().
-  ASSERT(!impl_);
-  impl_ = std::make_unique<Impl>();
-}
-
 Window::Window(Dimension size, Position pos) : impl_(std::make_unique<Impl>(size, pos))
 {
 }
@@ -306,12 +921,24 @@ Window::Window(std::unique_ptr<Impl> impl) : impl_(std::move(impl))
 {
 }
 
-Window::Window(Window&&) noexcept = default;
+Window::Window() = default;
 
+void Window::init_as_stdscr()
+{
+  // Only call this function once and only on a default constructed Window. This should only be called from Session().
+  ASSERT(!impl_);
+  impl_ = std::make_unique<Impl>();
+}
+
+Window::~Window() = default;
+Window::Window(Window&&) noexcept = default;
 Window& Window::operator=(Window&&) noexcept = default;
 
-Window::~Window()
+Window Window::newpad(Dimension size)
 {
+  WINDOW* res = Impl::newpad(size);
+  ASSERT(res);
+  return Window(std::make_unique<Impl>(res));
 }
 
 Window Window::subwin(Dimension size, Position pos)
@@ -335,6 +962,11 @@ void Window::syncup()
   impl_->syncup();
 }
 
+void Window::cursyncup()
+{
+  impl_->cursyncup();
+}
+
 void Window::syncok(bool enabled)
 {
   int res = impl_->syncok(enabled);
@@ -351,9 +983,81 @@ ComplexChar Window::get_background() const
   return impl_->get_background();
 }
 
+void Window::attr_set(Rendition rendition)
+{
+  int res = impl_->attr_set(rendition);
+  ASSERT(res != ERR);
+}
+
+void Window::attr_get(Rendition& rendition) const
+{
+  int res = impl_->attr_get(rendition);
+  ASSERT(res != ERR);
+}
+
+void Window::attr_on(Attributes attributes)
+{
+  int res = impl_->attr_on(attributes);
+  ASSERT(res != ERR);
+}
+
+void Window::attr_off(Attributes attributes)
+{
+  int res = impl_->attr_off(attributes);
+  ASSERT(res != ERR);
+}
+
+void Window::color_set(ColorPair color_pair)
+{
+  int res = impl_->color_set(color_pair);
+  ASSERT(res != ERR);
+}
+
+void Window::chgat(int n, Rendition rendition)
+{
+  int res = impl_->chgat(n, rendition);
+  ASSERT(res != ERR);
+}
+
+void Window::chgat(Position pos, int n, Rendition rendition)
+{
+  int res = impl_->chgat(pos, n, rendition);
+  ASSERT(res != ERR);
+}
+
+void Window::standout()
+{
+  int res = impl_->standout();
+  ASSERT(res != ERR);
+}
+
+void Window::standend()
+{
+  int res = impl_->standend();
+  ASSERT(res != ERR);
+}
+
 void Window::erase()
 {
   impl_->erase();
+}
+
+void Window::clear()
+{
+  int res = impl_->clear();
+  ASSERT(res != ERR);
+}
+
+void Window::clrtobot()
+{
+  int res = impl_->clrtobot();
+  ASSERT(res != ERR);
+}
+
+void Window::clrtoeol()
+{
+  int res = impl_->clrtoeol();
+  ASSERT(res != ERR);
 }
 
 void Window::refresh()
@@ -361,13 +1065,94 @@ void Window::refresh()
   impl_->refresh();
 }
 
+void Window::wnoutrefresh()
+{
+  int res = impl_->wnoutrefresh();
+  ASSERT(res != ERR);
+}
+
+void Window::redrawwin()
+{
+  int res = impl_->redrawwin();
+  ASSERT(res != ERR);
+}
+
+void Window::wredrawln(int beg_line, int num_lines)
+{
+  int res = impl_->wredrawln(beg_line, num_lines);
+  ASSERT(res != ERR);
+}
+
+void Window::clearok(bool bf)
+{
+  int res = impl_->clearok(bf);
+  ASSERT(res != ERR);
+}
+
+void Window::idcok(bool bf)
+{
+  impl_->idcok(bf);
+}
+
+void Window::idlok(bool bf)
+{
+  int res = impl_->idlok(bf);
+  ASSERT(res != ERR);
+}
+
+void Window::immedok(bool bf)
+{
+  impl_->immedok(bf);
+}
+
+void Window::leaveok(bool bf)
+{
+  int res = impl_->leaveok(bf);
+  ASSERT(res != ERR);
+}
+
+void Window::scrollok(bool bf)
+{
+  int res = impl_->scrollok(bf);
+  ASSERT(res != ERR);
+}
+
+void Window::setscrreg(int top, int bot)
+{
+  int res = impl_->setscrreg(top, bot);
+  ASSERT(res != ERR);
+}
+
 void Window::set_border(Border const& border)
 {
   ComplexChar const background = get_background();
   std::array<cchar_t, 8> complex_characters;
-  for (int i = 0; i < 8; ++i)
-    complex_characters[i] = convert_to_cchar(border.get_complex_character(i, background.rendition()));
+  for (int i = 0; i < 8; ++i) complex_characters[i] = convert_to_cchar(border.get_complex_character(i, background.rendition()));
   impl_->border_set(complex_characters);
+}
+
+void Window::hline_set(ComplexChar const& complex_char, int n)
+{
+  int res = impl_->hline_set(complex_char, n);
+  ASSERT(res != ERR);
+}
+
+void Window::hline_set(Position pos, ComplexChar const& complex_char, int n)
+{
+  int res = impl_->hline_set(pos, complex_char, n);
+  ASSERT(res != ERR);
+}
+
+void Window::vline_set(ComplexChar const& complex_char, int n)
+{
+  int res = impl_->vline_set(complex_char, n);
+  ASSERT(res != ERR);
+}
+
+void Window::vline_set(Position pos, ComplexChar const& complex_char, int n)
+{
+  int res = impl_->vline_set(pos, complex_char, n);
+  ASSERT(res != ERR);
 }
 
 void Window::addstr(char const* str)
@@ -410,6 +1195,54 @@ void Window::addstr(Position pos, char8_t const* wstr, int n)
   impl_->addstr(pos, wstr, n);
 }
 
+void Window::addstr(ComplexChar const* str)
+{
+  int res = impl_->addstr(str);
+  ASSERT(res != ERR);
+}
+
+void Window::addstr(ComplexChar const* str, int n)
+{
+  int res = impl_->addstr(str, n);
+  ASSERT(res != ERR);
+}
+
+void Window::addstr(Position pos, ComplexChar const* str)
+{
+  int res = impl_->addstr(pos, str);
+  ASSERT(res != ERR);
+}
+
+void Window::addstr(Position pos, ComplexChar const* str, int n)
+{
+  int res = impl_->addstr(pos, str, n);
+  ASSERT(res != ERR);
+}
+
+void Window::addstr(wchar_t const* str)
+{
+  int res = impl_->addstr(str);
+  ASSERT(res != ERR);
+}
+
+void Window::addstr(wchar_t const* str, int n)
+{
+  int res = impl_->addstr(str, n);
+  ASSERT(res != ERR);
+}
+
+void Window::addstr(Position pos, wchar_t const* str)
+{
+  int res = impl_->addstr(pos, str);
+  ASSERT(res != ERR);
+}
+
+void Window::addstr(Position pos, wchar_t const* str, int n)
+{
+  int res = impl_->addstr(pos, str, n);
+  ASSERT(res != ERR);
+}
+
 void Window::addch(ComplexChar const& complex_char)
 {
   impl_->addch(complex_char);
@@ -423,6 +1256,224 @@ void Window::addch(Position pos, ComplexChar const& complex_char)
 void Window::echochar(ComplexChar const& complex_char)
 {
   impl_->echochar(complex_char);
+}
+
+void Window::delch()
+{
+  int res = impl_->delch();
+  ASSERT(res != ERR);
+}
+
+void Window::delch(Position pos)
+{
+  int res = impl_->delch(pos);
+  ASSERT(res != ERR);
+}
+
+void Window::insdelln(int n)
+{
+  int res = impl_->insdelln(n);
+  ASSERT(res != ERR);
+}
+
+void Window::get_wch(wint_t& key)
+{
+  int res = impl_->get_wch(key);
+  ASSERT(res != ERR);
+}
+
+void Window::unget_wch(wchar_t key)
+{
+  int res = Impl::unget_wch(key);
+  ASSERT(res != ERR);
+}
+
+void Window::in_wch(ComplexChar& complex_char) const
+{
+  int res = impl_->in_wch(complex_char);
+  ASSERT(res != ERR);
+}
+
+void Window::in_wch(Position pos, ComplexChar& complex_char) const
+{
+  int res = impl_->in_wch(pos, complex_char);
+  ASSERT(res != ERR);
+}
+
+void Window::instr(ComplexChar* str) const
+{
+  int res = impl_->instr(str);
+  ASSERT(res != ERR);
+}
+
+void Window::instr(ComplexChar* str, int n) const
+{
+  int res = impl_->instr(str, n);
+  ASSERT(res != ERR);
+}
+
+void Window::instr(Position pos, ComplexChar* str) const
+{
+  int res = impl_->instr(pos, str);
+  ASSERT(res != ERR);
+}
+
+void Window::instr(Position pos, ComplexChar* str, int n) const
+{
+  int res = impl_->instr(pos, str, n);
+  ASSERT(res != ERR);
+}
+
+void Window::ins_wch(ComplexChar const& complex_char)
+{
+  int res = impl_->ins_wch(complex_char);
+  ASSERT(res != ERR);
+}
+
+void Window::ins_wch(Position pos, ComplexChar const& complex_char)
+{
+  int res = impl_->ins_wch(pos, complex_char);
+  ASSERT(res != ERR);
+}
+
+void Window::insstr(wchar_t const* str)
+{
+  int res = impl_->insstr(str);
+  ASSERT(res != ERR);
+}
+
+void Window::insstr(wchar_t const* str, int n)
+{
+  int res = impl_->insstr(str, n);
+  ASSERT(res != ERR);
+}
+
+void Window::insstr(Position pos, wchar_t const* str)
+{
+  int res = impl_->insstr(pos, str);
+  ASSERT(res != ERR);
+}
+
+void Window::insstr(Position pos, wchar_t const* str, int n)
+{
+  int res = impl_->insstr(pos, str, n);
+  ASSERT(res != ERR);
+}
+
+void Window::insstr(char const* str)
+{
+  int res = impl_->insstr(str);
+  ASSERT(res != ERR);
+}
+
+void Window::insstr(char const* str, int n)
+{
+  int res = impl_->insstr(str, n);
+  ASSERT(res != ERR);
+}
+
+void Window::insstr(Position pos, char const* str)
+{
+  int res = impl_->insstr(pos, str);
+  ASSERT(res != ERR);
+}
+
+void Window::insstr(Position pos, char const* str, int n)
+{
+  int res = impl_->insstr(pos, str, n);
+  ASSERT(res != ERR);
+}
+
+void Window::inwstr(wchar_t* str) const
+{
+  int res = impl_->inwstr(str);
+  ASSERT(res != ERR);
+}
+
+void Window::inwstr(wchar_t* str, int n) const
+{
+  int res = impl_->inwstr(str, n);
+  ASSERT(res != ERR);
+}
+
+void Window::inwstr(Position pos, wchar_t* str) const
+{
+  int res = impl_->inwstr(pos, str);
+  ASSERT(res != ERR);
+}
+
+void Window::inwstr(Position pos, wchar_t* str, int n) const
+{
+  int res = impl_->inwstr(pos, str, n);
+  ASSERT(res != ERR);
+}
+
+void Window::curs_set(int visibility)
+{
+  int res = Impl::curs_set(visibility);
+  ASSERT(res != ERR);
+}
+
+void Window::printw(char const* fmt, ...)
+{
+  va_list args;
+  va_start(args, fmt);
+  int res = impl_->printw(fmt, args);
+  va_end(args);
+  ASSERT(res != ERR);
+}
+
+void Window::vprintw(char const* fmt, va_list varglist)
+{
+  int res = impl_->printw(fmt, varglist);
+  ASSERT(res != ERR);
+}
+
+void Window::printw(Position pos, char const* fmt, ...)
+{
+  va_list args;
+  va_start(args, fmt);
+  int res = impl_->printw(pos, fmt, args);
+  va_end(args);
+  ASSERT(res != ERR);
+}
+
+Window Window::subpad(Dimension size, Position pos)
+{
+  WINDOW* res = impl_->subpad(size, pos);
+  ASSERT(res);
+  return Window(std::make_unique<Impl>(res));
+}
+
+void Window::prefresh(Position pad_pos, Position screen_pos, Dimension screen_size)
+{
+  int res = impl_->prefresh(pad_pos, screen_pos, screen_size);
+  ASSERT(res != ERR);
+}
+
+void Window::pnoutrefresh(Position pad_pos, Position screen_pos, Dimension screen_size)
+{
+  int res = impl_->pnoutrefresh(pad_pos, screen_pos, screen_size);
+  ASSERT(res != ERR);
+}
+
+void Window::pechochar(ComplexChar const& complex_char)
+{
+  int res = impl_->pechochar(complex_char);
+  ASSERT(res != ERR);
+}
+
+void Window::scrl(int n)
+{
+  int res = impl_->scrl(n);
+  ASSERT(res != ERR);
+}
+
+void Window::key_name(wint_t key, std::string& name)
+{
+  char const* res = Impl::key_name(key);
+  ASSERT(res);
+  name = res;
 }
 
 void Window::move(Position pos)

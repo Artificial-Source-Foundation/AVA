@@ -23,7 +23,7 @@ attr_t convert_to_attr(Attributes attributes)
 // Convert the subset of ncurses attributes represented by terminal::Attributes back to the public terminal bitmask.
 // Attribute bits that terminal::Attributes cannot represent are intentionally ignored; this keeps conversions stable
 // when ncurses returns extra rendition bits that this wrapper does not model.
-static Attributes convert_to_Attributes(attr_t attributes)
+Attributes convert_to_Attributes(attr_t attributes)
 {
   Attributes result;
   if ((attributes & A_BOLD))

@@ -5,7 +5,10 @@
 #include "Dimension.h"
 #include "Position.h"
 
+#include <cstdarg>
+#include <cwchar>
 #include <memory>
+#include <string>
 
 // To print all implemented ncurses functions (from the comments):
 //
@@ -43,6 +46,9 @@ class Window
   // Construct a new Window with its top-left cell at `pos` with dimension `size`.
   Window(Dimension size, Position pos); // newwin
 
+  // Construct a new off-screen pad with dimension `size`; pads require explicit pad refresh rectangles.
+  static Window newpad(Dimension size); // newpad
+
   // Disallow copying; allow moving a Window.
   Window(Window const&) = delete;
   Window& operator=(Window const&) = delete;
@@ -74,11 +80,35 @@ class Window
   // Flatten the changed-cell bookkeeping, propagating all subwindow touches to the root Window.
   void syncup();                                                        // wsyncup
 
+  // Propagate this Window cursor position to all ancestor windows.
+  void cursyncup();                                                     // wcursyncup
+
   // Enable or disable automatic syncup upon mutations.
   void syncok(bool enabled);                                            // syncok
 
   void set_background(ComplexChar background, bool erase = true);       // wbkgrndset / wbkgrnd
   ComplexChar get_background() const;                                   // wgetbkgrnd
+
+  // https://invisible-island.net/ncurses/man/curs_attr.3x.html
+
+  // Set the rendition used for subsequent output without changing existing cells.
+  void attr_set(Rendition rendition);                                   // wattr_set
+  // Return the rendition currently used for subsequent output through `rendition`.
+  void attr_get(Rendition& rendition) const;                            // wattr_get
+  // Add `attributes` to the current output rendition.
+  void attr_on(Attributes attributes);                                  // wattr_on
+  // Remove `attributes` from the current output rendition.
+  void attr_off(Attributes attributes);                                 // wattr_off
+  // Change only the color pair used for subsequent output.
+  void color_set(ColorPair color_pair);                                 // wcolor_set
+  // Change rendition over `n` cells at the cursor, or to end of line when `n` is negative.
+  void chgat(int n, Rendition rendition);                               // wchgat
+  // Move to `pos` and change rendition over `n` cells, or to end of line when `n` is negative.
+  void chgat(Position pos, int n, Rendition rendition);                 // mvwchgat
+  // Turn on terminal standout mode for subsequent output.
+  void standout();                                                      // wstandout
+  // Turn off standout and return subsequent output to normal rendition.
+  void standend();                                                      // wstandend
 
   // https://invisible-island.net/ncurses/man/curs_move.3x.html
 
@@ -139,6 +169,24 @@ class Window
   void vline_set(ComplexChar const& complex_char, int n);               // wvline_set
   void vline_set(Position pos, ComplexChar const& complex_char, int n); // mvwvline_set
 
+  // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
+
+  void addstr(ComplexChar const* str);                                  // wadd_wchstr
+  // Add at most `n` complex characters without advancing the cursor.
+  void addstr(ComplexChar const* str, int n);                           // wadd_wchnstr
+  void addstr(Position pos, ComplexChar const* str);                    // mvwadd_wchstr
+  // Move to `pos` and add at most `n` complex characters without advancing the cursor.
+  void addstr(Position pos, ComplexChar const* str, int n);             // mvwadd_wchnstr
+
+  // https://invisible-island.net/ncurses/man/curs_addwstr.3x.html
+
+  void addstr(wchar_t const* str);                                      // waddwstr
+  // Add at most `n` wide characters, stopping early at a null wide character.
+  void addstr(wchar_t const* str, int n);                               // waddnwstr
+  void addstr(Position pos, wchar_t const* str);                        // mvwaddwstr
+  // Move to `pos` and add at most `n` wide characters.
+  void addstr(Position pos, wchar_t const* str, int n);                 // mvwaddnwstr
+
   // https://invisible-island.net/ncurses/man/curs_addstr.3x.html
 
   void addstr(char const* str);                                         // waddstr
@@ -160,12 +208,114 @@ class Window
 
   void echochar(ComplexChar const& complex_char);                       // wecho_wchar
 
+  // https://invisible-island.net/ncurses/man/curs_delch.3x.html
+
+  // Delete the character under the cursor and shift the rest of the line left.
+  void delch();                                                         // wdelch
+  // Move to `pos`, delete that character, and shift the rest of the line left.
+  void delch(Position pos);                                             // mvwdelch
+
+  // https://invisible-island.net/ncurses/man/curs_deleteln.3x.html
+
+  // Insert positive or delete negative line counts at the cursor line.
+  void insdelln(int n);                                                 // winsdelln
+
+  // https://invisible-island.net/ncurses/man/curs_get_wch.3x.html
+
+  // Read one wide character or function-key code from this Window into `key`.
+  void get_wch(wint_t& key);                                            // wget_wch
+  // Push `key` back onto the ncurses input queue for the next read.
+  static void unget_wch(wchar_t key);                                   // unget_wch
+
+  // https://invisible-island.net/ncurses/man/curs_in_wch.3x.html
+
+  // Read the complex character under the cursor into `complex_char` without changing the Window.
+  void in_wch(ComplexChar& complex_char) const;                         // win_wch
+  // Move to `pos` and read that complex character into `complex_char`.
+  void in_wch(Position pos, ComplexChar& complex_char) const;           // mvwin_wch
+
+  // https://invisible-island.net/ncurses/man/curs_in_wchstr.3x.html
+
+  // Read complex characters from the cursor into `str` until end of line.
+  void instr(ComplexChar* str) const;                                   // win_wchstr
+  // Read at most `n` complex characters from the cursor into `str`.
+  void instr(ComplexChar* str, int n) const;                            // win_wchnstr
+  // Move to `pos` and read complex characters into `str` until end of line.
+  void instr(Position pos, ComplexChar* str) const;                     // mvwin_wchstr
+  // Move to `pos` and read at most `n` complex characters into `str`.
+  void instr(Position pos, ComplexChar* str, int n) const;              // mvwin_wchnstr
+
+  // https://invisible-island.net/ncurses/man/curs_ins_wch.3x.html
+
+  // Insert `complex_char` before the cursor, shifting the line right.
+  void ins_wch(ComplexChar const& complex_char);                        // wins_wch
+  // Move to `pos` and insert `complex_char` before that cell.
+  void ins_wch(Position pos, ComplexChar const& complex_char);          // mvwins_wch
+
+  // https://invisible-island.net/ncurses/man/curs_ins_wstr.3x.html
+
+  // Insert a null-terminated wide string before the cursor, shifting cells right.
+  void insstr(wchar_t const* str);                                      // wins_wstr
+  // Insert at most `n` wide characters before the cursor, shifting cells right.
+  void insstr(wchar_t const* str, int n);                               // wins_nwstr
+  // Move to `pos` and insert a null-terminated wide string before that cell.
+  void insstr(Position pos, wchar_t const* str);                        // mvwins_wstr
+  // Move to `pos` and insert at most `n` wide characters before that cell.
+  void insstr(Position pos, wchar_t const* str, int n);                 // mvwins_nwstr
+
+  // https://invisible-island.net/ncurses/man/curs_insstr.3x.html
+
+  // Insert a null-terminated narrow/UTF-8 string before the cursor.
+  void insstr(char const* str);                                         // winsstr
+  // Insert at most `n` narrow/UTF-8 bytes before the cursor.
+  void insstr(char const* str, int n);                                  // winsnstr
+  // Move to `pos` and insert a null-terminated narrow/UTF-8 string.
+  void insstr(Position pos, char const* str);                           // mvwinsstr
+  // Move to `pos` and insert at most `n` narrow/UTF-8 bytes.
+  void insstr(Position pos, char const* str, int n);                    // mvwinsnstr
+
+  // https://invisible-island.net/ncurses/man/curs_inwstr.3x.html
+
+  // Extract wide characters from the cursor into `str` until end of line.
+  void inwstr(wchar_t* str) const;                                      // winwstr
+  // Extract at most `n` wide characters from the cursor into `str`.
+  void inwstr(wchar_t* str, int n) const;                               // winnwstr
+  // Move to `pos` and extract wide characters into `str` until end of line.
+  void inwstr(Position pos, wchar_t* str) const;                        // mvwinwstr
+  // Move to `pos` and extract at most `n` wide characters into `str`.
+  void inwstr(Position pos, wchar_t* str, int n) const;                 // mvwinnwstr
+
+  // https://invisible-island.net/ncurses/man/curs_kernel.3x.html
+
+  // Set terminal cursor visibility; `visibility` follows ncurses curs_set values.
+  static void curs_set(int visibility);                                 // curs_set
+
   // https://invisible-island.net/ncurses/man/curs_printw.3x.html
 
-  int printw(char const* fmt, ...);                                     // wprintw
-  int vprintw(char const* fmt, va_list varglist);                       // vw_printw
-  int mvprintw(int y, int x, char const* fmt, ...);                     // mvprintw
+  void printw(char const* fmt, ...);                                    // wprintw
+  void vprintw(char const* fmt, va_list varglist);                      // vw_printw
+  void printw(Position pos, char const* fmt, ...);                      // mvwprintw
 
+  // https://invisible-island.net/ncurses/man/curs_pad.3x.html
+
+  // Create a pad subwindow of `size` with top-left position `pos` relative to this pad.
+  Window subpad(Dimension size, Position pos);                          // subpad
+  // Refresh a pad rectangle starting at `pad_pos` into a screen rectangle.
+  void prefresh(Position pad_pos, Position screen_pos, Dimension screen_size); // prefresh
+  // Stage a pad rectangle starting at `pad_pos` into a screen rectangle without updating the terminal.
+  void pnoutrefresh(Position pad_pos, Position screen_pos, Dimension screen_size); // pnoutrefresh
+  // Add `complex_char` to a pad and refresh the pad using ncurses' remembered pad viewport.
+  void pechochar(ComplexChar const& complex_char);                      // pecho_wchar
+
+  // https://invisible-island.net/ncurses/man/curs_scroll.3x.html
+
+  // Scroll the Window up for positive `n` or down for negative `n` lines.
+  void scrl(int n);                                                     // wscrl
+
+  // https://invisible-island.net/ncurses/man/curs_util.3x.html
+
+  // Store the printable name for `key` in `name`; function-key codes are supported.
+  static void key_name(wint_t key, std::string& name);                  // key_name
 };
 
 } // namespace terminal

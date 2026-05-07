@@ -19,6 +19,11 @@ struct ComposerDraftState {
   std::size_t cursor = 0;
   std::string kill_buffer;
   std::vector<ComposerDraftSnapshot> undo_stack;
+  std::vector<ComposerDraftSnapshot> redo_stack;
+  std::vector<std::string> kill_ring;
+  std::size_t yank_start = std::string::npos;
+  std::size_t yank_end = std::string::npos;
+  std::size_t yank_ring_index = 0;
 };
 
 [[nodiscard]] std::size_t clamp_composer_draft_cursor(std::string_view text, std::size_t cursor);

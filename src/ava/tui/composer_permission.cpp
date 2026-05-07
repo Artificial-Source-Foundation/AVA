@@ -137,23 +137,9 @@ void append_permission_diff_lines(std::vector<std::string>& lines, PermissionPro
   if (lines.size() >= budget) return;
 
   auto const line_prefix = std::string("    ");
-  auto const diff_line_budget = prompt.diff_truncated && budget > lines.size() ? budget - 1 : budget;
-  for (auto const& raw_line : split_lines(prompt.diff_preview)) {
-    if (lines.size() >= diff_line_budget) break;
-    auto sanitized = sanitize_terminal_text(raw_line);
-    std::string_view sgr = kSgrMuted;
-    if (!sanitized.empty() && sanitized.front() == '+') {
-      sgr = kSgrSuccess;
-    } else if (!sanitized.empty() && sanitized.front() == '-') {
-      sgr = kSgrError;
-    }
-    lines.push_back(
-        fit_line_preserving_sgr(line_prefix + std::string(sgr) + std::move(sanitized) + std::string(kSgrReset), width));
-  }
-  if (prompt.diff_truncated && lines.size() < budget) {
-    lines.push_back(fit_line_preserving_sgr(
-        line_prefix + std::string(kSgrWarning) + "[diff truncated]" + std::string(kSgrReset), width));
-  }
+  auto diff_lines = render_unified_diff_body(prompt.diff_preview, prompt.diff_truncated, width, line_prefix,
+                                             budget > lines.size() ? budget - lines.size() : std::size_t{0});
+  lines.insert(lines.end(), diff_lines.begin(), diff_lines.end());
 }
 
 std::string question_dock_header(QuestionPromptView const& prompt, std::size_t width)
@@ -499,11 +485,13 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
     case Key::CtrlE:
     case Key::CtrlF:
     case Key::CtrlK:
+    case Key::CtrlR:
     case Key::CtrlT:
     case Key::CtrlU:
     case Key::CtrlW:
     case Key::CtrlY:
     case Key::CtrlZ:
+    case Key::AltY:
     case Key::ArrowUp:
     case Key::ArrowDown:
     case Key::PageUp:
@@ -709,11 +697,13 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
     case Key::CtrlE:
     case Key::CtrlF:
     case Key::CtrlK:
+    case Key::CtrlR:
     case Key::CtrlT:
     case Key::CtrlU:
     case Key::CtrlW:
     case Key::CtrlY:
     case Key::CtrlZ:
+    case Key::AltY:
     case Key::ArrowLeft:
     case Key::ArrowRight:
     case Key::PageUp:

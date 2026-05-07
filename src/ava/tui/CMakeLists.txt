@@ -7,10 +7,12 @@ endif()
 
 add_library(ava_tui
   "composer.cpp"
+  "composer_diff.cpp"
   "composer_editor.cpp"
   "composer_input.cpp"
   "composer_palette.cpp"
   "composer_permission.cpp"
+  "composer_select_list.cpp"
   "composer_text.cpp"
   "composer_transcript.cpp"
   "event_state.cpp"

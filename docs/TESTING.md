@@ -96,6 +96,18 @@ The `ava_tests` binary covers:
 
 Add regression tests for every safety-sensitive bug fix.
 
+## TUI / ncurses Focused Validation
+
+For TUI-only changes, the focused suite is:
+
+```sh
+cmake --build build --target ava_tests
+./build/ava_tests tui_composer
+ctest --test-dir build --output-on-failure -R "ava_tests.tui_composer"
+```
+
+The suite includes the CI-safe ncurses baseline currently available in-tree: configured `ESCDELAY`, escape buffering/discard for CSI/OSC/DCS/bracketed-paste markers, mouse wheel/click mapping at the composer layer, resize stress renders, Unicode/CJK/combining/emoji width and cursor placement, `newterm` smokes for xterm/screen terminfo plus tmux/kitty/wezterm/ssh-like environment variables without a real TTY, and large/very-long transcript performance budgets. These are initialization and rendering smokes, not a substitute for real terminal behavior coverage. Batch 4 keeps full ncurses redraw because the stress baseline remains bounded; differential redraw/damage tracking is deferred until real PTY/tmux evidence shows a need. Real PTY/tmux automation remains a follow-up; use `docs/dev/ncurses-notes.md` for the manual smoke checklist and known unsupported terminal features until a deterministic harness exists.
+
 ## 0.90 Release-Candidate Checklist
 
 Before treating a 0.90 release-candidate audit as complete, run and record:

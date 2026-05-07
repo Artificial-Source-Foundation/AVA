@@ -116,16 +116,16 @@ AVA's provider layer now has a registry-backed OpenAI path, an Anthropic Message
 
 Missing or incomplete:
 
-- Live credentialed provider smokes for Anthropic streaming/non-streaming paths and Kimi/Moonshot/OpenRouter-compatible paths.
+- Follow-up live provider-breadth smokes for Anthropic streaming/non-streaming paths, Moonshot, and OpenRouter-compatible paths. OpenAI and Kimi-for-coding already have 1.0 release evidence.
 - Broader provider compatibility drift beyond the deterministic fake contracts currently covering Anthropic, Kimi, Moonshot, and OpenRouter-style routes, including OpenRouter-native reasoning fields.
-- Kimi/Moonshot coding behavior beyond the implemented compatible route, such as deeper reference-informed coding prompt/profile work and live endpoint validation.
+- Moonshot coding behavior beyond the implemented compatible route, plus deeper reference-informed Kimi/Moonshot prompt/profile work and additional live endpoint validation.
 - Provider-specific auth discovery beyond simple API-key/OAuth-token sources, such as Google ADC, AWS Bedrock credentials, or provider-specific CLI tokens.
 - Provider-specific idempotency keys where providers support request ids or idempotency keys; current behavior is documented as best-effort without deduplication guarantees.
 
 1.0 target:
 
 - OpenAI remains excellent.
-- At least one additional provider path reaches production-quality before 1.0 ships; Anthropic is the current partial candidate and mainly needs live credentialed smoke evidence and final provider-doc recheck before being counted as production-ready.
+- At least one additional provider path reaches production-quality for 1.0; Kimi-for-coding is accepted for the 1.0 provider-breadth requirement, while Anthropic, Moonshot, and OpenRouter-compatible paths remain follow-up provider-breadth validation.
 - Provider/model definitions declare capabilities that the runtime can enforce.
 - OAuth credentials refresh before expiry.
 - Provider failures are categorized and actionable.

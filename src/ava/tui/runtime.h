@@ -48,6 +48,19 @@ struct TuiActiveRunQueues {
   std::function<ava::core::VoidResult(bool)> finish;
 };
 
+struct TuiRuntimeStateSnapshot {
+  std::string mode;
+  std::string provider;
+  std::string model;
+  std::string session_id;
+  std::string session_path;
+  std::string workspace;
+  std::string git_branch;
+  std::optional<std::size_t> context_source_count = std::nullopt;
+  std::string status;
+  std::vector<SlashCommandItem> slash_commands = {};
+};
+
 struct TuiSubmitContext {
   ava::permissions::PermissionResolver permission_resolver;
   ava::agent::QuestionResolver question_resolver;
@@ -64,6 +77,7 @@ struct TuiRuntimeOptions {
   std::string provider;
   std::string model;
   std::string session_id;
+  std::string session_path;
   std::string workspace;
   std::string git_branch;
   std::string app_version = std::string(ava::core::version::kDisplayVersion);
@@ -78,9 +92,15 @@ struct TuiRuntimeOptions {
   std::function<TuiSubmitResult(std::string const&, TuiSubmitContext)> on_submit;
   std::function<ava::core::Result<std::string>()> on_toggle_mode;
   std::function<ava::core::Result<std::string>()> on_cycle_reasoning;
+  std::function<SelectListView()> model_selector_view;
+  std::function<SelectListView()> session_selector_view;
+  std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_model_selected;
+  std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_session_selected;
 };
 
 [[nodiscard]] int run_interactive_composer(TuiRuntimeOptions options);
+[[nodiscard]] SelectListView hotkeys_select_list_view(TuiKeyBindings const& bindings, std::string footer_hint = {});
+[[nodiscard]] SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, std::string footer_hint = {});
 [[nodiscard]] ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_prompt_view(
     QuestionPromptView const& prompt);
 

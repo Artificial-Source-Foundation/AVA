@@ -27,6 +27,7 @@ std::vector<CommandCatalogEntry> const& command_catalog()
       CommandCatalogEntry{
           .command = "/help", .description = "Show commands and effective hotkeys", .category = "General"},
       CommandCatalogEntry{.command = "/hotkeys", .description = "Show effective TUI hotkeys", .category = "General"},
+      CommandCatalogEntry{.command = "/settings", .description = "Open read-only TUI settings", .category = "General"},
       CommandCatalogEntry{.command = "/mode", .description = "Toggle build/plan mode", .category = "General"},
       CommandCatalogEntry{.command = "/details", .description = "Toggle tool detail view", .category = "General"},
       CommandCatalogEntry{

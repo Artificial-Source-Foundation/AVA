@@ -273,6 +273,11 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
   if (request.command == "/hotkeys") {
     return handled_text(command_hotkeys_text(request.hotkeys));
   }
+  if (request.command == "/settings") {
+    return handled_text(
+        "Settings are shown as a read-only TUI view. Runtime-owned slash commands keep config changes in "
+        "the backend.");
+  }
   if (request.command == "/details") {
     return handled_text("Tool details are a TUI display toggle. Use /details inside the TUI to switch views.");
   }

@@ -358,7 +358,7 @@ std::string assistant_meta_for_event(ava::app::RuntimeEvent const& event)
   if (event.model_id.empty()) return {};
   auto mode = title_case_ascii(ava::agent::to_string(event.mode));
   if (mode.empty()) mode = "AVA";
-  return mode + " - " + ava::config::model_display_label(event.provider_id, event.model_id);
+  return mode + " · " + ava::config::model_display_label(event.provider_id, event.model_id);
 }
 
 void update_pending_assistant_meta(TuiEventState& state, ava::app::RuntimeEvent const& event)
@@ -1017,7 +1017,7 @@ void apply_runtime_event(TuiEventState& state, ava::app::RuntimeEvent const& eve
       break;
     case RuntimeEventType::CompactionEnd: {
       auto detail = compact_lifecycle_detail("compaction completed", event);
-      state.transcript.push_back(transcript_text_item("audit", detail));
+      state.transcript.push_back(transcript_text_item("compaction", detail));
       upsert_sidebar_activity(state, SidebarActivityItem{.id = first_non_empty({event.trigger, "compaction"}),
                                                          .label = "compaction",
                                                          .detail = std::move(detail),
@@ -1074,11 +1074,12 @@ void apply_runtime_event(TuiEventState& state, ava::app::RuntimeEvent const& eve
         apply_canceled_event(state, event);
         break;
       }
+      commit_pending_assistant_text(state, assistant_meta_for_event(event));
       state.error_text = error_text_for_event(event);
       state.error_details = event.error_details;
       if (!state.error_text.empty() || !state.error_details.empty()) {
-        state.transcript.push_back(
-            transcript_text_item("error", state.error_details.empty() ? state.error_text : state.error_details));
+        auto const transcript_text = state.error_text.empty() ? state.error_details : state.error_text;
+        state.transcript.push_back(transcript_text_item("error", transcript_text));
       }
       settle_responding_activity(state, ToolTimelineStatus::Error, "assistant failed");
       state.run_status = TuiEventRunStatus::Error;

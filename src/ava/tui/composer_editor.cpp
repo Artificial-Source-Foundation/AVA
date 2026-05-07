@@ -4,11 +4,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <utility>
 
 namespace ava::tui {
 namespace {
 
 constexpr std::size_t kMaxUndoItems = 100;
+constexpr std::size_t kMaxKillRingItems = 16;
 
 bool is_ascii_space_at(std::string_view text, std::size_t cursor)
 {
@@ -90,19 +92,60 @@ std::size_t line_end_cursor(std::string_view text, std::size_t cursor)
   return line_break == std::string_view::npos ? text.size() : line_break;
 }
 
-void record_undo(ComposerDraftState& draft)
+void clear_yank_tracking(ComposerDraftState& draft)
+{
+  draft.yank_start = std::string::npos;
+  draft.yank_end = std::string::npos;
+  draft.yank_ring_index = 0;
+}
+
+ComposerDraftSnapshot current_snapshot(ComposerDraftState const& draft)
 {
   auto const cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
-  if (!draft.undo_stack.empty() && draft.undo_stack.back().text == draft.text &&
-      draft.undo_stack.back().cursor == cursor) {
-    return;
+  return ComposerDraftSnapshot{.text = draft.text, .cursor = cursor};
+}
+
+void push_snapshot(std::vector<ComposerDraftSnapshot>& stack, ComposerDraftSnapshot snapshot)
+{
+  if (!stack.empty() && stack.back().text == snapshot.text && stack.back().cursor == snapshot.cursor) return;
+  stack.push_back(std::move(snapshot));
+  if (stack.size() > kMaxUndoItems) {
+    stack.erase(stack.begin(), stack.begin() + static_cast<std::ptrdiff_t>(stack.size() - kMaxUndoItems));
   }
-  draft.undo_stack.push_back(ComposerDraftSnapshot{.text = draft.text, .cursor = cursor});
-  if (draft.undo_stack.size() > kMaxUndoItems) {
-    draft.undo_stack.erase(
-        draft.undo_stack.begin(),
-        draft.undo_stack.begin() + static_cast<std::ptrdiff_t>(draft.undo_stack.size() - kMaxUndoItems));
+}
+
+void push_undo(ComposerDraftState& draft)
+{
+  push_snapshot(draft.undo_stack, current_snapshot(draft));
+}
+
+void push_redo(ComposerDraftState& draft)
+{
+  push_snapshot(draft.redo_stack, current_snapshot(draft));
+}
+
+void record_undo(ComposerDraftState& draft)
+{
+  push_undo(draft);
+  draft.redo_stack.clear();
+  clear_yank_tracking(draft);
+}
+
+void remember_kill(ComposerDraftState& draft, std::string killed)
+{
+  if (killed.empty()) return;
+  draft.kill_buffer = std::move(killed);
+  if (draft.kill_ring.empty() || draft.kill_ring.front() != draft.kill_buffer) {
+    draft.kill_ring.insert(draft.kill_ring.begin(), draft.kill_buffer);
+    if (draft.kill_ring.size() > kMaxKillRingItems) draft.kill_ring.resize(kMaxKillRingItems);
   }
+  clear_yank_tracking(draft);
+}
+
+void ensure_kill_ring(ComposerDraftState& draft)
+{
+  if (!draft.kill_ring.empty() || draft.kill_buffer.empty()) return;
+  draft.kill_ring.push_back(draft.kill_buffer);
 }
 
 bool erase_range(ComposerDraftState& draft, std::size_t start, std::size_t end)
@@ -111,8 +154,9 @@ bool erase_range(ComposerDraftState& draft, std::size_t start, std::size_t end)
   end = clamp_composer_draft_cursor(draft.text, end);
   if (end < start) std::swap(start, end);
   if (start == end) return false;
-  draft.kill_buffer = draft.text.substr(start, end - start);
+  auto killed = draft.text.substr(start, end - start);
   record_undo(draft);
+  remember_kill(draft, std::move(killed));
   draft.text.erase(start, end - start);
   draft.cursor = start;
   return true;
@@ -134,6 +178,8 @@ void reset_composer_draft(ComposerDraftState& draft, std::string text, std::size
   draft.text = std::move(text);
   draft.cursor = cursor == std::string::npos ? draft.text.size() : clamp_composer_draft_cursor(draft.text, cursor);
   draft.undo_stack.clear();
+  draft.redo_stack.clear();
+  clear_yank_tracking(draft);
 }
 
 bool replace_composer_draft(ComposerDraftState& draft, std::string text, std::size_t cursor)
@@ -162,8 +208,11 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
   switch (action) {
     case TuiAction::ClearInput:
       if (draft.text.empty()) return false;
-      draft.kill_buffer = draft.text;
-      record_undo(draft);
+      {
+        auto killed = draft.text;
+        record_undo(draft);
+        remember_kill(draft, std::move(killed));
+      }
       draft.text.clear();
       draft.cursor = 0;
       return true;
@@ -176,34 +225,83 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
     case TuiAction::DeleteToLineEnd:
       return erase_range(draft, draft.cursor, line_end_cursor(draft.text, draft.cursor));
     case TuiAction::CursorLeft:
+      clear_yank_tracking(draft);
       draft.cursor = previous_input_cursor(draft.text, draft.cursor);
       return true;
     case TuiAction::CursorRight:
+      clear_yank_tracking(draft);
       draft.cursor = next_input_cursor(draft.text, draft.cursor);
       return true;
     case TuiAction::CursorLineStart:
+      clear_yank_tracking(draft);
       draft.cursor = line_start_cursor(draft.text, draft.cursor);
       return true;
     case TuiAction::CursorLineEnd:
+      clear_yank_tracking(draft);
       draft.cursor = line_end_cursor(draft.text, draft.cursor);
       return true;
     case TuiAction::CursorWordLeft:
+      clear_yank_tracking(draft);
       draft.cursor = previous_word_cursor(draft.text, draft.cursor);
       return true;
     case TuiAction::CursorWordRight:
+      clear_yank_tracking(draft);
       draft.cursor = next_word_cursor(draft.text, draft.cursor);
       return true;
     case TuiAction::Undo: {
       if (draft.undo_stack.empty()) return false;
+      push_redo(draft);
       auto previous = std::move(draft.undo_stack.back());
       draft.undo_stack.pop_back();
       draft.text = std::move(previous.text);
       draft.cursor = clamp_composer_draft_cursor(draft.text, previous.cursor);
+      clear_yank_tracking(draft);
       return true;
     }
-    case TuiAction::Yank:
-      if (draft.kill_buffer.empty()) return false;
-      return insert_composer_draft_text(draft, draft.kill_buffer);
+    case TuiAction::Redo: {
+      if (draft.redo_stack.empty()) return false;
+      push_undo(draft);
+      auto next = std::move(draft.redo_stack.back());
+      draft.redo_stack.pop_back();
+      draft.text = std::move(next.text);
+      draft.cursor = clamp_composer_draft_cursor(draft.text, next.cursor);
+      clear_yank_tracking(draft);
+      return true;
+    }
+    case TuiAction::Yank: {
+      ensure_kill_ring(draft);
+      if (draft.kill_ring.empty() || draft.kill_ring.front().empty()) return false;
+      auto const yanked = draft.kill_ring.front();
+      record_undo(draft);
+      auto const start = draft.cursor;
+      draft.text.insert(draft.cursor, yanked);
+      draft.cursor += yanked.size();
+      draft.kill_buffer = yanked;
+      draft.yank_start = start;
+      draft.yank_end = draft.cursor;
+      draft.yank_ring_index = 0;
+      return true;
+    }
+    case TuiAction::YankPop: {
+      ensure_kill_ring(draft);
+      if (draft.kill_ring.size() < 2 || draft.yank_start == std::string::npos || draft.yank_end == std::string::npos ||
+          draft.yank_start > draft.text.size() || draft.yank_end > draft.text.size() ||
+          draft.yank_start > draft.yank_end) {
+        return false;
+      }
+      auto const start = draft.yank_start;
+      auto const end = draft.yank_end;
+      auto const next_ring_index = (draft.yank_ring_index + 1) % draft.kill_ring.size();
+      auto const replacement = draft.kill_ring[next_ring_index];
+      record_undo(draft);
+      draft.text.replace(start, end - start, replacement);
+      draft.cursor = start + replacement.size();
+      draft.kill_buffer = replacement;
+      draft.yank_start = start;
+      draft.yank_end = draft.cursor;
+      draft.yank_ring_index = next_ring_index;
+      return true;
+    }
     case TuiAction::Submit:
     case TuiAction::NewLine:
     case TuiAction::Cancel:

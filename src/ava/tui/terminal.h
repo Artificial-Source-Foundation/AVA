@@ -32,11 +32,13 @@ enum class Key {
   CtrlE,
   CtrlF,
   CtrlK,
+  CtrlR,
   CtrlT,
   CtrlU,
   CtrlW,
   CtrlY,
   CtrlZ,
+  AltY,
   Unknown
 };
 
@@ -73,6 +75,7 @@ class CursesSession {
 };
 
 void erase_last_utf8_codepoint(std::string& text);
+[[nodiscard]] int terminal_escape_delay_ms();
 [[nodiscard]] Key terminal_escape_sequence_key(std::string_view sequence);
 [[nodiscard]] bool terminal_escape_sequence_complete(std::string_view sequence);
 [[nodiscard]] bool terminal_escape_sequence_should_discard(std::string_view sequence);

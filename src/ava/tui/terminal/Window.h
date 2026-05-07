@@ -18,10 +18,6 @@
 //
 // grep '^extern.*WINDOW *\*.*implemented' /usr/include/curses.h | grep -v SCREEN | sed -re 's/^extern NCURSES_EXPORT\([^)]*\) ([^ (]*).*/\1/' | sort -u
 //
-// Missing members:
-//
-//   mvwin
-//
 namespace terminal {
 
 // Forward declaration.
@@ -85,6 +81,8 @@ class Window
 
   // Enable or disable automatic syncup upon mutations.
   void syncok(bool enabled);                                            // syncok
+
+  // https://invisible-island.net/ncurses/man/curs_bkgrnd.3x.html
 
   void set_background(ComplexChar background, bool erase = true);       // wbkgrndset / wbkgrnd
   ComplexChar get_background() const;                                   // wgetbkgrnd

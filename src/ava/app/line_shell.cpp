@@ -232,7 +232,7 @@ LineResult handle_line(ShellState& state, std::string const& line,
 {
   LineResult line_result;
   if (line.empty()) return line_result;
-  if (ava::app::is_backend_command(line)) {
+  if (ava::app::is_backend_command(line, state.session)) {
     if (is_compact_command(line)) {
       return with_provider_runtime(
           state, "\nother slash tool commands still work offline.",
@@ -279,6 +279,31 @@ LineResult handle_line(ShellState& state, std::string const& line,
     line_result.quit = command_result->quit;
     line_result.output = std::move(command_result->output);
     line_result.tool_timeline = std::move(command_result->tool_timeline);
+    if (command_result->prompt_message) {
+      return with_provider_runtime(state, "\nthis command expands to a prompt and needs provider auth.",
+                                   [&](ava::provider::Provider const& provider, ava::provider::Transport& transport,
+                                       ava::app::RuntimeRunOptions run_options) {
+                                     run_options.permission_resolver = permission_resolver;
+                                     run_options.question_resolver = question_resolver;
+                                     run_options.event_sink = std::move(event_sink);
+                                     run_options.cancel_requested = std::move(cancel_requested);
+                                     run_options.take_steering_messages = std::move(take_steering_messages);
+                                     auto result = ava::app::run_prompt(state.session, *command_result->prompt_message,
+                                                                        provider, transport, run_options);
+                                     LineResult prompt_result;
+                                     if (!result) {
+                                       add_output(prompt_result, result.error().format());
+                                       return prompt_result;
+                                     }
+                                     prompt_result.tool_timeline = std::move(result->tool_timeline);
+                                     if (!result->final_text.empty()) {
+                                       add_output(prompt_result, result->final_text);
+                                     } else {
+                                       add_output(prompt_result, "done");
+                                     }
+                                     return prompt_result;
+                                   });
+    }
     return line_result;
   }
   if (line.starts_with('/')) {

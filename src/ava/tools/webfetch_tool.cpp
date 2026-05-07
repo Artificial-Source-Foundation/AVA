@@ -6,6 +6,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -416,6 +417,63 @@ bool is_html_content(std::string_view content_type)
   return lowercase(content_type).find("html") != std::string::npos;
 }
 
+std::size_t logical_line_count(std::string_view text)
+{
+  if (text.empty()) return 0;
+  auto const newline_count = static_cast<std::size_t>(std::ranges::count(text, '\n'));
+  return text.back() == '\n' ? newline_count : newline_count + 1;
+}
+
+std::size_t byte_offset_for_line(std::string_view text, std::size_t line)
+{
+  if (line <= 1) return 0;
+  std::size_t current_line = 1;
+  for (std::size_t index = 0; index < text.size(); ++index) {
+    if (text[index] != '\n') continue;
+    ++current_line;
+    if (current_line == line) return index + 1;
+  }
+  return text.size();
+}
+
+void trim_partial_final_line(std::string& text)
+{
+  auto const newline = text.find_last_of('\n');
+  if (newline == std::string::npos || newline + 1 == text.size()) return;
+  text.resize(newline + 1);
+}
+
+void apply_line_window(WebFetchResult& result, std::string_view text, WebFetchOptions const& options,
+                       std::size_t max_bytes)
+{
+  result.total_bytes = text.size();
+  result.total_lines = logical_line_count(text);
+  result.start_line = options.offset_line == 0 ? 1 : options.offset_line;
+  auto const end_line_exclusive =
+      options.max_lines == 0 || result.start_line > std::numeric_limits<std::size_t>::max() - options.max_lines
+          ? std::numeric_limits<std::size_t>::max()
+          : result.start_line + options.max_lines;
+
+  auto const start_offset = byte_offset_for_line(text, result.start_line);
+  auto const end_offset = end_line_exclusive == std::numeric_limits<std::size_t>::max()
+                              ? text.size()
+                              : byte_offset_for_line(text, end_line_exclusive);
+  auto const selected = text.substr(start_offset, end_offset - start_offset);
+  result.content = std::string(selected.substr(0, std::min(max_bytes, selected.size())));
+  if (result.content.size() < selected.size()) trim_partial_final_line(result.content);
+
+  result.output_bytes = result.content.size();
+  result.output_lines = logical_line_count(result.content);
+  result.end_line = result.output_lines > 0 ? result.start_line + result.output_lines - 1 : 0;
+  result.byte_limited = result.output_bytes < selected.size();
+  result.line_limited = options.max_lines > 0 && end_line_exclusive != std::numeric_limits<std::size_t>::max() &&
+                        result.total_lines >= end_line_exclusive;
+  result.truncated = result.byte_limited || result.line_limited;
+  if (result.line_limited && !result.byte_limited && result.end_line > 0 && result.end_line < result.total_lines) {
+    result.next_offset_line = result.end_line + 1;
+  }
+}
+
 }  // namespace
 
 ava::core::Result<WebFetchResult> webfetch(ToolContext const& context, std::string_view url, WebFetchOptions options)
@@ -488,10 +546,7 @@ ava::core::Result<WebFetchResult> webfetch(ToolContext const& context, std::stri
       converted = html_to_text(response->body, false);
     }
   }
-  result.total_bytes = converted.size();
-  result.output_bytes = std::min(max_bytes, converted.size());
-  result.truncated = result.output_bytes < result.total_bytes;
-  result.content = converted.substr(0, result.output_bytes);
+  apply_line_window(result, converted, options, max_bytes);
   return result;
 }
 

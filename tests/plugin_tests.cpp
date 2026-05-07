@@ -15,6 +15,7 @@
 
 #include "ava/core/json.h"
 
+#include "tests/support/golden.h"
 #include "tests/support/test_harness.h"
 
 #include <algorithm>
@@ -25,6 +26,10 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#ifndef AVA_SAMPLE_TODO_PLUGIN_DIR
+#define AVA_SAMPLE_TODO_PLUGIN_DIR ""
+#endif
 
 namespace {
 
@@ -68,6 +73,23 @@ std::string read_text(std::filesystem::path const& path)
   std::ostringstream buffer;
   buffer << file.rdbuf();
   return buffer.str();
+}
+
+std::filesystem::path sample_todo_plugin_dir()
+{
+  std::filesystem::path const path{AVA_SAMPLE_TODO_PLUGIN_DIR};
+  expect(!path.empty(), "sample todo plugin fixture path is configured");
+  expect(std::filesystem::is_directory(path), "sample todo plugin fixture directory exists");
+  return path;
+}
+
+ava::plugin::PluginManifest load_sample_todo_manifest()
+{
+  auto const manifest_path = sample_todo_plugin_dir() / "plugin.json";
+  auto parsed = ava::plugin::load_plugin_manifest(manifest_path);
+  expect(parsed.has_value(), parsed ? "sample todo plugin manifest loads"
+                                    : "sample todo plugin manifest loads: " + parsed.error().format());
+  return parsed.value_or(ava::plugin::PluginManifest{});
 }
 
 std::string runner_manifest_json(std::string id, std::string script_name)
@@ -219,6 +241,98 @@ void test_plugin_manifest_parsing()
       {});
   expect(!bad_resource_path && bad_resource_path.error().message().find("safe relative path") != std::string::npos,
          "plugin manifest rejects prompt and skill paths that escape the plugin directory");
+}
+
+void test_sample_todo_plugin_manifest_and_resources()
+{
+  auto const plugin_dir = sample_todo_plugin_dir();
+  auto const manifest = load_sample_todo_manifest();
+
+  expect(manifest.id == "com.example.todo", "sample todo plugin id stays stable");
+  expect(manifest.name == "Todo Sample Plugin", "sample todo plugin name is parsed");
+  expect(manifest.version == "0.1.0", "sample todo plugin version is parsed");
+  expect(manifest.entrypoint.command == "/bin/sh", "sample todo plugin uses explicit shell entrypoint");
+  expect(manifest.entrypoint.args.size() == 1 && manifest.entrypoint.args[0] == "plugin.sh",
+         "sample todo plugin entrypoint does not depend on executable mode");
+  expect(manifest.contributes.tools.size() == 1 && manifest.contributes.tools[0].name == "todo_add",
+         "sample todo plugin declares todo_add tool");
+  if (!manifest.contributes.tools.empty()) {
+    expect(manifest.contributes.tools[0].input_schema_json.find("\"required\"") != std::string::npos &&
+               manifest.contributes.tools[0].input_schema_json.find("\"text\"") != std::string::npos,
+           "sample todo plugin tool schema requires text");
+  }
+  expect(manifest.contributes.commands.size() == 1 && manifest.contributes.commands[0].name == "status",
+         "sample todo plugin declares status command");
+  expect(manifest.contributes.event_hooks.size() == 1 && manifest.contributes.event_hooks[0].event == "tool.result",
+         "sample todo plugin declares tool.result event hook");
+
+  auto const has_prompt = std::any_of(manifest.contributes.prompts.begin(), manifest.contributes.prompts.end(),
+                                      [](ava::plugin::PluginResourceContribution const& prompt) {
+                                        return prompt.name == "todo-review" && prompt.path == "prompts/todo-review.md";
+                                      });
+  auto const has_skill = std::any_of(manifest.contributes.skills.begin(), manifest.contributes.skills.end(),
+                                     [](ava::plugin::PluginResourceContribution const& skill) {
+                                       return skill.name == "todo-triage" && skill.path == "skills/todo-triage.md";
+                                     });
+  expect(has_prompt, "sample todo plugin declares todo-review prompt resource");
+  expect(has_skill, "sample todo plugin declares todo-triage skill resource");
+
+  auto const prompt_path = plugin_dir / "prompts" / "todo-review.md";
+  auto const skill_path = plugin_dir / "skills" / "todo-triage.md";
+  auto const readme_path = plugin_dir / "README.md";
+  expect(std::filesystem::is_regular_file(prompt_path), "sample todo prompt resource file exists");
+  expect(std::filesystem::is_regular_file(skill_path), "sample todo skill resource file exists");
+  expect(read_text(prompt_path).find("Review the current work") != std::string::npos,
+         "sample todo prompt resource has expected authoring content");
+  expect(read_text(skill_path).find("Todo Triage Skill") != std::string::npos,
+         "sample todo skill resource has expected authoring content");
+  expect(read_text(readme_path).find("/plugins validate") != std::string::npos,
+         "sample todo README documents the validation workflow");
+}
+
+void test_sample_todo_plugin_protocol_path()
+{
+  auto manifest = load_sample_todo_manifest();
+  auto const root = temp_root() / "sample-todo-plugin";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+
+  auto options = runner_options(workspace, std::chrono::milliseconds(500));
+  options.request_timeout = std::chrono::milliseconds(500);
+  auto process = ava::plugin::PluginProcess::start(std::move(manifest), options);
+  expect(process.has_value(),
+         process ? "sample todo plugin initializes through actual entrypoint"
+                 : "sample todo plugin initializes through actual entrypoint: " + process.error().format());
+  if (!process) return;
+
+  expect((*process)->initialization().plugin_version == "0.1.0",
+         "sample todo plugin reports the manifest version during initialize");
+  expect((*process)->initialization().contributions_json.find("\"tools\":[]") != std::string::npos,
+         "sample todo plugin keeps dynamic initialize contributions empty");
+
+  auto command = (*process)->call_command("status", "{}", "sample_status");
+  expect(command && command->ok && command->content == "Todo sample plugin is ready." &&
+             command->metadata_json.find("\"open_items\":0") != std::string::npos,
+         command ? "sample todo plugin exchanges command.call/command.result records"
+                 : "sample todo plugin exchanges command.call/command.result records: " + command.error().format());
+
+  auto tool = (*process)->call_tool("todo_add", "{\"text\":\"write tests\"}", "sample_tool");
+  expect(tool && tool->ok && tool->content == "Todo item accepted by the sample plugin." &&
+             tool->metadata_json.find("\"items\":1") != std::string::npos,
+         tool ? "sample todo plugin exchanges tool.call/tool.result records"
+              : "sample todo plugin exchanges tool.call/tool.result records: " + tool.error().format());
+
+  auto event = (*process)->observe_event("tool_result", "{\"tool\":\"demo\",\"status\":\"success\"}", "sample_event");
+  expect(event && event->ok && event->content == "Todo sample observed the event." &&
+             event->metadata_json.find("\"events\":1") != std::string::npos,
+         event ? "sample todo plugin exchanges event.observe/event.observed records"
+               : "sample todo plugin exchanges event.observe/event.observed records: " + event.error().format());
+
+  auto shutdown = (*process)->shutdown(std::chrono::milliseconds(500));
+  expect(shutdown.has_value(), shutdown ? "sample todo plugin shuts down cleanly"
+                                        : "sample todo plugin shuts down cleanly: " + shutdown.error().format());
 }
 
 void test_plugin_runner_protocol_parsing()
@@ -948,11 +1062,15 @@ void test_plugin_tool_dispatcher()
   context.cancel_requested = [&] { return cancel_requested; };
 
   auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(context);
-  bool const has_plugin_schema = std::any_of(schemas.begin(), schemas.end(), [&](std::string const& schema) {
+  auto const plugin_schema = std::find_if(schemas.begin(), schemas.end(), [&](std::string const& schema) {
     return schema.find("\"name\":\"" + model_tool_name + "\"") != std::string::npos &&
            schema.find("\"parameters\"") != std::string::npos;
   });
-  expect(has_plugin_schema, "enabled plugin tool contribution is exported as a provider schema");
+  expect(plugin_schema != schemas.end(), "enabled plugin tool contribution is exported as a provider schema");
+  if (plugin_schema != schemas.end()) {
+    ava::test::expect_json_matches_golden(*plugin_schema, "plugin-tool-schema.json",
+                                          "plugin tool provider schema matches AVA 0.80 golden fixture");
+  }
 
   ava::agent::ToolDispatcher dispatcher(context);
   auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
@@ -999,6 +1117,24 @@ void test_plugin_tool_dispatcher()
              denied->result_text.find("plugin process launch requires permission") != std::string::npos &&
              denied_prompts.size() == 1,
          "plugin tool dispatcher respects permission denial before process execution");
+  expect(!denied_prompts.empty() && !denied_prompts.front().permission_request_id.empty(),
+         "plugin permission denial prompt carries a request id");
+  if (!denied_prompts.empty()) {
+    auto const& denied_id = denied_prompts.front().permission_request_id;
+    auto const linked_audits = std::count_if(
+        audits.begin(), audits.end(), [&](auto const& event) { return event.permission_request_id == denied_id; });
+    auto const has_resolver_denial = std::any_of(audits.begin(), audits.end(), [&](auto const& event) {
+      return event.permission_request_id == denied_id &&
+             event.operation == ava::permissions::Operation::PluginExecute && event.resolution == "deny" &&
+             event.resolution_source == "resolver";
+    });
+    expect(linked_audits >= 2 && has_resolver_denial,
+           "plugin permission denial audits policy and resolver events with the prompt request id");
+    expect(denied &&
+               std::find(denied->payload.permission_request_ids.begin(), denied->payload.permission_request_ids.end(),
+                         denied_id) != denied->payload.permission_request_ids.end(),
+           "plugin denial payload links the permission request id");
+  }
 
   auto const prompts_before_cancel = prompts.size();
   cancel_requested = true;
@@ -1086,6 +1222,8 @@ void test_plugin_tool_registry_skips_name_collisions()
 void run_plugin_tests()
 {
   test_plugin_manifest_parsing();
+  test_sample_todo_plugin_manifest_and_resources();
+  test_sample_todo_plugin_protocol_path();
   test_plugin_runner_protocol_parsing();
   test_plugin_discovery();
   test_plugin_enablement();

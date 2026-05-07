@@ -2068,7 +2068,7 @@ void test_tui_composer_rendering_and_input()
                                      .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
                                                                         .name = "read_file",
                                                                         .argument_summary = "path=note.txt\x1b[31m",
-                                                                        .result_summary = "read 12/12 bytes"}}},
+                                                                        .result_summary = "read lines 1-12/12"}}},
                                  .width = 80,
                                  .height = 10});
   expect(std::ranges::any_of(tool_card,
@@ -2081,7 +2081,7 @@ void test_tui_composer_rendering_and_input()
              std::ranges::any_of(tool_card,
                                  [](std::string const& line) {
                                    auto visible = strip_sgr(line);
-                                   return visible.find("read 12/12 bytes") != std::string::npos;
+                                   return visible.find("read lines 1-12/12") != std::string::npos;
                                  }) &&
              std::ranges::any_of(tool_card,
                                  [](std::string const& line) {
@@ -2978,7 +2978,7 @@ void test_tui_event_state_reduces_runtime_events()
   provider_execution_result.call_id = "provider_call_1";
   provider_execution_result.tool_name = "read_file";
   provider_execution_result.status = "success";
-  provider_execution_result.text = "read 10/10 bytes";
+  provider_execution_result.text = "read lines 1-10/10";
   ava::tui::apply_runtime_event(provider_state, provider_execution_result);
   expect(provider_state.pending_tools.empty() && !provider_state.transcript.empty() &&
              provider_state.transcript.back().tool &&
@@ -3145,6 +3145,8 @@ void test_tui_event_state_reduces_runtime_events()
                                                 "\"status\":\"success\",\"truncated\":true,"
                                                 "\"details_visible\":true,"
                                                 "\"output_bytes\":256,\"total_bytes\":1024,"
+                                                "\"output_lines\":4,\"total_lines\":20,"
+                                                "\"start_line\":5,\"end_line\":8,\"next_offset_line\":9,"
                                                 "\"omitted_bytes\":768,\"omitted_lines\":12,"
                                                 "\"visible_matches\":2,\"total_matches\":8,"
                                                 "\"spill_path\":\"/tmp/ava-spill/grep.txt\","
@@ -3160,7 +3162,7 @@ void test_tui_event_state_reduces_runtime_events()
                                  .input = "",
                                  .status = "ready",
                                  .transcript = ava::tui::event_state_transcript_snapshot(correlated_tool_state),
-                                 .width = 80,
+                                 .width = 120,
                                  .height = 14,
                                  .tool_details_visible = false});
   expect(
@@ -3177,7 +3179,8 @@ void test_tui_event_state_reduces_runtime_events()
           std::ranges::any_of(correlated_tool_render,
                               [](std::string const& line) {
                                 auto const visible = strip_sgr(line);
-                                return visible.find("truncation: truncated 256/1024 bytes") != std::string::npos &&
+                                return visible.find("truncation: truncated lines 5-8/20; next offset 9") !=
+                                           std::string::npos &&
                                        visible.find("omitted 768 bytes, 12 lines") != std::string::npos;
                               }) &&
           std::ranges::any_of(

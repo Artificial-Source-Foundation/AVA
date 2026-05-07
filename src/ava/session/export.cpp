@@ -196,6 +196,9 @@ void append_reasoning_change(std::string& out, SessionEntry const& entry, Export
   append_optional_fenced_block(out, "Model", string_field(entry, "model"));
   append_optional_fenced_block(out, "Format", string_field(entry, "format"));
   append_optional_fenced_block(out, "Level", string_field(entry, "level"));
+  if (auto const budget_tokens = integer_field(entry, "budget_tokens")) {
+    append_fenced_block(out, "Budget tokens", std::to_string(*budget_tokens));
+  }
   append_optional_fenced_block(out, "Display", string_field(entry, "display"));
 }
 

@@ -65,6 +65,8 @@ struct RuntimeEvent {
   bool reasoning_signature_present = false;
   bool diff_truncated = false;
   bool truncated = false;
+  bool byte_limited = false;
+  bool line_limited = false;
   bool spill_truncated = false;
   std::size_t provider_iterations = 0;
   std::size_t tool_calls = 0;
@@ -79,6 +81,11 @@ struct RuntimeEvent {
   std::size_t current_entries = 0;
   std::size_t output_bytes = 0;
   std::size_t total_bytes = 0;
+  std::size_t output_lines = 0;
+  std::size_t total_lines = 0;
+  std::size_t start_line = 0;
+  std::size_t end_line = 0;
+  std::size_t next_offset_line = 0;
   std::size_t omitted_bytes = 0;
   std::size_t omitted_lines = 0;
   std::size_t visible_matches = 0;

@@ -14,6 +14,7 @@ namespace ava::tools {
 struct BashOptions {
   std::chrono::milliseconds timeout = std::chrono::milliseconds(30'000);
   std::size_t max_bytes = 50 * 1024;
+  std::size_t max_lines = 200;
 };
 
 struct BashResult {
@@ -21,8 +22,14 @@ struct BashResult {
   bool timed_out = false;
   bool canceled = false;
   bool truncated = false;
+  bool byte_limited = false;
+  bool line_limited = false;
   bool spill_truncated = false;
   std::size_t total_bytes = 0;
+  std::size_t output_bytes = 0;
+  std::size_t total_lines = 0;
+  std::size_t output_lines = 0;
+  std::size_t omitted_lines = 0;
   std::string output;
   std::filesystem::path spill_path;
 };

@@ -322,6 +322,7 @@ int main(int argc, char** argv)
   std::string const target_path = argc == 6 ? argv[5] : "";
   int const request_count =
       scenario == "http-error"         ? 3
+      : scenario == "text-three"       ? 3
       : scenario == "read-tool-twice"  ? 4
       : scenario == "read-tool-thrice" ? 6
       : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "write-tool" ||

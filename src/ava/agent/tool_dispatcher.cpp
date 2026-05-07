@@ -101,7 +101,7 @@ ToolDispatchResult read_file_result(ava::tools::ToolContext const& context, Prov
       tool_context, workspace_path(context, *path),
       ava::tools::ReadOptions{.max_bytes = optional_size_arg(call.arguments_json, "max_bytes", 50 * 1024, 512 * 1024),
                               .offset_line = optional_size_arg(call.arguments_json, "offset", 1, 100000000),
-                              .max_lines = optional_size_arg(call.arguments_json, "limit", 0, 100000)});
+                              .max_lines = optional_size_arg(call.arguments_json, "limit", 200, 100000)});
   if (!result) return tool_error_result(call, result.error());
   std::string text =
       "{\"tool\":\"read_file\",\"ok\":true,\"path\":\"" + ava::core::json::escape(*path) + "\",\"content\":\"" +
@@ -109,10 +109,12 @@ ToolDispatchResult read_file_result(ava::tools::ToolContext const& context, Prov
       ",\"byte_limited\":" + json_bool(result->byte_limited) + ",\"line_limited\":" + json_bool(result->line_limited) +
       ",\"total_bytes\":" + std::to_string(result->total_bytes) +
       ",\"output_bytes\":" + std::to_string(result->output_bytes) +
+      ",\"output_lines\":" + std::to_string(result->output_lines) +
       ",\"start_line\":" + std::to_string(result->start_line) + ",\"end_line\":" + std::to_string(result->end_line) +
       ",\"total_lines\":" + std::to_string(result->total_lines);
   if (result->next_offset_line > 0) {
     text += ",\"next_offset\":" + std::to_string(result->next_offset_line);
+    text += ",\"next_offset_line\":" + std::to_string(result->next_offset_line);
     text += ",\"truncation_hint\":\"Call read_file again with offset=" + std::to_string(result->next_offset_line) +
             " to continue.\"";
   } else if (result->byte_limited) {
@@ -261,38 +263,52 @@ ToolDispatchResult bash_result(ava::tools::ToolContext const& context, ProviderT
 {
   auto command = required_safe_string_arg(call.arguments_json, "command", call.name);
   if (!command) return tool_error_result(call, command.error());
+  auto max_lines = optional_size_arg(call.arguments_json, "max_lines", 0, 100000);
+  if (max_lines == 0) max_lines = optional_size_arg(call.arguments_json, "limit", 200, 100000);
   auto const tool_context = context_for_provider_tool(context, call);
   auto result = ava::tools::run_bash(
       tool_context, *command,
       ava::tools::BashOptions{
           .timeout = std::chrono::milliseconds(optional_size_arg(call.arguments_json, "timeout_ms", 30000, 120000)),
-          .max_bytes = optional_size_arg(call.arguments_json, "max_bytes", 50 * 1024, 512 * 1024)});
+          .max_bytes = optional_size_arg(call.arguments_json, "max_bytes", 50 * 1024, 512 * 1024),
+          .max_lines = max_lines});
   if (!result) return tool_error_result(call, result.error());
-  return ToolDispatchResult{.call_id = call.id,
-                            .name = call.name,
-                            .success = result->exit_code == 0 && !result->timed_out && !result->canceled,
-                            .result_text =
-                                [&] {
-                                  std::string text =
-                                      "{\"tool\":\"bash\",\"ok\":" +
-                                      json_bool(result->exit_code == 0 && !result->timed_out && !result->canceled) +
-                                      ",\"exit_code\":" + std::to_string(result->exit_code) +
-                                      ",\"timed_out\":" + json_bool(result->timed_out) +
-                                      ",\"canceled\":" + json_bool(result->canceled) +
-                                      ",\"truncated\":" + json_bool(result->truncated) +
-                                      ",\"total_bytes\":" + std::to_string(result->total_bytes) + ",\"output\":\"" +
-                                      ava::core::json::escape(result->output) + "\"";
-                                  append_spill_fields(text, result->spill_path, result->spill_truncated);
-                                  text += "}";
-                                  return text;
-                                }(),
-                            .payload =
-                                [&] {
-                                  ava::agent::ToolResultPayload payload;
-                                  payload.status = result->canceled ? ava::agent::ToolResultStatus::Canceled
-                                                                    : ava::agent::ToolResultStatus::Success;
-                                  return payload;
-                                }()};
+  return ToolDispatchResult{
+      .call_id = call.id,
+      .name = call.name,
+      .success = result->exit_code == 0 && !result->timed_out && !result->canceled,
+      .result_text =
+          [&] {
+            std::string text = "{\"tool\":\"bash\",\"ok\":" +
+                               json_bool(result->exit_code == 0 && !result->timed_out && !result->canceled) +
+                               ",\"exit_code\":" + std::to_string(result->exit_code) +
+                               ",\"timed_out\":" + json_bool(result->timed_out) +
+                               ",\"canceled\":" + json_bool(result->canceled) +
+                               ",\"truncated\":" + json_bool(result->truncated) +
+                               ",\"byte_limited\":" + json_bool(result->byte_limited) +
+                               ",\"line_limited\":" + json_bool(result->line_limited) +
+                               ",\"total_bytes\":" + std::to_string(result->total_bytes) +
+                               ",\"output_bytes\":" + std::to_string(result->output_bytes) +
+                               ",\"total_lines\":" + std::to_string(result->total_lines) +
+                               ",\"output_lines\":" + std::to_string(result->output_lines) +
+                               ",\"omitted_lines\":" + std::to_string(result->omitted_lines) + ",\"output\":\"" +
+                               ava::core::json::escape(result->output) + "\"";
+            if (result->truncated && result->line_limited) {
+              text += ",\"truncation_hint\":\"Increase max_lines to retain more command output.\"";
+            } else if (result->truncated && result->byte_limited) {
+              text += ",\"truncation_hint\":\"Increase max_bytes to retain longer output lines.\"";
+            }
+            append_spill_fields(text, result->spill_path, result->spill_truncated);
+            text += "}";
+            return text;
+          }(),
+      .payload =
+          [&] {
+            ava::agent::ToolResultPayload payload;
+            payload.status =
+                result->canceled ? ava::agent::ToolResultStatus::Canceled : ava::agent::ToolResultStatus::Success;
+            return payload;
+          }()};
 }
 
 ToolDispatchResult webfetch_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
@@ -318,6 +334,8 @@ ToolDispatchResult webfetch_result(ava::tools::ToolContext const& context, Provi
       tool_context, *url,
       ava::tools::WebFetchOptions{
           .max_bytes = optional_size_arg(call.arguments_json, "max_bytes", 1024 * 1024, 5 * 1024 * 1024),
+          .offset_line = optional_size_arg(call.arguments_json, "offset", 1, 100000000),
+          .max_lines = optional_size_arg(call.arguments_json, "limit", 200, 100000),
           .timeout_ms = static_cast<int>(optional_size_arg(call.arguments_json, "timeout_ms", 30000, 120000)),
           .format = format,
       });
@@ -330,8 +348,25 @@ ToolDispatchResult webfetch_result(ava::tools::ToolContext const& context, Provi
                      "\",\"status_code\":" + std::to_string(result->status_code) + ",\"content_type\":\"" +
                      ava::core::json::escape(result->content_type) + "\",\"content\":\"" +
                      ava::core::json::escape(result->content) + "\",\"truncated\":" + json_bool(result->truncated) +
-                     ",\"total_bytes\":" + std::to_string(result->total_bytes) +
-                     ",\"output_bytes\":" + std::to_string(result->output_bytes) + "}"};
+                     ",\"byte_limited\":" + json_bool(result->byte_limited) + ",\"line_limited\":" +
+                     json_bool(result->line_limited) + ",\"total_bytes\":" + std::to_string(result->total_bytes) +
+                     ",\"output_bytes\":" + std::to_string(result->output_bytes) + ",\"output_lines\":" +
+                     std::to_string(result->output_lines) + ",\"start_line\":" + std::to_string(result->start_line) +
+                     ",\"end_line\":" + std::to_string(result->end_line) +
+                     ",\"total_lines\":" + std::to_string(result->total_lines) +
+                     [&] {
+                       std::string suffix;
+                       if (result->next_offset_line > 0) {
+                         suffix += ",\"next_offset\":" + std::to_string(result->next_offset_line);
+                         suffix += ",\"next_offset_line\":" + std::to_string(result->next_offset_line);
+                         suffix += ",\"truncation_hint\":\"Call webfetch again with offset=" +
+                                   std::to_string(result->next_offset_line) + " to continue.\"";
+                       } else if (result->byte_limited) {
+                         suffix += ",\"truncation_hint\":\"Increase max_bytes to read more of this range.\"";
+                       }
+                       return suffix;
+                     }() +
+                     "}"};
 }
 
 ToolDispatchResult websearch_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)

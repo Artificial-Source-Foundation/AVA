@@ -112,7 +112,9 @@ void test_tool_dispatcher()
                                    .arguments_json = "{\"path\":\"lines.txt\",\"offset\":2,\"limit\":1}"});
   expect(read_range && read_range->success && read_range->result_text.find("Two\\n") != std::string::npos &&
              read_range->result_text.find("\"start_line\":2") != std::string::npos &&
-             read_range->result_text.find("\"next_offset\":3") != std::string::npos,
+             read_range->result_text.find("\"output_lines\":1") != std::string::npos &&
+             read_range->result_text.find("\"next_offset\":3") != std::string::npos &&
+             read_range->result_text.find("\"next_offset_line\":3") != std::string::npos,
          "tool dispatcher exposes read_file line offset and continuation metadata");
 
   auto listed = dispatcher.dispatch(ava::agent::ProviderToolCall{

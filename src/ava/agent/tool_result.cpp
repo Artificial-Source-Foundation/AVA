@@ -143,8 +143,15 @@ ToolResultPayload merge_payload_defaults(ToolResultPayload payload, std::string_
   }
   payload.diff_truncated = payload.diff_truncated || parsed.diff_truncated;
   payload.truncated = payload.truncated || parsed.truncated;
+  payload.byte_limited = payload.byte_limited || parsed.byte_limited;
+  payload.line_limited = payload.line_limited || parsed.line_limited;
   if (!payload.output_bytes) payload.output_bytes = parsed.output_bytes;
   if (!payload.total_bytes) payload.total_bytes = parsed.total_bytes;
+  if (!payload.output_lines) payload.output_lines = parsed.output_lines;
+  if (!payload.total_lines) payload.total_lines = parsed.total_lines;
+  if (!payload.start_line) payload.start_line = parsed.start_line;
+  if (!payload.end_line) payload.end_line = parsed.end_line;
+  if (!payload.next_offset_line) payload.next_offset_line = parsed.next_offset_line;
   if (!payload.omitted_bytes) payload.omitted_bytes = parsed.omitted_bytes;
   if (!payload.omitted_lines) payload.omitted_lines = parsed.omitted_lines;
   if (!payload.visible_matches) payload.visible_matches = parsed.visible_matches;
@@ -197,11 +204,21 @@ ToolResultPayload parse_tool_result_payload(std::string_view tool_name, bool suc
   payload.diff = ava::core::json::string_field(result_text, "diff").value_or("");
   payload.diff_truncated = bool_field_is_true(result_text, "diff_truncated");
   payload.truncated = bool_field_is_true(result_text, "truncated");
+  payload.byte_limited = bool_field_is_true(result_text, "byte_limited");
+  payload.line_limited = bool_field_is_true(result_text, "line_limited");
   payload.spill_truncated = bool_field_is_true(result_text, "spill_truncated");
   payload.spill_path = ava::core::json::string_field(result_text, "spill_path")
                            .value_or(ava::core::json::string_field(result_text, "spill_file").value_or(""));
   assign_size_field(payload.output_bytes, result_text, "output_bytes");
   assign_size_field(payload.total_bytes, result_text, "total_bytes");
+  assign_size_field(payload.output_lines, result_text, "output_lines");
+  assign_size_field(payload.output_lines, result_text, "visible_lines");
+  assign_size_field(payload.output_lines, result_text, "returned_lines");
+  assign_size_field(payload.total_lines, result_text, "total_lines");
+  assign_size_field(payload.start_line, result_text, "start_line");
+  assign_size_field(payload.end_line, result_text, "end_line");
+  assign_size_field(payload.next_offset_line, result_text, "next_offset_line");
+  assign_size_field(payload.next_offset_line, result_text, "next_offset");
   assign_size_field(payload.omitted_bytes, result_text, "omitted_bytes");
   assign_size_field(payload.omitted_bytes, result_text, "omitted_output_bytes");
   assign_size_field(payload.omitted_lines, result_text, "omitted_lines");
@@ -262,8 +279,15 @@ std::string serialize_tool_result_payload_json(ToolDispatchResult const& result)
   append_string_array_field(out, "changed_paths", payload.changed_paths);
   append_string_array_field(out, "permission_request_ids", payload.permission_request_ids);
   append_bool_field(out, "truncated", payload.truncated);
+  if (payload.byte_limited) append_bool_field(out, "byte_limited", payload.byte_limited);
+  if (payload.line_limited) append_bool_field(out, "line_limited", payload.line_limited);
   append_optional_number_field(out, "output_bytes", payload.output_bytes);
   append_optional_number_field(out, "total_bytes", payload.total_bytes);
+  append_optional_number_field(out, "output_lines", payload.output_lines);
+  append_optional_number_field(out, "total_lines", payload.total_lines);
+  append_optional_number_field(out, "start_line", payload.start_line);
+  append_optional_number_field(out, "end_line", payload.end_line);
+  append_optional_number_field(out, "next_offset_line", payload.next_offset_line);
   append_optional_number_field(out, "omitted_bytes", payload.omitted_bytes);
   append_optional_number_field(out, "omitted_lines", payload.omitted_lines);
   append_optional_number_field(out, "visible_matches", payload.visible_matches);

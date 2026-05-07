@@ -300,11 +300,106 @@ std::string command_result_json(CommandResult const& result)
   json += bool_field_json("handled", result.handled);
   json += ',';
   json += bool_field_json("quit", result.quit);
+  if (result.prompt_message) {
+    json += ',';
+    json += bool_field_json("prompt", true);
+    json += ',';
+    json += string_field_json("prompt_command", result.prompt_command);
+    json += ',';
+    json += string_field_json("prompt_source", result.prompt_source);
+  }
   json += ",\"output\":";
   json += output_array_json(result.output);
   json += ',';
   json += string_field_json("text", joined_output(result.output));
   json += '}';
+  return json;
+}
+
+std::string command_registry_result_json(CommandRegistry const& registry)
+{
+  std::string json = "{\"commands\":[";
+  for (std::size_t index = 0; index < registry.entries.size(); ++index) {
+    auto const& entry = registry.entries[index];
+    if (index > 0) json += ',';
+    json += '{';
+    json += string_field_json("command", entry.command);
+    json += ",\"aliases\":";
+    json += string_array_json(entry.aliases);
+    json += ',';
+    json += string_field_json("description", entry.description);
+    json += ',';
+    json += string_field_json("hint", entry.hint);
+    json += ',';
+    json += string_field_json("category", entry.category);
+    json += ',';
+    json += bool_field_json("enabled", entry.enabled);
+    json += ',';
+    json += string_field_json("disabled_reason", entry.disabled_reason);
+    json += ',';
+    json += string_field_json("source", ava::app::to_string(entry.source));
+    json += ',';
+    json += string_field_json("kind", ava::app::to_string(entry.kind));
+    json += ',';
+    json += string_field_json("source_id", entry.source_id);
+    json += ',';
+    json += string_field_json("source_path", entry.source_path.string());
+    json += ',';
+    json += string_field_json("source_scope", entry.source_scope);
+    if (!entry.skill_name.empty()) {
+      json += ',';
+      json += string_field_json("skill_name", entry.skill_name);
+    }
+    if (!entry.mcp_server_id.empty()) {
+      json += ',';
+      json += string_field_json("mcp_server_id", entry.mcp_server_id);
+      json += ',';
+      json += string_field_json("mcp_prompt_name", entry.mcp_prompt_name);
+      json += ",\"mcp_arguments\":[";
+      for (std::size_t argument_index = 0; argument_index < entry.mcp_arguments.size(); ++argument_index) {
+        auto const& argument = entry.mcp_arguments[argument_index];
+        if (argument_index > 0) json += ',';
+        json += '{';
+        json += string_field_json("name", argument.name);
+        json += ',';
+        json += string_field_json("description", argument.description);
+        json += ',';
+        json += bool_field_json("required", argument.required);
+        json += '}';
+      }
+      json += ']';
+    }
+    if (!entry.plugin_id.empty()) {
+      json += ',';
+      json += string_field_json("plugin_id", entry.plugin_id);
+      json += ',';
+      json += string_field_json("plugin_command_name", entry.plugin_command_name);
+    }
+    json += '}';
+  }
+  json += "],\"diagnostics\":[";
+  for (std::size_t index = 0; index < registry.diagnostics.size(); ++index) {
+    auto const& diagnostic = registry.diagnostics[index];
+    if (index > 0) json += ',';
+    json += '{';
+    json += string_field_json("command", diagnostic.command);
+    json += ',';
+    json += string_field_json("source", diagnostic.source);
+    json += ',';
+    json += string_field_json("source_id", diagnostic.source_id);
+    json += ',';
+    json += string_field_json("path", diagnostic.path.string());
+    json += ',';
+    json += string_field_json("message", diagnostic.message);
+    json += ',';
+    json += string_field_json("winner_source", diagnostic.winner_source);
+    json += ',';
+    json += string_field_json("winner_source_id", diagnostic.winner_source_id);
+    json += ',';
+    json += string_field_json("winner_path", diagnostic.winner_path.string());
+    json += '}';
+  }
+  json += "]}";
   return json;
 }
 

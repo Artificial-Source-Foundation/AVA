@@ -46,7 +46,7 @@ void print_help()
   std::cout << "  ava -p [prompt] [--json|--output json] [--allow read-only] [--allow-tool list]\n";
   std::cout << "  ava --rpc [--allow read-only] [--allow-tool list]\n";
   std::cout << "  ava --output rpc [--allow read-only] [--allow-tool list]\n\n";
-  std::cout << version::kDisplayVersion << " status: ncursesw TUI replacement on the hardened 0.2 backend.\n";
+  std::cout << version::kDisplayVersion << " status: backend MVP runtime with terminal, print, and RPC workflows.\n";
 }
 
 bool stdin_is_tty()

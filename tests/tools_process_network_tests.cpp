@@ -91,9 +91,24 @@ void test_bash_tool()
 
   auto capped_output = ava::tools::run_bash(
       context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .max_bytes = 4});
-  expect(capped_output && capped_output->exit_code == 0 && capped_output->truncated &&
-             capped_output->output.size() == 4 && capped_output->total_bytes > capped_output->output.size(),
+  expect(capped_output && capped_output->exit_code == 0 && capped_output->truncated && capped_output->byte_limited &&
+             capped_output->output.size() == 4 && capped_output->output_bytes == capped_output->output.size() &&
+             capped_output->total_bytes > capped_output->output.size(),
          "run_bash bounds retained output while reporting total bytes");
+
+  ava::tools::ToolContext const line_context{.workspace_dir = temp_root(),
+                                             .mode = ava::agent::Mode::Build,
+                                             .permission_resolver = [](ava::permissions::PermissionPrompt const&)
+                                                 -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+                                               return ava::permissions::PermissionResolution::Allow;
+                                             }};
+  auto line_capped_output = ava::tools::run_bash(
+      line_context, "seq 1 5", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .max_lines = 2});
+  expect(line_capped_output && line_capped_output->exit_code == 0 && line_capped_output->truncated &&
+             line_capped_output->line_limited && !line_capped_output->byte_limited &&
+             line_capped_output->output == "4\n5\n" && line_capped_output->total_lines == 5 &&
+             line_capped_output->output_lines == 2 && line_capped_output->omitted_lines == 3,
+         "run_bash retains output by line tail before applying byte caps");
 
   std::vector<ava::tools::ToolProgressEvent> bash_progress;
   ava::tools::ToolContext const progress_context{
@@ -278,12 +293,25 @@ void test_webfetch_tool()
   auto fetched =
       ava::tools::webfetch(context, "https://example.com/page",
                            ava::tools::WebFetchOptions{.max_bytes = 3, .timeout_ms = 5000, .transport = &transport});
-  expect(fetched && fetched->content == "abc" && fetched->truncated && fetched->total_bytes == 6 &&
-             fetched->output_bytes == 3 && fetched->content_type == "text/plain; charset=utf-8" && prompts == 1 &&
-             transport.requests.size() == 1 && transport.requests[0].method == "GET" &&
-             transport.requests[0].timeout_ms == 5000 && !transport.requests[0].follow_redirects &&
-             transport.requests[0].include_response_headers,
+  expect(fetched && fetched->content == "abc" && fetched->truncated && fetched->byte_limited &&
+             fetched->total_bytes == 6 && fetched->output_bytes == 3 && fetched->output_lines == 1 &&
+             fetched->content_type == "text/plain; charset=utf-8" && prompts == 1 && transport.requests.size() == 1 &&
+             transport.requests[0].method == "GET" && transport.requests[0].timeout_ms == 5000 &&
+             !transport.requests[0].follow_redirects && transport.requests[0].include_response_headers,
          "webfetch requires permission and bounds fetched text content");
+
+  StaticTransport multiline_transport(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {{"content-type", "text/plain; charset=utf-8"}},
+                                  .body = "one\ntwo\nthree\nfour\n"});
+  auto fetched_lines = ava::tools::webfetch(
+      context, "https://example.com/page",
+      ava::tools::WebFetchOptions{
+          .max_bytes = 1024, .offset_line = 2, .max_lines = 2, .timeout_ms = 5000, .transport = &multiline_transport});
+  expect(fetched_lines && fetched_lines->content == "two\nthree\n" && fetched_lines->line_limited &&
+             !fetched_lines->byte_limited && fetched_lines->output_lines == 2 && fetched_lines->start_line == 2 &&
+             fetched_lines->end_line == 3 && fetched_lines->total_lines == 4 && fetched_lines->next_offset_line == 4,
+         "webfetch supports line offset and limit continuation metadata");
 
   StaticTransport html_transport(ava::provider::HttpResponse{
       .status_code = 200,

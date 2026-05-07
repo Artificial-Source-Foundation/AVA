@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/app/command_registry.h"
 #include "ava/app/commands.h"
 #include "ava/app/runtime.h"
 
@@ -27,6 +28,7 @@ namespace ava::app::rpc {
 [[nodiscard]] ava::core::Result<std::string> list_sessions_result_json(RuntimeSession const& session);
 [[nodiscard]] ava::core::Result<std::string> list_models_result_json(RuntimeSession const& session);
 [[nodiscard]] std::string command_result_json(CommandResult const& result);
+[[nodiscard]] std::string command_registry_result_json(CommandRegistry const& registry);
 [[nodiscard]] ava::core::Result<std::string> messages_result_json(RuntimeSession const& session);
 [[nodiscard]] ava::core::Result<std::string> session_stats_result_json(RuntimeSession const& session);
 [[nodiscard]] ava::core::Result<std::string> session_validation_result_json(RuntimeSession const& session);

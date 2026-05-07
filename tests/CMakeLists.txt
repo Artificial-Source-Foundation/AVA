@@ -27,6 +27,7 @@ add_executable(ava_tests
   "agent_loop_tests.cpp"
   "agent_tool_dispatcher_tests.cpp"
   "app_compaction_tests.cpp"
+  "app_command_registry_tests.cpp"
   "app_print_tests.cpp"
   "app_rpc_queue_tests.cpp"
   "app_rpc_resolver_tests.cpp"
@@ -52,6 +53,8 @@ target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_
 add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_provider_server)
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_FILE:ava_fake_mcp_server>")
+target_compile_definitions(ava_tests PRIVATE AVA_SAMPLE_TODO_PLUGIN_DIR="${CMAKE_SOURCE_DIR}/examples/plugins/todo")
+target_compile_definitions(ava_tests PRIVATE AVA_080_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden/ava-080")
 ava_apply_warnings(ava_tests)
 ava_apply_sanitizers(ava_tests)
 
@@ -60,6 +63,7 @@ set(AVA_TEST_SUITES
   session
   core_json_permission
   app_command_classification
+  app_command_registry
   tools
   config_context_auth_oauth
   app_compaction
@@ -208,11 +212,28 @@ add_test(
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_mcp_commands.cmake)
 
 add_test(
+  NAME ava_cli.headless_rpc_command_registry
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_EXE=$<TARGET_FILE:ava>
+          -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_FAKE_MCP_SERVER_EXE=$<TARGET_FILE:ava_fake_mcp_server>
+          -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-command-registry
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_command_registry.cmake)
+
+add_test(
   NAME ava_cli.headless_rpc_plugin_commands
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-plugin-commands
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_plugin_commands.cmake)
+
+add_test(
+  NAME ava_cli.headless_rpc_sample_plugin
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_EXE=$<TARGET_FILE:ava>
+          -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-sample-plugin
+          -DAVA_SAMPLE_TODO_PLUGIN_DIR=${CMAKE_SOURCE_DIR}/examples/plugins/todo
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_sample_plugin.cmake)
 
 add_test(
   NAME ava_cli.headless_rpc_mcp_config_errors

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Artificial-Source/AVA/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Artificial-Source/AVA/actions/workflows/ci.yml)
 
-AVA is a native C++23 agentic coding tool. The active default branch is `develop`; historical branches are kept under `archive/*`. The current 0.32 line ships a focused terminal binary with OpenAI-first auth, safe built-in tools, build/plan modes, permission prompts, tool visibility, append-only JSONL sessions, headless print/RPC modes, and an interactive TUI backed by wide-character ncurses (`ncursesw`).
+AVA is a native C++23 agentic coding tool. The active default branch is `develop`; historical branches are kept under `archive/*`. The shipped 1.0 backend MVP includes OpenAI and Kimi-for-coding live-verified provider paths, safe built-in tools, build/plan modes, permission prompts, tool visibility, append-only JSONL sessions, headless print/RPC modes, local plugin/MCP foundations, and an interactive TUI backed by wide-character ncurses (`ncursesw`). Backend release-position docs moved through the 0.60 platform catch-up, 0.65 provider-native hardening, bundled 0.70 reasoning/model lifecycle closeout, 0.75 extension foundation, 0.80 extension stabilization, and 0.90 release-candidate verification before this `1.0.0` runtime bump.
 
 ## Build
 
@@ -11,7 +11,7 @@ Dependencies:
 - CMake 3.25+
 - C++23 compiler
 - `ncursesw` development headers/library
-- `curl` executable for OpenAI HTTP transport
+- `curl` executable for provider HTTP transport
 
 ```sh
 cmake -S . -B build -DAVA_BUILD_TESTS=ON
@@ -104,6 +104,9 @@ The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME
 - `/glob <pattern>`: list readable matching files
 - `/grep <text> [glob]`: literal text search
 - `/bash <command>`: run an argv-style permissioned command
+- `/plugins list|inspect|enable|disable|validate|failures|prompts|prompt|skills|skill`: inspect and manage local plugins
+- `/plugin run <id> <command> [arguments_json]`: run a plugin command through the permissioned extension path
+- `/mcp list|inspect|tools|restart`: inspect configured MCP servers and discover tools
 - `/quit`: exit and print a resume command
 
 ## 0.2 Notes
@@ -126,16 +129,41 @@ The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME
 - Non-TTY stdin/stdout still use the line shell fallback for scripts and tests.
 - Later frontend work added live assistant/tool lifecycle updates, inline thinking visibility, and backend-provided tool detail/diff rendering in the TUI. 0.32 did not add providers, persistent permission rules, session-wide allows, MCP, plugins, or a session tree UI.
 
+## 0.60 Backend Notes
+
+- 0.60 is the backend platform catch-up line after the 0.32 ncursesw TUI baseline and the oversized 0.33 maturity ledger.
+- The milestone position is Phases 0-4 complete for the approved backend scope, Phase 5 foundation complete, 0.65/0.70 provider and reasoning work covered by offline/fake validation with live smokes deferred, and 0.75 plugin/MCP foundations implemented but not 1.0-stable.
+- Notable backend slices include semantic runtime events and command results, frontend-owned content adaptation, smaller helper modules, stronger headless CLI/RPC coverage, provider/model registry foundations, session/compaction/usage hardening, and line-first tool output windows.
+- The command-registry foundation now exposes project/global prompt commands, skill prompts, plugin command contributions, and MCP prompts through one discoverable backend/RPC command surface.
+- Use `docs/versions/0.60.md` for the platform catch-up position, `docs/versions/0.65.md` and `docs/versions/0.70.md` for provider/reasoning closeout status, `docs/versions/0.75.md` for the implemented extension foundation line, `docs/versions/0.80.md` for extension stabilization, `docs/versions/0.90.md` for release-candidate evidence, `docs/versions/1.0.md` for the shipped backend MVP, `docs/versions/0.33.md` for detailed slice evidence, and `docs/product/backend-capabilities-1.0.md` for the 1.0 backend capability checklist.
+
+## 0.65 Backend Notes
+
+- 0.65 is the provider-native hardening line after the 0.60 platform catch-up.
+- That slice keeps OpenAI as the default production path, hardens Anthropic native Messages support with offline/fake coverage, and adds Kimi/Moonshot/OpenRouter-compatible contract coverage for request shape, reasoning content, usage/error parsing, auth/header/base URL behavior, and context-overflow classification.
+- The 0.70 reasoning/model lifecycle closeout is bundled into this work for protocol docs, focused tests, and reasoning-change export polish.
+- Live credentialed provider smokes are still release-validation evidence and are deferred unless credentials are available.
+
 ## Planning Docs
 
 - `docs/versions/0.1.md`
 - `docs/versions/0.2.md`
 - `docs/versions/0.21.md`
 - `docs/versions/0.32.md`
+- `docs/versions/0.33.md`
+- `docs/versions/0.60.md`
+- `docs/versions/0.65.md`
+- `docs/versions/0.70.md`
+- `docs/versions/0.75.md`
+- `docs/versions/0.80.md`
+- `docs/versions/0.90.md`
+- `docs/versions/1.0.md`
 - `docs/CONFIG.md`
 - `docs/USAGE.md`
 - `docs/TESTING.md`
 - `docs/CONTRIBUTING.md`
+- `docs/roadmap/backend.md`
+- `docs/product/backend-capabilities-1.0.md`
 - `docs/product/product-plan.md`
 - `docs/product/tooling-plan.md`
 - `docs/product/architecture-plan.md`

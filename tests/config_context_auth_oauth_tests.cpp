@@ -1013,9 +1013,10 @@ void test_model_and_prompt_config()
                  selected.reasoning_levels.end(),
          "default GPT-5.5 model declares OpenAI reasoning effort levels including xhigh");
   bool saw_priced_builtin = false;
-  bool saw_anthropic_runtime_reasoning_disabled = false;
+  bool saw_anthropic_builtin_reasoning_enabled = false;
   bool saw_kimi_builtin = false;
   bool saw_moonshot_builtin = false;
+  bool saw_openrouter_builtin_without_reasoning = false;
   bool all_builtins_have_context_windows = !builtin.models.empty();
   bool all_builtins_have_text_output = !builtin.models.empty();
   for (auto const& model : builtin.models) {
@@ -1031,10 +1032,15 @@ void test_model_and_prompt_config()
                                model.reports_usage.value_or(false));
     expect(ava::config::find_provider_profile(model.provider_id).has_value(),
            "each builtin model references a centralized provider profile");
-    saw_anthropic_runtime_reasoning_disabled =
-        saw_anthropic_runtime_reasoning_disabled ||
+    saw_anthropic_builtin_reasoning_enabled =
+        saw_anthropic_builtin_reasoning_enabled ||
         (model.provider_id == "anthropic" && model.model_id == "claude-sonnet-4-5" &&
-         !model.supports_reasoning.value_or(false) && model.reasoning_format.empty() && model.reasoning_levels.empty());
+         model.supports_reasoning.value_or(false) && model.reasoning_format == "anthropic_thinking" &&
+         model.reasoning_levels.size() == 1 && model.reasoning_levels[0] == "enabled" &&
+         std::find(model.reasoning_levels.begin(), model.reasoning_levels.end(), "adaptive") ==
+             model.reasoning_levels.end() &&
+         std::find(model.compatibility_quirks.begin(), model.compatibility_quirks.end(), "anthropic_messages") !=
+             model.compatibility_quirks.end());
     saw_kimi_builtin =
         saw_kimi_builtin ||
         (model.provider_id == "kimi" && model.model_id == "kimi-k2-thinking" &&
@@ -1045,16 +1051,23 @@ void test_model_and_prompt_config()
          std::find(model.compatibility_quirks.begin(), model.compatibility_quirks.end(),
                    "preserve_reasoning_content") != model.compatibility_quirks.end());
     saw_moonshot_builtin = saw_moonshot_builtin || (model.provider_id == "moonshot" && model.model_id == "kimi-k2.6" &&
-                                                    model.api_family == "openai_chat_completions" &&
-                                                    model.reasoning_format == "reasoning_content");
+                                                     model.api_family == "openai_chat_completions" &&
+                                                     model.reasoning_format == "reasoning_content");
+    saw_openrouter_builtin_without_reasoning =
+        saw_openrouter_builtin_without_reasoning ||
+        (model.provider_id == "openrouter" && model.model_id == "moonshotai/kimi-k2.6" &&
+         model.api_family == "openai_chat_completions" && !model.supports_reasoning.value_or(false) &&
+         model.reasoning_levels.empty() && model.reasoning_format.empty());
   }
   expect(all_builtins_have_context_windows, "builtin model registry always provides context windows");
   expect(all_builtins_have_text_output, "builtin model registry always declares text output support");
   expect(saw_priced_builtin, "builtin model registry carries static pricing, context, and capability metadata");
-  expect(saw_anthropic_runtime_reasoning_disabled,
-         "Anthropic builtin keeps reasoning disabled until runtime controls are wired");
+  expect(saw_anthropic_builtin_reasoning_enabled,
+         "Anthropic builtin exposes enabled-only native thinking reasoning metadata");
   expect(saw_kimi_builtin && saw_moonshot_builtin,
-         "builtin model registry includes Kimi and Moonshot OpenAI-compatible coding profiles");
+          "builtin model registry includes Kimi and Moonshot OpenAI-compatible coding profiles");
+  expect(saw_openrouter_builtin_without_reasoning,
+         "builtin OpenRouter profile does not advertise reasoning until OpenRouter-native reasoning is implemented");
   expect(ava::config::reasoning_parameter_text(selected) == openai_profile->reasoning_request_parameters,
          "model reasoning parameter text comes from centralized provider/reasoning profiles");
 

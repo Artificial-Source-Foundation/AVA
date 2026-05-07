@@ -3,6 +3,7 @@
 #include "ava/core/json.h"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -56,6 +57,19 @@ std::string string_arg_summary(std::string_view arguments, std::string_view fiel
   return std::string(field) + "=" + safe_summary_text(*value);
 }
 
+std::optional<std::size_t> size_field(std::string_view object, std::string_view key)
+{
+  auto const value = ava::core::json::integer_field(object, key);
+  if (!value || *value < 0) return std::nullopt;
+  return static_cast<std::size_t>(*value);
+}
+
+std::string line_range_summary(std::size_t start_line, std::size_t end_line, std::size_t total_lines)
+{
+  if (start_line == 0 || end_line == 0) return "0/" + std::to_string(total_lines) + " lines";
+  return "lines " + std::to_string(start_line) + "-" + std::to_string(end_line) + "/" + std::to_string(total_lines);
+}
+
 std::string summarize_tool_error(std::string_view result_text)
 {
   auto const error = ava::core::json::object_field(result_text, "error");
@@ -73,6 +87,12 @@ std::string summarize_tool_arguments(ProviderToolCall const& call)
   std::string summary;
   if (call.name == "read_file") {
     summary = append_summary_part(std::move(summary), string_arg_summary(arguments, "path"));
+    if (auto const offset = ava::core::json::integer_field(arguments, "offset")) {
+      summary = append_summary_part(std::move(summary), "offset=" + std::to_string(*offset));
+    }
+    if (auto const limit = ava::core::json::integer_field(arguments, "limit")) {
+      summary = append_summary_part(std::move(summary), "limit=" + std::to_string(*limit));
+    }
     if (auto const max_bytes = ava::core::json::integer_field(arguments, "max_bytes")) {
       summary = append_summary_part(std::move(summary), "max_bytes=" + std::to_string(*max_bytes));
     }
@@ -107,7 +127,26 @@ std::string summarize_tool_arguments(ProviderToolCall const& call)
     summary = append_summary_part(std::move(summary), string_arg_summary(arguments, "include"));
     return summary;
   }
-  if (call.name == "bash") return string_arg_summary(arguments, "command");
+  if (call.name == "bash") {
+    summary = append_summary_part(std::move(summary), string_arg_summary(arguments, "command"));
+    if (auto const max_lines = ava::core::json::integer_field(arguments, "max_lines")) {
+      summary = append_summary_part(std::move(summary), "max_lines=" + std::to_string(*max_lines));
+    }
+    if (auto const limit = ava::core::json::integer_field(arguments, "limit")) {
+      summary = append_summary_part(std::move(summary), "limit=" + std::to_string(*limit));
+    }
+    return summary;
+  }
+  if (call.name == "webfetch") {
+    summary = append_summary_part(std::move(summary), string_arg_summary(arguments, "url"));
+    if (auto const offset = ava::core::json::integer_field(arguments, "offset")) {
+      summary = append_summary_part(std::move(summary), "offset=" + std::to_string(*offset));
+    }
+    if (auto const limit = ava::core::json::integer_field(arguments, "limit")) {
+      summary = append_summary_part(std::move(summary), "limit=" + std::to_string(*limit));
+    }
+    return summary;
+  }
   if (call.name == "apply_patch") {
     auto const edits = ava::core::json::objects_in_array_field(arguments, "edits");
     summary = "edits=" + std::to_string(edits.size());
@@ -125,10 +164,22 @@ std::string summarize_tool_result(ToolDispatchResult const& result)
   if (!result.success && !payload.error_message.empty()) return "error: " + safe_summary_text(payload.error_message);
   if (!result.success) return summarize_tool_error(result.result_text);
   if (result.name == "read_file") {
-    auto const output_bytes =
-        payload.output_bytes.value_or(ava::core::json::integer_field(result.result_text, "output_bytes").value_or(0));
-    auto const total_bytes = payload.total_bytes.value_or(
-        ava::core::json::integer_field(result.result_text, "total_bytes").value_or(output_bytes));
+    auto const output_lines = payload.output_lines.value_or(size_field(result.result_text, "output_lines").value_or(0));
+    auto const total_lines = payload.total_lines.value_or(size_field(result.result_text, "total_lines").value_or(0));
+    if (total_lines > 0 || output_lines > 0) {
+      auto const start_line = payload.start_line.value_or(size_field(result.result_text, "start_line").value_or(0));
+      auto const end_line = payload.end_line.value_or(size_field(result.result_text, "end_line").value_or(0));
+      auto const next_offset =
+          payload.next_offset_line.value_or(size_field(result.result_text, "next_offset_line")
+                                                .value_or(size_field(result.result_text, "next_offset").value_or(0)));
+      std::string summary = line_range_summary(start_line, end_line, total_lines);
+      if (payload.truncated || bool_field_is_true(result.result_text, "truncated")) summary += " (truncated)";
+      if (next_offset > 0) summary += " (next offset " + std::to_string(next_offset) + ")";
+      return summary;
+    }
+    auto const output_bytes = payload.output_bytes.value_or(size_field(result.result_text, "output_bytes").value_or(0));
+    auto const total_bytes =
+        payload.total_bytes.value_or(size_field(result.result_text, "total_bytes").value_or(output_bytes));
     std::string summary = "read " + std::to_string(output_bytes) + "/" + std::to_string(total_bytes) + " bytes";
     if (payload.truncated || bool_field_is_true(result.result_text, "truncated")) summary += " (truncated)";
     return summary;
@@ -156,8 +207,30 @@ std::string summarize_tool_result(ToolDispatchResult const& result)
     std::string summary = "exit " + std::to_string(exit_code);
     if (bool_field_is_true(result.result_text, "timed_out")) summary += " (timed out)";
     if (bool_field_is_true(result.result_text, "canceled")) summary += " (canceled)";
-    if (bool_field_is_true(result.result_text, "truncated")) summary += " (output truncated)";
+    if (bool_field_is_true(result.result_text, "truncated")) {
+      auto const output_lines =
+          payload.output_lines.value_or(size_field(result.result_text, "output_lines").value_or(0));
+      auto const total_lines = payload.total_lines.value_or(size_field(result.result_text, "total_lines").value_or(0));
+      if (total_lines > 0 || output_lines > 0) {
+        summary +=
+            " (output truncated to " + std::to_string(output_lines) + "/" + std::to_string(total_lines) + " lines)";
+      } else {
+        summary += " (output truncated)";
+      }
+    }
     return summary;
+  }
+  if (result.name == "webfetch") {
+    auto const output_lines = payload.output_lines.value_or(size_field(result.result_text, "output_lines").value_or(0));
+    auto const total_lines = payload.total_lines.value_or(size_field(result.result_text, "total_lines").value_or(0));
+    if (total_lines > 0 || output_lines > 0) {
+      auto const start_line = payload.start_line.value_or(size_field(result.result_text, "start_line").value_or(0));
+      auto const end_line = payload.end_line.value_or(size_field(result.result_text, "end_line").value_or(0));
+      std::string summary = "fetched " + line_range_summary(start_line, end_line, total_lines);
+      if (payload.truncated || bool_field_is_true(result.result_text, "truncated")) summary += " (truncated)";
+      return summary;
+    }
+    return "fetched";
   }
   if (result.name == "apply_patch") {
     auto const edits = ava::core::json::objects_in_array_field(result.result_text, "edits");

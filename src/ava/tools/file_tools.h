@@ -79,6 +79,7 @@ struct TextOutput {
   bool line_limited = false;
   std::size_t total_bytes = 0;
   std::size_t output_bytes = 0;
+  std::size_t output_lines = 0;
   std::size_t start_line = 1;
   std::size_t end_line = 0;
   std::size_t total_lines = 0;
@@ -97,7 +98,7 @@ struct FileMutationResult {
 struct ReadOptions {
   std::size_t max_bytes = 50 * 1024;
   std::size_t offset_line = 1;
-  std::size_t max_lines = 0;
+  std::size_t max_lines = 200;
   bool permission_already_checked = false;
 };
 

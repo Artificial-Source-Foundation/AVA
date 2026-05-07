@@ -181,6 +181,8 @@ std::string payload_json_for_runtime_event(RuntimeEvent const& event)
   append_payload_bool_field(out, has_field, "reasoning_signature_present", event.reasoning_signature_present);
   append_payload_bool_field(out, has_field, "diff_truncated", event.diff_truncated);
   append_payload_bool_field(out, has_field, "truncated", event.truncated);
+  append_payload_bool_field(out, has_field, "byte_limited", event.byte_limited);
+  append_payload_bool_field(out, has_field, "line_limited", event.line_limited);
   append_payload_bool_field(out, has_field, "spill_truncated", event.spill_truncated);
   append_payload_number_field(out, has_field, "provider_iterations", event.provider_iterations);
   append_payload_number_field(out, has_field, "tool_calls", event.tool_calls);
@@ -195,6 +197,11 @@ std::string payload_json_for_runtime_event(RuntimeEvent const& event)
   append_payload_number_field(out, has_field, "current_entries", event.current_entries);
   append_payload_number_field(out, has_field, "output_bytes", event.output_bytes);
   append_payload_number_field(out, has_field, "total_bytes", event.total_bytes);
+  append_payload_number_field(out, has_field, "output_lines", event.output_lines);
+  append_payload_number_field(out, has_field, "total_lines", event.total_lines);
+  append_payload_number_field(out, has_field, "start_line", event.start_line);
+  append_payload_number_field(out, has_field, "end_line", event.end_line);
+  append_payload_number_field(out, has_field, "next_offset_line", event.next_offset_line);
   append_payload_number_field(out, has_field, "omitted_bytes", event.omitted_bytes);
   append_payload_number_field(out, has_field, "omitted_lines", event.omitted_lines);
   append_payload_number_field(out, has_field, "visible_matches", event.visible_matches);
@@ -213,9 +220,11 @@ void append_payload_aliases(std::string& out, std::string_view payload_json)
     }
   }
   for (std::string_view key :
-       {"provider_iterations", "tool_calls", "attempt", "max_attempts", "delay_ms", "remaining_ms", "estimated_tokens",
-        "threshold_tokens", "summary_bytes", "snapshot_entries", "current_entries", "output_bytes", "total_bytes",
-        "omitted_bytes", "omitted_lines", "visible_matches", "total_matches"}) {
+       {"provider_iterations", "tool_calls",       "attempt",          "max_attempts",  "delay_ms",
+        "remaining_ms",        "estimated_tokens", "threshold_tokens", "summary_bytes", "snapshot_entries",
+        "current_entries",     "output_bytes",     "total_bytes",      "output_lines",  "total_lines",
+        "start_line",          "end_line",         "next_offset_line", "omitted_bytes", "omitted_lines",
+        "visible_matches",     "total_matches"}) {
     if (auto value = ava::core::json::integer_field(payload_json, key); value && *value > 0) {
       out += ",\"";
       out += key;
@@ -306,6 +315,8 @@ std::string serialize_event_json(RuntimeEvent const& event)
   append_bool_field(out, "reasoning_signature_present", event.reasoning_signature_present);
   append_bool_field(out, "diff_truncated", event.diff_truncated);
   append_bool_field(out, "truncated", event.truncated);
+  append_bool_field(out, "byte_limited", event.byte_limited);
+  append_bool_field(out, "line_limited", event.line_limited);
   append_bool_field(out, "spill_truncated", event.spill_truncated);
   append_number_field(out, "provider_iterations", event.provider_iterations);
   append_number_field(out, "tool_calls", event.tool_calls);
@@ -320,6 +331,11 @@ std::string serialize_event_json(RuntimeEvent const& event)
   append_number_field(out, "current_entries", event.current_entries);
   append_number_field(out, "output_bytes", event.output_bytes);
   append_number_field(out, "total_bytes", event.total_bytes);
+  append_number_field(out, "output_lines", event.output_lines);
+  append_number_field(out, "total_lines", event.total_lines);
+  append_number_field(out, "start_line", event.start_line);
+  append_number_field(out, "end_line", event.end_line);
+  append_number_field(out, "next_offset_line", event.next_offset_line);
   append_number_field(out, "omitted_bytes", event.omitted_bytes);
   append_number_field(out, "omitted_lines", event.omitted_lines);
   append_number_field(out, "visible_matches", event.visible_matches);

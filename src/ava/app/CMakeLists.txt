@@ -8,6 +8,7 @@ add_library(ava_app
   "command_mcp.cpp"
   "command_models.cpp"
   "command_palette.cpp"
+  "command_registry.cpp"
   "command_plugins.cpp"
   "command_sessions.cpp"
   "command_tools.cpp"

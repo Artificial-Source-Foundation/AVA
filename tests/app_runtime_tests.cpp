@@ -419,7 +419,8 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
                                  [](ava::app::RuntimeEvent const& event) {
                                    return event.type == ava::app::RuntimeEventType::ToolResult &&
                                           event.call_id == "call_bash" && event.tool_name == "bash" &&
-                                          event.truncated && event.total_bytes > 0 && !event.spill_path.empty() &&
+                                          event.truncated && event.total_bytes > 0 && event.output_lines > 0 &&
+                                          event.total_lines > 0 && !event.spill_path.empty() &&
                                           event.tool_result_json.find("\"spill_file\"") != std::string::npos;
                                  }),
          "runtime run_prompt emits semantic tool args, result, and spill metadata for frontend adapters");

@@ -57,14 +57,20 @@ std::string truncation_summary(ToolTimelineItem const& item)
 
   std::string summary;
   if (item.truncated) {
-    if (item.output_bytes && item.total_bytes) {
-      summary = "truncated " + std::to_string(*item.output_bytes) + "/" + std::to_string(*item.total_bytes) + " bytes";
+    if (item.start_line && item.end_line && item.total_lines) {
+      summary = "truncated lines " + std::to_string(*item.start_line) + "-" + std::to_string(*item.end_line) + "/" +
+                std::to_string(*item.total_lines);
+    } else if (item.output_lines && item.total_lines) {
+      summary = "truncated " + std::to_string(*item.output_lines) + "/" + std::to_string(*item.total_lines) + " lines";
     } else if (item.visible_matches && item.total_matches) {
       summary =
           "truncated " + std::to_string(*item.visible_matches) + "/" + std::to_string(*item.total_matches) + " matches";
+    } else if (item.output_bytes && item.total_bytes) {
+      summary = "truncated " + std::to_string(*item.output_bytes) + "/" + std::to_string(*item.total_bytes) + " bytes";
     } else {
       summary = "truncated output";
     }
+    if (item.next_offset_line) summary += "; next offset " + std::to_string(*item.next_offset_line);
     std::vector<std::string> omitted;
     if (item.omitted_bytes) omitted.push_back(std::to_string(*item.omitted_bytes) + " bytes");
     if (item.omitted_lines) omitted.push_back(std::to_string(*item.omitted_lines) + " lines");

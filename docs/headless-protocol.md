@@ -25,7 +25,7 @@ Text output is the default. In text output, stdout contains the final assistant 
 
 ## Headless Permission Flags
 
-Headless modes are fail-closed by default for backend permission decisions whose action is `ask`. Print mode installs an explicit deny resolver when no policy flag is provided. RPC mode emits a `permission_requested` event for ask prompts unless a supplied headless policy auto-allows the request. Permission decisions whose action is already `deny` are never upgraded by these flags.
+Headless modes are fail-closed by default for backend permission decisions whose action is `ask`. Print mode installs an explicit deny resolver when no policy flag is provided. RPC mode emits a `permission_requested` event for ask prompts unless a supplied headless policy auto-allows the request. Permission decisions whose action is already `allow` proceed without a resolver, and decisions whose action is already `deny` are never upgraded by these flags.
 
 Supported policy flags:
 
@@ -59,7 +59,20 @@ Invalid permission flag values exit with code `2` and write a usage error to std
 
 ## Provider Credentials
 
-Runtime provider calls resolve credentials for the active session provider. OpenAI keeps its existing stored OAuth/API-key behavior and falls back to `OPENAI_API_KEY` when no stored OpenAI credential exists. Non-OpenAI connect setup stores provider-scoped API keys in `auth.json`, for example `{"anthropic":{"type":"api_key","api_key":"..."}}`, and can also read provider API-key environment variables such as `ANTHROPIC_API_KEY`. Interactive setup is available with `ava login [provider]`, `ava auth login [provider]`, `ava connect [provider]`, and TUI `/connect`; omitting the provider opens a searchable provider picker, and TUI `/connect` uses a modal. OpenAI interactive setup offers browser OAuth, headless OAuth, and API key methods. Secrets are read with terminal echo disabled where possible and masked in TUI prompts. Headless setup can store credentials without a browser or TTY, for example `ava connect openai --headless-oauth`, `printf '%s\n' "$ANTHROPIC_API_KEY" | ava connect anthropic --api-key-stdin`, or `ava connect moonshot --api-key-env MOONSHOT_API_KEY`. AVA only reads credential files when they are owned by the current user and not readable by group/other users; manually-created files should use owner-only permissions such as `chmod 600 ~/.config/ava/auth.json`. OpenAI OAuth credentials refresh automatically before use when a refresh token is present.
+Runtime provider calls resolve credentials for the active session provider. OpenAI keeps its existing stored OAuth/API-key behavior and falls back to `OPENAI_API_KEY` when no stored OpenAI credential exists. Non-OpenAI connect setup stores provider-scoped API keys in `auth.json`, for example `{"anthropic":{"type":"api_key","api_key":"..."}}`, and can also read provider API-key environment variables such as `ANTHROPIC_API_KEY`, `KIMI_API_KEY`, `MOONSHOT_API_KEY`, and `OPENROUTER_API_KEY`. Interactive setup is available with `ava login [provider]`, `ava auth login [provider]`, `ava connect [provider]`, and TUI `/connect`; omitting the provider opens a searchable provider picker, and TUI `/connect` uses a modal. OpenAI interactive setup offers browser OAuth, headless OAuth, and API key methods. Secrets are read with terminal echo disabled where possible and masked in TUI prompts. Headless setup can store credentials without a browser or TTY, for example `ava connect openai --headless-oauth`, `printf '%s\n' "$ANTHROPIC_API_KEY" | ava connect anthropic --api-key-stdin`, or `ava connect moonshot --api-key-env MOONSHOT_API_KEY`. AVA only reads credential files when they are owned by the current user and not readable by group/other users; manually-created files should use owner-only permissions such as `chmod 600 ~/.config/ava/auth.json`. OpenAI OAuth credentials refresh automatically before use when a refresh token is present.
+
+## Provider Retry And Idempotency
+
+Provider transport retries are bounded and provider-neutral. AVA retries transport I/O failures, HTTP rate limits, and transient HTTP responses before any streaming body chunks are delivered. It parses `Retry-After` when present, emits `retry` and `retry_tick` events for visible backoff, and checks cancellation during retry waits.
+
+Retry policy by request class:
+
+- OpenAI, Anthropic, Kimi, Moonshot, and OpenRouter prompt requests are best-effort retries. AVA does not currently attach provider-specific idempotency keys, so a provider could process a request even if the client later sees a transport failure.
+- Streaming prompt retries stop after the first response chunk is delivered. Once text, reasoning, tool-call, or provider events have begun, AVA treats the stream as non-replayable and surfaces later failures instead of silently retrying a partial turn.
+- Non-streaming prompt retries may retry transient/rate-limited failures because no response body has been accepted yet. They are still best-effort because provider-side deduplication is not guaranteed.
+- Context-overflow repair is separate from transport retry. AVA may perform one bounded compaction/retry path when the provider error is classified as context overflow.
+
+Headless clients should treat repeated prompt attempts as possible duplicate provider requests unless a future protocol version exposes provider-specific idempotency metadata.
 
 ## Event Envelope
 
@@ -179,6 +192,12 @@ State:
 
 Returns the active protocol version, session id/path, mode, provider/model, workspace/current directory, cancel flag, current reasoning selection, and loaded context source summary. Reasoning fields are `reasoning_enabled` plus optional `reasoning_level`, `reasoning_budget_tokens`, and `reasoning_display` when enabled.
 
+Example state response shape:
+
+```json
+{"id":"3","type":"response","success":true,"result":{"protocol_version":1,"session_id":"session_...","provider":"anthropic","model":"claude-sonnet-4-5","reasoning_enabled":true,"reasoning_level":"enabled","reasoning_budget_tokens":4096,"reasoning_display":"summarized"}}
+```
+
 `get_state`, `list_models`, `list_sessions`, `permission_grants`, `permission_grant_revoke`, and `permission_grants_clear` remain available while a prompt is active. `get_messages`, `get_session_stats`, `validate_session`, `set_model`, `cycle_model`, `set_reasoning`, `clear_reasoning`, `compact`, `export`, and `context` materialize or mutate session history and are rejected while a prompt is active. RPC `/compact` also marks the session busy while it generates and records the provider summary, so a prompt cannot start midway through compaction.
 
 Messages:
@@ -221,7 +240,14 @@ Model catalog and switching:
 
 `list_models` returns the configured effective model catalog with local `models.json` overrides taking precedence over built-ins. The response includes `default_provider`, `default_model`, `current_provider`, `current_model`, and `models`, where each model includes `provider`, `model`, `display_name`, `family`, `api_family`, `registered`, `selectable`, capability metadata, modality arrays, and `selected` for the active model. `current_provider`/`current_model` are authoritative; when a session restores a removed model, AVA includes a synthetic selected model entry with `selectable:false`. `set_model` switches to a configured selectable model, appends a durable `model_change` session entry only when the provider/model actually changes, reloads provider/model-specific prompt context, and returns the same state shape as `get_state`. If `provider` is omitted, AVA first tries the current provider and then accepts the model id only when it is unique across registered providers. `cycle_model` advances to the next configured selectable model, appends `model_change` when the selection changes, reloads prompt context, and returns the state shape. Model switching commands are rejected while a prompt or RPC compaction is active.
 
-`set_reasoning` validates a reasoning selection against the active model metadata, appends a durable `reasoning_change` entry when it changes, and returns the same state shape as `get_state`. `reasoning_level` is required and must appear in the selected model's `reasoning_levels`. `reasoning_budget_tokens` and `reasoning_display` are accepted only where the selected model's `api_family` permits them: `openai_responses` accepts level/effort only; `openai_chat_completions` accepts level only and uses `clear_reasoning` rather than a `disabled` level; `anthropic_messages` accepts `enabled` with `budget_tokens >= 1024` and below `max_output_tokens` (or AVA's 4096-token provider default when no model limit is declared), accepts `display` values `summarized` or `omitted`, and accepts `adaptive` only without a budget. `clear_reasoning` appends a disabled `reasoning_change` entry when reasoning was enabled and returns the updated state; it omits explicit provider reasoning controls on future requests so the provider/model default applies. Model switches clear the active in-memory reasoning selection; restored sessions recover only the latest valid `reasoning_change` for the restored provider/model after the most recent session-start/model-change boundary.
+`set_reasoning` validates a reasoning selection against the active model metadata, appends a durable `reasoning_change` entry when it changes, and returns the same state shape as `get_state`. `reasoning_level` is required and must appear in the selected model's `reasoning_levels`. `reasoning_budget_tokens` and `reasoning_display` are accepted only where the selected model's `api_family` permits them: `openai_responses` accepts level/effort only; `openai_chat_completions` accepts level only and uses `clear_reasoning` rather than a `disabled` level; `anthropic_messages` accepts `enabled` with `budget_tokens >= 1024` and below `max_output_tokens` (or AVA's 4096-token provider default when no model limit is declared), accepts `display` values `summarized` or `omitted`, and accepts `adaptive` only when a model profile explicitly lists that level and no budget is supplied. The built-in Claude Sonnet 4.5 profile currently exposes `enabled` only. `clear_reasoning` appends a disabled `reasoning_change` entry when reasoning was enabled and returns the updated state; it omits explicit provider reasoning controls on future requests so the provider/model default applies. Model switches clear the active in-memory reasoning selection; restored sessions recover only the latest valid `reasoning_change` for the restored provider/model after the most recent session-start/model-change boundary.
+
+Unsupported reasoning selections fail before a provider request is built:
+
+```json
+{"id":"bad_reasoning","type":"set_reasoning","reasoning_level":"enabled","reasoning_budget_tokens":4096}
+{"id":"bad_reasoning","type":"response","success":false,"error":{"category":"invalid_argument","message":"Kimi reasoning supports level only"}}
+```
 
 The provider-native MVP adds two compatibility rules to model switching: clients should only offer reasoning controls for models that declare support, and AVA rejects provider switches that cannot safely replay the existing conversation history instead of silently dropping tool or reasoning context. A switch is rejected before any `model_change` entry is appended when replayed tool-call history would target a model without explicit tool support, or when provider-native reasoning blocks use a format the target provider/model cannot replay. Compatibility is checked only for the active replay window after the latest compaction entry. Anthropic `anthropic_thinking` blocks require an Anthropic Messages model. OpenAI-compatible `reasoning_content` replay requires matching model metadata plus the `preserve_reasoning_content` compatibility quirk.
 

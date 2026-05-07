@@ -12,6 +12,24 @@
 
 namespace ava::tools::detail {
 
+namespace {
+
+std::size_t logical_line_count(std::string_view text)
+{
+  if (text.empty()) return 0;
+  auto const newline_count = static_cast<std::size_t>(std::ranges::count(text, '\n'));
+  return text.back() == '\n' ? newline_count : newline_count + 1;
+}
+
+void trim_partial_final_line(std::string& text)
+{
+  auto const newline = text.find_last_of('\n');
+  if (newline == std::string::npos || newline + 1 == text.size()) return;
+  text.resize(newline + 1);
+}
+
+}  // namespace
+
 bool is_canceled(ToolContext const& context)
 {
   return context.cancel_requested && context.cancel_requested();
@@ -142,12 +160,17 @@ ava::core::Result<TextOutput> read_head_text(ToolContext const& context, std::fi
     return std::unexpected(std::move(error));
   }
   output.total_lines = saw_any_byte ? (previous_was_newline ? current_line - 1 : current_line) : 0;
+  if (output.content.size() < selected_total_bytes) {
+    trim_partial_final_line(output.content);
+  }
   output.output_bytes = output.content.size();
+  output.output_lines = logical_line_count(output.content);
   output.byte_limited = output.output_bytes < selected_total_bytes;
   output.line_limited = options.max_lines > 0 && end_line_exclusive != std::numeric_limits<std::size_t>::max() &&
                         output.total_lines >= end_line_exclusive;
   output.truncated = output.byte_limited || output.line_limited;
-  if (output.line_limited && output.end_line > 0 && output.end_line < output.total_lines) {
+  output.end_line = output.output_lines > 0 ? output.start_line + output.output_lines - 1 : 0;
+  if (output.line_limited && !output.byte_limited && output.end_line > 0 && output.end_line < output.total_lines) {
     output.next_offset_line = output.end_line + 1;
   }
   return output;

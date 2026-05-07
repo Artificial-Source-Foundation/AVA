@@ -67,4 +67,5 @@ git --no-pager diff --check
 - Keep changes small and subsystem-owned.
 - Preserve backend permission boundaries for file writes and process execution.
 - Add focused regression tests for safety-sensitive changes.
+- For plugin or MCP contract changes, follow [`docs/plugin-compatibility-policy.md`](plugin-compatibility-policy.md) and update deterministic golden fixtures when stable serialized shapes intentionally change.
 - Do not include `build*/` trees or `docs/reference-code/` repositories in reviews.

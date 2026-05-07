@@ -1,7 +1,9 @@
 #include "private_convert.h"
-#include "debug.h"
+
 #include <array>
 #include <cwchar>
+
+#include "debug.h"
 
 attr_t convert_to_attr(Attributes attributes)
 {

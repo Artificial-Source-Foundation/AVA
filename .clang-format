@@ -1,15 +1,28 @@
 BasedOnStyle: Google
 Standard: Latest
-ColumnLimit: 120
+ColumnLimit: 160
 IndentWidth: 2
 DerivePointerAlignment: false
 PointerAlignment: Left
 QualifierAlignment: Right
 BreakBeforeBraces: Custom
 BraceWrapping:
+  AfterClass: true
+  AfterStruct: true
+  AfterUnion: true
+  AfterEnum: true
   AfterFunction: true
+  AfterControlStatement: Always
+  BeforeElse: true
+  BeforeCatch: true
+  AfterNamespace: false
 AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortIfStatementsOnASingleLine: Never
+AlignTrailingComments:
+  Kind: Leave
 SortIncludes: CaseSensitive
+SpacesBeforeTrailingComments: 1
+SpaceInEmptyBraces: Block
 IncludeBlocks: Regroup
 IncludeCategories:
   - Regex: '^"sys.h"'

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <limits>
+
 #include "debug.h"
 
 namespace terminal {
@@ -39,10 +40,7 @@ class Color
     ASSERT(rgb_ < 0x1000000);
   }
 
-  int as_int() const
-  {
-    return static_cast<int>(static_cast<int32_t>(rgb_));
-  }
+  int as_int() const { return static_cast<int>(static_cast<int32_t>(rgb_)); }
 };
 
 } // namespace terminal

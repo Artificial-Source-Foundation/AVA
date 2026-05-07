@@ -29,10 +29,7 @@ struct Window::Impl {
 
  public:
   // Construct an Impl representing stdscr.
-  Impl() : handle_(stdscr)
-  {
-    default_window_initialization();
-  }
+  Impl() : handle_(stdscr) { default_window_initialization(); }
 
   // Wrap an ncurses WINDOW handle returned by a window-creation function.
   // The pointer must be non-null and is owned by this Impl, except for stdscr which is owned by ncurses itself.
@@ -52,7 +49,8 @@ struct Window::Impl {
 
   ~Impl()
   {
-    if (handle_ == stdscr) return;
+    if (handle_ == stdscr)
+      return;
     // https://invisible-island.net/ncurses/man/curs_window.3x.html
     //
     // Calling delwin deletes the named window, freeing all memory associated with it. Subwindows must be deleted
@@ -133,17 +131,56 @@ struct Window::Impl {
     ::wborder_set(handle_, &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &b[6], &b[7]);
   }
 
+  int hline_set(ComplexChar const& complex_char, int n)
+  {
+    // https://invisible-island.net/ncurses/man/curs_border_set.3x.html
+    //
+    // whline_set draws up to n horizontal line cells starting at the cursor without moving the cursor.
+    cchar_t wch = convert_to_cchar(complex_char);
+    return ::whline_set(handle_, &wch, n);
+  }
+
+  int hline_set(Position pos, ComplexChar const& complex_char, int n)
+  {
+    // https://invisible-island.net/ncurses/man/curs_border_set.3x.html
+    //
+    // mvwhline_set first moves the cursor, then draws up to n horizontal line cells without moving the cursor.
+    cchar_t wch = convert_to_cchar(complex_char);
+    return ::mvwhline_set(handle_, pos.row(), pos.col(), &wch, n);
+  }
+
+  int vline_set(ComplexChar const& complex_char, int n)
+  {
+    // https://invisible-island.net/ncurses/man/curs_border_set.3x.html
+    //
+    // wvline_set draws up to n vertical line cells downward from the cursor without moving the cursor.
+    cchar_t wch = convert_to_cchar(complex_char);
+    return ::wvline_set(handle_, &wch, n);
+  }
+
+  int vline_set(Position pos, ComplexChar const& complex_char, int n)
+  {
+    // https://invisible-island.net/ncurses/man/curs_border_set.3x.html
+    //
+    // mvwvline_set first moves the cursor, then draws up to n vertical line cells without moving the cursor.
+    cchar_t wch = convert_to_cchar(complex_char);
+    return ::mvwvline_set(handle_, pos.row(), pos.col(), &wch, n);
+  }
+
   void set_background(ComplexChar background, bool erase)
   {
     cchar_t const wch = convert_to_cchar(background);
-    if (erase) {
+    if (erase)
+    {
       // https://invisible-island.net/ncurses/man/curs_bkgrnd.3x.html
       //
       // The wbkgrndset function manipulates the background of the named window. The background becomes a property of
       // the character and moves with the character through any scrolling and insert/delete line/character operations.
       ::wbkgrndset(handle_, &wch);
       this->erase();
-    } else {
+    }
+    else
+    {
       // https://invisible-island.net/ncurses/man/curs_bkgrnd.3x.html
       //
       // The wbkgrnd function turns off the previous background attributes, logically ORs the requested attributes into
@@ -211,10 +248,7 @@ struct Window::Impl {
 
   void addstr(Position pos, cchar_t const* wchstr) { ::mvwadd_wchstr(handle_, pos.row(), pos.col(), wchstr); }
 
-  void addstr(Position pos, cchar_t const* wchstr, int n)
-  {
-    ::mvwadd_wchnstr(handle_, pos.row(), pos.col(), wchstr, n);
-  }
+  void addstr(Position pos, cchar_t const* wchstr, int n) { ::mvwadd_wchnstr(handle_, pos.row(), pos.col(), wchstr, n); }
 
   void addch(ComplexChar const& complex_char)
   {
@@ -396,4 +430,4 @@ void Window::move(Position pos)
   impl_->move(pos);
 }
 
-}  // namespace terminal
+} // namespace terminal

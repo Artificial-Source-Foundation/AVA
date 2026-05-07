@@ -24,7 +24,8 @@ namespace terminal {
 // Forward declaration.
 class Session;
 
-class Window {
+class Window
+{
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
@@ -32,15 +33,15 @@ class Window {
  private:
   // These are called before ncurses is initialized by the constructor of Session.
   friend class Session;
-  Window();               // Construct an uninitialized Window.
-  void init_as_stdscr();  // Initialize a default constructed window with stdscr.
+  Window();                     // Construct an uninitialized Window.
+  void init_as_stdscr();        // Initialize a default constructed window with stdscr.
 
   // Wrap an already created subwindow Impl.
   explicit Window(std::unique_ptr<Impl> impl);
 
  public:
   // Construct a new Window with its top-left cell at `pos` with dimension `size`.
-  Window(Dimension size, Position pos);  // newwin
+  Window(Dimension size, Position pos); // newwin
 
   // Disallow copying; allow moving a Window.
   Window(Window const&) = delete;
@@ -50,8 +51,6 @@ class Window {
 
   // The destructor must be defined in the .cxx file because of the std::unique_ptr<Impl> with incomplete `Impl`.
   ~Window();
-
-  // clang-format off: keep comments aligned.
 
   // https://invisible-island.net/ncurses/man/curs_window.3x.html
 
@@ -167,7 +166,6 @@ class Window {
   int vprintw(char const* fmt, va_list varglist);                       // vw_printw
   int mvprintw(int y, int x, char const* fmt, ...);                     // mvprintw
 
-  // clang-format on: keep comments aligned.
 };
 
-}  // namespace terminal
+} // namespace terminal

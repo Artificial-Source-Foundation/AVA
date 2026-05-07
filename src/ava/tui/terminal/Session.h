@@ -1,9 +1,10 @@
 #pragma once
 
-#include "ComplexChar.h"
-#include "ColorPair.h"
 #include "Color.h"
+#include "ColorPair.h"
+#include "ComplexChar.h"
 #include "Window.h"
+
 #include <vector>
 
 namespace terminal {
@@ -24,12 +25,7 @@ class Session final
   Session();
   ~Session();
 
-  Rendition const& default_rendition() const
-  {
-    return default_rendition_;
-  }
-
-  // clang-format off: keep comments aligned.
+  Rendition const& default_rendition() const { return default_rendition_; }
 
   // Return a suitable ColorPair for the given colors.
   ColorPair create_color_pair(Color foreground, Color background);      // init_extended_pair
@@ -44,8 +40,6 @@ class Session final
   int get_wch();                                                        // get_wch
   // Synchronize the virtual screen with the physical screen.
   void doupdate();                                                      // doupdate
-
-  // clang-format on: keep comments aligned.
 };
 
 } // namespace terminal

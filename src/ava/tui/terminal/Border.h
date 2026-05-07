@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ComplexChar.h"
+
 #include <array>
 #include <string>
 
@@ -12,6 +13,7 @@ namespace terminal {
 // we only store a single wchar_t here: combining characters are not possible.
 // The Rendition has to be supplied separatedly.
 //
+// clang-format off
 class Border
 {
  public:
@@ -47,5 +49,6 @@ class Border
     return {GraphemeCluster{zero_terminated_character}, rendition};
   }
 };
+// clang-format on
 
 } // namespace terminal

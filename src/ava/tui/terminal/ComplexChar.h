@@ -1,7 +1,8 @@
 #pragma once
 
-#include "Rendition.h"
 #include "GraphemeCluster.h"
+#include "Rendition.h"
+
 #include <cstdint>
 
 namespace terminal {
@@ -20,17 +21,18 @@ class ComplexChar
   ComplexChar(GraphemeCluster const& cell_character, Rendition rendition);
 
   // Specify ColorPair and (optionally) Attributes.
-  ComplexChar(GraphemeCluster const& cell_character, ColorPair color_pair, Attributes attributes = {}) :
-    ComplexChar(cell_character, Rendition{color_pair, attributes}) { }
+  ComplexChar(GraphemeCluster const& cell_character, ColorPair color_pair, Attributes attributes = {})
+      : ComplexChar(cell_character, Rendition{color_pair, attributes})
+  {
+  }
 
   // Use default colors.
-  ComplexChar(GraphemeCluster const& cell_character, Attributes attributes = {}) :
-    ComplexChar(cell_character, {}, attributes) { }
+  ComplexChar(GraphemeCluster const& cell_character, Attributes attributes = {}) : ComplexChar(cell_character, {}, attributes) { }
 
   // Empty variable width character.
-  ComplexChar(Rendition rendition)                              : ComplexChar(GraphemeCluster{}, rendition) { }
+  ComplexChar(Rendition rendition) : ComplexChar(GraphemeCluster{}, rendition) { }
   ComplexChar(ColorPair color_pair, Attributes attributes = {}) : ComplexChar(GraphemeCluster{}, color_pair, attributes) { }
-  ComplexChar(Attributes attributes = {})                       : ComplexChar(GraphemeCluster{}, attributes) { }
+  ComplexChar(Attributes attributes = {}) : ComplexChar(GraphemeCluster{}, attributes) { }
 
   // Accessors.
   GraphemeCluster const& cell_character() const { return cell_character_; }

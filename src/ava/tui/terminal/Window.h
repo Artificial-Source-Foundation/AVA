@@ -1,18 +1,30 @@
 #pragma once
 
-#include "ComplexChar.h"
 #include "Border.h"
+#include "ComplexChar.h"
 #include "Dimension.h"
 #include "Position.h"
+
 #include <memory>
 
+// To print all implemented ncurses functions (from the comments):
+//
+// grep -E '^ *(void|Window ).*// [a-z_]' Window.h | sed -e 's/^.*\/\/ //;s/ \/ /,/' | tr ',' '\n' | sort -u
+//
+// WINDOW related ncurses functions:
+//
+// grep '^extern.*WINDOW *\*.*implemented' /usr/include/curses.h | grep -v SCREEN | sed -re 's/^extern NCURSES_EXPORT\([^)]*\) ([^ (]*).*/\1/' | sort -u
+//
+// Missing members:
+//
+//   mvwin
+//
 namespace terminal {
 
 // Forward declaration.
 class Session;
 
-class Window
-{
+class Window {
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
@@ -20,76 +32,142 @@ class Window
  private:
   // These are called before ncurses is initialized by the constructor of Session.
   friend class Session;
-  Window();                     // Construct an uninitialized Window.
-  void init_as_stdscr();        // Initialize a default constructed window with stdscr.
+  Window();               // Construct an uninitialized Window.
+  void init_as_stdscr();  // Initialize a default constructed window with stdscr.
+
+  // Wrap an already created subwindow Impl.
+  explicit Window(std::unique_ptr<Impl> impl);
 
  public:
   // Construct a new Window with its top-left cell at `pos` with dimension `size`.
-  Window(Dimension size, Position pos);                         // newwin
+  Window(Dimension size, Position pos);  // newwin
+
+  // Disallow copying; allow moving a Window.
+  Window(Window const&) = delete;
+  Window& operator=(Window const&) = delete;
+  Window(Window&&) noexcept;
+  Window& operator=(Window&&) noexcept;
 
   // The destructor must be defined in the .cxx file because of the std::unique_ptr<Impl> with incomplete `Impl`.
   ~Window();
 
-  void set_background(ComplexChar background, bool erase = true);
-  ComplexChar get_background() const;
+  // clang-format off: keep comments aligned.
 
-  void erase();                                                 // https://man.archlinux.org/man/curs_clear.3x.en
-  void refresh();                                               // https://man.archlinux.org/man/curs_refresh.3x.en
-  void set_border(Border const& border);                        // https://man.archlinux.org/man/curs_border_set.3x.en
+  // https://invisible-island.net/ncurses/man/curs_window.3x.html
 
-  // https://invisible-island.net/ncurses/man/curs_addstr.3x.html
+  // Create a Window that is a subwindow of the current Window, with dimensions `size` and top-left screen position `pos`.
+  //
+  // The returned Window shares storage with this Window. The caller must keep parent
+  // and child lifetimes ordered so the subwindow is destroyed before its parent.
+  Window subwin(Dimension size, Position pos);                          // subwin
 
-  void addstr(char const* str);                                 // waddstr
-  void addstr(char8_t const* str);                              //
+  // Create a Window that is a derived subwindow of the current Window, with dimensions `size` and top-left position `pos` relative to this Window.
+  //
+  // The returned Window shares storage with this Window. The caller must keep parent
+  // and child lifetimes ordered so the subwindow is destroyed before its parent.
+  Window derwin(Dimension size, Position pos);                          // derwin
 
-  void addstr(Position pos, char const* str);                   // mvwaddstr
-  void addstr(Position pos, char8_t const* wstr);               //
+  // Move this derived subwindow to `pos` (relative to its parent).
+  //
+  // The current Window must have been created with `derwin` and stay completely inside its parent window.
+  void derwin(Position pos);                                            // mvderwin
 
-  void addstr(char const* str, int n);                          // waddnstr
-  void addstr(char8_t const* str, int n);                       //
+  // Flatten the changed-cell bookkeeping, propagating all subwindow touches to the root Window.
+  void syncup();                                                        // wsyncup
 
-  void addstr(Position pos, char const* str, int n);            // mvwaddnstr
-  void addstr(Position pos, char8_t const* str, int n);         //
+  // Enable or disable automatic syncup upon mutations.
+  void syncok(bool enabled);                                            // syncok
 
-  // https://invisible-island.net/ncurses/man/curs_add_wch.3x.html
-
-  void addch(ComplexChar const& complex_char);                  // wadd_wch
-  void addch(Position pos, ComplexChar const& complex_char);    // mvwadd_wch
-
-  void echochar(ComplexChar const& complex_char);               // wecho_wchar
+  void set_background(ComplexChar background, bool erase = true);       // wbkgrndset / wbkgrnd
+  ComplexChar get_background() const;                                   // wgetbkgrnd
 
   // https://invisible-island.net/ncurses/man/curs_move.3x.html
 
-  void move(Position pos);
+  void move(Position pos);                                              // wmove
 
- private:
-  // https://invisible-island.net/ncurses/man/curs_window.3x.html
+  // https://invisible-island.net/ncurses/man/curs_outopts.3x.html
 
-  // Create or replace the writable subwindow inside this Window with dimension `size` and its top-left cell relative to this Window at `pos`.
+  void clearok(bool bf);                                                // clearok
+  void idcok(bool bf);                                                  // idcok
+  void idlok(bool bf);                                                  // idlok
+  void immedok(bool bf);                                                // immedok
+  void leaveok(bool bf);                                                // leaveok
+  void scrollok(bool bf);                                               // scrollok
+  void setscrreg(int top, int bot);                                     // wsetscrreg
+
+  // https://invisible-island.net/ncurses/man/curs_clear.3x.html
+
+  // Fill window with blanks.
+  void erase();                                                         // werase
+
+  // Same as erase, plus call to clearok.
+  void clear();                                                         // wclear
+
+  // Clear from cursor to the end of the screen.
+  void clrtobot();                                                      // wclrtobot
+
+  // Clear the cursor position and everything to the right.
+  void clrtoeol();                                                      // wclrtoeol
+
+  // https://invisible-island.net/ncurses/man/curs_refresh.3x.html
+
+  // Copy the Window to the physical screen.
   //
-  // The subwindow shares ncurses storage with the parent Window, is owned by this Window, and is deleted before the parent.
-  // Returns false when ncurses rejects the requested rectangle, leaving the Window without a subwindow.
-  bool create_writable_subwindow(Dimension size, Position pos); // derwin
-
-  // Remove the writable subwindow, if one exists.
+  // This is done by first calling `wnoutrefresh`, followed by `Session::doupdate`.
   //
-  // This does not erase terminal cells because ncurses subwindows share parent storage; subsequent writes fall back to the full parent Window.
-  void delete_writable_subwindow();                             // delwin
+  // Unless `leaveok` has been enabled, the physical cursor of the
+  // terminal is left at the location of the cursor this Window.
+  void refresh();                                                       // wrefresh
 
-  // Move the writable subwindow to `pos` relative to this Window.
-  //
-  // Returns false if there is no active subwindow or ncurses rejects the move.
-  bool move_writable_subwindow(Position pos);                   // mvderwin
+  // Copy all touched lines from the Window to the virtual screen.
+  void wnoutrefresh();                                                  // wnoutrefresh
 
-  // Propagate changed-cell bookkeeping from the writable subwindow to this Window.
-  //
-  // This is a no-op when no subwindow is active and is useful before refreshing the parent after subwindow writes.
-  void sync_writable_subwindow_to_parent();                     // wsyncup
+  // Force a refresh of the entire window (in case of corruption of the screen).
+  void redrawwin();                                                     // redrawwin
+  // Force a refresh of specified lines.
+  void wredrawln(int beg_line, int num_lines);                          // wredrawln
 
-  // Enable or disable ncurses automatic touch synchronization from the writable subwindow to this Window.
-  //
-  // Returns false if there is no active subwindow or ncurses rejects the request.
-  bool set_writable_subwindow_sync(bool enabled);               // syncok
+  // https://invisible-island.net/ncurses/man/curs_border_set.3x.html
+
+  // Draw a border around the Window (does not affect the cursor).
+  void set_border(Border const& border);                                // wborder_set
+
+  // Add horizontal line after cursor.
+  void hline_set(ComplexChar const& complex_char, int n);               // whline_set
+  void hline_set(Position pos, ComplexChar const& complex_char, int n); // mvwhline_set
+
+  // Add a vertical line below the cursor.
+  void vline_set(ComplexChar const& complex_char, int n);               // wvline_set
+  void vline_set(Position pos, ComplexChar const& complex_char, int n); // mvwvline_set
+
+  // https://invisible-island.net/ncurses/man/curs_addstr.3x.html
+
+  void addstr(char const* str);                                         // waddstr
+  void addstr(char8_t const* str);                                      //
+
+  void addstr(Position pos, char const* str);                           // mvwaddstr
+  void addstr(Position pos, char8_t const* wstr);                       //
+
+  void addstr(char const* str, int n);                                  // waddnstr
+  void addstr(char8_t const* str, int n);                               //
+
+  void addstr(Position pos, char const* str, int n);                    // mvwaddnstr
+  void addstr(Position pos, char8_t const* str, int n);                 //
+
+  // https://invisible-island.net/ncurses/man/curs_add_wch.3x.html
+
+  void addch(ComplexChar const& complex_char);                          // wadd_wch
+  void addch(Position pos, ComplexChar const& complex_char);            // mvwadd_wch
+
+  void echochar(ComplexChar const& complex_char);                       // wecho_wchar
+
+  // https://invisible-island.net/ncurses/man/curs_printw.3x.html
+
+  int printw(char const* fmt, ...);                                     // wprintw
+  int vprintw(char const* fmt, va_list varglist);                       // vw_printw
+  int mvprintw(int y, int x, char const* fmt, ...);                     // mvprintw
+
+  // clang-format on: keep comments aligned.
 };
 
-} // namespace terminal
+}  // namespace terminal

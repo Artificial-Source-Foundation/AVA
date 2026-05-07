@@ -29,17 +29,23 @@ class Session final
     return default_rendition_;
   }
 
+  // clang-format off: keep comments aligned.
+
   // Return a suitable ColorPair for the given colors.
-  ColorPair create_color_pair(Color foreground, Color background);
+  ColorPair create_color_pair(Color foreground, Color background);      // init_extended_pair
 
-  Window const& stdscr() const { return stdscr_; }
-  Window& stdscr() { return stdscr_; }
+  Window const& stdscr() const { return stdscr_; }                      // stdscr
+  Window& stdscr() { return stdscr_; }                                  //
 
-  uint32_t rows() const;
-  uint32_t cols() const;
+  uint32_t rows() const;                                                // LINES
+  uint32_t cols() const;                                                // COLS
   Dimension size() const { return {rows(), cols()}; }
 
-  int get_wch();
+  int get_wch();                                                        // get_wch
+  // Synchronize the virtual screen with the physical screen.
+  void doupdate();                                                      // doupdate
+
+  // clang-format on: keep comments aligned.
 };
 
 } // namespace terminal

@@ -1,4 +1,7 @@
 #include "Window.h"
+
+#include <utility>
+
 #include "debug.h"
 
 // This header must be included last.
@@ -6,228 +9,236 @@
 
 namespace terminal {
 
-struct Window::Impl
-{
-  // We store a new window initially in active_window_.
-  // If a subwindow is created, then active_window_ is stored in parent_window_ and the new subwindow is stored in active_window_.
-  WINDOW* active_window_;
-  WINDOW* parent_window_ = nullptr;
+struct Window::Impl {
+ private:
+  WINDOW* handle_;
 
-  // Return the ncurses window that owns this Window's full rectangle.
-  // If a subwindow is active, this is the parent returned by newwin; otherwise it is the active window itself. Use
-  // this for operations, such as border drawing and whole-window refreshes, whose semantics include margin cells.
-  WINDOW* outer_window() const
+ private:
+  void default_window_initialization()
   {
-    return parent_window_ ? parent_window_ : active_window_;
+    int res;
+    res = ::keypad(handle_, TRUE);
+    ASSERT(res == OK);
+    // Block on calls to get_wch: use a dedicated thread to get input.
+    res = ::nodelay(handle_, FALSE);
+    ASSERT(res == OK);
+    // Wait after seeing an ESC for more characters to allow a keyboard to send a full escape sequence.
+    res = ::notimeout(handle_, FALSE);
+    ASSERT(res == OK);
   }
 
+ public:
   // Construct an Impl representing stdscr.
-  Impl() : active_window_(stdscr)
+  Impl() : handle_(stdscr)
   {
+    default_window_initialization();
   }
+
+  // Wrap an ncurses WINDOW handle returned by a window-creation function.
+  // The pointer must be non-null and is owned by this Impl, except for stdscr which is owned by ncurses itself.
+  explicit Impl(WINDOW* handle) : handle_(handle) { ASSERT(handle_); }
 
   Impl(Dimension size, Position pos)
   {
-    // From https://docs.oracle.com/cd/E86824_01/html/E54767/newwin-3curses.html
+    // https://invisible-island.net/ncurses/man/curs_window.3x.html
     //
-    // The newwin() routine creates and returns a pointer to a new window with the given number of lines, nlines, and columns, ncols.
-    // The upper left-hand corner of the window is at line begin_y, column begin_x . If either nlines or ncols is zero, they default
-    // to LINES — begin_y and COLS — begin_x. A new full-screen window is created by calling newwin(0,0,0,0).
-    active_window_ = ::newwin(size.height(), size.width(), pos.row(), pos.col());
+    // Calling newwin creates and returns a pointer to a new window with the given number of lines and columns. The
+    // upper left-hand corner of the window is at line begin_y, column begin_x. If either nlines or ncols is zero,
+    // they default to LINES - begin_y and COLS - begin_x.
+    handle_ = ::newwin(size.height(), size.width(), pos.row(), pos.col());
+    ASSERT(handle_);
+    default_window_initialization();
   }
 
   ~Impl()
   {
-    delete_subwindow();
-    if (active_window_ == stdscr)
-      return;
-    // From https://docs.oracle.com/cd/E86824_01/html/E54767/delwin-3xcurses.html
+    if (handle_ == stdscr) return;
+    // https://invisible-island.net/ncurses/man/curs_window.3x.html
     //
-    // The delwin() function deletes the specified window, freeing up the memory associated with it.
-    // Deleting a parent window without deleting its subwindows and then trying to manipulate the subwindows will have undefined results.
-    ::delwin(active_window_);
+    // Calling delwin deletes the named window, freeing all memory associated with it. Subwindows must be deleted
+    // before the main window can be deleted.
+    ::delwin(handle_);
   }
 
-  // Return true if this Window has a subwindow.
-  bool is_subwindow() const
+  WINDOW* subwin(Dimension size, Position pos)
   {
-    return parent_window_ != nullptr;
+    // https://invisible-island.net/ncurses/man/curs_window.3x.html
+    //
+    // Calling subwin creates and returns a pointer to a new window with the given number of lines and columns. The
+    // window is at position (begin_y, begin_x) on the screen. The subwindow shares memory with the window orig, its
+    // ancestor, so changes made to one window will affect both windows.
+    return ::subwin(handle_, size.height(), size.width(), pos.row(), pos.col());
   }
 
-  // Create or replace the derived ncurses subwindow used for margin-aware writes.
-  // `size` is the writable area's height and width, and `pos` is the writable area's top-left cell relative to
-  // active_window_. The old subwindow is deleted first because ncurses requires subwindows to be destroyed before
-  // their parent; if derwin fails, no subwindow remains and write operations fall back to the parent window.
-  // The returned pointer is owned by this Impl and is valid until the next create_subwindow, delete_subwindow, or
-  // destructor call.
-  WINDOW* create_subwindow(Dimension size, Position pos)
+  WINDOW* derwin(Dimension size, Position pos)
   {
-    delete_subwindow();
-    WINDOW* const subwindow = ::derwin(active_window_, size.height(), size.width(), pos.row(), pos.col());
-    if (!subwindow)
-      return nullptr;
-    parent_window_ = active_window_;
-    active_window_ = subwindow;
-    return subwindow;
+    // https://invisible-island.net/ncurses/man/curs_window.3x.html
+    //
+    // Calling derwin is the same as calling subwin, except that begin_y and begin_x are relative to the origin of the
+    // window orig rather than the screen. There is no difference between the subwindows and the derived windows.
+    return ::derwin(handle_, size.height(), size.width(), pos.row(), pos.col());
   }
 
-  // Delete the currently installed derived subwindow, if any.
-  // This releases only the subwindow object; ncurses subwindows share backing storage with their parent, so screen
-  // contents are not erased and the parent remains valid. The method is idempotent to make margin reset and
-  // destructor paths safe to call even when no subwindow was created.
-  void delete_subwindow()
+  int derwin(Position pos)
   {
-    if (!is_subwindow())
-      return;
-    ::delwin(active_window_);
-    active_window_ = parent_window_;
-    parent_window_ = nullptr;
+    // https://invisible-island.net/ncurses/man/curs_window.3x.html
+    //
+    // Calling mvderwin moves a derived window (or subwindow) inside its parent window. The screen-relative parameters
+    // of the window are not changed. This routine is used to display different parts of the parent window at the same
+    // physical position on the screen.
+    return ::mvderwin(handle_, pos.row(), pos.col());
   }
 
-  // Move an existing derived subwindow within its parent without changing its dimensions.
-  // `pos` is relative to active_window_. ncurses returns ERR if the moved subwindow would not fit in the parent;
-  // callers can use the return value to decide whether to recreate the subwindow or report an invalid margin.
-  int move_subwindow(Position pos)
+  void syncup()
   {
-    if (!is_subwindow())
-      return ERR;
-    return ::mvderwin(active_window_, pos.row(), pos.col());
+    // https://invisible-island.net/ncurses/man/curs_window.3x.html
+    //
+    // Calling wsyncup touches all locations in ancestors of win that are changed in win. If syncok is called with
+    // second argument TRUE then wsyncup is called automatically whenever there is a change in the window.
+    ::wsyncup(handle_);
   }
 
-  // Mark parent cells touched after writes through the derived subwindow.
-  // Subwindows and parents share character storage but not all refresh bookkeeping; wsyncup propagates touch state
-  // from the writable subwindow to ancestors so a later parent refresh knows which cells changed. It is a no-op when
-  // no subwindow is active.
-  void sync_subwindow_to_parent()
+  int syncok(bool enabled)
   {
-    if (!is_subwindow())
-      return;
-    ::wsyncup(active_window_);
-  }
-
-  // Enable or disable ncurses automatic synchronization from the subwindow to its parent after each change.
-  // The boolean controls ncurses syncok for the active subwindow only. The return value is ncurses OK/ERR so callers
-  // can preserve error context when subwindow creation failed or ncurses rejects the request.
-  int set_subwindow_sync(bool enabled)
-  {
-    if (!is_subwindow())
-      return ERR;
-    return ::syncok(active_window_, enabled);
+    // https://invisible-island.net/ncurses/man/curs_window.3x.html
+    //
+    // If syncok is called with second argument TRUE then wsyncup is called automatically whenever there is a change in
+    // the window.
+    return ::syncok(handle_, enabled);
   }
 
   void erase()
   {
-    // See https://docs.oracle.com/cd/E88353_01/html/E37849/werase-3curses.html
+    // https://invisible-island.net/ncurses/man/curs_clear.3x.html
     //
-    // The werase() routine copy blanks to every position in the window.
-    ::werase(active_window_);
+    // The erase and werase routines copy blanks to every position in the window, clearing the screen.
+    ::werase(handle_);
   }
 
   void refresh()
   {
-    // From https://docs.oracle.com/cd/E88353_01/html/E37849/wrefresh-3curses.html
+    // https://invisible-island.net/ncurses/man/curs_refresh.3x.html
     //
-    // The refresh() and wrefresh() routines (or wnoutrefresh() and doupdate()) must be called to get any output on the terminal,
-    // as other routines merely manipulate data structures. The routine wrefresh() copies the named window to the physical terminal screen,
-    // taking into account what is already there in order to do optimizations. The refresh() routine is the same, using stdscr as the default window.
-    // Unless leaveok() has been enabled, the physical cursor of the terminal is left at the location of the cursor for that window.
-    if (is_subwindow())
-      sync_subwindow_to_parent();
-    ::wrefresh(outer_window());
+    // The refresh and wrefresh routines (or wnoutrefresh and doupdate) must be called to get any output on the
+    // terminal, as other routines merely manipulate data structures. The routine wrefresh copies the named window to
+    // the physical terminal screen.
+    ::wrefresh(handle_);
   }
 
-  void wborder_set(std::array<cchar_t, 8> const& b)
+  void border_set(std::array<cchar_t, 8> const& b)
   {
-    ::wborder_set(outer_window(), &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &b[6], &b[7]);
+    // https://invisible-island.net/ncurses/man/curs_border_set.3x.html
+    //
+    // The border_set and wborder_set functions draw a border around the edges of the current or specified window.
+    ::wborder_set(handle_, &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &b[6], &b[7]);
   }
 
-  ComplexChar outer_background() const
+  void set_background(ComplexChar background, bool erase)
   {
+    cchar_t const wch = convert_to_cchar(background);
+    if (erase) {
+      // https://invisible-island.net/ncurses/man/curs_bkgrnd.3x.html
+      //
+      // The wbkgrndset function manipulates the background of the named window. The background becomes a property of
+      // the character and moves with the character through any scrolling and insert/delete line/character operations.
+      ::wbkgrndset(handle_, &wch);
+      this->erase();
+    } else {
+      // https://invisible-island.net/ncurses/man/curs_bkgrnd.3x.html
+      //
+      // The wbkgrnd function turns off the previous background attributes, logically ORs the requested attributes into
+      // the window rendition, and applies this setting to every character position in that window.
+      ::wbkgrnd(handle_, &wch);
+    }
+  }
+
+  ComplexChar get_background() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_bkgrnd.3x.html
+    //
+    // The getbkgrnd and wgetbkgrnd functions obtain the window's current background character and rendition.
     cchar_t background;
-    ::wgetbkgrnd(outer_window(), &background);
+    ::wgetbkgrnd(handle_, &background);
     return convert_to_ComplexChar(background);
   }
 
   void addstr(char const* str)
   {
-    ::waddstr(active_window_, str);
+    // https://invisible-island.net/ncurses/man/curs_addstr.3x.html
+    //
+    // The addstr, addnstr, waddstr, and waddnstr routines write all characters of the null-terminated string str on
+    // the given window. The n variants write at most n characters.
+    ::waddstr(handle_, str);
   }
 
   void addstr(char8_t const* utf8_str)
   {
     // Instead of using waddwstr, which would require application-side conversion from char8_t (utf8) to wchar_t,
     // it is better to just cast to `char const*` and let the terminal do that.
-    ::waddstr(active_window_, reinterpret_cast<char const*>(utf8_str));
+    ::waddstr(handle_, reinterpret_cast<char const*>(utf8_str));
   }
 
-  void addstr(Position pos, char const* str)
-  {
-    ::mvwaddstr(active_window_, pos.row(), pos.col(), str);
-  }
+  void addstr(Position pos, char const* str) { ::mvwaddstr(handle_, pos.row(), pos.col(), str); }
 
   void addstr(Position pos, char8_t const* utf8_str)
   {
     // Instead of using mvwaddwstr, which would require application-side conversion from char8_t (utf8) to wchar_t,
     // it is better to just cast to `char const*` and let the terminal do that.
-    ::mvwaddstr(active_window_, pos.row(), pos.col(), reinterpret_cast<char const*>(utf8_str));
+    ::mvwaddstr(handle_, pos.row(), pos.col(), reinterpret_cast<char const*>(utf8_str));
   }
 
-  void addstr(char const* str, int n)
-  {
-    ::waddnstr(active_window_, str, n);
-  }
+  void addstr(char const* str, int n) { ::waddnstr(handle_, str, n); }
 
-  void addstr(char8_t const* utf8_str, int n)
-  {
-    ::waddnstr(active_window_, reinterpret_cast<char const*>(utf8_str), n);
-  }
+  void addstr(char8_t const* utf8_str, int n) { ::waddnstr(handle_, reinterpret_cast<char const*>(utf8_str), n); }
 
-  void addstr(Position pos, char const* str, int n)
-  {
-    ::mvwaddnstr(active_window_, pos.row(), pos.col(), str, n);
-  }
+  void addstr(Position pos, char const* str, int n) { ::mvwaddnstr(handle_, pos.row(), pos.col(), str, n); }
 
   void addstr(Position pos, char8_t const* utf8_str, int n)
   {
-    ::mvwaddnstr(active_window_, pos.row(), pos.col(), reinterpret_cast<char const*>(utf8_str), n);
+    ::mvwaddnstr(handle_, pos.row(), pos.col(), reinterpret_cast<char const*>(utf8_str), n);
   }
 
   void addstr(cchar_t const* wchstr)
   {
-    ::wadd_wchstr(active_window_, wchstr);
+    // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
+    //
+    // The wadd_wchstr functions copy the array of complex characters into the window image structure at and after the
+    // cursor position. The four functions with n as the last argument copy at most n elements.
+    ::wadd_wchstr(handle_, wchstr);
   }
 
-  void addstr(cchar_t const* wchstr, int n)
-  {
-    ::wadd_wchnstr(active_window_, wchstr, n);
-  }
+  void addstr(cchar_t const* wchstr, int n) { ::wadd_wchnstr(handle_, wchstr, n); }
 
-  void addstr(Position pos, cchar_t const* wchstr)
-  {
-    ::mvwadd_wchstr(active_window_, pos.row(), pos.col(), wchstr);
-  }
+  void addstr(Position pos, cchar_t const* wchstr) { ::mvwadd_wchstr(handle_, pos.row(), pos.col(), wchstr); }
 
   void addstr(Position pos, cchar_t const* wchstr, int n)
   {
-    ::mvwadd_wchnstr(active_window_, pos.row(), pos.col(), wchstr, n);
+    ::mvwadd_wchnstr(handle_, pos.row(), pos.col(), wchstr, n);
   }
 
   void addch(ComplexChar const& complex_char)
   {
+    // https://invisible-island.net/ncurses/man/curs_add_wch.3x.html
+    //
+    // The wadd_wch function places the complex character at the current cursor position of the specified window, then
+    // advances the cursor position.
     cchar_t wch = convert_to_cchar(complex_char);
-    ::wadd_wch(active_window_, &wch);
+    ::wadd_wch(handle_, &wch);
   }
 
   void addch(Position pos, ComplexChar const& complex_char)
   {
     cchar_t wch = convert_to_cchar(complex_char);
-    ::mvwadd_wch(active_window_, pos.row(), pos.col(), &wch);
+    ::mvwadd_wch(handle_, pos.row(), pos.col(), &wch);
   }
 
   void echochar(ComplexChar const& complex_char)
   {
+    // https://invisible-island.net/ncurses/man/curs_add_wch.3x.html
+    //
+    // The wecho_wchar function is functionally equivalent to calling wadd_wch followed by wrefresh.
     cchar_t wch = convert_to_cchar(complex_char);
-    ::wecho_wchar(active_window_, &wch);
+    ::wecho_wchar(handle_, &wch);
   }
 
   void move(Position pos)
@@ -238,7 +249,7 @@ struct Window::Impl
     // line y and column x. The terminal's cursor does not move until
     // refresh(3x) is called. The position (y, x) is relative to the upper
     // left-hand corner of the window, which has coordinates (0, 0).
-    ::wmove(active_window_, pos.row(), pos.col());
+    ::wmove(handle_, pos.row(), pos.col());
   }
 };
 
@@ -257,65 +268,53 @@ Window::Window(Dimension size, Position pos) : impl_(std::make_unique<Impl>(size
 {
 }
 
+Window::Window(std::unique_ptr<Impl> impl) : impl_(std::move(impl))
+{
+}
+
+Window::Window(Window&&) noexcept = default;
+
+Window& Window::operator=(Window&&) noexcept = default;
+
 Window::~Window()
 {
 }
 
-bool Window::create_writable_subwindow(Dimension size, Position pos)
+Window Window::subwin(Dimension size, Position pos)
 {
-  return impl_->create_subwindow(size, pos) != nullptr;
+  return Window(std::make_unique<Impl>(impl_->subwin(size, pos)));
 }
 
-void Window::delete_writable_subwindow()
+Window Window::derwin(Dimension size, Position pos)
 {
-  impl_->delete_subwindow();
+  return Window(std::make_unique<Impl>(impl_->derwin(size, pos)));
 }
 
-bool Window::move_writable_subwindow(Position pos)
+void Window::derwin(Position pos)
 {
-  return impl_->move_subwindow(pos) != ERR;
+  int res = impl_->derwin(pos);
+  ASSERT(res != ERR);
 }
 
-void Window::sync_writable_subwindow_to_parent()
+void Window::syncup()
 {
-  impl_->sync_subwindow_to_parent();
+  impl_->syncup();
 }
 
-bool Window::set_writable_subwindow_sync(bool enabled)
+void Window::syncok(bool enabled)
 {
-  return impl_->set_subwindow_sync(enabled) != ERR;
+  int res = impl_->syncok(enabled);
+  ASSERT(res != ERR);
 }
 
 void Window::set_background(ComplexChar background, bool erase)
 {
-  cchar_t const wch = convert_to_cchar(background);
-  if (erase)
-  {
-    // See https://docs.oracle.com/cd/E86824_01/html/E54767/wbkgrndset-3xcurses.html
-    //
-    // The wbkgrndset() function turns off the previous background attributes, logical OR the requested attributes into the window rendition,
-    // and sets the background property of the current or specified window based on the information in cchar of the second parameter.
-    ::wbkgrndset(impl_->active_window_, &wch);
-    impl_->erase();
-  }
-  else
-  {
-    // See https://docs.oracle.com/cd/E88353_01/html/E37849/wbkgrnd-3xcurses.html
-    //
-    // The bkgrnd() and wbkgrnd() functions turn off the previous background attributes, logical OR the requested attributes into the window rendition,
-    // and set the background property of the current or specified window and then apply this setting to every character position in that window:
-    //
-    // * The rendition of every character on the screen is changed to the new window rendition.
-    // * Wherever the former background character appears, it is changed to the new background character.
-    ::wbkgrnd(impl_->active_window_, &wch);
-  }
+  impl_->set_background(background, erase);
 }
 
 ComplexChar Window::get_background() const
 {
-  cchar_t background;
-  ::wgetbkgrnd(impl_->active_window_, &background);
-  return convert_to_ComplexChar(background);
+  return impl_->get_background();
 }
 
 void Window::erase()
@@ -330,11 +329,11 @@ void Window::refresh()
 
 void Window::set_border(Border const& border)
 {
-  ComplexChar const background = impl_->outer_background();
+  ComplexChar const background = get_background();
   std::array<cchar_t, 8> complex_characters;
   for (int i = 0; i < 8; ++i)
     complex_characters[i] = convert_to_cchar(border.get_complex_character(i, background.rendition()));
-  impl_->wborder_set(complex_characters);
+  impl_->border_set(complex_characters);
 }
 
 void Window::addstr(char const* str)
@@ -397,4 +396,4 @@ void Window::move(Position pos)
   impl_->move(pos);
 }
 
-} // namespace terminal
+}  // namespace terminal

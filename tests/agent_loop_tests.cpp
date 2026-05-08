@@ -98,9 +98,9 @@ void test_agent_loop_text_only_turn()
   expect(transport.requests().size() == 1 &&
              transport.requests()[0].url == "https://chatgpt.com/backend-api/codex/responses" &&
              transport.requests()[0].headers.at("ChatGPT-Account-Id") == "acct_123",
-         "agent loop routes OpenAI OAuth turns through Codex endpoint");
+         "agent loop routes OpenAI OAuth turns through delegated endpoint");
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("\"store\":false") != std::string::npos,
-         "agent loop disables Codex response storage for OpenAI OAuth turns");
+         "agent loop disables response storage for OpenAI OAuth turns");
   auto entries = store.load();
   expect(entries && entries->size() == 2 && (*entries)[0].type == ava::session::EntryType::UserMessage &&
              (*entries)[1].type == ava::session::EntryType::AssistantMessage,
@@ -268,7 +268,8 @@ void test_agent_loop_tool_turn_and_continuation()
              result->tool_timeline.front().argument_summary.find("path=note.txt") != std::string::npos &&
              result->tool_timeline.front().argument_summary.find('{') == std::string::npos &&
              result->tool_timeline.front().result_summary.find("tool content") == std::string::npos &&
-             result->tool_timeline.front().result_summary.find("bytes") != std::string::npos &&
+             result->tool_timeline.front().result_summary.find("lines") != std::string::npos &&
+             result->tool_timeline.front().output_lines && *result->tool_timeline.front().output_lines == 1 &&
              result->tool_timeline.front().structured_result_json.find("\"status\":\"success\"") != std::string::npos &&
              result->tool_timeline.front().content_type == "application/json",
          "agent loop returns safe compact tool timeline summaries and structured result metadata");
@@ -364,6 +365,17 @@ void test_agent_loop_permission_resolver_threads_to_tools()
              ava::core::json::string_field(resolver_audits[1].data_json, "resolution") == "allow" &&
              ava::core::json::string_field(resolver_audits[1].data_json, "resolution_source") == "resolver",
          "agent loop persists linked ask and resolver permission audit entries");
+  auto const resolver_structured_permission_ids =
+      result && !result->tool_timeline.empty()
+          ? ava::core::json::strings_in_array_field(result->tool_timeline.front().structured_result_json,
+                                                    "permission_request_ids")
+          : std::vector<std::string>{};
+  expect(resolver_structured_permission_ids.size() == 1 &&
+             resolver_structured_permission_ids[0] == resolver_permission_request_id,
+         "agent loop links structured tool result to permission audit request id");
+  expect(result && !result->tool_timeline.empty() && result->tool_timeline.front().permission_request_ids.size() == 1 &&
+             result->tool_timeline.front().permission_request_ids[0] == resolver_permission_request_id,
+         "agent loop exposes permission request ids on tool timeline entries");
 
   {
     auto const bash_root = temp_root() / "agent-bash-ask-allow";

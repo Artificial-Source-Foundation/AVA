@@ -2,6 +2,7 @@
 
 #include "ava/tools/spill_files.h"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cerrno>
@@ -138,26 +139,89 @@ ava::core::Result<std::vector<std::string>> parse_command_argv(std::string_view 
   return argv;
 }
 
-void append_tail(BashResult& result, std::string_view chunk, std::size_t max_bytes)
+std::size_t logical_line_count(std::string_view text)
+{
+  if (text.empty()) return 0;
+  auto const newline_count = static_cast<std::size_t>(std::ranges::count(text, '\n'));
+  return text.back() == '\n' ? newline_count : newline_count + 1;
+}
+
+std::size_t byte_offset_for_line(std::string_view text, std::size_t line)
+{
+  if (line <= 1) return 0;
+  std::size_t current_line = 1;
+  for (std::size_t index = 0; index < text.size(); ++index) {
+    if (text[index] != '\n') continue;
+    ++current_line;
+    if (current_line == line) return index + 1;
+  }
+  return text.size();
+}
+
+void trim_to_last_lines(BashResult& result, std::size_t max_lines)
+{
+  auto const output_lines = logical_line_count(result.output);
+  if (output_lines == 0) return;
+  if (max_lines == 0) {
+    result.output.clear();
+    result.line_limited = true;
+    return;
+  }
+  if (output_lines <= max_lines) return;
+  auto const start_line = output_lines - max_lines + 1;
+  auto const offset = byte_offset_for_line(result.output, start_line);
+  if (offset == 0) return;
+  result.output.erase(0, offset);
+  result.line_limited = true;
+}
+
+void trim_to_max_bytes(BashResult& result, std::size_t max_bytes)
+{
+  if (result.output.empty()) return;
+  if (max_bytes == 0) {
+    result.output.clear();
+    result.byte_limited = true;
+    return;
+  }
+  if (result.output.size() <= max_bytes) return;
+
+  auto offset = result.output.size() - max_bytes;
+  auto const newline = result.output.find('\n', offset);
+  if (newline != std::string::npos && newline + 1 < result.output.size()) {
+    offset = newline + 1;
+  }
+  result.output.erase(0, offset);
+  result.byte_limited = true;
+}
+
+void append_output(BashResult& result, std::string_view chunk, BashOptions const& options, bool& saw_output,
+                   bool& previous_was_newline, std::size_t& newline_count)
 {
   result.total_bytes += chunk.size();
-  if (max_bytes == 0) {
-    result.truncated = result.total_bytes > 0;
-    return;
-  }
-
-  if (chunk.size() >= max_bytes) {
-    result.output.assign(chunk.substr(chunk.size() - max_bytes));
-    result.truncated = true;
-    return;
-  }
-
-  auto const next_size = result.output.size() + chunk.size();
-  if (next_size > max_bytes) {
-    result.output.erase(0, next_size - max_bytes);
-    result.truncated = true;
+  for (char const ch : chunk) {
+    saw_output = true;
+    if (ch == '\n') {
+      ++newline_count;
+      previous_was_newline = true;
+    } else {
+      previous_was_newline = false;
+    }
   }
   result.output.append(chunk);
+  trim_to_last_lines(result, options.max_lines);
+  trim_to_max_bytes(result, options.max_bytes);
+  result.output_bytes = result.output.size();
+}
+
+void finalize_output(BashResult& result, BashOptions const& options, bool saw_output, bool previous_was_newline,
+                     std::size_t newline_count)
+{
+  result.total_lines = saw_output ? newline_count + (previous_was_newline ? 0 : 1) : 0;
+  if (options.max_lines > 0 && result.total_lines > options.max_lines) result.line_limited = true;
+  result.output_bytes = result.output.size();
+  result.output_lines = logical_line_count(result.output);
+  result.omitted_lines = result.total_lines > result.output_lines ? result.total_lines - result.output_lines : 0;
+  result.truncated = result.byte_limited || result.line_limited || result.output_bytes < result.total_bytes;
 }
 
 ssize_t read_retry(int fd, char* data, std::size_t size)
@@ -334,6 +398,9 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
   BashResult result;
   SpillBuffer spill_buffer;
   bool running = true;
+  bool saw_output = false;
+  bool previous_was_newline = false;
+  std::size_t newline_count = 0;
   auto const deadline = std::chrono::steady_clock::now() + options.timeout;
   auto last_progress = std::chrono::steady_clock::now();
   std::size_t next_progress_bytes = kBashProgressByteInterval;
@@ -354,7 +421,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
       if (bytes > 0) {
         std::string_view const chunk(buffer.data(), static_cast<std::size_t>(bytes));
         spill_buffer.append(chunk);
-        append_tail(result, chunk, options.max_bytes);
+        append_output(result, chunk, options, saw_output, previous_was_newline, newline_count);
         if (auto progress = maybe_emit_progress(); !progress) {
           signal_process(pid, can_signal_group, SIGKILL);
           waitpid_retry(pid, &status, 0);
@@ -412,7 +479,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     }
     std::string_view const chunk(buffer.data(), static_cast<std::size_t>(bytes));
     spill_buffer.append(chunk);
-    append_tail(result, chunk, options.max_bytes);
+    append_output(result, chunk, options, saw_output, previous_was_newline, newline_count);
     if (auto progress = maybe_emit_progress(); !progress) return std::unexpected(std::move(progress.error()));
   }
   read_fd.reset();
@@ -424,6 +491,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
   } else if (WIFSIGNALED(status)) {
     result.exit_code = 128 + WTERMSIG(status);
   }
+  finalize_output(result, options, saw_output, previous_was_newline, newline_count);
   if (result.truncated && !context.spill_dir.empty()) {
     auto spill = write_spill_file(context, "bash", "txt", spill_buffer);
     if (!spill) return std::unexpected(std::move(spill.error()));

@@ -1,15 +1,36 @@
 #include "ava/app/command_connect.h"
 
+#include "ava/app/browser_open.h"
 #include "ava/app/command_format.h"
+#include "ava/app/connect_openai.h"
 
 #include "ava/config/auth.h"
+#include "ava/config/openai_oauth.h"
 #include "ava/config/provider_profiles.h"
 
+#include "ava/provider/curl_transport.h"
+
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
+#include <functional>
+#include <future>
+#include <optional>
 
 namespace ava::app {
 namespace {
+
+enum class ConnectMethod {
+  ApiKey,
+  OpenAIBrowserOAuth,
+  OpenAIHeadlessOAuth,
+};
+
+struct ConnectMethodSelection {
+  ConnectMethod method = ConnectMethod::ApiKey;
+  bool back = false;
+};
 
 bool is_valid_connect_provider_id(std::string_view provider_id)
 {
@@ -34,16 +55,69 @@ std::string credential_type_value(std::string_view method)
   if (method == "api" || method == "api-key" || method == "apikey" || method == "key" || method == "api_key") {
     return "api_key";
   }
-  if (method == "oauth" || method == "oauth-token" || method == "oauth_token" || method == "bearer" ||
-      method == "token") {
-    return "oauth";
-  }
   return {};
 }
 
-std::string credential_type_label(std::string_view credential_type)
+std::string credential_type_value(ConnectMethod method)
 {
-  return credential_type == "oauth" ? "OAuth bearer token" : "API key";
+  static_cast<void>(method);
+  return "api_key";
+}
+
+std::string credential_type_label(ConnectMethod method)
+{
+  static_cast<void>(method);
+  return "API key";
+}
+
+std::string connect_method_label(ConnectMethod method)
+{
+  switch (method) {
+    case ConnectMethod::ApiKey:
+      return "API key";
+    case ConnectMethod::OpenAIBrowserOAuth:
+      return "ChatGPT Pro/Plus browser OAuth";
+    case ConnectMethod::OpenAIHeadlessOAuth:
+      return "ChatGPT Pro/Plus headless OAuth";
+  }
+  return "credential";
+}
+
+std::string lower_ascii(std::string_view text)
+{
+  std::string lowered;
+  lowered.reserve(text.size());
+  for (char const ch : text) lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  return lowered;
+}
+
+std::optional<ConnectMethod> parse_connect_method(std::string_view value, std::string_view provider_id)
+{
+  auto const lowered = lower_ascii(value);
+  if (provider_id == "openai") {
+    if (lowered == "browser" || lowered == "browser-oauth" || lowered == "browser_oauth" || lowered == "chatgpt" ||
+        lowered == "oauth") {
+      return ConnectMethod::OpenAIBrowserOAuth;
+    }
+    if (lowered == "headless" || lowered == "headless-oauth" || lowered == "headless_oauth" || lowered == "device" ||
+        lowered == "device-oauth" || lowered == "device_oauth") {
+      return ConnectMethod::OpenAIHeadlessOAuth;
+    }
+  }
+
+  auto const credential_type = credential_type_value(value);
+  if (credential_type == "api_key") return ConnectMethod::ApiKey;
+  return std::nullopt;
+}
+
+bool is_question_prompt_cancel(ava::core::Error const& error)
+{
+  return error.category() == ava::core::ErrorCategory::Tool && error.message() == "question prompt canceled";
+}
+
+long long unix_time_seconds()
+{
+  return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
 std::string selected_or_custom_answer(ava::agent::QuestionAnswer const& answer)
@@ -60,25 +134,45 @@ ava::core::Result<ava::agent::QuestionAnswer> ask_connect_question(CommandReques
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                          "/connect requires the interactive TUI; use `ava connect <provider> --api-key-stdin`, "
-                         "`--api-key-env ENV`, `--oauth-token-stdin`, or `--oauth-token-env ENV` for headless setup"));
+                         "`--api-key-env ENV`, or `ava connect openai --headless-oauth` for headless setup"));
   }
   return request.question_resolver(prompt);
+}
+
+std::string connect_provider_group_id(std::string_view provider_id)
+{
+  if (provider_id == "kimi" || provider_id == "moonshot") return "kimi-moonshot";
+  return std::string(provider_id);
+}
+
+std::string connect_provider_display_name(std::string_view provider_id)
+{
+  if (connect_provider_group_id(provider_id) == "kimi-moonshot") return "Kimi / Moonshot";
+  return ava::config::provider_display_name(provider_id);
 }
 
 std::vector<ava::agent::QuestionOption> provider_options(RuntimeSession const& session)
 {
   std::vector<ava::agent::QuestionOption> options;
-  auto add = [&](std::string value, std::string label) {
-    if (std::ranges::any_of(options, [&](auto const& option) { return option.value == value; })) return;
+  std::vector<std::string> groups;
+  auto add = [&](std::string value, std::string label, std::string group) {
+    if (std::ranges::find(groups, group) != groups.end()) return;
+    groups.push_back(std::move(group));
     options.push_back(ava::agent::QuestionOption{.value = std::move(value), .label = std::move(label)});
   };
   if (!session.model.provider_id.empty()) {
-    add(session.model.provider_id, ava::config::provider_display_name(session.model.provider_id) + " (current)");
+    add(session.model.provider_id, connect_provider_display_name(session.model.provider_id) + " ✓",
+        connect_provider_group_id(session.model.provider_id));
   }
   for (auto const& profile : ava::config::builtin_provider_profiles()) {
+    if (profile.provider_id == "kimi") continue;
+    if (profile.provider_id == "moonshot") {
+      add(profile.provider_id, "Kimi / Moonshot - API key", connect_provider_group_id(profile.provider_id));
+      continue;
+    }
     auto label = profile.display_name;
     if (!profile.connect_detail.empty()) label += " - " + profile.connect_detail;
-    add(profile.provider_id, std::move(label));
+    add(profile.provider_id, std::move(label), connect_provider_group_id(profile.provider_id));
   }
   return options;
 }
@@ -99,44 +193,65 @@ ava::core::Result<std::string> resolve_connect_provider(RuntimeSession& session,
   return selected_or_custom_answer(*answer);
 }
 
-ava::core::Result<std::string> resolve_connect_credential_type(CommandRequest const& request,
-                                                               std::vector<std::string> const& args)
+std::vector<ava::agent::QuestionOption> method_options_for_provider(std::string_view provider_id)
+{
+  if (provider_id == "openai") {
+    return {ava::agent::QuestionOption{.value = "openai_browser_oauth", .label = "B ChatGPT Pro/Plus (browser)"},
+            ava::agent::QuestionOption{.value = "openai_headless_oauth", .label = "H ChatGPT Pro/Plus (headless)"},
+            ava::agent::QuestionOption{.value = "api_key", .label = "A OpenAI API key"},
+            ava::agent::QuestionOption{.value = "back", .label = "P Previous"}};
+  }
+  return {ava::agent::QuestionOption{.value = "api_key", .label = "A API key"}};
+}
+
+ava::core::Result<ConnectMethodSelection> resolve_connect_method(CommandRequest const& request,
+                                                                 std::vector<std::string> const& args,
+                                                                 std::string_view provider_id)
 {
   if (args.size() >= 2) {
-    auto const credential_type = credential_type_value(args[1]);
-    if (!credential_type.empty()) return credential_type;
+    auto method = parse_connect_method(args[1], provider_id);
+    if (method) return ConnectMethodSelection{.method = *method, .back = false};
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                  "/connect credential type must be api-key or oauth");
-    error.with_context("usage", "/connect [provider] [api-key|oauth]");
+                                  "/connect credential type must be api-key, browser-oauth, or headless-oauth");
+    error.with_context("usage", "/connect [provider] [api-key|browser-oauth|headless-oauth]");
     return std::unexpected(std::move(error));
   }
 
+  if (provider_id != "openai") return ConnectMethodSelection{.method = ConnectMethod::ApiKey, .back = false};
+
   auto answer = ask_connect_question(
-      request, ava::agent::QuestionPrompt{
-                   .header = "Connect a provider",
-                   .question = "Choose credential type",
-                   .options = {ava::agent::QuestionOption{.value = "api_key", .label = "API key"},
-                               ava::agent::QuestionOption{.value = "oauth", .label = "OAuth bearer token"}},
-                   .multiple = false,
-                   .allow_custom = false,
-                   .secret = false,
-                   .modal = true});
+      request, ava::agent::QuestionPrompt{.header = provider_id == "openai" ? "Connect OpenAI" : "Connect a provider",
+                                          .question = "Choose login method",
+                                          .options = method_options_for_provider(provider_id),
+                                          .multiple = false,
+                                          .allow_custom = false,
+                                          .secret = false,
+                                          .modal = true});
   if (!answer) return std::unexpected(std::move(answer.error()));
-  return selected_or_custom_answer(*answer);
+  auto const selected = selected_or_custom_answer(*answer);
+  if (selected == "back") return ConnectMethodSelection{.method = ConnectMethod::ApiKey, .back = true};
+  if (selected == "openai_browser_oauth") {
+    return ConnectMethodSelection{.method = ConnectMethod::OpenAIBrowserOAuth, .back = false};
+  }
+  if (selected == "openai_headless_oauth") {
+    return ConnectMethodSelection{.method = ConnectMethod::OpenAIHeadlessOAuth, .back = false};
+  }
+  if (selected == "api_key") return ConnectMethodSelection{.method = ConnectMethod::ApiKey, .back = false};
+  return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "unknown connect login method"));
 }
 
 ava::core::Result<std::string> prompt_connect_secret(CommandRequest const& request, std::string_view provider_id,
-                                                     std::string_view credential_type)
+                                                     ConnectMethod method)
 {
-  auto answer = ask_connect_question(
-      request, ava::agent::QuestionPrompt{
-                   .header = "Connect a provider",
-                   .question = "Paste " + credential_type_label(credential_type) + " for " + std::string(provider_id),
-                   .options = {},
-                   .multiple = false,
-                   .allow_custom = true,
-                   .secret = true,
-                   .modal = true});
+  auto answer =
+      ask_connect_question(request, ava::agent::QuestionPrompt{.header = "Connect a provider",
+                                                               .question = "Paste " + credential_type_label(method) +
+                                                                           " for " + std::string(provider_id),
+                                                               .options = {},
+                                                               .multiple = false,
+                                                               .allow_custom = true,
+                                                               .secret = true,
+                                                               .modal = true});
   if (!answer) return std::unexpected(std::move(answer.error()));
   auto secret = trim_secret_text(selected_or_custom_answer(*answer));
   if (secret.empty()) {
@@ -145,51 +260,187 @@ ava::core::Result<std::string> prompt_connect_secret(CommandRequest const& reque
   return secret;
 }
 
+ava::core::VoidResult prompt_oauth_wait(CommandRequest const& request, std::string header, std::string question,
+                                        std::string copy_text, std::function<bool()> auto_resolve)
+{
+  auto answer = ask_connect_question(
+      request, ava::agent::QuestionPrompt{
+                   .header = std::move(header),
+                   .question = std::move(question),
+                   .options = {ava::agent::QuestionOption{.value = "copy:" + std::move(copy_text), .label = "C Copy"}},
+                   .multiple = false,
+                   .allow_custom = false,
+                   .secret = false,
+                   .modal = true,
+                   .searchable = false,
+                   .auto_resolve = std::move(auto_resolve)});
+  if (!answer) return std::unexpected(std::move(answer.error()));
+  return {};
+}
+
+ava::core::VoidResult store_connect_credential(RuntimeSession const& session, std::string_view provider_id,
+                                               ConnectMethod method, std::string secret)
+{
+  if (provider_id == "openai") {
+    auto credential = ava::config::OpenAICredential{.type = ava::config::OpenAICredentialType::ApiKey,
+                                                    .access_token = std::move(secret),
+                                                    .refresh_token = "",
+                                                    .expires_at = 0,
+                                                    .account_id = "",
+                                                    .source_path = {}};
+    return ava::config::store_openai_credential(session.paths, credential);
+  }
+
+  return ava::config::store_provider_credential(
+      session.paths, ava::config::ProviderCredential{.provider_id = std::string(provider_id),
+                                                     .access_token = std::move(secret),
+                                                     .credential_type = credential_type_value(method),
+                                                     .account_id = "",
+                                                     .source = "connect"});
+}
+
+ava::core::Result<std::string> store_openai_oauth_result(RuntimeSession const& session,
+                                                         ava::config::OpenAICredential const& credential)
+{
+  auto stored = ava::config::store_openai_credential(session.paths, credential);
+  if (!stored) return std::unexpected(std::move(stored.error()));
+  return "Stored OpenAI OAuth credential at " + session.paths.auth_file.string();
+}
+
+ava::core::Result<std::string> run_openai_browser_oauth(RuntimeSession const& session, CommandRequest const& request)
+{
+  auto oauth_session = ava::config::make_openai_oauth_session();
+  if (!oauth_session) return std::unexpected(std::move(oauth_session.error()));
+
+  ava::provider::CurlCliTransport transport;
+  std::atomic_bool prompt_cancelled{false};
+  auto cancel_requested = [&]() {
+    return prompt_cancelled.load() || (request.cancel_requested && request.cancel_requested());
+  };
+  auto credential_future = std::async(std::launch::async, [&]() {
+    return complete_openai_browser_oauth(*oauth_session, transport, unix_time_seconds(), cancel_requested);
+  });
+
+  auto const browser_opened = open_url_in_browser(oauth_session->authorization_url);
+  auto prompt = prompt_oauth_wait(
+      request, "ChatGPT Pro/Plus (browser)",
+      oauth_session->authorization_url + "\n\n" +
+          (browser_opened ? "Complete authorization in your browser. This window will close automatically."
+                          : "Open the URL in your browser. This window will close automatically.") +
+          "\n\nWaiting for authorization...",
+      oauth_session->authorization_url,
+      [&]() { return credential_future.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready; });
+  if (!prompt) {
+    prompt_cancelled.store(true);
+    static_cast<void>(credential_future.get());
+    return std::unexpected(std::move(prompt.error()));
+  }
+  auto credential = credential_future.get();
+  if (!credential) return std::unexpected(std::move(credential.error()));
+  return store_openai_oauth_result(session, *credential);
+}
+
+ava::core::Result<std::string> run_openai_headless_oauth(RuntimeSession const& session, CommandRequest const& request)
+{
+  ava::provider::CurlCliTransport transport;
+  auto authorization = ava::config::start_openai_oauth_device_authorization(transport);
+  if (!authorization) return std::unexpected(std::move(authorization.error()));
+
+  std::atomic_bool prompt_cancelled{false};
+  auto cancel_requested = [&]() {
+    return prompt_cancelled.load() || (request.cancel_requested && request.cancel_requested());
+  };
+  auto credential_future = std::async(std::launch::async, [&]() {
+    return wait_for_openai_device_oauth(*authorization, transport, unix_time_seconds(), cancel_requested);
+  });
+
+  auto prompt = prompt_oauth_wait(
+      request, "ChatGPT Pro/Plus (headless)",
+      authorization->verification_url + "\n\nEnter code: " + authorization->user_code +
+          "\n\nWaiting for authorization...",
+      authorization->verification_url + "\n" + authorization->user_code,
+      [&]() { return credential_future.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready; });
+  if (!prompt) {
+    prompt_cancelled.store(true);
+    static_cast<void>(credential_future.get());
+    return std::unexpected(std::move(prompt.error()));
+  }
+  auto credential = credential_future.get();
+  if (!credential) return std::unexpected(std::move(credential.error()));
+  return store_openai_oauth_result(session, *credential);
+}
+
 }  // namespace
 
 ava::core::Result<CommandResult> run_connect_command(RuntimeSession& session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;
-  auto const args = split_command_arguments(command_argument(request.command, "/connect"));
+  auto args = split_command_arguments(command_argument(request.command, "/connect"));
   if (args.size() > 2) {
-    add_output(result, missing_argument("/connect [provider] [api-key|oauth]"));
+    add_output(result, missing_argument("/connect [provider] [api-key|browser-oauth|headless-oauth]"));
     return result;
   }
 
-  auto provider_id = resolve_connect_provider(session, request, args);
-  if (!provider_id) {
-    add_output(result, provider_id.error().format());
+  std::string provider_id;
+  ConnectMethod method = ConnectMethod::ApiKey;
+  while (true) {
+    auto resolved_provider_id = resolve_connect_provider(session, request, args);
+    if (!resolved_provider_id) {
+      if (!is_question_prompt_cancel(resolved_provider_id.error()))
+        add_output(result, resolved_provider_id.error().format());
+      return result;
+    }
+    if (!is_valid_connect_provider_id(*resolved_provider_id)) {
+      add_output(result, "provider id must contain only letters, numbers, '-' or '_'");
+      return result;
+    }
+
+    auto selected_method = resolve_connect_method(request, args, *resolved_provider_id);
+    if (!selected_method) {
+      if (!is_question_prompt_cancel(selected_method.error())) add_output(result, selected_method.error().format());
+      return result;
+    }
+    if (selected_method->back) {
+      args.clear();
+      continue;
+    }
+    provider_id = std::move(*resolved_provider_id);
+    method = selected_method->method;
+    break;
+  }
+
+  if (method == ConnectMethod::OpenAIBrowserOAuth) {
+    auto stored = run_openai_browser_oauth(session, request);
+    if (stored) {
+      add_output(result, *stored);
+    } else if (!is_question_prompt_cancel(stored.error())) {
+      add_output(result, stored.error().format());
+    }
     return result;
   }
-  if (!is_valid_connect_provider_id(*provider_id)) {
-    add_output(result, "provider id must contain only letters, numbers, '-' or '_'");
+  if (method == ConnectMethod::OpenAIHeadlessOAuth) {
+    auto stored = run_openai_headless_oauth(session, request);
+    if (stored) {
+      add_output(result, *stored);
+    } else if (!is_question_prompt_cancel(stored.error())) {
+      add_output(result, stored.error().format());
+    }
     return result;
   }
 
-  auto credential_type = resolve_connect_credential_type(request, args);
-  if (!credential_type) {
-    add_output(result, credential_type.error().format());
-    return result;
-  }
-
-  auto secret = prompt_connect_secret(request, *provider_id, *credential_type);
+  auto secret = prompt_connect_secret(request, provider_id, method);
   if (!secret) {
-    add_output(result, secret.error().format());
+    if (!is_question_prompt_cancel(secret.error())) add_output(result, secret.error().format());
     return result;
   }
 
-  auto stored = ava::config::store_provider_credential(
-      session.paths, ava::config::ProviderCredential{.provider_id = *provider_id,
-                                                     .access_token = *secret,
-                                                     .credential_type = *credential_type,
-                                                     .account_id = "",
-                                                     .source = "connect"});
+  auto stored = store_connect_credential(session, provider_id, method, *secret);
   if (!stored) {
     add_output(result, stored.error().format());
     return result;
   }
-  add_output(result, "Stored " + *provider_id + " " + credential_type_label(*credential_type) + " credential at " +
+  add_output(result, "Stored " + provider_id + " " + connect_method_label(method) + " credential at " +
                          session.paths.auth_file.string());
   return result;
 }

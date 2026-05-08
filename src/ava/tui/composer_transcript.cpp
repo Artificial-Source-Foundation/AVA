@@ -260,17 +260,24 @@ std::vector<std::string> render_user_block(std::string const& text, std::size_t 
 {
   std::vector<std::string> lines;
   std::vector<std::string> plain_lines;
+  auto const wide = wide_blocks(width);
+  constexpr auto kBubblePaddingColumns = std::size_t{2};
+  constexpr auto kWidePrefixColumns = std::size_t{5};
+  auto const max_panel_columns = width > kWidePrefixColumns ? width - kWidePrefixColumns : std::size_t{1};
+  auto const preferred_panel_columns = std::max<std::size_t>(18, (width * 3) / 4);
+  auto const panel_budget = std::max<std::size_t>(1, std::min(max_panel_columns, preferred_panel_columns));
+  auto const wrap_width =
+      panel_budget > kBubblePaddingColumns * 2 ? panel_budget - (kBubblePaddingColumns * 2) : std::size_t{1};
   for (auto const& raw_line : split_lines(text)) {
     auto const sanitized = sanitize_terminal_text(raw_line);
-    if (wide_blocks(width)) {
-      auto const content_width = width > 4 ? width - 4 : std::size_t{1};
-      auto wrapped = wrap_words_with_prefix(sanitized, content_width);
+    if (wide) {
+      auto wrapped = wrap_words_with_prefix(sanitized, wrap_width);
       plain_lines.insert(plain_lines.end(), wrapped.begin(), wrapped.end());
     } else {
       plain_lines.push_back(sanitized);
     }
   }
-  if (!wide_blocks(width)) {
+  if (!wide) {
     for (auto const& part : plain_lines) {
       lines.push_back(
           fit_line_preserving_sgr(std::string(kSgrAccent) + "│" + std::string(kSgrReset) + " " + part, width));
@@ -278,13 +285,21 @@ std::vector<std::string> render_user_block(std::string const& text, std::size_t 
     return lines;
   }
 
+  auto panel_text_columns = std::size_t{1};
   for (auto const& part : plain_lines) {
-    auto const content_width = width > 5 ? width - 5 : std::size_t{1};
-    auto content =
-        std::string(" ") + std::string(kSgrTextDimmed) + fit_line(part, content_width) + std::string(kSgrReset);
-    auto panel = surface_line(kSgrComposerBg, std::move(content), width > 3 ? width - 3 : std::size_t{1});
-    lines.push_back(fit_line_preserving_sgr(
-        std::string("  ") + std::string(kSgrAccent) + "│" + std::string(kSgrReset) + std::move(panel), width));
+    panel_text_columns = std::max(panel_text_columns, std::min(wrap_width, terminal_text_columns(part)));
+  }
+  auto const panel_columns = std::min(max_panel_columns, panel_text_columns + (kBubblePaddingColumns * 2));
+  auto const prefix = std::string("  ") + std::string(kSgrAccent) + "│" + std::string(kSgrReset) + "  ";
+  for (auto const& part : plain_lines) {
+    auto clipped = fit_line(part, panel_text_columns);
+    auto const clipped_columns = terminal_text_columns(clipped);
+    std::string content(kBubblePaddingColumns, ' ');
+    content += std::string(kSgrTextDimmed) + std::move(clipped) + std::string(kSgrReset);
+    if (clipped_columns < panel_text_columns) content += std::string(panel_text_columns - clipped_columns, ' ');
+    content += std::string(kBubblePaddingColumns, ' ');
+    auto panel = surface_line(kSgrComposerBg, std::move(content), panel_columns);
+    lines.push_back(fit_line_preserving_sgr(prefix + std::move(panel), width));
   }
   return lines;
 }
@@ -469,6 +484,16 @@ std::string render_error_line(std::string const& text, std::size_t width)
   return prefix + content;
 }
 
+std::vector<std::string> render_compaction_block(std::string const& text, std::size_t width)
+{
+  auto const sanitized = sanitize_terminal_text(text);
+  auto const first_prefix = std::string("  ") + std::string(kSgrWarning) + "compact" + std::string(kSgrReset) + " ";
+  auto const next_prefix = std::string(terminal_text_columns(first_prefix), ' ');
+  auto wrapped = wrap_words_with_prefix(sanitized, width, first_prefix, next_prefix);
+  for (auto& line : wrapped) line = fit_line_preserving_sgr(std::move(line), width);
+  return wrapped;
+}
+
 }  // namespace
 
 std::string render_generic_line(std::string const& text, std::size_t width)
@@ -505,6 +530,9 @@ std::vector<std::string> render_transcript_lines(std::vector<TranscriptItem> con
     } else if (item.label == "thinking" && thinking_visible) {
       auto block = render_thinking_block(text_model_or(item.text_model, item.text), width);
       rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
+    } else if (item.label == "compaction") {
+      auto block = render_compaction_block(text_model_or(item.text_model, item.text), width);
+      rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
     } else {
       auto const text = text_model_or(item.text_model, item.text);
       auto const text_lines = split_lines(text);
@@ -519,6 +547,7 @@ std::vector<std::string> render_transcript_lines(std::vector<TranscriptItem> con
       }
     }
   }
+  if (!rendered_transcript.empty() && wide_blocks(width)) rendered_transcript.emplace_back();
   return rendered_transcript;
 }
 

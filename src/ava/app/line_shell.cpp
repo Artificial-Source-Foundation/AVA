@@ -4,6 +4,7 @@
 #include "ava/app/commands.h"
 #include "ava/app/interactive_run_queue.h"
 #include "ava/app/reasoning_controls.h"
+#include "ava/app/rpc/handlers.h"
 
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
@@ -85,10 +86,37 @@ std::vector<ava::tui::ToolTimelineItem> tui_tool_timeline(std::vector<ava::agent
   std::vector<ava::tui::ToolTimelineItem> items;
   items.reserve(entries.size());
   for (auto const& entry : entries) {
-    items.push_back(ava::tui::ToolTimelineItem{.status = tui_tool_status(entry.status),
-                                               .name = entry.name,
-                                               .argument_summary = entry.argument_summary,
-                                               .result_summary = entry.result_summary});
+    auto item = ava::tui::ToolTimelineItem{.status = tui_tool_status(entry.status),
+                                           .name = entry.name,
+                                           .argument_summary = entry.argument_summary,
+                                           .result_summary = entry.result_summary,
+                                           .arguments_json = entry.arguments_json,
+                                           .result_json = entry.result_json,
+                                           .call_id = entry.call_id,
+                                           .lifecycle = entry.status == ava::agent::ToolTimelineStatus::Running
+                                                            ? ava::tui::ToolLifecycleState::ExecutionStarted
+                                                            : ava::tui::ToolLifecycleState::Complete,
+                                           .diff = entry.diff,
+                                           .diff_truncated = entry.diff_truncated,
+                                           .changed_paths = entry.changed_paths,
+                                           .truncated = entry.truncated,
+                                           .byte_limited = entry.byte_limited,
+                                           .line_limited = entry.line_limited,
+                                           .output_bytes = entry.output_bytes,
+                                           .total_bytes = entry.total_bytes,
+                                           .output_lines = entry.output_lines,
+                                           .total_lines = entry.total_lines,
+                                           .start_line = entry.start_line,
+                                           .end_line = entry.end_line,
+                                           .next_offset_line = entry.next_offset_line,
+                                           .omitted_bytes = entry.omitted_bytes,
+                                           .omitted_lines = entry.omitted_lines,
+                                           .visible_matches = entry.visible_matches,
+                                           .total_matches = entry.total_matches,
+                                           .spill_path = entry.spill_path,
+                                           .spill_truncated = entry.spill_truncated};
+    if (entry.status == ava::agent::ToolTimelineStatus::Error) item.lifecycle = ava::tui::ToolLifecycleState::Error;
+    items.push_back(std::move(item));
   }
   return items;
 }
@@ -232,7 +260,7 @@ LineResult handle_line(ShellState& state, std::string const& line,
 {
   LineResult line_result;
   if (line.empty()) return line_result;
-  if (ava::app::is_backend_command(line)) {
+  if (ava::app::is_backend_command(line, state.session)) {
     if (is_compact_command(line)) {
       return with_provider_runtime(
           state, "\nother slash tool commands still work offline.",
@@ -254,6 +282,7 @@ LineResult handle_line(ShellState& state, std::string const& line,
                                                    state.session, entries, config, instructions, estimated_tokens,
                                                    provider, transport, run_options);
                                              },
+                                         .cancel_requested = cancel_requested,
                                          .hotkeys = hotkeys});
             if (!command_result) {
               LineResult compact_result;
@@ -269,6 +298,7 @@ LineResult handle_line(ShellState& state, std::string const& line,
         ava::app::run_command(state.session, ava::app::CommandRequest{.command = line,
                                                                       .permission_resolver = permission_resolver,
                                                                       .question_resolver = question_resolver,
+                                                                      .cancel_requested = cancel_requested,
                                                                       .hotkeys = hotkeys});
     if (!command_result) {
       add_output(line_result, command_result.error().format());
@@ -277,6 +307,37 @@ LineResult handle_line(ShellState& state, std::string const& line,
     line_result.quit = command_result->quit;
     line_result.output = std::move(command_result->output);
     line_result.tool_timeline = std::move(command_result->tool_timeline);
+    if (command_result->prompt_message) {
+      return with_provider_runtime(state, "\nthis command expands to a prompt and needs provider auth.",
+                                   [&](ava::provider::Provider const& provider, ava::provider::Transport& transport,
+                                       ava::app::RuntimeRunOptions run_options) {
+                                     run_options.permission_resolver = permission_resolver;
+                                     run_options.question_resolver = question_resolver;
+                                     run_options.event_sink = std::move(event_sink);
+                                     run_options.cancel_requested = std::move(cancel_requested);
+                                     run_options.take_steering_messages = std::move(take_steering_messages);
+                                     auto result = ava::app::run_prompt(state.session, *command_result->prompt_message,
+                                                                        provider, transport, run_options);
+                                     LineResult prompt_result;
+                                     if (!result) {
+                                       add_output(prompt_result, result.error().format());
+                                       return prompt_result;
+                                     }
+                                     prompt_result.tool_timeline = std::move(result->tool_timeline);
+                                     if (!result->final_text.empty()) {
+                                       add_output(prompt_result, result->final_text);
+                                     } else {
+                                       add_output(prompt_result, "done");
+                                     }
+                                     return prompt_result;
+                                   });
+    }
+    return line_result;
+  }
+  if (line.starts_with('/')) {
+    auto const end = line.find_first_of(" \t\r\n");
+    auto const command = line.substr(0, end == std::string::npos ? line.size() : end);
+    add_output(line_result, "Unknown command: " + command + ". Type /help to list commands.");
     return line_result;
   }
 
@@ -345,12 +406,37 @@ int run_tui(ShellState state)
     keybind_status = loaded.error().format();
   }
   auto hotkeys = command_hotkeys_from_key_bindings(key_bindings);
+  auto model_display = [](ava::config::ModelInfo const& model) {
+    return model.display_name.empty() ? ava::config::model_display_label(model.model_id) : model.display_name;
+  };
+  auto runtime_open_options = [&state]() {
+    ava::app::RuntimeOpenOptions options;
+    options.workspace_dir = state.session.workspace_dir;
+    options.current_dir = state.session.current_dir;
+    options.mode = state.session.mode;
+    options.paths = state.session.paths;
+    return options;
+  };
+  auto state_snapshot = [&state, &hotkeys, &model_display](std::string status) {
+    return ava::tui::TuiRuntimeStateSnapshot{
+        .mode = ava::agent::to_string(state.session.mode),
+        .provider = state.session.model.provider_id,
+        .model = model_display(state.session.model),
+        .session_id = state.session.store.session_id(),
+        .session_path = state.session.store.session_path().string(),
+        .workspace = state.session.current_dir.empty() ? state.session.workspace_dir.string()
+                                                       : state.session.current_dir.string(),
+        .git_branch = git_branch_for_sidebar(state.session.workspace_dir),
+        .context_source_count = state.session.context_sources.size(),
+        .status = std::move(status),
+        .slash_commands = ava::app::command_catalog_slash_items(state.session, hotkeys)};
+  };
   auto result = ava::tui::run_interactive_composer(ava::tui::TuiRuntimeOptions{
       .mode = ava::agent::to_string(state.session.mode),
       .provider = state.session.model.provider_id,
-      .model = state.session.model.display_name.empty() ? ava::config::model_display_label(state.session.model.model_id)
-                                                        : state.session.model.display_name,
+      .model = model_display(state.session.model),
       .session_id = state.session.store.session_id(),
+      .session_path = state.session.store.session_path().string(),
       .workspace =
           state.session.current_dir.empty() ? state.session.workspace_dir.string() : state.session.current_dir.string(),
       .git_branch = git_branch_for_sidebar(state.session.workspace_dir),
@@ -436,6 +522,41 @@ int run_tui(ShellState state)
       },
       .on_cycle_reasoning = [&state]() -> ava::core::Result<std::string> {
         return ava::app::cycle_runtime_reasoning(state.session);
+      },
+      .model_selector_view =
+          [&state]() {
+            return ava::app::model_selector_view(state.session, "Enter switch model · type to filter · Esc cancel");
+          },
+      .session_selector_view =
+          [&state]() {
+            return ava::app::session_selector_view(state.session, ava::app::SessionSelectorSort::Recent,
+                                                   "Enter open session · type to filter · Esc cancel");
+          },
+      .on_model_selected =
+          [&state, &state_snapshot](std::string_view value) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+        auto const separator = value.find('/');
+        if (separator == std::string_view::npos || separator == 0 || separator + 1 >= value.size()) {
+          return std::unexpected(
+              ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model selection is missing provider/model"));
+        }
+        auto model = ava::app::resolve_runtime_model(state.session.paths, value.substr(0, separator),
+                                                     value.substr(separator + 1));
+        if (!model) return std::unexpected(std::move(model.error()));
+        auto switched = ava::app::switch_runtime_model(state.session, std::move(*model));
+        if (!switched) return std::unexpected(std::move(switched.error()));
+        return state_snapshot(*switched ? "model switched" : "model already selected");
+      },
+      .on_session_selected = [&state, &runtime_open_options, &state_snapshot](
+                                 std::string_view value) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+        if (value.empty()) {
+          return std::unexpected(
+              ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session selection is missing session id"));
+        }
+        if (value == state.session.store.session_id()) return state_snapshot("session already open");
+        auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_options(), value);
+        if (!opened) return std::unexpected(std::move(opened.error()));
+        state.session = std::move(*opened);
+        return state_snapshot("session opened");
       }});
   std::cout << std::flush;
   return result;

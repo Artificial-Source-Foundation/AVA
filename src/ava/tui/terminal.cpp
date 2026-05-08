@@ -20,9 +20,11 @@
 namespace ava::tui {
 namespace {
 
+constexpr int kTerminalEscapeDelayMs = 100;
+
 sig_atomic_t volatile g_terminal_signal = 0;
-struct sigaction g_curses_previous_sigint{};
-struct sigaction g_curses_previous_sigterm{};
+struct sigaction g_curses_previous_sigint {};
+struct sigaction g_curses_previous_sigterm {};
 
 void mark_terminal_signal(int signal_number)
 {
@@ -31,7 +33,7 @@ void mark_terminal_signal(int signal_number)
 
 void install_curses_signal_flags()
 {
-  struct sigaction action{};
+  struct sigaction action {};
   action.sa_handler = mark_terminal_signal;
   sigemptyset(&action.sa_mask);
   sigaddset(&action.sa_mask, SIGINT);
@@ -60,18 +62,6 @@ void configure_curses_mouse()
   if (!has_mouse()) return;
   mmask_t previous_mask = 0;
   mmask_t mask = BUTTON1_CLICKED | BUTTON4_PRESSED | BUTTON5_PRESSED;
-#ifdef BUTTON4_CLICKED
-  mask |= BUTTON4_CLICKED;
-#endif
-#ifdef BUTTON4_RELEASED
-  mask |= BUTTON4_RELEASED;
-#endif
-#ifdef BUTTON5_CLICKED
-  mask |= BUTTON5_CLICKED;
-#endif
-#ifdef BUTTON5_RELEASED
-  mask |= BUTTON5_RELEASED;
-#endif
   static_cast<void>(mousemask(mask, &previous_mask));
 #endif
 }
@@ -140,6 +130,54 @@ bool is_legacy_shift_enter_sequence(std::string_view sequence)
   if (!consume_char(sequence, index, ';')) return false;
   auto const key_code = parse_unsigned_int(sequence, index);
   return key_code && *key_code == 13 && index + 1 == sequence.size() && sequence[index] == '~';
+}
+
+Key page_key_from_csi_tilde(std::string_view sequence)
+{
+  if (!sequence.starts_with('[') || sequence.empty() || sequence.back() != '~') return Key::Unknown;
+
+  auto index = std::size_t{1};
+  auto const code = parse_unsigned_int(sequence, index);
+  if (!code) return Key::Unknown;
+
+  while (index + 1 < sequence.size()) {
+    if (!consume_char(sequence, index, ';') && !consume_char(sequence, index, ':')) return Key::Unknown;
+    if (!parse_unsigned_int(sequence, index)) return Key::Unknown;
+  }
+  if (index + 1 != sequence.size()) return Key::Unknown;
+
+  if (*code == 5) return Key::PageUp;
+  if (*code == 6) return Key::PageDown;
+  return Key::Unknown;
+}
+
+Key sgr_mouse_key(std::string_view sequence)
+{
+  if (!sequence.starts_with("[<") || sequence.size() < 7) return Key::Unknown;
+  auto index = std::size_t{2};
+  auto const button = parse_unsigned_int(sequence, index);
+  if (!button || !consume_char(sequence, index, ';')) return Key::Unknown;
+  if (!parse_unsigned_int(sequence, index) || !consume_char(sequence, index, ';')) return Key::Unknown;
+  if (!parse_unsigned_int(sequence, index)) return Key::Unknown;
+  if (index + 1 != sequence.size() || sequence[index] != 'M') return Key::Unknown;
+
+  if ((*button & 64) == 0) return Key::Unknown;
+  return (*button & 1) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
+}
+
+bool is_legacy_mouse_sequence(std::string_view sequence)
+{
+  return sequence.starts_with("[M") && sequence.size() >= 5;
+}
+
+Key legacy_mouse_key(std::string_view sequence)
+{
+  if (!is_legacy_mouse_sequence(sequence)) return Key::Unknown;
+  auto const button_byte = static_cast<unsigned char>(sequence[2]);
+  if (button_byte < 32) return Key::Unknown;
+  auto const button = static_cast<unsigned int>(button_byte - 32U);
+  if ((button & 64U) == 0) return Key::Unknown;
+  return (button & 1U) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
 }
 
 bool is_csi_final_byte(unsigned char byte)
@@ -230,8 +268,10 @@ ava::core::Result<CursesSession> CursesSession::enter()
 
   noqiflush();
   static_cast<void>(nonl());
+  static_cast<void>(scrollok(stdscr, FALSE));
+  static_cast<void>(idlok(stdscr, FALSE));
 #ifdef NCURSES_VERSION
-  static_cast<void>(set_escdelay(100));
+  static_cast<void>(set_escdelay(terminal_escape_delay_ms()));
 #endif
   configure_curses_colors();
   configure_curses_mouse();
@@ -285,9 +325,18 @@ void erase_last_utf8_codepoint(std::string& text)
   }
 }
 
+int terminal_escape_delay_ms()
+{
+  return kTerminalEscapeDelayMs;
+}
+
 Key terminal_escape_sequence_key(std::string_view sequence)
 {
+  if (sequence == "y" || sequence == "Y") return Key::AltY;
   if (is_legacy_shift_enter_sequence(sequence) || is_shift_enter_csi_u(sequence)) return Key::ShiftEnter;
+  if (auto const key = page_key_from_csi_tilde(sequence); key != Key::Unknown) return key;
+  if (auto const key = sgr_mouse_key(sequence); key != Key::Unknown) return key;
+  if (auto const key = legacy_mouse_key(sequence); key != Key::Unknown) return key;
   return Key::Unknown;
 }
 
@@ -299,6 +348,7 @@ bool terminal_escape_sequence_complete(std::string_view sequence)
 
   if (sequence.starts_with('[')) {
     if (sequence.size() <= 1) return false;
+    if (sequence.starts_with("[M")) return is_legacy_mouse_sequence(sequence);
     return is_csi_final_byte(static_cast<unsigned char>(sequence.back()));
   }
 

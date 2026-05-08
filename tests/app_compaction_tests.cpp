@@ -153,7 +153,7 @@ void test_app_compact_openai_oauth_streaming_summary_success()
              transport.requests()[0].url == "https://chatgpt.com/backend-api/codex/responses" &&
              transport.requests()[0].body.find("\"stream\":true") != std::string::npos &&
              transport.requests()[0].body.find("\"store\":false") != std::string::npos,
-         "OAuth compaction summary request uses Codex streaming request shape");
+         "OAuth compaction summary request uses delegated streaming request shape");
 }
 
 void test_app_compact_provider_failure_leaves_session_untouched()

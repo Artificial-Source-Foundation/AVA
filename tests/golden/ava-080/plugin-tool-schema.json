@@ -1,0 +1,15 @@
+{
+  "type": "function",
+  "name": "plugin_com_example_todo_todo_add",
+  "description": "Add todo",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      }
+    },
+    "required": ["text"],
+    "additionalProperties": false
+  }
+}

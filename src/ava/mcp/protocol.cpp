@@ -200,4 +200,20 @@ std::string mcp_text_content_from_result(std::string_view result_json)
   return {};
 }
 
+std::string mcp_prompt_text_from_result(std::string_view result_json)
+{
+  std::string content;
+  for (auto const& message : ava::core::json::objects_in_array_field(result_json, "messages")) {
+    if (auto const item = ava::core::json::object_field(message, "content")) {
+      auto const type = ava::core::json::string_field(*item, "type");
+      auto const text = ava::core::json::string_field(*item, "text");
+      if (type && *type == "text" && text) {
+        if (!content.empty()) content += '\n';
+        content += *text;
+      }
+    }
+  }
+  return content;
+}
+
 }  // namespace ava::mcp

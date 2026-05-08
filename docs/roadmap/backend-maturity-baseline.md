@@ -1,12 +1,12 @@
-# AVA Backend PI Baseline
+# AVA Backend Maturity Baseline
 
-This document defines what "as mature as PI as a baseline" means for AVA's backend. PI and OpenCode remain behavior references only. AVA should match the useful backend capability shape while preserving AVA's C++23, one-binary, terminal-first, permissioned local-agent architecture.
+This document defines AVA's backend maturity target. External systems are behavior references only; AVA should match the useful backend capability shape while preserving AVA's C++23, one-binary, terminal-first, permissioned local-agent architecture.
 
 This is not a frontend polish goal. The backend baseline is about semantic contracts, runtime correctness, provider/tool/session robustness, extension containment, and tests. UI layout, cards, borders, modals, colors, and terminal rendering remain frontend-owned.
 
 ## Baseline Definition
 
-AVA reaches PI-baseline backend maturity when these gates are true:
+AVA reaches backend maturity when these gates are true:
 
 1. Runs are evented, replayable, and cancelable.
    - Every run has stable run, turn, message, tool-call, request, and correlation IDs where applicable.
@@ -69,10 +69,10 @@ AVA is past the toy-backend stage. The important existing seams are:
 - Append-only session storage and typed entry categories: `src/ava/session/session_store.*`.
 - Focused tests already exist under `tests/` for providers, events, runtime, tools, sessions, permissions, plugin, MCP, LSP, and TUI composer behavior.
 
-The backend is not yet PI-baseline because several seams are still thinner than the maturity target:
+The backend is not yet at the maturity target because several seams are still thinner than the target:
 
 - `RuntimeEvent` is semantic but still uses a broad flat payload with many optional string fields. That is workable for compatibility, but typed payload contracts should be strengthened around tools, permissions, questions, usage, and cancellation.
-- `ToolDispatchResult` now carries an initial structured result payload with status, content type, errors, diffs, changed paths, truncation, and spill metadata. PI-baseline tools still need broader permission linkage, RPC golden coverage, and full migration away from text-only compatibility paths.
+- `ToolDispatchResult` now carries an initial structured result payload with status, content type, errors, diffs, changed paths, truncation, and spill metadata. Tool paths still need broader permission linkage, RPC golden coverage, and full migration away from text-only compatibility paths.
 - Cancellation now reaches provider retry sleeps, streaming and non-streaming transport boundaries, bash process cleanup, search/webfetch tool paths, read/write/edit file operations, plugin/MCP brokered tool calls, and subprocess LSP diagnostics. The baseline still requires broader RPC cancel golden coverage and stress-style coverage for larger multi-file mutation flows.
 - Provider abstractions are credible, but baseline maturity requires a tested provider matrix and cross-provider semantics, not only OpenAI plus partial Anthropic support.
 - Sessions are inspectable and versioned, and an initial replay validator checks entry versions, entry IDs, parent links, tool call/result pairing, stable permission audit request IDs when present, structured tool-result payloads, compaction preservation boundaries, and model/reasoning entry shape. Branch-ready structure and migration/repair coverage still need to be proven.
@@ -80,7 +80,7 @@ The backend is not yet PI-baseline because several seams are still thinner than 
 
 ## Gap Matrix
 
-| Area | PI-baseline expectation | AVA status | Closure work | Verification gate |
+| Area | Maturity expectation | AVA status | Closure work | Verification gate |
 | --- | --- | --- | --- | --- |
 | Runtime events | Stable event envelope plus typed semantic payloads for run/message/reasoning/tool/permission/question/retry/compaction/usage/cancel/error | Partial. Event envelope exists; payloads are still broad and flat in places | Define typed payload structs or narrow JSON schema helpers for the high-risk event families while keeping compatibility serialization | Event golden tests, replay tests, RPC round-trip tests |
 | Cancellation | Prompt cancellation at provider stream, retry sleep, tool execution, shell timeout, process cleanup, and active run queue | Partial. Provider retry, streaming/non-streaming transport, bash, search, webfetch, read/write/edit file operations, plugin, MCP, and LSP diagnostics paths are covered | Keep the shared cancellation callback flowing through remaining long-running tools and add fuller RPC golden coverage | Fake transport abort tests, retry-sleep cancel test, bash/file/plugin/MCP/LSP process cleanup tests, RPC cancel test |
@@ -98,7 +98,7 @@ The backend is not yet PI-baseline because several seams are still thinner than 
 
 Deliverables:
 
-- Keep this document as the PI-baseline acceptance target.
+- Keep this document as the backend maturity acceptance target.
 - Keep `docs/roadmap/backend.md` as the broader 1.0 roadmap.
 - Treat reference code as product behavior input only.
 
@@ -214,7 +214,7 @@ The best first code slice is Stage 1: structured tool results and event payload 
 
 Why this first:
 
-- It is central to PI-baseline maturity because tools, sessions, permissions, RPC, plugins, MCP, and frontend rendering all depend on the same result semantics.
+- It is central to backend maturity because tools, sessions, permissions, RPC, plugins, MCP, and frontend rendering all depend on the same result semantics.
 - It is narrower than provider breadth or plugin hosting.
 - It reduces future churn for Carlo's frontend API because backend events will carry semantic data instead of UI-shaped summaries.
 

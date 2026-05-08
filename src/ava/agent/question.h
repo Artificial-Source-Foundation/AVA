@@ -23,6 +23,7 @@ struct QuestionPrompt {
   bool secret = false;
   bool modal = false;
   bool searchable = false;
+  std::function<bool()> auto_resolve = nullptr;
 };
 
 struct QuestionAnswer {

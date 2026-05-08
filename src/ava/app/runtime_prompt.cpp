@@ -5,6 +5,8 @@
 #include "ava/app/runtime_reasoning.h"
 #include "ava/app/runtime_retry.h"
 
+#include "ava/context/skill_loader.h"
+
 #include <optional>
 #include <utility>
 
@@ -33,7 +35,10 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::Xdg
         ContextSourceMetadata{.path = file.path, .source_type = file.source_type, .byte_count = file.byte_count});
   }
 
-  auto system_prompt = prompt->text + ava::context::format_context_for_prompt(*loaded_context);
+  auto loaded_skills = ava::context::load_skills(ava::context::SkillLoadOptions{.workspace_root = workspace_dir});
+
+  auto system_prompt = prompt->text + ava::context::format_context_for_prompt(*loaded_context) +
+                       ava::context::format_available_skills_for_prompt(loaded_skills.skills);
   return RuntimePromptState{.mode = mode,
                             .prompt = std::move(*prompt),
                             .context_sources = std::move(context_sources),
@@ -153,11 +158,19 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
             event.diff = entry.diff;
             event.diff_truncated = entry.diff_truncated;
             event.changed_paths = entry.changed_paths;
+            event.permission_request_ids = entry.permission_request_ids;
             event.truncated = entry.truncated;
+            event.byte_limited = entry.byte_limited;
+            event.line_limited = entry.line_limited;
             event.spill_path = entry.spill_path;
             event.spill_truncated = entry.spill_truncated;
             if (entry.output_bytes) event.output_bytes = *entry.output_bytes;
             if (entry.total_bytes) event.total_bytes = *entry.total_bytes;
+            if (entry.output_lines) event.output_lines = *entry.output_lines;
+            if (entry.total_lines) event.total_lines = *entry.total_lines;
+            if (entry.start_line) event.start_line = *entry.start_line;
+            if (entry.end_line) event.end_line = *entry.end_line;
+            if (entry.next_offset_line) event.next_offset_line = *entry.next_offset_line;
             if (entry.omitted_bytes) event.omitted_bytes = *entry.omitted_bytes;
             if (entry.omitted_lines) event.omitted_lines = *entry.omitted_lines;
             if (entry.visible_matches) event.visible_matches = *entry.visible_matches;

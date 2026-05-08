@@ -55,7 +55,7 @@ ProviderProfile const& anthropic_provider_profile()
   static ProviderProfile const profile{
       .provider_id = "anthropic",
       .display_name = "Anthropic",
-      .connect_detail = "Claude API key or OAuth token",
+      .connect_detail = "Claude API key",
       .api_family = anthropic_thinking_reasoning_profile().api_family,
       .default_compatibility_quirks = {"anthropic_messages"},
       .default_reasoning_levels = anthropic_thinking_reasoning_profile().levels,
@@ -75,7 +75,7 @@ ProviderProfile const& kimi_provider_profile()
   static ProviderProfile const profile{
       .provider_id = "kimi",
       .display_name = "Kimi",
-      .connect_detail = "Moonshot compatible API key",
+      .connect_detail = "API key",
       .api_family = openai_compatible_reasoning_content_profile().api_family,
       .default_base_url_env = "KIMI_BASE_URL",
       .default_base_url = "https://api.kimi.com/coding",
@@ -96,7 +96,7 @@ ProviderProfile const& moonshot_provider_profile()
   static ProviderProfile const profile{
       .provider_id = "moonshot",
       .display_name = "Moonshot",
-      .connect_detail = "Kimi API key",
+      .connect_detail = "API key",
       .api_family = openai_compatible_reasoning_content_profile().api_family,
       .default_base_url_env = "MOONSHOT_BASE_URL",
       .default_base_url = "https://api.moonshot.ai",
@@ -114,7 +114,7 @@ ProviderProfile const& openai_provider_profile()
   static ProviderProfile const profile{
       .provider_id = "openai",
       .display_name = "OpenAI",
-      .connect_detail = "API key or ChatGPT OAuth token",
+      .connect_detail = "ChatGPT Pro/Plus or API key",
       .api_family = openai_responses_reasoning_profile().api_family,
       .default_reasoning_levels = openai_responses_reasoning_profile().levels,
       .default_reasoning_format = openai_responses_reasoning_profile().format,

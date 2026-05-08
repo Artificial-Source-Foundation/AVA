@@ -1,98 +1,19 @@
 #include "ava/app/rpc/serialization.h"
 
 #include "ava/app/rpc/protocol.h"
+#include "ava/app/rpc/serialization_json.h"
+#include "ava/app/rpc/serialization_models.h"
 
 #include "ava/session/stats.h"
 #include "ava/session/validation.h"
 
-#include "ava/provider/registry.h"
-
 #include "ava/core/json.h"
 
-#include <algorithm>
 #include <cctype>
-#include <iomanip>
-#include <sstream>
 #include <utility>
 
 namespace ava::app::rpc {
 namespace {
-
-std::string decimal_field_json(std::string_view key, long double value)
-{
-  std::ostringstream out;
-  out << std::setprecision(12) << value;
-  return "\"" + std::string(key) + "\":" + out.str();
-}
-
-std::string model_key(std::string_view provider_id, std::string_view model_id)
-{
-  return std::string(provider_id) + "\n" + std::string(model_id);
-}
-
-bool has_model_key(std::vector<std::string> const& keys, std::string_view key)
-{
-  for (auto const& existing : keys) {
-    if (existing == key) return true;
-  }
-  return false;
-}
-
-void append_optional_bool(std::string& json, std::string_view key, std::optional<bool> const& value)
-{
-  if (!value) return;
-  json += ',';
-  json += bool_field_json(key, *value);
-}
-
-void append_optional_integer(std::string& json, std::string_view key, std::optional<long long> const& value)
-{
-  if (!value) return;
-  json += ',';
-  json += integer_field_json(key, *value);
-}
-
-std::string model_info_json(ava::config::ModelInfo const& model, RuntimeSession const& session, bool configured)
-{
-  bool const registered = ava::provider::builtin_provider_registry().contains(model.provider_id);
-  std::string json = "{";
-  json += string_field_json("provider", model.provider_id);
-  json += ',';
-  json += string_field_json("model", model.model_id);
-  json += ',';
-  json += string_field_json("display_name", model.display_name);
-  json += ',';
-  json += string_field_json("family", model.family);
-  json += ',';
-  json += string_field_json("api_family", model.api_family);
-  json += ',';
-  json += bool_field_json("registered", registered);
-  json += ',';
-  json += bool_field_json("selectable", registered && configured);
-  append_optional_integer(json, "context_window_tokens", model.context_window_tokens);
-  append_optional_integer(json, "max_output_tokens", model.max_output_tokens);
-  append_optional_bool(json, "supports_tools", model.supports_tools);
-  append_optional_bool(json, "supports_streaming", model.supports_streaming);
-  append_optional_bool(json, "supports_reasoning", model.supports_reasoning);
-  append_optional_bool(json, "reports_usage", model.reports_usage);
-  json += ",\"input_modalities\":";
-  json += string_array_json(model.input_modalities);
-  json += ",\"output_modalities\":";
-  json += string_array_json(model.output_modalities);
-  json += ",\"reasoning_levels\":";
-  json += string_array_json(model.reasoning_levels);
-  if (!model.reasoning_format.empty()) {
-    json += ',';
-    json += string_field_json("reasoning_format", model.reasoning_format);
-  }
-  json += ",\"compatibility_quirks\":";
-  json += string_array_json(model.compatibility_quirks);
-  json += ',';
-  json += bool_field_json("selected",
-                          session.model.provider_id == model.provider_id && session.model.model_id == model.model_id);
-  json += '}';
-  return json;
-}
 
 std::string joined_output(std::vector<std::string> const& output)
 {
@@ -274,66 +195,6 @@ std::string question_options_json(std::vector<ava::agent::QuestionOption> const&
 
 }  // namespace
 
-std::string string_field_json(std::string_view key, std::string_view value)
-{
-  return "\"" + std::string(key) + "\":\"" + ava::core::json::escape(value) + "\"";
-}
-
-std::string bool_field_json(std::string_view key, bool value)
-{
-  return "\"" + std::string(key) + "\":" + (value ? "true" : "false");
-}
-
-std::string number_field_json(std::string_view key, std::size_t value)
-{
-  return "\"" + std::string(key) + "\":" + std::to_string(value);
-}
-
-std::string integer_field_json(std::string_view key, long long value)
-{
-  return "\"" + std::string(key) + "\":" + std::to_string(value);
-}
-
-std::string output_array_json(std::vector<std::string> const& output)
-{
-  std::string json = "[";
-  for (std::size_t index = 0; index < output.size(); ++index) {
-    if (index > 0) json += ',';
-    json += '"';
-    json += ava::core::json::escape(output[index]);
-    json += '"';
-  }
-  json += ']';
-  return json;
-}
-
-std::string string_array_json(std::vector<std::string> const& values)
-{
-  std::string json = "[";
-  for (std::size_t index = 0; index < values.size(); ++index) {
-    if (index > 0) json += ',';
-    json += '"';
-    json += ava::core::json::escape(values[index]);
-    json += '"';
-  }
-  json += ']';
-  return json;
-}
-
-std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry)
-{
-  std::vector<ava::config::ModelInfo> models;
-  std::vector<std::string> seen;
-  for (auto model = registry.models.rbegin(); model != registry.models.rend(); ++model) {
-    auto const key = model_key(model->provider_id, model->model_id);
-    if (has_model_key(seen, key)) continue;
-    seen.push_back(key);
-    models.push_back(*model);
-  }
-  std::reverse(models.begin(), models.end());
-  return models;
-}
-
 std::string state_result_json(RuntimeSession const& session, bool cancel_requested)
 {
   std::string json = "{";
@@ -439,11 +300,106 @@ std::string command_result_json(CommandResult const& result)
   json += bool_field_json("handled", result.handled);
   json += ',';
   json += bool_field_json("quit", result.quit);
+  if (result.prompt_message) {
+    json += ',';
+    json += bool_field_json("prompt", true);
+    json += ',';
+    json += string_field_json("prompt_command", result.prompt_command);
+    json += ',';
+    json += string_field_json("prompt_source", result.prompt_source);
+  }
   json += ",\"output\":";
   json += output_array_json(result.output);
   json += ',';
   json += string_field_json("text", joined_output(result.output));
   json += '}';
+  return json;
+}
+
+std::string command_registry_result_json(CommandRegistry const& registry)
+{
+  std::string json = "{\"commands\":[";
+  for (std::size_t index = 0; index < registry.entries.size(); ++index) {
+    auto const& entry = registry.entries[index];
+    if (index > 0) json += ',';
+    json += '{';
+    json += string_field_json("command", entry.command);
+    json += ",\"aliases\":";
+    json += string_array_json(entry.aliases);
+    json += ',';
+    json += string_field_json("description", entry.description);
+    json += ',';
+    json += string_field_json("hint", entry.hint);
+    json += ',';
+    json += string_field_json("category", entry.category);
+    json += ',';
+    json += bool_field_json("enabled", entry.enabled);
+    json += ',';
+    json += string_field_json("disabled_reason", entry.disabled_reason);
+    json += ',';
+    json += string_field_json("source", ava::app::to_string(entry.source));
+    json += ',';
+    json += string_field_json("kind", ava::app::to_string(entry.kind));
+    json += ',';
+    json += string_field_json("source_id", entry.source_id);
+    json += ',';
+    json += string_field_json("source_path", entry.source_path.string());
+    json += ',';
+    json += string_field_json("source_scope", entry.source_scope);
+    if (!entry.skill_name.empty()) {
+      json += ',';
+      json += string_field_json("skill_name", entry.skill_name);
+    }
+    if (!entry.mcp_server_id.empty()) {
+      json += ',';
+      json += string_field_json("mcp_server_id", entry.mcp_server_id);
+      json += ',';
+      json += string_field_json("mcp_prompt_name", entry.mcp_prompt_name);
+      json += ",\"mcp_arguments\":[";
+      for (std::size_t argument_index = 0; argument_index < entry.mcp_arguments.size(); ++argument_index) {
+        auto const& argument = entry.mcp_arguments[argument_index];
+        if (argument_index > 0) json += ',';
+        json += '{';
+        json += string_field_json("name", argument.name);
+        json += ',';
+        json += string_field_json("description", argument.description);
+        json += ',';
+        json += bool_field_json("required", argument.required);
+        json += '}';
+      }
+      json += ']';
+    }
+    if (!entry.plugin_id.empty()) {
+      json += ',';
+      json += string_field_json("plugin_id", entry.plugin_id);
+      json += ',';
+      json += string_field_json("plugin_command_name", entry.plugin_command_name);
+    }
+    json += '}';
+  }
+  json += "],\"diagnostics\":[";
+  for (std::size_t index = 0; index < registry.diagnostics.size(); ++index) {
+    auto const& diagnostic = registry.diagnostics[index];
+    if (index > 0) json += ',';
+    json += '{';
+    json += string_field_json("command", diagnostic.command);
+    json += ',';
+    json += string_field_json("source", diagnostic.source);
+    json += ',';
+    json += string_field_json("source_id", diagnostic.source_id);
+    json += ',';
+    json += string_field_json("path", diagnostic.path.string());
+    json += ',';
+    json += string_field_json("message", diagnostic.message);
+    json += ',';
+    json += string_field_json("winner_source", diagnostic.winner_source);
+    json += ',';
+    json += string_field_json("winner_source_id", diagnostic.winner_source_id);
+    json += ',';
+    json += string_field_json("winner_path", diagnostic.winner_path.string());
+    json += '}';
+  }
+  json += "]}";
   return json;
 }
 

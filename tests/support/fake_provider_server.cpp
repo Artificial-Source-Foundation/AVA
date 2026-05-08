@@ -204,6 +204,38 @@ std::string multi_question_tool_body()
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
 }
 
+std::string skill_tool_body()
+{
+  std::string const arguments = "{\"name\":\"cli-skill\"}";
+  return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_skill\",\"type\":\"function\","
+         "\"function\":{\"name\":\"skill\",\"arguments\":\"" +
+         json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+}
+
+std::string websearch_tool_body()
+{
+  std::string const arguments = "{\"query\":\"OpenAI API docs\",\"num_results\":2,\"contextMaxCharacters\":2000}";
+  return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_websearch\",\"type\":\"function\","
+         "\"function\":{\"name\":\"websearch\",\"arguments\":\"" +
+         json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+}
+
+std::string webfetch_tool_body()
+{
+  std::string const arguments = "{\"url\":\"https://example.com/\",\"format\":\"text\",\"max_bytes\":2048}";
+  return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_webfetch\",\"type\":\"function\","
+         "\"function\":{\"name\":\"webfetch\",\"arguments\":\"" +
+         json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+}
+
+std::string mcp_tool_body()
+{
+  std::string const arguments = "{\"text\":\"hello from cli\"}";
+  return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_mcp\",\"type\":\"function\","
+         "\"function\":{\"name\":\"mcp_demo_echo\",\"arguments\":\"" +
+         json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+}
+
 struct ProviderResponse {
   int status_code = 200;
   std::string reason = "OK";
@@ -254,6 +286,18 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
     return ProviderResponse{.body = request_index == 0 ? multi_question_tool_body()
                                                        : text_body("after multi question reply")};
   }
+  if (scenario == "skill-tool") {
+    return ProviderResponse{.body = request_index == 0 ? skill_tool_body() : text_body("after skill tool")};
+  }
+  if (scenario == "websearch-tool") {
+    return ProviderResponse{.body = request_index == 0 ? websearch_tool_body() : text_body("after websearch tool")};
+  }
+  if (scenario == "webfetch-tool") {
+    return ProviderResponse{.body = request_index == 0 ? webfetch_tool_body() : text_body("after webfetch tool")};
+  }
+  if (scenario == "mcp-tool") {
+    return ProviderResponse{.body = request_index == 0 ? mcp_tool_body() : text_body("after mcp tool")};
+  }
   if (scenario == "compact") {
     return ProviderResponse{.body = request_index == 0
                                         ? text_body("before compact")
@@ -276,14 +320,17 @@ int main(int argc, char** argv)
   auto const delay = std::chrono::milliseconds(std::stoi(argv[3]));
   std::string const scenario = argc == 6 ? argv[4] : "text";
   std::string const target_path = argc == 6 ? argv[5] : "";
-  int const request_count = scenario == "http-error"         ? 3
-                            : scenario == "read-tool-twice"  ? 4
-                            : scenario == "read-tool-thrice" ? 6
-                            : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "write-tool" ||
-                               scenario == "bash-timeout-tree" || scenario == "question-tool" ||
-                               scenario == "question-tool-multi" || scenario == "compact")
-                                ? 2
-                                : 1;
+  int const request_count =
+      scenario == "http-error"         ? 3
+      : scenario == "text-three"       ? 3
+      : scenario == "read-tool-twice"  ? 4
+      : scenario == "read-tool-thrice" ? 6
+      : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "write-tool" ||
+         scenario == "bash-timeout-tree" || scenario == "question-tool" || scenario == "question-tool-multi" ||
+         scenario == "skill-tool" || scenario == "websearch-tool" || scenario == "webfetch-tool" ||
+         scenario == "mcp-tool" || scenario == "compact")
+          ? 2
+          : 1;
 
   Fd server(::socket(AF_INET, SOCK_STREAM, 0));
   if (server.get() < 0) {

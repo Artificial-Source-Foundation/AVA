@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "com.example.todo",
+  "name": "Todo Sample Plugin",
+  "version": "0.1.0",
+  "api_version": "ava.plugin.v1",
+  "description": "Minimal local plugin that demonstrates a command, a tool, static resources, and an event hook.",
+  "entrypoint": {
+    "command": "/bin/sh",
+    "args": ["plugin.sh"]
+  },
+  "capabilities": ["tools", "commands", "prompts", "skills", "event_hooks"],
+  "permissions": {
+    "file": [],
+    "shell": [],
+    "network": [],
+    "session": []
+  },
+  "contributes": {
+    "tools": [
+      {
+        "name": "todo_add",
+        "description": "Accept one todo item for the current AVA call.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "text": { "type": "string" }
+          },
+          "required": ["text"],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "commands": [
+      {
+        "name": "status",
+        "description": "Report that the sample plugin is ready."
+      }
+    ],
+    "prompts": [
+      {
+        "name": "todo-review",
+        "description": "Review todo-oriented follow-up work.",
+        "path": "prompts/todo-review.md"
+      }
+    ],
+    "skills": [
+      {
+        "name": "todo-triage",
+        "description": "Triage a small implementation todo list.",
+        "path": "skills/todo-triage.md"
+      }
+    ],
+    "event_hooks": [
+      { "event": "tool.result" }
+    ]
+  }
+}

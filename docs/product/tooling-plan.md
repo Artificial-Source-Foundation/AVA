@@ -16,7 +16,7 @@ Every tool has:
 - Output truncation rules.
 - Cancellation support where applicable.
 
-Tool metadata should stay generic by default, matching PI's lean tool model. The metadata shape should still allow later provider/model-specific descriptions or availability choices, matching the useful OpenCode pattern, once AVA has the Phase 5 provider/model capability catalog.
+Tool metadata should stay generic by default, matching the lean backend maturity baseline. The metadata shape should still allow later provider/model-specific descriptions or availability choices, once AVA has the Phase 5 provider/model capability catalog.
 
 For the backend MVP, the tool contract also becomes the foundation for plugin and MCP tools. Built-in tools, plugin tools, and MCP tools must share one registry path for schema validation, permission checks, source identity, event emission, audit records, cancellation, and output bounds. This registry work must preserve current built-in tool behavior before external tools are allowed through it.
 

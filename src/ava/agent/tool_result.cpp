@@ -37,6 +37,14 @@ void add_changed_path(ToolResultPayload& payload, std::string path)
   }
 }
 
+void add_permission_request_id(ToolResultPayload& payload, std::string id)
+{
+  if (id.empty()) return;
+  if (std::ranges::find(payload.permission_request_ids, id) == payload.permission_request_ids.end()) {
+    payload.permission_request_ids.push_back(std::move(id));
+  }
+}
+
 void assign_size_field(std::optional<std::size_t>& target, std::string_view object, std::string_view key)
 {
   if (auto value = optional_size_field(object, key)) target = *value;
@@ -46,6 +54,11 @@ bool has_error_fields(ToolResultPayload const& payload)
 {
   return !payload.error_category.empty() || !payload.error_code.empty() || !payload.error_message.empty() ||
          !payload.error_details.empty();
+}
+
+bool path_field_represents_mutation(std::string_view tool_name)
+{
+  return tool_name == "write_file" || tool_name == "edit_file" || tool_name == "apply_patch";
 }
 
 void append_string_field(std::string& out, std::string_view key, std::string_view value)
@@ -125,10 +138,20 @@ ToolResultPayload merge_payload_defaults(ToolResultPayload payload, std::string_
   if (payload.error_details.empty()) payload.error_details = std::move(parsed.error_details);
   if (payload.diff.empty()) payload.diff = std::move(parsed.diff);
   if (payload.changed_paths.empty()) payload.changed_paths = std::move(parsed.changed_paths);
+  if (payload.permission_request_ids.empty()) {
+    payload.permission_request_ids = std::move(parsed.permission_request_ids);
+  }
   payload.diff_truncated = payload.diff_truncated || parsed.diff_truncated;
   payload.truncated = payload.truncated || parsed.truncated;
+  payload.byte_limited = payload.byte_limited || parsed.byte_limited;
+  payload.line_limited = payload.line_limited || parsed.line_limited;
   if (!payload.output_bytes) payload.output_bytes = parsed.output_bytes;
   if (!payload.total_bytes) payload.total_bytes = parsed.total_bytes;
+  if (!payload.output_lines) payload.output_lines = parsed.output_lines;
+  if (!payload.total_lines) payload.total_lines = parsed.total_lines;
+  if (!payload.start_line) payload.start_line = parsed.start_line;
+  if (!payload.end_line) payload.end_line = parsed.end_line;
+  if (!payload.next_offset_line) payload.next_offset_line = parsed.next_offset_line;
   if (!payload.omitted_bytes) payload.omitted_bytes = parsed.omitted_bytes;
   if (!payload.omitted_lines) payload.omitted_lines = parsed.omitted_lines;
   if (!payload.visible_matches) payload.visible_matches = parsed.visible_matches;
@@ -161,7 +184,9 @@ ToolResultPayload parse_tool_result_payload(std::string_view tool_name, bool suc
   if (bool_field_is_true(result_text, "canceled")) payload.status = ToolResultStatus::Canceled;
   payload.content = std::string(result_text);
   payload.content_type = ava::core::json::is_valid_object(result_text) ? "application/json" : "text/plain";
-  add_changed_path(payload, ava::core::json::string_field(result_text, "path").value_or(""));
+  if (path_field_represents_mutation(tool_name)) {
+    add_changed_path(payload, ava::core::json::string_field(result_text, "path").value_or(""));
+  }
   for (auto const& path : ava::core::json::strings_in_array_field(result_text, "changed_paths")) {
     add_changed_path(payload, path);
   }
@@ -171,15 +196,29 @@ ToolResultPayload parse_tool_result_payload(std::string_view tool_name, bool suc
   for (auto const& edit : ava::core::json::objects_in_array_field(result_text, "edits")) {
     add_changed_path(payload, ava::core::json::string_field(edit, "path").value_or(""));
   }
+  add_permission_request_id(payload, ava::core::json::string_field(result_text, "permission_request_id").value_or(""));
+  for (auto const& id : ava::core::json::strings_in_array_field(result_text, "permission_request_ids")) {
+    add_permission_request_id(payload, id);
+  }
 
   payload.diff = ava::core::json::string_field(result_text, "diff").value_or("");
   payload.diff_truncated = bool_field_is_true(result_text, "diff_truncated");
   payload.truncated = bool_field_is_true(result_text, "truncated");
+  payload.byte_limited = bool_field_is_true(result_text, "byte_limited");
+  payload.line_limited = bool_field_is_true(result_text, "line_limited");
   payload.spill_truncated = bool_field_is_true(result_text, "spill_truncated");
   payload.spill_path = ava::core::json::string_field(result_text, "spill_path")
                            .value_or(ava::core::json::string_field(result_text, "spill_file").value_or(""));
   assign_size_field(payload.output_bytes, result_text, "output_bytes");
   assign_size_field(payload.total_bytes, result_text, "total_bytes");
+  assign_size_field(payload.output_lines, result_text, "output_lines");
+  assign_size_field(payload.output_lines, result_text, "visible_lines");
+  assign_size_field(payload.output_lines, result_text, "returned_lines");
+  assign_size_field(payload.total_lines, result_text, "total_lines");
+  assign_size_field(payload.start_line, result_text, "start_line");
+  assign_size_field(payload.end_line, result_text, "end_line");
+  assign_size_field(payload.next_offset_line, result_text, "next_offset_line");
+  assign_size_field(payload.next_offset_line, result_text, "next_offset");
   assign_size_field(payload.omitted_bytes, result_text, "omitted_bytes");
   assign_size_field(payload.omitted_bytes, result_text, "omitted_output_bytes");
   assign_size_field(payload.omitted_lines, result_text, "omitted_lines");
@@ -238,9 +277,17 @@ std::string serialize_tool_result_payload_json(ToolDispatchResult const& result)
   append_string_field(out, "diff", payload.diff);
   if (!payload.diff.empty() || payload.diff_truncated) append_bool_field(out, "diff_truncated", payload.diff_truncated);
   append_string_array_field(out, "changed_paths", payload.changed_paths);
+  append_string_array_field(out, "permission_request_ids", payload.permission_request_ids);
   append_bool_field(out, "truncated", payload.truncated);
+  if (payload.byte_limited) append_bool_field(out, "byte_limited", payload.byte_limited);
+  if (payload.line_limited) append_bool_field(out, "line_limited", payload.line_limited);
   append_optional_number_field(out, "output_bytes", payload.output_bytes);
   append_optional_number_field(out, "total_bytes", payload.total_bytes);
+  append_optional_number_field(out, "output_lines", payload.output_lines);
+  append_optional_number_field(out, "total_lines", payload.total_lines);
+  append_optional_number_field(out, "start_line", payload.start_line);
+  append_optional_number_field(out, "end_line", payload.end_line);
+  append_optional_number_field(out, "next_offset_line", payload.next_offset_line);
   append_optional_number_field(out, "omitted_bytes", payload.omitted_bytes);
   append_optional_number_field(out, "omitted_lines", payload.omitted_lines);
   append_optional_number_field(out, "visible_matches", payload.visible_matches);

@@ -20,6 +20,6 @@ struct XdgPaths {
 
 [[nodiscard]] XdgPaths xdg_paths();
 [[nodiscard]] std::filesystem::path legacy_ava_credentials_path();
-[[nodiscard]] std::filesystem::path opencode_auth_path();
+[[nodiscard]] std::filesystem::path legacy_compatible_auth_path();
 
 }  // namespace ava::config

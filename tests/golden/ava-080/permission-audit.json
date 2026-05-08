@@ -1,0 +1,14 @@
+{
+  "permission_request_id": "permreq_ava080",
+  "operation": "mcp.tool.call",
+  "mode": "build",
+  "tool_name": "mcp_demo_echo",
+  "action": "ask",
+  "reason": "MCP tool calls require explicit approval",
+  "risk": "high",
+  "target_path": "/workspace/.ava/mcp.json",
+  "command": "demo:echo",
+  "resolution": "deny",
+  "resolution_source": "resolver",
+  "resolution_reason": "denied by contract test"
+}

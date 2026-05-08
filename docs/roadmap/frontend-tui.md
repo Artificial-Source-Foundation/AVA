@@ -26,66 +26,28 @@ Required 1.0 behavior:
 
 Reference code is used for product and interaction comparison only. Do not copy architecture or source code into AVA.
 
-### OpenCode
+### Frontend Interaction Reference
 
-Useful reference paths:
-
-- `docs/reference-code/opencode/packages/web/src/content/docs/tui.mdx`
-- `docs/reference-code/opencode/packages/plugin/src/tui.ts`
-- `docs/reference-code/opencode/packages/opencode/specs/tui-plugins.md`
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/component/dialog-command.tsx`
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/component/dialog-variant.tsx`
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/routes/session/permission.tsx`
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/routes/session/question.tsx`
-- `docs/reference-code/opencode/packages/opencode/src/config/keybinds.ts`
-- `docs/reference-code/opencode/packages/opencode/src/provider/transform.ts`
-- `docs/reference-code/opencode/packages/web/src/content/docs/keybinds.mdx`
-- `docs/reference-code/opencode/packages/web/src/content/docs/models.mdx`
-- `docs/reference-code/opencode/.opencode/plugins/tui-smoke.tsx`
+Useful local reference material lives under `docs/reference-code/`; do not copy its code or architecture.
 
 Lessons to adapt:
 
 - Commands should be metadata-rich: title, description, category, slash name/aliases, keybind display, suggested/hidden/enabled state, and one backend-owned action id.
 - Dialogs for permissions and questions should handle single-select, multi-select, custom text, confirmation, rejection, and keyboard escape paths consistently.
 - The TUI should expose compact commands for common session work: `/compact`, `/details`, `/export`, `/models`, `/sessions`, and thinking visibility once provider capabilities exist. `Ctrl+T` should be the primary way to rotate thinking modes.
-- Thinking display and thinking capability are separate controls. OpenCode uses `/thinking` for display visibility and `Ctrl+T` for cycling model variants; AVA should keep the same conceptual split. A `/variants` or `/thinking-modes` selector can exist later as a direct-pick modal, but it should not replace the `Ctrl+T` rotation flow.
+- Thinking display and thinking capability are separate controls. AVA should keep display visibility separate from model reasoning level. A `/variants` or `/thinking-modes` selector can exist later as a direct-pick modal, but it should not replace the `Ctrl+T` rotation flow.
 - Provider/model reasoning levels are capability data, not universal TUI constants. OpenAI-style models may expose levels such as `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`, while other providers expose different names or no variants.
 - Keybinds should be semantic actions first, physical keys second. Even if AVA does not expose user-configurable keybinds in v1, the internal model should avoid hardcoding behavior across renderers.
-- OpenCode's plugin slots, route system, install flow, theme marketplace, MCP/sidebar surfaces, and web-style extensibility are not AVA v1 goals. They are useful proof that narrow host APIs matter later.
+- Plugin slots, route systems, install flows, theme marketplaces, MCP/sidebar surfaces, and web-style extensibility are not AVA v1 goals. They are useful proof that narrow host APIs matter later.
 
-### PI / pi-mono
+### Terminal Runtime Reference
 
-Useful reference paths:
-
-- `docs/reference-code/pi-mono/packages/tui/src/tui.ts`
-- `docs/reference-code/pi-mono/packages/tui/src/terminal.ts`
-- `docs/reference-code/pi-mono/packages/tui/src/stdin-buffer.ts`
-- `docs/reference-code/pi-mono/packages/tui/src/utils.ts`
-- `docs/reference-code/pi-mono/packages/tui/src/autocomplete.ts`
-- `docs/reference-code/pi-mono/packages/tui/src/components/editor.ts`
-- `docs/reference-code/pi-mono/packages/tui/src/keybindings.ts`
-- `docs/reference-code/pi-mono/packages/tui/test/virtual-terminal.ts`
-- `docs/reference-code/pi-mono/packages/tui/test/tui-render.test.ts`
-- `docs/reference-code/pi-mono/packages/tui/test/editor.test.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/core/slash-commands.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/core/footer-data-provider.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/core/session-manager.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/test/suite/harness.ts`
-- `docs/reference-code/pi-mono/packages/ai/src/providers/faux.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/docs/tui.md`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/modes/interactive/interactive-mode.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/modes/interactive/components/footer.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/modes/interactive/components/assistant-message.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/modes/interactive/components/bash-execution.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/modes/interactive/components/tool-execution.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/modes/interactive/components/compaction-summary-message.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/modes/interactive/components/diff.ts`
-- `docs/reference-code/pi-mono/packages/tui/src/components/markdown.ts`
+Useful local reference material lives under `docs/reference-code/`; do not copy its code or architecture.
 
 Lessons to adapt:
 
 - A terminal component contract can stay small: render to bounded-width lines, handle input only when focused, invalidate cached render state, and preserve text width correctness.
-- Differential rendering, synchronized output, and throttled redraws are useful after live streaming lands, but AVA should first migrate to event-driven state. Optimize measured redraw pain, not theoretical flicker, and do not replace ncursesw solely to imitate PI's raw-ANSI renderer.
+- Differential rendering, synchronized output, and throttled redraws are useful after live streaming lands, but AVA should first migrate to event-driven state. Optimize measured redraw pain, not theoretical flicker, and do not replace ncursesw solely to imitate another renderer.
 - Terminal correctness is product quality: escape-sequence buffering, bracketed paste, resize redraws, cursor placement, IME-sensitive hardware cursor positioning, width overflow diagnostics, and Unicode grapheme/CJK/emoji width tests should be treated as v1 hardening work.
 - The footer should be structured, not a single opaque status string: workspace/cwd, git/session, token usage, cost, context percentage, provider/model, and reasoning state where available.
 - Token counts and context pressure belong in the structured footer/status surface, not inside the composer text area. Command outputs such as help/session stats should render into the chat transcript as normal system-style entries.
@@ -102,7 +64,7 @@ Lessons to adapt:
 - Compaction should render as a first-class transcript event with collapsed summary and expandable details.
 - Startup/context visibility should be compact by default and expandable on demand, showing loaded context files and diagnostics without forcing users to parse prompts.
 - Testing should include a fake provider/event harness and terminal-render harness so streaming, prompts, tool events, resize, Unicode width, and regression cases are verifiable without a real provider or paid tokens.
-- PI's extension-loaded custom renderers, raw-ANSI renderer, image protocol handling, branch tree UI, external share flows, and package/resource ecosystem are post-v1 unless they directly support a v1 acceptance criterion.
+- Extension-loaded custom renderers, raw-ANSI renderers, image protocol handling, branch tree UI, external share flows, and package/resource ecosystems are post-v1 unless they directly support a v1 acceptance criterion.
 
 ## Current AVA Baseline
 
@@ -123,7 +85,7 @@ Current 1.0 gaps:
 - Native interactive runs now support backend-owned queue behavior for the shipped subset: submitting a draft during an active assistant or `/compact` run enqueues a follow-up turn, `/steer ...` enqueues steering for the next safe provider boundary, queued items render in a compact pending region above the composer, `/restore` restores the latest pending item to the draft before it starts, and `steer_queued`/`steer_applied`/`steer_skipped` plus `follow_up_queued`/`follow_up_started`/`follow_up_skipped` render from the shared event stream.
 - Session stats and compact token usage have initial visibility through `/stats` and the composer status slot, but context pressure and compaction state still need richer long-session UI.
 - Slash commands are metadata-rich, and provider login now routes through backend auth. `/models`, `/sessions`, and `/context` accept optional query text using backend/session data; import/reload/new/resume switching flows still remain disabled or shallow until the corresponding backend APIs exist.
-- Slash autocomplete now supports staged argument suggestions from backend-owned data sources: configured providers/models, resumable sessions, loaded context sources, configured MCP server ids, and discovered plugin metadata. File/path autocomplete remains deferred until the backend/tooling path can provide ignored-path-aware search semantics.
+- Slash autocomplete now supports staged argument suggestions from backend-owned data sources: configured providers/models, resumable sessions, loaded context sources, configured MCP server ids, and discovered plugin metadata. Dynamic backend-owned project/global prompt commands, `/skill:*`, MCP prompt commands, and plugin command contributions can appear in the palette through the shared command registry; the TUI still only renders command metadata and leaves parsing/effects to backend handlers. File/path autocomplete remains deferred until the backend/tooling path can provide ignored-path-aware search semantics.
 - The composer has core editor affordances and tall-draft visibility indicators; mouse wheel input is reserved for transcript scrolling so chat scrollback stays predictable.
 - Terminal/input hardening is improved but not exhausted for v1-level daily use: current tests include IME-sensitive cursor-placement cases through a virtual `newterm` ncurses smoke path, but real-terminal IME automation and deeper performance profiling remain future work. Current render/input tests cover broader escape-sequence buffering and discard, invalid UTF-8, CJK width, combining marks, zero-width joiners, variation selectors, resize stress, bounded overflow, a large-render performance budget, and a `newterm` ncurses smoke path that runs without a real TTY.
 - Tool cards now cover provider announcements, argument streaming, execution, progress, completion, errors, details, backend-provided per-tool detail state, and backend-provided truncation/spill/diff metadata. Diff-before-approval is implemented for backend file mutation prompts where AVA can safely compute a unified diff before approval; richer full diff navigation remains deferred.
@@ -141,7 +103,7 @@ Scope:
 - Treat this document as the frontend companion to `docs/roadmap/backend.md`.
 - Keep the custom ncursesw path as the default until a concrete blocker justifies FTXUI or another dependency.
 - Preserve the existing backend/TUI boundary: slash palette renders options, but backend command handlers own parsing and effects.
-- Keep OpenCode as the primary visual/interaction reference and PI as the primary terminal-runtime/session-visibility reference.
+- Keep external references as behavior input only; frontend implementation should stay inside AVA's ncursesw and backend-event constraints.
 
 Acceptance criteria:
 
@@ -335,7 +297,7 @@ Backend dependency: backend tool-quality work, especially unified diffs, streami
 
 Scope:
 
-- Add a tool details toggle similar to OpenCode's `/details`, defaulting to compact summaries but allowing expanded output for selected or all tool cards.
+- Add a tool details toggle, defaulting to compact summaries but allowing expanded output for selected or all tool cards.
 - Render truncated output with explicit affordances: omitted byte/line counts, spill-file path when backend provides one, and guidance for opening or exporting detail.
 - Distinguish backend/context truncation from frontend visual truncation. The UI can collapse long output for readability, but it must not imply the model saw content that backend omitted from context.
 - Sanitize binary and non-printable tool/shell output before display, preferably using visible replacement rather than silently dropping dangerous bytes.
@@ -428,12 +390,12 @@ Acceptance criteria:
 ## Explicit Non-Goals For V1
 
 - Replacing ncursesw with FTXUI or another dependency without a specific blocker and decision record.
-- Replacing ncursesw or bypassing it with a raw-ANSI renderer solely because PI uses raw terminal output.
+- Replacing ncursesw or bypassing it with a raw-ANSI renderer solely to match another implementation.
 - Full theme system or theme marketplace.
 - Plugin-extensible sidebars, arbitrary TUI slots, route plugins, or custom renderer plugins.
-- Dynamic extension slash commands, `/skill:*` commands, command invocation-name conflict rewriting, or plugin-provided command handlers.
+- TUI-owned command semantics, command invocation-name conflict rewriting, plugin-provided UI surfaces, or custom renderer slots. Backend-owned dynamic prompt, skill, MCP, and plugin commands may appear in the palette through the shared command registry, but their parsing and effects stay outside the TUI.
 - Full session tree, branch/fork timeline, or visual merge workflow.
-- PI-style `/fork`, `/clone`, and `/tree` branch workflows.
+- Full `/fork`, `/clone`, and `/tree` branch workflows.
 - External sharing commands such as `/share` to GitHub Gist or any other network publishing flow.
 - Clipboard commands such as `/copy` unless a separate terminal/clipboard permission and portability decision is made.
 - Full settings UI, `/settings`, `/scoped-models`, or `/changelog`; prefer focused commands and backend-owned config flows until a settings surface is justified.

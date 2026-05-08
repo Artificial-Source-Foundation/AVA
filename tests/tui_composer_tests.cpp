@@ -1,3 +1,4 @@
+#include "ava/app/command_palette.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
@@ -69,9 +70,22 @@ namespace {
 
 void test_tui_composer_rendering_and_input()
 {
+  expect(ava::tui::terminal_escape_delay_ms() == 100,
+         "terminal escape delay is deliberately tuned low enough for responsive Esc while buffering split CSI input");
   expect(ava::tui::terminal_escape_sequence_key("[27;2;13~") == ava::tui::Key::ShiftEnter &&
              ava::tui::terminal_escape_sequence_key("[13;2u") == ava::tui::Key::ShiftEnter &&
              ava::tui::terminal_escape_sequence_key("[13;2~") == ava::tui::Key::ShiftEnter &&
+             ava::tui::terminal_escape_sequence_key("[5~") == ava::tui::Key::PageUp &&
+             ava::tui::terminal_escape_sequence_key("[6~") == ava::tui::Key::PageDown &&
+             ava::tui::terminal_escape_sequence_key("[5;2~") == ava::tui::Key::PageUp &&
+             ava::tui::terminal_escape_sequence_key("[6;2~") == ava::tui::Key::PageDown &&
+             ava::tui::terminal_escape_sequence_key("[<64;12;9M") == ava::tui::Key::MouseWheelUp &&
+             ava::tui::terminal_escape_sequence_key("[<65;12;9M") == ava::tui::Key::MouseWheelDown &&
+             ava::tui::terminal_escape_sequence_key("[<68;12;9M") == ava::tui::Key::MouseWheelUp &&
+             ava::tui::terminal_escape_sequence_key("[<69;12;9M") == ava::tui::Key::MouseWheelDown &&
+             ava::tui::terminal_escape_sequence_key("[<64;12;9m") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[<65;12;9m") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("y") == ava::tui::Key::AltY &&
              ava::tui::terminal_escape_sequence_key("[13;2") == ava::tui::Key::Unknown &&
              ava::tui::terminal_escape_sequence_key("[13;5u") == ava::tui::Key::Unknown &&
              ava::tui::terminal_escape_sequence_key("[27;2;13") == ava::tui::Key::Unknown &&
@@ -85,6 +99,7 @@ void test_tui_composer_rendering_and_input()
              ava::tui::terminal_escape_sequence_complete(std::string("]52;c;AAAA") + "\x1b\\") &&
              ava::tui::terminal_escape_sequence_complete(std::string("P1;2|payload") + "\x1b\\") &&
              !ava::tui::terminal_escape_sequence_complete("[13;2") &&
+             !ava::tui::terminal_escape_sequence_complete("[200") &&
              !ava::tui::terminal_escape_sequence_complete("]0;AVA") &&
              !ava::tui::terminal_escape_sequence_complete(std::string("P1;2|payload")),
          "terminal escape parser buffers CSI, OSC, and DCS sequences until a real terminator is present");
@@ -93,6 +108,7 @@ void test_tui_composer_rendering_and_input()
           ava::tui::terminal_escape_sequence_should_discard(std::string("]0;AVA") + "\a") &&
           ava::tui::terminal_escape_sequence_should_discard(std::string("]52;c;AAAA") + "\x1b\\") &&
           ava::tui::terminal_escape_sequence_should_discard(std::string("P1;2|payload") + "\x1b\\") &&
+          ava::tui::terminal_escape_sequence_should_discard("[<64;12;9m") &&
           !ava::tui::terminal_escape_sequence_should_discard("[13;2u") &&
           !ava::tui::terminal_escape_sequence_should_discard("[200~") &&
           !ava::tui::terminal_escape_sequence_should_discard("[13;2"),
@@ -189,6 +205,39 @@ void test_tui_composer_rendering_and_input()
       ava::tui::handle_question_prompt_input(single_question, ava::tui::InputEvent{.key = ava::tui::Key::Backspace});
   expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && question_input.custom_text.empty(),
          "question prompt backspace edits custom text");
+  auto secret_question = ava::tui::QuestionPromptView{.header = "Connect",
+                                                      .question = "Paste API key",
+                                                      .options = {},
+                                                      .multiple = false,
+                                                      .allow_custom = true,
+                                                      .secret = true,
+                                                      .selected_option_index = 0,
+                                                      .custom_text = ""};
+  question_input =
+      ava::tui::handle_question_prompt_input(secret_question, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && question_input.custom_text.empty(),
+         "question prompt enter keeps an empty single custom answer open");
+
+  auto copy_question = ava::tui::QuestionPromptView{
+      .header = "Connect",
+      .question = "Open URL",
+      .options = {ava::tui::QuestionPromptOptionView{.value = "done", .label = "Done"},
+                  ava::tui::QuestionPromptOptionView{.value = "copy:https://auth.openai.com", .label = "C Copy"}},
+      .multiple = false,
+      .allow_custom = false,
+      .selected_option_index = 0,
+      .custom_text = ""};
+  question_input = ava::tui::handle_question_prompt_input(
+      copy_question, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'c'});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Copy &&
+             question_input.copy_text == "https://auth.openai.com" &&
+             std::ranges::none_of(question_input.options,
+                                  [](ava::tui::QuestionPromptOptionView const& option) { return option.selected; }),
+         "question prompt copy shortcut copies without resolving a single-select option");
+  question_input =
+      ava::tui::handle_question_prompt_input(copy_question, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Resolve && question_input.options[0].selected,
+         "question prompt enter confirms the selected non-copy option");
 
   auto multi_question =
       ava::tui::QuestionPromptView{.header = "Choose",
@@ -252,6 +301,11 @@ void test_tui_composer_rendering_and_input()
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::Undo) &&
              draft.text == std::string("a") + "\xC3\xA9",
          "tui draft editor undo restores the previous edit");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::Redo) && draft.text == "a",
+         "tui draft editor redo reapplies the undone edit");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::Undo) &&
+             draft.text == std::string("a") + "\xC3\xA9",
+         "tui draft editor can undo again after redo");
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorLeft) && draft.cursor == 1,
          "tui draft editor moves left by full utf-8 codepoint boundaries");
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteBackward) &&
@@ -286,6 +340,23 @@ void test_tui_composer_rendering_and_input()
          "tui draft editor clears a non-empty composer draft into the kill buffer");
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::Undo) && draft.text == "pending message",
          "tui draft editor undo restores a cleared composer draft");
+  ava::tui::ComposerDraftState ring_draft;
+  ava::tui::reset_composer_draft(ring_draft, "alpha beta gamma");
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::DeleteWordBackward) &&
+             ring_draft.text == "alpha beta " && ring_draft.kill_buffer == "gamma",
+         "tui draft editor records killed text in a ring");
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::DeleteWordBackward) &&
+             ring_draft.text == "alpha " && ring_draft.kill_buffer == "beta ",
+         "tui draft editor keeps the most recent kill at the front of the ring");
+  expect(
+      ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::Yank) && ring_draft.text == "alpha beta ",
+      "tui draft editor yanks the newest kill-ring entry");
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::YankPop) &&
+             ring_draft.text == "alpha gamma" && ring_draft.kill_buffer == "gamma",
+         "tui draft editor yank-pop swaps the previous yank with the next kill-ring entry");
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::YankPop) &&
+             ring_draft.text == "alpha beta " && ring_draft.kill_buffer == "beta ",
+         "tui draft editor yank-pop cycles through the kill ring");
   expect(ava::tui::normalize_composer_paste_text("one\r\ntwo\rthree") == "one\ntwo\nthree",
          "tui paste normalizes crlf and lone carriage returns into newlines");
   expect(ava::tui::normalize_composer_paste_text(std::string("a\x01\tb\n", 5) + "\xC3\xA9") ==
@@ -411,7 +482,7 @@ void test_tui_composer_rendering_and_input()
                                return visible.find("Build · GPT-5.5 OpenAI · low") != std::string::npos &&
                                       visible.find("reasoning") == std::string::npos;
                              }),
-         "tui shows selected reasoning level in the composer as OpenCode-style metadata");
+         "tui shows selected reasoning level in the composer metadata");
 
   auto const default_reasoning_lines =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -430,6 +501,10 @@ void test_tui_composer_rendering_and_input()
                                       visible.find("default") == std::string::npos;
                              }),
          "tui leaves reasoning metadata blank when the model uses default reasoning");
+  expect(std::ranges::none_of(
+             default_reasoning_lines,
+             [](std::string const& line) { return strip_sgr(line).find("session session_test") != std::string::npos; }),
+         "tui keeps the session id out of the composer footer");
 
   auto const plan_mode_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "plan",
                                                                                     .provider = "openai",
@@ -469,6 +544,38 @@ void test_tui_composer_rendering_and_input()
                                       visible.substr(token_pos + token_text.size(), 2) == "  ";
                              }),
          "tui leaves right margin after token-status text");
+
+  auto const compact_footer_lines = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "ready",
+                                 .token_status = "1.3k (0.7%)",
+                                 .transcript = {},
+                                 .width = 110,
+                                 .height = 10,
+                                 .sidebar = ava::tui::SidebarSnapshot{.session_id = "session_test",
+                                                                      .mode = "build",
+                                                                      .provider = "openai",
+                                                                      .model = "gpt-5.5",
+                                                                      .workspace = "/workspace/project",
+                                                                      .git_branch = "develop",
+                                                                      .token_status = "1.3k (0.7%)",
+                                                                      .context_source_count = 2,
+                                                                      .session_entry_count = 42}});
+  expect(
+      std::ranges::any_of(compact_footer_lines,
+                          [](std::string const& line) {
+                            auto const visible = strip_sgr(line);
+                            return visible.find("cwd project") != std::string::npos &&
+                                   visible.find("git develop") != std::string::npos &&
+                                   visible.find("ctx 2") != std::string::npos &&
+                                   visible.find("entries 42") != std::string::npos &&
+                                   visible.find("1.3k (0.7%)") != std::string::npos;
+                          }),
+      "tui compact footer persists cwd, git, context, session, model, mode, and token snapshot data without sidebar");
 
   auto const markdown_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -548,10 +655,10 @@ void test_tui_composer_rendering_and_input()
   });
   expect(user_markup_line != role_markup_transcript.end() && assistant_markup_line != role_markup_transcript.end() &&
              !has_active_sgr_at_text(*user_markup_line, "x", kWarningSgr) &&
-             !has_active_sgr_at_text(*user_markup_line, "y", kBoldSgr) &&
+             !has_active_sgr_at_text(*user_markup_line, "y", kBoldSgr) && visible_columns(*user_markup_line) < 28 &&
              has_active_sgr_at_text(*assistant_markup_line, "x", kWarningSgr) &&
              has_active_sgr_at_text(*assistant_markup_line, "y", kBoldSgr),
-         "tui keeps user inline markdown literal while formatting assistant inline markdown");
+         "tui keeps user inline markdown literal inside a compact bubble while formatting assistant inline markdown");
 
   auto const wrapped_markdown_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -796,6 +903,13 @@ void test_tui_composer_rendering_and_input()
          "tui slash selection inserts explicit backend-provided argument completion text");
   expect(ava::tui::slash_command_selection_text("/mcp inspect f", argument_slash_commands, 0) == "/mcp inspect fs",
          "tui argument completion preserves required previous arguments for nested command forms");
+  std::vector<ava::tui::SlashCommandItem> const connect_slash_commands = {
+      ava::tui::SlashCommandItem{.command = "/connect", .description = "Connect a provider", .category = "General"}};
+  expect(!ava::tui::slash_palette_visible("/connect", connect_slash_commands) &&
+             !ava::tui::slash_palette_visible("/connect ", connect_slash_commands) &&
+             !ava::tui::slash_palette_visible("/connect openai", connect_slash_commands) &&
+             ava::tui::filter_slash_commands("/connect openai ", connect_slash_commands).empty(),
+         "tui slash palette lets /connect submit directly so provider and method choices stay in the centered modal");
   auto const argument_palette =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                            .provider = "openai",
@@ -819,10 +933,13 @@ void test_tui_composer_rendering_and_input()
 
   auto const key_bindings = ava::tui::parse_key_bindings_json(
       "{\"submit\":\"Ctrl+T, Enter\",\"new_line\":\"Shift+Enter\",\"delete_to_line_start\":\"Ctrl+U\","
-      "\"autocomplete_accept\":\"Tab\",\"variant_cycle\":\"Ctrl+D\"}");
+      "\"autocomplete_accept\":\"Tab\",\"variant_cycle\":\"Ctrl+D\",\"redo\":\"Ctrl+R\","
+      "\"yank_pop\":\"Alt+Y\"}");
   expect(
       key_bindings && ava::tui::action_for_key(*key_bindings, ava::tui::Key::CtrlT) == ava::tui::TuiAction::Submit &&
           ava::tui::action_for_key(*key_bindings, ava::tui::Key::CtrlD) == ava::tui::TuiAction::VariantCycle &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::Redo, ava::tui::Key::CtrlR) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::YankPop, ava::tui::Key::AltY) &&
           ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::DeleteToLineStart, ava::tui::Key::CtrlU) &&
           ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::AutocompleteAccept, ava::tui::Key::Tab) &&
           ava::tui::keys_display(*key_bindings, ava::tui::TuiAction::Submit).find("Ctrl+T") != std::string::npos,
@@ -834,7 +951,9 @@ void test_tui_composer_rendering_and_input()
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModeToggle, ava::tui::Key::Tab) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::AutocompleteAccept, ava::tui::Key::Tab) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Undo, ava::tui::Key::CtrlZ) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Redo, ava::tui::Key::CtrlR) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Yank, ava::tui::Key::CtrlY) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::YankPop, ava::tui::Key::AltY) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Interrupt, ava::tui::Key::CtrlC),
       "tui default keybinds preserve context-specific semantic actions for shared keys");
   auto const help_items = ava::tui::key_binding_help_items(default_bindings);
@@ -853,7 +972,15 @@ void test_tui_composer_rendering_and_input()
                                  }) &&
              std::ranges::any_of(help_items,
                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "redo" && item.keys.find("Ctrl+R") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
                                    return item.action == "yank" && item.keys.find("Ctrl+Y") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "yank_pop" && item.keys.find("Alt+Y") != std::string::npos;
                                  }),
          "tui keybind help lists concrete semantic action names and effective keys");
   expect(!ava::tui::parse_key_bindings_json("{\"submit\":\"Hyper+Enter\"}"),
@@ -1665,6 +1792,95 @@ void test_tui_composer_rendering_and_input()
                  [](std::string const& line) { return strip_sgr(line).find("OpenAI") != std::string::npos; }),
          "tui renders searchable provider questions as centered filtered modals");
 
+  auto const oauth_modal_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "question required",
+      .transcript = {},
+      .question_prompt =
+          ava::tui::QuestionPromptView{
+              .header = "ChatGPT Pro/Plus (browser)",
+              .question = "https://auth.openai.com/oauth/authorize?client_id="
+                          "app_EMoamEEZ73f0CkXaXp7hrann&redirect_uri=http%3A%2F%2Flocalhost%3A1455"
+                          "%2Fauth%2Fcallback&code_challenge=longchallengevalue&state=state\n"
+                          "\nComplete authorization in your browser. This window will close automatically."
+                          "\n\nWaiting for authorization...",
+              .options = {ava::tui::QuestionPromptOptionView{.value = "copy:https://auth.openai.com/oauth/authorize",
+                                                             .label = "C Copy"}},
+              .multiple = false,
+              .allow_custom = false,
+              .secret = false,
+              .modal = true,
+              .searchable = false,
+              .selected_option_index = 0,
+              .custom_text = ""},
+      .width = 80,
+      .height = 20});
+  expect(std::ranges::any_of(oauth_modal_frame,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("https://auth.openai.com") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(
+                 oauth_modal_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("C Copy") != std::string::npos; }) &&
+             std::ranges::any_of(oauth_modal_frame,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("Waiting for authorization") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(
+                 oauth_modal_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("C copy") != std::string::npos; }) &&
+             std::ranges::none_of(
+                 oauth_modal_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("Enter confirm") != std::string::npos; }),
+         "tui renders OpenAI OAuth modal with opencode-style waiting and C copy shortcut");
+
+  auto const sidebar_modal_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "question required",
+      .transcript = {},
+      .question_prompt = ava::tui::QuestionPromptView{.header = "Connect OpenAI",
+                                                      .question = "Choose login method",
+                                                      .options = {ava::tui::QuestionPromptOptionView{
+                                                          .value = "api_key", .label = "A OpenAI API key"}},
+                                                      .multiple = false,
+                                                      .allow_custom = false,
+                                                      .secret = false,
+                                                      .modal = true,
+                                                      .searchable = false,
+                                                      .selected_option_index = 0,
+                                                      .custom_text = ""},
+      .width = 128,
+      .height = 22,
+      .sidebar = ava::tui::SidebarSnapshot{.session_id = "session_test",
+                                           .mode = "build",
+                                           .provider = "openai",
+                                           .model = "gpt-5.5",
+                                           .workspace = "/workspace",
+                                           .git_branch = "develop",
+                                           .version = "0.32",
+                                           .context_source_count = 1}});
+  expect(std::ranges::any_of(sidebar_modal_frame,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("Connect OpenAI") != std::string::npos &&
+                                      visible.find("│") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(
+                 sidebar_modal_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("Modified Files") != std::string::npos; }) &&
+             std::ranges::any_of(
+                 sidebar_modal_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("Session") != std::string::npos; }),
+         "tui modal overlays the main pane without hiding the sidebar");
+
   auto searchable_question = ava::tui::QuestionPromptView{
       .header = "Connect a provider",
       .question = "Select provider",
@@ -1707,6 +1923,262 @@ void test_tui_composer_rendering_and_input()
   expect(custom_search_answer && custom_search_answer->selected_options.empty() &&
              custom_search_answer->custom_text == "custom-provider",
          "searchable question enter resolves custom provider ids when no option matches");
+
+  auto selector =
+      ava::tui::SelectListView{.title = "Pick model",
+                               .subtitle = std::string("Choose a provider/model pair ") + "\x1b[31m" + "unsafe",
+                               .items = {ava::tui::SelectListItemView{.value = "openai/gpt-5.5",
+                                                                      .label = "GPT-5.5",
+                                                                      .description = "openai/gpt-5.5",
+                                                                      .group = "openai",
+                                                                      .detail = "tools yes · reasoning yes",
+                                                                      .badge = "reasoning",
+                                                                      .current = true,
+                                                                      .enabled = true,
+                                                                      .disabled_reason = {}},
+                                         ava::tui::SelectListItemView{.value = "anthropic/claude-sonnet-4-5",
+                                                                      .label = "Claude Sonnet 4.5",
+                                                                      .description = "anthropic/claude-sonnet-4-5",
+                                                                      .group = "anthropic",
+                                                                      .detail = "tools yes · reasoning no",
+                                                                      .badge = {},
+                                                                      .current = false,
+                                                                      .enabled = true,
+                                                                      .disabled_reason = {}},
+                                         ava::tui::SelectListItemView{.value = "ghost/model",
+                                                                      .label = "Ghost Model",
+                                                                      .description = "ghost/model",
+                                                                      .group = "ghost",
+                                                                      .detail = "tools ?",
+                                                                      .badge = {},
+                                                                      .current = false,
+                                                                      .enabled = false,
+                                                                      .disabled_reason = "provider unavailable"}},
+                               .selected_item_index = 0,
+                               .query = {},
+                               .placeholder = "Search models",
+                               .empty_text = "No matches",
+                               .footer_hint = "Enter choose · Esc cancel"};
+  selector.query = "sonnet";
+  auto selector_matches = ava::tui::filter_select_list_items(selector);
+  expect(selector_matches.size() == 1 && selector_matches.front() == 1,
+         "select-list fuzzy filter matches provider/model labels and preserves original row ids");
+  auto selector_input = ava::tui::handle_select_list_input(
+      selector, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'g'});
+  expect(selector_input.action == ava::tui::SelectListInputAction::Redraw && selector_input.query == "sonnetg" &&
+             selector_input.selected_item_index == 0,
+         "select-list typing updates the search query and clamps to empty-match selection safely");
+  selector.query = "ghost";
+  selector.selected_item_index = 2;
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
+  expect(selector_input.action == ava::tui::SelectListInputAction::Redraw,
+         "select-list enter refuses disabled model/provider rows without resolving");
+  selector.query = "claude";
+  selector.selected_item_index = 0;
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
+  expect(selector_input.action == ava::tui::SelectListInputAction::Resolve && selector_input.selected_item_index == 1,
+         "select-list enter resolves the highlighted enabled fuzzy match");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::Escape});
+  expect(selector_input.action == ava::tui::SelectListInputAction::Cancel,
+         "select-list escape cancels the modal safely");
+
+  auto const selector_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "composer behind selector",
+      .status = "selecting model",
+      .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "background transcript"}},
+      .select_list = selector,
+      .width = 88,
+      .height = 18});
+  expect(selector_frame.size() == 18 &&
+             std::ranges::any_of(
+                 selector_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("Pick model") != std::string::npos; }) &&
+             std::ranges::any_of(
+                 selector_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("Search: claude") != std::string::npos; }) &&
+             std::ranges::any_of(selector_frame,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("Choose a provider/model pair ?[31munsafe") !=
+                                          std::string::npos;
+                                 }) &&
+             std::ranges::any_of(selector_frame,
+                                 [](std::string const& line) {
+                                   auto const visible = strip_sgr(line);
+                                   return visible.find("anthropic") != std::string::npos &&
+                                          visible.find("Claude Sonnet 4.5") != std::string::npos;
+                                 }) &&
+             std::ranges::none_of(selector_frame,
+                                  [](std::string const& line) {
+                                    return strip_sgr(line).find("GPT-5.5  current") != std::string::npos;
+                                  }) &&
+             std::ranges::any_of(selector_frame,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("Enter choose · Esc cancel") != std::string::npos;
+                                 }),
+         "tui renders reusable select-list modals with search, grouping, filtered rows, and footer hints");
+
+  auto make_model = [](std::string provider, std::string id, std::string name, std::string family,
+                       std::optional<bool> reasoning, std::vector<std::string> levels = {}) {
+    ava::config::ModelInfo model;
+    model.provider_id = std::move(provider);
+    model.model_id = std::move(id);
+    model.display_name = std::move(name);
+    model.family = std::move(family);
+    model.context_window_tokens = 200000;
+    model.supports_tools = true;
+    model.supports_streaming = true;
+    model.supports_reasoning = reasoning;
+    model.reasoning_levels = std::move(levels);
+    return model;
+  };
+  ava::config::ModelRegistry model_registry{
+      .default_provider_id = "openai",
+      .default_model_id = "gpt-5.5",
+      .models = {make_model("openai", "gpt-5.5", "GPT-5.5", "gpt-5", true, {"low", "medium", "high"}),
+                 make_model("anthropic", "claude-sonnet-4-5", "Claude Sonnet 4.5", "claude-sonnet", false),
+                 make_model("unregistered", "remote-model", "Remote Model", "remote", std::nullopt)}};
+  auto const model_picker =
+      ava::app::model_selector_view(model_registry, model_registry.models.front(), "Enter choose · Esc cancel");
+  expect(model_picker.title == "Select model" && model_picker.selected_item_index == 0 &&
+             model_picker.items.size() == 3 && model_picker.items[0].current && model_picker.items[0].enabled &&
+             model_picker.items[0].detail.find("levels low/medium/high") != std::string::npos &&
+             !model_picker.items[2].enabled &&
+             model_picker.items[2].disabled_reason.find("provider unavailable") != std::string::npos,
+         "model picker view exposes provider grouping, current marker, capability hints, and disabled providers");
+
+  std::vector<ava::session::SessionSummary> session_summaries{
+      ava::session::SessionSummary{.session_id = "session_beta",
+                                   .path = "/tmp/ava/sessions/beta.jsonl",
+                                   .last_updated = "2026-05-06T10:00:00Z",
+                                   .entry_count = 12},
+      ava::session::SessionSummary{.session_id = "session_alpha",
+                                   .path = "/tmp/ava/sessions/alpha.jsonl",
+                                   .last_updated = "2026-05-06T09:00:00Z",
+                                   .entry_count = 4},
+      ava::session::SessionSummary{.session_id = "session_gamma",
+                                   .path = "/var/tmp/ava/gamma.jsonl",
+                                   .last_updated = "2026-05-06T11:00:00Z",
+                                   .entry_count = 20}};
+  auto const recent_sessions = ava::app::session_selector_view(
+      session_summaries, "session_beta", ava::app::SessionSelectorSort::Recent, "Enter choose · Esc cancel");
+  auto by_name_sessions =
+      ava::app::session_selector_view(session_summaries, "session_beta", ava::app::SessionSelectorSort::Name, {});
+  auto by_path_sessions =
+      ava::app::session_selector_view(session_summaries, "session_beta", ava::app::SessionSelectorSort::Path, {});
+  by_path_sessions.query = "gamma.jsonl";
+  auto const path_matches = ava::tui::filter_select_list_items(by_path_sessions);
+  expect(recent_sessions.title == "Select session" && recent_sessions.items.size() == 3 &&
+             recent_sessions.items[0].value == "session_gamma" && recent_sessions.items[1].current &&
+             recent_sessions.selected_item_index == 1 &&
+             recent_sessions.items[1].description.find("beta.jsonl") != std::string::npos &&
+             recent_sessions.items[1].detail.find("entries 12") != std::string::npos &&
+             recent_sessions.items[1].detail.find("updated 2026-05-06T10:00:00Z") != std::string::npos &&
+             by_name_sessions.items[0].value == "session_alpha" &&
+             by_path_sessions.items[0].description.find("/tmp/ava/sessions/alpha.jsonl") != std::string::npos &&
+             path_matches.size() == 1 && by_path_sessions.items[path_matches.front()].value == "session_gamma",
+         "session selector view sorts by recent/name/path and exposes existing path, time, and entry-count metadata");
+
+  auto const session_selector_frame =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_beta",
+                                                           .input = "composer behind session selector",
+                                                           .status = "selecting session",
+                                                           .transcript = {},
+                                                           .select_list = recent_sessions,
+                                                           .width = 96,
+                                                           .height = 18});
+  expect(std::ranges::any_of(
+             session_selector_frame,
+             [](std::string const& line) { return strip_sgr(line).find("Select session") != std::string::npos; }) &&
+             std::ranges::any_of(session_selector_frame,
+                                 [](std::string const& line) {
+                                   auto const visible = strip_sgr(line);
+                                   return visible.find("session_beta") != std::string::npos &&
+                                          visible.find("beta.jsonl") != std::string::npos;
+                                 }),
+         "session selector view renders through the reusable select-list modal");
+
+  auto hotkeys_view = ava::tui::hotkeys_select_list_view(ava::tui::default_key_bindings());
+  hotkeys_view.query = "mode";
+  auto const hotkeys_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                  .provider = "openai",
+                                                                                  .model = "gpt-5.5",
+                                                                                  .session_id = "session_test",
+                                                                                  .input = "composer behind hotkeys",
+                                                                                  .status = "hotkeys opened",
+                                                                                  .transcript = {},
+                                                                                  .select_list = hotkeys_view,
+                                                                                  .width = 92,
+                                                                                  .height = 18});
+  expect(hotkeys_view.title == "Hotkeys" &&
+             std::ranges::any_of(hotkeys_view.items,
+                                 [](ava::tui::SelectListItemView const& item) {
+                                   return item.value == "mode_toggle" && item.detail.find("Tab") != std::string::npos &&
+                                          item.badge == "shared key";
+                                 }) &&
+             std::ranges::any_of(
+                 hotkeys_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("Hotkeys") != std::string::npos; }) &&
+             std::ranges::any_of(
+                 hotkeys_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("mode_toggle") != std::string::npos; }),
+         "hotkeys view exposes active keybindings and marks context-shared keys in a read-only modal");
+
+  auto const settings_view = ava::tui::settings_select_list_view(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "ready",
+                                 .token_status = "1.3k (0.7%)",
+                                 .reasoning_status = "low",
+                                 .transcript = {},
+                                 .sidebar = ava::tui::SidebarSnapshot{.session_id = "session_test",
+                                                                      .mode = "build",
+                                                                      .provider = "openai",
+                                                                      .model = "gpt-5.5",
+                                                                      .workspace = "/workspace/project",
+                                                                      .git_branch = "develop",
+                                                                      .version = "0.32",
+                                                                      .token_status = "1.3k (0.7%)",
+                                                                      .reasoning_status = "low",
+                                                                      .context_source_count = 2,
+                                                                      .session_path = "/tmp/ava/session_test.jsonl",
+                                                                      .session_entry_count = 42}});
+  auto const settings_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                   .provider = "openai",
+                                                                                   .model = "gpt-5.5",
+                                                                                   .session_id = "session_test",
+                                                                                   .input = "",
+                                                                                   .status = "settings opened",
+                                                                                   .transcript = {},
+                                                                                   .select_list = settings_view,
+                                                                                   .width = 96,
+                                                                                   .height = 20});
+  expect(std::ranges::any_of(settings_view.items,
+                             [](ava::tui::SelectListItemView const& item) {
+                               return item.label == "Theme" && item.description == "ava-dark" &&
+                                      item.badge == "built-in";
+                             }) &&
+             std::ranges::any_of(settings_view.items,
+                                 [](ava::tui::SelectListItemView const& item) {
+                                   return item.label == "Current directory" &&
+                                          item.description == "/workspace/project" && item.detail == "project";
+                                 }) &&
+             std::ranges::any_of(
+                 settings_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("Settings") != std::string::npos; }) &&
+             std::ranges::any_of(
+                 settings_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("ava-dark") != std::string::npos; }),
+         "settings view exposes read-only runtime, workspace, and built-in theme status without config mutation");
 
   auto const multiline_input = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                     .provider = "openai",
@@ -1939,7 +2411,7 @@ void test_tui_composer_rendering_and_input()
                                      .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
                                                                         .name = "read_file",
                                                                         .argument_summary = "path=note.txt\x1b[31m",
-                                                                        .result_summary = "read 12/12 bytes"}}},
+                                                                        .result_summary = "read lines 1-12/12"}}},
                                  .width = 80,
                                  .height = 10});
   expect(std::ranges::any_of(tool_card,
@@ -1952,7 +2424,7 @@ void test_tui_composer_rendering_and_input()
              std::ranges::any_of(tool_card,
                                  [](std::string const& line) {
                                    auto visible = strip_sgr(line);
-                                   return visible.find("read 12/12 bytes") != std::string::npos;
+                                   return visible.find("read lines 1-12/12") != std::string::npos;
                                  }) &&
              std::ranges::any_of(tool_card,
                                  [](std::string const& line) {
@@ -2137,7 +2609,7 @@ void test_tui_composer_rendering_and_input()
                               }) &&
           std::ranges::any_of(
               wide_diff_card,
-              [](std::string const& line) { return strip_sgr(line).find("[diff truncated]") != std::string::npos; }),
+              [](std::string const& line) { return strip_sgr(line).find("diff truncated") != std::string::npos; }),
       "tui renders backend-provided unified diff previews with mutation colors and truncation markers");
 
   auto const narrow_diff_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
@@ -2162,6 +2634,190 @@ void test_tui_composer_rendering_and_input()
                           [](std::string const& line) { return strip_sgr(line).find("diff:") != std::string::npos; }) &&
           std::ranges::all_of(narrow_diff_card, [](std::string const& line) { return visible_columns(line) <= 36; }),
       "tui keeps backend-provided diff previews width-safe on narrow terminals");
+
+  auto const bash_ux_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Error,
+                                             .name = "bash",
+                                             .argument_summary = "command=ctest --test-dir build",
+                                             .result_summary = "exit 1",
+                                             .arguments_json = "{\"command\":\"ctest --test-dir build\"}",
+                                             .result_json = "{\"tool\":\"bash\",\"exit_code\":1,"
+                                                            "\"duration_ms\":1530,\"total_lines\":4,"
+                                                            "\"output_lines\":4,\"output\":"
+                                                            "\"configure\\nbuild\\nfail\\nsummary\"}"}}},
+      .width = 72,
+      .height = 16});
+  expect(std::ranges::any_of(bash_ux_card,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("bash") != std::string::npos &&
+                                      visible.find("command=ctest --test-dir build") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(
+                 bash_ux_card,
+                 [](std::string const& line) { return strip_sgr(line).find("exit 1 · 1.5s") != std::string::npos; }) &&
+             std::ranges::any_of(bash_ux_card,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("output: 2 shown/4 lines · 2 hidden") !=
+                                          std::string::npos;
+                                 }) &&
+             std::ranges::any_of(
+                 bash_ux_card,
+                 [](std::string const& line) { return strip_sgr(line).find("configure") != std::string::npos; }) &&
+             std::ranges::all_of(bash_ux_card, [](std::string const& line) { return visible_columns(line) <= 72; }),
+         "tui renders bash cards with command, exit status, duration, and collapsed output hidden-line counts");
+
+  auto const expanded_bash_ux_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                             .name = "bash",
+                                             .argument_summary = "command=cmake --build build",
+                                             .result_summary = "exit 0",
+                                             .arguments_json = "{\"command\":\"cmake --build build\"}",
+                                             .result_json = "{\"tool\":\"bash\",\"exit_code\":0,"
+                                                            "\"duration_ms\":250,\"total_lines\":3,"
+                                                            "\"output_lines\":3,\"output\":"
+                                                            "\"[1/2] compile\\n[2/2] link\\nok\"}"}}},
+      .width = 80,
+      .height = 18,
+      .tool_details_visible = true});
+  expect(std::ranges::any_of(expanded_bash_ux_card,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("command: cmake --build build") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(
+                 expanded_bash_ux_card,
+                 [](std::string const& line) { return strip_sgr(line).find("status: exit 0") != std::string::npos; }) &&
+             std::ranges::any_of(expanded_bash_ux_card,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("duration: 250ms") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(expanded_bash_ux_card,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("output: 3 shown lines") != std::string::npos;
+                                 }),
+         "tui expanded bash cards show command/status/duration and a wider output preview");
+
+  auto const quoted_bash_summary_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                             .name = "bash",
+                                             .argument_summary = "command=echo \"a, b\", timeout=1000",
+                                             .result_summary = "exit 0",
+                                             .details_visible = true}}},
+      .width = 80,
+      .height = 14});
+  expect(std::ranges::any_of(quoted_bash_summary_card,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("command: echo \"a, b\"") != std::string::npos;
+                             }) &&
+             std::ranges::none_of(quoted_bash_summary_card,
+                                  [](std::string const& line) {
+                                    return strip_sgr(line).find("command: echo \"a") != std::string::npos &&
+                                           strip_sgr(line).find("b\"") == std::string::npos;
+                                  }),
+         "tui bash cards do not split fallback command summaries at comma-space inside shell quotes");
+
+  auto const escaped_bash_summary_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                             .name = "bash",
+                                             .argument_summary = "command=printf foo\\, bar, timeout=1000",
+                                             .result_summary = "exit 0",
+                                             .details_visible = true}}},
+      .width = 80,
+      .height = 14});
+  expect(std::ranges::any_of(escaped_bash_summary_card,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("command: printf foo\\, bar") != std::string::npos;
+                             }),
+         "tui bash cards do not split fallback command summaries at escaped comma-space");
+
+  auto const running_bash_ux_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Running,
+                                             .name = "bash",
+                                             .argument_summary = "command=long-test",
+                                             .arguments_json = "{\"command\":\"long-test\"}"}}},
+      .width = 52,
+      .height = 10});
+  expect(std::ranges::any_of(running_bash_ux_card,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("running · Esc/Ctrl+C stop") != std::string::npos;
+                             }) &&
+             std::ranges::all_of(running_bash_ux_card,
+                                 [](std::string const& line) { return visible_columns(line) <= 52; }),
+         "tui running bash cards include the existing active-run cancel hint without backend mutation");
+
+  auto const rich_diff_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .tool =
+              ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                         .name = "edit_file",
+                                         .argument_summary = "path=note.txt",
+                                         .result_summary = "edited note.txt",
+                                         .details_visible = true,
+                                         .diff = "--- note.txt\n+++ note.txt\n@@ -1,2 +1,2 @@\n-old\n+new\n context",
+                                         .changed_paths = {"note.txt"}}}},
+      .width = 92,
+      .height = 18});
+  expect(std::ranges::any_of(
+             rich_diff_card,
+             [](std::string const& line) { return strip_sgr(line).find("diff note.txt:") != std::string::npos; }) &&
+             std::ranges::any_of(rich_diff_card,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("hunk @@ -1,2 +1,2 @@") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(rich_diff_card,
+                                 [](std::string const& line) {
+                                   auto const visible = strip_sgr(line);
+                                   return visible.find("1") != std::string::npos &&
+                                          visible.find("-old") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(rich_diff_card,
+                                 [](std::string const& line) {
+                                   auto const visible = strip_sgr(line);
+                                   return visible.find("1") != std::string::npos &&
+                                          visible.find("+new") != std::string::npos;
+                                 }),
+         "tui diff cards render unified hunk boundaries with line-numbered added and removed rows");
 
   auto const sidebar_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -2229,7 +2885,7 @@ void test_tui_composer_rendering_and_input()
              std::ranges::none_of(sidebar_frame,
                                   [](std::string const& line) { return line.find("\x1b[31m") != std::string::npos; }) &&
              std::ranges::all_of(sidebar_frame, [](std::string const& line) { return visible_columns(line) <= 128; }),
-         "tui renders an OpenCode-style sidebar with activity, modified files, session metadata, and version");
+         "tui renders a sidebar with activity, modified files, session metadata, and version");
   expect(std::ranges::any_of(sidebar_frame,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
@@ -2301,6 +2957,42 @@ void test_tui_composer_rendering_and_input()
              [](std::string const& line) { return strip_sgr(line).find("context sources 0") != std::string::npos; }),
          "tui sidebar distinguishes a known zero context source count from unknown context data");
 
+  auto const long_session_sidebar_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {},
+      .width = 132,
+      .height = 20,
+      .sidebar = ava::tui::SidebarSnapshot{.session_id = "session_test",
+                                           .mode = "build",
+                                           .provider = "openai",
+                                           .model = "gpt-5.5",
+                                           .workspace = "/workspace/project",
+                                           .git_branch = "develop",
+                                           .version = "0.32",
+                                           .token_status = "180k (90.0%)",
+                                           .reasoning_status = std::nullopt,
+                                           .context_source_count = 3,
+                                           .session_path = "/tmp/ava/sessions/session_test.jsonl",
+                                           .session_entry_count = 42}});
+  expect(std::ranges::any_of(long_session_sidebar_frame,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("path /tmp/ava/sessions") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(
+                 long_session_sidebar_frame,
+                 [](std::string const& line) { return strip_sgr(line).find("entries 42") != std::string::npos; }) &&
+             std::ranges::any_of(long_session_sidebar_frame,
+                                 [](std::string const& line) {
+                                   auto const visible = strip_sgr(line);
+                                   return visible.find("context pressure critical 90.0%") != std::string::npos;
+                                 }),
+         "tui sidebar surfaces current session path, entry count, and context pressure when snapshot data exists");
+
   auto const narrow_no_sidebar = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
       .provider = "openai",
@@ -2339,14 +3031,27 @@ void test_tui_composer_rendering_and_input()
       .session_id = "session_test",
       .input = "",
       .status = "ready",
-      .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "answer", .meta = "Build - GPT-5.5"}},
+      .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "answer", .meta = "Build · GPT-5.5 · 1.2s"}},
       .width = 48,
       .height = 10});
-  expect(std::ranges::any_of(
-             assistant_meta,
-             [](std::string const& line) { return strip_sgr(line).find("* Build - GPT-5.5") != std::string::npos; }) &&
+  expect(std::ranges::any_of(assistant_meta,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("* Build · GPT-5.5 · 1.2s") != std::string::npos;
+                             }) &&
              std::ranges::all_of(assistant_meta, [](std::string const& line) { return visible_columns(line) <= 48; }),
-         "tui renders assistant mode/model metadata under AVA messages with ASCII markers");
+         "tui renders assistant mode/model/duration metadata under AVA messages with ASCII markers");
+  auto assistant_meta_index = std::optional<std::size_t>{};
+  auto composer_index = std::optional<std::size_t>{};
+  for (std::size_t index = 0; index < assistant_meta.size(); ++index) {
+    auto const visible = strip_sgr(assistant_meta[index]);
+    if (!assistant_meta_index && visible.find("* Build · GPT-5.5 · 1.2s") != std::string::npos) {
+      assistant_meta_index = index;
+    }
+    if (!composer_index && visible.find("▎  ❯") != std::string::npos) composer_index = index;
+  }
+  expect(assistant_meta_index && composer_index && *composer_index > *assistant_meta_index + 1 &&
+             strip_sgr(assistant_meta[*assistant_meta_index + 1]).empty(),
+         "tui leaves a vertical margin between the latest assistant metadata and the composer");
 
   std::string exact_width_utf8_status;
   for (int index = 0; index < 12; ++index) {
@@ -2393,7 +3098,7 @@ void test_tui_composer_rendering_and_input()
                                                          .text = "assistant answer " + std::to_string(index) +
                                                                  " keeps CJK \xE7\x95\x8C and emoji \xF0\x9F\x98\x80 "
                                                                  "inside the measured viewport",
-                                                         .meta = "Build - GPT-5.5",
+                                                         .meta = "Build · GPT-5.5",
                                                          .thinking = "checked resize path " + std::to_string(index)});
     if (index % 5 == 0) {
       stress_transcript.push_back(ava::tui::TranscriptItem{
@@ -2572,7 +3277,7 @@ void test_tui_event_state_reduces_runtime_events()
   auto streaming_snapshot = ava::tui::event_state_transcript_snapshot(state);
   expect(state.pending_assistant_text == "hello" && streaming_snapshot.size() == 2 &&
              streaming_snapshot[1].label == "ava" && streaming_snapshot[1].text == "hello" &&
-             streaming_snapshot[1].meta == "Build - GPT-5.5" &&
+             streaming_snapshot[1].meta == "Build · GPT-5.5" &&
              ava::tui::to_plain_text(streaming_snapshot[1].text_model) == "hello",
          "tui event state exposes pending assistant deltas and mode/model metadata in snapshots");
 
@@ -2581,7 +3286,7 @@ void test_tui_event_state_reduces_runtime_events()
   ava::tui::apply_runtime_event(state, end);
   expect(state.run_status == ava::tui::TuiEventRunStatus::Completed && state.pending_assistant_text.empty() &&
              state.transcript.size() == 2 && state.transcript[1].label == "ava" &&
-             state.transcript[1].text == "hello" && state.transcript[1].meta == "Build - GPT-5.5" &&
+             state.transcript[1].text == "hello" && state.transcript[1].meta == "Build · GPT-5.5" &&
              ava::tui::to_plain_text(state.transcript[1].text_model) == "hello",
          "tui event state commits assistant deltas on message end");
   expect(!state.activity.empty() && state.activity.back().id == "responding" &&
@@ -2597,7 +3302,7 @@ void test_tui_event_state_reduces_runtime_events()
   non_gpt_delta.text = "hi";
   ava::tui::apply_runtime_event(non_gpt_state, non_gpt_delta);
   auto const non_gpt_snapshot = ava::tui::event_state_transcript_snapshot(non_gpt_state);
-  expect(non_gpt_snapshot.size() == 1 && non_gpt_snapshot[0].meta == "Build - Claude Sonnet 4.5",
+  expect(non_gpt_snapshot.size() == 1 && non_gpt_snapshot[0].meta == "Build · Claude Sonnet 4.5",
          "tui event state uses centralized model profile display labels for non-GPT assistant metadata");
 
   ava::app::RuntimeEvent assistant_final;
@@ -2667,7 +3372,7 @@ void test_tui_event_state_reduces_runtime_events()
                              [](std::string const& line) {
                                return strip_sgr(line).find("Thinking: checking options") != std::string::npos;
                              }),
-         "tui renders reasoning content as an inline thinking transcript block with an OpenCode-style prefix");
+         "tui renders reasoning content as an inline thinking transcript block with a stable prefix");
   expect(std::ranges::any_of(thinking_render,
                              [](std::string const& line) {
                                return strip_sgr(line).find("Thinking:") != std::string::npos &&
@@ -2682,7 +3387,7 @@ void test_tui_event_state_reduces_runtime_events()
                                        visible.find("╭─ You") != std::string::npos ||
                                        visible.find("You:") != std::string::npos;
                               }),
-         "tui transcript role headers stay hidden for OpenCode-style chat rendering");
+         "tui transcript role headers stay hidden for compact chat rendering");
   expect(std::ranges::none_of(
              thinking_render,
              [](std::string const& line) { return strip_sgr(line).find("╭─ Thinking") != std::string::npos; }),
@@ -2849,7 +3554,7 @@ void test_tui_event_state_reduces_runtime_events()
   provider_execution_result.call_id = "provider_call_1";
   provider_execution_result.tool_name = "read_file";
   provider_execution_result.status = "success";
-  provider_execution_result.text = "read 10/10 bytes";
+  provider_execution_result.text = "read lines 1-10/10";
   ava::tui::apply_runtime_event(provider_state, provider_execution_result);
   expect(provider_state.pending_tools.empty() && !provider_state.transcript.empty() &&
              provider_state.transcript.back().tool &&
@@ -3016,6 +3721,8 @@ void test_tui_event_state_reduces_runtime_events()
                                                 "\"status\":\"success\",\"truncated\":true,"
                                                 "\"details_visible\":true,"
                                                 "\"output_bytes\":256,\"total_bytes\":1024,"
+                                                "\"output_lines\":4,\"total_lines\":20,"
+                                                "\"start_line\":5,\"end_line\":8,\"next_offset_line\":9,"
                                                 "\"omitted_bytes\":768,\"omitted_lines\":12,"
                                                 "\"visible_matches\":2,\"total_matches\":8,"
                                                 "\"spill_path\":\"/tmp/ava-spill/grep.txt\","
@@ -3031,7 +3738,7 @@ void test_tui_event_state_reduces_runtime_events()
                                  .input = "",
                                  .status = "ready",
                                  .transcript = ava::tui::event_state_transcript_snapshot(correlated_tool_state),
-                                 .width = 80,
+                                 .width = 120,
                                  .height = 14,
                                  .tool_details_visible = false});
   expect(
@@ -3048,7 +3755,8 @@ void test_tui_event_state_reduces_runtime_events()
           std::ranges::any_of(correlated_tool_render,
                               [](std::string const& line) {
                                 auto const visible = strip_sgr(line);
-                                return visible.find("truncation: truncated 256/1024 bytes") != std::string::npos &&
+                                return visible.find("truncation: truncated lines 5-8/20; next offset 9") !=
+                                           std::string::npos &&
                                        visible.find("omitted 768 bytes, 12 lines") != std::string::npos;
                               }) &&
           std::ranges::any_of(
@@ -3064,8 +3772,27 @@ void test_tui_event_state_reduces_runtime_events()
   ava::tui::apply_runtime_event(state, error);
   expect(state.run_status == ava::tui::TuiEventRunStatus::Error && state.error_text == "provider failed" &&
              state.error_details == "Provider: provider failed" && state.transcript.back().label == "error" &&
-             state.transcript.back().text == "Provider: provider failed",
+             state.transcript.back().text == "provider failed",
          "tui event state records runtime errors and exposes error transcript text");
+
+  ava::tui::TuiEventState streaming_error_state;
+  ava::app::RuntimeEvent streaming_delta;
+  streaming_delta.type = ava::app::RuntimeEventType::MessageUpdate;
+  streaming_delta.model_id = "gpt-5.5";
+  streaming_delta.text = "partial answer";
+  ava::tui::apply_runtime_event(streaming_error_state, streaming_delta);
+  ava::app::RuntimeEvent streaming_error;
+  streaming_error.type = ava::app::RuntimeEventType::Error;
+  streaming_error.model_id = "gpt-5.5";
+  streaming_error.error_message = "provider: curl transport failed";
+  streaming_error.error_details = "provider: curl transport failed\noutput: event: response.created\ndata: {...}";
+  ava::tui::apply_runtime_event(streaming_error_state, streaming_error);
+  expect(streaming_error_state.transcript.size() == 2 && streaming_error_state.transcript[0].label == "ava" &&
+             streaming_error_state.transcript[0].text == "partial answer" &&
+             streaming_error_state.transcript[1].label == "error" &&
+             streaming_error_state.transcript[1].text == "provider: curl transport failed" &&
+             streaming_error_state.transcript[1].text.find("output: event:") == std::string::npos,
+         "tui event state commits partial assistant text before compact provider error messages");
 
   ava::tui::TuiEventState canceled_state;
   ava::app::RuntimeEvent canceled;
@@ -3136,6 +3863,7 @@ void test_tui_event_state_reduces_runtime_events()
              lifecycle_state.transcript[0].text.find("delay=250ms") != std::string::npos &&
              lifecycle_state.transcript[0].text.find("tokens~9000/8000") != std::string::npos &&
              lifecycle_state.transcript[0].text.find("entries=3/4") != std::string::npos &&
+             lifecycle_state.transcript[1].label == "compaction" &&
              lifecycle_state.transcript[1].text.find("compaction completed") != std::string::npos &&
              lifecycle_state.transcript[1].text.find("attempt 1/2") != std::string::npos &&
              lifecycle_state.transcript[1].text.find("summary=1234 bytes") != std::string::npos &&
@@ -3145,6 +3873,23 @@ void test_tui_event_state_reduces_runtime_events()
                                           activity.detail.find("remaining=125ms") != std::string::npos;
                                  }),
          "tui event state renders backend retry, retry countdown, and compaction markers with backend-provided detail");
+  auto const compaction_render = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "ready",
+                                 .transcript = ava::tui::event_state_transcript_snapshot(lifecycle_state),
+                                 .width = 88,
+                                 .height = 12});
+  expect(std::ranges::any_of(compaction_render,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("compact compaction completed") != std::string::npos &&
+                                      visible.find("summary=1234 bytes") != std::string::npos;
+                             }),
+         "tui renders compaction lifecycle entries as dedicated long-session status cards");
 
   ava::tui::TuiEventState done_state;
   delta.text = "done text";
@@ -3495,31 +4240,57 @@ void test_tui_event_state_reduces_runtime_events()
          "tui EventEnvelope reducer surfaces backend cancel requests without pretending the run has finished");
 }
 
-void test_ncurses_newterm_smoke_without_real_tty()
+struct VirtualTerminalProfile {
+  std::string name;
+  std::string term;
+  std::string term_program = {};
+  std::string colorterm = {};
+  std::string tmux = {};
+  std::string tmux_pane = {};
+  std::string ssh_tty = {};
+  std::string kitty_window_id = {};
+  std::string wezterm_exec = {};
+};
+
+struct VirtualTerminalResult {
+  bool screen_created = false;
+  bool size_reported = false;
+  bool base_drawn = false;
+  bool modal_drawn = false;
+  bool cursor_restored_after_modal = false;
+};
+
+VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile const& profile)
 {
-  static_cast<void>(setenv("TERM", "xterm-256color", 1));
-  char const* previous_locale_value = std::setlocale(LC_ALL, nullptr);
-  std::string const previous_locale = previous_locale_value == nullptr ? "C" : previous_locale_value;
-  static_cast<void>(std::setlocale(LC_ALL, ""));
+  ScopedEnvVar term_guard("TERM", profile.term);
+  ScopedEnvVar term_program_guard("TERM_PROGRAM", profile.term_program);
+  ScopedEnvVar colorterm_guard("COLORTERM", profile.colorterm);
+  ScopedEnvVar tmux_guard("TMUX", profile.tmux);
+  ScopedEnvVar tmux_pane_guard("TMUX_PANE", profile.tmux_pane);
+  ScopedEnvVar ssh_tty_guard("SSH_TTY", profile.ssh_tty);
+  ScopedEnvVar kitty_window_guard("KITTY_WINDOW_ID", profile.kitty_window_id);
+  ScopedEnvVar wezterm_exec_guard("WEZTERM_EXECUTABLE", profile.wezterm_exec);
+
+  VirtualTerminalResult result;
   FILE* input = std::tmpfile();
   FILE* output = std::tmpfile();
-  expect(input != nullptr && output != nullptr, "ncurses smoke test can create temporary input/output streams");
+  expect(input != nullptr && output != nullptr, "ncurses smoke test can create temporary streams for " + profile.name);
   if (!input || !output) {
     if (input) static_cast<void>(std::fclose(input));
     if (output) static_cast<void>(std::fclose(output));
-    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
-    return;
+    return result;
   }
 
   SCREEN* screen = newterm(nullptr, output, input);
-  expect(screen != nullptr, "ncurses smoke test creates a screen without a real terminal");
+  result.screen_created = screen != nullptr;
   if (screen) {
-    SCREEN* previous = set_term(screen);
+    static_cast<void>(set_term(screen));
     int rows = 0;
     int columns = 0;
     getmaxyx(stdscr, rows, columns);
-    expect(rows > 0 && columns > 0, "ncurses smoke test reports a usable virtual screen size");
-    static_cast<void>(resizeterm(12, 48));
+    result.size_reported = rows > 0 && columns > 0;
+    expect(result.size_reported, "ncurses smoke test reports a usable virtual screen size for " + profile.name);
+    static_cast<void>(resizeterm(14, 64));
     auto const ime_sensitive_input = std::string("a") + "\xE7\x95\x8C" + "e" + "\xCC\x81";
     auto const snapshot =
         ava::tui::ComposerSnapshot{.mode = "build",
@@ -3530,24 +4301,85 @@ void test_ncurses_newterm_smoke_without_real_tty()
                                    .status = "ready",
                                    .transcript = {ava::tui::TranscriptItem{
                                        .label = "ava", .text = "virtual terminal draw keeps \xE7\x95\x8C bounded"}},
-                                   .width = 48,
-                                   .height = 12,
+                                   .width = 64,
+                                   .height = 14,
                                    .input_cursor = ime_sensitive_input.size()};
     auto const expected_column =
         ava::tui::detail::input_cursor_column(snapshot, ava::tui::composer_main_width(snapshot));
-    expect(ava::tui::draw_screen(snapshot), "ncurses smoke test draws a unicode composer frame to a virtual screen");
+    result.base_drawn = ava::tui::draw_screen(snapshot);
+
+    auto modal_snapshot = snapshot;
+    modal_snapshot.select_list =
+        ava::tui::SelectListView{.title = "Terminal profile",
+                                 .subtitle = profile.name,
+                                 .items = {ava::tui::SelectListItemView{.value = profile.term,
+                                                                        .label = profile.term,
+                                                                        .description = profile.name,
+                                                                        .group = "terminal",
+                                                                        .detail = "virtual newterm smoke",
+                                                                        .badge = {},
+                                                                        .current = true,
+                                                                        .enabled = true,
+                                                                        .disabled_reason = {}}},
+                                 .selected_item_index = 0,
+                                 .query = {},
+                                 .placeholder = "Search profiles",
+                                 .empty_text = "No profiles",
+                                 .footer_hint = "Esc closes"};
+    result.modal_drawn = ava::tui::draw_screen(modal_snapshot);
+
+    auto const restored_drawn = ava::tui::draw_screen(snapshot);
     int cursor_y = 0;
     int cursor_x = 0;
     getyx(stdscr, cursor_y, cursor_x);
-    expect(cursor_x == static_cast<int>(expected_column - 1) && cursor_y >= 0,
-           "ncurses smoke test places the hardware cursor using CJK and combining-mark display columns");
+    result.cursor_restored_after_modal =
+        restored_drawn && cursor_x == static_cast<int>(expected_column - 1) && cursor_y >= 0 && cursor_y < LINES;
     static_cast<void>(endwin());
-    if (previous) static_cast<void>(set_term(previous));
     delscreen(screen);
   }
 
   static_cast<void>(std::fclose(input));
   static_cast<void>(std::fclose(output));
+  return result;
+}
+
+void test_ncurses_newterm_smoke_without_real_tty()
+{
+  char const* previous_locale_value = std::setlocale(LC_ALL, nullptr);
+  std::string const previous_locale = previous_locale_value == nullptr ? "C" : previous_locale_value;
+  static_cast<void>(std::setlocale(LC_ALL, ""));
+
+  std::vector<VirtualTerminalProfile> const profiles = {{.name = "xterm baseline", .term = "xterm-256color"},
+                                                        {.name = "screen/tmux terminfo", .term = "screen-256color"},
+                                                        {.name = "tmux-like environment",
+                                                         .term = "xterm-256color",
+                                                         .term_program = "tmux",
+                                                         .colorterm = "truecolor",
+                                                         .tmux = "/tmp/tmux-1000/default,123,0",
+                                                         .tmux_pane = "%1"},
+                                                        {.name = "kitty-like environment",
+                                                         .term = "xterm-256color",
+                                                         .term_program = "kitty",
+                                                         .colorterm = "truecolor",
+                                                         .kitty_window_id = "1"},
+                                                        {.name = "wezterm over ssh-like environment",
+                                                         .term = "xterm-256color",
+                                                         .term_program = "WezTerm",
+                                                         .colorterm = "truecolor",
+                                                         .ssh_tty = "/dev/pts/99",
+                                                         .wezterm_exec = "/usr/bin/wezterm"}};
+
+  std::size_t exercised = 0;
+  for (auto const& profile : profiles) {
+    auto const result = exercise_virtual_terminal_profile(profile);
+    if (result.screen_created) ++exercised;
+    expect(result.screen_created, "ncurses smoke test creates a screen without a real terminal for " + profile.name);
+    expect(result.base_drawn && result.modal_drawn && result.cursor_restored_after_modal,
+           "ncurses smoke test draws base/modal frames and restores the composer cursor for " + profile.name);
+  }
+  expect(exercised == profiles.size(),
+         "ncurses smoke test covers xterm and screen terminfo plus tmux, kitty, wezterm, and ssh-like environment "
+         "variables");
   static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
 }
 
@@ -3563,7 +4395,7 @@ void test_tui_large_render_performance_budget()
     transcript.push_back(ava::tui::TranscriptItem{.label = "ava",
                                                   .text = "performance answer " + std::to_string(index) +
                                                           " keeps rendered rows bounded while the transcript is large",
-                                                  .meta = "Build - GPT-5.5",
+                                                  .meta = "Build · GPT-5.5",
                                                   .thinking = "reasoning summary " + std::to_string(index)});
     transcript.push_back(ava::tui::TranscriptItem{
         .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
@@ -3616,6 +4448,76 @@ void test_tui_large_render_performance_budget()
          "tui large render performance budget catches pathological redraw slowdowns without a real terminal");
 }
 
+void test_tui_very_long_transcript_performance_budget()
+{
+  std::vector<ava::tui::TranscriptItem> transcript;
+  transcript.reserve(1400);
+  for (int index = 0; index < 600; ++index) {
+    transcript.push_back(ava::tui::TranscriptItem{
+        .label = "you",
+        .text = "long transcript input " + std::to_string(index) +
+                " asks for a bounded terminal redraw with CJK \xE7\x95\x8C and a long-token-that-wraps"});
+    transcript.push_back(ava::tui::TranscriptItem{
+        .label = "ava",
+        .text = "long transcript answer " + std::to_string(index) +
+                " renders markdown like **bold**, `code`, and - bullet-shaped text without overflowing",
+        .meta = "Build · GPT-5.5",
+        .thinking = index % 4 == 0 ? "checked viewport stress path " + std::to_string(index) : std::string{}});
+    if (index % 5 == 0) {
+      transcript.push_back(ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                             .name = "bash",
+                                             .argument_summary = "command=ctest --test-dir build",
+                                             .result_summary = "exit=0 lines=42 hidden=120",
+                                             .call_id = "long_perf_" + std::to_string(index),
+                                             .lifecycle = ava::tui::ToolLifecycleState::Complete,
+                                             .truncated = true,
+                                             .output_lines = 42,
+                                             .total_lines = 162,
+                                             .omitted_lines = 120}});
+    }
+  }
+  expect(transcript.size() > 900, "tui very long transcript stress extends beyond the existing large-render scale");
+
+  auto const start = std::chrono::steady_clock::now();
+  std::vector<std::string> frame;
+  std::vector<std::string> visible_frames;
+  for (int pass = 0; pass < 3; ++pass) {
+    frame = ava::tui::render_composer(
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_long_perf",
+                                   .input = "draft stays responsive while scrolling a very long transcript",
+                                   .status = "ready",
+                                   .processing = true,
+                                   .transcript = transcript,
+                                   .transcript_scroll_offset = static_cast<std::size_t>(pass * 240),
+                                   .width = 96,
+                                   .height = 30,
+                                   .input_cursor = std::string::npos,
+                                   .tool_details_visible = true,
+                                   .thinking_visible = true});
+    std::string visible;
+    for (auto const& line : frame) {
+      visible += strip_sgr(line);
+      visible += '\n';
+    }
+    visible_frames.push_back(std::move(visible));
+  }
+  auto const elapsed = std::chrono::steady_clock::now() - start;
+  expect(frame.size() == 30, "tui very long transcript frame keeps the requested height");
+  expect(std::ranges::all_of(frame,
+                             [](std::string const& line) {
+                               return line.find('\n') == std::string::npos && visible_columns(line) <= 96;
+                             }),
+         "tui very long transcript frame keeps every rendered line inside the requested width");
+  expect(visible_frames.size() == 3 && visible_frames[0] != visible_frames[1] && visible_frames[1] != visible_frames[2],
+         "tui very long transcript stress validates that scroll offsets change visible transcript content");
+  expect(elapsed < std::chrono::seconds(20),
+         "tui very long transcript performance budget keeps full redraw viable for real-world scrollback scale");
+}
+
 }  // namespace
 
 void run_tui_composer_tests()
@@ -3625,4 +4527,5 @@ void run_tui_composer_tests()
   test_tui_event_state_reduces_runtime_events();
   test_ncurses_newterm_smoke_without_real_tty();
   test_tui_large_render_performance_budget();
+  test_tui_very_long_transcript_performance_budget();
 }

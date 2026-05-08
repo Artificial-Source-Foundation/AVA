@@ -36,6 +36,23 @@ std::string model_label(std::string_view model)
   return sanitize_terminal_text(ava::config::model_display_label(model));
 }
 
+std::string compact_path_leaf(std::string_view path)
+{
+  auto end = path.size();
+  while (end > 1 && (path[end - 1] == '/' || path[end - 1] == '\\')) --end;
+  auto const trimmed = path.substr(0, end);
+  auto const slash = trimmed.find_last_of("/\\");
+  if (slash == std::string_view::npos || slash + 1 >= trimmed.size()) return std::string(trimmed);
+  return std::string(trimmed.substr(slash + 1));
+}
+
+void append_muted_segment(std::string& line, std::string_view label, std::string_view value)
+{
+  if (value.empty()) return;
+  line += " " + std::string(kSgrMuted) + "· " + std::string(label) + " " + sanitize_terminal_text(value) +
+          std::string(kSgrReset) + std::string(kSgrComposerBg);
+}
+
 std::string render_status_line(ComposerSnapshot const& snapshot, std::size_t width)
 {
   auto const provider = provider_label(snapshot.provider);
@@ -57,6 +74,17 @@ std::string render_status_line(ComposerSnapshot const& snapshot, std::size_t wid
     line += " " + std::string(kSgrMuted) + "·" + std::string(kSgrReset) + std::string(kSgrComposerBg) + " " +
             std::string(kSgrWarning) + sanitize_terminal_text(*snapshot.reasoning_status) + std::string(kSgrReset) +
             std::string(kSgrComposerBg);
+  }
+  if (snapshot.sidebar) {
+    if (!snapshot.sidebar->workspace.empty())
+      append_muted_segment(line, "cwd", compact_path_leaf(snapshot.sidebar->workspace));
+    if (!snapshot.sidebar->git_branch.empty()) append_muted_segment(line, "git", snapshot.sidebar->git_branch);
+    if (snapshot.sidebar->context_source_count) {
+      append_muted_segment(line, "ctx", std::to_string(*snapshot.sidebar->context_source_count));
+    }
+    if (snapshot.sidebar->session_entry_count) {
+      append_muted_segment(line, "entries", std::to_string(*snapshot.sidebar->session_entry_count));
+    }
   }
   std::string right;
   if (snapshot.token_status && !snapshot.token_status->empty()) {

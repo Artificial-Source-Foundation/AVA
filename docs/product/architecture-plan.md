@@ -184,7 +184,7 @@ Dependency rule: choose boring, maintained dependencies and hide each behind an 
 
 ## Server Later
 
-OpenCode's client/server architecture is useful, but not version 0.
+External reference client/server architecture is useful, but not version 0.
 
 If AVA later adds a server, it should expose the same core services:
 

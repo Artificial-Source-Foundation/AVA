@@ -67,6 +67,11 @@ struct ComposerInputLayout {
                                                               std::size_t max_lines);
 [[nodiscard]] std::vector<std::string> render_question_modal(QuestionPromptView const& prompt, std::size_t width,
                                                              std::size_t max_lines);
+[[nodiscard]] std::vector<std::string> render_select_list_modal(SelectListView const& view, std::size_t width,
+                                                                std::size_t max_lines);
+[[nodiscard]] std::vector<std::string> render_unified_diff_body(std::string_view diff, bool diff_truncated,
+                                                                std::size_t width, std::string_view line_prefix,
+                                                                std::size_t max_lines);
 
 [[nodiscard]] std::string render_generic_line(std::string const& text, std::size_t width);
 [[nodiscard]] std::vector<std::string> render_transcript_lines(std::vector<TranscriptItem> const& transcript,

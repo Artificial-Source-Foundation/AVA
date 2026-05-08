@@ -50,6 +50,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -141,7 +142,7 @@ void test_openai_provider_contract()
     expect(request->body.find("\"max_output_tokens\":1234") != std::string::npos,
            "OpenAI request includes configured max output tokens");
     expect(request->body.find("\"store\":false") == std::string::npos,
-           "OpenAI API-key request does not force Codex store flag");
+           "OpenAI API-key request does not force storage flag");
     expect(request->body.find("hello \\\"ava\\\"") != std::string::npos, "OpenAI request JSON escapes message content");
     expect(request->body.find("\"tools\":[{\"type\":\"function\",\"name\":\"read_file\"}]") != std::string::npos,
            "OpenAI request includes tools array");
@@ -241,14 +242,14 @@ void test_openai_provider_contract()
                                     .source_path = {}},
       11);
   expect(oauth_credential_request && oauth_credential_request->url == "https://chatgpt.com/backend-api/codex/responses",
-         "OpenAI OAuth request targets ChatGPT Codex responses endpoint");
+         "OpenAI OAuth request targets delegated responses endpoint");
   if (oauth_credential_request) {
     expect(oauth_credential_request->headers.at("ChatGPT-Account-Id") == "acct_123" &&
                oauth_credential_request->headers.at("OpenAI-Beta") == "responses=experimental" &&
                oauth_credential_request->headers.at("originator") == "ava",
-           "OpenAI OAuth request carries Codex account and beta headers");
+           "OpenAI OAuth request carries delegated account and beta headers");
     expect(oauth_credential_request->body.find("\"store\":false") != std::string::npos,
-           "OpenAI OAuth request disables Codex response storage");
+           "OpenAI OAuth request disables response storage");
   }
 
   auto const oauth_credential_request_without_now = provider.build_request(
@@ -262,11 +263,11 @@ void test_openai_provider_contract()
                                     .source_path = {}});
   expect(oauth_credential_request_without_now &&
              oauth_credential_request_without_now->url == "https://chatgpt.com/backend-api/codex/responses",
-         "OpenAI OAuth request without explicit clock still uses Codex endpoint");
+         "OpenAI OAuth request without explicit clock still uses delegated endpoint");
   if (oauth_credential_request_without_now) {
     expect(oauth_credential_request_without_now->headers.at("ChatGPT-Account-Id") == "acct_456" &&
                oauth_credential_request_without_now->body.find("\"store\":false") != std::string::npos,
-           "OpenAI OAuth request without explicit clock applies Codex auth options");
+           "OpenAI OAuth request without explicit clock applies delegated auth options");
   }
 
   auto const invalid_tool = provider.build_request(ava::provider::ProviderRequest{.provider_id = "openai",
@@ -983,12 +984,42 @@ void test_openai_compatible_parsing()
 
   auto sse_error = ava::provider::parse_openai_compatible_sse(
       "data: {\"error\":{\"message\":\"{\\\"reasoning_content\\\":\\\"secret stream reasoning\\\","
-      "\\\"api_key\\\":\\\"secret-stream-key\\\"}\"}}\n\n");
+      "\\\"api_key\\\":\\\"secret-stream-key\\\"}\"}}\n\n"
+      ": OPENROUTER PROCESSING\n\n"
+      "data: {\"choices\":[{\"delta\":{\"content\":\"must not appear\"}}]}\n\n"
+      "data: [DONE]\n\n");
   expect(sse_error && sse_error->size() == 1 && (*sse_error)[0].type == ava::provider::StreamEventType::Error &&
-             (*sse_error)[0].error_message.find("[redacted]") != std::string::npos &&
-             (*sse_error)[0].error_message.find("secret stream reasoning") == std::string::npos &&
-             (*sse_error)[0].error_message.find("secret-stream-key") == std::string::npos,
-         "OpenAI-compatible SSE errors redact reasoning and credential fields");
+              (*sse_error)[0].error_message.find("[redacted]") != std::string::npos &&
+              (*sse_error)[0].error_message.find("secret stream reasoning") == std::string::npos &&
+              (*sse_error)[0].error_message.find("secret-stream-key") == std::string::npos &&
+              (*sse_error)[0].error_message.find("must not appear") == std::string::npos,
+          "OpenAI-compatible SSE errors redact reasoning and credential fields and terminate parsing");
+  auto sse_error_after_open_state = ava::provider::parse_openai_compatible_sse(
+      "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"plan\"}}]}\n\n"
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_err\","
+      "\"function\":{\"name\":\"grep\",\"arguments\":\"{}\"}}]}}]}\n\n"
+      "data: {\"error\":{\"message\":\"provider failed\"}}\n\n"
+      "data: [DONE]\n\n");
+  expect(sse_error_after_open_state && sse_error_after_open_state->size() == 7 &&
+             (*sse_error_after_open_state)[0].type == ava::provider::StreamEventType::ReasoningStart &&
+             (*sse_error_after_open_state)[1].type == ava::provider::StreamEventType::ReasoningDelta &&
+             (*sse_error_after_open_state)[2].type == ava::provider::StreamEventType::ToolCallStart &&
+             (*sse_error_after_open_state)[3].type == ava::provider::StreamEventType::ToolCallDelta &&
+             (*sse_error_after_open_state)[4].type == ava::provider::StreamEventType::ToolCallEnd &&
+             (*sse_error_after_open_state)[5].type == ava::provider::StreamEventType::ReasoningEnd &&
+             (*sse_error_after_open_state)[6].type == ava::provider::StreamEventType::Error,
+         "OpenAI-compatible SSE provider errors close open lifecycle state before the terminal error");
+  auto openrouter_keepalive = ava::provider::parse_openai_compatible_sse(
+      ": OPENROUTER PROCESSING\n\n"
+      "event: ping\n\n"
+      "data: {\"choices\":[{\"delta\":{\"content\":\"routed\"}}]}\n\n"
+      ": keep-alive\n\n"
+      "data: [DONE]\n\n");
+  expect(openrouter_keepalive && openrouter_keepalive->size() == 2 &&
+             (*openrouter_keepalive)[0].type == ava::provider::StreamEventType::TextDelta &&
+             (*openrouter_keepalive)[0].text == "routed" &&
+             (*openrouter_keepalive)[1].type == ava::provider::StreamEventType::Done,
+         "OpenAI-compatible SSE parser ignores OpenRouter comment and keepalive lines");
   auto malformed_compatible = ava::provider::parse_openai_compatible_sse("data: {not-json}\n\n");
   expect(malformed_compatible && malformed_compatible->size() == 1 &&
              (*malformed_compatible)[0].type == ava::provider::StreamEventType::Error,
@@ -1026,6 +1057,202 @@ void test_openai_compatible_parsing()
          "OpenAI-compatible HTTP errors reuse normalized context-overflow classification");
 }
 
+void test_builtin_openai_compatible_provider_contracts()
+{
+  ScopedEnvVar kimi_base("KIMI_BASE_URL", "https://kimi.override.test/coding/");
+  ScopedEnvVar moonshot_base("MOONSHOT_BASE_URL", "https://moonshot.override.test/api");
+  ScopedEnvVar openrouter_base("OPENROUTER_BASE_URL", "https://openrouter.override.test/router/");
+  auto registry = ava::provider::builtin_provider_registry();
+
+  auto kimi = registry.create("kimi");
+  expect(kimi.has_value() && *kimi, "builtin registry creates Kimi compatible provider");
+  if (!kimi || !*kimi) return;
+  auto const kimi_request = (*kimi)->build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "kimi",
+          .model_id = "kimi-k2-thinking",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello"},
+                       ava::provider::ChatMessage{
+                           .role = "assistant",
+                           .content = "fallback answer",
+                           .content_parts = {ava::provider::ContentPart{
+                                                 .type = ava::provider::ContentPartType::Reasoning,
+                                                 .text = "prior kimi reasoning",
+                                                 .reasoning_format = "reasoning_content"},
+                                             ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text,
+                                                                        .text = "visible answer"}}}},
+          .tools_json = {},
+          .stream = true,
+          .reasoning = ava::provider::ProviderReasoningOptions{.type = "enabled"}},
+      "kimi-token");
+  expect(kimi_request.has_value(), "builtin Kimi request builds");
+  if (kimi_request) {
+    expect(kimi_request->url == "https://kimi.override.test/coding/v1/chat/completions",
+           "builtin Kimi request honors env base URL and chat-completions path");
+    expect(kimi_request->headers.at("Authorization") == "Bearer kimi-token" &&
+               kimi_request->headers.at("User-Agent") == "KimiCLI/1.5",
+           "builtin Kimi request includes bearer auth and Kimi user agent");
+    expect(kimi_request->body.find("\"model\":\"kimi-k2-thinking\"") != std::string::npos &&
+               kimi_request->body.find("\"temperature\":1") != std::string::npos &&
+               kimi_request->body.find("\"stream_options\":{\"include_usage\":true}") != std::string::npos &&
+               kimi_request->body.find("\"thinking\":{\"type\":\"enabled\",\"keep\":\"all\"}") != std::string::npos &&
+               kimi_request->body.find("\"reasoning_content\":\"prior kimi reasoning\"") != std::string::npos,
+           "builtin Kimi request includes fixed temperature, stream usage, thinking keep-all, and replayed reasoning");
+  }
+
+  auto moonshot = registry.create("moonshot");
+  expect(moonshot.has_value() && *moonshot, "builtin registry creates Moonshot compatible provider");
+  if (!moonshot || !*moonshot) return;
+  auto const moonshot_request = (*moonshot)->build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "moonshot",
+          .model_id = "kimi-k2.6",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+              .role = "assistant",
+              .content = "moonshot fallback",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Reasoning,
+                                                           .text = "private moonshot reasoning",
+                                                           .reasoning_format = "reasoning_content"},
+                                ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text,
+                                                           .text = "moonshot answer"}}}},
+          .tools_json = {},
+          .stream = true,
+          .reasoning = ava::provider::ProviderReasoningOptions{.type = "enabled"}},
+      "moonshot-token");
+  expect(moonshot_request.has_value(), "builtin Moonshot request builds");
+  if (moonshot_request) {
+    expect(moonshot_request->url == "https://moonshot.override.test/api/v1/chat/completions",
+           "builtin Moonshot request honors env base URL and chat-completions path");
+    expect(moonshot_request->headers.at("Authorization") == "Bearer moonshot-token",
+           "builtin Moonshot request includes bearer auth");
+    expect(moonshot_request->body.find("\"model\":\"kimi-k2.6\"") != std::string::npos &&
+               moonshot_request->body.find("\"stream_options\":{\"include_usage\":true}") != std::string::npos &&
+               moonshot_request->body.find("\"thinking\":{\"type\":\"enabled\"}") != std::string::npos,
+           "builtin Moonshot request includes model, stream usage, and thinking controls");
+    expect(moonshot_request->body.find("private moonshot reasoning") == std::string::npos &&
+               moonshot_request->body.find("\"reasoning_content\"") == std::string::npos &&
+               moonshot_request->body.find("\"keep\":\"all\"") == std::string::npos,
+           "builtin Moonshot request does not replay private reasoning_content or request keep-all");
+  }
+
+  auto openrouter = registry.create("openrouter");
+  expect(openrouter.has_value() && *openrouter, "builtin registry creates OpenRouter compatible provider");
+  if (!openrouter || !*openrouter) return;
+  auto const openrouter_request =
+      (*openrouter)
+          ->build_request(ava::provider::ProviderRequest{.provider_id = "openrouter",
+                                                         .model_id = "moonshotai/kimi-k2.6",
+                                                         .system_prompt = "system",
+                                                         .messages = {ava::provider::ChatMessage{.role = "user",
+                                                                                                 .content = "hello"}},
+                                                         .tools_json = {},
+                                                         .stream = true},
+                          "openrouter-token");
+  expect(openrouter_request.has_value(), "builtin OpenRouter request builds");
+  if (openrouter_request) {
+    expect(openrouter_request->url == "https://openrouter.override.test/router/v1/chat/completions",
+           "builtin OpenRouter request honors env base URL and chat-completions path");
+    expect(openrouter_request->headers.at("Authorization") == "Bearer openrouter-token" &&
+               openrouter_request->body.find("\"model\":\"moonshotai/kimi-k2.6\"") != std::string::npos &&
+               openrouter_request->body.find("\"stream_options\":{\"include_usage\":true}") != std::string::npos,
+           "builtin OpenRouter request includes bearer auth, model, and stream usage");
+  }
+
+  struct CompatibleErrorCase {
+    std::string provider_id;
+    std::string label;
+    int status_code = 0;
+    std::map<std::string, std::string> headers;
+    std::string body;
+    ava::provider::ProviderErrorKind expected_kind = ava::provider::ProviderErrorKind::Unknown;
+    std::string required_context;
+  };
+
+  std::vector<CompatibleErrorCase> const error_cases = {
+      CompatibleErrorCase{"kimi",
+                          "Kimi authentication error",
+                          401,
+                          {},
+                          "{\"error\":{\"message\":\"invalid api key\"}}",
+                          ava::provider::ProviderErrorKind::Authentication,
+                          ""},
+      CompatibleErrorCase{"kimi",
+                          "Kimi context-overflow error",
+                          400,
+                          {},
+                          "Input token length too long",
+                          ava::provider::ProviderErrorKind::ContextOverflow,
+                          ""},
+      CompatibleErrorCase{"moonshot",
+                          "Moonshot rate-limit error",
+                          429,
+                          {{"Retry-After", "4"}},
+                          "{\"error\":{\"message\":\"rate limit\"}}",
+                          ava::provider::ProviderErrorKind::RateLimited,
+                          "retry_after: 4"},
+      CompatibleErrorCase{"moonshot",
+                          "Moonshot context-overflow error",
+                          400,
+                          {},
+                          "Your request exceeded model token limit",
+                          ava::provider::ProviderErrorKind::ContextOverflow,
+                          ""},
+      CompatibleErrorCase{"openrouter",
+                          "OpenRouter transient error",
+                          503,
+                          {},
+                          "{\"error\":{\"message\":\"upstream overloaded\"}}",
+                          ava::provider::ProviderErrorKind::Transient,
+                          ""},
+      CompatibleErrorCase{"openrouter",
+                          "OpenRouter invalid-request error",
+                          422,
+                          {},
+                          "{\"error\":{\"message\":\"invalid model\"}}",
+                          ava::provider::ProviderErrorKind::InvalidRequest,
+                          ""},
+      CompatibleErrorCase{"openrouter",
+                          "OpenRouter insufficient-credits error",
+                          402,
+                          {},
+                          "{\"error\":{\"message\":\"insufficient credits\"}}",
+                          ava::provider::ProviderErrorKind::Quota,
+                          ""},
+      CompatibleErrorCase{"openrouter",
+                          "OpenRouter context-overflow error",
+                          400,
+                          {},
+                          "{\"error\":{\"message\":\"This model's maximum context length is 8192 tokens\"}}",
+                          ava::provider::ProviderErrorKind::ContextOverflow,
+                          ""},
+  };
+
+  for (auto const& error_case : error_cases) {
+    auto compatible = registry.create(error_case.provider_id);
+    expect(compatible.has_value() && *compatible, error_case.label + " provider is registered");
+    if (!compatible || !*compatible) continue;
+    auto parsed = (*compatible)
+                      ->parse_response(ava::provider::HttpResponse{.status_code = error_case.status_code,
+                                                                   .headers = error_case.headers,
+                                                                   .body = error_case.body},
+                                       false);
+    expect(!parsed &&
+               parsed.error().format().find("provider_error_kind: " +
+                                            ava::provider::to_string(error_case.expected_kind)) != std::string::npos,
+           error_case.label + " is normalized with the expected compatible provider error kind");
+    if (!parsed && !error_case.required_context.empty()) {
+      expect(parsed.error().format().find(error_case.required_context) != std::string::npos,
+             error_case.label + " preserves expected error context");
+    }
+    if (!parsed && error_case.expected_kind == ava::provider::ProviderErrorKind::ContextOverflow) {
+      expect(ava::provider::is_context_overflow_error(parsed.error()),
+             error_case.label + " is detectable as a context-overflow provider error");
+    }
+  }
+}
+
 void test_builtin_provider_registry()
 {
   auto registry = ava::provider::builtin_provider_registry();
@@ -1050,5 +1277,6 @@ void run_provider_openai_tests()
   test_openai_incremental_sse_parser();
   test_openai_compatible_provider_contract();
   test_openai_compatible_parsing();
+  test_builtin_openai_compatible_provider_contracts();
   test_builtin_provider_registry();
 }

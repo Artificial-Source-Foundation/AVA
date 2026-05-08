@@ -1,5 +1,6 @@
 #include "ava/app/rpc_mode.h"
 
+#include "ava/app/command_registry.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/rpc/handlers.h"
@@ -9,6 +10,7 @@
 #include "ava/app/rpc/resolvers.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/rpc/serialization.h"
+#include "ava/app/rpc/serialization_json.h"
 #include "ava/app/rpc/session_commands.h"
 
 #include "ava/provider/curl_transport.h"
@@ -131,6 +133,104 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
                                                    rpc::session_id_snapshot(session, session_mutex), cleared);
       if (auto written = rpc::write_record(output, serialize_event_envelope_jsonl(envelope)); !written) return written;
       if (auto written = rpc::write_success(output, command->id, cleared); !written) return written;
+      continue;
+    }
+
+    if (command->type == "list_commands") {
+      if (rpc::active_run(run_state)) {
+        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
+            !written) {
+          return written;
+        }
+        continue;
+      }
+      std::lock_guard lock(session_mutex);
+      auto registry = load_command_registry(
+          session, CommandRegistryOptions{
+                       .include_builtins = true,
+                       .include_prompt_commands = true,
+                       .include_skills = true,
+                       .include_plugin_commands = true,
+                       .include_mcp_prompts = true,
+                       .permission_resolver = runtime_options.permission_resolver,
+                       .cancel_requested = [&] { return run_state.cancel_requested.load(std::memory_order_relaxed); }});
+      if (auto written = rpc::write_success(output, command->id, rpc::command_registry_result_json(registry));
+          !written) {
+        return written;
+      }
+      continue;
+    }
+
+    if (command->type == "invoke_command") {
+      if (!command->name || command->name->empty()) {
+        if (auto written = rpc::write_error(output, command->id, rpc::invalid_rpc("invoke_command requires name"));
+            !written) {
+          return written;
+        }
+        continue;
+      }
+      if (rpc::active_run(run_state)) {
+        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type));
+            !written) {
+          return written;
+        }
+        continue;
+      }
+
+      std::string slash_command = command->name->starts_with('/') ? *command->name : "/" + *command->name;
+      if (command->command_arguments && !command->command_arguments->empty()) {
+        slash_command += " " + *command->command_arguments;
+      }
+
+      EventBus event_bus;
+      rpc::subscribe_event_envelope_writer(event_bus, output);
+      std::optional<std::string> prompt_message;
+      ava::config::XdgPaths paths;
+      {
+        std::lock_guard lock(session_mutex);
+        paths = session.paths;
+        auto result = run_command(session, CommandRequest{.command = std::move(slash_command),
+                                                          .event_sink = make_runtime_event_bus_adapter(
+                                                              event_bus, rpc::rpc_event_context(command->id)),
+                                                          .permission_resolver = runtime_options.permission_resolver,
+                                                          .session_mutex = &session_mutex});
+        if (!result) {
+          if (auto written = rpc::write_error(output, command->id, result.error()); !written) return written;
+          continue;
+        }
+        if (!result->handled) {
+          auto error = rpc::invalid_rpc("command not found");
+          error.with_context("name", *command->name);
+          if (auto written = rpc::write_error(output, command->id, error); !written) return written;
+          continue;
+        }
+        if (result->prompt_message) {
+          prompt_message = *result->prompt_message;
+        } else {
+          if (auto written = rpc::write_success(output, command->id, rpc::command_result_json(*result)); !written) {
+            return written;
+          }
+          continue;
+        }
+      }
+
+      reap_finished_prompt();
+      rpc::set_active_run(run_state, true, command->id);
+      prompt_worker.emplace(rpc::make_rpc_prompt_worker(rpc::RpcPromptWorkerOptions{
+          .session = session,
+          .session_mutex = session_mutex,
+          .output = output,
+          .run_state = run_state,
+          .pending_state = pending_state,
+          .injected_provider = provider,
+          .injected_provider_id = injected_provider_id,
+          .transport = transport,
+          .auth_transport = auth_transport,
+          .runtime_options = runtime_options,
+          .paths = std::move(paths),
+          .request_id = command->id,
+          .message = std::move(*prompt_message),
+      }));
       continue;
     }
 

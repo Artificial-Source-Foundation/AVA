@@ -1,10 +1,12 @@
 #include "ava/config/openai_oauth.h"
 
 #include "ava/core/json.h"
+#include "ava/core/version.h"
 
 #include <array>
 #include <bit>
 #include <cctype>
+#include <charconv>
 #include <cstdint>
 #include <cstring>
 #include <optional>
@@ -21,6 +23,10 @@ namespace {
 constexpr std::string_view kClientId = "app_EMoamEEZ73f0CkXaXp7hrann";
 constexpr std::string_view kAuthorizeUrl = "https://auth.openai.com/oauth/authorize";
 constexpr std::string_view kTokenUrl = "https://auth.openai.com/oauth/token";
+constexpr std::string_view kDeviceUserCodeUrl = "https://auth.openai.com/api/accounts/deviceauth/usercode";
+constexpr std::string_view kDeviceTokenUrl = "https://auth.openai.com/api/accounts/deviceauth/token";
+constexpr std::string_view kDeviceVerificationUrl = "https://auth.openai.com/codex/device";
+constexpr std::string_view kDeviceRedirectUri = "https://auth.openai.com/deviceauth/callback";
 constexpr std::string_view kRedirectUri = "http://localhost:1455/auth/callback";
 constexpr std::string_view kScope = "openid profile email offline_access";
 constexpr std::string_view kBase64UrlAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -269,6 +275,23 @@ bool is_complete_json_object(std::string_view value)
   return false;
 }
 
+std::optional<int> positive_integer_from_json_field(std::string_view body, std::string_view field)
+{
+  if (auto const integer = ava::core::json::integer_field(body, field)) {
+    if (*integer > 0 && *integer <= 3600) return static_cast<int>(*integer);
+    return std::nullopt;
+  }
+
+  auto const text = ava::core::json::string_field(body, field);
+  if (!text || text->empty()) return std::nullopt;
+  int value = 0;
+  auto const* begin = text->data();
+  auto const* end = begin + text->size();
+  auto const [ptr, error] = std::from_chars(begin, end, value);
+  if (error != std::errc{} || ptr != end || value <= 0 || value > 3600) return std::nullopt;
+  return value;
+}
+
 long long token_response_expiry(std::string_view body, long long now_seconds)
 {
   if (auto const expires_at = ava::core::json::integer_field(body, "expires_at")) return *expires_at;
@@ -291,13 +314,13 @@ ava::core::Result<OpenAICredential> parse_openai_oauth_token_response(std::strin
 {
   if (!is_complete_json_object(body)) {
     return std::unexpected(
-        ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI OAuth token response was malformed JSON"));
+        ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI OAuth response was malformed JSON"));
   }
 
   auto access = ava::core::json::string_field(body, "access_token");
   if (!access || access->empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider,
-                                            "OpenAI OAuth token response did not include an access token"));
+                                            "OpenAI OAuth response did not include an access credential"));
   }
   auto refresh = ava::core::json::string_field(body, "refresh_token");
   auto account_id = token_response_account_id(body, *access);
@@ -331,6 +354,11 @@ ava::core::Result<ava::provider::HttpResponse> post_openai_oauth_token_form(std:
     return std::unexpected(std::move(error));
   }
   return response;
+}
+
+std::string openai_oauth_user_agent()
+{
+  return "ava/" + std::string(ava::core::version::kDisplayVersion);
 }
 
 std::optional<std::string> jwt_payload(std::string_view token)
@@ -441,15 +469,104 @@ ava::core::Result<OpenAICredential> exchange_openai_oauth_code(std::string_view 
                                                                ava::provider::Transport& transport,
                                                                long long now_seconds)
 {
+  return exchange_openai_oauth_code(code, verifier, kRedirectUri, transport, now_seconds);
+}
+
+ava::core::Result<OpenAICredential> exchange_openai_oauth_code(std::string_view code, std::string_view verifier,
+                                                               std::string_view redirect_uri,
+                                                               ava::provider::Transport& transport,
+                                                               long long now_seconds)
+{
   std::string body = "grant_type=authorization_code";
   body += "&client_id=" + url_encode(kClientId);
   body += "&code=" + url_encode(code);
   body += "&code_verifier=" + url_encode(verifier);
-  body += "&redirect_uri=" + url_encode(kRedirectUri);
+  body += "&redirect_uri=" + url_encode(redirect_uri);
 
-  auto response = post_openai_oauth_token_form(std::move(body), transport, "OpenAI OAuth token exchange failed");
+  auto response = post_openai_oauth_token_form(std::move(body), transport, "OpenAI OAuth exchange failed");
   if (!response) return std::unexpected(response.error());
   return parse_openai_oauth_token_response(response->body, now_seconds, "", "");
+}
+
+ava::core::Result<OpenAIOAuthDeviceAuthorization> start_openai_oauth_device_authorization(
+    ava::provider::Transport& transport)
+{
+  auto response = transport.send(ava::provider::HttpRequest{
+      .method = "POST",
+      .url = std::string(kDeviceUserCodeUrl),
+      .headers = {{"Content-Type", "application/json"}, {"User-Agent", openai_oauth_user_agent()}},
+      .body = "{\"client_id\":\"" + ava::core::json::escape(kClientId) + "\"}",
+      .timeout_ms = 60000,
+      .follow_redirects = true,
+      .include_response_headers = false,
+      .resolve_hosts = {}});
+  if (!response) return std::unexpected(response.error());
+  if (response->status_code < 200 || response->status_code >= 300) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI OAuth device authorization failed");
+    error.with_context("status", std::to_string(response->status_code));
+    return std::unexpected(std::move(error));
+  }
+  if (!is_complete_json_object(response->body)) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI OAuth device response was malformed JSON"));
+  }
+
+  auto device_auth_id = ava::core::json::string_field(response->body, "device_auth_id");
+  auto user_code = ava::core::json::string_field(response->body, "user_code");
+  if (!device_auth_id || device_auth_id->empty() || !user_code || user_code->empty()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider,
+                                            "OpenAI OAuth device response was missing authorization fields"));
+  }
+  return OpenAIOAuthDeviceAuthorization{
+      .device_auth_id = *device_auth_id,
+      .user_code = *user_code,
+      .verification_url = std::string(kDeviceVerificationUrl),
+      .interval_seconds = positive_integer_from_json_field(response->body, "interval").value_or(5)};
+}
+
+ava::core::Result<std::optional<OpenAICredential>> poll_openai_oauth_device_authorization(
+    OpenAIOAuthDeviceAuthorization const& authorization, ava::provider::Transport& transport, long long now_seconds)
+{
+  if (authorization.device_auth_id.empty() || authorization.user_code.empty()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                            "OpenAI OAuth device authorization is missing required fields"));
+  }
+
+  std::string body = "{\"device_auth_id\":\"" + ava::core::json::escape(authorization.device_auth_id) +
+                     "\",\"user_code\":\"" + ava::core::json::escape(authorization.user_code) + "\"}";
+  auto response = transport.send(ava::provider::HttpRequest{
+      .method = "POST",
+      .url = std::string(kDeviceTokenUrl),
+      .headers = {{"Content-Type", "application/json"}, {"User-Agent", openai_oauth_user_agent()}},
+      .body = std::move(body),
+      .timeout_ms = 60000,
+      .follow_redirects = true,
+      .include_response_headers = false,
+      .resolve_hosts = {}});
+  if (!response) return std::unexpected(response.error());
+  if (response->status_code == 403 || response->status_code == 404) return std::optional<OpenAICredential>{};
+  if (response->status_code < 200 || response->status_code >= 300) {
+    auto error =
+        ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI OAuth device authorization polling failed");
+    error.with_context("status", std::to_string(response->status_code));
+    return std::unexpected(std::move(error));
+  }
+  if (!is_complete_json_object(response->body)) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::Provider, "OpenAI OAuth device token response was malformed JSON"));
+  }
+
+  auto authorization_code = ava::core::json::string_field(response->body, "authorization_code");
+  auto code_verifier = ava::core::json::string_field(response->body, "code_verifier");
+  if (!authorization_code || authorization_code->empty() || !code_verifier || code_verifier->empty()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider,
+                                            "OpenAI OAuth device token response was missing exchange fields"));
+  }
+
+  auto credential =
+      exchange_openai_oauth_code(*authorization_code, *code_verifier, kDeviceRedirectUri, transport, now_seconds);
+  if (!credential) return std::unexpected(std::move(credential.error()));
+  return std::optional<OpenAICredential>{std::move(*credential)};
 }
 
 ava::core::Result<OpenAICredential> refresh_openai_oauth_credential(OpenAICredential const& credential,

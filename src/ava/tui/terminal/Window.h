@@ -4,6 +4,7 @@
 #include "ComplexChar.h"
 #include "Dimension.h"
 #include "Position.h"
+#include "Margin.h"
 
 #include <cstdarg>
 #include <cwchar>
@@ -64,17 +65,25 @@ class Window
 
   // https://invisible-island.net/ncurses/man/curs_window.3x.html
 
-  // Create a Window that is a subwindow of the current Window, with dimensions `size` and top-left screen position `pos`.
+  // Create a Window that is a subwindow of the current Window.
+  //
+  // Either pass dimension `size` and top-left screen position `pos`,
+  // or pass a Margin that is relative to this Window.
   //
   // The returned Window shares storage with this Window. The caller must keep parent
   // and child lifetimes ordered so the subwindow is destroyed before its parent.
   Window subwin(Dimension size, Position pos);                          // subwin
+  Window subwin(Margin margin);                                         //
 
-  // Create a Window that is a derived subwindow of the current Window, with dimensions `size` and top-left position `pos` relative to this Window.
+  // Create a Window that is a derived subwindow of the current Window.
+  //
+  // Either pass dimension `size` and top-left position `pos` relative to this Window,
+  // or pass a Margin that is relative to this Window.
   //
   // The returned Window shares storage with this Window. The caller must keep parent
   // and child lifetimes ordered so the subwindow is destroyed before its parent.
   Window derwin(Dimension size, Position pos);                          // derwin
+  Window derwin(Margin margin);                                         //
 
   // Move this derived subwindow to `pos` (relative to its parent).
   //
@@ -119,6 +128,10 @@ class Window
   // https://invisible-island.net/ncurses/man/curs_move.3x.html
 
   void move(Position pos);                                              // wmove
+
+  // https://invisible-island.net/ncurses/man/wresize.3x.html
+
+  void resize(Dimension size);                                          // wresize
 
   // https://invisible-island.net/ncurses/man/curs_getyx.3x.html
 

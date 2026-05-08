@@ -841,7 +841,7 @@ struct Window::Impl
     return ::key_name(key);
   }
 
-  void move(Position pos)
+  int move(Position pos)
   {
     // https://invisible-island.net/ncurses/man/curs_move.3x.html
     //
@@ -849,7 +849,17 @@ struct Window::Impl
     // line y and column x. The terminal's cursor does not move until
     // refresh(3x) is called. The position (y, x) is relative to the upper
     // left-hand corner of the window, which has coordinates (0, 0).
-    ::wmove(handle_, pos.row(), pos.col());
+    return ::wmove(handle_, pos.row(), pos.col());
+  }
+
+  int resize(Dimension size)
+  {
+    // https://invisible-island.net/ncurses/man/wresize.3x.html
+    //
+    // wresize reallocates storage for win, adjusting its dimensions to lines and columns.
+    // If either dimension is larger than its current value, ncurses fills the expanded part
+    // of the window with the window's background character as configured by wbkgrndset.
+    return ::wresize(handle_, size.height(), size.width());
   }
 
   Position getyx() const
@@ -1076,9 +1086,23 @@ Window Window::subwin(Dimension size, Position pos)
   return Window(std::make_unique<Impl>(impl_->subwin(size, pos)));
 }
 
+Window Window::subwin(Margin margin)
+{
+  Dimension size = getmaxyx();
+  Position pos = getbegyx();
+  return subwin(size - margin, pos + margin);
+}
+
 Window Window::derwin(Dimension size, Position pos)
 {
   return Window(std::make_unique<Impl>(impl_->derwin(size, pos)));
+}
+
+Window Window::derwin(Margin margin)
+{
+  Dimension size = getmaxyx();
+  Position pos{0, 0};
+  return derwin(size - margin, pos + margin);
 }
 
 void Window::derwin(Position pos)
@@ -1610,7 +1634,14 @@ void Window::key_name(wint_t key, std::string& name)
 
 void Window::move(Position pos)
 {
-  impl_->move(pos);
+  int res = impl_->move(pos);
+  ASSERT(res != ERR);
+}
+
+void Window::resize(Dimension size)
+{
+  int res = impl_->resize(size);
+  ASSERT(res != ERR);
 }
 
 Position Window::getyx() const

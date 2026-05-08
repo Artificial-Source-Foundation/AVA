@@ -35,7 +35,7 @@ else
   if test ! -e cmake/aicxx/scripts/real_maintainer.sh; then
     echo "Houston, we have a problem: the cmake-aicxx git submodule is missing from your source tree!?"
     echo "I'd suggest to clone the source code of this project from github:"
-    echo "git clone --recursive https://github.com/@PROJECT_URL@"
+    echo "git clone --recursive https://github.com/Artificial-Source/AVA.git"
     exit 1
   fi
 fi

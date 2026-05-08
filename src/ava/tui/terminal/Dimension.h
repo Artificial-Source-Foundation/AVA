@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Margin.h"
 #include <cstdint>
 
 namespace terminal {
@@ -39,6 +40,8 @@ class Dimension
 
   friend Dimension operator*(Dimension d, float n) { return d *= n; }
   friend Dimension operator/(Dimension d, float n) { return d /= n; }
+
+  friend Dimension operator-(Dimension d, Margin margin) { return {d.height_ - (margin.top + margin.bottom), d.width_ - (margin.left + margin.right)}; }
 };
 
 } // namespace terminal

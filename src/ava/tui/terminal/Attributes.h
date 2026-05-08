@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstdint>
 #include <concepts>
+#include <cstdint>
 #include <type_traits>
 
 namespace terminal {
@@ -49,10 +49,14 @@ class Attributes
   attr_t& mask() { return mask_; }
 };
 
+// clang-format off
+
 template<typename T>
 concept AttributesConcept =
   std::same_as<std::remove_cvref_t<T>, Attributes> ||
   std::same_as<std::remove_cvref_t<T>, Attribute>;
+
+// clang-format on
 
 // Free operator| to OR Attributes and Attribute types.
 Attributes operator|=(AttributesConcept auto&& lhs, AttributesConcept auto&& rhs)

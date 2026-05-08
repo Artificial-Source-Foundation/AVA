@@ -191,15 +191,6 @@ ava::core::Result<std::string> provider_credential_object_json(ProviderCredentia
     return "{\n    \"type\": \"api_key\",\n    \"api_key\": \"" + ava::core::json::escape(credential.access_token) +
            "\"\n  }";
   }
-  if (credential.credential_type == "oauth") {
-    std::string body = "{\n    \"type\": \"oauth\",\n    \"access_token\": \"" +
-                       ava::core::json::escape(credential.access_token) + "\"";
-    if (!credential.account_id.empty()) {
-      body += ",\n    \"account_id\": \"" + ava::core::json::escape(credential.account_id) + "\"";
-    }
-    body += "\n  }";
-    return body;
-  }
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider credential type is unsupported");
   error.with_context("provider", credential.provider_id);
   error.with_context("credential_type", credential.credential_type);

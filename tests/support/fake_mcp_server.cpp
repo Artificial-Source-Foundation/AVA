@@ -106,7 +106,7 @@ int main(int argc, char** argv)
 
     if (*method == "initialize") {
       write_message(response(*id,
-                             "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},"
+                             "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{},\"prompts\":{}},"
                              "\"serverInfo\":{\"name\":\"fake-mcp\",\"version\":\"1.0.0\"}}"));
     } else if (*method == "tools/list") {
       if (mode == "exit-after-initialize") {
@@ -119,7 +119,14 @@ int main(int argc, char** argv)
                              "\"inputSchema\":{\"type\":\"object\",\"properties\":{\"text\":{\"type\":"
                              "\"string\"}},\"required\":[\"text\"]}}]}"));
     } else if (*method == "tools/call") {
-      if (mode == "tool-error") {
+      if (mode == "exit-tool") {
+        std::cerr << "fake MCP exited during tools/call";
+        std::cerr.flush();
+        return 44;
+      }
+      if (mode == "error-call") {
+        write_message(error_response(*id, "fake MCP JSON-RPC call failed"));
+      } else if (mode == "tool-error") {
         write_message(response(*id,
                                "{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"MCP tool "
                                "failed\"}]}"));
@@ -133,6 +140,20 @@ int main(int argc, char** argv)
                                "{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"MCP call "
                                "ok\"}]}"));
       }
+    } else if (*method == "prompts/list") {
+      write_message(response(*id,
+                             "{\"prompts\":[{\"name\":\"release-notes\",\"description\":\"Draft release notes\","
+                             "\"arguments\":[{\"name\":\"topic\",\"description\":\"Release topic\","
+                             "\"required\":true}]}]}"));
+    } else if (*method == "prompts/get") {
+      if (mode == "slow-prompt") {
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+      }
+      auto const params = ava::core::json::object_field(*message, "params").value_or("{}");
+      auto const arguments = ava::core::json::object_field(params, "arguments").value_or("{}");
+      auto const topic = ava::core::json::string_field(arguments, "topic").value_or("unknown");
+      write_message(response(*id, "{\"messages\":[{\"role\":\"user\",\"content\":{\"type\":\"text\",\"text\":" +
+                                      json_string("MCP prompt for " + topic) + "}}]}"));
     } else {
       write_message(error_response(*id, "unsupported method"));
     }

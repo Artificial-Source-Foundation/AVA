@@ -384,6 +384,11 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   if (auto valid = rpc::validate_optional_rpc_text(selected, "selected", rpc::kMaxRpcQuestionAnswerBytes); !valid) {
     return std::unexpected(std::move(valid.error()));
   }
+  auto command_arguments = ava::core::json::string_field(line, "command_arguments");
+  if (auto valid = rpc::validate_optional_rpc_text(command_arguments, "command_arguments", rpc::kMaxRpcLineBytes / 2);
+      !valid) {
+    return std::unexpected(std::move(valid.error()));
+  }
 
   return RpcCommand{.id = std::move(*id),
                     .type = std::move(*type),
@@ -407,6 +412,7 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
                     .plugin_id = std::move(plugin_id),
                     .name = std::move(name),
                     .arguments = ava::core::json::object_field(line, "arguments"),
+                    .command_arguments = std::move(command_arguments),
                     .server_id = std::move(server_id),
                     .path = ava::core::json::string_field(line, "path")};
 }

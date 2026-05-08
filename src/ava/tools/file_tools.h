@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace ava::lsp {
 class DiagnosticsProvider;
@@ -59,6 +60,7 @@ struct ToolContext {
   std::string permission_tool_name = {};
   std::string current_tool_name = {};
   std::string current_call_id = {};
+  std::shared_ptr<std::vector<std::string>> permission_request_ids = nullptr;
   std::shared_ptr<MutationQueue> mutation_queue = nullptr;
   std::shared_ptr<ava::lsp::DiagnosticsProvider> lsp_diagnostics_provider = nullptr;
   std::filesystem::path plugin_global_plugins_dir = {};
@@ -66,13 +68,22 @@ struct ToolContext {
   std::filesystem::path plugin_enablement_file = {};
   std::filesystem::path mcp_global_config_file = {};
   std::filesystem::path mcp_project_config_file = {};
+  std::vector<std::filesystem::path> skill_global_dirs = {};
+  std::vector<std::filesystem::path> skill_project_dirs = {};
 };
 
 struct TextOutput {
   std::string content;
   bool truncated = false;
+  bool byte_limited = false;
+  bool line_limited = false;
   std::size_t total_bytes = 0;
   std::size_t output_bytes = 0;
+  std::size_t output_lines = 0;
+  std::size_t start_line = 1;
+  std::size_t end_line = 0;
+  std::size_t total_lines = 0;
+  std::size_t next_offset_line = 0;
 };
 
 struct FileMutationResult {
@@ -86,6 +97,8 @@ struct FileMutationResult {
 
 struct ReadOptions {
   std::size_t max_bytes = 50 * 1024;
+  std::size_t offset_line = 1;
+  std::size_t max_lines = 200;
   bool permission_already_checked = false;
 };
 

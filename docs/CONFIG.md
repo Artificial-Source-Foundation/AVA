@@ -16,36 +16,30 @@ Create an OpenAI OAuth credential with:
 ava connect openai
 ```
 
-The command prints an OpenAI authorization URL, waits for the browser callback on `http://localhost:1455/auth/callback`, and stores the resulting credential owner-only at the AVA auth path.
+The command opens an OpenAI login method picker. Browser OAuth prints an OpenAI authorization URL, waits for the callback on `http://localhost:1455/auth/callback`, and stores the resulting credential owner-only at the AVA auth path. Headless OAuth uses OpenAI's device-code flow and prints `https://auth.openai.com/codex/device` plus the code to enter.
 
-Interactive provider login is available for API keys and bearer tokens:
+Interactive provider login is available for API keys:
 
 ```sh
 ava auth login
 ava login anthropic
 ava auth login moonshot --api-key
-ava connect kimi --oauth-token
+ava connect kimi --api-key
 ```
 
-When the provider is omitted, `ava auth login`, `ava login`, and interactive `ava connect` open a searchable terminal provider picker before asking for credential type and secret. Secrets are read without terminal echo when stdin is a TTY. In the TUI, use `/connect` or `/login` to open the same provider flow as a modal; pasted secrets are masked in the prompt.
+When the provider is omitted, `ava auth login`, `ava login`, and interactive `ava connect` open a searchable terminal provider picker before asking for login method and secret. Secrets are read without terminal echo when stdin is a TTY. In the TUI, use `/connect` or `/login` to open the same provider flow as a modal; OpenAI shows browser OAuth, headless OAuth, and API key options.
 
 Headless API-key setup is available for OpenAI, Anthropic, Moonshot/Kimi, and other provider ids:
 
 ```sh
+ava connect openai --headless-oauth
 printf '%s\n' "$OPENAI_API_KEY" | ava connect openai --api-key-stdin
 printf '%s\n' "$ANTHROPIC_API_KEY" | ava connect anthropic --api-key-stdin
 ava connect moonshot --api-key-env MOONSHOT_API_KEY
 ava connect kimi --api-key-env KIMI_API_KEY
 ```
 
-Bearer-token providers can use the OAuth-token variants:
-
-```sh
-printf '%s\n' "$ANTHROPIC_OAUTH_TOKEN" | ava connect anthropic --oauth-token-stdin
-ava connect anthropic --oauth-token-env ANTHROPIC_OAUTH_TOKEN
-```
-
-OAuth token format:
+OpenAI OAuth credential format:
 
 ```json
 {"openai":{"type":"oauth","access_token":"...","refresh_token":"...","expires_at":1893456000}}
@@ -57,7 +51,7 @@ API key format:
 {"openai":{"type":"api_key","api_key":"sk-..."},"anthropic":{"type":"api_key","api_key":"sk-ant-..."}}
 ```
 
-Auth files are written owner-only. Provider credential setup preserves existing provider entries in the same auth file. Explicit AVA auth entries take precedence; AVA also attempts to read legacy `~/.ava/credentials.json` and opencode's XDG auth file for OpenAI migration when no AVA OpenAI credential is stored.
+Auth files are written owner-only. Provider credential setup preserves existing provider entries in the same auth file. Explicit AVA auth entries take precedence; AVA also attempts to read legacy `~/.ava/credentials.json` and the legacy-compatible XDG auth file for OpenAI migration when no AVA OpenAI credential is stored.
 
 OAuth credentials refresh automatically before use when a refresh token is present. If refresh fails or the credential has no refresh token, rerun `ava connect openai`.
 

@@ -34,12 +34,10 @@ void print_help()
   std::cout << "AVA " << version::kDisplayVersion << "\n\n";
   std::cout << "Usage:\n";
   std::cout << "  ava [--help]\n";
-  std::cout << "  ava login [provider] [--api-key|--oauth-token]\n";
-  std::cout << "  ava auth login [provider] [--api-key|--oauth-token]\n";
-  std::cout << "  ava connect [provider] [--api-key|--oauth-token]\n";
-  std::cout << "  ava connect openai\n";
+  std::cout << "  ava login [provider] [--api-key|--browser-oauth|--headless-oauth]\n";
+  std::cout << "  ava auth login [provider] [--api-key|--browser-oauth|--headless-oauth]\n";
+  std::cout << "  ava connect [provider] [--api-key|--browser-oauth|--headless-oauth]\n";
   std::cout << "  ava connect <provider> --api-key-stdin|--api-key-env <env>\n";
-  std::cout << "  ava connect <provider> --oauth-token-stdin|--oauth-token-env <env>\n";
   std::cout << "  ava --version\n";
   std::cout << "  ava --mode build|plan\n";
   std::cout << "  ava --session <id>\n";
@@ -48,7 +46,7 @@ void print_help()
   std::cout << "  ava -p [prompt] [--json|--output json] [--allow read-only] [--allow-tool list]\n";
   std::cout << "  ava --rpc [--allow read-only] [--allow-tool list]\n";
   std::cout << "  ava --output rpc [--allow read-only] [--allow-tool list]\n\n";
-  std::cout << version::kDisplayVersion << " status: ncursesw TUI replacement on the hardened 0.2 backend.\n";
+  std::cout << version::kDisplayVersion << " status: backend MVP runtime with terminal, print, and RPC workflows.\n";
 }
 
 bool stdin_is_tty()
@@ -120,13 +118,14 @@ int run(int argc, char** argv)
 
   auto const paths = ava::config::xdg_paths();
 
-  auto parse_connect_like_command = [&](int& index, std::optional<std::string> provider,
-                                        bool preserve_openai_browser_default) -> int {
+  auto parse_connect_like_command = [&](int& index, std::optional<std::string> provider) -> int {
     enum class CredentialSource {
       None,
       Stdin,
       Env,
       Prompt,
+      BrowserOAuth,
+      HeadlessOAuth,
     };
     CredentialSource source = CredentialSource::None;
     std::optional<ava::app::ConnectCredentialType> credential_type;
@@ -148,24 +147,20 @@ int run(int argc, char** argv)
         if (!set_source(CredentialSource::Prompt, ava::app::ConnectCredentialType::ApiKey)) return 2;
         continue;
       }
-      if (option == "--oauth-token") {
-        if (!set_source(CredentialSource::Prompt, ava::app::ConnectCredentialType::OAuthToken)) return 2;
+      if (option == "--browser-oauth") {
+        if (!set_source(CredentialSource::BrowserOAuth, ava::app::ConnectCredentialType::ApiKey)) return 2;
+        continue;
+      }
+      if (option == "--headless-oauth") {
+        if (!set_source(CredentialSource::HeadlessOAuth, ava::app::ConnectCredentialType::ApiKey)) return 2;
         continue;
       }
       if (option == "--api-key-stdin") {
         if (!set_source(CredentialSource::Stdin, ava::app::ConnectCredentialType::ApiKey)) return 2;
         continue;
       }
-      if (option == "--oauth-token-stdin") {
-        if (!set_source(CredentialSource::Stdin, ava::app::ConnectCredentialType::OAuthToken)) return 2;
-        continue;
-      }
-      if (option == "--api-key-env" || option == "--oauth-token-env") {
-        if (!set_source(option == "--oauth-token-env" ? CredentialSource::Env : CredentialSource::Env,
-                        option == "--oauth-token-env" ? ava::app::ConnectCredentialType::OAuthToken
-                                                      : ava::app::ConnectCredentialType::ApiKey)) {
-          return 2;
-        }
+      if (option == "--api-key-env") {
+        if (!set_source(CredentialSource::Env, ava::app::ConnectCredentialType::ApiKey)) return 2;
         if (index + 1 >= argc) {
           std::cerr << ava::tui::sanitize_terminal_text(std::string(option))
                     << " requires an environment variable name\n";
@@ -176,6 +171,15 @@ int run(int argc, char** argv)
       }
       std::cerr << "unknown connect option\n";
       return 2;
+    }
+
+    if (source == CredentialSource::BrowserOAuth || source == CredentialSource::HeadlessOAuth) {
+      if (!provider || *provider != "openai") {
+        std::cerr << "OpenAI OAuth flags require provider `openai`\n";
+        return 2;
+      }
+      if (source == CredentialSource::BrowserOAuth) return run_connect_openai_browser(paths, std::cout, std::cerr);
+      return run_connect_openai_headless(paths, std::cout, std::cerr);
     }
 
     if (source == CredentialSource::Stdin || source == CredentialSource::Env) {
@@ -198,7 +202,11 @@ int run(int argc, char** argv)
           std::cin, std::cout, std::cerr);
     }
 
-    if (preserve_openai_browser_default && provider && *provider == "openai") return run_connect_openai(paths);
+    if (provider && *provider == "openai") {
+      return run_connect_openai_wizard(
+          paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .stdin_is_tty = stdin_is_tty()},
+          std::cin, std::cout, std::cerr);
+    }
     return run_connect_provider_wizard(
         paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .stdin_is_tty = stdin_is_tty()},
         std::cin, std::cout, std::cerr);
@@ -209,12 +217,12 @@ int run(int argc, char** argv)
     if (arg == "connect") {
       std::optional<std::string> provider;
       if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--")) provider = argv[++index];
-      return parse_connect_like_command(index, provider, true);
+      return parse_connect_like_command(index, provider);
     }
     if (arg == "login") {
       std::optional<std::string> provider;
       if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--")) provider = argv[++index];
-      return parse_connect_like_command(index, provider, false);
+      return parse_connect_like_command(index, provider);
     }
     if (arg == "auth") {
       if (index + 1 >= argc || std::string_view(argv[++index]) != "login") {
@@ -223,7 +231,7 @@ int run(int argc, char** argv)
       }
       std::optional<std::string> provider;
       if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--")) provider = argv[++index];
-      return parse_connect_like_command(index, provider, false);
+      return parse_connect_like_command(index, provider);
     }
     if (arg == "--help" || arg == "-h") {
       print_help();

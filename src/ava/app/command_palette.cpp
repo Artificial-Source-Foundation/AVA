@@ -95,6 +95,102 @@ std::string model_completion_description(ava::config::ModelInfo const& model, bo
   return description;
 }
 
+std::string optional_capability_text(std::string_view label, std::optional<bool> value)
+{
+  if (!value) return std::string(label) + " ?";
+  return std::string(label) + (*value ? " yes" : " no");
+}
+
+std::string model_selector_detail(ava::config::ModelInfo const& model)
+{
+  std::string detail = optional_capability_text("tools", model.supports_tools) + " · " +
+                       optional_capability_text("stream", model.supports_streaming) + " · " +
+                       optional_capability_text("reasoning", model.supports_reasoning);
+  if (model.context_window_tokens) detail += " · ctx " + std::to_string(*model.context_window_tokens);
+  if (!model.reasoning_levels.empty()) {
+    detail += " · levels ";
+    for (std::size_t index = 0; index < model.reasoning_levels.size(); ++index) {
+      if (index > 0) detail += "/";
+      detail += model.reasoning_levels[index];
+    }
+  }
+  return detail;
+}
+
+tui::SelectListItemView model_selector_item(ava::config::ModelInfo const& model,
+                                            ava::config::ModelInfo const& current_model, bool registered)
+{
+  auto const current = model.provider_id == current_model.provider_id && model.model_id == current_model.model_id;
+  auto label = model.display_name.empty() ? model.model_id : model.display_name;
+  auto description = model.provider_id + "/" + model.model_id;
+  return tui::SelectListItemView{
+      .value = description,
+      .label = std::move(label),
+      .description = std::move(description),
+      .group = model.provider_id,
+      .detail = model_selector_detail(model),
+      .badge = model.supports_reasoning.value_or(false) ? std::string("reasoning") : std::string{},
+      .current = current,
+      .enabled = registered,
+      .disabled_reason = registered ? std::string{} : std::string("provider unavailable")};
+}
+
+std::string session_sort_label(SessionSelectorSort sort)
+{
+  switch (sort) {
+    case SessionSelectorSort::Recent:
+      return "recent";
+    case SessionSelectorSort::Name:
+      return "name";
+    case SessionSelectorSort::Path:
+      return "path";
+  }
+  return "recent";
+}
+
+std::string session_selector_detail(ava::session::SessionSummary const& summary)
+{
+  std::string detail = "entries " + std::to_string(summary.entry_count);
+  if (!summary.last_updated.empty()) detail += " · updated " + summary.last_updated;
+  return detail;
+}
+
+tui::SelectListItemView session_selector_item(ava::session::SessionSummary const& summary,
+                                              std::string_view current_session_id)
+{
+  auto const current = !current_session_id.empty() && summary.session_id == current_session_id;
+  auto path = summary.path.empty() ? std::string("path unavailable") : summary.path.generic_string();
+  return tui::SelectListItemView{.value = summary.session_id,
+                                 .label = summary.session_id,
+                                 .description = std::move(path),
+                                 .group = "Sessions",
+                                 .detail = session_selector_detail(summary),
+                                 .badge = current ? std::string("current") : std::string{},
+                                 .current = current,
+                                 .enabled = true,
+                                 .disabled_reason = {}};
+}
+
+void sort_session_summaries(std::vector<ava::session::SessionSummary>& summaries, SessionSelectorSort sort)
+{
+  std::ranges::sort(summaries,
+                    [&](ava::session::SessionSummary const& left, ava::session::SessionSummary const& right) {
+                      switch (sort) {
+                        case SessionSelectorSort::Recent:
+                          if (left.last_updated != right.last_updated) return left.last_updated > right.last_updated;
+                          return left.session_id > right.session_id;
+                        case SessionSelectorSort::Name:
+                          return left.session_id < right.session_id;
+                        case SessionSelectorSort::Path:
+                          if (left.path.generic_string() != right.path.generic_string()) {
+                            return left.path.generic_string() < right.path.generic_string();
+                          }
+                          return left.session_id < right.session_id;
+                      }
+                      return left.session_id < right.session_id;
+                    });
+}
+
 ava::mcp::McpConfigLoadOptions mcp_config_options(RuntimeSession const& session)
 {
   auto options = ava::mcp::default_mcp_config_options(session.workspace_dir);
@@ -116,21 +212,6 @@ std::filesystem::path plugin_enablement_file(RuntimeSession const& session)
 
 void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, RuntimeSession const& session)
 {
-  if (auto index = find_item_index(items, "/connect")) {
-    auto& item = items[*index];
-    if (!session.model.provider_id.empty()) {
-      add_completion(item, 0, session.model.provider_id,
-                     ava::config::provider_display_name(session.model.provider_id) + " (current)", "Providers");
-    }
-    for (auto const& profile : ava::config::builtin_provider_profiles()) {
-      auto description = profile.display_name;
-      if (!profile.connect_detail.empty()) description += " - " + profile.connect_detail;
-      add_completion(item, 0, profile.provider_id, std::move(description), "Providers");
-    }
-    add_completion(item, 1, "api-key", "Store an API key credential", "Credential");
-    add_completion(item, 1, "oauth", "Store an OAuth bearer token credential", "Credential");
-  }
-
   if (auto index = find_item_index(items, "/models")) {
     auto& item = items[*index];
     auto const providers = ava::provider::builtin_provider_registry();
@@ -247,6 +328,144 @@ std::vector<tui::SlashCommandItem> command_catalog_slash_items(RuntimeSession co
   auto items = command_catalog_slash_items(hotkeys);
   add_backend_argument_completions(items, session);
   return items;
+}
+
+tui::SelectListView model_selector_view(ava::config::ModelRegistry const& registry,
+                                        ava::config::ModelInfo const& current_model, std::string footer_hint)
+{
+  auto const providers = ava::provider::builtin_provider_registry();
+  auto models = effective_models(registry);
+
+  tui::SelectListView view{.title = "Select model",
+                           .subtitle = "Current " + current_model.provider_id + "/" + current_model.model_id +
+                                       " · selection is validated by the backend before session mutation",
+                           .items = {},
+                           .selected_item_index = 0,
+                           .query = {},
+                           .placeholder = "Search models",
+                           .empty_text = "No configured models match",
+                           .footer_hint = std::move(footer_hint)};
+  view.items.reserve(models.size() + 1);
+
+  bool current_in_catalog = false;
+  for (auto const& model : models) {
+    auto const current = model.provider_id == current_model.provider_id && model.model_id == current_model.model_id;
+    current_in_catalog = current_in_catalog || current;
+    if (current) view.selected_item_index = view.items.size();
+    view.items.push_back(model_selector_item(model, current_model, providers.contains(model.provider_id)));
+  }
+
+  if (!current_in_catalog && !current_model.provider_id.empty() && !current_model.model_id.empty()) {
+    view.selected_item_index = view.items.size();
+    view.items.push_back(
+        model_selector_item(current_model, current_model, providers.contains(current_model.provider_id)));
+  }
+
+  return view;
+}
+
+tui::SelectListView model_selector_view(RuntimeSession const& session, std::string footer_hint)
+{
+  auto registry = ava::config::load_model_registry(session.paths);
+  if (registry) return model_selector_view(*registry, session.model, std::move(footer_hint));
+
+  return tui::SelectListView{.title = "Select model",
+                             .subtitle = "Unable to load configured models",
+                             .items = {tui::SelectListItemView{.value = {},
+                                                               .label = "Model registry unavailable",
+                                                               .description = registry.error().format(),
+                                                               .group = "Models",
+                                                               .detail = {},
+                                                               .badge = {},
+                                                               .current = false,
+                                                               .enabled = false,
+                                                               .disabled_reason = "model registry failed to load"}},
+                             .selected_item_index = 0,
+                             .query = {},
+                             .placeholder = "Search models",
+                             .empty_text = "No configured models match",
+                             .footer_hint = std::move(footer_hint)};
+}
+
+tui::SelectListView session_selector_view(std::vector<ava::session::SessionSummary> summaries,
+                                          std::string current_session_id, SessionSelectorSort sort,
+                                          std::string footer_hint)
+{
+  sort_session_summaries(summaries, sort);
+
+  tui::SelectListView view{.title = "Select session",
+                           .subtitle = "Linear sessions from the existing JSONL store · sort " +
+                                       session_sort_label(sort) + " · tree/fork views need a backend session schema",
+                           .items = {},
+                           .selected_item_index = 0,
+                           .query = {},
+                           .placeholder = "Search sessions",
+                           .empty_text = "No sessions match",
+                           .footer_hint = footer_hint.empty()
+                                              ? std::string("Enter choose · type to filter · Esc cancel")
+                                              : std::move(footer_hint)};
+  view.items.reserve(summaries.size() + 1);
+
+  bool current_found = false;
+  for (auto const& summary : summaries) {
+    if (!current_session_id.empty() && summary.session_id == current_session_id) {
+      view.selected_item_index = view.items.size();
+      current_found = true;
+    }
+    view.items.push_back(session_selector_item(summary, current_session_id));
+  }
+
+  if (!current_found && !current_session_id.empty()) {
+    view.selected_item_index = view.items.size();
+    view.items.push_back(tui::SelectListItemView{.value = current_session_id,
+                                                 .label = current_session_id,
+                                                 .description = "current session metadata unavailable",
+                                                 .group = "Sessions",
+                                                 .detail = "path/model/message count unavailable from current view",
+                                                 .badge = "current",
+                                                 .current = true,
+                                                 .enabled = true,
+                                                 .disabled_reason = {}});
+  }
+
+  if (view.items.empty()) {
+    view.items.push_back(tui::SelectListItemView{.value = {},
+                                                 .label = "No sessions found",
+                                                 .description = "Start a conversation to create a session",
+                                                 .group = "Sessions",
+                                                 .detail = {},
+                                                 .badge = {},
+                                                 .current = false,
+                                                 .enabled = false,
+                                                 .disabled_reason = "session list is empty"});
+  }
+
+  return view;
+}
+
+tui::SelectListView session_selector_view(RuntimeSession const& session, SessionSelectorSort sort,
+                                          std::string footer_hint)
+{
+  auto sessions = ava::session::SessionStore::list_sessions(session.workspace_dir, session.paths.sessions_dir);
+  if (sessions)
+    return session_selector_view(std::move(*sessions), session.store.session_id(), sort, std::move(footer_hint));
+
+  return tui::SelectListView{.title = "Select session",
+                             .subtitle = "Unable to load session list",
+                             .items = {tui::SelectListItemView{.value = {},
+                                                               .label = "Session list unavailable",
+                                                               .description = sessions.error().format(),
+                                                               .group = "Sessions",
+                                                               .detail = {},
+                                                               .badge = {},
+                                                               .current = false,
+                                                               .enabled = false,
+                                                               .disabled_reason = "session list failed to load"}},
+                             .selected_item_index = 0,
+                             .query = {},
+                             .placeholder = "Search sessions",
+                             .empty_text = "No sessions match",
+                             .footer_hint = std::move(footer_hint)};
 }
 
 }  // namespace ava::app

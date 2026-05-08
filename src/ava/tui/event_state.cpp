@@ -183,6 +183,8 @@ std::optional<ava::app::RuntimeEvent> runtime_event_from_envelope(ava::app::Even
   event.reasoning_signature_present = bool_field(envelope.payload_json, "reasoning_signature_present");
   event.diff_truncated = bool_field(envelope.payload_json, "diff_truncated");
   event.truncated = bool_field(envelope.payload_json, "truncated");
+  event.byte_limited = bool_field(envelope.payload_json, "byte_limited");
+  event.line_limited = bool_field(envelope.payload_json, "line_limited");
   event.spill_truncated = bool_field(envelope.payload_json, "spill_truncated");
   event.provider_iterations = size_field(envelope.payload_json, "provider_iterations");
   event.tool_calls = size_field(envelope.payload_json, "tool_calls");
@@ -197,6 +199,11 @@ std::optional<ava::app::RuntimeEvent> runtime_event_from_envelope(ava::app::Even
   event.current_entries = size_field(envelope.payload_json, "current_entries");
   event.output_bytes = size_field(envelope.payload_json, "output_bytes");
   event.total_bytes = size_field(envelope.payload_json, "total_bytes");
+  event.output_lines = size_field(envelope.payload_json, "output_lines");
+  event.total_lines = size_field(envelope.payload_json, "total_lines");
+  event.start_line = size_field(envelope.payload_json, "start_line");
+  event.end_line = size_field(envelope.payload_json, "end_line");
+  event.next_offset_line = size_field(envelope.payload_json, "next_offset_line");
   event.omitted_bytes = size_field(envelope.payload_json, "omitted_bytes");
   event.omitted_lines = size_field(envelope.payload_json, "omitted_lines");
   event.visible_matches = size_field(envelope.payload_json, "visible_matches");
@@ -351,7 +358,7 @@ std::string assistant_meta_for_event(ava::app::RuntimeEvent const& event)
   if (event.model_id.empty()) return {};
   auto mode = title_case_ascii(ava::agent::to_string(event.mode));
   if (mode.empty()) mode = "AVA";
-  return mode + " - " + ava::config::model_display_label(event.provider_id, event.model_id);
+  return mode + " · " + ava::config::model_display_label(event.provider_id, event.model_id);
 }
 
 void update_pending_assistant_meta(TuiEventState& state, ava::app::RuntimeEvent const& event)
@@ -580,10 +587,17 @@ ToolTimelineItem tool_item_from_event(ava::app::RuntimeEvent const& event, ToolT
   item.diff_truncated = event.diff_truncated;
   item.changed_paths = event.changed_paths;
   item.truncated = event.truncated;
+  item.byte_limited = event.byte_limited;
+  item.line_limited = event.line_limited;
   item.spill_path = event.spill_path;
   item.spill_truncated = event.spill_truncated;
   if (event.output_bytes > 0) item.output_bytes = event.output_bytes;
   if (event.total_bytes > 0) item.total_bytes = event.total_bytes;
+  if (event.output_lines > 0) item.output_lines = event.output_lines;
+  if (event.total_lines > 0) item.total_lines = event.total_lines;
+  if (event.start_line > 0) item.start_line = event.start_line;
+  if (event.end_line > 0) item.end_line = event.end_line;
+  if (event.next_offset_line > 0) item.next_offset_line = event.next_offset_line;
   if (event.omitted_bytes > 0) item.omitted_bytes = event.omitted_bytes;
   if (event.omitted_lines > 0) item.omitted_lines = event.omitted_lines;
   if (event.visible_matches > 0) item.visible_matches = event.visible_matches;
@@ -652,10 +666,17 @@ void apply_tool_result(TuiEventState& state, ava::app::RuntimeEvent const& event
   item.diff_truncated = event.diff_truncated;
   item.changed_paths = event.changed_paths;
   item.truncated = event.truncated;
+  item.byte_limited = event.byte_limited;
+  item.line_limited = event.line_limited;
   item.spill_path = event.spill_path;
   item.spill_truncated = event.spill_truncated;
   if (event.output_bytes > 0) item.output_bytes = event.output_bytes;
   if (event.total_bytes > 0) item.total_bytes = event.total_bytes;
+  if (event.output_lines > 0) item.output_lines = event.output_lines;
+  if (event.total_lines > 0) item.total_lines = event.total_lines;
+  if (event.start_line > 0) item.start_line = event.start_line;
+  if (event.end_line > 0) item.end_line = event.end_line;
+  if (event.next_offset_line > 0) item.next_offset_line = event.next_offset_line;
   if (event.omitted_bytes > 0) item.omitted_bytes = event.omitted_bytes;
   if (event.omitted_lines > 0) item.omitted_lines = event.omitted_lines;
   if (event.visible_matches > 0) item.visible_matches = event.visible_matches;
@@ -837,10 +858,20 @@ void apply_tool_payload_metadata(ToolTimelineItem& item, std::string_view payloa
   }
   item.diff_truncated = item.diff_truncated || bool_field(payload_json, "diff_truncated");
   item.truncated = item.truncated || bool_field(payload_json, "truncated");
+  item.byte_limited = item.byte_limited || bool_field(payload_json, "byte_limited");
+  item.line_limited = item.line_limited || bool_field(payload_json, "line_limited");
   item.spill_truncated = item.spill_truncated || bool_field(payload_json, "spill_truncated");
   if (auto value = optional_bool_field(payload_json, "details_visible")) item.details_visible = *value;
   if (auto value = optional_size_field(payload_json, "output_bytes")) item.output_bytes = *value;
   if (auto value = optional_size_field(payload_json, "total_bytes")) item.total_bytes = *value;
+  if (auto value = optional_size_field(payload_json, "output_lines")) item.output_lines = *value;
+  if (auto value = optional_size_field(payload_json, "visible_lines")) item.output_lines = *value;
+  if (auto value = optional_size_field(payload_json, "returned_lines")) item.output_lines = *value;
+  if (auto value = optional_size_field(payload_json, "total_lines")) item.total_lines = *value;
+  if (auto value = optional_size_field(payload_json, "start_line")) item.start_line = *value;
+  if (auto value = optional_size_field(payload_json, "end_line")) item.end_line = *value;
+  if (auto value = optional_size_field(payload_json, "next_offset_line")) item.next_offset_line = *value;
+  if (auto value = optional_size_field(payload_json, "next_offset")) item.next_offset_line = *value;
   if (auto value = optional_size_field(payload_json, "omitted_bytes")) item.omitted_bytes = *value;
   if (auto value = optional_size_field(payload_json, "omitted_output_bytes")) item.omitted_bytes = *value;
   if (auto value = optional_size_field(payload_json, "omitted_lines")) item.omitted_lines = *value;
@@ -986,7 +1017,7 @@ void apply_runtime_event(TuiEventState& state, ava::app::RuntimeEvent const& eve
       break;
     case RuntimeEventType::CompactionEnd: {
       auto detail = compact_lifecycle_detail("compaction completed", event);
-      state.transcript.push_back(transcript_text_item("audit", detail));
+      state.transcript.push_back(transcript_text_item("compaction", detail));
       upsert_sidebar_activity(state, SidebarActivityItem{.id = first_non_empty({event.trigger, "compaction"}),
                                                          .label = "compaction",
                                                          .detail = std::move(detail),
@@ -1043,11 +1074,12 @@ void apply_runtime_event(TuiEventState& state, ava::app::RuntimeEvent const& eve
         apply_canceled_event(state, event);
         break;
       }
+      commit_pending_assistant_text(state, assistant_meta_for_event(event));
       state.error_text = error_text_for_event(event);
       state.error_details = event.error_details;
       if (!state.error_text.empty() || !state.error_details.empty()) {
-        state.transcript.push_back(
-            transcript_text_item("error", state.error_details.empty() ? state.error_text : state.error_details));
+        auto const transcript_text = state.error_text.empty() ? state.error_details : state.error_text;
+        state.transcript.push_back(transcript_text_item("error", transcript_text));
       }
       settle_responding_activity(state, ToolTimelineStatus::Error, "assistant failed");
       state.run_status = TuiEventRunStatus::Error;

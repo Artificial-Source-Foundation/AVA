@@ -118,6 +118,28 @@ void test_headless_permission_policy()
                                                            .command = "https://example.com",
                                                            .tool_name = "webfetch",
                                                            .reason = "network fetch requires explicit approval"};
+  ava::permissions::PermissionPrompt const websearch_prompt{.operation = ava::permissions::Operation::NetworkSearch,
+                                                            .mode = ava::agent::Mode::Build,
+                                                            .workspace_dir = workspace,
+                                                            .target_path = {},
+                                                            .command = "current docs",
+                                                            .tool_name = "websearch",
+                                                            .reason = "network search requires explicit approval"};
+  ava::permissions::PermissionPrompt const skill_prompt{
+      .operation = ava::permissions::Operation::SkillLoad,
+      .mode = ava::agent::Mode::Build,
+      .workspace_dir = workspace,
+      .target_path = workspace / ".ava" / "skills" / "demo" / "SKILL.md",
+      .command = "demo",
+      .tool_name = "skill",
+      .reason = "skill loading requires explicit approval"};
+  ava::permissions::PermissionPrompt const mcp_prompt{.operation = ava::permissions::Operation::McpToolCall,
+                                                      .mode = ava::agent::Mode::Build,
+                                                      .workspace_dir = workspace,
+                                                      .target_path = workspace / ".ava" / "mcp.json",
+                                                      .command = "demo:echo",
+                                                      .tool_name = "mcp_demo_echo",
+                                                      .reason = "MCP tool calls require explicit approval"};
 
   auto default_resolver = ava::app::build_headless_permission_resolver(ava::app::HeadlessPermissionPolicyOptions{});
   auto default_read = default_resolver(read_prompt);
@@ -133,6 +155,7 @@ void test_headless_permission_policy()
   auto read_only_write = read_only_resolver(write_prompt);
   auto read_only_bash = read_only_resolver(bash_prompt);
   auto read_only_webfetch = read_only_resolver(webfetch_prompt);
+  auto read_only_websearch = read_only_resolver(websearch_prompt);
   expect(read_only_read && *read_only_read == ava::permissions::PermissionResolution::Allow,
          "headless read-only policy allows read prompts");
   expect(read_only_search && *read_only_search == ava::permissions::PermissionResolution::Allow,
@@ -143,15 +166,21 @@ void test_headless_permission_policy()
          "headless read-only policy denies bash prompts");
   expect(read_only_webfetch && *read_only_webfetch == ava::permissions::PermissionResolution::Deny,
          "headless read-only policy denies network prompts");
+  expect(read_only_websearch && *read_only_websearch == ava::permissions::PermissionResolution::Deny,
+         "headless read-only policy denies network search prompts");
 
   ava::app::HeadlessPermissionPolicyOptions tool_options;
-  auto tools_added = ava::app::add_headless_allowed_tools(tool_options, "glob,grep,read_file,webfetch");
-  expect(tools_added.has_value() && tool_options.allowed_tools.size() == 4,
+  auto tools_added =
+      ava::app::add_headless_allowed_tools(tool_options, "glob,grep,mcp,read_file,skill,webfetch,websearch");
+  expect(tools_added.has_value() && tool_options.allowed_tools.size() == 7,
          "headless allow-tool parses supported comma-separated tool names");
   auto tool_resolver = ava::app::build_headless_permission_resolver(tool_options);
   auto const tool_read = tool_resolver(read_prompt);
   auto const tool_search = tool_resolver(search_prompt);
   auto const tool_webfetch = tool_resolver(webfetch_prompt);
+  auto const tool_websearch = tool_resolver(websearch_prompt);
+  auto const tool_skill = tool_resolver(skill_prompt);
+  auto const tool_mcp = tool_resolver(mcp_prompt);
   ava::permissions::PermissionPrompt const lower_layer_read_prompt{.operation = ava::permissions::Operation::ReadFile,
                                                                    .mode = ava::agent::Mode::Build,
                                                                    .workspace_dir = workspace,
@@ -174,6 +203,12 @@ void test_headless_permission_policy()
          "headless allow-tool allows exact glob search prompts");
   expect(tool_webfetch && *tool_webfetch == ava::permissions::PermissionResolution::Allow,
          "headless allow-tool allows exact webfetch network prompts");
+  expect(tool_websearch && *tool_websearch == ava::permissions::PermissionResolution::Allow,
+         "headless allow-tool allows exact websearch network prompts");
+  expect(tool_skill && *tool_skill == ava::permissions::PermissionResolution::Allow,
+         "headless allow-tool allows exact skill prompts");
+  expect(tool_mcp && *tool_mcp == ava::permissions::PermissionResolution::Allow,
+         "headless allow-tool allows dynamic MCP tool prompts through the mcp group");
   expect(lower_layer_read && *lower_layer_read == ava::permissions::PermissionResolution::Deny,
          "headless allow-tool requires exact tool names");
   expect(mismatched_tool && *mismatched_tool == ava::permissions::PermissionResolution::Deny,
@@ -449,23 +484,6 @@ void test_app_connect_provider_credentials_headlessly()
              (*anthropic)->credential_type == "api_key",
          "headless provider connect writes loadable Anthropic API key auth");
 
-  std::istringstream anthropic_oauth_input("anthropic-oauth-token\r\n");
-  std::ostringstream anthropic_oauth_out;
-  std::ostringstream anthropic_oauth_err;
-  auto const anthropic_oauth_exit = ava::app::run_connect_provider_credential(
-      paths,
-      ava::app::ConnectProviderCredentialOptions{.provider_id = "anthropic",
-                                                 .credential_type = ava::app::ConnectCredentialType::OAuthToken,
-                                                 .env_var = std::nullopt},
-      anthropic_oauth_input, anthropic_oauth_out, anthropic_oauth_err);
-  expect(anthropic_oauth_exit == 0 && anthropic_oauth_err.str().empty() &&
-             anthropic_oauth_out.str().find("Stored OAuth bearer token credential") != std::string::npos,
-         "headless provider connect stores Anthropic OAuth bearer token from stdin");
-  anthropic = ava::config::provider_credential_for_request(paths, "anthropic", transport);
-  expect(anthropic && anthropic->has_value() && (*anthropic)->access_token == "anthropic-oauth-token" &&
-             (*anthropic)->credential_type == "oauth",
-         "headless provider connect replaces Anthropic API key with OAuth bearer token");
-
   ScopedEnvVar moonshot_key("AVA_TEST_MOONSHOT_KEY", "moonshot-api-key");
   std::istringstream moonshot_input;
   std::ostringstream moonshot_out;
@@ -483,7 +501,7 @@ void test_app_connect_provider_credentials_headlessly()
              (*moonshot)->credential_type == "api_key",
          "headless provider connect writes loadable Moonshot API key auth");
   anthropic = ava::config::provider_credential_for_request(paths, "anthropic", transport);
-  expect(anthropic && anthropic->has_value() && (*anthropic)->access_token == "anthropic-oauth-token",
+  expect(anthropic && anthropic->has_value() && (*anthropic)->access_token == "anthropic-api-key",
          "headless provider connect preserves existing provider credentials when adding another provider");
 
   std::istringstream invalid_env_input;
@@ -531,7 +549,7 @@ void test_app_connect_provider_credentials_headlessly()
   std::error_code wizard_remove_error;
   std::filesystem::remove_all(wizard_root, wizard_remove_error);
   auto const wizard_paths = app_test_paths(wizard_root);
-  std::istringstream wizard_input("anthropic\napi-key\nwizard-api-key\n");
+  std::istringstream wizard_input("anthropic\nwizard-api-key\n");
   std::ostringstream wizard_out;
   std::ostringstream wizard_err;
   auto const wizard_exit = ava::app::run_connect_provider_wizard(
@@ -542,10 +560,45 @@ void test_app_connect_provider_credentials_headlessly()
   expect(wizard_exit == 0 && wizard_err.str().empty() && wizard_out.str().find("Add credential") != std::string::npos &&
              wizard_out.str().find("Select provider") != std::string::npos &&
              wizard_out.str().find("Stored anthropic API key credential") != std::string::npos,
-         "interactive provider wizard opens a searchable provider menu before prompting for method and secret");
+         "interactive provider wizard opens a searchable provider menu before prompting for secret");
   auto wizard_anthropic = ava::config::provider_credential_for_request(wizard_paths, "anthropic", transport);
   expect(wizard_anthropic && wizard_anthropic->has_value() && (*wizard_anthropic)->access_token == "wizard-api-key",
          "interactive provider wizard stores a loadable credential");
+
+  auto const openai_wizard_root = temp_root() / "app-connect-openai-wizard";
+  std::error_code openai_wizard_remove_error;
+  std::filesystem::remove_all(openai_wizard_root, openai_wizard_remove_error);
+  auto const openai_wizard_paths = app_test_paths(openai_wizard_root);
+  std::istringstream openai_wizard_input("3\nwizard-openai-api-key\n");
+  std::ostringstream openai_wizard_out;
+  std::ostringstream openai_wizard_err;
+  auto const openai_wizard_exit = ava::app::run_connect_openai_wizard(
+      openai_wizard_paths,
+      ava::app::ConnectProviderWizardOptions{
+          .provider_id = "openai", .credential_type = std::nullopt, .stdin_is_tty = true},
+      openai_wizard_input, openai_wizard_out, openai_wizard_err);
+  expect(openai_wizard_exit == 0 && openai_wizard_err.str().empty() &&
+             openai_wizard_out.str().find("OpenAI login method") != std::string::npos &&
+             openai_wizard_out.str().find("ChatGPT Pro/Plus (headless OAuth)") != std::string::npos &&
+             openai_wizard_out.str().find("Stored openai API key credential") != std::string::npos,
+         "interactive OpenAI connect command opens method picker and stores selected API key credential");
+  auto openai_wizard_credential = ava::config::load_openai_credential(openai_wizard_paths);
+  expect(openai_wizard_credential && openai_wizard_credential->has_value() &&
+             (*openai_wizard_credential)->type == ava::config::OpenAICredentialType::ApiKey &&
+             (*openai_wizard_credential)->access_token == "wizard-openai-api-key",
+         "interactive OpenAI connect command writes a loadable OpenAI credential");
+
+  std::istringstream non_tty_openai_wizard_input;
+  std::ostringstream non_tty_openai_wizard_out;
+  std::ostringstream non_tty_openai_wizard_err;
+  auto const non_tty_openai_wizard_exit = ava::app::run_connect_openai_wizard(
+      openai_wizard_paths,
+      ava::app::ConnectProviderWizardOptions{
+          .provider_id = "openai", .credential_type = std::nullopt, .stdin_is_tty = false},
+      non_tty_openai_wizard_input, non_tty_openai_wizard_out, non_tty_openai_wizard_err);
+  expect(non_tty_openai_wizard_exit == 2 && non_tty_openai_wizard_out.str().empty() &&
+             non_tty_openai_wizard_err.str().find("--headless-oauth") != std::string::npos,
+         "interactive OpenAI connect command points non-tty callers at headless OAuth");
 
   std::istringstream cancelled_wizard_input("\x1b");
   std::ostringstream cancelled_wizard_out;
@@ -558,7 +611,7 @@ void test_app_connect_provider_credentials_headlessly()
   expect(cancelled_wizard_exit == 1 && cancelled_wizard_err.str().find("provider login cancelled") != std::string::npos,
          "interactive provider wizard cancels on standalone escape without waiting for more input");
 
-  std::istringstream arrow_wizard_input("\x1b[B\napi-key\narrow-api-key\n");
+  std::istringstream arrow_wizard_input("\x1b[B\narrow-api-key\n");
   std::ostringstream arrow_wizard_out;
   std::ostringstream arrow_wizard_err;
   auto const arrow_wizard_exit = ava::app::run_connect_provider_wizard(
@@ -572,7 +625,7 @@ void test_app_connect_provider_credentials_headlessly()
   expect(wizard_anthropic && wizard_anthropic->has_value() && (*wizard_anthropic)->access_token == "arrow-api-key",
          "interactive provider wizard arrow selection stores the selected provider credential");
 
-  std::istringstream ignored_escape_wizard_input("\x1b[Canthropic\napi-key\nright-arrow-api-key\n");
+  std::istringstream ignored_escape_wizard_input("\x1b[Canthropic\nright-arrow-api-key\n");
   std::ostringstream ignored_escape_wizard_out;
   std::ostringstream ignored_escape_wizard_err;
   auto const ignored_escape_wizard_exit = ava::app::run_connect_provider_wizard(

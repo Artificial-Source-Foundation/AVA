@@ -30,10 +30,18 @@ struct ToolResultPayload {
   std::string error_details;
   std::string diff;
   std::vector<std::string> changed_paths;
+  std::vector<std::string> permission_request_ids;
   bool diff_truncated = false;
   bool truncated = false;
+  bool byte_limited = false;
+  bool line_limited = false;
   std::optional<std::size_t> output_bytes = std::nullopt;
   std::optional<std::size_t> total_bytes = std::nullopt;
+  std::optional<std::size_t> output_lines = std::nullopt;
+  std::optional<std::size_t> total_lines = std::nullopt;
+  std::optional<std::size_t> start_line = std::nullopt;
+  std::optional<std::size_t> end_line = std::nullopt;
+  std::optional<std::size_t> next_offset_line = std::nullopt;
   std::optional<std::size_t> omitted_bytes = std::nullopt;
   std::optional<std::size_t> omitted_lines = std::nullopt;
   std::optional<std::size_t> visible_matches = std::nullopt;

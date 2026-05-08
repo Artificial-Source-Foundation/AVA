@@ -1,0 +1,14 @@
+{
+  "type": "function",
+  "name": "mcp_demo_echo",
+  "description": "Echo test tool",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      }
+    },
+    "required": ["text"]
+  }
+}

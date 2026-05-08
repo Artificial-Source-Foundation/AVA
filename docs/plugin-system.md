@@ -1,37 +1,35 @@
 # AVA Plugin And MCP Foundation
 
-This document defines AVA's current 1.0 plugin and MCP foundation. It is grounded in PI's extension model, but adapted for AVA's constraints: native C++23, one binary, explicit permission boundaries, inspectable local files, and a core that keeps working when plugins fail.
+This document defines AVA's current 1.0 plugin and MCP foundation. It is grounded in external extension-system lessons, but adapted for AVA's constraints: native C++23, one binary, explicit permission boundaries, inspectable local files, and a core that keeps working when plugins fail.
 
 Advanced extension features remain 1.1+ roadmap work.
 
-## PI Reference Lessons
+## External Reference Lessons
 
-PI uses trusted TypeScript extensions loaded in-process. The relevant reference files are:
+The external reference systems use trusted TypeScript extensions loaded in-process. The relevant behavior areas are:
 
-- `docs/reference-code/pi-mono/packages/coding-agent/docs/extensions.md`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/core/extensions/types.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/core/extensions/loader.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/core/extensions/runner.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/src/core/extensions/wrapper.ts`
-- `docs/reference-code/pi-mono/packages/coding-agent/docs/packages.md`
-- `docs/reference-code/pi-mono/packages/coding-agent/docs/skills.md`
+- Extension user-facing documentation.
+- Extension type definitions.
+- Extension loading and runner lifecycle code.
+- Extension process/wrapper code.
+- Package and skill resource documentation.
 
-PI's useful ideas:
+Useful external-baseline ideas:
 
 - Extensions are easy to author: a small module gets an API object and calls `registerTool`, `registerCommand`, or `on` for events.
 - Extension resources are discovered from global, project, package, and explicit CLI/config paths.
-- Packages can bundle extensions, skills, prompts, and themes through a `pi` field in `package.json`.
+- Packages can bundle extensions, skills, prompts, and themes through package metadata.
 - Tools have names, descriptions, schemas, execution modes, optional prompt snippets, and optional UI rendering.
 - Runtime events cover session, input, agent, turn, provider request/response, message streaming, tool call/result, compaction, and model selection.
 - Tool hooks can block calls or transform results, which lets extensions implement custom permission gates.
 - Skills and prompt templates are filesystem resources, not compiled code.
 - RPC mode streams events and can bridge extension UI prompts to non-TTY clients.
 
-PI's limits that AVA should not copy directly:
+External-baseline limits that AVA should not copy directly:
 
-- PI extensions run in-process with full user permissions. PI documents this trust model clearly, but it means a bad extension can crash or compromise the process.
-- PI has no native MCP support. Its README explicitly says "No MCP" and recommends building MCP as an extension.
-- PI's extension APIs expose broad UI customization, providers, and provider request interception. AVA should start narrower until safety, events, permissions, and sessions are stable.
+- In-process extensions run with full user permissions. That trust model is clear, but it means a bad extension can crash or compromise the process.
+- Native MCP support is not always part of the reference extension model, which pushes MCP through extension code instead.
+- Broad extension APIs can expose UI customization, providers, and provider request interception. AVA should start narrower until safety, events, permissions, and sessions are stable.
 
 ## AVA Direction
 
@@ -40,6 +38,8 @@ AVA ships a small, stable, local plugin foundation for 1.0.
 The default plugin shape is an out-of-process executable that speaks a versioned JSONL protocol over stdin/stdout. AVA owns discovery, enablement, validation, permission checks, event emission, audit/session records, cancellation, timeouts, output bounds, diagnostics, and lifecycle cleanup.
 
 AVA does not load third-party native shared libraries in-process for 1.0. A native plugin ABI would make crashes, memory corruption, and C++ ABI compatibility part of the public support burden.
+
+The compatibility rules for this surface live in [`docs/plugin-compatibility-policy.md`](plugin-compatibility-policy.md). That policy defines compatible `ava.plugin.v1` additions, breaking-change handling, golden contract expectations, and the explicit MCP resource deferral.
 
 ## Goals
 
@@ -71,6 +71,100 @@ Supported locations are explicit and inspectable:
 
 Discovered executable plugins are disabled by default. AVA can inspect their manifests without starting a process, but it does not run entrypoints until the user enables the plugin. Enablement is machine-local state stored under `$XDG_STATE_HOME/ava/plugin-enablement.json`, falling back to `~/.local/state/ava/plugin-enablement.json`, keyed by canonical workspace path, plugin id, and scope.
 
+## Plugin Authoring Guide
+
+The stable 1.0 authoring surface is a local directory with a `plugin.json` manifest and an out-of-process entrypoint. Start from the checked-in sample at `examples/plugins/todo/`; it is intentionally small, uses POSIX shell, and is exercised by regression tests.
+
+Recommended layout:
+
+```text
+.ava/plugins/com.example.todo/
+  plugin.json
+  plugin.sh
+  prompts/todo-review.md
+  skills/todo-triage.md
+  README.md
+```
+
+Use the same layout under `$XDG_CONFIG_HOME/ava/plugins/<plugin-id>/` for a global plugin. Project plugins under `.ava/plugins/<plugin-id>/` are discovered from the active workspace but remain disabled until explicitly enabled on the local machine.
+
+Authoring checklist:
+
+- Choose a stable lowercase `id` such as reverse-DNS (`com.example.todo`) or an owner-prefixed id. It may contain letters, digits, `.`, `_`, and `-`, but cannot start empty, use uppercase, repeat separators, or end with a separator.
+- Set `schema_version` to `1` and `api_version` to `ava.plugin.v1`.
+- Declare an `entrypoint` with a command and optional string `args`. For portable shell samples, prefer `"command": "/bin/sh", "args": ["plugin.sh"]` so the plugin does not depend on executable file mode.
+- List static `contributes.tools`, `contributes.commands`, `contributes.prompts`, `contributes.skills`, and `contributes.event_hooks` that AVA can inspect before running the plugin. Prompt and skill paths must be safe relative paths inside the plugin directory.
+- Keep stdout reserved for LF-delimited JSON protocol records. Write diagnostics to stderr; AVA captures a bounded stderr tail for failures.
+- Use a real JSON parser in non-trivial plugins. The shell sample only parses AVA's compact demo records and is not a general JSON parser.
+
+Entrypoint behavior:
+
+- AVA launches the plugin process with the plugin directory as the child working directory.
+- AVA sends one `initialize` record before any tool, command, or event request.
+- The plugin must answer every request with one LF-delimited JSON object and echo the request `id` exactly.
+- `list`, `inspect`, `validate`, `prompts`, `prompt`, `skills`, and `skill` read metadata or static resources only; they do not start the plugin process.
+- `enable` and `disable` update local enablement state only; they do not start or stop a resident daemon.
+- `/plugin run` and model-dispatched plugin tools start a fresh plugin process for the call path today, subject to permission checks and timeouts.
+
+Minimum JSONL records:
+
+```json
+{"id":"ava_1","type":"initialize","api_version":"ava.plugin.v1","plugin_id":"com.example.todo","workspace":"/repo"}
+{"id":"ava_1","type":"initialized","api_version":"ava.plugin.v1","plugin_version":"0.1.0","contributions":{"tools":[],"commands":[],"prompts":[],"skills":[],"event_hooks":[]}}
+{"id":"ava_command_cmd_1","type":"command.call","command":"status","arguments":{},"context":{"call_id":"cmd_1","workspace":"/repo"}}
+{"id":"ava_command_cmd_1","type":"command.result","ok":true,"content":"Todo sample plugin is ready.","metadata":{"open_items":0}}
+{"id":"ava_tool_call_1","type":"tool.call","tool":"todo_add","arguments":{"text":"write tests"},"context":{"call_id":"call_1","workspace":"/repo"}}
+{"id":"ava_tool_call_1","type":"tool.result","ok":true,"content":"Todo item accepted by the sample plugin.","metadata":{"items":1}}
+{"id":"ava_event_event_1","type":"event.observe","event":"tool_result","payload":{"tool":"read_file","status":"success"},"context":{"call_id":"event_1","workspace":"/repo"}}
+{"id":"ava_event_event_1","type":"event.observed","ok":true,"content":"Todo sample observed the event.","metadata":{"events":1}}
+```
+
+Static prompts and skills are plain markdown resources. AVA reads them through `/plugins prompt <id> <name>` and `/plugins skill <id> <name>` after manifest validation and path containment checks. They are useful for reusable instructions even when the plugin entrypoint is disabled or failing.
+
+Permissions:
+
+- Plugin process launch requires `plugin.execute`.
+- Tool calls require `plugin.tool.call` after launch permission.
+- Command calls require `plugin.command.run` after launch permission.
+- Event hooks require `plugin.event.observe` after launch permission.
+- A manifest `permissions` block is useful documentation for reviewers, but the current 1.0 runtime enforcement is the permission prompt around process launch and contributed operations. The deferred core-service proxy below is not available yet.
+
+Local workflow:
+
+```sh
+mkdir -p .ava/plugins
+cp -R examples/plugins/todo .ava/plugins/com.example.todo
+ava --continue
+```
+
+Inside AVA:
+
+```text
+/plugins validate .ava/plugins/com.example.todo/plugin.json
+/plugins list
+/plugins inspect com.example.todo
+/plugins prompts com.example.todo
+/plugins prompt com.example.todo todo-review
+/plugins skills com.example.todo
+/plugins skill com.example.todo todo-triage
+/plugins enable com.example.todo
+/plugin run com.example.todo status {}
+/plugins disable com.example.todo
+```
+
+Troubleshooting:
+
+- `plugin manifest must be a valid JSON object`: fix `plugin.json`; `validate` never starts the entrypoint.
+- `api_version is unsupported`: use `ava.plugin.v1`.
+- `plugin is disabled`: run `/plugins enable <id>` in the workspace that discovered the plugin.
+- `permission_denied`: approve the permission prompt in an interactive session or wire an RPC permission reply; headless modes fail closed by default.
+- `plugin initialize response is malformed`: stdout contained non-protocol text, missing fields, the wrong `id`, or unsupported `api_version`.
+- `timed out waiting`: the entrypoint did not answer within the startup or request timeout.
+- Missing prompt or skill content: check that the resource path is relative, inside the plugin directory, a regular file, and below the resource size cap.
+- Duplicate ids are disabled and reported through `/plugins failures`.
+
+Current core-service proxy limit: plugins cannot yet ask AVA over the plugin protocol to read files, edit files, run shell commands, fetch network resources, or inspect session state. If a plugin performs those side effects directly inside its own process, AVA only mediates the plugin launch/call permission and cannot provide built-in file/shell/network policy for the internal operation. Keep early plugins narrow and prefer static resources or explicit AVA built-in tools until the proxy surface lands.
+
 ## Plugin Manifest
 
 The manifest is the stable authoring surface. JSON is preferred because AVA already has JSON infrastructure and plugin protocol records are JSONL.
@@ -81,20 +175,20 @@ Example:
 {
   "schema_version": 1,
   "id": "com.example.todo",
-  "name": "Todo Tools",
+  "name": "Todo Sample Plugin",
   "version": "0.1.0",
   "api_version": "ava.plugin.v1",
-  "description": "Adds a small session-local todo tool and slash command.",
+  "description": "Minimal local plugin that demonstrates a command, a tool, static resources, and an event hook.",
   "entrypoint": {
-    "command": "node",
-    "args": ["plugin.js"]
+    "command": "/bin/sh",
+    "args": ["plugin.sh"]
   },
-  "capabilities": ["tools", "commands", "prompts", "event_hooks"],
+  "capabilities": ["tools", "commands", "prompts", "skills", "event_hooks"],
   "permissions": {
     "file": [],
     "shell": [],
     "network": [],
-    "session": ["read_current"]
+    "session": []
   },
   "contributes": {
     "tools": [
@@ -113,8 +207,8 @@ Example:
     ],
     "commands": [
       {
-        "name": "todo",
-        "description": "Show or update the session todo list."
+        "name": "status",
+        "description": "Report that the sample plugin is ready."
       }
     ],
     "prompts": [
@@ -124,7 +218,13 @@ Example:
         "path": "prompts/todo-review.md"
       }
     ],
-    "skills": [],
+    "skills": [
+      {
+        "name": "todo-triage",
+        "description": "Triage todo items before implementation.",
+        "path": "skills/todo-triage.md"
+      }
+    ],
     "event_hooks": [
       { "event": "tool.result" }
     ]
@@ -136,7 +236,7 @@ Manifest rules:
 
 - `id` is stable, lowercase, and globally unique by convention, such as reverse-DNS or GitHub-owner style.
 - `api_version` must match a supported AVA plugin API version.
-- `entrypoint.command` is resolved relative to the plugin directory only when it is a relative path.
+- The entrypoint runs with the plugin directory as its working directory. Use `/bin/sh plugin.sh` for scripts that should not depend on executable mode, or a relative path with a slash such as `./plugin` for executable files inside the plugin directory.
 - `contributes` may declare static contributions that AVA can inspect before execution.
 - Runtime registration may add dynamic contributions only after handshake and core-side validation.
 - Unknown manifest fields are ignored unless they appear under a schema-controlled contribution object.
@@ -150,7 +250,7 @@ Minimum handshake:
 
 ```json
 {"id":"ava_1","type":"initialize","api_version":"ava.plugin.v1","plugin_id":"com.example.todo","workspace":"/repo"}
-{"id":"ava_1","type":"initialized","api_version":"ava.plugin.v1","plugin_version":"0.1.0","contributions":{"tools":[],"commands":[],"prompts":[],"event_hooks":[]}}
+{"id":"ava_1","type":"initialized","api_version":"ava.plugin.v1","plugin_version":"0.1.0","contributions":{"tools":[],"commands":[],"prompts":[],"skills":[],"event_hooks":[]}}
 ```
 
 Tool call:
@@ -163,8 +263,8 @@ Tool call:
 Command call:
 
 ```json
-{"id":"ava_command_cmd_...","type":"command.call","command":"todo","arguments":{"show_completed":false},"context":{"call_id":"cmd_...","workspace":"/repo"}}
-{"id":"ava_command_cmd_...","type":"command.result","ok":true,"content":"2 open todos","metadata":{"count":2}}
+{"id":"ava_command_cmd_...","type":"command.call","command":"status","arguments":{},"context":{"call_id":"cmd_...","workspace":"/repo"}}
+{"id":"ava_command_cmd_...","type":"command.result","ok":true,"content":"Todo sample plugin is ready.","metadata":{"open_items":0}}
 ```
 
 Event observation:
@@ -205,7 +305,7 @@ Provider plugins, custom UI renderers, and prompt/provider interception can come
 
 ## Permissions And Audit
 
-Plugins must not get side-effect authority by registering a tool. Side effects go through AVA permissions.
+Plugin-contributed operations must not get side-effect authority merely by registering a tool. AVA enforces launch and call permissions today; future core-service proxy operations will reuse the existing file, shell, network, and session permission categories.
 
 Permission categories:
 
@@ -214,18 +314,21 @@ Permission categories:
 - `plugin.command.run`: run a plugin command.
 - `plugin.event.observe`: subscribe to runtime events.
 - `mcp.server.launch`: launch a local MCP server process.
-- `mcp.server.connect`: connect to a remote MCP endpoint.
+- `mcp.server.connect`: connect to a configured MCP server.
 - `mcp.tool.call`: call an MCP tool.
 - Existing categories such as `file.read`, `file.write`, `shell.run`, `network.fetch`, and `external.directory` still apply when a plugin asks AVA to perform those operations through a core service proxy.
 
-Audit records should include:
+Audit records emitted today include:
 
-- Plugin id and version.
-- Contribution id and contribution type.
-- Requested capability and requested operation.
-- Permission decision and resolver actor.
-- Core operation performed, if any.
-- MCP server id and MCP tool name when applicable.
+- Permission request id.
+- Operation, such as `plugin.execute`, `plugin.tool.call`, `plugin.command.run`, `plugin.event.observe`, `mcp.server.launch`, `mcp.server.connect`, or `mcp.tool.call`.
+- Agent mode.
+- Model-facing tool or command name when applicable.
+- Policy action, reason, and risk.
+- Target path or command when applicable.
+- Resolver resolution, source, and reason when applicable.
+
+Dedicated plugin id/version, contribution id/type, requested capability, core operation, MCP server id, and MCP tool-name audit fields are deferred compatibility-preserving metadata. Today, those identities are carried indirectly through operation, tool name, command, path, and error context.
 
 ## Deferred Core Service Proxy
 
@@ -275,6 +378,7 @@ Current 1.0 MCP scope:
 - Explicit `enabled:true` for project MCP servers before command execution.
 - MCP `initialize` lifecycle with server capability capture.
 - `tools/list` and `tools/call`, adapted into AVA's tool registry.
+- `prompts/list` and `prompts/get`, surfaced through the command registry as dynamic `/mcp:<server_id>:<prompt_name>` prompt commands.
 - Per-server startup timeout, initialize timeout, request timeout, cancellation, and process-tree cleanup.
 - Health status and diagnostics visible through plugin/MCP inspect commands.
 - Schema conversion from MCP tool input schemas to AVA/provider-compatible tool schemas, with unsupported schemas disabled and explained.
@@ -283,8 +387,7 @@ Current 1.0 MCP scope:
 
 Deferred MCP scope:
 
-- `resources/list` and `resources/read`, exposed as explicit read-style commands or tools, not silently injected into context.
-- `prompts/list` and `prompts/get`, exposed as prompt templates.
+- `resources/list` and `resources/read`, deferred until a separate read-style command/tool design with explicit permissions and bounds lands; they are not implemented or silently injected into context for 1.0 contract hardening.
 - Streamable HTTP transport for remote MCP servers.
 - Progress/log notifications surfaced as runtime events.
 - Resource subscriptions if they can be made bounded and cancellable.
@@ -324,7 +427,7 @@ AVA provides backend commands that work in TUI, print/RPC where applicable, and 
 - `/mcp tools <server>`
 - `/mcp restart <server>`
 
-The same operations have RPC command forms for external editor integrations. `/mcp tools` launches a fresh stdio process for discovery, emits tool start/result events, and requires `mcp.server.launch` and `mcp.server.connect` permission approval. `/mcp restart` is informational because current MCP stdio servers are per-discovery/per-tool-call processes rather than resident daemons.
+The same operations have RPC command forms for external editor integrations. MCP prompts are exposed through `list_commands`/`invoke_command` as dynamic command-registry entries, not as direct `/mcp prompts` slash commands. `/mcp tools` launches a fresh stdio process for discovery, emits tool start/result events, and requires `mcp.server.launch` and `mcp.server.connect` permission approval. `/mcp restart` is informational because current MCP stdio servers are per-discovery/per-tool-call processes rather than resident daemons.
 
 ## Testing Requirements
 
@@ -337,11 +440,13 @@ Minimum regression coverage:
 - Permission denial for plugin execution and plugin tool calls.
 - Audit/session records for plugin execution and tool calls.
 - Fake MCP server initialize/list-tools/call-tool success.
+- Fake MCP server prompt list/get success through command-registry discovery and invocation.
 - Fake MCP server tool error, malformed initialize response, early startup/discovery exit, timeout, cancellation,
   stderr bounding, and process cleanup.
 - Direct `ava --rpc` headless smoke coverage for plugin list/failures/inspect/validate/resource/enable/disable
-  commands, fail-closed plugin command execution, MCP list/inspect/restart commands, invalid-config containment, and
-  fail-closed `list_mcp_tools` behavior without a TUI resolver.
+  commands, real-sample plugin discovery/resource/enable/disable flow, fail-closed plugin command execution, MCP
+  list/inspect/restart commands, invalid-config containment, and fail-closed `list_mcp_tools` behavior without a TUI
+  resolver.
 - Tool name collision behavior between built-in, plugin, and MCP tools.
 
 ## Implemented 1.0 Foundation
@@ -350,11 +455,11 @@ Minimum regression coverage:
 - Plugin manifest parsing, diagnostics, discovery, local enable/disable state, and validation commands.
 - Out-of-process plugin runner with initialize, tool call, command call, event observation, cancellation, bounded stderr, timeouts, and shutdown.
 - Plugin tool contributions, plugin command contributions, static prompt/skill resources, and non-mutating event hooks.
-- Direct headless RPC plugin command smokes for discovery, diagnostics, static resources, enablement, and fail-closed
-  execution.
-- Stdio MCP config loading, initialize, `tools/list`, `tools/call`, bounded stderr diagnostics, tool broker
-  registration, slash/RPC diagnostics, direct headless command smokes, and fake-server success/error/exit regression
-  coverage.
+- Direct headless RPC plugin command smokes for discovery, diagnostics, static resources, real-sample project plugin
+  coverage, enablement, and fail-closed execution.
+- Stdio MCP config loading, initialize, `tools/list`, `tools/call`, `prompts/list`, `prompts/get`, bounded stderr
+  diagnostics, tool broker registration, command-registry prompt exposure, slash/RPC diagnostics, direct headless
+  command smokes, and fake-server success/error/exit regression coverage.
 
 ## 1.0 Decisions
 
@@ -367,6 +472,7 @@ Minimum regression coverage:
 - Plugin and MCP stderr capture is bounded. The initial target is an in-memory tail of the last 64 KiB per process, with larger log spill files deferred until diagnostics prove the need.
 - Plugin restart is manual for 1.0. Current plugin and MCP stdio processes are launched per call or discovery; `/mcp restart` reports that the next discovery or tool call will launch a fresh process.
 - Plugins do not get a plugin-to-plugin event bus in 1.0. Event hooks observe AVA runtime events only, and inter-plugin communication is deferred.
+- `ava.plugin.v1` compatibility is governed by the plugin/MCP compatibility policy; additive optional fields are preferred, while breaking manifest/protocol/schema changes require an explicit versioned transition.
 
 ## Remaining Implementation Choices
 
@@ -374,4 +480,4 @@ Minimum regression coverage:
 - Exact timeout defaults for plugin startup, per-request calls, MCP initialize, and MCP tool/resource/prompt calls.
 - Whether plugin enablement should support a separate machine-local project nickname for moved worktrees.
 - Plugin-manifest MCP server contributions.
-- MCP resources, prompts, Streamable HTTP, and progress/log notification surfacing.
+- MCP resources, Streamable HTTP, and progress/log notification surfacing.

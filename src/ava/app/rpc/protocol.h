@@ -34,6 +34,7 @@ struct RpcCommand {
   std::optional<std::string> plugin_id;
   std::optional<std::string> name;
   std::optional<std::string> arguments;
+  std::optional<std::string> command_arguments;
   std::optional<std::string> server_id;
   std::optional<std::string> path;
 };

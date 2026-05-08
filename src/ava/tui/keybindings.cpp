@@ -30,7 +30,9 @@ constexpr std::array kActions = {TuiAction::Submit,
                                  TuiAction::DeleteToLineStart,
                                  TuiAction::DeleteToLineEnd,
                                  TuiAction::Undo,
+                                 TuiAction::Redo,
                                  TuiAction::Yank,
+                                 TuiAction::YankPop,
                                  TuiAction::AutocompleteAccept,
                                  TuiAction::PromptAllow,
                                  TuiAction::PromptDeny,
@@ -307,7 +309,9 @@ TuiKeyBindings default_key_bindings()
                                      {TuiAction::DeleteToLineStart, {Key::CtrlU}},
                                      {TuiAction::DeleteToLineEnd, {Key::CtrlK}},
                                      {TuiAction::Undo, {Key::CtrlZ}},
+                                     {TuiAction::Redo, {Key::CtrlR}},
                                      {TuiAction::Yank, {Key::CtrlY}},
+                                     {TuiAction::YankPop, {Key::AltY}},
                                      {TuiAction::AutocompleteAccept, {Key::Tab}},
                                      {TuiAction::PromptAllow, {}},
                                      {TuiAction::PromptDeny, {}},
@@ -357,11 +361,14 @@ std::optional<Key> parse_key_name(std::string_view text)
   if (normalized == "ctrl+e" || normalized == "ctrle") return Key::CtrlE;
   if (normalized == "ctrl+f" || normalized == "ctrlf") return Key::CtrlF;
   if (normalized == "ctrl+k" || normalized == "ctrlk") return Key::CtrlK;
+  if (normalized == "ctrl+r" || normalized == "ctrlr") return Key::CtrlR;
   if (normalized == "ctrl+t" || normalized == "ctrlt") return Key::CtrlT;
   if (normalized == "ctrl+u" || normalized == "ctrlu") return Key::CtrlU;
   if (normalized == "ctrl+w" || normalized == "ctrlw") return Key::CtrlW;
   if (normalized == "ctrl+y" || normalized == "ctrly") return Key::CtrlY;
   if (normalized == "ctrl+z" || normalized == "ctrlz") return Key::CtrlZ;
+  if (normalized == "alt+y" || normalized == "alty" || normalized == "meta+y" || normalized == "metay")
+    return Key::AltY;
   return std::nullopt;
 }
 
@@ -404,6 +411,8 @@ std::string key_display(Key key)
       return "Ctrl+F";
     case Key::CtrlK:
       return "Ctrl+K";
+    case Key::CtrlR:
+      return "Ctrl+R";
     case Key::CtrlT:
       return "Ctrl+T";
     case Key::CtrlU:
@@ -414,6 +423,8 @@ std::string key_display(Key key)
       return "Ctrl+Y";
     case Key::CtrlZ:
       return "Ctrl+Z";
+    case Key::AltY:
+      return "Alt+Y";
     case Key::MouseWheelUp:
       return "MouseWheelUp";
     case Key::MouseWheelDown:
@@ -468,8 +479,12 @@ std::string action_name(TuiAction action)
       return "delete_to_line_end";
     case TuiAction::Undo:
       return "undo";
+    case TuiAction::Redo:
+      return "redo";
     case TuiAction::Yank:
       return "yank";
+    case TuiAction::YankPop:
+      return "yank_pop";
     case TuiAction::AutocompleteAccept:
       return "autocomplete_accept";
     case TuiAction::PromptAllow:
@@ -535,8 +550,12 @@ std::string action_description(TuiAction action)
       return "Delete from the cursor to the end of the current line";
     case TuiAction::Undo:
       return "Undo the last composer edit";
+    case TuiAction::Redo:
+      return "Redo the last undone composer edit";
     case TuiAction::Yank:
       return "Paste the last killed composer text";
+    case TuiAction::YankPop:
+      return "Replace the last yank with the next kill-ring entry";
     case TuiAction::AutocompleteAccept:
       return "Accept the highlighted slash command suggestion";
     case TuiAction::PromptAllow:

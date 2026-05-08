@@ -37,7 +37,7 @@ file(WRITE "${PLUGIN_MANIFEST}"
 }
 ]=])
 file(WRITE "${PLUGIN_SCRIPT}"
-     "printf '%s\n' plugin-entrypoint-ran > ran.txt\n"
+     "printf '%s\n' plugin-entrypoint-ran > '${PLUGIN_RAN_FILE}'\n"
      "while read line; do :; done\n")
 file(WRITE "${PLUGIN_DIR}/prompts/review.md" "Prompt body from plugin\n")
 file(WRITE "${PLUGIN_DIR}/skills/triage.md" "Skill body from plugin\n")

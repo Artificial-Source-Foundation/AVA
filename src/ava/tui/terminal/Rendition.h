@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ColorPair.h"
 #include "Attributes.h"
+#include "ColorPair.h"
 
 namespace terminal {
 

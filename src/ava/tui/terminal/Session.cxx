@@ -1,6 +1,7 @@
 #include "Session.h"
-#include <cstdlib>
+
 #include <clocale>
+#include <cstdlib>
 
 // This header must be included last.
 #include "private_convert.h"
@@ -10,6 +11,13 @@ namespace terminal {
 Session::Session() : default_rendition_(ColorPair{0})
 {
   setlocale(LC_ALL, "");
+
+  // From https://invisible-island.net/ncurses/man/curs_util.3x.html
+  // use_env   use_tioctl   Summary
+  // TRUE      TRUE         ncurses updates LINES and COLUMNS based on operating system calls.
+  ::use_env(TRUE);
+  ::use_tioctl(TRUE);
+
   initscr();
 
   stdscr_.init_as_stdscr();
@@ -31,6 +39,8 @@ Session::Session() : default_rendition_(ColorPair{0})
 
   cbreak();
   noecho();
+  nl();                 // Always translate the Enter key to a linefeed.
+  meta(::stdscr, TRUE); // Always return 8-bit character codes.
 }
 
 Session::~Session()

@@ -4,6 +4,7 @@
 #include "ava/tools/spill_files.h"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <optional>
 #include <regex>
@@ -84,6 +85,16 @@ bool looks_binary(std::string_view line)
   return line.find('\0') != std::string_view::npos;
 }
 
+std::string lowercase_ascii(std::string_view text)
+{
+  std::string lowered;
+  lowered.reserve(text.size());
+  for (char const ch : text) {
+    lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  }
+  return lowered;
+}
+
 std::string search_permission_tool_name(ToolContext const& context)
 {
   return context.permission_tool_name.empty() ? std::string("search") : context.permission_tool_name;
@@ -155,6 +166,34 @@ ava::core::Result<bool> read_limited_line(std::ifstream& file, std::string& line
     return std::unexpected(std::move(error));
   }
   return saw_character;
+}
+
+ava::core::Result<std::optional<std::regex>> compile_grep_regex(std::string_view pattern, GrepOptions const& options)
+{
+  if (options.literal) return std::optional<std::regex>{};
+
+  auto flags = std::regex::ECMAScript;
+  if (options.case_insensitive) flags |= std::regex::icase;
+  try {
+    return std::optional<std::regex>{std::regex(std::string(pattern), flags)};
+  } catch (std::regex_error const& err) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid grep regex pattern");
+    error.with_context("pattern", std::string(pattern));
+    error.with_context("cause", err.what());
+    return std::unexpected(std::move(error));
+  }
+}
+
+bool grep_line_matches(std::string_view line, std::string_view pattern, GrepOptions const& options,
+                       std::optional<std::regex> const& matcher, std::string const& case_folded_pattern)
+{
+  if (!options.literal) {
+    return std::regex_search(line.begin(), line.end(), *matcher);
+  }
+  if (!options.case_insensitive) {
+    return line.find(pattern) != std::string_view::npos;
+  }
+  return lowercase_ascii(line).find(case_folded_pattern) != std::string::npos;
 }
 
 }  // namespace
@@ -307,6 +346,11 @@ ava::core::Result<GrepResult> grep_files(ToolContext const& context, std::string
   }
   if (auto canceled = check_canceled(context, "grep"); !canceled) return std::unexpected(std::move(canceled.error()));
 
+  auto matcher = compile_grep_regex(literal_pattern, options);
+  if (!matcher) return std::unexpected(std::move(matcher.error()));
+  auto const case_folded_pattern =
+      options.case_insensitive && options.literal ? lowercase_ascii(literal_pattern) : std::string{};
+
   auto files = glob_files(context, include_glob, GlobOptions{.max_results = 100000, .no_ignore = options.no_ignore});
   if (!files) {
     return std::unexpected(files.error());
@@ -348,7 +392,7 @@ ava::core::Result<GrepResult> grep_files(ToolContext const& context, std::string
         file_is_binary = true;
         break;
       }
-      bool const matched = line.find(literal_pattern) != std::string::npos;
+      bool const matched = grep_line_matches(line, literal_pattern, options, *matcher, case_folded_pattern);
       if (!matched) {
         continue;
       }
@@ -417,6 +461,85 @@ ava::core::Result<GrepResult> grep_files(ToolContext const& context, std::string
     }
   }
 
+  return result;
+}
+
+ava::core::Result<ListDirectoryResult> list_directory(ToolContext const& context, std::filesystem::path const& path,
+                                                      ListDirectoryOptions options)
+{
+  if (auto canceled = check_canceled(context, "list_directory"); !canceled)
+    return std::unexpected(std::move(canceled.error()));
+  auto const tool_name =
+      context.permission_tool_name.empty() ? std::string("list_directory") : context.permission_tool_name;
+  if (auto permission = ensure_permission(context, ava::permissions::Operation::SearchFiles, path, "", tool_name,
+                                          "tool requires permission");
+      !permission) {
+    return std::unexpected(permission.error());
+  }
+  if (auto canceled = check_canceled(context, "list_directory"); !canceled)
+    return std::unexpected(std::move(canceled.error()));
+
+  std::error_code status_error;
+  if (!std::filesystem::exists(path, status_error)) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "directory does not exist");
+    error.with_context("path", path.string());
+    if (status_error) error.with_context("cause", status_error.message());
+    return std::unexpected(std::move(error));
+  }
+  if (!std::filesystem::is_directory(path, status_error)) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "path is not a directory");
+    error.with_context("path", path.string());
+    if (status_error) error.with_context("cause", status_error.message());
+    return std::unexpected(std::move(error));
+  }
+
+  ListDirectoryResult result;
+  result.path = path;
+  std::vector<DirectoryEntry> visible_entries;
+  std::error_code iter_error;
+  for (std::filesystem::directory_iterator it(path, iter_error), end; !iter_error && it != end;
+       it.increment(iter_error)) {
+    if (auto canceled = check_canceled(context, "list_directory"); !canceled)
+      return std::unexpected(std::move(canceled.error()));
+    auto const& entry = *it;
+    if (is_git_dir(entry.path())) {
+      continue;
+    }
+    auto can_read = can_read_search_match(context, entry.path());
+    if (!can_read) return std::unexpected(can_read.error());
+    if (!*can_read) {
+      continue;
+    }
+
+    std::error_code entry_error;
+    bool const directory = entry.is_directory(entry_error);
+    std::uintmax_t size = 0;
+    if (!directory && entry.is_regular_file(entry_error)) {
+      std::error_code size_error;
+      size = entry.file_size(size_error);
+      if (size_error) size = 0;
+    }
+    visible_entries.push_back(
+        DirectoryEntry{.name = entry.path().filename().generic_string(), .directory = directory, .size = size});
+  }
+  if (iter_error) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed while listing directory");
+    error.with_context("path", path.string());
+    error.with_context("cause", iter_error.message());
+    return std::unexpected(std::move(error));
+  }
+
+  std::ranges::sort(visible_entries, [](DirectoryEntry const& lhs, DirectoryEntry const& rhs) {
+    if (lhs.directory != rhs.directory) return lhs.directory && !rhs.directory;
+    auto const left = lowercase_ascii(lhs.name);
+    auto const right = lowercase_ascii(rhs.name);
+    if (left != right) return left < right;
+    return lhs.name < rhs.name;
+  });
+  result.total_entries = visible_entries.size();
+  result.truncated = result.total_entries > options.max_entries;
+  auto const keep_entries = std::min(options.max_entries, visible_entries.size());
+  result.entries.assign(visible_entries.begin(), visible_entries.begin() + static_cast<std::ptrdiff_t>(keep_entries));
   return result;
 }
 

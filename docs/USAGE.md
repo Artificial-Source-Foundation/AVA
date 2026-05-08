@@ -8,7 +8,8 @@ ava auth login
 ava login anthropic
 ava auth login moonshot --api-key
 ava connect openai
-ava connect kimi --oauth-token
+ava connect openai --headless-oauth
+ava connect kimi --api-key-env KIMI_API_KEY
 printf '%s\n' "$OPENAI_API_KEY" | ava connect openai --api-key-stdin
 printf '%s\n' "$ANTHROPIC_API_KEY" | ava connect anthropic --api-key-stdin
 ava connect moonshot --api-key-env MOONSHOT_API_KEY
@@ -58,7 +59,7 @@ Use comma-separated strings for multiple keys. Current named actions include com
 
 The slash palette opens above the composer while typing `/`. Use arrows to move focus, Tab or Enter to insert the selected command or argument suggestion, and Esc to dismiss without clearing the draft. The selected item is visually highlighted with a `›` marker. Disabled planned commands remain visible with a reason and are not submitted as model prompts. Argument suggestions are only shown from backend/session data sources, such as configured models, resumable sessions, loaded context sources, configured MCP servers, and plugin metadata.
 
-`/connect` opens a centered provider-credential modal. Type to search providers, use arrows to move selection, press Enter to confirm, then choose API key or OAuth bearer token and paste the secret. `/login` is an alias.
+`/connect` opens a centered provider login modal. Type to search providers, use arrows to move selection, press Enter to confirm, then choose a login method. OpenAI shows ChatGPT Pro/Plus browser OAuth, headless OAuth, and API key options; OAuth waiting modals keep the URL and `C` copy shortcut visible, and browser OAuth opens the default browser automatically. `/login` is an alias.
 
 ## Permission Prompts
 
@@ -79,7 +80,7 @@ Interactive permission requests replace the composer with an approval dock. The 
 - `/mode`: toggle build/plan mode
 - `/details`: toggle tool detail expansion in the TUI
 - `/thinking`: toggle inline thinking block visibility in the TUI without changing provider reasoning mode
-- `/connect [provider] [api-key|oauth]`: open a provider login modal and store an API key or OAuth bearer token; `/login` is an alias
+- `/connect`: open provider and login method modals; `/login` is an alias
 - `/models [query|provider/model]`: list configured models and provider/model capabilities; `/model` is an alias
 - `/sessions [query|id]`: list sessions for this workspace, optionally filtered by session id or timestamp
 - `/context [query|source]`: list loaded context sources, optionally filtered by path or source type
@@ -91,7 +92,12 @@ Interactive permission requests replace the composer with an approval dock. The 
 - `/glob <pattern>`: list readable matching files
 - `/grep <text> [glob]`: search readable files for literal text
 - `/bash <command>`: run a conservative permissioned command
+- `/plugins list|inspect|enable|disable|validate|failures|prompts|prompt|skills|skill`: inspect and manage local plugins
+- `/plugin run <id> <command> [arguments_json]`: run a plugin command through the permissioned extension path
+- `/mcp list|inspect|tools|restart`: inspect configured MCP servers and discover tools
 - `/quit`: exit
+
+See `docs/plugin-system.md` for the stable local plugin authoring guide and `examples/plugins/todo/` for a minimal sample plugin.
 
 Planned but unavailable commands such as `/import`, `/new`, `/resume`, `/reload`, and `/logout` are recognized and return a disabled explanation instead of being sent to the model.
 
@@ -113,13 +119,14 @@ printf 'summarize this repo\n' | ava --print
 ava --print "summarize this repo" --json
 ```
 
-Text print mode writes final assistant text to stdout and diagnostics to stderr. JSON print mode writes newline-delimited runtime events to stdout. Prompt turns require configured OpenAI auth.
+Text print mode writes final assistant text to stdout and diagnostics to stderr. JSON print mode writes newline-delimited runtime events to stdout. Prompt turns require configured auth for the active provider.
 
-Headless modes are fail-closed for permission prompts unless an explicit supported read/search policy is supplied. Network access is separate: `--allow read-only` does not allow network prompts, while `--allow-tool webfetch` can auto-allow exact `webfetch` `network.fetch` prompts. In RPC mode, matching prompts are auto-allowed before `permission_requested`; non-matching asks still require `permission_reply`:
+Headless modes are fail-closed for permission prompts unless an explicit supported read/search policy is supplied. This applies to backend decisions whose action is `ask`; operations allowed directly by the workspace policy do not create a prompt. Network access is separate: `--allow read-only` does not allow network prompts, while `--allow-tool webfetch` can auto-allow exact `webfetch` `network.fetch` prompts. In RPC mode, matching prompts are auto-allowed before `permission_requested`; non-matching asks still require `permission_reply`:
 
 ```sh
 ava --print "inspect this project" --allow read-only
 ava --print "read the README" --allow-tool read_file
+ava --print "list and search files" --allow-tool list_directory,glob,grep
 ava --print "fetch release notes" --allow-tool webfetch
 ava --rpc --allow read-only
 ```
@@ -130,13 +137,14 @@ Use RPC mode for a long-lived JSONL stdio automation client:
 printf '%s\n' '{"id":"state","type":"get_state"}' | ava --rpc
 ```
 
-See `docs/headless-protocol.md` for the complete stdout/stderr contract, event types, RPC commands, and exit-code behavior.
+See `docs/headless-protocol.md` for the complete stdout/stderr contract, event types, RPC commands, and exit-code behavior. RPC `list_commands` and `invoke_command` expose project/global prompt commands, skills, plugin commands, and MCP prompt commands through the shared command registry.
 
 ## Current Limits
 
-- Built-in providers are OpenAI and Anthropic. Additional provider ids can store credentials for configured/provider-compatible model entries, but broader provider shims are still in progress.
+- Built-in providers are OpenAI, Anthropic, Kimi, Moonshot, and OpenRouter. OpenAI remains the default production path. Anthropic uses native Messages API support for tools and reasoning. Kimi, Moonshot, and OpenRouter use OpenAI-compatible shims with built-in profile tests; live credentialed smokes are still release-validation work.
+- Local plugin and MCP foundations exist for command discovery, plugin diagnostics, plugin prompt/skill resources and commands, MCP stdio tool discovery/calls, and MCP prompts through command-registry entries. The stable local plugin authoring guide lives in `docs/plugin-system.md`, the compatibility policy lives in `docs/plugin-compatibility-policy.md`, and a minimal sample lives under `examples/plugins/todo/`; representative golden/audit/failure contract tests now cover the v1 foundation. MCP resources are deferred.
 - The HTTP transport uses the local `curl` executable.
 - The TUI now renders assistant text, inline thinking blocks, and tool lifecycle updates live. Tool cards show backend-provided truncation, spill, and diff metadata when those fields are present; the live runtime event path still has summary-only tool results for some backend producers.
-- Permission `ask` decisions open a TUI prompt in interactive mode and fail closed in non-TTY/headless mode unless a supported read/search allow policy is supplied or an RPC client answers `permission_requested` with `permission_reply`. File mutation asks include `diff_preview` and `diff_truncated` when the backend can safely provide a unified diff. Successful RPC permission/question replies emit `permission_replied` or `question_replied` events before their in-band response; permission replies may include a bounded `reason` field to explain the resolution, and denial reasons are preserved in tool errors and permission audits. RPC `allow_session` replies create process-local exact-match grants that can be listed with `permission_grants`, revoked with `permission_grant_revoke`, or cleared with `permission_grants_clear`.
+- Permission `ask` decisions open a TUI prompt in interactive mode and fail closed in non-TTY/headless mode unless a supported read/search allow policy is supplied or an RPC client answers `permission_requested` with `permission_reply`. Workspace-policy `allow` decisions can still proceed without a resolver, while policy `deny` decisions are never upgraded by headless flags. File mutation asks include `diff_preview` and `diff_truncated` when the backend can safely provide a unified diff. Successful RPC permission/question replies emit `permission_replied` or `question_replied` events before their in-band response; permission replies may include a bounded `reason` field to explain the resolution, and denial reasons are preserved in tool errors and permission audits. RPC `allow_session` replies create process-local exact-match grants that can be listed with `permission_grants`, revoked with `permission_grant_revoke`, or cleared with `permission_grants_clear`.
 - Shared runtime events now include backend-owned compaction, bounded provider/compaction retry, retry countdown ticks, cancel-request, and terminal canceled markers. The TUI renders those as audit/status items instead of inferring lifecycle state from command text; retry and compaction markers show attempt totals, retry delays, and countdown remaining time when the backend emits them.
 - Interactive/TUI mode supports local modals for provider login plus question prompts with single-select, multi-select, custom text, and cancel handling. RPC clients can answer `question_requested` with `question_reply` using `answer`, `selected`, or `selected_options` for multi-select prompts.

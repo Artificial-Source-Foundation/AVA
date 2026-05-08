@@ -162,6 +162,7 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<int, std::
                            bool& saw_data, bool& done_seen, bool& error_seen, std::string_view data,
                            std::string_view reasoning_format)
 {
+  if (done_seen || error_seen) return;
   if (data == "[DONE]") {
     done_seen = true;
     append_finish_reasoning_if_open(events, reasoning_open, reasoning_format);
@@ -174,6 +175,8 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<int, std::
   saw_data = true;
   if (!is_json_object_shape(data)) {
     error_seen = true;
+    append_tool_call_end_events(events, open_tool_call_ids);
+    append_finish_reasoning_if_open(events, reasoning_open, reasoning_format);
     events.push_back(StreamEvent{.type = StreamEventType::Error,
                                  .text = "",
                                  .tool_call_id = "",
@@ -189,6 +192,8 @@ void append_event_for_data(std::vector<StreamEvent>& events, std::map<int, std::
   if (auto const error_object = ava::core::json::object_field(data, "error")) {
     done_seen = true;
     error_seen = true;
+    append_tool_call_end_events(events, open_tool_call_ids);
+    append_finish_reasoning_if_open(events, reasoning_open, reasoning_format);
     events.push_back(StreamEvent{.type = StreamEventType::Error,
                                  .text = "",
                                  .tool_call_id = "",
@@ -393,7 +398,7 @@ ava::core::Result<HttpRequest> OpenAICompatibleProvider::build_request(ProviderR
   }
   if (access_token.empty()) {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
-                                            options_.provider_name + " bearer token is required"));
+                                            options_.provider_name + " credential is required"));
   }
   if (auto valid_tools = validate_openai_compatible_tools_json(request); !valid_tools)
     return std::unexpected(std::move(valid_tools.error()));

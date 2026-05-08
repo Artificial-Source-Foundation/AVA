@@ -328,11 +328,8 @@ std::unique_ptr<StreamParser> AnthropicProvider::create_stream_parser() const
 
 ava::core::VoidResult AnthropicProvider::apply_auth_options(HttpRequest& request, ProviderAuthContext const& auth) const
 {
-  if (auth.credential_type != "oauth") return {};
-  request.headers.erase("x-api-key");
-  request.headers["Authorization"] = "Bearer " + auth.access_token;
-  request.headers["user-agent"] = "ava";
-  request.headers["x-app"] = "cli";
+  static_cast<void>(request);
+  static_cast<void>(auth);
   return {};
 }
 

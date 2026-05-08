@@ -22,13 +22,14 @@ ava::core::Error unsupported_allow_tool_error(std::string_view value)
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "unsupported --allow-tool value");
   error.with_context("value", std::string(value));
-  error.with_context("supported", "glob, grep, read_file, webfetch");
+  error.with_context("supported", "glob, grep, list_directory, mcp, read_file, skill, webfetch, websearch");
   return error;
 }
 
 bool is_supported_tool(std::string_view value)
 {
-  return value == "glob" || value == "grep" || value == "read_file" || value == "webfetch";
+  return value == "glob" || value == "grep" || value == "list_directory" || value == "mcp" || value == "read_file" ||
+         value == "skill" || value == "webfetch" || value == "websearch";
 }
 
 bool contains_tool(std::vector<std::string> const& tools, std::string_view value)
@@ -47,11 +48,23 @@ bool prompt_matches_allowed_tool(ava::permissions::PermissionPrompt const& promp
   if (prompt.tool_name == "read_file") {
     return prompt.operation == ava::permissions::Operation::ReadFile && tools.contains("read_file");
   }
-  if (prompt.tool_name == "glob" || prompt.tool_name == "grep") {
+  if (prompt.tool_name == "glob" || prompt.tool_name == "grep" || prompt.tool_name == "list_directory") {
     return prompt.operation == ava::permissions::Operation::SearchFiles && tools.contains(prompt.tool_name);
   }
   if (prompt.tool_name == "webfetch") {
     return prompt.operation == ava::permissions::Operation::NetworkFetch && tools.contains("webfetch");
+  }
+  if (prompt.tool_name == "websearch") {
+    return prompt.operation == ava::permissions::Operation::NetworkSearch && tools.contains("websearch");
+  }
+  if (prompt.tool_name == "skill") {
+    return prompt.operation == ava::permissions::Operation::SkillLoad && tools.contains("skill");
+  }
+  if (prompt.tool_name.starts_with("mcp_") || prompt.tool_name == "mcp_discovery" || prompt.tool_name == "mcp_tools") {
+    return (prompt.operation == ava::permissions::Operation::McpServerLaunch ||
+            prompt.operation == ava::permissions::Operation::McpServerConnect ||
+            prompt.operation == ava::permissions::Operation::McpToolCall) &&
+           tools.contains("mcp");
   }
   return false;
 }

@@ -3,6 +3,7 @@
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/spill_files.h"
 #include "ava/tools/webfetch_tool.h"
+#include "ava/tools/websearch_tool.h"
 
 #include "ava/permissions/permission.h"
 
@@ -90,9 +91,24 @@ void test_bash_tool()
 
   auto capped_output = ava::tools::run_bash(
       context, "pwd", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .max_bytes = 4});
-  expect(capped_output && capped_output->exit_code == 0 && capped_output->truncated &&
-             capped_output->output.size() == 4 && capped_output->total_bytes > capped_output->output.size(),
+  expect(capped_output && capped_output->exit_code == 0 && capped_output->truncated && capped_output->byte_limited &&
+             capped_output->output.size() == 4 && capped_output->output_bytes == capped_output->output.size() &&
+             capped_output->total_bytes > capped_output->output.size(),
          "run_bash bounds retained output while reporting total bytes");
+
+  ava::tools::ToolContext const line_context{.workspace_dir = temp_root(),
+                                             .mode = ava::agent::Mode::Build,
+                                             .permission_resolver = [](ava::permissions::PermissionPrompt const&)
+                                                 -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+                                               return ava::permissions::PermissionResolution::Allow;
+                                             }};
+  auto line_capped_output = ava::tools::run_bash(
+      line_context, "seq 1 5", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .max_lines = 2});
+  expect(line_capped_output && line_capped_output->exit_code == 0 && line_capped_output->truncated &&
+             line_capped_output->line_limited && !line_capped_output->byte_limited &&
+             line_capped_output->output == "4\n5\n" && line_capped_output->total_lines == 5 &&
+             line_capped_output->output_lines == 2 && line_capped_output->omitted_lines == 3,
+         "run_bash retains output by line tail before applying byte caps");
 
   std::vector<ava::tools::ToolProgressEvent> bash_progress;
   ava::tools::ToolContext const progress_context{
@@ -277,12 +293,40 @@ void test_webfetch_tool()
   auto fetched =
       ava::tools::webfetch(context, "https://example.com/page",
                            ava::tools::WebFetchOptions{.max_bytes = 3, .timeout_ms = 5000, .transport = &transport});
-  expect(fetched && fetched->content == "abc" && fetched->truncated && fetched->total_bytes == 6 &&
-             fetched->output_bytes == 3 && fetched->content_type == "text/plain; charset=utf-8" && prompts == 1 &&
-             transport.requests.size() == 1 && transport.requests[0].method == "GET" &&
-             transport.requests[0].timeout_ms == 5000 && !transport.requests[0].follow_redirects &&
-             transport.requests[0].include_response_headers,
+  expect(fetched && fetched->content == "abc" && fetched->truncated && fetched->byte_limited &&
+             fetched->total_bytes == 6 && fetched->output_bytes == 3 && fetched->output_lines == 1 &&
+             fetched->content_type == "text/plain; charset=utf-8" && prompts == 1 && transport.requests.size() == 1 &&
+             transport.requests[0].method == "GET" && transport.requests[0].timeout_ms == 5000 &&
+             !transport.requests[0].follow_redirects && transport.requests[0].include_response_headers,
          "webfetch requires permission and bounds fetched text content");
+
+  StaticTransport multiline_transport(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {{"content-type", "text/plain; charset=utf-8"}},
+                                  .body = "one\ntwo\nthree\nfour\n"});
+  auto fetched_lines = ava::tools::webfetch(
+      context, "https://example.com/page",
+      ava::tools::WebFetchOptions{
+          .max_bytes = 1024, .offset_line = 2, .max_lines = 2, .timeout_ms = 5000, .transport = &multiline_transport});
+  expect(fetched_lines && fetched_lines->content == "two\nthree\n" && fetched_lines->line_limited &&
+             !fetched_lines->byte_limited && fetched_lines->output_lines == 2 && fetched_lines->start_line == 2 &&
+             fetched_lines->end_line == 3 && fetched_lines->total_lines == 4 && fetched_lines->next_offset_line == 4,
+         "webfetch supports line offset and limit continuation metadata");
+
+  StaticTransport html_transport(ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {{"content-type", "text/html; charset=utf-8"}},
+      .body = "<html><body><h1>Title</h1><script>hidden()</script><p>A&amp;B</p></body></html>"});
+  auto html_text = ava::tools::webfetch(context, "https://example.com/page",
+                                        ava::tools::WebFetchOptions{.max_bytes = 1024,
+                                                                    .timeout_ms = 5000,
+                                                                    .format = ava::tools::WebFetchFormat::Text,
+                                                                    .transport = &html_transport});
+  expect(html_text && html_text->content.find("Title") != std::string::npos &&
+             html_text->content.find("A&B") != std::string::npos &&
+             html_text->content.find("hidden") == std::string::npos &&
+             html_transport.requests[0].headers.at("Accept").find("text/plain") != std::string::npos,
+         "webfetch supports text output for HTML responses with basic tag stripping");
 
   StaticTransport unused_transport(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "unused"});
   auto invalid_scheme =
@@ -356,10 +400,63 @@ void test_webfetch_tool()
              cancel_aware_transport.saw_cancel_callback && cancel_aware_transport.requests.size() == 1,
          "webfetch passes cancellation into the transport request boundary");
 }
+
+void test_websearch_tool()
+{
+  std::error_code remove_error;
+  std::filesystem::remove_all(temp_root(), remove_error);
+  auto const workspace = temp_root() / "websearch-workspace";
+  std::filesystem::create_directories(workspace);
+
+  StaticTransport transport(ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {{"content-type", "application/json"}},
+      .body = "{\"Heading\":\"AVA\",\"AbstractText\":\"Native C++ agent\",\"AbstractURL\":\"https://ava.example/\","
+              "\"RelatedTopics\":[{\"Text\":\"AVA docs\",\"FirstURL\":\"https://ava.example/docs\"},"
+              "{\"Topics\":[{\"Text\":\"AVA releases\",\"FirstURL\":\"https://ava.example/releases\"}]}]}"});
+  int prompts = 0;
+  ava::tools::ToolContext const context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++prompts;
+        expect(prompt.operation == ava::permissions::Operation::NetworkSearch,
+               "websearch resolver receives network search operation");
+        expect(prompt.command == "ava agent", "websearch resolver receives query as command target");
+        return ava::permissions::PermissionResolution::Allow;
+      }};
+
+  auto searched = ava::tools::websearch(
+      context, " ava agent ",
+      ava::tools::WebSearchOptions{
+          .max_results = 2, .context_max_chars = 10000, .timeout_ms = 7000, .transport = &transport});
+  expect(searched && searched->query == "ava agent" && searched->results.size() == 2 &&
+             searched->results[0].title == "AVA" && searched->results[1].url == "https://ava.example/docs" &&
+             searched->total_results == 3 && searched->truncated && prompts == 1 && transport.requests.size() == 1 &&
+             transport.requests[0].method == "GET" &&
+             transport.requests[0].url.find("q=ava+agent") != std::string::npos &&
+             transport.requests[0].timeout_ms == 7000 && transport.requests[0].follow_redirects,
+         "websearch requires permission, queries a bounded search endpoint, and parses structured results");
+
+  StaticTransport unused_transport(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{}"});
+  auto invalid_query =
+      ava::tools::websearch(context, "\n", ava::tools::WebSearchOptions{.transport = &unused_transport});
+  expect(!invalid_query && unused_transport.requests.empty(),
+         "websearch rejects empty/control queries before transport use");
+
+  ava::tools::ToolContext const no_resolver_context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build};
+  auto no_resolver = ava::tools::websearch(no_resolver_context, "ava agent",
+                                           ava::tools::WebSearchOptions{.transport = &unused_transport});
+  expect(!no_resolver && no_resolver.error().format().find("no_resolver") != std::string::npos &&
+             unused_transport.requests.empty(),
+         "websearch fails closed without network search permission resolver");
+}
 }  // namespace
 
 void run_tools_process_network_tests()
 {
   test_bash_tool();
   test_webfetch_tool();
+  test_websearch_tool();
 }

@@ -39,8 +39,25 @@ struct McpToolDescription {
   std::string input_schema_json;
 };
 
+struct McpPromptArgumentDescription {
+  std::string name;
+  std::string description;
+  bool required = false;
+};
+
+struct McpPromptDescription {
+  std::string name;
+  std::string description;
+  std::vector<McpPromptArgumentDescription> arguments;
+};
+
 struct McpToolCallResult {
   bool is_error = false;
+  std::string content;
+  std::string raw_json;
+};
+
+struct McpPromptGetResult {
   std::string content;
   std::string raw_json;
 };
@@ -68,6 +85,11 @@ class McpStdioClient final {
   [[nodiscard]] ava::core::Result<McpToolCallResult> call_tool(std::string_view tool_name,
                                                                std::string_view arguments_json,
                                                                CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::Result<std::vector<McpPromptDescription>> list_prompts(
+      CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::Result<McpPromptGetResult> get_prompt(std::string_view prompt_name,
+                                                                 std::string_view arguments_json,
+                                                                 CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult shutdown(std::chrono::milliseconds grace = std::chrono::milliseconds(250));
 
  private:

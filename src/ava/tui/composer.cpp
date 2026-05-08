@@ -4,7 +4,7 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdlib>
+#include <cctype>
 #include <string_view>
 #include <vector>
 
@@ -297,6 +297,49 @@ void push_sidebar_line(std::vector<std::string>& lines, std::string line, std::s
   lines.push_back(detail::fit_line_preserving_sgr(" " + std::move(line), width));
 }
 
+std::optional<std::string> percent_text_from_token_status(std::optional<std::string> const& token_status)
+{
+  if (!token_status || token_status->empty()) return std::nullopt;
+  auto const open = token_status->rfind('(');
+  if (open == std::string::npos) return std::nullopt;
+  auto const percent = token_status->find('%', open + 1);
+  if (percent == std::string::npos || percent <= open + 1) return std::nullopt;
+  return token_status->substr(open + 1, percent - open - 1);
+}
+
+std::string context_pressure_line(std::string const& percent_text)
+{
+  double value = 0.0;
+  double scale = 1.0;
+  bool fractional = false;
+  bool parsed_digit = false;
+  for (auto const ch : percent_text) {
+    auto const byte = static_cast<unsigned char>(ch);
+    if (std::isdigit(byte) != 0) {
+      parsed_digit = true;
+      auto const digit = static_cast<double>(byte - static_cast<unsigned char>('0'));
+      if (fractional) {
+        scale *= 10.0;
+        value += digit / scale;
+      } else {
+        value = (value * 10.0) + digit;
+      }
+    } else if (ch == '.' && !fractional) {
+      fractional = true;
+    } else {
+      break;
+    }
+  }
+  if (!parsed_digit) value = 0.0;
+  auto const level = value >= 90.0   ? std::string("critical")
+                     : value >= 70.0 ? std::string("high")
+                     : value >= 40.0 ? std::string("moderate")
+                                     : std::string("low");
+  auto const color = value >= 70.0 ? kSgrWarning : kSgrDim;
+  return std::string("context pressure ") + std::string(color) + level + " " + sanitize_terminal_text(percent_text) +
+         "%" + std::string(kSgrReset);
+}
+
 std::vector<std::string> render_sidebar(SidebarSnapshot const& sidebar, std::size_t width, std::size_t height)
 {
   std::vector<std::string> lines;
@@ -349,12 +392,20 @@ std::vector<std::string> render_sidebar(SidebarSnapshot const& sidebar, std::siz
   push_sidebar_line(
       lines, "model " + sanitize_terminal_text(sidebar.provider) + "/" + sanitize_terminal_text(sidebar.model), width);
   push_sidebar_line(lines, "session " + sanitize_terminal_text(sidebar.session_id), width);
+  if (!sidebar.session_path.empty())
+    push_sidebar_line(lines, "path " + sanitize_terminal_text(sidebar.session_path), width);
+  if (sidebar.session_entry_count.has_value()) {
+    push_sidebar_line(lines, "entries " + std::to_string(*sidebar.session_entry_count), width);
+  }
   if (!sidebar.workspace.empty()) push_sidebar_line(lines, "cwd " + sanitize_terminal_text(sidebar.workspace), width);
   if (!sidebar.git_branch.empty())
     push_sidebar_line(lines, "branch " + sanitize_terminal_text(sidebar.git_branch), width);
   if (sidebar.reasoning_status.has_value())
     push_sidebar_line(lines, "reasoning " + sanitize_terminal_text(*sidebar.reasoning_status), width);
   push_sidebar_line(lines, "usage " + sanitize_terminal_text(sidebar.token_status.value_or("tokens unknown")), width);
+  if (auto const percent = percent_text_from_token_status(sidebar.token_status)) {
+    push_sidebar_line(lines, context_pressure_line(*percent), width);
+  }
   if (sidebar.context_source_count.has_value()) {
     push_sidebar_line(lines, "context sources " + std::to_string(*sidebar.context_source_count), width);
   } else {
@@ -395,7 +446,7 @@ std::size_t modal_width_for(std::size_t width)
 std::size_t modal_height_for(std::size_t height)
 {
   if (height < 10) return height;
-  return std::min<std::size_t>(18, height > 4 ? height - 4 : height);
+  return std::min<std::size_t>(22, height > 4 ? height - 4 : height);
 }
 
 std::vector<std::string> overlay_question_modal(std::vector<std::string> lines, QuestionPromptView const& prompt,
@@ -405,6 +456,22 @@ std::vector<std::string> overlay_question_modal(std::vector<std::string> lines, 
   auto const modal_width = std::min(modal_width_for(width), width);
   auto const modal_height = std::min(modal_height_for(height), height);
   auto const modal_lines = detail::render_question_modal(prompt, modal_width, modal_height);
+  auto const top = height > modal_lines.size() ? (height - modal_lines.size()) / 2 : std::size_t{0};
+  auto const left = width > modal_width ? (width - modal_width) / 2 : std::size_t{0};
+  auto const right = width > left + modal_width ? width - left - modal_width : std::size_t{0};
+  for (std::size_t index = 0; index < modal_lines.size() && top + index < lines.size(); ++index) {
+    lines[top + index] = std::string(left, ' ') + modal_lines[index] + std::string(right, ' ');
+  }
+  return lines;
+}
+
+std::vector<std::string> overlay_select_list_modal(std::vector<std::string> lines, SelectListView const& view,
+                                                   std::size_t width, std::size_t height)
+{
+  while (lines.size() < height) lines.emplace_back();
+  auto const modal_width = std::min(modal_width_for(width), width);
+  auto const modal_height = std::min(modal_height_for(height), height);
+  auto const modal_lines = detail::render_select_list_modal(view, modal_width, modal_height);
   auto const top = height > modal_lines.size() ? (height - modal_lines.size()) / 2 : std::size_t{0};
   auto const left = width > modal_width ? (width - modal_width) / 2 : std::size_t{0};
   auto const right = width > left + modal_width ? width - left - modal_width : std::size_t{0};
@@ -445,12 +512,6 @@ std::vector<std::string> render_composer(ComposerSnapshot const& snapshot)
 {
   auto const width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
   auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
-  if (snapshot.question_prompt && snapshot.question_prompt->modal) {
-    auto base = snapshot;
-    auto const prompt = *base.question_prompt;
-    base.question_prompt = std::nullopt;
-    return overlay_question_modal(render_composer(base), prompt, width, height);
-  }
   if (sidebar_visible(snapshot, width)) {
     auto const sidebar_width = std::min<std::size_t>(kSidebarWidth, width / 3);
     auto const main_width = main_width_for(snapshot, width);
@@ -465,6 +526,18 @@ std::vector<std::string> render_composer(ComposerSnapshot const& snapshot)
                          std::string(kSgrReset) + pad_line_to_width(sidebar_line, sidebar_width));
     }
     return combined;
+  }
+  if (snapshot.question_prompt && snapshot.question_prompt->modal) {
+    auto base = snapshot;
+    auto const prompt = *base.question_prompt;
+    base.question_prompt = std::nullopt;
+    return overlay_question_modal(render_composer(base), prompt, width, height);
+  }
+  if (snapshot.select_list) {
+    auto base = snapshot;
+    auto const view = *base.select_list;
+    base.select_list = std::nullopt;
+    return overlay_select_list_modal(render_composer(base), view, width, height);
   }
   std::vector<std::string> lines;
   lines.reserve(height);
@@ -544,26 +617,26 @@ bool draw_screen(ComposerSnapshot const& snapshot)
   auto const main_width = composer_main_width(snapshot);
   auto const lines = render_composer(snapshot);
 
-  if (snapshot.permission_prompt || snapshot.question_prompt) {
-    static_cast<void>(curs_set(0));
-  } else {
-    static_cast<void>(curs_set(1));
-  }
+  auto const cursor_visible = !snapshot.permission_prompt && !snapshot.question_prompt && !snapshot.select_list;
+  static_cast<void>(curs_set(0));
+  static_cast<void>(leaveok(stdscr, cursor_visible ? FALSE : TRUE));
 
-  erase();
+  // Every visible row is repainted below. Avoid a full-screen blank pass because it makes
+  // the sidebar flash during transcript scrolls on terminals with slower refreshes.
   for (std::size_t index = 0; index < lines.size(); ++index) {
     if (index > static_cast<std::size_t>(LINES > 0 ? LINES - 1 : 0)) break;
     move(static_cast<int>(index), 0);
     draw_styled_line(detail::screen_surface_line(lines[index], width));
   }
 
-  if (!snapshot.permission_prompt && !snapshot.question_prompt) {
+  if (cursor_visible) {
     auto const cursor = input_cursor_placement(snapshot, lines.size(), main_width);
     move(static_cast<int>(std::min<std::size_t>(cursor.row, LINES > 0 ? LINES - 1 : 0)),
          static_cast<int>(std::min<std::size_t>(cursor.column, COLS > 0 ? COLS - 1 : 0)));
+    static_cast<void>(curs_set(1));
   }
 
-  return refresh() != ERR;
+  return wnoutrefresh(stdscr) != ERR && doupdate() != ERR;
 }
 
 }  // namespace ava::tui

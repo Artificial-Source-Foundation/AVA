@@ -43,8 +43,15 @@ struct ToolTimelineItem {
   bool diff_truncated = false;
   std::vector<std::string> changed_paths = {};
   bool truncated = false;
+  bool byte_limited = false;
+  bool line_limited = false;
   std::optional<std::size_t> output_bytes = std::nullopt;
   std::optional<std::size_t> total_bytes = std::nullopt;
+  std::optional<std::size_t> output_lines = std::nullopt;
+  std::optional<std::size_t> total_lines = std::nullopt;
+  std::optional<std::size_t> start_line = std::nullopt;
+  std::optional<std::size_t> end_line = std::nullopt;
+  std::optional<std::size_t> next_offset_line = std::nullopt;
   std::optional<std::size_t> omitted_bytes = std::nullopt;
   std::optional<std::size_t> omitted_lines = std::nullopt;
   std::optional<std::size_t> visible_matches = std::nullopt;
@@ -106,6 +113,8 @@ struct SidebarSnapshot {
   std::optional<std::string> token_status = std::nullopt;
   std::optional<std::string> reasoning_status = std::nullopt;
   std::optional<std::size_t> context_source_count = std::nullopt;
+  std::string session_path = {};
+  std::optional<std::size_t> session_entry_count = std::nullopt;
 };
 
 struct SlashCommandItem {
@@ -159,6 +168,7 @@ struct QuestionPromptOptionView {
 enum class QuestionPromptInputAction {
   None,
   Redraw,
+  Copy,
   Resolve,
   Cancel,
 };
@@ -167,6 +177,7 @@ struct QuestionPromptInputResult {
   std::size_t selected_option_index = 0;
   std::vector<QuestionPromptOptionView> options;
   std::string custom_text;
+  std::string copy_text;
   QuestionPromptInputAction action = QuestionPromptInputAction::None;
 };
 
@@ -181,6 +192,42 @@ struct QuestionPromptView {
   bool searchable = false;
   std::size_t selected_option_index = 0;
   std::string custom_text;
+};
+
+struct SelectListItemView {
+  std::string value;
+  std::string label;
+  std::string description;
+  std::string group;
+  std::string detail;
+  std::string badge;
+  bool current = false;
+  bool enabled = true;
+  std::string disabled_reason;
+};
+
+enum class SelectListInputAction {
+  None,
+  Redraw,
+  Resolve,
+  Cancel,
+};
+
+struct SelectListInputResult {
+  std::size_t selected_item_index = 0;
+  std::string query;
+  SelectListInputAction action = SelectListInputAction::None;
+};
+
+struct SelectListView {
+  std::string title;
+  std::string subtitle;
+  std::vector<SelectListItemView> items;
+  std::size_t selected_item_index = 0;
+  std::string query;
+  std::string placeholder = "Search";
+  std::string empty_text = "No matches";
+  std::string footer_hint;
 };
 
 struct ComposerSnapshot {
@@ -198,6 +245,7 @@ struct ComposerSnapshot {
   std::vector<SlashCommandItem> slash_commands = {};
   std::optional<PermissionPromptView> permission_prompt = std::nullopt;
   std::optional<QuestionPromptView> question_prompt = std::nullopt;
+  std::optional<SelectListView> select_list = std::nullopt;
   std::size_t selected_slash_command_index = 0;
   bool slash_palette_suppressed = false;
   std::size_t transcript_scroll_offset = 0;
@@ -239,6 +287,11 @@ struct ComposerSnapshot {
                                                                          InputEvent event);
 [[nodiscard]] QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const& prompt,
                                                                      InputEvent event);
+[[nodiscard]] std::vector<std::size_t> filter_select_list_items(SelectListView const& view);
+[[nodiscard]] std::size_t clamp_select_list_selection(SelectListView const& view, std::size_t selected_index);
+[[nodiscard]] std::size_t previous_select_list_selection(SelectListView const& view, std::size_t selected_index);
+[[nodiscard]] std::size_t next_select_list_selection(SelectListView const& view, std::size_t selected_index);
+[[nodiscard]] SelectListInputResult handle_select_list_input(SelectListView const& view, InputEvent event);
 [[nodiscard]] std::string to_string(ToolTimelineStatus status);
 [[nodiscard]] std::string to_string(ToolLifecycleState state);
 

@@ -261,6 +261,78 @@ ava::core::Result<McpToolCallResult> McpStdioClient::call_tool(std::string_view 
                            .raw_json = response->raw_json};
 }
 
+ava::core::Result<std::vector<McpPromptDescription>> McpStdioClient::list_prompts(CancelCallback cancel_requested)
+{
+  if (is_canceled(cancel_requested)) {
+    return std::unexpected(canceled_error("MCP prompts/list canceled", server_));
+  }
+  auto response = request("prompts/list", "{}", options_.request_timeout, "timed out waiting for MCP prompts/list",
+                          cancel_requested);
+  if (!response) return std::unexpected(std::move(response.error()));
+  auto const prompts_start = ava::core::json::field_value_start(response->result_json, "prompts");
+  if (prompts_start &&
+      (*prompts_start >= response->result_json.size() || response->result_json[*prompts_start] != '[')) {
+    auto error = protocol_error("MCP prompts/list result has invalid prompts field", server_);
+    error.with_context("response", response->raw_json.substr(0, 512));
+    return std::unexpected(std::move(error));
+  }
+
+  std::vector<McpPromptDescription> prompts;
+  for (auto const& prompt_json : ava::core::json::objects_in_array_field(response->result_json, "prompts")) {
+    auto name = ava::core::json::string_field(prompt_json, "name");
+    if (!name || !ava::mcp::is_valid_mcp_tool_name(*name)) {
+      auto error = protocol_error("MCP prompt has invalid name", server_);
+      error.with_context("response", prompt_json.substr(0, 512));
+      return std::unexpected(std::move(error));
+    }
+    McpPromptDescription prompt{.name = std::move(*name),
+                                .description = ava::core::json::string_field(prompt_json, "description").value_or(""),
+                                .arguments = {}};
+    for (auto const& argument_json : ava::core::json::objects_in_array_field(prompt_json, "arguments")) {
+      auto argument_name = ava::core::json::string_field(argument_json, "name");
+      if (!argument_name || !ava::mcp::is_valid_mcp_tool_name(*argument_name)) {
+        auto error = protocol_error("MCP prompt argument has invalid name", server_);
+        error.with_context("prompt", prompt.name);
+        error.with_context("response", argument_json.substr(0, 512));
+        return std::unexpected(std::move(error));
+      }
+      prompt.arguments.push_back(McpPromptArgumentDescription{
+          .name = std::move(*argument_name),
+          .description = ava::core::json::string_field(argument_json, "description").value_or(""),
+          .required = mcp_bool_field(argument_json, "required").value_or(false)});
+    }
+    prompts.push_back(std::move(prompt));
+  }
+  return prompts;
+}
+
+ava::core::Result<McpPromptGetResult> McpStdioClient::get_prompt(std::string_view prompt_name,
+                                                                 std::string_view arguments_json,
+                                                                 CancelCallback cancel_requested)
+{
+  if (!ava::mcp::is_valid_mcp_tool_name(prompt_name)) {
+    return std::unexpected(mcp_error(ava::core::ErrorCategory::InvalidArgument, "MCP prompt name is invalid", server_));
+  }
+  if (!ava::core::json::is_valid_object(arguments_json)) {
+    auto error =
+        mcp_error(ava::core::ErrorCategory::InvalidArgument, "MCP prompt arguments must be a JSON object", server_);
+    error.with_context("prompt", std::string(prompt_name));
+    return std::unexpected(std::move(error));
+  }
+  if (is_canceled(cancel_requested)) {
+    auto error = canceled_error("MCP prompts/get canceled", server_);
+    error.with_context("prompt", std::string(prompt_name));
+    return std::unexpected(std::move(error));
+  }
+  std::string const params =
+      "{\"name\":" + json_string(prompt_name) + ",\"arguments\":" + std::string(arguments_json) + "}";
+  auto response = request("prompts/get", params, options_.request_timeout, "timed out waiting for MCP prompts/get",
+                          cancel_requested);
+  if (!response) return std::unexpected(std::move(response.error()));
+  return McpPromptGetResult{.content = mcp_prompt_text_from_result(response->result_json),
+                            .raw_json = response->raw_json};
+}
+
 ava::core::Result<McpStdioClient::JsonRpcResponse> McpStdioClient::request(std::string_view method,
                                                                            std::string_view params_json,
                                                                            std::chrono::milliseconds timeout,

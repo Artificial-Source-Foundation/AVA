@@ -11,12 +11,14 @@
 
 #include "ava/core/json.h"
 
+#include "tests/support/golden.h"
 #include "tests/support/test_harness.h"
 
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -67,6 +69,24 @@ std::string nested_arrays_json(std::size_t depth)
   for (std::size_t index = 0; index < depth; ++index) text += '[';
   for (std::size_t index = 0; index < depth; ++index) text += ']';
   return text;
+}
+
+ava::permissions::PermissionPrompt const* prompt_for_operation(
+    std::vector<ava::permissions::PermissionPrompt> const& prompts, ava::permissions::Operation operation)
+{
+  auto const found =
+      std::find_if(prompts.begin(), prompts.end(), [&](auto const& prompt) { return prompt.operation == operation; });
+  return found == prompts.end() ? nullptr : &*found;
+}
+
+bool has_audit_for_prompt(std::vector<ava::tools::PermissionAuditEvent> const& audits,
+                          ava::permissions::PermissionPrompt const& prompt, std::string const& resolution,
+                          std::string const& resolution_source)
+{
+  return std::any_of(audits.begin(), audits.end(), [&](auto const& event) {
+    return event.permission_request_id == prompt.permission_request_id && event.operation == prompt.operation &&
+           event.resolution == resolution && event.resolution_source == resolution_source;
+  });
 }
 
 void test_mcp_config_parsing()
@@ -149,6 +169,26 @@ void test_mcp_protocol_parsing()
          "MCP protocol rejects excessively deep JSON records");
 }
 
+void test_mcp_permission_audit_golden_shape()
+{
+  ava::tools::PermissionAuditEvent event;
+  event.permission_request_id = "permreq_ava080";
+  event.operation = ava::permissions::Operation::McpToolCall;
+  event.mode = ava::agent::Mode::Build;
+  event.tool_name = "mcp_demo_echo";
+  event.action = ava::permissions::PermissionAction::Ask;
+  event.reason = "MCP tool calls require explicit approval";
+  event.risk = ava::permissions::PermissionRisk::High;
+  event.target_path = "/workspace/.ava/mcp.json";
+  event.command = "demo:echo";
+  event.resolution = "deny";
+  event.resolution_source = "resolver";
+  event.resolution_reason = "denied by contract test";
+
+  ava::test::expect_json_matches_golden(ava::tools::permission_audit_data_json(event), "permission-audit.json",
+                                        "permission audit JSON shape matches AVA 0.80 golden fixture");
+}
+
 void test_mcp_stdio_client_lists_and_calls_tools()
 {
   auto const root = temp_root() / "mcp-client";
@@ -212,6 +252,21 @@ void test_mcp_stdio_client_lists_and_calls_tools()
     expect(tool_error_shutdown.has_value(), "MCP stdio client shuts down after tool-level error result");
   }
 
+  auto error_call_server = fake_server_config(root);
+  error_call_server.args = {"error-call"};
+  auto error_call_client = ava::mcp::McpStdioClient::start(error_call_server, fake_client_options(workspace));
+  expect(error_call_client.has_value(),
+         error_call_client
+             ? "MCP stdio client initializes JSON-RPC error fake server"
+             : "MCP stdio client initializes JSON-RPC error fake server: " + error_call_client.error().format());
+  if (error_call_client) {
+    auto error_call = (*error_call_client)->call_tool("echo", "{\"text\":\"hello\"}");
+    expect(!error_call && error_call.error().message().find("fake MCP JSON-RPC call failed") != std::string::npos,
+           "MCP stdio client surfaces JSON-RPC tool-call errors");
+    auto error_call_shutdown = (*error_call_client)->shutdown(std::chrono::milliseconds(500));
+    expect(error_call_shutdown.has_value(), "MCP stdio client shuts down after JSON-RPC error result");
+  }
+
   auto exit_list_server = fake_server_config(root);
   exit_list_server.args = {"exit-after-initialize"};
   auto exit_list_client = ava::mcp::McpStdioClient::start(exit_list_server, fake_client_options(workspace));
@@ -260,6 +315,40 @@ void test_mcp_stdio_client_lists_and_calls_tools()
     auto slow_shutdown = (*slow_client)->shutdown(std::chrono::milliseconds(500));
     expect(slow_shutdown.has_value(), "MCP stdio client shuts down after canceled tool call");
   }
+
+  auto exit_tool_server = fake_server_config(root);
+  exit_tool_server.args = {"exit-tool"};
+  auto exit_tool_client = ava::mcp::McpStdioClient::start(exit_tool_server, fake_client_options(workspace));
+  expect(exit_tool_client.has_value(),
+         exit_tool_client ? "MCP stdio client initializes exit-tool fake server"
+                          : "MCP stdio client initializes exit-tool fake server: " + exit_tool_client.error().format());
+  if (exit_tool_client) {
+    auto exited_tool = (*exit_tool_client)->call_tool("echo", "{\"text\":\"hello\"}");
+    auto const exited_tool_format = exited_tool ? std::string{} : exited_tool.error().format();
+    expect(!exited_tool && exited_tool.error().message().find("closed stdout") != std::string::npos &&
+               exited_tool_format.find("status: exit 44") != std::string::npos &&
+               exited_tool_format.find("fake MCP exited during tools/call") != std::string::npos,
+           "MCP stdio client reports tool-call process exit with status and stderr diagnostics: " + exited_tool_format);
+    auto exit_tool_shutdown = (*exit_tool_client)->shutdown(std::chrono::milliseconds(500));
+    expect(exit_tool_shutdown.has_value(), "MCP stdio client shuts down after tool-call process exit");
+  }
+
+  auto slow_prompt_server = fake_server_config(root);
+  slow_prompt_server.args = {"slow-prompt"};
+  auto slow_prompt_client = ava::mcp::McpStdioClient::start(slow_prompt_server, fake_client_options(workspace));
+  expect(slow_prompt_client.has_value(), slow_prompt_client ? "MCP stdio client initializes slow-prompt fake server"
+                                                            : "MCP stdio client initializes slow-prompt fake server: " +
+                                                                  slow_prompt_client.error().format());
+  if (slow_prompt_client) {
+    int prompt_cancel_checks = 0;
+    auto canceled_prompt = (*slow_prompt_client)->get_prompt("release-notes", "{\"topic\":\"demo\"}", [&] {
+      return ++prompt_cancel_checks > 2;
+    });
+    expect(!canceled_prompt && canceled_prompt.error().message().find("canceled") != std::string::npos,
+           "MCP stdio client cancels hung prompts/get calls before timeout");
+    auto slow_prompt_shutdown = (*slow_prompt_client)->shutdown(std::chrono::milliseconds(500));
+    expect(slow_prompt_shutdown.has_value(), "MCP stdio client shuts down after canceled prompt get");
+  }
 }
 
 void test_mcp_tool_dispatcher()
@@ -292,11 +381,15 @@ void test_mcp_tool_dispatcher()
 
   auto const model_tool_name = ava::mcp::mcp_model_tool_name("demo", "echo");
   auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(context);
-  bool const has_mcp_schema = std::any_of(schemas.begin(), schemas.end(), [&](std::string const& schema) {
+  auto const mcp_schema = std::find_if(schemas.begin(), schemas.end(), [&](std::string const& schema) {
     return schema.find("\"name\":\"" + model_tool_name + "\"") != std::string::npos &&
            schema.find("\"parameters\"") != std::string::npos;
   });
-  expect(has_mcp_schema, "enabled MCP tool is exported as a provider schema");
+  expect(mcp_schema != schemas.end(), "enabled MCP tool is exported as a provider schema");
+  if (mcp_schema != schemas.end()) {
+    ava::test::expect_json_matches_golden(*mcp_schema, "mcp-tool-schema.json",
+                                          "MCP tool provider schema matches AVA 0.80 golden fixture");
+  }
 
   ava::agent::ToolDispatcher dispatcher(context);
   auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
@@ -344,6 +437,78 @@ void test_mcp_tool_dispatcher()
          "MCP tool dispatcher reports semantic cancellation before permission or process execution");
 }
 
+void test_mcp_tool_dispatcher_audits_permission_denials()
+{
+  auto run_denial_case = [](std::string const& suffix, ava::permissions::Operation denied_operation,
+                            std::string const& expected_error) {
+    auto const root = temp_root() / ("mcp-denial-" + suffix);
+    std::error_code remove_error;
+    std::filesystem::remove_all(root, remove_error);
+    auto const workspace = root / "workspace";
+    auto const project_config = workspace / ".ava" / "mcp.json";
+    std::filesystem::create_directories(workspace);
+    write_text(project_config, mcp_config_json("demo", AVA_FAKE_MCP_SERVER_PATH, true));
+
+    std::vector<ava::permissions::PermissionPrompt> prompts;
+    std::vector<ava::tools::PermissionAuditEvent> audits;
+    std::optional<ava::permissions::Operation> operation_to_deny;
+    ava::tools::ToolContext context;
+    context.workspace_dir = workspace;
+    context.mcp_global_config_file = root / "missing-global-mcp.json";
+    context.mcp_project_config_file = project_config;
+    context.permission_resolver = [&](ava::permissions::PermissionPrompt const& prompt)
+        -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+      prompts.push_back(prompt);
+      if (operation_to_deny && prompt.operation == *operation_to_deny) {
+        return ava::permissions::PermissionResolutionDecision(ava::permissions::PermissionResolution::Deny,
+                                                              "denied by contract test");
+      }
+      return ava::permissions::PermissionResolutionDecision(ava::permissions::PermissionResolution::Allow,
+                                                            "allowed by contract test setup");
+    };
+    context.permission_audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+      audits.push_back(event);
+      return {};
+    };
+
+    auto const model_tool_name = ava::mcp::mcp_model_tool_name("demo", "echo");
+    ava::agent::ToolDispatcher dispatcher(context);
+    prompts.clear();
+    audits.clear();
+    operation_to_deny = denied_operation;
+
+    auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "call_mcp_denied_" + suffix, .name = model_tool_name, .arguments_json = "{\"text\":\"hello\"}"});
+    expect(dispatched && !dispatched->success && dispatched->result_text.find(expected_error) != std::string::npos,
+           dispatched ? "MCP dispatcher reports permission denial for " + suffix
+                      : "MCP dispatcher reports permission denial for " + suffix + ": " + dispatched.error().format());
+
+    auto const* denied_prompt = prompt_for_operation(prompts, denied_operation);
+    expect(denied_prompt != nullptr && !denied_prompt->permission_request_id.empty(),
+           "MCP denial prompt carries a request id for " + suffix);
+    if (denied_prompt != nullptr) {
+      auto const linked_audits = std::count_if(audits.begin(), audits.end(), [&](auto const& event) {
+        return event.permission_request_id == denied_prompt->permission_request_id;
+      });
+      expect(linked_audits >= 2,
+             "MCP denial records policy and resolver audit events with the prompt request id for " + suffix);
+      expect(has_audit_for_prompt(audits, *denied_prompt, "deny", "resolver"),
+             "MCP denial audit records resolver denial for " + suffix);
+      if (dispatched) {
+        expect(std::find(dispatched->payload.permission_request_ids.begin(),
+                         dispatched->payload.permission_request_ids.end(),
+                         denied_prompt->permission_request_id) != dispatched->payload.permission_request_ids.end(),
+               "MCP denial result payload links the permission request id for " + suffix);
+      }
+    }
+  };
+
+  run_denial_case("launch", ava::permissions::Operation::McpServerLaunch, "MCP server launch requires permission");
+  run_denial_case("connect", ava::permissions::Operation::McpServerConnect,
+                  "MCP server connection requires permission");
+  run_denial_case("tool", ava::permissions::Operation::McpToolCall, "MCP tool call requires permission");
+}
+
 void test_mcp_tool_dispatcher_contains_tool_errors()
 {
   auto const root = temp_root() / "mcp-dispatcher-tool-error";
@@ -385,7 +550,9 @@ void run_mcp_tests()
 {
   test_mcp_config_parsing();
   test_mcp_protocol_parsing();
+  test_mcp_permission_audit_golden_shape();
   test_mcp_stdio_client_lists_and_calls_tools();
   test_mcp_tool_dispatcher();
+  test_mcp_tool_dispatcher_audits_permission_denials();
   test_mcp_tool_dispatcher_contains_tool_errors();
 }

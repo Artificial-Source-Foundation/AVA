@@ -1204,6 +1204,14 @@ void test_session_markdown_export()
                                               "\"format\":\"anthropic_thinking\","
                                               "\"text\":\"visible reasoning summary\","
                                               "\"signature\":\"super-secret-signature\"}"},
+      ava::session::SessionEntry{.id = "reasoning_change_1",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ReasoningChange,
+                                 .timestamp = "2026-04-29T00:00:02Z",
+                                 .data_json = "{\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-5\","
+                                              "\"format\":\"anthropic_thinking\",\"enabled\":true,"
+                                              "\"level\":\"enabled\",\"budget_tokens\":4096,"
+                                              "\"display\":\"summarized\"}"},
       ava::session::SessionEntry{
           .id = "tool_call_1",
           .parent_id = "",
@@ -1262,6 +1270,9 @@ void test_session_markdown_export()
              basic.find("Signature present") != std::string::npos &&
              basic.find("super-secret-signature") == std::string::npos,
          "markdown export renders reasoning blocks without leaking provider-private signatures");
+  expect(basic.find("## Reasoning Change") != std::string::npos && basic.find("Budget tokens") != std::string::npos &&
+             basic.find("4096") != std::string::npos,
+         "markdown export renders reasoning-change budget tokens when present");
   expect(basic.find("Usage:") != std::string::npos && basic.find("input_tokens") != std::string::npos,
          "markdown export renders assistant usage when present");
   expect(basic.find("## Tool Call") == std::string::npos && basic.find("README.md") == std::string::npos,

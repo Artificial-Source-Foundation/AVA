@@ -68,12 +68,14 @@ ModelRegistry builtin_model_profiles()
                                          .reasoning_per_million = std::nullopt},
                             openai, false),
                  text_model(anthropic.provider_id, "claude-sonnet-4-5", "Claude Sonnet 4.5", "claude-sonnet", 200'000,
-                            64'000, std::nullopt, anthropic, false, {}, {}, anthropic.default_compatibility_quirks),
+                            64'000, std::nullopt, anthropic, true, {"enabled"}, anthropic.default_reasoning_format,
+                            anthropic.default_compatibility_quirks),
                  reasoning_model("kimi-k2-thinking", "Kimi K2 Thinking", "kimi-thinking", 262'144, 32'768, kimi),
                  reasoning_model("kimi-for-coding", "Kimi For Coding", "kimi-coding", 262'144, 32'768, kimi),
-                 reasoning_model("kimi-k2.6", "Kimi K2.6", "kimi-thinking", 262'144, 32'768, moonshot),
-                 reasoning_model("moonshotai/kimi-k2.6", "Kimi K2.6 (OpenRouter)", "kimi-thinking", 262'144, 32'768,
-                                 openrouter)}};
+                  reasoning_model("kimi-k2.6", "Kimi K2.6", "kimi-thinking", 262'144, 32'768, moonshot),
+                  text_model(openrouter.provider_id, "moonshotai/kimi-k2.6", "Kimi K2.6 (OpenRouter)",
+                             "kimi-thinking", 262'144, 32'768, std::nullopt, openrouter, false, {}, {},
+                             openrouter.default_compatibility_quirks)}};
 }
 
 std::string model_display_label(std::string_view provider_id, std::string_view model_id)

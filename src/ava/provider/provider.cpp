@@ -56,7 +56,8 @@ bool looks_like_context_overflow(std::string_view text)
 
 bool looks_like_quota(std::string_view text)
 {
-  return has_any(text, {"quota", "billing", "insufficient_quota", "credit balance"});
+  return has_any(text, {"quota", "billing", "insufficient_quota", "credit balance", "insufficient credit",
+                        "insufficient credits", "payment required"});
 }
 
 bool looks_like_content_filter(std::string_view text)
@@ -481,6 +482,7 @@ ProviderErrorKind classify_provider_error(HttpResponse const& response)
   if (response.status_code >= 200 && response.status_code < 300) return ProviderErrorKind::Unknown;
   auto const body = lower_copy(response.body);
   if (response.status_code == 401 || response.status_code == 403) return ProviderErrorKind::Authentication;
+  if (response.status_code == 402) return ProviderErrorKind::Quota;
   if (looks_like_context_overflow(body)) return ProviderErrorKind::ContextOverflow;
   if (looks_like_quota(body)) return ProviderErrorKind::Quota;
   if (looks_like_content_filter(body)) return ProviderErrorKind::ContentFilter;

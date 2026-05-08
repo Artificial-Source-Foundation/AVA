@@ -31,6 +31,13 @@ void append_spill_fields(std::string& text, std::filesystem::path const& path, b
   text += ",\"spill_truncated\":" + json_bool(spill_truncated);
 }
 
+std::string read_line_summary(ava::tools::TextOutput const& output)
+{
+  if (output.output_lines == 0) return "0/" + std::to_string(output.total_lines) + " lines";
+  return "lines " + std::to_string(output.start_line) + "-" + std::to_string(output.end_line) + "/" +
+         std::to_string(output.total_lines);
+}
+
 RuntimeEvent command_event(RuntimeSession const& session, RuntimeEventType type)
 {
   RuntimeEvent event;
@@ -64,11 +71,19 @@ ava::core::VoidResult emit_tool_event(RuntimeSession const& session, RuntimeEven
   event.diff = entry.diff;
   event.diff_truncated = entry.diff_truncated;
   event.changed_paths = entry.changed_paths;
+  event.permission_request_ids = entry.permission_request_ids;
   event.truncated = entry.truncated;
+  event.byte_limited = entry.byte_limited;
+  event.line_limited = entry.line_limited;
   event.spill_path = entry.spill_path;
   event.spill_truncated = entry.spill_truncated;
   if (entry.output_bytes) event.output_bytes = *entry.output_bytes;
   if (entry.total_bytes) event.total_bytes = *entry.total_bytes;
+  if (entry.output_lines) event.output_lines = *entry.output_lines;
+  if (entry.total_lines) event.total_lines = *entry.total_lines;
+  if (entry.start_line) event.start_line = *entry.start_line;
+  if (entry.end_line) event.end_line = *entry.end_line;
+  if (entry.next_offset_line) event.next_offset_line = *entry.next_offset_line;
   if (entry.omitted_bytes) event.omitted_bytes = *entry.omitted_bytes;
   if (entry.omitted_lines) event.omitted_lines = *entry.omitted_lines;
   if (entry.visible_matches) event.visible_matches = *entry.visible_matches;
@@ -110,9 +125,17 @@ ava::agent::ToolTimelineEntry command_result_entry(std::string const& call_id, s
       .diff = payload.diff,
       .diff_truncated = payload.diff_truncated,
       .changed_paths = payload.changed_paths,
+      .permission_request_ids = payload.permission_request_ids,
       .truncated = payload.truncated,
+      .byte_limited = payload.byte_limited,
+      .line_limited = payload.line_limited,
       .output_bytes = payload.output_bytes,
       .total_bytes = payload.total_bytes,
+      .output_lines = payload.output_lines,
+      .total_lines = payload.total_lines,
+      .start_line = payload.start_line,
+      .end_line = payload.end_line,
+      .next_offset_line = payload.next_offset_line,
       .omitted_bytes = payload.omitted_bytes,
       .omitted_lines = payload.omitted_lines,
       .visible_matches = payload.visible_matches,
@@ -205,17 +228,27 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
     }
     std::string text = output->content;
     if (output->truncated) {
-      text += "\n[truncated " + std::to_string(output->output_bytes) + '/' + std::to_string(output->total_bytes) +
-              " bytes]";
+      text += "\n[truncated " + read_line_summary(*output);
+      if (output->next_offset_line > 0) text += "; next offset " + std::to_string(output->next_offset_line);
+      if (output->byte_limited) text += "; byte cap reached";
+      text += "]";
     }
-    auto const read_result_json = "{\"tool\":\"read\",\"ok\":true,\"path\":\"" + ava::core::json::escape(argument) +
-                                  "\",\"content\":\"" + ava::core::json::escape(output->content) +
-                                  "\",\"truncated\":" + json_bool(output->truncated) +
-                                  ",\"total_bytes\":" + std::to_string(output->total_bytes) +
-                                  ",\"output_bytes\":" + std::to_string(output->output_bytes) + "}";
-    if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "read",
-                                           ava::agent::ToolTimelineStatus::Success,
-                                           std::to_string(output->output_bytes) + " bytes", read_result_json);
+    auto const read_result_json =
+        "{\"tool\":\"read\",\"ok\":true,\"path\":\"" + ava::core::json::escape(argument) + "\",\"content\":\"" +
+        ava::core::json::escape(output->content) + "\",\"truncated\":" + json_bool(output->truncated) +
+        ",\"byte_limited\":" + json_bool(output->byte_limited) +
+        ",\"line_limited\":" + json_bool(output->line_limited) +
+        ",\"total_bytes\":" + std::to_string(output->total_bytes) +
+        ",\"output_bytes\":" + std::to_string(output->output_bytes) +
+        ",\"output_lines\":" + std::to_string(output->output_lines) +
+        ",\"start_line\":" + std::to_string(output->start_line) + ",\"end_line\":" + std::to_string(output->end_line) +
+        ",\"total_lines\":" + std::to_string(output->total_lines) +
+        (output->next_offset_line > 0 ? ",\"next_offset_line\":" + std::to_string(output->next_offset_line)
+                                      : std::string{}) +
+        "}";
+    if (auto recorded =
+            record_tool_result(session, request.event_sink, result, call_id, "read",
+                               ava::agent::ToolTimelineStatus::Success, read_line_summary(*output), read_result_json);
         !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }
@@ -373,15 +406,22 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
     std::string output = "exit: " + std::to_string(bash->exit_code);
     if (bash->timed_out) output += " (timed out)";
     if (bash->truncated) {
-      output += " (output truncated to last " + std::to_string(bash->output.size()) + '/' +
-                std::to_string(bash->total_bytes) + " bytes)";
+      output += " (output truncated to last " + std::to_string(bash->output_lines) + '/' +
+                std::to_string(bash->total_lines) + " lines";
+      if (bash->byte_limited) output += "; byte cap reached";
+      output += ")";
     }
     output += '\n' + bash->output;
     std::string bash_result_json =
         "{\"tool\":\"bash\",\"ok\":" + json_bool(bash->exit_code == 0 && !bash->timed_out && !bash->canceled) +
         ",\"exit_code\":" + std::to_string(bash->exit_code) + ",\"timed_out\":" + json_bool(bash->timed_out) +
         ",\"canceled\":" + json_bool(bash->canceled) + ",\"truncated\":" + json_bool(bash->truncated) +
-        ",\"total_bytes\":" + std::to_string(bash->total_bytes) + ",\"output\":\"" +
+        ",\"byte_limited\":" + json_bool(bash->byte_limited) + ",\"line_limited\":" + json_bool(bash->line_limited) +
+        ",\"total_bytes\":" + std::to_string(bash->total_bytes) +
+        ",\"output_bytes\":" + std::to_string(bash->output_bytes) +
+        ",\"total_lines\":" + std::to_string(bash->total_lines) +
+        ",\"output_lines\":" + std::to_string(bash->output_lines) +
+        ",\"omitted_lines\":" + std::to_string(bash->omitted_lines) + ",\"output\":\"" +
         ava::core::json::escape(bash->output) + "\"";
     append_spill_fields(bash_result_json, bash->spill_path, bash->spill_truncated);
     bash_result_json += "}";

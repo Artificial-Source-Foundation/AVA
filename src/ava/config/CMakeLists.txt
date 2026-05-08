@@ -11,6 +11,9 @@ add_library(ava_config
   "xdg_paths.cpp"
 )
 
-target_include_directories(ava_config PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_include_directories(ava_config
+  PUBLIC "${CMAKE_SOURCE_DIR}/src"
+  PRIVATE "${AVA_GENERATED_INCLUDE_DIR}"
+)
 ava_apply_warnings(ava_config)
 ava_apply_sanitizers(ava_config)

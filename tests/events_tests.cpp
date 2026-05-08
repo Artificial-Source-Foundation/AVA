@@ -175,12 +175,20 @@ void test_tool_runtime_event_serializes_semantic_frontend_payloads()
   event.content_type = "application/json";
   event.diff = "--- src/main.cpp\n+++ src/main.cpp\n-old\n+new";
   event.changed_paths = {"src/main.cpp", "include/ava/app/events.h"};
+  event.permission_request_ids = {"permreq_edit"};
   event.diff_truncated = true;
   event.truncated = true;
+  event.byte_limited = true;
+  event.line_limited = true;
   event.spill_path = "/tmp/ava-spill/tool.txt";
   event.spill_truncated = true;
   event.output_bytes = 128;
   event.total_bytes = 512;
+  event.output_lines = 4;
+  event.total_lines = 11;
+  event.start_line = 2;
+  event.end_line = 5;
+  event.next_offset_line = 6;
   event.omitted_bytes = 384;
   event.omitted_lines = 7;
 
@@ -190,9 +198,14 @@ void test_tool_runtime_event_serializes_semantic_frontend_payloads()
              json.find("\"structured_result\":{\"schema_version\":1") != std::string::npos &&
              json.find("\"content_type\":\"application/json\"") != std::string::npos &&
              json.find("\"changed_paths\":[\"src/main.cpp\",\"include/ava/app/events.h\"]") != std::string::npos &&
+             json.find("\"permission_request_ids\":[\"permreq_edit\"]") != std::string::npos &&
              json.find("\"diff_truncated\":true") != std::string::npos &&
+             json.find("\"byte_limited\":true") != std::string::npos &&
+             json.find("\"line_limited\":true") != std::string::npos &&
+             json.find("\"output_lines\":4") != std::string::npos &&
+             json.find("\"next_offset_line\":6") != std::string::npos &&
              json.find("\"omitted_lines\":7") != std::string::npos,
-         "tool runtime events serialize semantic args, result, changed paths, diffs, and truncation metadata");
+         "tool runtime events serialize semantic args, result, permission ids, diffs, and truncation metadata");
 
   ava::app::EventEnvelopeContext context;
   context.event_id = "event_semantic_tool";
@@ -201,10 +214,15 @@ void test_tool_runtime_event_serializes_semantic_frontend_payloads()
   auto const result = ava::core::json::object_field(envelope.payload_json, "result");
   auto const structured_result = ava::core::json::object_field(envelope.payload_json, "structured_result");
   auto const paths = ava::core::json::strings_in_array_field(envelope.payload_json, "changed_paths");
+  auto const permission_ids = ava::core::json::strings_in_array_field(envelope.payload_json, "permission_request_ids");
   expect(envelope.name == "tool_result" && args && *args == "{\"path\":\"src/main.cpp\"}" && result &&
              *result == "{\"ok\":true,\"path\":\"src/main.cpp\"}" && structured_result &&
              structured_result->find("\"status\":\"success\"") != std::string::npos && paths.size() == 2 &&
-             paths[1] == "include/ava/app/events.h" &&
+             paths[1] == "include/ava/app/events.h" && permission_ids.size() == 1 &&
+             permission_ids[0] == "permreq_edit" &&
+             envelope.payload_json.find("\"output_lines\":4") != std::string::npos &&
+             envelope.payload_json.find("\"total_lines\":11") != std::string::npos &&
+             envelope.payload_json.find("\"next_offset_line\":6") != std::string::npos &&
              envelope.payload_json.find("\"spill_path\":\"/tmp/ava-spill/tool.txt\"") != std::string::npos,
          "tool event envelopes preserve semantic payloads for frontend replay");
 }

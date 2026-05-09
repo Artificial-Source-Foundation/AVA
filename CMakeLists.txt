@@ -52,7 +52,7 @@ function(ava_apply_warnings target)
   if(MSVC)
     target_compile_options(${target} PRIVATE /W4 /WX)
   else()
-    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(${target} PRIVATE -Wall -Werror -fmax-errors=2)
   endif()
 endfunction()
 

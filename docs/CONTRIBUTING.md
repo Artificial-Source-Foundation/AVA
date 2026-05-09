@@ -94,6 +94,19 @@ For example, using `-DCMAKE_BUILD_TYPE=Debug` will print
 ```
 where `Debug` is in red, because the default is `Release`.
 
+## Building
+
+After (re)configuration AVA can be build by issuing the command:
+```sh
+cmake --build "$BUILDDIR" --config "$CMAKE_CONFIG" --parallel $CPUS [--verbose]
+```
+
+Adding `--verbose` shows the exact commands that are being executed by ninja;
+mostly useful if one want to inspect if the expected compiler arguments are being passed to the compiler.
+
+Note that the `--config "$CMAKE_CONFIG"` is only needed for multi-target generators, so not for `Makefile` or `Ninja`.
+`CPUS` should be set to the number of processors that you want to use for compilation. For example, use `CPUS=$(nproc --all)`.
+
 ## Formatting And Static Checks
 
 Format changed C++ with the repository `.clang-format`:

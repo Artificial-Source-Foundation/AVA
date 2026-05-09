@@ -60,7 +60,7 @@ Tests currently build into one `ava_tests` CTest target from focused test source
 Lets assume that, next to GITACHE_ROOT (see above) the following environment variables are set:
 * `REPOROOT` : full path of the repository root of ava (i.e. the directory that you cloned ava into.
 * `BUILDDIR` : full path to the build directory; this can be inside or outside the repository root (e.g. `$REPOROOT/build` is fine) but should be an empty or non-existent directory.
-* `CMAKE_CONFIG` : the CMake build mode. Possible options are `Release`, `RelWithDebInfo`, `Debug`, `BetaTest`, `RelWithDebug` explained [here](https://stackoverflow.com/a/59314670/1487069).
+* `CMAKE_CONFIG` : the CMake build type. Possible options are `Release`, `RelWithDebInfo`, `Debug`, `BetaTest`, `RelWithDebug` explained [here](https://stackoverflow.com/a/59314670/1487069).
 
 Then one can configure AVA with:
 

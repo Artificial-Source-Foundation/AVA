@@ -24,7 +24,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev
 
       - name: Restore gitache cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.GITACHE_ROOT }}
           key: gitache-${{ runner.os }}-${{ hashFiles('.gitmodules') }}

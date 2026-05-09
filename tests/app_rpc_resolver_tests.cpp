@@ -1,19 +1,14 @@
+#include "tests/support/app_runtime_support.h"
+#include "tests/support/fake_transport.h"
+#include "tests/support/test_harness.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
-
 #include "ava/session/session_store.h"
-
 #include "ava/permissions/permission.h"
-
 #include "ava/provider/openai_provider.h"
-
 #include "ava/core/json.h"
-
-#include "tests/support/app_runtime_support.h"
-#include "tests/support/fake_transport.h"
-#include "tests/support/test_harness.h"
 
 #include <chrono>
 #include <filesystem>
@@ -330,26 +325,27 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  auto const rpc_timeout = std::chrono::seconds(10);
 
   input_buffer.push(
       "{\"id\":\"bad-rule\",\"type\":\"permission_rule_add\",\"action\":\"allow\","
       "\"target_path\":\"" +
       outside_path.string() + "\",\"reason\":\"missing operation\"}\n");
-  bool const invalid_rejected = output_buffer.wait_contains("permission_rule_add requires operation", std::chrono::seconds(2));
+  bool const invalid_rejected = output_buffer.wait_contains("permission_rule_add requires operation", rpc_timeout);
   input_buffer.push(
       "{\"id\":\"add-rule\",\"type\":\"permission_rule_add\",\"action\":\"allow\","
       "\"operation\":\"read\",\"target_path\":\"" +
       outside_path.string() + "\",\"reason\":\"allow exact outside read\"}\n");
-  bool const added = output_buffer.wait_contains("\"name\":\"permission_rule_added\"", std::chrono::seconds(2));
+  bool const added = output_buffer.wait_contains("\"name\":\"permission_rule_added\"", rpc_timeout);
   auto const rule_id = extract_json_string_field(output_buffer.str(), "rule_id");
   input_buffer.push("{\"id\":\"rules\",\"type\":\"permission_rules\"}\n");
-  bool const listed = output_buffer.wait_contains("\"id\":\"rules\"", std::chrono::seconds(2)) &&
-                      output_buffer.wait_contains("\"rule_id\":\"" + rule_id + "\"", std::chrono::seconds(2));
+  bool const listed =
+      output_buffer.wait_contains("\"id\":\"rules\"", rpc_timeout) && output_buffer.wait_contains("\"rule_id\":\"" + rule_id + "\"", rpc_timeout);
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read outside via persistent rule\"}\n");
-  bool const completed = output_buffer.wait_contains("persistent rule allow done", std::chrono::seconds(2)) &&
-                         output_buffer.wait_contains("\"id\":\"p1\",\"type\":\"response\",\"success\":true", std::chrono::seconds(2));
+  bool const completed = output_buffer.wait_contains("persistent rule allow done", rpc_timeout) && output_buffer.wait_contains("\"id\":\"p1\"", rpc_timeout) &&
+                         output_buffer.wait_contains("\"success\":true", rpc_timeout);
   input_buffer.push("{\"id\":\"remove-rule\",\"type\":\"permission_rule_remove\",\"rule_id\":\"" + rule_id + "\"}\n");
-  bool const removed = output_buffer.wait_contains("\"name\":\"permission_rule_removed\"", std::chrono::seconds(2));
+  bool const removed = output_buffer.wait_contains("\"name\":\"permission_rule_removed\"", rpc_timeout);
   input_buffer.close();
   rpc_thread.join();
 

@@ -1,11 +1,54 @@
 #include "ava/app/rpc/output.h"
+
 #include "ava/app/rpc/protocol.h"
 #include "ava/app/rpc/serialization.h"
+
 #include "ava/core/ids.h"
 
 #include <utility>
 
 namespace ava::app::rpc {
+namespace {
+
+std::string payload_type_for_resolver_event(std::string_view name)
+{
+  if (name == "permission_requested" || name == "permission_replied" || name == "permission_rule_added" || name == "permission_rule_removed" ||
+      name == "permission_grant_revoked" || name == "permission_grants_cleared")
+  {
+    return std::string(ava::app::to_string(RuntimePayloadType::Permission));
+  }
+  if (name == "question_requested" || name == "question_replied")
+  {
+    return std::string(ava::app::to_string(RuntimePayloadType::Question));
+  }
+  if (name == "cancel_requested")
+  {
+    return std::string(ava::app::to_string(RuntimePayloadType::Cancellation));
+  }
+  if (name == "steer_queued" || name == "steer_applied" || name == "steer_skipped" || name == "follow_up_queued" || name == "follow_up_started" ||
+      name == "follow_up_skipped")
+  {
+    return std::string(ava::app::to_string(RuntimePayloadType::Queue));
+  }
+  return {};
+}
+
+}  // namespace
+
+ResolverEventPayload resolver_permission_payload(std::string payload_json)
+{
+  return ResolverEventPayload{.payload_type = RuntimePayloadType::Permission, .json = std::move(payload_json)};
+}
+
+ResolverEventPayload resolver_question_payload(std::string payload_json)
+{
+  return ResolverEventPayload{.payload_type = RuntimePayloadType::Question, .json = std::move(payload_json)};
+}
+
+ResolverEventPayload resolver_queue_payload(std::string payload_json)
+{
+  return ResolverEventPayload{.payload_type = RuntimePayloadType::Queue, .json = std::move(payload_json)};
+}
 
 ava::core::VoidResult write_record(RpcOutput& output, std::string_view record)
 {
@@ -63,7 +106,24 @@ EventEnvelope resolver_event_envelope(std::string name, std::string request_id, 
   envelope.request_id = std::move(request_id);
   envelope.correlation_id = std::move(correlation_id);
   envelope.name = std::move(name);
+  envelope.payload_type = payload_type_for_resolver_event(envelope.name);
   envelope.payload_json = std::move(payload_json);
+  return envelope;
+}
+
+EventEnvelope resolver_event_envelope(std::string name, std::string request_id, std::string correlation_id, std::string session_id,
+                                      ResolverEventPayload payload)
+{
+  EventEnvelope envelope;
+  envelope.schema_version = 1;
+  envelope.event_id = ava::core::make_id("event");
+  envelope.timestamp = ava::session::now_timestamp();
+  envelope.session_id = std::move(session_id);
+  envelope.request_id = std::move(request_id);
+  envelope.correlation_id = std::move(correlation_id);
+  envelope.name = std::move(name);
+  envelope.payload_type = std::string(ava::app::to_string(payload.payload_type));
+  envelope.payload_json = std::move(payload.json);
   return envelope;
 }
 

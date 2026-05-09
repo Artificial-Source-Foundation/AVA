@@ -16,6 +16,7 @@ namespace ava::provider {
 enum class ContentPartType
 {
   Text,
+  Image,
   Reasoning,
   ToolUse,
   ToolResult,
@@ -38,6 +39,16 @@ struct ContentPart
   std::string reasoning_signature = {};
   std::string reasoning_redacted_data = {};
   bool redacted = false;
+  // Image attachment metadata. Session/RPC records store references and
+  // provider serializers may load bytes transiently after validation.
+  std::string attachment_id = {};
+  std::string mime_type = {};
+  std::string storage_path = {};
+  std::string sha256 = {};
+  std::size_t byte_size = 0;
+  // Transient provider payload populated only after session attachment storage
+  // has verified size, hash, and path containment. Never persist this field.
+  std::string data_base64 = {};
 };
 
 struct ChatMessage
@@ -230,5 +241,9 @@ class RetryTransport final : public Transport
 [[nodiscard]] ProviderErrorKind classify_provider_error(HttpResponse const& response);
 [[nodiscard]] std::optional<std::string> retry_after_header(HttpResponse const& response);
 [[nodiscard]] bool is_context_overflow_error(ava::core::Error const& error);
+[[nodiscard]] bool is_supported_image_mime_type(std::string_view mime_type);
+[[nodiscard]] bool request_has_image_parts(ProviderRequest const& request);
+[[nodiscard]] ava::core::VoidResult validate_image_content_parts(ProviderRequest const& request,
+                                                                 bool model_supports_images);
 
 }  // namespace ava::provider

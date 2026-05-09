@@ -217,6 +217,24 @@ ava::core::Result<std::string> provider_credential_object_json(ProviderCredentia
   {
     return "{\n    \"type\": \"api_key\",\n    \"api_key\": \"" + ava::core::json::escape(credential.access_token) + "\"\n  }";
   }
+  if (credential.provider_id == "anthropic" && credential.credential_type == "oauth") {
+    std::string body = "{\n    \"type\": \"oauth\",\n    \"access_token\": \"" +
+                       ava::core::json::escape(credential.access_token) + "\"";
+    if (!credential.refresh_token.empty()) {
+      body += ",\n    \"refresh_token\": \"" + ava::core::json::escape(credential.refresh_token) + "\"";
+    }
+    if (credential.expires_at > 0) {
+      body += ",\n    \"expires_at\": " + std::to_string(credential.expires_at);
+    }
+    if (!credential.account_id.empty()) {
+      body += ",\n    \"account_id\": \"" + ava::core::json::escape(credential.account_id) + "\"";
+    }
+    if (!credential.source_metadata.empty()) {
+      body += ",\n    \"source\": \"" + ava::core::json::escape(credential.source_metadata) + "\"";
+    }
+    body += "\n  }";
+    return body;
+  }
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider credential type is unsupported");
   error.with_context("provider", credential.provider_id);
   error.with_context("credential_type", credential.credential_type);

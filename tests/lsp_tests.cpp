@@ -1,17 +1,27 @@
-#include "tests/support/test_harness.h"
 #include "ava/agent/tool_dispatcher.h"
+
 #include "ava/tools/file_tools.h"
 #include "ava/tools/lsp_tools.h"
+
 #include "ava/lsp/lsp_client.h"
+#include "ava/lsp/configured_provider.h"
+
 #include "ava/core/json.h"
 
+#include "tests/support/test_harness.h"
+
+#include <cerrno>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
+
+#include <signal.h>
+#include <sys/types.h>
 
 namespace {
 
@@ -37,6 +47,35 @@ std::filesystem::path make_lsp_workspace(std::string_view name)
   return workspace;
 }
 
+std::optional<pid_t> read_pid_file_for_test(std::filesystem::path const& path)
+{
+  std::ifstream file(path, std::ios::binary);
+  long long value = 0;
+  file >> value;
+  if (!file || value <= 0)
+    return std::nullopt;
+  return static_cast<pid_t>(value);
+}
+
+bool process_group_exists(pid_t pgid)
+{
+  errno = 0;
+  if (::kill(-pgid, 0) == 0)
+    return true;
+  return errno != ESRCH;
+}
+
+bool wait_for_process_group_exit(pid_t pgid)
+{
+  for (int index = 0; index < 100; ++index)
+  {
+    if (!process_group_exists(pgid))
+      return true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  return !process_group_exists(pgid);
+}
+
 class ManyDiagnosticsProvider final : public ava::lsp::DiagnosticsProvider
 {
  public:
@@ -50,6 +89,35 @@ class ManyDiagnosticsProvider final : public ava::lsp::DiagnosticsProvider
     }
     return diagnostics;
   }
+};
+
+class ManySymbolsProvider final : public ava::lsp::DiagnosticsProvider
+{
+ public:
+  explicit ManySymbolsProvider(std::filesystem::path workspace) : workspace_(std::move(workspace)) {}
+
+  [[nodiscard]] ava::core::Result<std::vector<ava::lsp::Diagnostic>> diagnostics(std::filesystem::path const&, ava::lsp::CancelCallback = nullptr) override
+  {
+    return std::vector<ava::lsp::Diagnostic>{};
+  }
+
+  [[nodiscard]] ava::core::Result<std::vector<ava::lsp::Symbol>> document_symbols(std::filesystem::path const&, ava::lsp::CancelCallback = nullptr) override
+  {
+    std::vector<ava::lsp::Symbol> symbols;
+    symbols.reserve(300);
+    for (int index = 0; index < 300; ++index)
+    {
+      symbols.push_back(ava::lsp::Symbol{.name = std::string(1024, 's'),
+                                         .kind = 12,
+                                         .path = workspace_ / "main.cpp",
+                                         .range = ava::lsp::Range{.start_line = index, .start_column = 0, .end_line = index, .end_column = 4},
+                                         .container = "many"});
+    }
+    return symbols;
+  }
+
+ private:
+  std::filesystem::path workspace_;
 };
 
 void test_lsp_manager_fake_server_diagnostics()
@@ -67,6 +135,54 @@ void test_lsp_manager_fake_server_diagnostics()
   expect(diagnostics && diagnostics->size() == 1 && (*diagnostics)[0].severity == 1 && (*diagnostics)[0].message == "fake diagnostic from LSP" &&
              (*diagnostics)[0].line == 2 && (*diagnostics)[0].column == 4 && (*diagnostics)[0].code == "AVA_FAKE",
          "LSP manager requests and parses fake diagnostics");
+}
+
+void test_lsp_manager_fake_server_symbols_and_definition()
+{
+  auto const workspace = make_lsp_workspace("lsp-symbols");
+  auto client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
+      .argv = fake_lsp_argv(),
+      .workspace_root = workspace,
+      .request_timeout = std::chrono::milliseconds(3000),
+  });
+  expect(client.has_value(), "LSP symbols test starts fake server");
+  if (!client)
+    return;
+
+  auto document_symbols = (*client)->document_symbols(workspace / "main.cpp");
+  expect(document_symbols && document_symbols->size() == 2 && (*document_symbols)[0].name == "main" &&
+             (*document_symbols)[0].path == workspace / "main.cpp" && (*document_symbols)[1].container == "main",
+         "LSP manager requests and parses document symbols");
+
+  auto workspace_symbols = (*client)->workspace_symbols("main");
+  expect(workspace_symbols && workspace_symbols->size() == 1 && (*workspace_symbols)[0].name == "main" &&
+             (*workspace_symbols)[0].container == "global" && (*workspace_symbols)[0].path == workspace / "main.cpp",
+         "LSP manager requests and parses workspace symbols");
+
+  auto definitions = (*client)->definitions(workspace / "main.cpp", 0, 4);
+  expect(definitions && definitions->size() == 1 && (*definitions)[0].path == workspace / "main.cpp" &&
+              (*definitions)[0].range.start_line == 0 && (*definitions)[0].range.start_column == 4,
+          "LSP manager requests and parses definitions");
+
+  auto references = (*client)->references(workspace / "main.cpp", 0, 4);
+  expect(references && references->size() == 2 && (*references)[0].path == workspace / "main.cpp" &&
+             (*references)[1].range.start_column == 13,
+         "LSP manager sends didOpen before references and parses locations");
+}
+
+void test_lsp_manager_malformed_symbols_error()
+{
+  auto const workspace = make_lsp_workspace("lsp-malformed-symbols");
+  auto client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
+      .argv = fake_lsp_argv({"--malformed-symbols"}),
+      .workspace_root = workspace,
+      .request_timeout = std::chrono::milliseconds(3000),
+  });
+  expect(client.has_value(), "LSP malformed symbols test starts fake server");
+  auto symbols = client ? (*client)->document_symbols(workspace / "main.cpp")
+                        : ava::core::Result<std::vector<ava::lsp::Symbol>>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "missing client"))};
+  expect(!symbols && symbols.error().format().find("malformed") != std::string::npos,
+         "LSP manager reports malformed symbol responses cleanly");
 }
 
 void test_lsp_manager_malformed_response_error()
@@ -118,28 +234,35 @@ void test_lsp_manager_timeout_error()
 void test_lsp_manager_cancellation()
 {
   auto const startup_workspace = make_lsp_workspace("lsp-startup-cancel");
-  int startup_cancel_checks = 0;
+  auto const startup_cancel_pgid_file = startup_workspace / "lsp-startup-cancel-pgid.txt";
   auto startup_canceled = ava::lsp::SubprocessLspClient::start(
       ava::lsp::ServerConfig{
-          .argv = fake_lsp_argv({"--sleep-initialize"}),
+          .argv = fake_lsp_argv({"--sleep-initialize-marker", startup_cancel_pgid_file.generic_string()}),
           .workspace_root = startup_workspace,
           .request_timeout = std::chrono::milliseconds(1000),
       },
-      [&] { return ++startup_cancel_checks > 2; });
-  expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos, "LSP manager cancels hung startup before timeout");
+      [&] { return read_pid_file_for_test(startup_cancel_pgid_file).has_value(); });
+  auto const startup_cancel_pgid = read_pid_file_for_test(startup_cancel_pgid_file);
+  expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos && startup_cancel_pgid &&
+             wait_for_process_group_exit(*startup_cancel_pgid),
+         "LSP manager cancels hung startup and terminates the server process group before timeout");
 
   auto const diagnostics_workspace = make_lsp_workspace("lsp-diagnostics-cancel");
+  auto const diagnostics_cancel_pgid_file = diagnostics_workspace / "lsp-diagnostics-cancel-pgid.txt";
   auto client = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
-      .argv = fake_lsp_argv({"--sleep-diagnostics"}),
+      .argv = fake_lsp_argv({"--sleep-diagnostics-marker", diagnostics_cancel_pgid_file.generic_string()}),
       .workspace_root = diagnostics_workspace,
       .request_timeout = std::chrono::milliseconds(1000),
   });
   expect(client.has_value(), "LSP cancellation test starts sleeping fake server");
   if (client)
   {
-    int cancel_checks = 0;
-    auto diagnostics = (*client)->diagnostics(diagnostics_workspace / "main.cpp", [&] { return ++cancel_checks > 2; });
-    expect(!diagnostics && diagnostics.error().message().find("canceled") != std::string::npos, "LSP manager cancels hung diagnostics before timeout");
+    auto diagnostics =
+        (*client)->diagnostics(diagnostics_workspace / "main.cpp", [&] { return read_pid_file_for_test(diagnostics_cancel_pgid_file).has_value(); });
+    auto const diagnostics_cancel_pgid = read_pid_file_for_test(diagnostics_cancel_pgid_file);
+    expect(!diagnostics && diagnostics.error().message().find("canceled") != std::string::npos && diagnostics_cancel_pgid &&
+               wait_for_process_group_exit(*diagnostics_cancel_pgid),
+           "LSP manager cancels hung diagnostics and terminates the server process group before timeout");
   }
 }
 
@@ -196,7 +319,37 @@ void test_lsp_diagnostics_tool_and_dispatcher_json()
              dispatched->result_text.find("\"severity\":1") != std::string::npos &&
              dispatched->result_text.find("fake diagnostic from LSP") != std::string::npos &&
              dispatched->result_text.find("\"code\":\"AVA_FAKE\"") != std::string::npos,
-         "tool dispatcher returns expected lsp_diagnostics JSON");
+          "tool dispatcher returns expected lsp_diagnostics JSON");
+
+  auto document_symbols = dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_lsp_symbols", .name = "lsp_document_symbols", .arguments_json = "{\"path\":\"main.cpp\"}"});
+  expect(document_symbols && document_symbols->success &&
+             document_symbols->result_text.find("\"tool\":\"lsp_document_symbols\"") != std::string::npos &&
+             document_symbols->result_text.find("\"name\":\"main\"") != std::string::npos &&
+             document_symbols->result_text.find("\"container\":\"main\"") != std::string::npos,
+         "tool dispatcher returns expected lsp_document_symbols JSON");
+
+  auto workspace_symbols = dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "call_lsp_workspace", .name = "lsp_workspace_symbols", .arguments_json = "{\"query\":\"main\"}"});
+  expect(workspace_symbols && workspace_symbols->success &&
+             workspace_symbols->result_text.find("\"tool\":\"lsp_workspace_symbols\"") != std::string::npos &&
+             workspace_symbols->result_text.find("\"query\":\"main\"") != std::string::npos &&
+             workspace_symbols->result_text.find("\"path\":\"main.cpp\"") != std::string::npos,
+         "tool dispatcher returns expected lsp_workspace_symbols JSON");
+
+  auto definition = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_lsp_definition", .name = "lsp_definition", .arguments_json = "{\"path\":\"main.cpp\",\"line\":0,\"column\":4}"});
+  expect(definition && definition->success && definition->result_text.find("\"tool\":\"lsp_definition\"") != std::string::npos &&
+             definition->result_text.find("\"total_locations\":1") != std::string::npos &&
+              definition->result_text.find("\"path\":\"main.cpp\"") != std::string::npos,
+          "tool dispatcher returns expected lsp_definition JSON");
+
+  auto references = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_lsp_references", .name = "lsp_references", .arguments_json = "{\"path\":\"main.cpp\",\"line\":0,\"column\":4}"});
+  expect(references && references->success && references->result_text.find("\"tool\":\"lsp_references\"") != std::string::npos &&
+             references->result_text.find("\"total_locations\":2") != std::string::npos &&
+             references->result_text.find("\"path\":\"main.cpp\"") != std::string::npos,
+         "tool dispatcher returns expected lsp_references JSON");
 
   auto canceled_context = context;
   canceled_context.cancel_requested = [] { return true; };
@@ -243,7 +396,7 @@ void test_lsp_dispatcher_redacts_server_error_context()
   ava::agent::ToolDispatcher const dispatcher(context);
   auto dispatched =
       dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_lsp_redacted", .name = "lsp_diagnostics", .arguments_json = "{\"path\":\"main.cpp\"}"});
-  expect(dispatched && !dispatched->success && dispatched->result_text.find("LSP diagnostics failed") != std::string::npos &&
+  expect(dispatched && !dispatched->success && dispatched->result_text.find("LSP query failed") != std::string::npos &&
              dispatched->result_text.find(AVA_FAKE_LSP_SERVER_PATH) == std::string::npos &&
              dispatched->result_text.find(workspace.generic_string()) == std::string::npos,
          "provider-facing LSP errors redact local server command and workspace context");
@@ -269,7 +422,106 @@ void test_lsp_dispatcher_bounds_provider_json()
   });
   expect(long_path_result && !long_path_result->success && long_path_result->result_text.find("path is too long") != std::string::npos &&
              long_path_result->result_text.size() <= 64 * 1024,
-         "lsp_diagnostics rejects oversized provider path arguments before JSON reflection can exceed the cap");
+          "lsp_diagnostics rejects oversized provider path arguments before JSON reflection can exceed the cap");
+
+  ava::tools::ToolContext const symbol_context{.workspace_dir = workspace, .lsp_diagnostics_provider = std::make_shared<ManySymbolsProvider>(workspace)};
+  ava::agent::ToolDispatcher const symbol_dispatcher(symbol_context);
+  auto many_symbols = symbol_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_lsp_many_symbols", .name = "lsp_document_symbols", .arguments_json = "{\"path\":\"main.cpp\"}"});
+  expect(many_symbols && many_symbols->success && many_symbols->result_text.size() <= 64 * 1024 &&
+             many_symbols->result_text.find("\"truncated\":true") != std::string::npos &&
+             many_symbols->result_text.find("\"total_symbols\":300") != std::string::npos,
+         "lsp_document_symbols provider JSON is bounded and reports symbol truncation");
+}
+
+void test_lsp_configured_provider_loads_project_config_lazily()
+{
+  auto const workspace = make_lsp_workspace("lsp-configured-provider");
+  std::filesystem::create_directories(workspace / ".ava");
+  std::ofstream config(workspace / ".ava" / "lsp.json", std::ios::binary | std::ios::trunc);
+  config << "{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"" << ava::core::json::escape(AVA_FAKE_LSP_SERVER_PATH)
+         << "\"],\"file_extensions\":[\".cpp\"],\"timeout_ms\":3000}]}";
+  config.close();
+
+  auto provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
+      .global_config_file = workspace / "missing-global-lsp.json",
+      .project_config_file = workspace / ".ava" / "lsp.json",
+      .workspace_root = workspace,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        expect(prompt.operation == ava::permissions::Operation::LspServerLaunch,
+               "configured LSP provider requests explicit launch permission");
+        expect(!prompt.permission_request_id.empty(), "configured LSP launch prompts include a permission request id");
+        expect(prompt.command.rfind("[\"", 0) == 0 && prompt.command.find(AVA_FAKE_LSP_SERVER_PATH) != std::string::npos,
+               "configured LSP launch permission binds a JSON-array argv command");
+        return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Allow, "test allow"};
+      },
+  });
+  expect(provider && *provider != nullptr,
+         provider ? "configured LSP provider loads explicit project config"
+                  : "configured LSP provider loads explicit project config: " + provider.error().format());
+
+  ava::tools::ToolContext const context{.workspace_dir = workspace, .lsp_diagnostics_provider = provider ? *provider : nullptr};
+  auto schemas = ava::agent::ToolDispatcher::tool_schemas_json(context);
+  bool saw_lsp_references = false;
+  for (auto const& schema : schemas) {
+    if (schema.find("lsp_references") != std::string::npos) saw_lsp_references = true;
+  }
+  expect(saw_lsp_references, "configured LSP provider exposes LSP schemas without launching eagerly");
+
+  ava::agent::ToolDispatcher const dispatcher(context);
+  auto references = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_configured_refs", .name = "lsp_references", .arguments_json = "{\"path\":\"main.cpp\",\"line\":0,\"column\":4}"});
+  expect(references && references->success && references->result_text.find("\"total_locations\":2") != std::string::npos,
+         "configured LSP provider launches lazily and dispatches references");
+  expect(references && !references->payload.permission_request_ids.empty(),
+         "configured LSP launch permission request id is attached to the tool result payload");
+
+  auto no_match = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_configured_no_match", .name = "lsp_diagnostics", .arguments_json = "{\"path\":\"README.md\"}"});
+  expect(no_match && !no_match->success && no_match->result_text.find("LSP query failed") != std::string::npos,
+         "configured LSP provider rejects unmatched file extensions through redacted tool error");
+}
+
+void test_lsp_configured_provider_rejects_invalid_config()
+{
+  auto const workspace = make_lsp_workspace("lsp-invalid-config");
+  std::filesystem::create_directories(workspace / ".ava");
+  std::ofstream config(workspace / ".ava" / "lsp.json", std::ios::binary | std::ios::trunc);
+  config << "{\"version\":1,\"servers\":[{\"id\":\"bad id\",\"argv\":[\"server\"]}]}";
+  config.close();
+
+  auto provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
+      .global_config_file = workspace / "missing-global-lsp.json",
+      .project_config_file = workspace / ".ava" / "lsp.json",
+      .workspace_root = workspace,
+  });
+  expect(!provider && provider.error().message().find("id") != std::string::npos,
+         !provider ? "configured LSP provider rejects invalid server ids before exposing tools: " + provider.error().format()
+                   : "configured LSP provider rejects invalid server ids before exposing tools");
+
+  auto const strict_workspace = make_lsp_workspace("lsp-strict-config");
+  std::filesystem::create_directories(strict_workspace / ".ava");
+  auto strict_config_path = strict_workspace / ".ava" / "lsp.json";
+  auto rejects_config = [&](std::string_view content, std::string_view expected) {
+    std::ofstream strict_config(strict_config_path, std::ios::binary | std::ios::trunc);
+    strict_config << content;
+    strict_config.close();
+    auto strict_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
+        .global_config_file = strict_workspace / "missing-global-lsp.json",
+        .project_config_file = strict_config_path,
+        .workspace_root = strict_workspace,
+    });
+    expect(!strict_provider && strict_provider.error().message().find(expected) != std::string::npos,
+           !strict_provider ? "configured LSP provider rejects malformed typed config fields: " + strict_provider.error().format()
+                            : "configured LSP provider rejects malformed typed config fields");
+  };
+  rejects_config("{\"version\":1.5,\"servers\":[]}", "version");
+  rejects_config("{\"version\":1,\"servers\":[123]}", "servers");
+  rejects_config("{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"server\",123]}]}", "argv");
+  rejects_config("{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"server\"],\"file_extensions\":[\".cpp\",123]}]}", "file_extensions");
+  rejects_config("{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"server\"],\"language_id\":123}]}", "language_id");
+  rejects_config("{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"server\"],\"timeout_ms\":1000.5}]}", "timeout_ms");
+  rejects_config("{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"server\"]},{\"id\":\"fake\",\"argv\":[\"other\"]}]}", "duplicated");
 }
 
 }  // namespace
@@ -277,6 +529,8 @@ void test_lsp_dispatcher_bounds_provider_json()
 void run_lsp_tests()
 {
   test_lsp_manager_fake_server_diagnostics();
+  test_lsp_manager_fake_server_symbols_and_definition();
+  test_lsp_manager_malformed_symbols_error();
   test_lsp_manager_malformed_response_error();
   test_lsp_manager_crash_error();
   test_lsp_manager_timeout_error();
@@ -286,4 +540,6 @@ void run_lsp_tests()
   test_lsp_file_uri_escapes_encoded_separators();
   test_lsp_dispatcher_redacts_server_error_context();
   test_lsp_dispatcher_bounds_provider_json();
+  test_lsp_configured_provider_loads_project_config_lazily();
+  test_lsp_configured_provider_rejects_invalid_config();
 }

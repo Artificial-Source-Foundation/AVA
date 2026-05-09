@@ -10,5 +10,6 @@
   "command": "demo:echo",
   "resolution": "deny",
   "resolution_source": "resolver",
-  "resolution_reason": "denied by contract test"
+  "resolution_reason": "denied by contract test",
+  "actor": "agent"
 }

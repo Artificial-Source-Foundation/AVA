@@ -72,6 +72,8 @@ ava::tui::ToolTimelineStatus tui_tool_status(ava::agent::ToolTimelineStatus stat
       return ava::tui::ToolTimelineStatus::Running;
     case ava::agent::ToolTimelineStatus::Success:
       return ava::tui::ToolTimelineStatus::Success;
+    case ava::agent::ToolTimelineStatus::Canceled:
+      return ava::tui::ToolTimelineStatus::Error;
     case ava::agent::ToolTimelineStatus::Error:
       return ava::tui::ToolTimelineStatus::Error;
   }

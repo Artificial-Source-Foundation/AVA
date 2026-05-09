@@ -18,9 +18,10 @@ ava::core::VoidResult publish_tool_progress(AgentLoopOptions const& options, Too
 
 void populate_tool_timeline_metadata(ToolTimelineEntry& entry, ToolDispatchResult const& result)
 {
-  auto const& payload = result.payload;
-  entry.result_json = result.result_text;
-  entry.structured_result_json = serialize_tool_result_payload_json(result);
+  auto const materialized = with_tool_result_payload(result);
+  auto const& payload = materialized.payload;
+  entry.result_json = materialized.result_text;
+  entry.structured_result_json = serialize_tool_result_payload_json(materialized);
   entry.content_type = payload.content_type;
   entry.error_category = payload.error_category;
   entry.error_code = payload.error_code;

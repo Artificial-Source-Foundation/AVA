@@ -2,7 +2,7 @@
 
 This document defines AVA's backend maturity target. External systems are behavior references only; AVA should match the useful backend capability shape while preserving AVA's C++23, one-binary, terminal-first, permissioned local-agent architecture.
 
-This is not a frontend polish goal. The backend baseline is about semantic contracts, runtime correctness, provider/tool/session robustness, extension containment, and tests. UI layout, cards, borders, modals, colors, and terminal rendering remain frontend-owned.
+This is not a frontend polish goal. The backend baseline is about semantic contracts, runtime correctness, provider/tool/session robustness, extension containment, and tests. UI layout, cards, borders, modals, colors, and terminal rendering remain Carlo-owned frontend work.
 
 ## Baseline Definition
 

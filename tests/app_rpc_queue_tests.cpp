@@ -1,10 +1,13 @@
+#include "ava/app/rpc_mode.h"
+#include "ava/app/runtime.h"
+
+#include "ava/config/auth.h"
+
+#include "ava/provider/openai_provider.h"
+
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
-#include "ava/app/rpc_mode.h"
-#include "ava/app/runtime.h"
-#include "ava/config/auth.h"
-#include "ava/provider/openai_provider.h"
 
 #include <chrono>
 #include <filesystem>
@@ -36,23 +39,31 @@ void test_app_rpc_cancel_affects_subsequent_prompt()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({});
+  ava::tests::FakeTransport transport({sse_response(final_text_sse("prompt after cancel"))});
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
-  std::istringstream in(
-      "{\"id\":\"cancel\",\"type\":\"cancel\"}\n"
-      "{\"id\":\"state\",\"type\":\"get_state\"}\n"
-      "{\"id\":\"prompt\",\"type\":\"prompt\",\"message\":\"should cancel\"}\n");
-  std::ostringstream out;
-  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
-  auto const jsonl = out.str();
-  expect(result.has_value(), "RPC cancel loop completes after canceled prompt response");
-  expect(transport.requests().empty(), "RPC cancel flag prevents subsequent prompt provider request");
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult result;
+  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  input_buffer.push("{\"id\":\"cancel\",\"type\":\"cancel\"}\n");
+  bool const canceled = output_buffer.wait_contains("\"id\":\"cancel\"", std::chrono::seconds(2));
+  input_buffer.push("{\"id\":\"state\",\"type\":\"get_state\"}\n");
+  bool const state_reported_cancel = output_buffer.wait_contains("\"cancel_requested\":true", std::chrono::seconds(2));
+  input_buffer.push("{\"id\":\"prompt\",\"type\":\"prompt\",\"message\":\"should run\"}\n");
+  bool const completed = output_buffer.wait_contains("prompt after cancel", std::chrono::seconds(2));
+  input_buffer.close();
+  rpc_thread.join();
+  auto const jsonl = output_buffer.str();
+  expect(result.has_value(), "RPC cancel loop completes after prompt response");
+  expect(transport.requests().size() == 1, "RPC stale cancel flag is cleared when a subsequent prompt starts");
   expect(jsonl.find("\"id\":\"cancel\"") != std::string::npos && jsonl.find("\"cancel_requested\":true") != std::string::npos &&
-             jsonl.find("\"name\":\"cancel_requested\"") != std::string::npos && jsonl.find("\"name\":\"canceled\"") != std::string::npos &&
-             jsonl.find("\"id\":\"prompt\"") != std::string::npos && jsonl.find("agent loop canceled") != std::string::npos &&
-             jsonl.find("\"success\":false") != std::string::npos,
-         "RPC cancel response updates state and canceled prompts return protocol errors");
+             jsonl.find("\"name\":\"cancel_requested\"") != std::string::npos &&
+             jsonl.find("\"payload_type\":\"cancellation\"") != std::string::npos && canceled && state_reported_cancel && completed &&
+             jsonl.find("\"id\":\"prompt\"") != std::string::npos && jsonl.find("\"success\":true") != std::string::npos,
+         "RPC idle cancel updates state until the next accepted prompt clears it and runs normally");
 }
 
 void test_app_rpc_active_prompt_cancel_unblocks_pending_permission()
@@ -159,8 +170,8 @@ void test_app_rpc_steer_applies_before_next_provider_request()
   expect(transport.requests().size() == 2 && transport.requests()[1].body.find("steer this turn") != std::string::npos,
          "RPC steer is appended before the next provider request after tool completion");
   expect(jsonl.find("\"name\":\"steer_queued\"") != std::string::npos && jsonl.find("\"name\":\"steer_applied\"") != std::string::npos &&
-             jsonl.find("\"id\":\"s1\"") != std::string::npos && jsonl.find("\"success\":true") != std::string::npos &&
-             jsonl.find("after steer") != std::string::npos,
+             jsonl.find("\"payload_type\":\"queue\"") != std::string::npos && jsonl.find("\"id\":\"s1\"") != std::string::npos &&
+             jsonl.find("\"success\":true") != std::string::npos && jsonl.find("after steer") != std::string::npos,
          "RPC steer emits queued/applied events and active prompt completes");
 }
 
@@ -484,9 +495,11 @@ void test_app_rpc_cancel_clears_queued_steer_and_follow_up()
   bool const requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
   expect(requested, "RPC queued cancel test observes active permission wait");
   input_buffer.push("{\"id\":\"s1\",\"type\":\"steer\",\"message\":\"never apply\"}\n");
+  input_buffer.push("{\"id\":\"s2\",\"type\":\"steer\",\"message\":\"also never apply\"}\n");
   input_buffer.push("{\"id\":\"fu1\",\"type\":\"follow_up\",\"message\":\"never run\"}\n");
-  bool const queued = output_buffer.wait_contains("\"name\":\"follow_up_queued\"", std::chrono::seconds(2));
-  expect(queued, "RPC queued cancel test observes queued follow-up");
+  input_buffer.push("{\"id\":\"fu2\",\"type\":\"follow_up\",\"message\":\"also never run\"}\n");
+  bool const queued = output_buffer.wait_contains("\"request_id\":\"fu2\"", std::chrono::seconds(2));
+  expect(queued, "RPC queued cancel test observes all queued follow-ups before cancellation");
   input_buffer.push("{\"id\":\"cancel\",\"type\":\"cancel\"}\n");
   input_buffer.close();
   rpc_thread.join();
@@ -494,10 +507,21 @@ void test_app_rpc_cancel_clears_queued_steer_and_follow_up()
   auto const jsonl = output_buffer.str();
   expect(result.has_value(), "RPC queued cancel loop exits successfully");
   expect(transport.requests().size() == 1, "RPC cancel prevents queued steer/follow-up provider requests");
-  expect(jsonl.find("\"name\":\"steer_skipped\"") != std::string::npos && jsonl.find("\"name\":\"follow_up_skipped\"") != std::string::npos &&
-             jsonl.find("\"cleared_steer\":1") != std::string::npos && jsonl.find("\"cleared_follow_up\":1") != std::string::npos &&
-             jsonl.find("\"id\":\"fu1\"") != std::string::npos && jsonl.find("agent loop canceled") != std::string::npos,
-         "RPC cancel clears queued steer/follow-up items and reports skipped outcomes");
+  expect(count_substrings(jsonl, "\"name\":\"steer_queued\"") == 2 && count_substrings(jsonl, "\"name\":\"follow_up_queued\"") == 2 &&
+             count_substrings(jsonl, "\"name\":\"steer_skipped\"") == 2 && count_substrings(jsonl, "\"name\":\"follow_up_skipped\"") == 2,
+         "RPC active cancel emits one queued and skipped event per queued steer/follow-up");
+  expect(
+      jsonl.find("\"request_id\":\"cancel\",\"correlation_id\":\"p1\",\"name\":\"cancel_requested\"") != std::string::npos &&
+          jsonl.find(
+              "\"payload_type\":\"cancellation\",\"payload\":{\"active_run\":true,\"cleared_steer\":2,\"cleared_follow_up\":2,\"active_request_id\":\"p1\"}") !=
+              std::string::npos &&
+          jsonl.find("\"id\":\"cancel\",\"type\":\"response\",\"success\":true,\"result\":{\"cancel_requested\":true,\"active_run\":true,\"cleared_steer\":2,"
+                     "\"cleared_follow_up\":2}}") != std::string::npos,
+      "RPC active cancel reports stable active-run cancellation payload counters and active request id");
+  expect(count_substrings(jsonl, "\"id\":\"fu1\",\"type\":\"response\",\"success\":false") == 1 &&
+             count_substrings(jsonl, "\"id\":\"fu2\",\"type\":\"response\",\"success\":false") == 1 && count_substrings(jsonl, "agent loop canceled") >= 3 &&
+             jsonl.find("\"name\":\"follow_up_started\"") == std::string::npos && jsonl.find("\"name\":\"steer_applied\"") == std::string::npos,
+         "RPC active cancel clears queued follow-up errors without starting queued turns or applying steer");
 }
 
 void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch()

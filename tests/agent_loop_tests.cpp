@@ -124,6 +124,46 @@ void test_agent_loop_model_capability_gating()
          "agent loop disables streaming for models without streaming support");
 }
 
+void test_agent_loop_image_attachment_load_failure_records_error()
+{
+  auto const root = temp_root() / "agent-image-load-failure";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{
+      .root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "image-load-failure"});
+  expect(store.append(ava::session::SessionEntry{
+             .id = "prior_image",
+             .parent_id = "",
+             .type = ava::session::EntryType::UserMessage,
+             .timestamp = "2026-05-08T00:00:00Z",
+             .data_json = R"({"text":"look","attachments":[{"id":"img_missing","type":"image","mime_type":"image/png","byte_size":5,"sha256":"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","storage_path":"attachments/missing.png"}]})"})
+             .has_value(),
+         "agent loop image load failure test appends prior image message");
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"should not call\"}\n\n"
+                    "data: [DONE]\n\n")});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                          .mode = ava::agent::Mode::Build,
+                                                          .provider_id = "openai",
+                                                          .model_id = "gpt-image",
+                                                          .system_prompt = "system prompt",
+                                                          .access_token = "token",
+                                                          .model_input_modalities = {"text", "image"}});
+  auto result = loop.run_turn("continue", store, provider, transport);
+  expect(!result && result.error().message().find("image attachment") != std::string::npos,
+         "agent loop returns attachment load errors before provider calls");
+  expect(transport.requests().empty(), "agent loop does not call provider when attachment loading fails");
+  auto entries = store.load();
+  expect(entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+           return entry.type == ava::session::EntryType::Error && entry.data_json.find("image attachment") != std::string::npos;
+         }),
+         "agent loop records image attachment load errors in the session");
+}
+
 void test_agent_loop_usage_and_cost_persistence()
 {
   auto const root = temp_root() / "agent-usage";
@@ -857,6 +897,7 @@ void run_agent_loop_tests()
 {
   test_agent_loop_text_only_turn();
   test_agent_loop_model_capability_gating();
+  test_agent_loop_image_attachment_load_failure_records_error();
   test_agent_loop_usage_and_cost_persistence();
   test_agent_loop_tool_turn_and_continuation();
   test_agent_loop_permission_resolver_threads_to_tools();

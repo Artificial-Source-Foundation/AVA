@@ -22,6 +22,7 @@ namespace ava::app::rpc {
 
 [[nodiscard]] std::string state_result_json(RuntimeSession const& session, bool cancel_requested);
 [[nodiscard]] ava::core::Result<std::string> list_sessions_result_json(RuntimeSession const& session);
+[[nodiscard]] ava::core::Result<std::string> session_tree_result_json(RuntimeSession const& session);
 [[nodiscard]] ava::core::Result<std::string> list_models_result_json(RuntimeSession const& session);
 [[nodiscard]] std::string command_result_json(CommandResult const& result);
 [[nodiscard]] std::string command_registry_result_json(CommandRegistry const& registry);

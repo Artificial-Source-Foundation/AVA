@@ -272,6 +272,7 @@ struct ComposerSnapshot
   std::size_t selected_slash_command_index = 0;
   bool slash_palette_suppressed = false;
   std::size_t transcript_scroll_offset = 0;
+  std::size_t transcript_new_output_count = 0;
   std::size_t width = 80;
   std::size_t height = 24;
   std::size_t input_cursor = std::string::npos;

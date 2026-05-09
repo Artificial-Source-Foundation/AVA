@@ -20,7 +20,7 @@ Tool metadata should stay generic by default, matching the lean backend maturity
 
 For the backend MVP, the tool contract also becomes the foundation for plugin and MCP tools. Built-in tools, plugin tools, and MCP tools must share one registry path for schema validation, permission checks, source identity, event emission, audit records, cancellation, and output bounds. This registry work must preserve current built-in tool behavior before external tools are allowed through it.
 
-Image reading is deferred from the core text `read` tool for now. Supporting images would require provider modality metadata, session attachment shape, and model-specific payload handling; revisit it when multimodal provider capabilities are part of the provider/model catalog.
+Image reading remains deferred from the core text `read` tool. Multimodal image input now flows through session attachment metadata and provider serializers instead: AVA validates/copies stored attachments, reconstructs provider-neutral image content parts, and serializes verified bytes only for image-capable providers/models.
 
 Every tool result should include:
 
@@ -194,28 +194,35 @@ Rules:
 - Only available in interactive mode.
 - In non-interactive mode, returns unavailable with guidance.
 
-### lsp_diagnostics
+### LSP code intelligence
 
-Queries diagnostics for one file from a locally configured language server.
+Queries diagnostics, document symbols, workspace symbols, definitions, and references from a locally configured language server.
 
 Inputs:
 
-- `path`
+- `lsp_diagnostics`: `path`
+- `lsp_document_symbols`: `path`
+- `lsp_workspace_symbols`: `query`
+- `lsp_definition`: `path`, zero-based `line`, zero-based `column`
+- `lsp_references`: `path`, zero-based `line`, zero-based `column`
 
 Rules:
 
-- Request `lsp.query` permission for the target path before any server query.
+- Request `lsp.query` permission for the target path before any server query. Starting a configured LSP subprocess also requests explicit high-risk `lsp.server.launch` permission for the selected argv vector.
 - Treat permission as read-like: deny secret paths, ask outside the workspace, and allow workspace files by default.
 - Provider-visible input includes only the file path. Server command argv is local configuration/test harness state and is not model-controlled.
-- Advertise the provider schema only when a local diagnostics provider is configured; otherwise the tool is not available to model calls.
-- Start the configured server with an explicit argv vector and workspace root; do not use a shell.
-- Use JSON-RPC `Content-Length` framing, initialize the server, then request `textDocument/diagnostic` for the file URI.
+- Advertise the provider schema only when an explicit LSP provider config is present; otherwise the tool is not available to model calls.
+- Load LSP server config from AVA-owned `lsp.json` files (`$AVA_CONFIG_DIR/lsp.json` and workspace `.ava/lsp.json`). The supported schema is `version:1` plus a bounded `servers[]` list with `id`, explicit `argv[]`, optional `file_extensions[]`, optional `language_id`, and `timeout_ms`.
+- Validate unique server ids, argv strings, extension filters, language ids, config size, regular-file status, strict integer fields, and timeout bounds before exposing LSP schemas. Config symlinks, mixed-type arrays, wrong known-field types, duplicate ids, and control-byte arguments are rejected.
+- Start the selected server lazily after the tool's `lsp.query` permission and `lsp.server.launch` permission have already been granted, with an explicit argv vector and workspace root; do not use a shell and do not launch servers during schema discovery.
+- Use JSON-RPC `Content-Length` framing, initialize the server, then request the matching LSP method: `textDocument/diagnostic`, `textDocument/documentSymbol`, `workspace/symbol`, `textDocument/definition`, or `textDocument/references`.
+- Before position-based definition/reference requests, send a bounded full-text `textDocument/didOpen` notification for the on-disk workspace file. Unsaved buffers and incremental sync remain deferred.
 - Percent-encode file URI path bytes while preserving real path separators, so literal encoded separators in filenames cannot cross the permission boundary.
 - Bound request timeouts and kill the LSP child process group on timeout or client destruction.
-- Return bounded structured diagnostics: `severity`, `message`, `line`, `column`, and `code`, plus `truncated` and `total_diagnostics` when provider-facing output is capped.
+- Return bounded structured diagnostics, symbols, or locations. Symbol, definition, and reference results normalize in-workspace file URIs to workspace-relative paths and include stable LSP ranges.
 - Redact local server command and workspace details from provider-visible LSP failures; keep detailed process context for local diagnostics only.
 
-First-slice non-goals: language-server discovery/config catalogs, symbols, definitions, references, workspace-wide diagnostics, TUI rendering, plugin/MCP integration, provider registry changes, and new external dependencies.
+Current non-goals: automatic language-server installation/catalog selection, workspace-wide diagnostics, incremental or unsaved-buffer document sync, TUI rendering, plugin/MCP integration, provider registry changes, and new external dependencies.
 
 ## Permission Integration
 
@@ -228,7 +235,7 @@ Examples:
 - File deletion requests `file.delete` and is not part of MVP write/edit behavior.
 - `bash` requests `shell.run` and may request `shell.destructive` based on command scan.
 - `webfetch` requests `network.fetch`.
-- `lsp_diagnostics` requests `lsp.query` for the target file path.
+- LSP diagnostics/symbols/definitions/references request `lsp.query` for the target file path; workspace symbol search uses the workspace root as the permission target and the query as command context. Configured server startup separately requests `lsp.server.launch` with the exact JSON-array encoded argv vector in `command`.
 
 ## Output Truncation
 
@@ -262,7 +269,7 @@ Required regression areas:
 - Bash output truncation.
 - Search `.gitignore` pruning, provider-inaccessible `no_ignore`, spill files, and `tool_progress` events.
 - Webfetch URL validation, DNS pinning, redirect-disabled behavior, content-type filtering, and headless `network.fetch` permission.
-- LSP diagnostics permission, file URI encoding, timeout/size caps, provider error redaction, and provider JSON bounds.
+- LSP diagnostics/symbols/definitions/references permission, bounded `didOpen` sync, file URI encoding/decoding, timeout/size caps, provider error redaction, malformed response handling, and provider JSON bounds.
 - OpenAI Responses tool-call event parsing, including `response.output_item.added` function-call items.
 - Live headless smoke for every model-visible tool class: read/search/webfetch in print mode; write/edit/apply_patch/bash/question through RPC resolver replies; LSP through fake-server tests unless a local diagnostics provider is configured.
 - Permission allow/ask/deny behavior.

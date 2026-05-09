@@ -1,8 +1,12 @@
 add_library(ava_session
+  "attachments.cpp"
   "compaction.cpp"
   "export.cpp"
   "record.cpp"
+  "session_branch.cpp"
+  "session_metadata.cpp"
   "session_store.cpp"
+  "session_tree.cpp"
   "stats.cpp"
   "validation.cpp"
   "validation_fields.cpp"

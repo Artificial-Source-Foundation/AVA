@@ -391,7 +391,7 @@ bool is_unsupported_session_version_error(ava::core::Error const& error)
 
 ava::core::Result<std::string> serialize_session_entry_line(SessionEntry const& entry)
 {
-  std::string line = "{\"version\":" + std::to_string(kCurrentSessionEntryVersion) + ",";
+  std::string line = "{\"version\":" + std::to_string(entry.version) + ",";
   line += "\"id\":\"" + json_escape(entry.id) + "\",";
   line += "\"parent_id\":\"" + json_escape(entry.parent_id) + "\",";
   line += "\"type\":\"" + std::string(to_string(entry.type)) + "\",";

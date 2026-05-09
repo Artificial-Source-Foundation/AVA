@@ -38,10 +38,13 @@ constexpr std::array kActions = {TuiAction::Submit,
                                  TuiAction::DetailsToggle,
                                  TuiAction::PageUp,
                                  TuiAction::PageDown,
-                                 TuiAction::ModeToggle,
-                                 TuiAction::Interrupt,
-                                 TuiAction::Exit,
-                                 TuiAction::VariantCycle};
+                                  TuiAction::ModeToggle,
+                                  TuiAction::Interrupt,
+                                  TuiAction::Exit,
+                                  TuiAction::VariantCycle,
+                                  TuiAction::MessagePrev,
+                                  TuiAction::MessageNext,
+                                  TuiAction::JumpToBottom};
 
 std::string normalize_token(std::string_view text)
 {
@@ -365,10 +368,13 @@ TuiKeyBindings default_key_bindings()
                                      {TuiAction::DetailsToggle, {}},
                                      {TuiAction::PageUp, {Key::PageUp}},
                                      {TuiAction::PageDown, {Key::PageDown}},
-                                     {TuiAction::ModeToggle, {Key::Tab}},
-                                     {TuiAction::Interrupt, {Key::CtrlC}},
-                                     {TuiAction::Exit, {Key::CtrlD}},
-                                     {TuiAction::VariantCycle, {Key::CtrlT}}}};
+                                      {TuiAction::ModeToggle, {Key::Tab}},
+                                      {TuiAction::Interrupt, {Key::CtrlC}},
+                                      {TuiAction::Exit, {Key::CtrlD}},
+                                      {TuiAction::VariantCycle, {Key::CtrlT}},
+                                      {TuiAction::MessagePrev, {}},
+                                      {TuiAction::MessageNext, {}},
+                                      {TuiAction::JumpToBottom, {}}}};
 }
 
 std::optional<TuiAction> action_for_key(TuiKeyBindings const& bindings, Key key)
@@ -582,6 +588,12 @@ std::string action_name(TuiAction action)
       return "exit";
     case TuiAction::VariantCycle:
       return "variant_cycle";
+    case TuiAction::MessagePrev:
+      return "message_prev";
+    case TuiAction::MessageNext:
+      return "message_next";
+    case TuiAction::JumpToBottom:
+      return "jump_to_bottom";
   }
   return "unknown";
 }
@@ -654,6 +666,12 @@ std::string action_description(TuiAction action)
       return "Exit the TUI";
     case TuiAction::VariantCycle:
       return "Cycle model/variant choices when that backend support exists";
+    case TuiAction::MessagePrev:
+      return "Jump to the previous transcript message boundary";
+    case TuiAction::MessageNext:
+      return "Jump to the next transcript message boundary";
+    case TuiAction::JumpToBottom:
+      return "Return the transcript to the live tail";
   }
   return "Unknown action";
 }

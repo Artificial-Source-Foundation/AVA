@@ -1,10 +1,13 @@
+#include "ava/tools/file_tools.h"
+
 #include "ava/tools/diff_utils.h"
 #include "ava/tools/edit_match.h"
 #include "ava/tools/file_io.h"
-#include "ava/tools/file_tools.h"
 #include "ava/tools/mutation_queue.h"
+
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/permissions/permission_rules.h"
 
 #include <algorithm>
 #include <memory>
@@ -62,10 +65,12 @@ PermissionAuditEvent audit_event(ToolContext const& context, std::string permiss
                               .reason = decision.reason,
                               .risk = decision.risk,
                               .target_path = target_path,
-                              .command = std::string(command),
-                              .resolution = "",
-                              .resolution_source = "policy",
-                              .resolution_reason = ""};
+                               .command = std::string(command),
+                               .resolution = "",
+                               .resolution_source = "policy",
+                               .resolution_reason = "",
+                               .actor = context.permission_actor.empty() ? std::string("agent") : context.permission_actor,
+                               .rule_id = ""};
 }
 
 ava::core::Error permission_denied_error(std::string_view error_message, ava::permissions::PermissionDecision const& decision,
@@ -98,6 +103,75 @@ std::shared_ptr<MutationQueue> effective_mutation_queue(ToolContext const& conte
   if (context.mutation_queue)
     return context.mutation_queue;
   return default_mutation_queue();
+}
+
+std::filesystem::path normalized_absolute_path(std::filesystem::path const& path)
+{
+  std::error_code canonical_error;
+  auto const canonical = std::filesystem::weakly_canonical(path, canonical_error);
+  if (!canonical_error)
+    return canonical;
+  std::error_code absolute_error;
+  auto absolute = std::filesystem::absolute(path, absolute_error);
+  if (absolute_error)
+    absolute = path;
+  return absolute.lexically_normal();
+}
+
+void append_permission_rule_store_for_config_dir(std::vector<ava::permissions::PermissionRuleStore>& stores,
+                                                 ToolContext const& context,
+                                                 std::filesystem::path const& config_dir)
+{
+  if (context.workspace_dir.empty() || config_dir.empty())
+    return;
+  stores.push_back(ava::permissions::PermissionRuleStore{.global_rules_file = config_dir / "permission-rules.json",
+                                                         .workspace_rules_file = context.workspace_dir / ".ava" / "permission-rules.json",
+                                                         .workspace_dir = context.workspace_dir});
+}
+
+std::vector<ava::permissions::PermissionRuleStore> context_permission_rule_stores(ToolContext const& context)
+{
+  std::vector<ava::permissions::PermissionRuleStore> stores;
+  if (!context.mcp_global_config_file.empty())
+  {
+    append_permission_rule_store_for_config_dir(stores, context, context.mcp_global_config_file.parent_path());
+  }
+  if (!context.plugin_global_plugins_dir.empty())
+  {
+    append_permission_rule_store_for_config_dir(stores, context, context.plugin_global_plugins_dir.parent_path());
+  }
+  return stores;
+}
+
+bool is_legacy_workspace_permission_rules_path(ToolContext const& context, std::filesystem::path const& path)
+{
+  if (context.workspace_dir.empty())
+    return false;
+  auto const protected_path = normalized_absolute_path(context.workspace_dir / ".ava" / "permission-rules.json");
+  return normalized_absolute_path(path) == protected_path;
+}
+
+bool is_enforceable_permission_rules_path(ToolContext const& context, std::filesystem::path const& path)
+{
+  if (ava::permissions::is_registered_enforceable_permission_rules_file(path))
+    return true;
+  for (auto const& store : context_permission_rule_stores(context))
+  {
+    if (ava::permissions::is_enforceable_permission_rules_file(store, path))
+      return true;
+  }
+  return false;
+}
+
+ava::core::VoidResult reject_permission_rules_file_mutation(ToolContext const& context, std::filesystem::path const& path)
+{
+  if (!is_legacy_workspace_permission_rules_path(context, path) && !is_enforceable_permission_rules_path(context, path))
+    return {};
+
+  auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "permission rule files cannot be modified by normal file tools");
+  error.with_context("path", normalized_absolute_path(path).string());
+  error.with_context("management", "use permission_rule_add or permission_rule_remove RPC commands");
+  return std::unexpected(std::move(error));
 }
 
 ava::core::Result<std::optional<PermissionDiffPreview>> write_permission_diff_preview(ToolContext const& context, std::filesystem::path const& path,
@@ -146,6 +220,14 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
                                         std::string_view command, std::string_view tool_name, std::string_view error_message, std::string_view diff_preview,
                                         bool diff_truncated)
 {
+  if (operation == ava::permissions::Operation::EditFile)
+  {
+    if (auto protected_file = reject_permission_rules_file_mutation(context, target_path); !protected_file)
+    {
+      return protected_file;
+    }
+  }
+
   auto const request_tool_name = effective_tool_name(context, operation, tool_name);
   auto const permission_request_id = ava::core::make_id("permreq");
   auto const decision = ava::permissions::decide(ava::permissions::PermissionRequest{
@@ -201,12 +283,17 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   });
 
   auto outcome_event = policy_event;
-  outcome_event.resolution_source = resolution && *resolution == ava::permissions::PermissionResolution::AllowSessionGrant ? "session_grant" : "resolver";
+  outcome_event.resolution_source =
+      resolution && !resolution->resolution_source.empty()
+          ? resolution->resolution_source
+          : (resolution && *resolution == ava::permissions::PermissionResolution::AllowSessionGrant ? "session_grant" : "resolver");
   if (!resolution)
     outcome_event.resolution_source = "resolver_failed";
   outcome_event.resolution = resolution ? ava::permissions::to_string(*resolution) : "deny";
   if (resolution)
     outcome_event.resolution_reason = resolution->reason;
+  if (resolution)
+    outcome_event.rule_id = resolution->rule_id;
   if (auto audited = record_permission_audit(context, outcome_event); !audited)
   {
     return std::unexpected(std::move(audited.error()));
@@ -252,6 +339,14 @@ std::string permission_audit_data_json(PermissionAuditEvent const& event)
   {
     data += ",\"resolution_reason\":\"" + ava::core::json::escape(event.resolution_reason) + "\"";
   }
+  if (!event.actor.empty())
+  {
+    data += ",\"actor\":\"" + ava::core::json::escape(event.actor) + "\"";
+  }
+  if (!event.rule_id.empty())
+  {
+    data += ",\"rule_id\":\"" + ava::core::json::escape(event.rule_id) + "\"";
+  }
   data += '}';
   return data;
 }
@@ -282,6 +377,10 @@ ava::core::Result<FileMutationResult> write_file(ToolContext const& context, std
   if (auto canceled = check_canceled(context, "write_file", path); !canceled)
   {
     return std::unexpected(std::move(canceled.error()));
+  }
+  if (auto protected_file = reject_permission_rules_file_mutation(context, path); !protected_file)
+  {
+    return std::unexpected(std::move(protected_file.error()));
   }
   std::optional<PermissionDiffPreview> preview;
   if (!options.permission_already_checked)
@@ -321,6 +420,10 @@ ava::core::Result<FileMutationResult> edit_file(ToolContext const& context, std:
   if (auto canceled = check_canceled(context, "edit_file", path); !canceled)
   {
     return std::unexpected(std::move(canceled.error()));
+  }
+  if (auto protected_file = reject_permission_rules_file_mutation(context, path); !protected_file)
+  {
+    return std::unexpected(std::move(protected_file.error()));
   }
   auto const read_decision = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::ReadFile,

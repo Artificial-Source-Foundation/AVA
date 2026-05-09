@@ -39,8 +39,10 @@ add_executable(ava_tests
   "events_tests.cpp"
   "lsp_tests.cpp"
   "mcp_tests.cpp"
+  "permission_rules_tests.cpp"
   "plugin_tests.cpp"
   "provider_anthropic_tests.cpp"
+  "provider_live_smoke_tests.cpp"
   "provider_openai_tests.cpp"
   "session_tests.cpp"
   "tools_file_tests.cpp"
@@ -76,12 +78,14 @@ set(AVA_TEST_SUITES
   app_runtime
   provider_openai
   provider_anthropic
+  provider_live_smoke
   agent_loop_resilience
   agent_loop
   agent_tool_dispatcher
   lsp
   plugin
   mcp
+  permission_rules
   tui_composer
 )
 foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)

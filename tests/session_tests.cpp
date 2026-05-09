@@ -1,35 +1,49 @@
-#include "tests/support/fake_transport.h"
-#include "tests/support/test_harness.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
+
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_dispatcher.h"
+
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/search_tools.h"
+
 #include "ava/tui/composer.h"
 #include "ava/tui/terminal.h"
+
 #include "ava/config/auth.h"
 #include "ava/config/model_config.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/config/prompt_config.h"
 #include "ava/config/xdg_paths.h"
+
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
+#include "ava/session/attachments.h"
 #include "ava/session/record.h"
+#include "ava/session/session_branch.h"
 #include "ava/session/session_store.h"
+#include "ava/session/session_tree.h"
 #include "ava/session/stats.h"
 #include "ava/session/validation.h"
+
 #include "ava/permissions/permission.h"
+
 #include "ava/provider/openai_provider.h"
+#include "ava/provider/provider_utils.h"
+
 #include "ava/context/context_loader.h"
+
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+
+#include "tests/support/fake_transport.h"
+#include "tests/support/test_harness.h"
 
 #include <algorithm>
 #include <chrono>
@@ -45,6 +59,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -280,7 +295,8 @@ void test_session_store_round_trip()
   std::filesystem::create_directories(future_version_store.session_path().parent_path());
   {
     std::ofstream file(future_version_store.session_path(), std::ios::binary | std::ios::trunc);
-    file << "{\"version\":3,\"id\":\"entry_future\",\"parent_id\":\"\",\"type\":\"user_message\","
+    file << "{\"version\":" << (ava::session::kCurrentSessionEntryVersion + 1)
+         << ",\"id\":\"entry_future\",\"parent_id\":\"\",\"type\":\"user_message\","
             "\"timestamp\":\"2026-04-27T00:00:00Z\",\"data\":{\"text\":\"hello\"}}\n";
   }
   auto future_version_loaded = future_version_store.load();
@@ -320,7 +336,8 @@ void test_session_record_round_trip()
                                             .data_json = "{\"text\":\"hello\",\"nested\":{\"ok\":true}}"};
 
   auto line = ava::session::serialize_session_entry_line(original);
-  expect(line && line->find('\n') == std::string::npos && line->find("\"version\":2") != std::string::npos,
+  auto const current_version_text = std::string("\"version\":") + std::to_string(ava::session::kCurrentSessionEntryVersion);
+  expect(line && line->find('\n') == std::string::npos && line->find(current_version_text) != std::string::npos,
          line ? "session record serializer emits one current-version JSONL record"
               : "session record serializer emits one current-version JSONL record: " + line.error().format());
   if (!line)
@@ -359,6 +376,567 @@ void test_session_record_round_trip()
       .data_json = "{\"text\":\"hello\"}",
   });
   expect(!too_large, "session record serializer rejects oversized records before append");
+}
+
+void test_session_tree_metadata_entries_validate_and_export()
+{
+  std::vector<ava::session::SessionEntry> const entries = {
+      ava::session::SessionEntry{.id = "entry_metadata",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::SessionMetadata,
+                                 .timestamp = "2026-04-27T00:00:00Z",
+                                 .data_json = "{\"schema_version\":1,\"name\":\"Investigate auth flow\","
+                                              "\"labels\":[\"bug\",\"auth\"],\"branch_origin\":\"root\","
+                                              "\"actor\":\"auditor\"}"},
+      ava::session::SessionEntry{.id = "entry_branch_summary",
+                                 .parent_id = "entry_metadata",
+                                 .type = ava::session::EntryType::BranchSummary,
+                                  .timestamp = "2026-04-27T00:00:01Z",
+                                  .data_json = "{\"schema_version\":1,\"source_session_id\":\"session_parent\","
+                                               "\"branch_root_entry_id\":\"entry_metadata\","
+                                               "\"branch_tip_entry_id\":\"entry_metadata\","
+                                               "\"summary\":\"Branch tested the auth hypothesis.\","
+                                               "\"provider\":\"openai\",\"model\":\"gpt-test\","
+                                              "\"reason\":\"test\"}"},
+  };
+
+  auto const validation = ava::session::validate_session_replay(entries);
+  expect(validation.ok(), "session tree metadata and branch summary entries are replay-valid");
+  auto const metadata = ava::session::session_metadata_from_entries(entries);
+  expect(metadata && metadata->actor == "auditor", "session metadata read-back exposes persisted actor");
+
+  auto const metadata_type = ava::session::parse_entry_type("session_metadata");
+  auto const summary_type = ava::session::parse_entry_type("branch_summary");
+  expect(metadata_type && *metadata_type == ava::session::EntryType::SessionMetadata && ava::session::to_string(*metadata_type) == "session_metadata" &&
+             summary_type && *summary_type == ava::session::EntryType::BranchSummary && ava::session::to_string(*summary_type) == "branch_summary",
+         "session tree entry types parse and serialize by stable names");
+
+  auto const exported = ava::session::format_session_markdown(entries, ava::session::ExportOptions{});
+  expect(exported.find("Session Metadata") != std::string::npos && exported.find("Branch Summary") != std::string::npos &&
+             exported.find("Branch tested the auth hypothesis.") != std::string::npos,
+         "session export includes tree metadata and branch summaries");
+
+  auto invalid_metadata = entries;
+  invalid_metadata[0].data_json = "{\"schema_version\":1,\"labels\":[\"dup\",\"dup\"]}";
+  auto const invalid_metadata_validation = ava::session::validate_session_replay(invalid_metadata);
+  expect(!invalid_metadata_validation.ok() && has_replay_issue(invalid_metadata_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
+         "session replay validator rejects malformed tree metadata entries");
+
+  auto invalid_summary = entries;
+  invalid_summary[1].data_json = "{\"schema_version\":1,\"summary\":\"\"}";
+  auto const invalid_summary_validation = ava::session::validate_session_replay(invalid_summary);
+  expect(!invalid_summary_validation.ok() && has_replay_issue(invalid_summary_validation, ava::session::SessionReplayIssueKind::InvalidBranchSummaryEntry),
+         "session replay validator rejects malformed branch summary entries");
+
+  auto expect_invalid_branch_summary = [&](std::string data_json, std::string const& message) {
+    auto invalid = entries;
+    invalid[1].data_json = std::move(data_json);
+    auto const validation = ava::session::validate_session_replay(invalid);
+    expect(!validation.ok() && has_replay_issue(validation, ava::session::SessionReplayIssueKind::InvalidBranchSummaryEntry), message);
+  };
+  expect_invalid_branch_summary("{\"schema_version\":1,\"summary\":\"Missing provider\",\"model\":\"gpt-test\",\"reason\":\"test\"}",
+                                "session replay validator rejects branch summaries missing provider");
+  expect_invalid_branch_summary("{\"schema_version\":1,\"summary\":\"Missing model\",\"provider\":\"openai\",\"reason\":\"test\"}",
+                                "session replay validator rejects branch summaries missing model");
+  expect_invalid_branch_summary("{\"schema_version\":1,\"summary\":\"Missing reason\",\"provider\":\"openai\",\"model\":\"gpt-test\"}",
+                                "session replay validator rejects branch summaries missing reason");
+  expect_invalid_branch_summary("{\"schema_version\":1,\"summary\":\"Missing source\",\"branch_root_entry_id\":\"entry_metadata\","
+                                "\"branch_tip_entry_id\":\"entry_metadata\",\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}",
+                                "session replay validator rejects branch summaries missing source_session_id");
+  expect_invalid_branch_summary("{\"schema_version\":1,\"summary\":\"Missing root\",\"source_session_id\":\"session_parent\","
+                                "\"branch_tip_entry_id\":\"entry_metadata\",\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}",
+                                "session replay validator rejects branch summaries missing branch_root_entry_id");
+  expect_invalid_branch_summary("{\"schema_version\":1,\"summary\":\"Missing tip\",\"source_session_id\":\"session_parent\","
+                                "\"branch_root_entry_id\":\"entry_metadata\",\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}",
+                                "session replay validator rejects branch summaries missing branch_tip_entry_id");
+  expect_invalid_branch_summary("{\"schema_version\":1,\"summary\":\"Missing referenced tip\",\"source_session_id\":\"session_parent\","
+                                "\"branch_root_entry_id\":\"entry_metadata\",\"branch_tip_entry_id\":\"missing\","
+                                "\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}",
+                                "session replay validator rejects branch summaries with dangling tip references");
+  expect_invalid_branch_summary("{\"schema_version\":1,\"summary\":\"Self referenced tip\",\"source_session_id\":\"session_parent\","
+                                "\"branch_root_entry_id\":\"entry_metadata\",\"branch_tip_entry_id\":\"entry_branch_summary\","
+                                "\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}",
+                                "session replay validator rejects branch summaries that point at the summary entry itself");
+  auto inverted_summary_entries = std::vector<ava::session::SessionEntry>{
+      ava::session::SessionEntry{.id = "entry_first",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-04-27T00:00:00Z",
+                                 .data_json = "{\"text\":\"first\"}"},
+      ava::session::SessionEntry{.id = "entry_second",
+                                 .parent_id = "entry_first",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-04-27T00:00:01Z",
+                                 .data_json = "{\"text\":\"second\"}"},
+      ava::session::SessionEntry{.id = "entry_inverted_summary",
+                                 .parent_id = "entry_second",
+                                 .type = ava::session::EntryType::BranchSummary,
+                                 .timestamp = "2026-04-27T00:00:02Z",
+                                 .data_json = "{\"schema_version\":1,\"summary\":\"Inverted range\",\"source_session_id\":\"session_parent\","
+                                              "\"branch_root_entry_id\":\"entry_second\",\"branch_tip_entry_id\":\"entry_first\","
+                                              "\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}"}};
+  auto const inverted_summary_validation = ava::session::validate_session_replay(inverted_summary_entries);
+  expect(!inverted_summary_validation.ok() &&
+             has_replay_issue(inverted_summary_validation, ava::session::SessionReplayIssueKind::InvalidBranchSummaryEntry),
+         "session replay validator rejects branch summaries with inverted root/tip ranges");
+  expect_invalid_branch_summary("{\"schema_version\":1,\"summary\":\"Bad actor\",\"source_session_id\":\"session_parent\","
+                                "\"branch_root_entry_id\":\"entry_metadata\",\"branch_tip_entry_id\":\"entry_metadata\","
+                                "\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\",\"actor\":123}",
+                                "session replay validator rejects malformed branch summary actor");
+  expect_invalid_branch_summary("{\"schema_version\":1,\"summary\":\"Bad provider\",\"source_session_id\":\"session_parent\","
+                                "\"branch_root_entry_id\":\"entry_metadata\",\"branch_tip_entry_id\":\"entry_metadata\","
+                                "\"provider\":\"bad\\u001b\",\"model\":\"gpt-test\",\"reason\":\"test\"}",
+                                 "session replay validator rejects malformed branch summary provider text");
+  expect_invalid_branch_summary("{\"schema_version\":1,\"summary\":\"Bad\\u001bsummary\",\"source_session_id\":\"session_parent\","
+                                "\"branch_root_entry_id\":\"entry_metadata\",\"branch_tip_entry_id\":\"entry_metadata\","
+                                "\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}",
+                                "session replay validator rejects malformed branch summary text");
+  expect_invalid_branch_summary("{\"schema_version\":1,\"summary\":\"Bad reason\",\"source_session_id\":\"session_parent\","
+                                "\"branch_root_entry_id\":\"entry_metadata\",\"branch_tip_entry_id\":\"entry_metadata\","
+                                "\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"" + std::string(1025, 'x') + "\"}",
+                                "session replay validator rejects oversized branch summary reason");
+
+  auto empty_origin_with_name = entries;
+  empty_origin_with_name[0].data_json = "{\"schema_version\":1,\"name\":\"Named\",\"branch_origin\":\"\"}";
+  auto const empty_origin_validation = ava::session::validate_session_replay(empty_origin_with_name);
+  expect(empty_origin_validation.ok(), "session replay validator treats empty branch_origin as absent");
+
+  auto non_string_origin = entries;
+  non_string_origin[0].data_json = "{\"schema_version\":1,\"name\":\"Named\",\"branch_origin\":123}";
+  auto const non_string_origin_validation = ava::session::validate_session_replay(non_string_origin);
+  expect(
+      !non_string_origin_validation.ok() && has_replay_issue(non_string_origin_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
+      "session replay validator rejects non-string branch_origin values");
+
+  auto only_empty_origin = entries;
+  only_empty_origin[0].data_json = "{\"schema_version\":1,\"branch_origin\":\"\"}";
+  auto const only_empty_origin_validation = ava::session::validate_session_replay(only_empty_origin);
+  expect(
+      !only_empty_origin_validation.ok() && has_replay_issue(only_empty_origin_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
+      "session replay validator rejects metadata entries with no meaningful fields");
+
+  auto unsupported_metadata = entries;
+  unsupported_metadata[0].data_json = "{\"schema_version\":2,\"name\":\"future\"}";
+  auto const unsupported_metadata_validation = ava::session::validate_session_replay(unsupported_metadata);
+  expect(!unsupported_metadata_validation.ok() &&
+             has_replay_issue(unsupported_metadata_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
+         "session replay validator rejects unsupported session_metadata schema_version values");
+
+  auto unsupported_summary = entries;
+  unsupported_summary[1].data_json =
+      "{\"schema_version\":2,\"summary\":\"future\","
+      "\"source_session_id\":\"session_parent\",\"branch_root_entry_id\":\"entry_metadata\","
+      "\"branch_tip_entry_id\":\"entry_metadata\",\"provider\":\"openai\",\"model\":\"gpt-test\","
+      "\"reason\":\"test\"}";
+  auto const unsupported_summary_validation = ava::session::validate_session_replay(unsupported_summary);
+  expect(
+      !unsupported_summary_validation.ok() && has_replay_issue(unsupported_summary_validation, ava::session::SessionReplayIssueKind::InvalidBranchSummaryEntry),
+      "session replay validator rejects unsupported branch_summary schema_version values");
+}
+
+void test_session_tree_index_derives_branches()
+{
+  auto const root = temp_root() / "session-tree-index";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const sessions_dir = root / "sessions";
+  std::filesystem::create_directories(workspace);
+
+  auto make_store = [&](std::string session_id) {
+    return ava::session::SessionStore(
+        ava::session::SessionStoreOptions{.root_dir = sessions_dir, .workspace_dir = workspace, .session_id = std::move(session_id)});
+  };
+  auto append_start = [](ava::session::SessionStore& store, std::string_view entry_id) {
+    return store.append(ava::session::SessionEntry{.id = std::string(entry_id),
+                                                   .parent_id = "",
+                                                   .type = ava::session::EntryType::SessionStart,
+                                                   .timestamp = "2026-04-27T00:00:00Z",
+                                                   .data_json = "{\"mode\":\"build\"}"});
+  };
+
+  auto root_store = make_store("session_root");
+  auto child_store = make_store("session_child");
+  auto grandchild_store = make_store("session_grandchild");
+  auto orphan_store = make_store("session_orphan");
+  auto corrupt_metadata_store = make_store("session_corrupt_metadata");
+  expect(append_start(root_store, "entry_root_start").has_value() && append_start(child_store, "entry_child_start").has_value() &&
+             append_start(grandchild_store, "entry_grandchild_start").has_value() && append_start(orphan_store, "entry_orphan_start").has_value() &&
+             append_start(corrupt_metadata_store, "entry_corrupt_start").has_value(),
+         "session tree index test creates session files");
+
+  ava::session::SessionMetadataUpdate root_metadata;
+  root_metadata.name = "Root";
+  root_metadata.labels = std::vector<std::string>{"root"};
+  root_metadata.branch_origin = "root";
+  root_metadata.actor = "test";
+  auto root_meta = ava::session::append_session_metadata(root_store, std::move(root_metadata));
+
+  ava::session::SessionMetadataUpdate child_metadata;
+  child_metadata.name = "Child";
+  child_metadata.labels = std::vector<std::string>{"branch"};
+  child_metadata.parent_session_id = "session_root";
+  child_metadata.source_session_id = "session_root";
+  child_metadata.branch_from_entry_id = "entry_root_start";
+  child_metadata.branch_origin = "fork";
+  child_metadata.actor = "test";
+  auto child_meta = ava::session::append_session_metadata(child_store, std::move(child_metadata));
+
+  ava::session::SessionMetadataUpdate grandchild_metadata;
+  grandchild_metadata.name = "Grandchild";
+  grandchild_metadata.parent_session_id = "session_child";
+  grandchild_metadata.source_session_id = "session_child";
+  grandchild_metadata.branch_from_entry_id = "entry_child_start";
+  grandchild_metadata.branch_origin = "clone";
+  grandchild_metadata.actor = "test";
+  auto grandchild_meta = ava::session::append_session_metadata(grandchild_store, std::move(grandchild_metadata));
+
+  ava::session::SessionMetadataUpdate orphan_metadata;
+  orphan_metadata.name = "Orphan";
+  orphan_metadata.parent_session_id = "session_missing";
+  orphan_metadata.branch_origin = "manual";
+  orphan_metadata.actor = "test";
+  auto orphan_meta = ava::session::append_session_metadata(orphan_store, std::move(orphan_metadata));
+  auto corrupt_meta = corrupt_metadata_store.append(ava::session::SessionEntry{.id = "entry_corrupt_metadata",
+                                                                                .parent_id = "entry_corrupt_start",
+                                                                                .type = ava::session::EntryType::SessionMetadata,
+                                                                                .timestamp = "2026-04-27T00:00:01Z",
+                                                                                .data_json = "{\"schema_version\":1,\"name\":123}"});
+  expect(root_meta && child_meta && grandchild_meta && orphan_meta && corrupt_meta, "session tree index test persists branch metadata");
+
+  auto tree = ava::session::build_session_tree(workspace, sessions_dir, "session_grandchild");
+  expect(tree.has_value(), tree ? "session tree index builds" : "session tree index builds: " + tree.error().format());
+  if (!tree)
+    return;
+
+  auto contains = [](std::vector<std::string> const& values, std::string_view value) {
+    return std::ranges::any_of(values, [value](std::string const& item) { return item == value; });
+  };
+  auto find_node = [&](std::string_view session_id) -> ava::session::SessionTreeNode const* {
+    auto const found =
+        std::ranges::find_if(tree->sessions, [session_id](ava::session::SessionTreeNode const& node) { return node.summary.session_id == session_id; });
+    return found == tree->sessions.end() ? nullptr : &*found;
+  };
+
+  auto const* root_node = find_node("session_root");
+  auto const* child_node = find_node("session_child");
+  auto const* grandchild_node = find_node("session_grandchild");
+  auto const* orphan_node = find_node("session_orphan");
+  auto const* corrupt_node = find_node("session_corrupt_metadata");
+  expect(root_node != nullptr && child_node != nullptr && grandchild_node != nullptr && orphan_node != nullptr && tree->sessions.size() == 4,
+         "session tree index includes valid session summaries and skips malformed metadata sessions");
+  expect(corrupt_node == nullptr, "session tree index skips sessions with malformed metadata");
+  expect(root_node && root_node->metadata.name == "Root" && contains(root_node->metadata.labels, "root") && root_node->metadata.actor == "test" &&
+             contains(root_node->children, "session_child"),
+         "session tree index folds root metadata, actor, and direct children");
+  expect(child_node && child_node->metadata.parent_session_id == "session_root" && child_node->metadata.source_session_id == "session_root" &&
+             child_node->metadata.branch_from_entry_id == "entry_root_start" && child_node->metadata.branch_origin == "fork" &&
+             contains(child_node->children, "session_grandchild"),
+         "session tree index preserves child provenance metadata");
+  expect(grandchild_node && grandchild_node->current && grandchild_node->children.empty() && orphan_node && orphan_node->children.empty(),
+         "session tree index marks current and leaf sessions");
+  expect(contains(tree->roots, "session_root") && contains(tree->roots, "session_orphan") && !contains(tree->roots, "session_child") &&
+             contains(tree->leaves, "session_grandchild") && contains(tree->leaves, "session_orphan") && !contains(tree->leaves, "session_root"),
+         "session tree index derives roots and leaves from parent metadata");
+  expect(tree->current_path == std::vector<std::string>({"session_root", "session_child", "session_grandchild"}),
+         "session tree index derives current branch path without scanning child lists");
+}
+
+void test_session_tree_index_handles_parent_cycles()
+{
+  auto const root = temp_root() / "session-tree-cycle";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const sessions_dir = root / "sessions";
+  std::filesystem::create_directories(workspace);
+
+  auto make_store = [&](std::string session_id) {
+    return ava::session::SessionStore(
+        ava::session::SessionStoreOptions{.root_dir = sessions_dir, .workspace_dir = workspace, .session_id = std::move(session_id)});
+  };
+  auto append_start = [](ava::session::SessionStore& store, std::string_view entry_id) {
+    return store.append(ava::session::SessionEntry{.id = std::string(entry_id),
+                                                   .parent_id = "",
+                                                   .type = ava::session::EntryType::SessionStart,
+                                                   .timestamp = "2026-04-27T00:00:00Z",
+                                                   .data_json = "{\"mode\":\"build\"}"});
+  };
+
+  auto first_store = make_store("session_cycle_a");
+  auto second_store = make_store("session_cycle_b");
+  expect(append_start(first_store, "entry_cycle_a_start").has_value() && append_start(second_store, "entry_cycle_b_start").has_value(),
+         "session tree cycle test creates session files");
+
+  ava::session::SessionMetadataUpdate first_metadata;
+  first_metadata.parent_session_id = "session_cycle_b";
+  first_metadata.branch_origin = "manual";
+  first_metadata.actor = "test";
+  auto first_meta = ava::session::append_session_metadata(first_store, std::move(first_metadata));
+
+  ava::session::SessionMetadataUpdate second_metadata;
+  second_metadata.parent_session_id = "session_cycle_a";
+  second_metadata.branch_origin = "manual";
+  second_metadata.actor = "test";
+  auto second_meta = ava::session::append_session_metadata(second_store, std::move(second_metadata));
+  expect(first_meta && second_meta, "session tree cycle test persists cyclic parent metadata");
+
+  auto tree = ava::session::build_session_tree(workspace, sessions_dir, "session_cycle_a");
+  expect(tree.has_value(), tree ? "session tree index builds with cycles" : "session tree index builds with cycles: " + tree.error().format());
+  if (!tree)
+    return;
+
+  auto contains = [](std::vector<std::string> const& values, std::string_view value) {
+    return std::ranges::any_of(values, [value](std::string const& item) { return item == value; });
+  };
+  auto find_node = [&](std::string_view session_id) -> ava::session::SessionTreeNode const* {
+    auto const found =
+        std::ranges::find_if(tree->sessions, [session_id](ava::session::SessionTreeNode const& node) { return node.summary.session_id == session_id; });
+    return found == tree->sessions.end() ? nullptr : &*found;
+  };
+
+  auto const* first_node = find_node("session_cycle_a");
+  auto const* second_node = find_node("session_cycle_b");
+  expect(first_node && second_node && first_node->children.empty() && second_node->children.empty() && contains(tree->roots, "session_cycle_a") &&
+             contains(tree->roots, "session_cycle_b") && contains(tree->leaves, "session_cycle_a") && contains(tree->leaves, "session_cycle_b") &&
+             tree->current_path == std::vector<std::string>({"session_cycle_a"}),
+         "session tree index treats parent cycles as usable root/leaf nodes");
+}
+
+void test_session_branch_fork_and_clone_copy_source_safely()
+{
+  auto const root = temp_root() / "session-branch-copy";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const sessions_dir = root / "sessions";
+  std::filesystem::create_directories(workspace);
+
+  auto source_store =
+      ava::session::SessionStore(ava::session::SessionStoreOptions{.root_dir = sessions_dir, .workspace_dir = workspace, .session_id = "session_source"});
+  expect(source_store.append(ava::session::SessionEntry{.id = "entry_start",
+                                                         .parent_id = "",
+                                                         .type = ava::session::EntryType::SessionStart,
+                                                         .timestamp = "2026-04-27T00:00:00Z",
+                                                         .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-test\","
+                                                                      "\"context_sources\":0,\"context_window_tokens\":128000,\"max_output_tokens\":4096,"
+                                                                      "\"prompt_override\":false,\"supports_tools\":true,\"supports_streaming\":true,"
+                                                                      "\"supports_reasoning\":true,\"reports_usage\":true}"}) &&
+             source_store.append(ava::session::SessionEntry{.id = "entry_user",
+                                                              .parent_id = "entry_start",
+                                                              .type = ava::session::EntryType::UserMessage,
+                                                              .timestamp = "2026-04-27T00:00:01Z",
+                                                              .data_json = "{\"text\":\"question\",\"attachments\":[{\"id\":\"branch_img\","
+                                                                           "\"type\":\"image\",\"mime_type\":\"image/png\",\"byte_size\":5,"
+                                                                           "\"sha256\":\"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\","
+                                                                           "\"storage_path\":\"attachments/branch_img.txt\"}]}",
+                                                              .version = 2}) &&
+             source_store.append(ava::session::SessionEntry{.id = "entry_assistant",
+                                                            .parent_id = "entry_user",
+                                                            .type = ava::session::EntryType::AssistantMessage,
+                                                            .timestamp = "2026-04-27T00:00:02Z",
+                                                            .data_json = "{\"text\":\"answer\"}"}),
+         "session branch test creates source entries");
+
+  ava::session::SessionMetadataUpdate source_metadata;
+  source_metadata.name = "Source";
+  source_metadata.labels = std::vector<std::string>{"source"};
+  source_metadata.branch_origin = "root";
+  source_metadata.actor = "test";
+  auto source_meta = ava::session::append_session_metadata(source_store, std::move(source_metadata));
+  auto source_entries_before = source_store.load();
+  expect(source_meta && source_entries_before && source_entries_before->size() == 4, "session branch test source metadata is append-only");
+  auto const source_attachment_path = ava::session::attachment_storage_root(source_store) / "attachments" / "branch_img.txt";
+  std::filesystem::create_directories(source_attachment_path.parent_path());
+  {
+    std::ofstream file(source_attachment_path, std::ios::binary);
+    file << "hello";
+  }
+
+  auto forked = ava::session::create_session_branch(
+      ava::session::SessionBranchOptions{.workspace_dir = workspace,
+                                         .root_dir = sessions_dir,
+                                         .source_session_id = "session_source",
+                                         .branch_from_entry_id = "entry_user",
+                                         .name = std::optional<std::string>{"Forked"},
+                                         .labels = std::optional<std::vector<std::string>>{std::vector<std::string>{"forked"}},
+                                         .mode = ava::session::SessionBranchMode::Fork,
+                                         .actor = "test"});
+  expect(forked.has_value(), forked ? "session fork creates a new branch" : "session fork creates a new branch: " + forked.error().format());
+  if (!forked)
+    return;
+  auto fork_entries = forked->store.load();
+  expect(fork_entries && forked->copied_entry_count == 2 && fork_entries->size() == 3 &&
+               (*fork_entries)[1].version == 2 && fork_entries->back().type == ava::session::EntryType::SessionMetadata && forked->metadata.name == "Forked" &&
+              forked->metadata.labels.size() == 1 && forked->metadata.labels[0] == "forked" && forked->metadata.parent_session_id == "session_source" &&
+              forked->metadata.source_session_id == "session_source" && forked->metadata.branch_from_entry_id == "entry_user" &&
+              forked->metadata.branch_origin == "fork",
+           "session fork preserves copied entry versions and appends provenance metadata");
+  auto fork_attachment = ava::session::load_image_attachment(
+      forked->store, ava::session::ImageAttachmentRef{.id = "branch_img",
+                                                      .mime_type = "image/png",
+                                                      .storage_path = "attachments/branch_img.txt",
+                                                      .sha256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+                                                      .byte_size = 5});
+  expect(fork_attachment && fork_attachment->bytes == "hello",
+         "session fork copies verified image attachment storage for copied entries");
+
+  auto clone_with_branch_from = ava::session::create_session_branch(ava::session::SessionBranchOptions{.workspace_dir = workspace,
+                                                                                                       .root_dir = sessions_dir,
+                                                                                                       .source_session_id = "session_source",
+                                                                                                       .branch_from_entry_id = "entry_user",
+                                                                                                       .name = std::nullopt,
+                                                                                                       .labels = std::nullopt,
+                                                                                                       .mode = ava::session::SessionBranchMode::Clone,
+                                                                                                       .actor = "test"});
+  expect(!clone_with_branch_from && clone_with_branch_from.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "backend session clone rejects explicit branch_from_entry_id");
+
+  auto cloned = ava::session::create_session_branch(ava::session::SessionBranchOptions{.workspace_dir = workspace,
+                                                                                       .root_dir = sessions_dir,
+                                                                                       .source_session_id = "session_source",
+                                                                                       .branch_from_entry_id = "",
+                                                                                       .name = std::optional<std::string>{"Cloned"},
+                                                                                       .labels = std::nullopt,
+                                                                                       .mode = ava::session::SessionBranchMode::Clone,
+                                                                                       .actor = "test"});
+  expect(cloned.has_value(), cloned ? "session clone creates a new branch" : "session clone creates a new branch: " + cloned.error().format());
+  if (!cloned)
+    return;
+  auto clone_entries = cloned->store.load();
+  auto source_entries_after = source_store.load();
+  expect(clone_entries && source_entries_after && source_entries_after->size() == source_entries_before->size() &&
+              cloned->copied_entry_count == source_entries_before->size() && clone_entries->size() == source_entries_before->size() + 1 &&
+             cloned->metadata.name == "Cloned" && cloned->metadata.labels.size() == 1 && cloned->metadata.labels[0] == "source" &&
+             cloned->metadata.parent_session_id == "session_source" && cloned->metadata.branch_from_entry_id == source_entries_before->back().id &&
+             cloned->metadata.branch_origin == "clone" && cloned->metadata.actor == "test",
+          "session clone copies the full source session without modifying the source file and exposes actor");
+  auto clone_attachment = ava::session::load_image_attachment(
+      cloned->store, ava::session::ImageAttachmentRef{.id = "branch_img",
+                                                      .mime_type = "image/png",
+                                                      .storage_path = "attachments/branch_img.txt",
+                                                      .sha256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+                                                      .byte_size = 5});
+  expect(clone_attachment && clone_attachment->bytes == "hello",
+         "session clone copies verified image attachment storage for copied entries");
+
+  auto missing = ava::session::create_session_branch(ava::session::SessionBranchOptions{.workspace_dir = workspace,
+                                                                                        .root_dir = sessions_dir,
+                                                                                        .source_session_id = "session_source",
+                                                                                        .branch_from_entry_id = "missing",
+                                                                                        .name = std::nullopt,
+                                                                                        .labels = std::nullopt,
+                                                                                        .mode = ava::session::SessionBranchMode::Fork,
+                                                                                        .actor = "test"});
+  expect(!missing && missing.error().category() == ava::core::ErrorCategory::NotFound, "session fork rejects missing branch source entries");
+}
+
+void test_session_branch_summary_appends_to_source_session()
+{
+  auto const root = temp_root() / "session-branch-summary";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const sessions_dir = root / "sessions";
+  std::filesystem::create_directories(workspace);
+
+  auto source_store =
+      ava::session::SessionStore(ava::session::SessionStoreOptions{.root_dir = sessions_dir, .workspace_dir = workspace, .session_id = "session_source"});
+  expect(source_store.append(ava::session::SessionEntry{.id = "entry_start",
+                                                         .parent_id = "",
+                                                         .type = ava::session::EntryType::SessionStart,
+                                                         .timestamp = "2026-04-27T00:00:00Z",
+                                                         .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-test\","
+                                                                      "\"context_sources\":0,\"context_window_tokens\":128000,\"max_output_tokens\":4096,"
+                                                                      "\"prompt_override\":false,\"supports_tools\":true,\"supports_streaming\":true,"
+                                                                      "\"supports_reasoning\":true,\"reports_usage\":true}"}) &&
+             source_store.append(ava::session::SessionEntry{.id = "entry_user",
+                                                            .parent_id = "entry_start",
+                                                            .type = ava::session::EntryType::UserMessage,
+                                                            .timestamp = "2026-04-27T00:00:01Z",
+                                                            .data_json = "{\"text\":\"question\"}"}) &&
+             source_store.append(ava::session::SessionEntry{.id = "entry_assistant",
+                                                            .parent_id = "entry_user",
+                                                            .type = ava::session::EntryType::AssistantMessage,
+                                                            .timestamp = "2026-04-27T00:00:02Z",
+                                                            .data_json = "{\"text\":\"answer\"}"}),
+         "branch summary test creates source entries");
+  auto const source_entries_before = source_store.load();
+  expect(source_entries_before && source_entries_before->size() == 3, "branch summary test loads source before append");
+  if (!source_entries_before)
+    return;
+
+  auto summary = ava::session::append_branch_summary(ava::session::BranchSummaryOptions{.workspace_dir = workspace,
+                                                                                       .root_dir = sessions_dir,
+                                                                                       .source_session_id = "session_source",
+                                                                                       .branch_root_entry_id = "entry_user",
+                                                                                       .branch_tip_entry_id = "entry_assistant",
+                                                                                       .summary = "Abandoned branch explored the alternate answer.",
+                                                                                       .provider = "openai",
+                                                                                       .model = "gpt-test",
+                                                                                       .reason = "test",
+                                                                                       .actor = "test"});
+  expect(summary.has_value(), summary ? "branch summary appends to source session" : "branch summary appends to source session: " + summary.error().format());
+  if (!summary)
+    return;
+  auto source_entries_after = source_store.load();
+  expect(source_entries_after && source_entries_after->size() == source_entries_before->size() + 1 &&
+             source_entries_after->back().type == ava::session::EntryType::BranchSummary &&
+             source_entries_after->back().parent_id == source_entries_before->back().id && summary->entry.id == source_entries_after->back().id,
+         "branch summary is append-only at the source session tip");
+  if (!source_entries_after)
+    return;
+
+  auto const validation = ava::session::validate_session_replay(*source_entries_after);
+  auto const stats = ava::session::compute_session_stats(*source_entries_after);
+  auto const exported = ava::session::format_session_markdown(*source_entries_after, ava::session::ExportOptions{});
+  auto validation_message = std::string("branch summary entries validate from the source session");
+  if (!validation.ok() && !validation.issues.empty())
+  {
+    validation_message += ": ";
+    validation_message += validation.issues.front().message;
+  }
+  expect(validation.ok(), validation_message);
+  expect(stats.counts.branch_summary == 1, "branch summary entries count in source session stats");
+  expect(exported.find("Abandoned branch explored the alternate answer.") != std::string::npos, "branch summary entries export from the source session");
+
+  auto root_after_tip = ava::session::append_branch_summary(ava::session::BranchSummaryOptions{.workspace_dir = workspace,
+                                                                                              .root_dir = sessions_dir,
+                                                                                              .source_session_id = "session_source",
+                                                                                              .branch_root_entry_id = "entry_assistant",
+                                                                                              .branch_tip_entry_id = "entry_user",
+                                                                                              .summary = "bad range",
+                                                                                              .provider = "openai",
+                                                                                              .model = "gpt-test",
+                                                                                              .reason = "test",
+                                                                                              .actor = "test"});
+  expect(!root_after_tip && root_after_tip.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "branch summary rejects root entries after tip entries");
+
+  auto missing_tip = ava::session::append_branch_summary(ava::session::BranchSummaryOptions{.workspace_dir = workspace,
+                                                                                           .root_dir = sessions_dir,
+                                                                                           .source_session_id = "session_source",
+                                                                                           .branch_root_entry_id = "entry_user",
+                                                                                           .branch_tip_entry_id = "missing",
+                                                                                           .summary = "missing tip",
+                                                                                           .provider = "openai",
+                                                                                           .model = "gpt-test",
+                                                                                           .reason = "test",
+                                                                                            .actor = "test"});
+  expect(!missing_tip && missing_tip.error().category() == ava::core::ErrorCategory::NotFound, "branch summary rejects missing tip entries");
+
+  auto bad_provider = ava::session::append_branch_summary(ava::session::BranchSummaryOptions{.workspace_dir = workspace,
+                                                                                             .root_dir = sessions_dir,
+                                                                                             .source_session_id = "session_source",
+                                                                                             .branch_root_entry_id = "entry_user",
+                                                                                             .branch_tip_entry_id = "entry_assistant",
+                                                                                             .summary = "summary with\nallowed whitespace",
+                                                                                             .provider = "open\nai",
+                                                                                             .model = "gpt-test",
+                                                                                             .reason = "test",
+                                                                                             .actor = "test"});
+  expect(!bad_provider && bad_provider.error().category() == ava::core::ErrorCategory::InvalidArgument,
+         "branch summary rejects control bytes in provider metadata while allowing summary newlines");
 }
 
 void test_session_stats_helper()
@@ -594,6 +1172,73 @@ void test_session_replay_validation()
   expect(!structured_mismatch.ok() && has_replay_issue(structured_mismatch, ava::session::SessionReplayIssueKind::StructuredToolResultMismatch),
          "session replay validator flags structured result call/tool/status mismatches");
 
+  auto missing_schema_entries = valid_entries;
+  missing_schema_entries.back().data_json =
+      "{\"call_id\":\"call_read\",\"name\":\"read_file\",\"success\":true,\"status\":\"success\","
+      "\"result\":\"note contents\",\"structured_result\":{\"call_id\":\"call_read\","
+      "\"tool\":\"read_file\",\"status\":\"success\",\"ok\":true,"
+      "\"content_type\":\"text/plain\",\"content\":\"note contents\"}}";
+  auto const missing_schema =
+      ava::session::validate_session_replay(missing_schema_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
+  expect(!missing_schema.ok() && has_replay_issue(missing_schema, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
+         "session replay validator requires structured result schema versions");
+
+  auto missing_ok_entries = valid_entries;
+  missing_ok_entries.back().data_json =
+      "{\"call_id\":\"call_read\",\"name\":\"read_file\",\"success\":true,\"status\":\"success\","
+      "\"result\":\"note contents\",\"structured_result\":{\"schema_version\":1,\"call_id\":\"call_read\","
+      "\"tool\":\"read_file\",\"status\":\"success\","
+      "\"content_type\":\"text/plain\",\"content\":\"note contents\"}}";
+  auto const missing_ok =
+      ava::session::validate_session_replay(missing_ok_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
+  expect(!missing_ok.ok() && has_replay_issue(missing_ok, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
+         "session replay validator requires structured result ok flags");
+
+  auto ok_mismatch_entries = valid_entries;
+  ok_mismatch_entries.back().data_json =
+      "{\"call_id\":\"call_read\",\"name\":\"read_file\",\"success\":true,\"status\":\"success\","
+      "\"result\":\"note contents\",\"structured_result\":{\"schema_version\":1,\"call_id\":\"call_read\","
+      "\"tool\":\"read_file\",\"status\":\"success\",\"ok\":false,"
+      "\"content_type\":\"text/plain\",\"content\":\"note contents\"}}";
+  auto const ok_mismatch =
+      ava::session::validate_session_replay(ok_mismatch_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
+  expect(!ok_mismatch.ok() && has_replay_issue(ok_mismatch, ava::session::SessionReplayIssueKind::StructuredToolResultMismatch),
+         "session replay validator requires structured result ok to match success status");
+
+  auto missing_content_entries = valid_entries;
+  missing_content_entries.back().data_json =
+      "{\"call_id\":\"call_read\",\"name\":\"read_file\",\"success\":true,\"status\":\"success\","
+      "\"result\":\"note contents\",\"structured_result\":{\"schema_version\":1,\"call_id\":\"call_read\","
+      "\"tool\":\"read_file\",\"status\":\"success\",\"ok\":true,"
+      "\"content_type\":\"text/plain\"}}";
+  auto const missing_content =
+      ava::session::validate_session_replay(missing_content_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
+  expect(!missing_content.ok() && has_replay_issue(missing_content, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
+         "session replay validator requires structured result content data");
+
+  auto invalid_metadata_entries = valid_entries;
+  invalid_metadata_entries.back().data_json =
+      "{\"call_id\":\"call_read\",\"name\":\"read_file\",\"success\":true,\"status\":\"success\","
+      "\"result\":\"note contents\",\"structured_result\":{\"schema_version\":1,\"call_id\":\"call_read\","
+      "\"tool\":\"read_file\",\"status\":\"success\",\"ok\":true,"
+      "\"content_type\":\"text/plain\",\"content\":\"note contents\","
+      "\"changed_paths\":[\"note.txt\",\"note.txt\"]}}";
+  auto const invalid_metadata =
+      ava::session::validate_session_replay(invalid_metadata_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
+  expect(!invalid_metadata.ok() && has_replay_issue(invalid_metadata, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
+         "session replay validator rejects malformed structured result metadata arrays");
+
+  auto failed_missing_error_entries = valid_entries;
+  failed_missing_error_entries.back().data_json =
+      "{\"call_id\":\"call_read\",\"name\":\"read_file\",\"success\":false,\"status\":\"error\","
+      "\"result\":\"failed\",\"structured_result\":{\"schema_version\":1,\"call_id\":\"call_read\","
+      "\"tool\":\"read_file\",\"status\":\"error\",\"ok\":false,"
+      "\"content_type\":\"text/plain\",\"content\":\"failed\"}}";
+  auto const failed_missing_error = ava::session::validate_session_replay(
+      failed_missing_error_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
+  expect(!failed_missing_error.ok() && has_replay_issue(failed_missing_error, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
+         "session replay validator requires failed structured results to carry error details");
+
   std::vector<ava::session::SessionEntry> const valid_permission_entries = {
       ava::session::SessionEntry{.id = "permission_policy_allow",
                                  .parent_id = "",
@@ -623,8 +1268,28 @@ void test_session_replay_validation()
                                               "\"operation\":\"edit\",\"mode\":\"build\","
                                               "\"tool_name\":\"write_file\",\"action\":\"ask\","
                                               "\"reason\":\"target is outside the workspace\","
-                                              "\"risk\":\"high\",\"target_path\":\"/tmp/outside.txt\","
-                                              "\"resolution\":\"deny\",\"resolution_source\":\"resolver\"}"},
+                                               "\"risk\":\"high\",\"target_path\":\"/tmp/outside.txt\","
+                                               "\"resolution\":\"deny\",\"resolution_source\":\"resolver\"}"},
+      ava::session::SessionEntry{.id = "permission_lsp_launch",
+                                  .parent_id = "permission_resolution",
+                                  .type = ava::session::EntryType::PermissionDecision,
+                                  .timestamp = "2026-04-29T00:00:03Z",
+                                  .data_json = "{\"permission_request_id\":\"permreq_lsp\","
+                                               "\"operation\":\"lsp.server.launch\",\"mode\":\"build\","
+                                               "\"tool_name\":\"lsp_server_launch\",\"action\":\"allow\","
+                                               "\"reason\":\"LSP server launch requires explicit approval\","
+                                               "\"risk\":\"high\",\"command\":\"[\\\"clangd\\\"]\","
+                                               "\"resolution\":\"allow\",\"resolution_source\":\"policy\"}"},
+      ava::session::SessionEntry{.id = "permission_mcp_resource",
+                                  .parent_id = "permission_lsp_launch",
+                                  .type = ava::session::EntryType::PermissionDecision,
+                                  .timestamp = "2026-04-29T00:00:04Z",
+                                  .data_json = "{\"permission_request_id\":\"permreq_mcp_resource\","
+                                               "\"operation\":\"mcp.resource.read\",\"mode\":\"build\","
+                                               "\"tool_name\":\"mcp_demo_resource\",\"action\":\"allow\","
+                                               "\"reason\":\"MCP resource read requires permission\","
+                                               "\"risk\":\"medium\",\"command\":\"demo:file:///workspace/notes.md\","
+                                               "\"resolution\":\"allow\",\"resolution_source\":\"policy\"}"},
   };
   auto const valid_permission = ava::session::validate_session_replay(valid_permission_entries);
   expect(valid_permission.ok() && valid_permission.issues.empty(), "session replay validator accepts complete permission audit decisions");
@@ -867,6 +1532,9 @@ void test_session_replay_validation()
          "session replay issue kind names include entry version validation failures");
   expect(ava::session::to_string(ava::session::SessionReplayIssueKind::InvalidReasoningEntry) == "invalid_reasoning_entry",
          "session replay issue kind names include reasoning validation failures");
+  expect(ava::session::to_string(ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry) == "invalid_session_metadata_entry" &&
+             ava::session::to_string(ava::session::SessionReplayIssueKind::InvalidBranchSummaryEntry) == "invalid_branch_summary_entry",
+         "session replay issue kind names include tree metadata validation failures");
 }
 
 void test_session_resume_and_listing()
@@ -1589,12 +2257,378 @@ void test_tool_content_parts_reconstruction()
          "non-contiguous tool-use/result history falls back to text-only native replay");
 }
 
+void test_image_attachment_message_reconstruction_and_validation()
+{
+  std::string const attachment_json =
+      R"({"id":"img_1","type":"image","mime_type":"image/png","byte_size":1234,)"
+      R"("sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+      R"("storage_path":"attachments/img_1.png"})";
+  std::vector<ava::session::SessionEntry> const entries = {ava::session::SessionEntry{
+      .id = "image_user",
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-05-08T00:00:00Z",
+      .data_json = "{\"text\":\"describe this\",\"attachments\":[" + attachment_json + "]}"}};
+
+  auto messages = ava::agent::build_provider_messages_from_entries(entries);
+  expect(messages && messages->size() == 1, "image user message reconstructs as one provider message");
+  if (!messages || messages->empty())
+    return;
+  expect((*messages)[0].content.find("describe this") != std::string::npos &&
+             (*messages)[0].content.find("[image attachment: id=img_1 mime=image/png bytes=1234]") !=
+                 std::string::npos,
+         "image user message keeps text fallback metadata without raw bytes");
+  expect((*messages)[0].content_parts.size() == 2 &&
+             (*messages)[0].content_parts[0].type == ava::provider::ContentPartType::Text &&
+             (*messages)[0].content_parts[1].type == ava::provider::ContentPartType::Image &&
+             (*messages)[0].content_parts[1].attachment_id == "img_1" &&
+             (*messages)[0].content_parts[1].mime_type == "image/png" &&
+             (*messages)[0].content_parts[1].storage_path == "attachments/img_1.png" &&
+             (*messages)[0].content_parts[1].byte_size == 1234,
+         "image user message carries provider-neutral image content metadata");
+
+  auto const valid = ava::session::validate_session_replay(entries);
+  expect(valid.ok(), "image attachment metadata validates when bounded and referenced");
+
+  std::vector<ava::session::SessionEntry> const inline_data_entries = {ava::session::SessionEntry{
+      .id = "image_inline",
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-05-08T00:00:00Z",
+      .data_json = R"({"text":"bad","attachments":[{"id":"img_2","type":"image","mime_type":"image/png",)"
+                   R"("byte_size":12,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                   R"("storage_path":"attachments/img_2.png","data_base64":"AAAA"}]})"}};
+  auto const inline_validation = ava::session::validate_session_replay(inline_data_entries);
+  expect(!inline_validation.ok() && inline_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects inline image bytes in message attachment metadata");
+
+  std::vector<ava::session::SessionEntry> const unsupported_mime_entries = {ava::session::SessionEntry{
+      .id = "image_svg",
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-05-08T00:00:00Z",
+      .data_json = R"({"text":"bad","attachments":[{"id":"img_3","type":"image","mime_type":"image/svg+xml",)"
+                   R"("byte_size":12,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                   R"("storage_path":"attachments/img_3.svg"}]})"}};
+  auto const mime_validation = ava::session::validate_session_replay(unsupported_mime_entries);
+  expect(!mime_validation.ok() && mime_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+          "session replay rejects unsupported image attachment MIME types");
+
+  std::vector<ava::session::SessionEntry> const mixed_array_entries = {ava::session::SessionEntry{
+      .id = "image_mixed_array",
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-05-08T00:00:00Z",
+      .data_json = "{\"text\":\"bad\",\"attachments\":[" + attachment_json + R"(,"raw-bytes"]})"}};
+  auto const mixed_array_validation = ava::session::validate_session_replay(mixed_array_entries);
+  expect(!mixed_array_validation.ok() && mixed_array_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects non-object attachment array elements");
+
+  std::vector<ava::session::SessionEntry> const unknown_raw_entries = {ava::session::SessionEntry{
+      .id = "image_unknown_raw",
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-05-08T00:00:00Z",
+      .data_json = R"({"text":"bad","attachments":[{"id":"img_4","type":"image","mime_type":"image/png",)"
+                   R"("byte_size":12,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                   R"("storage_path":"attachments/img_4.png","raw_bytes_base64":"AAAA"}]})"}};
+  auto const unknown_raw_validation = ava::session::validate_session_replay(unknown_raw_entries);
+  expect(!unknown_raw_validation.ok() && unknown_raw_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects unknown attachment fields that could carry inline bytes");
+
+  std::vector<ava::session::SessionEntry> const traversal_path_entries = {ava::session::SessionEntry{
+      .id = "image_traversal",
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-05-08T00:00:00Z",
+      .data_json = R"({"text":"bad","attachments":[{"id":"img_5","type":"image","mime_type":"image/png",)"
+                   R"("byte_size":12,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                   R"("storage_path":"../img_5.png"}]})"}};
+  auto const traversal_validation = ava::session::validate_session_replay(traversal_path_entries);
+  expect(!traversal_validation.ok() && traversal_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects escaping image storage paths");
+
+  std::vector<ava::session::SessionEntry> const unanchored_path_entries = {ava::session::SessionEntry{
+      .id = "image_unanchored",
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-05-08T00:00:00Z",
+      .data_json = R"({"text":"bad","attachments":[{"id":"img_6","type":"image","mime_type":"image/png",)"
+                   R"("byte_size":12,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                   R"("storage_path":"README.md"}]})"}};
+  auto const unanchored_validation = ava::session::validate_session_replay(unanchored_path_entries);
+  expect(!unanchored_validation.ok() && unanchored_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects image storage paths outside attachments namespace");
+
+  std::vector<ava::session::SessionEntry> const fractional_size_entries = {ava::session::SessionEntry{
+      .id = "image_fractional_size",
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-05-08T00:00:00Z",
+      .data_json = R"({"text":"bad","attachments":[{"id":"img_6a","type":"image","mime_type":"image/png",)"
+                   R"("byte_size":12.5,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                   R"("storage_path":"attachments/img_6a.png"}]})"}};
+  auto const fractional_size_validation = ava::session::validate_session_replay(fractional_size_entries);
+  expect(!fractional_size_validation.ok() && fractional_size_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects fractional image byte sizes");
+  auto const fractional_size_sanitized = ava::session::sanitized_message_data_json(fractional_size_entries.front().data_json);
+  expect(fractional_size_sanitized.find("attachments") == std::string::npos,
+         "message data sanitizer omits fractional image byte sizes");
+  auto const fractional_size_messages = ava::agent::build_provider_messages_from_entries(fractional_size_entries);
+  expect(!fractional_size_messages && fractional_size_messages.error().message().find("provider replay") != std::string::npos,
+         "provider replay rejects invalid fractional image byte sizes instead of dropping image metadata");
+
+  std::vector<ava::session::SessionEntry> const exponent_size_entries = {ava::session::SessionEntry{
+      .id = "image_exponent_size",
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-05-08T00:00:00Z",
+      .data_json = R"({"text":"bad","attachments":[{"id":"img_6b","type":"image","mime_type":"image/png",)"
+                   R"("byte_size":1e3,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                   R"("storage_path":"attachments/img_6b.png"}]})"}};
+  auto const exponent_size_validation = ava::session::validate_session_replay(exponent_size_entries);
+  expect(!exponent_size_validation.ok() && exponent_size_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects exponent image byte sizes");
+
+  std::vector<ava::session::SessionEntry> const duplicate_key_entries = {ava::session::SessionEntry{
+      .id = "image_duplicate_key",
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-05-08T00:00:00Z",
+      .data_json = R"({"text":"bad","attachments":[{"id":"img_7","id":"img_8","type":"image","mime_type":"image/png",)"
+                   R"("byte_size":12,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                   R"("storage_path":"attachments/img_7.png"}]})"}};
+  auto const duplicate_key_validation = ava::session::validate_session_replay(duplicate_key_entries);
+  expect(!duplicate_key_validation.ok() && duplicate_key_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects duplicate image attachment object keys");
+
+  std::vector<ava::session::SessionEntry> const duplicate_id_entries = {ava::session::SessionEntry{
+      .id = "image_duplicate_id",
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-05-08T00:00:00Z",
+      .data_json = "{\"text\":\"bad\",\"attachments\":[" + attachment_json + "," + attachment_json + "]}"}};
+  auto const duplicate_id_validation = ava::session::validate_session_replay(duplicate_id_entries);
+  expect(!duplicate_id_validation.ok() && duplicate_id_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+          "session replay rejects duplicate image attachment ids");
+  auto const duplicate_id_sanitized = ava::session::sanitized_message_data_json(duplicate_id_entries.front().data_json);
+  expect(duplicate_id_sanitized.find("attachments") == std::string::npos,
+         "message data sanitizer omits duplicate image attachment ids");
+
+  std::vector<ava::session::SessionEntry> const duplicate_top_level_entries = {ava::session::SessionEntry{
+      .id = "image_duplicate_top_level",
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-05-08T00:00:00Z",
+      .data_json = "{\"text\":\"bad\",\"attachments\":[" + attachment_json + R"(],"attachments":["raw-bytes"]})"}};
+  auto const duplicate_top_level_validation = ava::session::validate_session_replay(duplicate_top_level_entries);
+  expect(!duplicate_top_level_validation.ok() &&
+             duplicate_top_level_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects duplicate top-level message attachment keys");
+  auto const duplicate_top_level_sanitized = ava::session::sanitized_message_data_json(duplicate_top_level_entries.front().data_json);
+  expect(duplicate_top_level_sanitized.find("raw-bytes") == std::string::npos,
+         "message data sanitizer omits duplicate top-level attachment payloads");
+
+  std::vector<ava::session::SessionEntry> const escaped_top_level_entries = {ava::session::SessionEntry{
+      .id = "image_escaped_top_level",
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = "2026-05-08T00:00:00Z",
+      .data_json = "{\"text\":\"bad\",\"attach\\u006dents\":[" + attachment_json + "]}"}};
+  auto const escaped_top_level_validation = ava::session::validate_session_replay(escaped_top_level_entries);
+  expect(!escaped_top_level_validation.ok() &&
+             escaped_top_level_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects escaped top-level message keys in attachment-bearing data");
+
+  std::vector<ava::session::SessionEntry> const assistant_attachment_entries = {ava::session::SessionEntry{
+      .id = "assistant_image",
+      .parent_id = "",
+      .type = ava::session::EntryType::AssistantMessage,
+      .timestamp = "2026-05-08T00:00:00Z",
+      .data_json = "{\"text\":\"assistant\",\"attachments\":[" + attachment_json + "]}"}};
+  auto const assistant_validation = ava::session::validate_session_replay(assistant_attachment_entries);
+  expect(!assistant_validation.ok() && assistant_validation.issues.front().kind == ava::session::SessionReplayIssueKind::InvalidMessageEntry,
+         "session replay rejects assistant image attachments until assistant image semantics exist");
+  auto const assistant_sanitized = ava::session::sanitized_message_data_json(assistant_attachment_entries.front().data_json, false);
+  expect(assistant_sanitized.find("attachments") == std::string::npos,
+         "message data sanitizer omits assistant image attachment metadata when attachments are disallowed");
+
+  auto const sanitized = ava::session::sanitized_message_data_json(unknown_raw_entries.front().data_json);
+  expect(sanitized.find("raw_bytes_base64") == std::string::npos && sanitized.find("AAAA") == std::string::npos,
+         "message data sanitizer omits unknown attachment fields and inline bytes");
+
+  ava::provider::ProviderRequest text_only_request{.provider_id = "test",
+                                                   .model_id = "text-only",
+                                                   .system_prompt = "",
+                                                   .messages = *messages,
+                                                   .tools_json = {}};
+  auto const text_only = ava::provider::validate_image_content_parts(text_only_request, false);
+  expect(!text_only && text_only.error().message().find("does not support image input") != std::string::npos,
+         "provider image validation rejects image parts for text-only models");
+  auto const image_model = ava::provider::validate_image_content_parts(text_only_request, true);
+  expect(image_model.has_value(), "provider image validation accepts bounded user image metadata for image models");
+
+  auto too_many_images = *messages;
+  too_many_images[0].content_parts.clear();
+  for (int index = 0; index < 17; ++index) {
+    too_many_images[0].content_parts.push_back(ava::provider::ContentPart{.type = ava::provider::ContentPartType::Image,
+                                                                          .attachment_id = "img_" + std::to_string(index),
+                                                                          .mime_type = "image/png",
+                                                                          .storage_path = "attachments/img_" + std::to_string(index) + ".png",
+                                                                          .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                                                          .byte_size = 1});
+  }
+  ava::provider::ProviderRequest too_many_request{.provider_id = "test",
+                                                  .model_id = "image-model",
+                                                  .system_prompt = "",
+                                                  .messages = too_many_images,
+                                                  .tools_json = {}};
+  auto const too_many = ava::provider::validate_image_content_parts(too_many_request, true);
+  expect(!too_many && too_many.error().message().find("count") != std::string::npos,
+         "provider image validation caps image attachment count per request");
+
+  auto too_large_total = *messages;
+  too_large_total[0].content_parts.clear();
+  for (int index = 0; index < 3; ++index) {
+    too_large_total[0].content_parts.push_back(ava::provider::ContentPart{.type = ava::provider::ContentPartType::Image,
+                                                                         .attachment_id = "big_" + std::to_string(index),
+                                                                         .mime_type = "image/png",
+                                                                         .storage_path = "attachments/big_" + std::to_string(index) + ".png",
+                                                                         .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                                                         .byte_size = 15 * 1024 * 1024});
+  }
+  too_many_request.messages = too_large_total;
+  auto const too_large = ava::provider::validate_image_content_parts(too_many_request, true);
+  expect(!too_large && too_large.error().message().find("total byte size") != std::string::npos,
+         "provider image validation caps aggregate image bytes per request");
+
+  auto invalid_path_messages = *messages;
+  invalid_path_messages[0].content_parts[1].storage_path = "/tmp/img_1.png";
+  ava::provider::ProviderRequest invalid_path_request{.provider_id = "test",
+                                                      .model_id = "image-model",
+                                                      .system_prompt = "",
+                                                      .messages = invalid_path_messages,
+                                                      .tools_json = {}};
+  auto const invalid_path = ava::provider::validate_image_content_parts(invalid_path_request, true);
+  expect(!invalid_path && invalid_path.error().message().find("storage path") != std::string::npos,
+         "provider image validation rejects absolute image storage paths");
+  invalid_path_messages[0].content_parts[1].storage_path = "README.md";
+  invalid_path_request.messages = invalid_path_messages;
+  auto const unanchored_path = ava::provider::validate_image_content_parts(invalid_path_request, true);
+  expect(!unanchored_path && unanchored_path.error().message().find("storage path") != std::string::npos,
+          "provider image validation rejects storage paths outside attachments namespace");
+}
+
+void test_image_attachment_storage_boundary()
+{
+  auto const root = temp_root() / "image-attachment-storage";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto store = ava::session::SessionStore::create(workspace, root / "sessions");
+  expect(store.has_value(), "session store opens for image attachment storage test");
+  if (!store)
+    return;
+
+  auto const attachment_root = ava::session::attachment_storage_root(*store);
+  auto const attachment_path = attachment_root / "attachments" / "img_1.txt";
+  std::filesystem::create_directories(attachment_path.parent_path());
+  {
+    std::ofstream file(attachment_path, std::ios::binary);
+    file << "hello";
+  }
+
+  ava::session::ImageAttachmentRef attachment{.id = "img_1",
+                                              .mime_type = "image/png",
+                                              .storage_path = "attachments/img_1.txt",
+                                              .sha256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+                                              .byte_size = 5};
+  auto loaded = ava::session::load_image_attachment(*store, attachment);
+  expect(loaded && loaded->bytes == "hello" && loaded->path == attachment_path.lexically_normal(),
+         "image attachment storage loads only verified session-owned bytes");
+
+  auto escaped = ava::session::resolve_attachment_storage_path(*store, "attachments/../secrets.txt");
+  expect(!escaped, "image attachment storage rejects escaping relative paths");
+
+  auto wrong_size = attachment;
+  wrong_size.byte_size = 4;
+  auto const size_result = ava::session::load_image_attachment(*store, wrong_size);
+  expect(!size_result && size_result.error().message().find("byte size") != std::string::npos,
+         "image attachment storage verifies file size before returning bytes");
+
+  auto wrong_hash = attachment;
+  wrong_hash.sha256 = "0000000000000000000000000000000000000000000000000000000000000000";
+  auto const hash_result = ava::session::load_image_attachment(*store, wrong_hash);
+  expect(!hash_result && hash_result.error().message().find("sha256") != std::string::npos,
+         "image attachment storage verifies sha256 before returning bytes");
+
+  auto const symlink_path = attachment_root / "attachments" / "link.txt";
+  std::error_code symlink_error;
+  std::filesystem::create_symlink(attachment_path, symlink_path, symlink_error);
+  if (!symlink_error) {
+    auto symlink_attachment = attachment;
+    symlink_attachment.storage_path = "attachments/link.txt";
+    auto const symlink_result = ava::session::load_image_attachment(*store, symlink_attachment);
+    expect(!symlink_result && symlink_result.error().message().find("symlink") != std::string::npos,
+           "image attachment storage rejects symlink attachment paths");
+  }
+
+  auto const outside_dir = root / "outside";
+  std::filesystem::create_directories(outside_dir);
+  auto const outside_file = outside_dir / "secret.txt";
+  {
+    std::ofstream file(outside_file, std::ios::binary);
+    file << "hello";
+  }
+  auto const symlink_directory = attachment_root / "attachments" / "linked-dir";
+  symlink_error.clear();
+  std::filesystem::create_directory_symlink(outside_dir, symlink_directory, symlink_error);
+  if (!symlink_error) {
+    auto intermediate_symlink = attachment;
+    intermediate_symlink.storage_path = "attachments/linked-dir/secret.txt";
+    auto const intermediate_result = ava::session::load_image_attachment(*store, intermediate_symlink);
+    expect(!intermediate_result && intermediate_result.error().message().find("symlink") != std::string::npos,
+           "image attachment storage rejects symlinked attachment directories");
+  }
+
+  auto symlink_root_store = ava::session::SessionStore::create(workspace, root / "symlink-root-sessions");
+  expect(symlink_root_store.has_value(), "session store opens for symlinked attachment root test");
+  if (symlink_root_store) {
+    auto const symlink_root = ava::session::attachment_storage_root(*symlink_root_store);
+    std::filesystem::create_directories(symlink_root.parent_path());
+    symlink_error.clear();
+    std::filesystem::create_directory_symlink(outside_dir, symlink_root, symlink_error);
+    if (!symlink_error) {
+      auto const symlink_root_result = ava::session::load_image_attachment(*symlink_root_store, attachment);
+      expect(!symlink_root_result && symlink_root_result.error().message().find("symlink") != std::string::npos,
+             "image attachment storage rejects symlinked attachment roots");
+    }
+  }
+}
+
+void test_provider_base64_encoding()
+{
+  expect(ava::provider::base64_encode("") == "", "base64 encoder handles empty input");
+  expect(ava::provider::base64_encode(std::string_view("\0", 1)) == "AA==",
+         "base64 encoder handles one-byte input padding");
+  expect(ava::provider::base64_encode("a") == "YQ==", "base64 encoder handles text one-byte input");
+  expect(ava::provider::base64_encode("ab") == "YWI=", "base64 encoder handles two-byte input padding");
+  expect(ava::provider::base64_encode("abc") == "YWJj", "base64 encoder handles full triples");
+  expect(ava::provider::base64_encode("hello") == "aGVsbG8=", "base64 encoder handles multi-block input");
+}
+
 }  // namespace
 
 void run_session_tests()
 {
   test_session_store_round_trip();
   test_session_record_round_trip();
+  test_session_tree_metadata_entries_validate_and_export();
+  test_session_tree_index_derives_branches();
+  test_session_tree_index_handles_parent_cycles();
+  test_session_branch_fork_and_clone_copy_source_safely();
+  test_session_branch_summary_appends_to_source_session();
   test_session_stats_helper();
   test_session_stats_omits_incomplete_cost_total();
   test_session_stats_flags_legacy_assistant_tokens_without_cost();
@@ -1605,4 +2639,7 @@ void run_session_tests()
   test_compaction_config_and_thresholds();
   test_compaction_context_reconstruction();
   test_tool_content_parts_reconstruction();
+  test_image_attachment_message_reconstruction_and_validation();
+  test_image_attachment_storage_boundary();
+  test_provider_base64_encoding();
 }

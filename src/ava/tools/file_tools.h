@@ -34,6 +34,8 @@ struct PermissionAuditEvent
   std::string resolution;
   std::string resolution_source;
   std::string resolution_reason;
+  std::string actor = "agent";
+  std::string rule_id;
 };
 
 using PermissionAuditSink = std::function<ava::core::VoidResult(PermissionAuditEvent const&)>;
@@ -59,6 +61,7 @@ struct ToolContext
   std::function<bool()> cancel_requested = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;
   std::string permission_tool_name = {};
+  std::string permission_actor = {};
   std::string current_tool_name = {};
   std::string current_call_id = {};
   std::shared_ptr<std::vector<std::string>> permission_request_ids = nullptr;
@@ -71,6 +74,10 @@ struct ToolContext
   std::filesystem::path mcp_project_config_file = {};
   std::vector<std::filesystem::path> skill_global_dirs = {};
   std::vector<std::filesystem::path> skill_project_dirs = {};
+  std::string session_id = {};
+  std::string provider_id = {};
+  std::string model_id = {};
+  std::filesystem::path current_dir = {};
 };
 
 struct TextOutput

@@ -39,6 +39,7 @@ bool is_canceled(ToolContext const& context)
 ava::core::Error canceled_error(std::string_view operation, std::filesystem::path const& path)
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled");
+  error.with_context("canceled", "true");
   error.with_context("operation", std::string(operation));
   if (!path.empty())
     error.with_context("path", path.string());
@@ -54,7 +55,10 @@ ava::core::VoidResult check_canceled(ToolContext const& context, std::string_vie
 
 bool is_canceled_error(ava::core::Error const& error)
 {
-  return error.message().find("canceled") != std::string::npos;
+  for (auto const& context : error.context()) {
+    if (context.key == "canceled" && context.value == "true") return true;
+  }
+  return error.message() == "tool canceled";
 }
 
 ava::core::Result<std::string> read_all_text(ToolContext const& context, std::filesystem::path const& path, std::string_view operation)

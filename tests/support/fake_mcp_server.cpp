@@ -3,11 +3,14 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
+
+#include <unistd.h>
 
 namespace {
 
@@ -83,6 +86,14 @@ std::string error_response(std::string_view id, std::string_view message)
   return "{\"jsonrpc\":\"2.0\",\"id\":" + json_string(id) + ",\"error\":{\"code\":-32000,\"message\":" + json_string(message) + "}}";
 }
 
+void write_process_group_marker(std::string const& path)
+{
+  if (path.empty())
+    return;
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  file << static_cast<long long>(getpgrp()) << '\n';
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -90,6 +101,7 @@ int main(int argc, char** argv)
   std::string mode = "ok";
   if (argc > 1)
     mode = argv[1];
+  std::string const marker_path = argc > 2 ? argv[2] : "";
   if (mode == "stderr-noise")
   {
     std::cerr << std::string(96, 'x') << "mcp-stderr-tail!";
@@ -103,8 +115,9 @@ int main(int argc, char** argv)
     if (!method || !id)
       continue;
 
-    if (mode == "timeout-initialize" && *method == "initialize")
+    if ((mode == "timeout-initialize" || mode == "timeout-initialize-marker") && *method == "initialize")
     {
+      write_process_group_marker(marker_path);
       std::this_thread::sleep_for(std::chrono::seconds(2));
       continue;
     }
@@ -123,7 +136,7 @@ int main(int argc, char** argv)
     if (*method == "initialize")
     {
       write_message(response(*id,
-                             "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{},\"prompts\":{}},"
+                             "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{},\"prompts\":{},\"resources\":{}},"
                              "\"serverInfo\":{\"name\":\"fake-mcp\",\"version\":\"1.0.0\"}}"));
     }
     else if (*method == "tools/list")
@@ -157,8 +170,15 @@ int main(int argc, char** argv)
                                "{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"MCP tool "
                                "failed\"}]}"));
       }
-      else if (mode == "slow-tool")
+      else if (mode == "tool-error-canceled-text")
       {
+        write_message(response(*id,
+                               "{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"job was "
+                               "canceled upstream\"}]}"));
+      }
+      else if (mode == "slow-tool" || mode == "slow-tool-marker")
+      {
+        write_process_group_marker(marker_path);
         std::this_thread::sleep_for(std::chrono::seconds(2));
         write_message(response(*id,
                                "{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"MCP slow "
@@ -180,8 +200,9 @@ int main(int argc, char** argv)
     }
     else if (*method == "prompts/get")
     {
-      if (mode == "slow-prompt")
+      if (mode == "slow-prompt" || mode == "slow-prompt-marker")
       {
+        write_process_group_marker(marker_path);
         std::this_thread::sleep_for(std::chrono::seconds(2));
       }
       auto const params = ava::core::json::object_field(*message, "params").value_or("{}");
@@ -189,6 +210,55 @@ int main(int argc, char** argv)
       auto const topic = ava::core::json::string_field(arguments, "topic").value_or("unknown");
       write_message(
           response(*id, "{\"messages\":[{\"role\":\"user\",\"content\":{\"type\":\"text\",\"text\":" + json_string("MCP prompt for " + topic) + "}}]}"));
+    }
+    else if (*method == "resources/list")
+    {
+      auto const params = ava::core::json::object_field(*message, "params").value_or("{}");
+      auto const cursor = ava::core::json::string_field(params, "cursor").value_or("");
+      if (mode == "paginated-resources" && cursor.empty())
+      {
+        write_message(response(*id,
+                               "{\"resources\":[{\"uri\":\"file:///workspace/one.md\",\"name\":\"one\","
+                               "\"mimeType\":\"text/markdown\"}],\"nextCursor\":\"page-2\"}"));
+      }
+      else if (mode == "paginated-resources" && cursor == "page-2")
+      {
+        write_message(response(*id,
+                               "{\"resources\":[{\"uri\":\"file:///workspace/two.md\",\"name\":\"two\","
+                               "\"mimeType\":\"text/markdown\"}]}"));
+      }
+      else
+      {
+        write_message(response(*id,
+                               "{\"resources\":[{\"uri\":\"file:///workspace/notes.md\",\"name\":\"project-notes\","
+                               "\"description\":\"Project notes resource\",\"mimeType\":\"text/markdown\"}]}"));
+      }
+    }
+    else if (*method == "resources/read")
+    {
+      if (mode == "slow-resource" || mode == "slow-resource-marker")
+      {
+        write_process_group_marker(marker_path);
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+      }
+      auto const params = ava::core::json::object_field(*message, "params").value_or("{}");
+      auto const uri = ava::core::json::string_field(params, "uri").value_or("");
+      if (mode == "resource-blob")
+      {
+        write_message(response(*id,
+                               "{\"contents\":[{\"uri\":" + json_string(uri) +
+                                   ",\"mimeType\":\"application/octet-stream\",\"blob\":\"ZmFrZQ==\"}]}"));
+      }
+      else if (mode == "resource-missing-contents")
+      {
+        write_message(response(*id, "{\"notContents\":[]}"));
+      }
+      else
+      {
+        write_message(response(*id,
+                               "{\"contents\":[{\"uri\":" + json_string(uri) +
+                                   ",\"mimeType\":\"text/markdown\",\"text\":\"MCP resource content\"}]}"));
+      }
     }
     else
     {

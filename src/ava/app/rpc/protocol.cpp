@@ -1,7 +1,12 @@
 #include "ava/app/rpc/protocol.h"
+
+#include "ava/session/session_store.h"
+
 #include "ava/core/json.h"
 
+#include <algorithm>
 #include <cctype>
+#include <initializer_list>
 #include <istream>
 #include <optional>
 #include <string>
@@ -107,6 +112,64 @@ ava::core::Result<std::optional<long long>> exact_optional_integer_field(std::st
   }
 }
 
+ava::core::Result<std::optional<std::string>> exact_optional_string_field(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return std::optional<std::string>{};
+  if (*start >= object.size() || object[*start] != '"')
+  {
+    return std::unexpected(invalid_rpc("RPC " + std::string(key) + " must be a string"));
+  }
+  auto value = ava::core::json::string_field(object, key);
+  if (!value)
+  {
+    return std::unexpected(invalid_rpc("RPC " + std::string(key) + " must be a string"));
+  }
+  return std::optional<std::string>{std::move(*value)};
+}
+
+ava::core::Result<std::optional<std::string>> plugin_command_arguments_field(std::string_view object, bool validate)
+{
+  auto const start = ava::core::json::field_value_start(object, "arguments");
+  if (!start)
+    return std::optional<std::string>{};
+  if (*start >= object.size())
+  {
+    return std::unexpected(invalid_rpc("RPC arguments must be an object"));
+  }
+
+  if (object[*start] == '{')
+  {
+    auto arguments = ava::core::json::object_field(object, "arguments");
+    if (!arguments && validate)
+    {
+      return std::unexpected(invalid_rpc("RPC arguments must be an object"));
+    }
+    return arguments;
+  }
+
+  if (object[*start] == '"')
+  {
+    auto arguments = ava::core::json::string_field(object, "arguments");
+    if (!arguments && validate)
+    {
+      return std::unexpected(invalid_rpc("RPC arguments must be an object"));
+    }
+    if (validate && (!arguments || !ava::core::json::is_valid_object(*arguments)))
+    {
+      return std::unexpected(invalid_rpc("RPC string arguments must contain a JSON object"));
+    }
+    return arguments;
+  }
+
+  if (validate)
+  {
+    return std::unexpected(invalid_rpc("RPC arguments must be an object"));
+  }
+  return std::optional<std::string>{};
+}
+
 bool is_rpc_identifier_metacharacter(char ch)
 {
   switch (ch)
@@ -180,6 +243,34 @@ ava::core::VoidResult validate_optional_rpc_text(std::optional<std::string> cons
   {
     auto const byte = static_cast<unsigned char>(ch);
     if (byte < 0x20 || byte == 0x7F)
+    {
+      auto error = invalid_rpc("RPC text field contains invalid character");
+      error.with_context("field", std::string(field_name));
+      return std::unexpected(std::move(error));
+    }
+  }
+
+  return {};
+}
+
+ava::core::VoidResult validate_optional_rpc_multiline_text(std::optional<std::string> const& value,
+                                                           std::string_view field_name,
+                                                           std::size_t max_bytes)
+{
+  if (!value)
+    return {};
+  if (value->size() > max_bytes)
+  {
+    auto error = invalid_rpc("RPC text field is too long");
+    error.with_context("field", std::string(field_name));
+    error.with_context("max_bytes", std::to_string(max_bytes));
+    return std::unexpected(std::move(error));
+  }
+
+  for (char const ch : *value)
+  {
+    auto const byte = static_cast<unsigned char>(ch);
+    if ((byte < 0x20 && ch != '\n' && ch != '\t') || byte == 0x7F)
     {
       auto error = invalid_rpc("RPC text field contains invalid character");
       error.with_context("field", std::string(field_name));
@@ -302,6 +393,11 @@ ava::core::VoidResult validate_optional_rpc_text_array(std::optional<std::vector
   return {};
 }
 
+bool command_type_is(std::string_view type, std::initializer_list<std::string_view> candidates)
+{
+  return std::ranges::any_of(candidates, [type](std::string_view candidate) { return type == candidate; });
+}
+
 }  // namespace
 
 ava::core::Error invalid_rpc(std::string message)
@@ -324,7 +420,9 @@ ava::core::VoidResult validate_protocol_version(RpcCommand const& command)
 
 std::string rpc_protocol_result_json()
 {
-  return "{\"protocol_version\":" + std::to_string(kRpcProtocolVersion) + ",\"supported_protocol_versions\":[" + std::to_string(kRpcProtocolVersion) + "]}";
+  return "{\"protocol_version\":" + std::to_string(kRpcProtocolVersion) + ",\"supported_protocol_versions\":[" + std::to_string(kRpcProtocolVersion) +
+         "],\"session_entry_version\":" + std::to_string(ava::session::kCurrentSessionEntryVersion) + ",\"supported_session_entry_versions\":[0,1,2," +
+         std::to_string(ava::session::kCurrentSessionEntryVersion) + "]}";
 }
 
 std::string parse_error_response_id(std::string_view line)
@@ -380,7 +478,7 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
     line.remove_suffix(1);
   if (line.size() > rpc::kMaxRpcLineBytes)
     return std::unexpected(rpc::invalid_rpc("RPC request line is too large"));
-  if (!rpc::is_json_object_line(line))
+  if (!rpc::is_json_object_line(line) || !ava::core::json::is_valid_object(line))
     return std::unexpected(rpc::invalid_rpc("malformed RPC JSON object"));
 
   auto id = ava::core::json::string_field(line, "id");
@@ -404,11 +502,6 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   {
     return std::unexpected(std::move(valid.error()));
   }
-  auto grant_id = ava::core::json::string_field(line, "grant_id");
-  if (auto valid = rpc::validate_optional_rpc_identifier(grant_id, "grant_id"); !valid)
-  {
-    return std::unexpected(std::move(valid.error()));
-  }
   auto provider = ava::core::json::string_field(line, "provider");
   if (auto valid = rpc::validate_optional_rpc_identifier(provider, "provider"); !valid)
   {
@@ -429,6 +522,12 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   {
     return std::unexpected(std::move(valid.error()));
   }
+  auto const is_plugin_command = *type == "run_plugin_command";
+  auto arguments = rpc::plugin_command_arguments_field(line, is_plugin_command);
+  if (!arguments)
+  {
+    return std::unexpected(std::move(arguments.error()));
+  }
   auto server_id = ava::core::json::string_field(line, "server_id");
   if (auto valid = rpc::validate_optional_rpc_identifier(server_id, "server_id"); !valid)
   {
@@ -437,41 +536,215 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   auto reasoning_budget_tokens = rpc::exact_optional_integer_field(line, "reasoning_budget_tokens");
   if (!reasoning_budget_tokens)
     return std::unexpected(std::move(reasoning_budget_tokens.error()));
-  auto reason = ava::core::json::string_field(line, "reason");
-  if (auto valid = rpc::validate_optional_rpc_text(reason, "reason", rpc::kMaxRpcReasonBytes); !valid)
-  {
-    return std::unexpected(std::move(valid.error()));
-  }
-  auto selected_options = rpc::optional_string_array_field(line, "selected_options");
-  if (!selected_options)
-    return std::unexpected(std::move(selected_options.error()));
-  if (auto valid =
-          rpc::validate_optional_rpc_text_array(*selected_options, "selected_options", rpc::kMaxRpcQuestionSelectedOptions, rpc::kMaxRpcQuestionAnswerBytes);
-      !valid)
-  {
-    return std::unexpected(std::move(valid.error()));
-  }
-  auto answer = ava::core::json::string_field(line, "answer");
-  if (auto valid = rpc::validate_optional_rpc_text(answer, "answer", rpc::kMaxRpcQuestionAnswerBytes); !valid)
-  {
-    return std::unexpected(std::move(valid.error()));
-  }
-  auto selected = ava::core::json::string_field(line, "selected");
-  if (auto valid = rpc::validate_optional_rpc_text(selected, "selected", rpc::kMaxRpcQuestionAnswerBytes); !valid)
-  {
-    return std::unexpected(std::move(valid.error()));
-  }
   auto command_arguments = ava::core::json::string_field(line, "command_arguments");
   if (auto valid = rpc::validate_optional_rpc_text(command_arguments, "command_arguments", rpc::kMaxRpcLineBytes / 2); !valid)
   {
     return std::unexpected(std::move(valid.error()));
   }
 
+  auto rule_id = std::optional<std::string>{};
+  if (rpc::command_type_is(*type, {"permission_rule_remove"}))
+  {
+    rule_id = ava::core::json::string_field(line, "rule_id");
+    if (auto valid = rpc::validate_optional_rpc_identifier(rule_id, "rule_id"); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+  }
+
+  auto grant_id = std::optional<std::string>{};
+  if (*type == "permission_grant_revoke")
+  {
+    grant_id = ava::core::json::string_field(line, "grant_id");
+    if (auto valid = rpc::validate_optional_rpc_identifier(grant_id, "grant_id"); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+  }
+
+  auto action = std::optional<std::string>{};
+  auto operation = std::optional<std::string>{};
+  auto scope = std::optional<std::string>{};
+  auto mode = std::optional<std::string>{};
+  auto target_path = std::optional<std::string>{};
+  auto rule_command = std::optional<std::string>{};
+  auto tool_name = std::optional<std::string>{};
+  if (rpc::command_type_is(*type, {"permission_rule_add"}))
+  {
+    action = ava::core::json::string_field(line, "action");
+    if (auto valid = rpc::validate_optional_rpc_identifier(action, "action"); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+    operation = ava::core::json::string_field(line, "operation");
+    if (auto valid = rpc::validate_optional_rpc_identifier(operation, "operation"); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+    scope = ava::core::json::string_field(line, "scope");
+    if (auto valid = rpc::validate_optional_rpc_identifier(scope, "scope"); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+    mode = ava::core::json::string_field(line, "mode");
+    if (auto valid = rpc::validate_optional_rpc_identifier(mode, "mode"); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+    tool_name = ava::core::json::string_field(line, "tool_name");
+    if (auto valid = rpc::validate_optional_rpc_identifier(tool_name, "tool_name"); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+    target_path = ava::core::json::string_field(line, "target_path");
+    if (auto valid = rpc::validate_optional_rpc_text(target_path, "target_path", rpc::kMaxRpcRulePathBytes); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+    auto const path_alias = ava::core::json::string_field(line, "path");
+    if (auto valid = rpc::validate_optional_rpc_text(path_alias, "path", rpc::kMaxRpcRulePathBytes); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+    rule_command = ava::core::json::string_field(line, "command");
+    if (auto valid = rpc::validate_optional_rpc_text(rule_command, "command", rpc::kMaxRpcRuleCommandBytes); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+  }
+
+  auto reason = std::optional<std::string>{};
+  if (rpc::command_type_is(*type, {"permission_reply", "permission_rule_add", "summarize_branch"}))
+  {
+    reason = ava::core::json::string_field(line, "reason");
+    if (auto valid = rpc::validate_optional_rpc_text(reason, "reason", rpc::kMaxRpcReasonBytes); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+  }
+
+  auto session_name = std::optional<std::string>{};
+  auto labels = std::optional<std::vector<std::string>>{};
+  if (rpc::command_type_is(*type, {"set_session_name", "fork_session", "clone_session"}))
+  {
+    auto parsed_session_name = rpc::exact_optional_string_field(line, "session_name");
+    if (!parsed_session_name)
+      return std::unexpected(std::move(parsed_session_name.error()));
+    session_name = std::move(*parsed_session_name);
+    if (auto valid = rpc::validate_optional_rpc_text(session_name, "session_name", rpc::kMaxRpcSessionNameBytes); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+  }
+  if (rpc::command_type_is(*type, {"set_session_labels", "fork_session", "clone_session"}))
+  {
+    auto parsed_labels = rpc::optional_string_array_field(line, "labels");
+    if (!parsed_labels)
+      return std::unexpected(std::move(parsed_labels.error()));
+    if (auto valid = rpc::validate_optional_rpc_text_array(*parsed_labels, "labels", rpc::kMaxRpcSessionLabels, rpc::kMaxRpcSessionLabelBytes); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+    labels = std::move(*parsed_labels);
+  }
+
+  auto branch_from_entry_id = std::optional<std::string>{};
+  if (*type == "clone_session" && ava::core::json::field_value_start(line, "branch_from_entry_id"))
+  {
+    return std::unexpected(rpc::invalid_rpc("clone_session does not support branch_from_entry_id"));
+  }
+  if (*type == "fork_session")
+  {
+    auto parsed_branch_from_entry_id = rpc::exact_optional_string_field(line, "branch_from_entry_id");
+    if (!parsed_branch_from_entry_id)
+      return std::unexpected(std::move(parsed_branch_from_entry_id.error()));
+    branch_from_entry_id = std::move(*parsed_branch_from_entry_id);
+    if (auto valid = rpc::validate_optional_rpc_text(branch_from_entry_id, "branch_from_entry_id", rpc::kMaxRpcEntryIdBytes); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+    if (branch_from_entry_id && branch_from_entry_id->empty())
+    {
+      return std::unexpected(rpc::invalid_rpc("fork_session branch_from_entry_id must be non-empty when provided"));
+    }
+  }
+
+  auto branch_root_entry_id = std::optional<std::string>{};
+  auto branch_tip_entry_id = std::optional<std::string>{};
+  auto summary = std::optional<std::string>{};
+  if (*type == "summarize_branch")
+  {
+    auto parsed_branch_root_entry_id = rpc::exact_optional_string_field(line, "branch_root_entry_id");
+    if (!parsed_branch_root_entry_id)
+      return std::unexpected(std::move(parsed_branch_root_entry_id.error()));
+    branch_root_entry_id = std::move(*parsed_branch_root_entry_id);
+    if (auto valid = rpc::validate_optional_rpc_text(branch_root_entry_id, "branch_root_entry_id", rpc::kMaxRpcEntryIdBytes); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+    auto parsed_branch_tip_entry_id = rpc::exact_optional_string_field(line, "branch_tip_entry_id");
+    if (!parsed_branch_tip_entry_id)
+      return std::unexpected(std::move(parsed_branch_tip_entry_id.error()));
+    branch_tip_entry_id = std::move(*parsed_branch_tip_entry_id);
+    if (auto valid = rpc::validate_optional_rpc_text(branch_tip_entry_id, "branch_tip_entry_id", rpc::kMaxRpcEntryIdBytes); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+    auto parsed_summary = rpc::exact_optional_string_field(line, "summary");
+    if (!parsed_summary)
+      return std::unexpected(std::move(parsed_summary.error()));
+    summary = std::move(*parsed_summary);
+    if (auto valid = rpc::validate_optional_rpc_multiline_text(summary, "summary", rpc::kMaxRpcBranchSummaryBytes); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+  }
+
+  auto session_id = ava::core::json::string_field(line, "session_id");
+  if (rpc::command_type_is(*type, {"fork_session", "clone_session", "summarize_branch", "open_session", "switch_session"}))
+  {
+    auto parsed_session_id = rpc::exact_optional_string_field(line, "session_id");
+    if (!parsed_session_id)
+      return std::unexpected(std::move(parsed_session_id.error()));
+    session_id = std::move(*parsed_session_id);
+    if (session_id && session_id->empty())
+    {
+      return std::unexpected(rpc::invalid_rpc(*type + " session_id must be non-empty when provided"));
+    }
+  }
+
+  auto selected_options = std::optional<std::vector<std::string>>{};
+  auto answer = std::optional<std::string>{};
+  auto selected = std::optional<std::string>{};
+  if (*type == "question_reply")
+  {
+    auto parsed_selected_options = rpc::optional_string_array_field(line, "selected_options");
+    if (!parsed_selected_options)
+      return std::unexpected(std::move(parsed_selected_options.error()));
+    if (auto valid = rpc::validate_optional_rpc_text_array(*parsed_selected_options, "selected_options", rpc::kMaxRpcQuestionSelectedOptions,
+                                                           rpc::kMaxRpcQuestionAnswerBytes);
+        !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+    selected_options = std::move(*parsed_selected_options);
+    answer = ava::core::json::string_field(line, "answer");
+    if (auto valid = rpc::validate_optional_rpc_text(answer, "answer", rpc::kMaxRpcQuestionAnswerBytes); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+    selected = ava::core::json::string_field(line, "selected");
+    if (auto valid = rpc::validate_optional_rpc_text(selected, "selected", rpc::kMaxRpcQuestionAnswerBytes); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+  }
+
   return RpcCommand{.id = std::move(*id),
                     .type = std::move(*type),
                     .protocol_version = std::move(*protocol_version),
                     .message = ava::core::json::string_field(line, "message"),
-                    .session_id = ava::core::json::string_field(line, "session_id"),
+                    .session_id = std::move(session_id),
                     .provider = std::move(provider),
                     .model = std::move(model),
                     .instructions = ava::core::json::string_field(line, "instructions"),
@@ -481,17 +754,31 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
                     .request_id = std::move(request_id),
                     .correlation_id = std::move(correlation_id),
                     .grant_id = std::move(grant_id),
+                    .rule_id = std::move(rule_id),
                     .decision = ava::core::json::string_field(line, "decision"),
+                    .action = std::move(action),
+                    .operation = std::move(operation),
+                    .scope = std::move(scope),
+                    .mode = std::move(mode),
                     .reason = std::move(reason),
-                    .answer = std::move(answer),
+                    .session_name = std::move(session_name),
+                    .labels = std::move(labels),
+                     .branch_from_entry_id = std::move(branch_from_entry_id),
+                     .branch_root_entry_id = std::move(branch_root_entry_id),
+                     .branch_tip_entry_id = std::move(branch_tip_entry_id),
+                     .summary = std::move(summary),
+                     .answer = std::move(answer),
                     .selected = std::move(selected),
-                    .selected_options = std::move(*selected_options),
+                    .selected_options = std::move(selected_options),
                     .plugin_id = std::move(plugin_id),
                     .name = std::move(name),
-                    .arguments = ava::core::json::object_field(line, "arguments"),
+                    .arguments = std::move(*arguments),
                     .command_arguments = std::move(command_arguments),
                     .server_id = std::move(server_id),
-                    .path = ava::core::json::string_field(line, "path")};
+                    .path = ava::core::json::string_field(line, "path"),
+                    .target_path = std::move(target_path),
+                    .command = std::move(rule_command),
+                    .tool_name = std::move(tool_name)};
 }
 
 std::string serialize_rpc_success_jsonl(std::string_view id, std::string_view result_json)

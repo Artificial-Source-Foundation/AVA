@@ -72,7 +72,8 @@ std::streamsize FailingStreambuf::xsputn(char const* s, std::streamsize count)
 std::filesystem::path temp_root()
 {
   auto const build_name = std::filesystem::current_path().filename();
-  return std::filesystem::temp_directory_path() / ("ava_core_tests_" + build_name.string());
+  auto const process_id = static_cast<unsigned long long>(::getpid());
+  return std::filesystem::temp_directory_path() / ("ava_core_tests_" + build_name.string() + "_" + std::to_string(process_id));
 }
 
 ScopedEnvVar::ScopedEnvVar(std::string name, std::string value) : name_(std::move(name))

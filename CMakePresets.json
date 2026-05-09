@@ -40,18 +40,15 @@
   "buildPresets": [
     {
       "name": "dev",
-      "configurePreset": "dev",
-      "nativeToolOptions": ["$penv{AVA_PARALLEL_BUILD}"]
+      "configurePreset": "dev"
     },
     {
       "name": "sanitize",
-      "configurePreset": "sanitize",
-      "nativeToolOptions": ["$penv{AVA_PARALLEL_BUILD}"]
+      "configurePreset": "sanitize"
     },
     {
       "name": "release",
-      "configurePreset": "release",
-      "nativeToolOptions": ["$penv{AVA_PARALLEL_BUILD}"]
+      "configurePreset": "release"
     }
   ],
   "testPresets": [

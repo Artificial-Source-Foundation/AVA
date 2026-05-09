@@ -1,25 +1,37 @@
-#include "tests/support/golden.h"
-#include "tests/support/test_harness.h"
 #include "ava/app/plugin_event_hooks.h"
+
 #include "ava/agent/tool_dispatcher.h"
+
 #include "ava/tools/file_tools.h"
+
 #include "ava/plugin/discovery.h"
 #include "ava/plugin/enablement.h"
 #include "ava/plugin/manifest.h"
 #include "ava/plugin/runner.h"
 #include "ava/plugin/runner_protocol.h"
 #include "ava/plugin/tool_broker.h"
+
 #include "ava/permissions/permission.h"
+
 #include "ava/core/json.h"
 
+#include "tests/support/golden.h"
+#include "tests/support/test_harness.h"
+
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
+
+#include <signal.h>
+#include <sys/types.h>
 
 #ifndef AVA_SAMPLE_TODO_PLUGIN_DIR
 #define AVA_SAMPLE_TODO_PLUGIN_DIR ""
@@ -69,6 +81,53 @@ std::string read_text(std::filesystem::path const& path)
   return buffer.str();
 }
 
+std::optional<pid_t> read_pid_file_for_test(std::filesystem::path const& path)
+{
+  std::ifstream file(path, std::ios::binary);
+  long long value = 0;
+  file >> value;
+  if (!file || value <= 0)
+    return std::nullopt;
+  return static_cast<pid_t>(value);
+}
+
+bool process_group_exists(pid_t pgid)
+{
+  errno = 0;
+  if (::kill(-pgid, 0) == 0)
+    return true;
+  return errno != ESRCH;
+}
+
+bool wait_for_process_group_exit(pid_t pgid)
+{
+  for (int index = 0; index < 100; ++index)
+  {
+    if (!process_group_exists(pgid))
+      return true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  return !process_group_exists(pgid);
+}
+
+std::string shell_single_quote(std::string_view value)
+{
+  std::string quoted = "'";
+  for (char ch : value)
+  {
+    if (ch == '\'')
+    {
+      quoted += "'\\''";
+    }
+    else
+    {
+      quoted.push_back(ch);
+    }
+  }
+  quoted += "'";
+  return quoted;
+}
+
 std::filesystem::path sample_todo_plugin_dir()
 {
   std::filesystem::path const path{AVA_SAMPLE_TODO_PLUGIN_DIR};
@@ -103,7 +162,8 @@ std::string runner_manifest_json(std::string id, std::string script_name)
          "}";
 }
 
-std::string tool_manifest_json(std::string id, std::string script_name, std::string tool_name = "todo_add")
+std::string tool_manifest_json(std::string id, std::string script_name, std::string tool_name = "todo_add",
+                               std::string capabilities_json = "[\"tools\"]")
 {
   return std::string("{\n") +
          "  \"schema_version\": 1,\n"
@@ -116,7 +176,7 @@ std::string tool_manifest_json(std::string id, std::string script_name, std::str
          "  \"entrypoint\": {\"command\": \"/bin/sh\", \"args\": [\"" +
          ava::core::json::escape(script_name) +
          "\"]},\n"
-         "  \"capabilities\": [\"tools\"],\n"
+         "  \"capabilities\": " + capabilities_json + ",\n" +
          "  \"contributes\": {\"tools\": [{\"name\": \"" +
          ava::core::json::escape(tool_name) +
          "\", \"description\": \"Add todo\", \"input_schema\": {\"type\": \"object\", \"properties\": "
@@ -171,6 +231,66 @@ std::string nested_arrays_json(std::size_t depth)
   return text;
 }
 
+std::string proxy_tool_script(std::string proxy_request_json, std::filesystem::path const& response_file,
+                              std::string call_id = "call_proxy")
+{
+  return "IFS= read -r line\n"
+         "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
+         "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
+         "IFS= read -r line\n"
+         "printf '%s\\n' " +
+         shell_single_quote(proxy_request_json) +
+         "\n"
+         "IFS= read -r proxy_response\n"
+         "printf '%s\\n' \"$proxy_response\" > " +
+         shell_single_quote(response_file.generic_string()) +
+         "\n"
+         "printf '%s\\n' '{\"id\":\"ava_tool_" +
+         ava::core::json::escape(call_id) +
+         "\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"proxy observed\",\"metadata\":{}}'\n"
+         "while IFS= read -r line; do :; done\n";
+}
+
+std::string proxy_request_json(std::string id, std::string operation, std::string arguments_json)
+{
+  return "{\"id\":\"" + ava::core::json::escape(id) + "\",\"type\":\"proxy.request\",\"operation\":\"" +
+         ava::core::json::escape(operation) + "\",\"arguments\":" + arguments_json + "}";
+}
+
+ava::tools::ToolContext plugin_proxy_test_context(std::filesystem::path const& workspace,
+                                                  std::filesystem::path const& project_plugins,
+                                                  std::filesystem::path const& state_file,
+                                                  std::vector<ava::permissions::PermissionPrompt>& prompts,
+                                                  std::vector<ava::tools::PermissionAuditEvent>& audits,
+                                                  bool& cancel_requested)
+{
+  ava::tools::ToolContext context;
+  context.workspace_dir = workspace;
+  context.plugin_global_plugins_dir = workspace.parent_path() / "global-plugins";
+  context.plugin_project_plugins_dir = project_plugins;
+  context.plugin_enablement_file = state_file;
+  context.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
+      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    prompts.push_back(prompt);
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  context.permission_audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+    audits.push_back(event);
+    return {};
+  };
+  context.cancel_requested = [&] { return cancel_requested; };
+  context.session_id = "ses_proxy_test";
+  context.provider_id = "openai";
+  context.model_id = "gpt-test";
+  context.current_dir = workspace / "src";
+  return context;
+}
+
+std::optional<std::string> proxy_response_content(std::string_view response)
+{
+  return ava::core::json::string_field(response, "content");
+}
+
 void test_plugin_manifest_parsing()
 {
   auto parsed = ava::plugin::parse_plugin_manifest(valid_manifest_json(), "/tmp/plugin/plugin.json");
@@ -181,6 +301,8 @@ void test_plugin_manifest_parsing()
     expect(parsed->entrypoint.command == "node", "plugin manifest entrypoint command parsed");
     expect(parsed->entrypoint.args.size() == 2 && parsed->entrypoint.args[1] == "--safe", "plugin manifest entrypoint args parsed");
     expect(parsed->capabilities.size() == 2, "plugin manifest capabilities parsed");
+    expect(ava::plugin::plugin_has_capability(*parsed, "tools") && !ava::plugin::plugin_has_capability(*parsed, "proxy.read"),
+           "plugin manifest capability helper gates explicit declarations");
     expect(parsed->contributes.tools.size() == 1, "plugin manifest tool contribution parsed");
     expect(parsed->contributes.tools[0].input_schema_json.find("additionalProperties") != std::string::npos,
            "plugin manifest preserves tool input schema JSON");
@@ -222,6 +344,17 @@ void test_plugin_manifest_parsing()
       {});
   expect(!bad_resource_path && bad_resource_path.error().message().find("safe relative path") != std::string::npos,
          "plugin manifest rejects prompt and skill paths that escape the plugin directory");
+
+  std::string deeply_nested_manifest =
+      "{\"schema_version\":1,\"id\":\"com.example.deep\",\"name\":\"Deep\",\"version\":\"0.1\","
+      "\"api_version\":\"ava.plugin.v1\",\"entrypoint\":{\"command\":\"node\"},\"extra\":";
+  for (int index = 0; index < 70; ++index) deeply_nested_manifest += '[';
+  deeply_nested_manifest += "0";
+  for (int index = 0; index < 70; ++index) deeply_nested_manifest += ']';
+  deeply_nested_manifest += '}';
+  auto deep = ava::plugin::parse_plugin_manifest(deeply_nested_manifest, {});
+  expect(!deep && deep.error().message().find("maximum JSON depth") != std::string::npos,
+         "plugin manifest rejects excessive JSON nesting before recursive validation");
 }
 
 void test_sample_todo_plugin_manifest_and_resources()
@@ -335,6 +468,16 @@ void test_plugin_runner_protocol_parsing()
 
   auto event_result = ava::plugin::parse_event_observed_response("{\"id\":\"ava_event_1\",\"type\":\"event.observed\",\"ok\":true}", "ava_event_1");
   expect(event_result && event_result->ok && event_result->content.empty(), "plugin runner protocol treats missing event content as empty text");
+
+  auto proxy_request = ava::plugin::parse_proxy_request(
+      "{\"id\":\"px_1\",\"type\":\"proxy.request\",\"operation\":\"file.read\",\"arguments\":{\"path\":\"README.md\"}}");
+  expect(proxy_request && proxy_request->id == "px_1" && proxy_request->operation == "file.read" &&
+             proxy_request->arguments_json.find("README.md") != std::string::npos,
+         "plugin runner protocol parses proxy.request records");
+
+  auto malformed_proxy_request = ava::plugin::parse_proxy_request(
+      "{\"id\":\"px_bad\",\"type\":\"proxy.request\",\"operation\":\"file.read\",\"arguments\":[]}");
+  expect(!malformed_proxy_request, "plugin runner protocol rejects proxy.request records without object arguments");
 
   auto too_deep = ava::plugin::parse_tool_result_response(
       "{\"id\":\"ava_tool_deep\",\"type\":\"tool.result\",\"ok\":true,\"content\":\"x\",\"metadata\":" + nested_arrays_json(130) + "}", "ava_tool_deep");
@@ -575,12 +718,16 @@ void test_plugin_runner_contained_failures()
   expect(!timed_out && timed_out.error().message().find("timed out") != std::string::npos, "plugin runner times out hung startup");
 
   auto const startup_cancel_dir = root / "plugins" / "com.example.startupcancel";
-  write_text(startup_cancel_dir / "plugin.sh", "sleep 2\n");
+  auto const startup_cancel_pgid_file = startup_cancel_dir / "startup-cancel-pgid.txt";
+  write_text(startup_cancel_dir / "plugin.sh", "printf '%s\\n' $$ > " + shell_single_quote(startup_cancel_pgid_file.generic_string()) + "\nsleep 30\n");
   auto startup_cancel_options = runner_options(workspace, std::chrono::milliseconds(1000));
-  int startup_cancel_checks = 0;
-  auto startup_canceled = ava::plugin::PluginProcess::start(runner_manifest(startup_cancel_dir, "com.example.startupcancel", "plugin.sh"),
-                                                            startup_cancel_options, [&] { return ++startup_cancel_checks > 2; });
-  expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos, "plugin runner cancels hung startup before timeout");
+  auto startup_canceled =
+      ava::plugin::PluginProcess::start(runner_manifest(startup_cancel_dir, "com.example.startupcancel", "plugin.sh"), startup_cancel_options,
+                                        [&] { return read_pid_file_for_test(startup_cancel_pgid_file).has_value(); });
+  auto const startup_cancel_pgid = read_pid_file_for_test(startup_cancel_pgid_file);
+  expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos && startup_cancel_pgid &&
+             wait_for_process_group_exit(*startup_cancel_pgid),
+         "plugin runner cancels hung startup and terminates the plugin process group before timeout");
 
   auto const exited_dir = root / "plugins" / "com.example.exited";
   write_text(exited_dir / "plugin.sh",
@@ -642,6 +789,9 @@ void test_plugin_runner_tool_calls()
     expect(request.find("\"type\":\"tool.call\"") != std::string::npos && request.find("\"tool\":\"todo_add\"") != std::string::npos &&
                request.find("\"text\":\"write tests\"") != std::string::npos && request.find(workspace.string()) != std::string::npos,
            "plugin runner sends bounded tool call request context");
+    auto pre_canceled = (*process)->call_tool("todo_add", "{}", "pre_canceled", [] { return true; });
+    expect(!pre_canceled && pre_canceled.error().message().find("canceled") != std::string::npos,
+           "plugin runner maps cancellation before a tool call to a deterministic canceled error");
     auto shutdown = (*process)->shutdown(std::chrono::milliseconds(500));
     expect(shutdown.has_value(), "plugin runner shuts down after tool call");
   }
@@ -680,21 +830,24 @@ void test_plugin_runner_tool_calls()
   }
 
   auto const cancel_dir = root / "plugins" / "com.example.toolcancel";
+  auto const cancel_pgid_file = cancel_dir / "tool-cancel-pgid.txt";
   write_text(cancel_dir / "plugin.sh",
              "read line\n"
              "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
              "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
              "read line\n"
-             "sleep 2\n");
+             "printf '%s\\n' $$ > " +
+                 shell_single_quote(cancel_pgid_file.generic_string()) + "\nsleep 30 &\nwait\n");
   auto cancel_options = runner_options(workspace, std::chrono::milliseconds(500));
   cancel_options.request_timeout = std::chrono::milliseconds(1000);
   auto cancel = ava::plugin::PluginProcess::start(runner_manifest(cancel_dir, "com.example.toolcancel", "plugin.sh"), cancel_options);
   expect(cancel.has_value(), "plugin runner starts cancellation fake plugin");
   if (cancel)
   {
-    int cancel_checks = 0;
-    auto result = (*cancel)->call_tool("todo_add", "{}", "cancel", [&] { return ++cancel_checks > 2; });
-    expect(!result && result.error().message().find("canceled") != std::string::npos, "plugin runner cancels hung tool calls before timeout");
+    auto result = (*cancel)->call_tool("todo_add", "{}", "cancel", [&] { return read_pid_file_for_test(cancel_pgid_file).has_value(); });
+    auto const cancel_pgid = read_pid_file_for_test(cancel_pgid_file);
+    expect(!result && result.error().message().find("canceled") != std::string::npos && cancel_pgid && wait_for_process_group_exit(*cancel_pgid),
+           "plugin runner cancels hung tool calls and terminates the plugin process group before timeout");
   }
 
   auto const crashed_dir = root / "plugins" / "com.example.toolcrash";
@@ -825,9 +978,13 @@ void test_enabled_plugin_event_hooks_observe_runtime_events()
                                            .mode = ava::agent::Mode::Build,
                                            .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
                                                -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-                                             prompts.push_back(prompt);
-                                             return ava::permissions::PermissionResolution::Allow;
-                                           }},
+                                              prompts.push_back(prompt);
+                                              return ava::permissions::PermissionResolution::Allow;
+                                            },
+                                            .session_id = "ses_event_test",
+                                            .provider_id = "openai",
+                                            .model_id = "gpt-test",
+                                            .current_dir = workspace},
       [&forwarded](ava::app::RuntimeEvent const&) -> ava::core::VoidResult {
         forwarded = true;
         return {};
@@ -896,14 +1053,18 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
           .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
             return ava::permissions::PermissionResolution::Allow;
           },
-          .hook_failure_sink =
-              [&failures](std::string_view plugin_id, std::string_view event_name, ava::core::Error const& error) {
-                failures.push_back(CapturedFailure{.plugin_id = std::string(plugin_id),
-                                                   .event_name = std::string(event_name),
-                                                   .category = error.category(),
-                                                   .message = error.message(),
-                                                   .details = error.format()});
-              }},
+           .hook_failure_sink =
+               [&failures](std::string_view plugin_id, std::string_view event_name, ava::core::Error const& error) {
+                 failures.push_back(CapturedFailure{.plugin_id = std::string(plugin_id),
+                                                    .event_name = std::string(event_name),
+                                                    .category = error.category(),
+                                                    .message = error.message(),
+                                                    .details = error.format()});
+               },
+           .session_id = "ses_event_diag",
+           .provider_id = "openai",
+           .model_id = "gpt-test",
+           .current_dir = workspace},
       [&forwarded](ava::app::RuntimeEvent const&) -> ava::core::VoidResult {
         forwarded = true;
         return {};
@@ -1039,8 +1200,347 @@ void test_plugin_tool_dispatcher()
   cancel_requested = true;
   auto canceled = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_canceled", .name = model_tool_name, .arguments_json = "{}"});
   expect(canceled && !canceled->success && canceled->payload.status == ava::agent::ToolResultStatus::Canceled &&
-             canceled->result_text.find("canceled") != std::string::npos && prompts.size() == prompts_before_cancel,
-         "plugin tool dispatcher reports semantic cancellation before permission or process execution");
+              canceled->result_text.find("canceled") != std::string::npos && prompts.size() == prompts_before_cancel,
+          "plugin tool dispatcher reports semantic cancellation before permission or process execution");
+}
+
+void test_plugin_core_service_proxy_read_search_slice()
+{
+  auto const root = temp_root() / "plugin-core-proxy";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const project_plugins = workspace / ".ava" / "plugins";
+  auto const state_file = root / "state" / "plugin-enablement.json";
+  auto const outside_dir = root / "outside";
+  std::filesystem::create_directories(workspace / "src");
+  write_text(workspace / "visible.txt", "visible workspace content\n");
+  write_text(workspace / "src" / "notes.txt", "alpha\nneedle is here\nomega\n");
+  write_text(outside_dir / "read.txt", "outside proxy content\n" + std::string(20 * 1024, 'x'));
+  write_text(outside_dir / "deny.txt", "denied outside content\n");
+
+  auto install_plugin = [&](std::string plugin_id, std::string capabilities_json, std::string script) {
+    auto const plugin_dir = project_plugins / plugin_id;
+    write_text(plugin_dir / "plugin.json", tool_manifest_json(plugin_id, "plugin.sh", "proxy_tool", capabilities_json));
+    write_text(plugin_dir / "plugin.sh", script);
+    auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, plugin_id, true,
+                                                    ava::plugin::PluginScope::Project);
+    expect(enabled.has_value(), "proxy test enables plugin " + plugin_id);
+    return plugin_dir;
+  };
+
+  {
+    auto const plugin_id = std::string("com.example.proxycap");
+    auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
+    auto const request = proxy_request_json(
+        "px_no_cap", "file.read",
+        "{\"path\":\"" + ava::core::json::escape((workspace / "visible.txt").generic_string()) + "\"}");
+    install_plugin(plugin_id, "[\"tools\"]", proxy_tool_script(request, response_file));
+    std::vector<ava::permissions::PermissionPrompt> prompts;
+    std::vector<ava::tools::PermissionAuditEvent> audits;
+    bool cancel_requested = false;
+    auto context = plugin_proxy_test_context(workspace, project_plugins, state_file, prompts, audits, cancel_requested);
+    ava::agent::ToolDispatcher dispatcher(context);
+    auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "call_proxy", .name = ava::plugin::plugin_model_tool_name(plugin_id, "proxy_tool"), .arguments_json = "{}"});
+    expect(dispatched && dispatched->success, dispatched ? "manifest without proxy capability receives a handled proxy denial"
+                                                    : "manifest without proxy capability dispatch failed: " + dispatched.error().format());
+    auto const response = read_text(response_file);
+    expect(ava::core::json::is_valid_object(response), "capability denial proxy.response is valid JSON");
+    expect(response.find("\"type\":\"proxy.response\"") != std::string::npos &&
+               response.find("\"id\":\"px_no_cap\"") != std::string::npos &&
+               response.find("\"ok\":false") != std::string::npos &&
+               response.find("required proxy capability") != std::string::npos,
+           "manifest without proxy.read cannot use file.read proxy");
+    auto const read_audit = std::any_of(audits.begin(), audits.end(), [](auto const& event) {
+      return event.operation == ava::permissions::Operation::ReadFile;
+    });
+    expect(!read_audit, "capability-gated proxy denial does not reach the read-file service");
+  }
+
+  {
+    auto const plugin_id = std::string("com.example.proxyread");
+    auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
+    auto const request = proxy_request_json(
+        "px_read", "file.read",
+        "{\"path\":\"" + ava::core::json::escape((outside_dir / "read.txt").generic_string()) +
+            "\",\"max_bytes\":999999,\"limit\":999999}");
+    install_plugin(plugin_id, "[\"tools\",\"proxy.read\"]", proxy_tool_script(request, response_file));
+    std::vector<ava::permissions::PermissionPrompt> prompts;
+    std::vector<ava::tools::PermissionAuditEvent> audits;
+    bool cancel_requested = false;
+    auto context = plugin_proxy_test_context(workspace, project_plugins, state_file, prompts, audits, cancel_requested);
+    ava::agent::ToolDispatcher dispatcher(context);
+    auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "call_proxy", .name = ava::plugin::plugin_model_tool_name(plugin_id, "proxy_tool"), .arguments_json = "{}"});
+    expect(dispatched && dispatched->success, dispatched ? "read proxy dispatch succeeds"
+                                                    : "read proxy dispatch failed: " + dispatched.error().format());
+    auto const response = read_text(response_file);
+    expect(response.size() <= 64 * 1024 && ava::core::json::is_valid_object(response),
+           "read proxy.response stays within the plugin record cap and is valid JSON");
+    auto content = proxy_response_content(response);
+    expect(content && ava::core::json::is_valid_object(*content) &&
+               content->find("outside proxy content") != std::string::npos &&
+               content->find("\"truncated\":true") != std::string::npos,
+           "read proxy returns bounded presentation JSON content");
+    auto const read_prompt = std::any_of(prompts.begin(), prompts.end(), [](auto const& prompt) {
+      return prompt.operation == ava::permissions::Operation::ReadFile;
+    });
+    auto const read_audit = std::any_of(audits.begin(), audits.end(), [&](auto const& event) {
+      return event.operation == ava::permissions::Operation::ReadFile && event.resolution == "allow" &&
+             event.actor.find("plugin:" + plugin_id) != std::string::npos &&
+             event.tool_name.find("file.read") != std::string::npos;
+    });
+    expect(read_prompt && read_audit, "read proxy routes through existing read-file permission prompt and audit context");
+  }
+
+  {
+    auto const plugin_id = std::string("com.example.proxysearch");
+    auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
+    auto const request = proxy_request_json(
+        "px_search", "file.search",
+        "{\"query\":\"needle\",\"include\":\"**/*.txt\",\"max_matches\":10}");
+    install_plugin(plugin_id, "[\"tools\",\"proxy.search\"]", proxy_tool_script(request, response_file));
+    std::vector<ava::permissions::PermissionPrompt> prompts;
+    std::vector<ava::tools::PermissionAuditEvent> audits;
+    bool cancel_requested = false;
+    auto context = plugin_proxy_test_context(workspace, project_plugins, state_file, prompts, audits, cancel_requested);
+    ava::agent::ToolDispatcher dispatcher(context);
+    auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "call_proxy", .name = ava::plugin::plugin_model_tool_name(plugin_id, "proxy_tool"), .arguments_json = "{}"});
+    expect(dispatched && dispatched->success, dispatched ? "search proxy dispatch succeeds"
+                                                    : "search proxy dispatch failed: " + dispatched.error().format());
+    auto const response = read_text(response_file);
+    auto content = proxy_response_content(response);
+    expect(ava::core::json::is_valid_object(response) && content && ava::core::json::is_valid_object(*content) &&
+               content->find("\"kind\":\"grep\"") != std::string::npos &&
+               content->find("needle is here") != std::string::npos,
+           "search proxy returns grep presentation JSON");
+    auto const search_audit = std::any_of(audits.begin(), audits.end(), [&](auto const& event) {
+      return event.operation == ava::permissions::Operation::SearchFiles &&
+             event.actor.find("plugin:" + plugin_id) != std::string::npos &&
+             event.tool_name.find("file.search") != std::string::npos;
+    });
+    expect(search_audit, "search proxy routes through existing search permission audit path");
+  }
+
+  {
+    auto const plugin_id = std::string("com.example.proxysession");
+    auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
+    auto const request = proxy_request_json("px_session", "session.status", "{}");
+    install_plugin(plugin_id, "[\"tools\",\"proxy.session\"]", proxy_tool_script(request, response_file));
+    std::vector<ava::permissions::PermissionPrompt> prompts;
+    std::vector<ava::tools::PermissionAuditEvent> audits;
+    bool cancel_requested = false;
+    auto context = plugin_proxy_test_context(workspace, project_plugins, state_file, prompts, audits, cancel_requested);
+    ava::agent::ToolDispatcher dispatcher(context);
+    auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "call_proxy", .name = ava::plugin::plugin_model_tool_name(plugin_id, "proxy_tool"), .arguments_json = "{}"});
+    expect(dispatched && dispatched->success, dispatched ? "session.status proxy dispatch succeeds"
+                                                   : "session.status proxy dispatch failed: " + dispatched.error().format());
+    auto const response = read_text(response_file);
+    auto content = proxy_response_content(response);
+    auto const expected_current_dir = "\"current_dir\":\"" +
+                                      ava::core::json::escape((workspace / "src").generic_string()) + "\"";
+    expect(ava::core::json::is_valid_object(response) && content && ava::core::json::is_valid_object(*content) &&
+                content->find("\"operation\":\"session.status\"") != std::string::npos &&
+                content->find("\"session_id\":\"ses_proxy_test\"") != std::string::npos &&
+                content->find("\"provider_id\":\"openai\"") != std::string::npos &&
+                content->find("\"model_id\":\"gpt-test\"") != std::string::npos &&
+                content->find(expected_current_dir) != std::string::npos,
+           "session.status proxy returns bounded read-only session metadata");
+    auto const service_prompt = std::any_of(prompts.begin(), prompts.end(), [](auto const& prompt) {
+      return prompt.operation != ava::permissions::Operation::PluginExecute &&
+             prompt.operation != ava::permissions::Operation::PluginToolCall;
+    });
+    expect(!service_prompt, "session.status proxy does not request file, search, or command permissions");
+  }
+
+  {
+    auto const plugin_id = std::string("com.example.proxysessionargs");
+    auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
+    auto const request = proxy_request_json("px_session_args", "session.status", "{\"include\":\"stats\"}");
+    install_plugin(plugin_id, "[\"tools\",\"proxy.session\"]", proxy_tool_script(request, response_file));
+    std::vector<ava::permissions::PermissionPrompt> prompts;
+    std::vector<ava::tools::PermissionAuditEvent> audits;
+    bool cancel_requested = false;
+    auto context = plugin_proxy_test_context(workspace, project_plugins, state_file, prompts, audits, cancel_requested);
+    ava::agent::ToolDispatcher dispatcher(context);
+    auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "call_proxy", .name = ava::plugin::plugin_model_tool_name(plugin_id, "proxy_tool"), .arguments_json = "{}"});
+    expect(dispatched && dispatched->success, dispatched ? "session.status argument rejection returns to plugin"
+                                                   : "session.status argument rejection dispatch failed: " + dispatched.error().format());
+    auto const response = read_text(response_file);
+    expect(ava::core::json::is_valid_object(response) && response.find("\"ok\":false") != std::string::npos &&
+               response.find("session.status does not accept arguments") != std::string::npos,
+           "session.status rejects non-empty arguments as structured proxy.response error");
+  }
+
+  {
+    auto const plugin_id = std::string("com.example.proxydenied");
+    auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
+    auto const request = proxy_request_json(
+        "px_denied", "file.read",
+        "{\"path\":\"" + ava::core::json::escape((outside_dir / "deny.txt").generic_string()) + "\"}");
+    install_plugin(plugin_id, "[\"tools\",\"proxy.read\"]", proxy_tool_script(request, response_file));
+    std::vector<ava::permissions::PermissionPrompt> prompts;
+    std::vector<ava::tools::PermissionAuditEvent> audits;
+    bool cancel_requested = false;
+    auto context = plugin_proxy_test_context(workspace, project_plugins, state_file, prompts, audits, cancel_requested);
+    context.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
+        -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+      prompts.push_back(prompt);
+      if (prompt.operation == ava::permissions::Operation::ReadFile) {
+        return ava::permissions::PermissionResolution::Deny;
+      }
+      return ava::permissions::PermissionResolution::Allow;
+    };
+    ava::agent::ToolDispatcher dispatcher(context);
+    auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "call_proxy", .name = ava::plugin::plugin_model_tool_name(plugin_id, "proxy_tool"), .arguments_json = "{}"});
+    expect(dispatched && dispatched->success, dispatched ? "permission-denied proxy dispatch returns to plugin"
+                                                    : "permission-denied proxy dispatch failed: " + dispatched.error().format());
+    auto const response = read_text(response_file);
+    expect(response.find("\"ok\":false") != std::string::npos && response.find("permission_denied") != std::string::npos &&
+               response.find("denied outside content") == std::string::npos,
+           "read proxy permission denial is returned as structured proxy.response without bypassing policy");
+    auto const denied_audit = std::any_of(audits.begin(), audits.end(), [](auto const& event) {
+      return event.operation == ava::permissions::Operation::ReadFile && event.resolution == "deny";
+    });
+    expect(denied_audit, "read proxy permission denial is audited");
+  }
+
+  {
+    auto const plugin_id = std::string("com.example.proxycancel");
+    auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
+    auto const request = proxy_request_json(
+        "px_cancel", "file.read",
+        "{\"path\":\"" + ava::core::json::escape((outside_dir / "read.txt").generic_string()) + "\"}");
+    install_plugin(plugin_id, "[\"tools\",\"proxy.read\"]", proxy_tool_script(request, response_file));
+    std::vector<ava::permissions::PermissionPrompt> prompts;
+    std::vector<ava::tools::PermissionAuditEvent> audits;
+    bool cancel_requested = false;
+    auto context = plugin_proxy_test_context(workspace, project_plugins, state_file, prompts, audits, cancel_requested);
+    context.permission_resolver = [&prompts, &cancel_requested](ava::permissions::PermissionPrompt const& prompt)
+        -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+      prompts.push_back(prompt);
+      if (prompt.operation == ava::permissions::Operation::ReadFile) cancel_requested = true;
+      return ava::permissions::PermissionResolution::Allow;
+    };
+    ava::agent::ToolDispatcher dispatcher(context);
+    auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "call_proxy", .name = ava::plugin::plugin_model_tool_name(plugin_id, "proxy_tool"), .arguments_json = "{}"});
+    expect(dispatched && !dispatched->success && dispatched->payload.status == ava::agent::ToolResultStatus::Canceled &&
+               dispatched->result_text.find("canceled") != std::string::npos,
+           "parent cancellation token cancels pending read proxy work and plugin tool call");
+  }
+
+  {
+    auto const plugin_id = std::string("com.example.proxyunknown");
+    auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
+    auto const request = proxy_request_json("px_unknown", "shell.run", "{\"command\":\"pwd\"}");
+    install_plugin(plugin_id, "[\"tools\",\"proxy.read\",\"proxy.search\"]",
+                   proxy_tool_script(request, response_file));
+    std::vector<ava::permissions::PermissionPrompt> prompts;
+    std::vector<ava::tools::PermissionAuditEvent> audits;
+    bool cancel_requested = false;
+    auto context = plugin_proxy_test_context(workspace, project_plugins, state_file, prompts, audits, cancel_requested);
+    ava::agent::ToolDispatcher dispatcher(context);
+    auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "call_proxy", .name = ava::plugin::plugin_model_tool_name(plugin_id, "proxy_tool"), .arguments_json = "{}"});
+    expect(dispatched && dispatched->success, "unknown proxy operation is returned to plugin as a safe error");
+    auto const response = read_text(response_file);
+    expect(ava::core::json::is_valid_object(response) && response.find("\"ok\":false") != std::string::npos &&
+               response.find("not supported") != std::string::npos,
+           "unknown proxy operation produces bounded structured proxy.response error");
+  }
+
+  {
+    auto const plugin_id = std::string("com.example.proxyescape");
+    auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
+    std::error_code symlink_error;
+    std::filesystem::create_symlink(outside_dir / "read.txt", workspace / "outside-link.txt", symlink_error);
+    if (!symlink_error)
+    {
+      auto const request = proxy_request_json("px_escape", "file.read", "{\"path\":\"outside-link.txt\"}");
+      install_plugin(plugin_id, "[\"tools\",\"proxy.read\"]", proxy_tool_script(request, response_file));
+      std::vector<ava::permissions::PermissionPrompt> prompts;
+      std::vector<ava::tools::PermissionAuditEvent> audits;
+      bool cancel_requested = false;
+      auto context = plugin_proxy_test_context(workspace, project_plugins, state_file, prompts, audits, cancel_requested);
+      ava::agent::ToolDispatcher dispatcher(context);
+      auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
+          .id = "call_proxy", .name = ava::plugin::plugin_model_tool_name(plugin_id, "proxy_tool"), .arguments_json = "{}"});
+      expect(dispatched && dispatched->success, "relative symlink proxy request is returned as structured error");
+      auto const response = read_text(response_file);
+      expect(response.find("\"ok\":false") != std::string::npos && response.find("outside proxy content") == std::string::npos,
+             "relative proxy paths cannot escape the workspace through symlinks");
+    }
+  }
+
+  {
+    auto const plugin_id = std::string("com.example.proxybadargs");
+    auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
+    auto const request = proxy_request_json("px_bad", "file.search", "{\"query\":\"needle\",\"root\":\"src\"}");
+    install_plugin(plugin_id, "[\"tools\",\"proxy.search\"]", proxy_tool_script(request, response_file));
+    std::vector<ava::permissions::PermissionPrompt> prompts;
+    std::vector<ava::tools::PermissionAuditEvent> audits;
+    bool cancel_requested = false;
+    auto context = plugin_proxy_test_context(workspace, project_plugins, state_file, prompts, audits, cancel_requested);
+    ava::agent::ToolDispatcher dispatcher(context);
+    auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "call_proxy", .name = ava::plugin::plugin_model_tool_name(plugin_id, "proxy_tool"), .arguments_json = "{}"});
+    expect(dispatched && dispatched->success, "unsupported search root is returned as structured proxy error");
+    auto const response = read_text(response_file);
+    expect(response.find("\"ok\":false") != std::string::npos && response.find("root is not supported") != std::string::npos,
+           "file.search root argument is rejected instead of silently ignored");
+  }
+
+  {
+    auto const plugin_id = std::string("com.example.proxybadnumber");
+    auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
+    auto const request = proxy_request_json("px_bad_number", "file.read",
+                                            "{\"path\":\"visible.txt\",\"max_bytes\":1.5}");
+    install_plugin(plugin_id, "[\"tools\",\"proxy.read\"]", proxy_tool_script(request, response_file));
+    std::vector<ava::permissions::PermissionPrompt> prompts;
+    std::vector<ava::tools::PermissionAuditEvent> audits;
+    bool cancel_requested = false;
+    auto context = plugin_proxy_test_context(workspace, project_plugins, state_file, prompts, audits, cancel_requested);
+    ava::agent::ToolDispatcher dispatcher(context);
+    auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "call_proxy", .name = ava::plugin::plugin_model_tool_name(plugin_id, "proxy_tool"), .arguments_json = "{}"});
+    expect(dispatched && dispatched->success, "fractional proxy bound is returned as structured proxy error");
+    auto const response = read_text(response_file);
+    auto const read_prompt = std::any_of(prompts.begin(), prompts.end(), [](auto const& prompt) {
+      return prompt.operation == ava::permissions::Operation::ReadFile;
+    });
+    expect(response.find("\"ok\":false") != std::string::npos &&
+               response.find("positive integer") != std::string::npos && !read_prompt,
+           "fractional numeric proxy bounds are rejected before read permission prompts");
+  }
+
+  {
+    auto const plugin_id = std::string("com.example.proxyregex");
+    auto const response_file = project_plugins / plugin_id / "proxy-response.txt";
+    auto const request = proxy_request_json("px_regex", "file.search",
+                                            "{\"query\":\"(a+)+$\",\"literal\":false}");
+    install_plugin(plugin_id, "[\"tools\",\"proxy.search\"]", proxy_tool_script(request, response_file));
+    std::vector<ava::permissions::PermissionPrompt> prompts;
+    std::vector<ava::tools::PermissionAuditEvent> audits;
+    bool cancel_requested = false;
+    auto context = plugin_proxy_test_context(workspace, project_plugins, state_file, prompts, audits, cancel_requested);
+    ava::agent::ToolDispatcher dispatcher(context);
+    auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "call_proxy", .name = ava::plugin::plugin_model_tool_name(plugin_id, "proxy_tool"), .arguments_json = "{}"});
+    expect(dispatched && dispatched->success, "regex proxy search is returned as structured proxy error");
+    auto const response = read_text(response_file);
+    auto const search_prompt = std::any_of(prompts.begin(), prompts.end(), [](auto const& prompt) {
+      return prompt.operation == ava::permissions::Operation::SearchFiles;
+    });
+    expect(response.find("\"ok\":false") != std::string::npos &&
+               response.find("regex mode is not supported") != std::string::npos && !search_prompt,
+           "file.search proxy rejects regex mode before dispatching grep work");
+  }
 }
 
 void test_plugin_tool_dispatcher_rejects_invalid_result()
@@ -1128,6 +1628,7 @@ void run_plugin_tests()
   test_enabled_plugin_event_hooks_observe_runtime_events();
   test_plugin_event_hook_failures_report_to_opt_in_sink();
   test_plugin_tool_dispatcher();
+  test_plugin_core_service_proxy_read_search_slice();
   test_plugin_tool_dispatcher_rejects_invalid_result();
   test_plugin_tool_registry_skips_name_collisions();
 }

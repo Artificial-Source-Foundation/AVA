@@ -1,8 +1,14 @@
 #include "ava/session/validation.h"
+
+#include "ava/session/record.h"
 #include "ava/session/validation_fields.h"
+
 #include "ava/core/json.h"
+#include "ava/provider/provider.h"
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -29,6 +35,26 @@ struct ActiveModelState
   std::string provider_id;
   std::string model_id;
 };
+
+constexpr std::size_t kMaxSessionNameBytes = 256;
+constexpr std::size_t kMaxSessionLabels = 32;
+constexpr std::size_t kMaxSessionLabelBytes = 64;
+constexpr std::size_t kMaxBranchSummaryBytes = 8192;
+constexpr std::size_t kMaxToolResultSummaryBytes = 8192;
+constexpr std::size_t kMaxToolResultShortStringBytes = 4096;
+constexpr std::size_t kMaxToolResultTextBytes = 512 * 1024;
+constexpr std::size_t kMaxToolResultPaths = 4096;
+constexpr std::size_t kMaxToolResultPathBytes = 4096;
+constexpr std::size_t kMaxToolResultPermissionIds = 4096;
+constexpr std::size_t kMaxToolResultPermissionIdBytes = 256;
+constexpr std::size_t kMaxMessageAttachments = 16;
+constexpr std::size_t kMaxImageAttachmentIdBytes = 128;
+constexpr std::size_t kMaxImageStoragePathBytes = 4096;
+constexpr std::size_t kMaxImageBytes = 20 * 1024 * 1024;
+
+bool valid_optional_string_array(std::string_view object, std::string_view key, std::size_t max_count,
+                                 std::size_t max_item_bytes);
+bool schema_version_is_current(std::string_view object);
 
 std::string permission_key(SessionEntry const& entry)
 {
@@ -74,8 +100,78 @@ void add_error(SessionReplayValidation& validation, SessionReplayIssueKind kind,
                                            .message = std::move(message)});
 }
 
+bool valid_optional_string_field(std::string_view object, std::string_view key, std::size_t max_bytes, bool allow_empty = true)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return true;
+  auto const value = ava::core::json::string_field(object, key);
+  return value && (allow_empty || !value->empty()) && value->size() <= max_bytes;
+}
+
+bool valid_required_structured_content(std::string_view object, std::string_view content_type)
+{
+  auto const start = ava::core::json::field_value_start(object, "content");
+  if (!start)
+    return false;
+  if (content_type == "application/json")
+  {
+    auto const content = ava::core::json::object_field(object, "content");
+    return content && ava::core::json::is_valid_object(*content);
+  }
+  return ava::core::json::string_field(object, "content").has_value();
+}
+
+bool valid_optional_structured_tool_metadata(std::string_view object)
+{
+  if (!valid_optional_string_field(object, "summary", kMaxToolResultSummaryBytes) ||
+      !valid_optional_string_field(object, "content_type", kMaxToolResultShortStringBytes, false) ||
+      !valid_optional_string_field(object, "diff", kMaxToolResultTextBytes) ||
+      !valid_optional_string_field(object, "spill_path", kMaxToolResultPathBytes) ||
+      !valid_optional_string_array(object, "changed_paths", kMaxToolResultPaths, kMaxToolResultPathBytes) ||
+      !valid_optional_string_array(object, "permission_request_ids", kMaxToolResultPermissionIds, kMaxToolResultPermissionIdBytes))
+  {
+    return false;
+  }
+  for (std::string_view key : {"diff_truncated", "truncated", "byte_limited", "line_limited", "spill_truncated"})
+  {
+    if (!present_boolean(object, key))
+      return false;
+  }
+  for (std::string_view key : {"output_bytes", "total_bytes", "output_lines", "total_lines", "start_line", "end_line",
+                               "next_offset_line", "omitted_bytes", "omitted_lines", "visible_matches", "total_matches"})
+  {
+    if (!present_integer_matching(object, key, false))
+      return false;
+  }
+  return true;
+}
+
+bool valid_structured_tool_error(std::string_view object, std::string_view status)
+{
+  auto const error_start = ava::core::json::field_value_start(object, "error");
+  if (!error_start)
+    return status == "success";
+  auto const error = ava::core::json::object_field(object, "error");
+  if (!error || !ava::core::json::is_valid_object(*error))
+    return false;
+  if (!valid_optional_string_field(*error, "category", kMaxToolResultShortStringBytes) ||
+      !valid_optional_string_field(*error, "code", kMaxToolResultShortStringBytes) ||
+      !valid_optional_string_field(*error, "message", kMaxToolResultSummaryBytes) ||
+      !valid_optional_string_field(*error, "details", kMaxToolResultTextBytes))
+  {
+    return false;
+  }
+  if (status != "success")
+  {
+    auto const message = ava::core::json::string_field(*error, "message");
+    return message && !message->empty();
+  }
+  return true;
+}
+
 void validate_structured_tool_result(SessionReplayValidation& validation, std::size_t index, SessionEntry const& entry, std::string_view call_id,
-                                     std::string_view tool_name)
+                                      std::string_view tool_name)
 {
   auto const structured = ava::core::json::object_field(entry.data_json, "structured_result");
   if (!structured)
@@ -90,12 +186,20 @@ void validate_structured_tool_result(SessionReplayValidation& validation, std::s
               "tool_result structured_result is not valid JSON");
     return;
   }
+  if (!schema_version_is_current(*structured))
+  {
+    add_error(validation, SessionReplayIssueKind::InvalidStructuredToolResult, index, entry, std::string(call_id),
+              "tool_result structured_result has an unsupported schema_version");
+    return;
+  }
 
   auto const structured_call_id = ava::core::json::string_field(*structured, "call_id").value_or("");
   auto const structured_tool = ava::core::json::string_field(*structured, "tool").value_or("");
   auto const status = ava::core::json::string_field(*structured, "status").value_or("");
   auto const content_type = ava::core::json::string_field(*structured, "content_type").value_or("");
-  if (structured_call_id.empty() || structured_tool.empty() || status.empty() || content_type.empty() || !valid_status(status))
+  if (structured_call_id.empty() || structured_tool.empty() || status.empty() || content_type.empty() || !valid_status(status) ||
+      !required_boolean(*structured, "ok") || !valid_required_structured_content(*structured, content_type) ||
+      !valid_optional_structured_tool_metadata(*structured) || !valid_structured_tool_error(*structured, status))
   {
     add_error(validation, SessionReplayIssueKind::InvalidStructuredToolResult, index, entry, std::string(call_id),
               "tool_result structured_result is missing required semantic fields");
@@ -115,13 +219,20 @@ void validate_structured_tool_result(SessionReplayValidation& validation, std::s
               "tool_result structured_result status does not match top-level status");
     return;
   }
-  if (bool_field_is_true(entry.data_json, "success") && status != "success")
+  bool const ok = bool_field_is_true(*structured, "ok");
+  if ((status == "success") != ok)
+  {
+    add_error(validation, SessionReplayIssueKind::StructuredToolResultMismatch, index, entry, std::string(call_id),
+              "tool_result structured_result ok flag does not match status");
+    return;
+  }
+  if (bool_field_is_true(entry.data_json, "success") && !ok)
   {
     add_error(validation, SessionReplayIssueKind::StructuredToolResultMismatch, index, entry, std::string(call_id),
               "successful tool_result has non-success structured_result status");
     return;
   }
-  if (bool_field_is_false(entry.data_json, "success") && status == "success")
+  if (bool_field_is_false(entry.data_json, "success") && ok)
   {
     add_error(validation, SessionReplayIssueKind::StructuredToolResultMismatch, index, entry, std::string(call_id),
               "failed tool_result has success structured_result status");
@@ -239,6 +350,516 @@ void validate_compaction_entry(SessionReplayValidation& validation, std::size_t 
       !present_integer_matching(entry.data_json, "max_summary_bytes", true))
   {
     add_error(validation, SessionReplayIssueKind::InvalidCompactionEntry, index, entry, "", "compaction entry has malformed semantic metadata");
+  }
+}
+
+void skip_json_ws(std::string_view text, std::size_t& index)
+{
+  while (index < text.size() && std::isspace(static_cast<unsigned char>(text[index])) != 0) ++index;
+}
+
+bool string_has_control_byte(std::string_view value)
+{
+  return std::ranges::any_of(value, [](char ch) {
+    auto const byte = static_cast<unsigned char>(ch);
+    return byte < 0x20 || byte == 0x7F;
+  });
+}
+
+bool hex_string(std::string_view value)
+{
+  return std::ranges::all_of(value, [](char ch) {
+    return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
+  });
+}
+
+std::optional<std::size_t> json_string_end(std::string_view text, std::size_t start)
+{
+  if (start >= text.size() || text[start] != '"') return std::nullopt;
+  bool escaped = false;
+  for (std::size_t index = start + 1; index < text.size(); ++index) {
+    char const ch = text[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"') return index;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::size_t> json_balanced_end(std::string_view text, std::size_t start, char open, char close)
+{
+  if (start >= text.size() || text[start] != open) return std::nullopt;
+  bool in_string = false;
+  bool escaped = false;
+  std::size_t depth = 0;
+  for (std::size_t index = start; index < text.size(); ++index) {
+    char const ch = text[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\' && in_string) {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"') {
+      in_string = !in_string;
+      continue;
+    }
+    if (in_string) continue;
+    if (ch == open) {
+      ++depth;
+    } else if (ch == close) {
+      if (depth == 0) return std::nullopt;
+      --depth;
+      if (depth == 0) return index;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<std::size_t> json_value_end(std::string_view text, std::size_t start)
+{
+  skip_json_ws(text, start);
+  if (start >= text.size()) return std::nullopt;
+  if (text[start] == '"') return json_string_end(text, start);
+  if (text[start] == '{') return json_balanced_end(text, start, '{', '}');
+  if (text[start] == '[') return json_balanced_end(text, start, '[', ']');
+  auto end = start;
+  while (end < text.size() && text[end] != ',' && text[end] != '}' && text[end] != ']') ++end;
+  while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1])) != 0) --end;
+  return end == start ? std::nullopt : std::optional<std::size_t>(end - 1);
+}
+
+bool allowed_image_attachment_key(std::string_view key)
+{
+  constexpr std::array<std::string_view, 7> kAllowedKeys = {"id",       "type",    "mime_type", "byte_size",
+                                                            "sha256",   "storage_path", "redacted"};
+  return std::find(kAllowedKeys.begin(), kAllowedKeys.end(), key) != kAllowedKeys.end();
+}
+
+bool object_has_duplicate_top_level_keys(std::string_view object)
+{
+  std::unordered_set<std::string> seen_keys;
+  std::size_t cursor = 0;
+  skip_json_ws(object, cursor);
+  if (cursor >= object.size() || object[cursor] != '{') return true;
+  ++cursor;
+  skip_json_ws(object, cursor);
+  if (cursor < object.size() && object[cursor] == '}') return false;
+
+  while (cursor < object.size()) {
+    skip_json_ws(object, cursor);
+    auto const key_end = json_string_end(object, cursor);
+    if (!key_end) return true;
+    auto const key = object.substr(cursor + 1, *key_end - cursor - 1);
+    if (key.find('\\') != std::string_view::npos) return true;
+    if (!seen_keys.insert(std::string(key)).second) return true;
+    cursor = *key_end + 1;
+    skip_json_ws(object, cursor);
+    if (cursor >= object.size() || object[cursor] != ':') return true;
+    ++cursor;
+    auto const value_end = json_value_end(object, cursor);
+    if (!value_end) return true;
+    cursor = *value_end + 1;
+    skip_json_ws(object, cursor);
+    if (cursor < object.size() && object[cursor] == ',') {
+      ++cursor;
+      continue;
+    }
+    if (cursor < object.size() && object[cursor] == '}') return false;
+    return true;
+  }
+  return true;
+}
+
+bool object_has_only_allowed_image_attachment_keys(std::string_view object)
+{
+  std::unordered_set<std::string> seen_keys;
+  std::size_t cursor = 0;
+  skip_json_ws(object, cursor);
+  if (cursor >= object.size() || object[cursor] != '{') return false;
+  ++cursor;
+  skip_json_ws(object, cursor);
+  if (cursor < object.size() && object[cursor] == '}') return true;
+
+  while (cursor < object.size()) {
+    skip_json_ws(object, cursor);
+    auto const key_end = json_string_end(object, cursor);
+    if (!key_end) return false;
+    auto const key = object.substr(cursor + 1, *key_end - cursor - 1);
+    if (key.find('\\') != std::string_view::npos || !allowed_image_attachment_key(key)) return false;
+    if (!seen_keys.insert(std::string(key)).second) return false;
+    cursor = *key_end + 1;
+    skip_json_ws(object, cursor);
+    if (cursor >= object.size() || object[cursor] != ':') return false;
+    ++cursor;
+    auto const value_end = json_value_end(object, cursor);
+    if (!value_end) return false;
+    cursor = *value_end + 1;
+    skip_json_ws(object, cursor);
+    if (cursor < object.size() && object[cursor] == ',') {
+      ++cursor;
+      continue;
+    }
+    if (cursor < object.size() && object[cursor] == '}') return true;
+    return false;
+  }
+  return false;
+}
+
+bool valid_attachment_storage_path(std::string_view path)
+{
+  if (path.empty() || path.size() > kMaxImageStoragePathBytes || string_has_control_byte(path)) return false;
+  if (!path.starts_with("attachments/")) return false;
+  if (path.starts_with('/') || path.starts_with('~') || path.find('\\') != std::string_view::npos) return false;
+  if (path.find(":") != std::string_view::npos) return false;
+  std::size_t segment_start = 0;
+  while (segment_start <= path.size()) {
+    auto const slash = path.find('/', segment_start);
+    auto const segment = path.substr(segment_start, slash == std::string_view::npos ? std::string_view::npos : slash - segment_start);
+    if (segment.empty() || segment == "." || segment == "..") return false;
+    if (slash == std::string_view::npos) break;
+    segment_start = slash + 1;
+  }
+  return true;
+}
+
+std::optional<long long> strict_positive_integer_field(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start || *start >= object.size() || !std::isdigit(static_cast<unsigned char>(object[*start]))) return std::nullopt;
+  unsigned long long value = 0;
+  auto cursor = *start;
+  while (cursor < object.size() && std::isdigit(static_cast<unsigned char>(object[cursor]))) {
+    auto const digit = static_cast<unsigned long long>(object[cursor] - '0');
+    if (value > (static_cast<unsigned long long>(kMaxImageBytes) - digit) / 10ULL) return std::nullopt;
+    value = value * 10ULL + digit;
+    ++cursor;
+  }
+  skip_json_ws(object, cursor);
+  if (cursor >= object.size() || (object[cursor] != ',' && object[cursor] != '}')) return std::nullopt;
+  if (value == 0 || value > static_cast<unsigned long long>(kMaxImageBytes)) return std::nullopt;
+  return static_cast<long long>(value);
+}
+
+std::optional<std::vector<std::string>> image_attachment_objects(std::string_view object, std::string_view key)
+{
+  std::vector<std::string> result;
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start || *start >= object.size() || object[*start] != '[') return std::nullopt;
+  auto const end = json_balanced_end(object, *start, '[', ']');
+  if (!end) return std::nullopt;
+  std::string_view const array = object.substr(*start, *end - *start + 1);
+  std::size_t cursor = 1;
+  skip_json_ws(array, cursor);
+  if (cursor < array.size() && array[cursor] == ']') return result;
+  while (cursor + 1 < array.size()) {
+    skip_json_ws(array, cursor);
+    if (cursor >= array.size() || array[cursor] != '{') return std::nullopt;
+    auto const object_end = json_balanced_end(array, cursor, '{', '}');
+    if (!object_end) return std::nullopt;
+    result.emplace_back(array.substr(cursor, *object_end - cursor + 1));
+    cursor = *object_end + 1;
+    skip_json_ws(array, cursor);
+    if (cursor < array.size() && array[cursor] == ',') {
+      ++cursor;
+      continue;
+    }
+    if (cursor < array.size() && array[cursor] == ']') return result;
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+bool valid_image_attachment_object(std::string_view attachment)
+{
+  if (!ava::core::json::is_valid_object(attachment))
+    return false;
+  if (!object_has_only_allowed_image_attachment_keys(attachment))
+    return false;
+
+  auto const type = ava::core::json::string_field(attachment, "type");
+  auto const id = ava::core::json::string_field(attachment, "id");
+  auto const mime_type = ava::core::json::string_field(attachment, "mime_type");
+  auto const storage_path = ava::core::json::string_field(attachment, "storage_path");
+  auto const sha256 = ava::core::json::string_field(attachment, "sha256");
+  auto const byte_size = strict_positive_integer_field(attachment, "byte_size");
+  if (!type || *type != "image" || !id || id->empty() || id->size() > kMaxImageAttachmentIdBytes ||
+      string_has_control_byte(*id) || !mime_type || !ava::provider::is_supported_image_mime_type(*mime_type) ||
+      !storage_path || !valid_attachment_storage_path(*storage_path) ||
+      !sha256 || sha256->size() != 64 || !hex_string(*sha256) ||
+      !byte_size)
+    return false;
+  auto const redacted_start = ava::core::json::field_value_start(attachment, "redacted");
+  return !redacted_start || bool_field_is_true(attachment, "redacted") || bool_field_is_false(attachment, "redacted");
+}
+
+void validate_message_entry(SessionReplayValidation& validation, std::size_t index, SessionEntry const& entry)
+{
+  if (!ava::core::json::is_valid_object(entry.data_json)) {
+    add_error(validation, SessionReplayIssueKind::InvalidMessageEntry, index, entry, "", "message entry data is not valid JSON");
+    return;
+  }
+  if (object_has_duplicate_top_level_keys(entry.data_json)) {
+    add_error(validation, SessionReplayIssueKind::InvalidMessageEntry, index, entry, "", "message entry data has duplicate keys");
+    return;
+  }
+  auto const attachments_start = ava::core::json::field_value_start(entry.data_json, "attachments");
+  if (!attachments_start)
+    return;
+  if (entry.type != EntryType::UserMessage) {
+    add_error(validation, SessionReplayIssueKind::InvalidMessageEntry, index, entry, "", "message attachments are only supported on user messages");
+    return;
+  }
+  if (*attachments_start >= entry.data_json.size() || entry.data_json[*attachments_start] != '[') {
+    add_error(validation, SessionReplayIssueKind::InvalidMessageEntry, index, entry, "", "message attachments must be an array");
+    return;
+  }
+  auto const attachments = image_attachment_objects(entry.data_json, "attachments");
+  if (!attachments) {
+    add_error(validation, SessionReplayIssueKind::InvalidMessageEntry, index, entry, "", "message attachments must contain only objects");
+    return;
+  }
+  if (attachments->size() > kMaxMessageAttachments) {
+    add_error(validation, SessionReplayIssueKind::InvalidMessageEntry, index, entry, "", "message has too many attachments");
+    return;
+  }
+  std::unordered_set<std::string> attachment_ids;
+  for (auto const& attachment : *attachments) {
+    if (!valid_image_attachment_object(attachment)) {
+      add_error(validation, SessionReplayIssueKind::InvalidMessageEntry, index, entry, "", "message image attachment metadata is invalid");
+      return;
+    }
+    auto const id = ava::core::json::string_field(attachment, "id").value_or("");
+    if (!attachment_ids.insert(id).second) {
+      add_error(validation, SessionReplayIssueKind::InvalidMessageEntry, index, entry, "", "message image attachment ids must be unique");
+      return;
+    }
+  }
+}
+
+bool string_has_control_byte_except_summary_whitespace(std::string_view value)
+{
+  return std::ranges::any_of(value, [](char ch) {
+    auto const byte = static_cast<unsigned char>(ch);
+    return (byte < 0x20 && ch != '\n' && ch != '\t') || byte == 0x7F;
+  });
+}
+
+bool valid_optional_short_string(std::string_view object, std::string_view key, std::size_t max_bytes, bool allow_empty)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return true;
+  auto const value = ava::core::json::string_field(object, key);
+  return value && (allow_empty || !value->empty()) && value->size() <= max_bytes && !string_has_control_byte(*value);
+}
+
+bool valid_optional_session_id(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return true;
+  auto const value = ava::core::json::string_field(object, key);
+  if (!value || value->empty())
+    return false;
+  return validate_session_id(*value).has_value();
+}
+
+bool valid_optional_entry_id(std::string_view object, std::string_view key, std::string_view entry_id)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return true;
+  auto const value = ava::core::json::string_field(object, key);
+  if (!value || value->empty())
+    return false;
+  return validate_parent_id(*value, entry_id).has_value();
+}
+
+bool schema_version_is_current(std::string_view object)
+{
+  return present_integer_matching(object, "schema_version", true) && ava::core::json::integer_field(object, "schema_version").value_or(0) == 1;
+}
+
+bool valid_metadata_origin(std::string_view origin)
+{
+  return origin.empty() || origin == "root" || origin == "fork" || origin == "clone" || origin == "manual" || origin == "import";
+}
+
+bool valid_optional_metadata_origin(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return true;
+  auto const value = ava::core::json::string_field(object, key);
+  return value && valid_metadata_origin(*value);
+}
+
+bool required_bounded_string(std::string_view object, std::string_view key, std::size_t max_bytes)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return false;
+  auto const value = ava::core::json::string_field(object, key);
+  return value && !value->empty() && value->size() <= max_bytes && !string_has_control_byte(*value);
+}
+
+bool required_session_id(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return false;
+  auto const value = ava::core::json::string_field(object, key);
+  return value && !value->empty() && validate_session_id(*value).has_value();
+}
+
+bool required_entry_id(std::string_view object, std::string_view key, std::string_view entry_id)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return false;
+  auto const value = ava::core::json::string_field(object, key);
+  return value && !value->empty() && validate_parent_id(*value, entry_id).has_value();
+}
+
+bool valid_optional_string_array(std::string_view object, std::string_view key, std::size_t max_count, std::size_t max_item_bytes)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return true;
+  if (*start >= object.size() || object[*start] != '[')
+    return false;
+
+  std::size_t cursor = *start + 1;
+  std::size_t string_count = 0;
+  skip_json_ws(object, cursor);
+  if (cursor < object.size() && object[cursor] != ']')
+  {
+    while (cursor < object.size())
+    {
+      if (object[cursor] != '"')
+        return false;
+      bool escaped = false;
+      bool closed = false;
+      for (++cursor; cursor < object.size(); ++cursor)
+      {
+        char const ch = object[cursor];
+        if (escaped)
+        {
+          escaped = false;
+          continue;
+        }
+        if (ch == '\\')
+        {
+          escaped = true;
+          continue;
+        }
+        if (ch == '"')
+        {
+          closed = true;
+          ++cursor;
+          break;
+        }
+      }
+      if (!closed)
+        return false;
+      ++string_count;
+      if (string_count > max_count)
+        return false;
+
+      skip_json_ws(object, cursor);
+      if (cursor >= object.size())
+        return false;
+      if (object[cursor] == ',')
+      {
+        ++cursor;
+        skip_json_ws(object, cursor);
+        continue;
+      }
+      if (object[cursor] == ']')
+        break;
+      return false;
+    }
+  }
+  if (cursor >= object.size() || object[cursor] != ']')
+    return false;
+  ++cursor;
+  skip_json_ws(object, cursor);
+  if (cursor < object.size() && object[cursor] != ',' && object[cursor] != '}')
+    return false;
+
+  auto values = ava::core::json::strings_in_array_field(object, key);
+  if (values.size() != string_count)
+    return false;
+  std::unordered_set<std::string> seen;
+  for (auto const& value : values)
+  {
+    if (value.empty() || value.size() > max_item_bytes || string_has_control_byte(value))
+      return false;
+    if (!seen.insert(value).second)
+      return false;
+  }
+  return true;
+}
+
+void validate_session_metadata_entry(SessionReplayValidation& validation, std::size_t index, SessionEntry const& entry)
+{
+  if (!ava::core::json::is_valid_object(entry.data_json))
+  {
+    add_error(validation, SessionReplayIssueKind::InvalidSessionMetadataEntry, index, entry, "", "session_metadata entry data is not valid JSON");
+    return;
+  }
+
+  auto const branch_origin = ava::core::json::string_field(entry.data_json, "branch_origin");
+  bool const has_branch_origin = branch_origin && !branch_origin->empty();
+  bool const has_meaningful_field =
+      ava::core::json::field_value_start(entry.data_json, "name") || ava::core::json::field_value_start(entry.data_json, "labels") ||
+      ava::core::json::field_value_start(entry.data_json, "parent_session_id") || ava::core::json::field_value_start(entry.data_json, "source_session_id") ||
+      ava::core::json::field_value_start(entry.data_json, "branch_from_entry_id") || has_branch_origin;
+  if (!schema_version_is_current(entry.data_json) || !has_meaningful_field ||
+      !valid_optional_short_string(entry.data_json, "name", kMaxSessionNameBytes, true) ||
+      !valid_optional_string_array(entry.data_json, "labels", kMaxSessionLabels, kMaxSessionLabelBytes) ||
+      !valid_optional_session_id(entry.data_json, "parent_session_id") || !valid_optional_session_id(entry.data_json, "source_session_id") ||
+      !valid_optional_entry_id(entry.data_json, "branch_from_entry_id", entry.id) ||
+      !valid_optional_short_string(entry.data_json, "actor", kMaxSessionLabelBytes, false) || !valid_optional_metadata_origin(entry.data_json, "branch_origin"))
+  {
+    add_error(validation, SessionReplayIssueKind::InvalidSessionMetadataEntry, index, entry, "", "session_metadata entry has malformed tree metadata");
+  }
+}
+
+void validate_branch_summary_entry(SessionReplayValidation& validation, std::size_t index, SessionEntry const& entry,
+                                   std::unordered_map<std::string, std::size_t> const& entry_indices)
+{
+  if (!ava::core::json::is_valid_object(entry.data_json))
+  {
+    add_error(validation, SessionReplayIssueKind::InvalidBranchSummaryEntry, index, entry, "", "branch_summary entry data is not valid JSON");
+    return;
+  }
+
+  auto const summary = ava::core::json::string_field(entry.data_json, "summary");
+  auto const root_entry_id = ava::core::json::string_field(entry.data_json, "branch_root_entry_id");
+  auto const tip_entry_id = ava::core::json::string_field(entry.data_json, "branch_tip_entry_id");
+  auto const root_index = root_entry_id ? entry_indices.find(*root_entry_id) : entry_indices.end();
+  auto const tip_index = tip_entry_id ? entry_indices.find(*tip_entry_id) : entry_indices.end();
+  bool const valid_range = root_entry_id && tip_entry_id && root_index != entry_indices.end() && tip_index != entry_indices.end() &&
+                           root_index->second < index && tip_index->second < index && root_index->second <= tip_index->second;
+
+  if (!schema_version_is_current(entry.data_json) || !summary || summary->empty() || summary->size() > kMaxBranchSummaryBytes ||
+      string_has_control_byte_except_summary_whitespace(*summary) || !valid_range || !required_session_id(entry.data_json, "source_session_id") ||
+      !required_entry_id(entry.data_json, "branch_root_entry_id", entry.id) || !required_entry_id(entry.data_json, "branch_tip_entry_id", entry.id) ||
+      !required_bounded_string(entry.data_json, "provider", 256) ||
+      !required_bounded_string(entry.data_json, "model", 256) || !required_bounded_string(entry.data_json, "reason", 1024) ||
+      !valid_optional_short_string(entry.data_json, "actor", kMaxSessionLabelBytes, false))
+  {
+    add_error(validation, SessionReplayIssueKind::InvalidBranchSummaryEntry, index, entry, "", "branch_summary entry has malformed semantic metadata");
   }
 }
 
@@ -431,6 +1052,12 @@ std::string_view to_string(SessionReplayIssueKind kind) noexcept
       return "unresolved_permission_prompt";
     case SessionReplayIssueKind::InvalidCompactionEntry:
       return "invalid_compaction_entry";
+    case SessionReplayIssueKind::InvalidSessionMetadataEntry:
+      return "invalid_session_metadata_entry";
+    case SessionReplayIssueKind::InvalidBranchSummaryEntry:
+      return "invalid_branch_summary_entry";
+    case SessionReplayIssueKind::InvalidMessageEntry:
+      return "invalid_message_entry";
     case SessionReplayIssueKind::CompactionWithUnresolvedToolCall:
       return "compaction_with_unresolved_tool_call";
     case SessionReplayIssueKind::CompactionWithUnresolvedPermissionPrompt:
@@ -443,10 +1070,107 @@ std::string_view to_string(SessionReplayIssueKind kind) noexcept
   return "invalid_structured_tool_result";
 }
 
+std::string sanitized_message_data_json(std::string_view data_json, bool allow_attachments)
+{
+  if (!ava::core::json::is_valid_object(data_json) || object_has_duplicate_top_level_keys(data_json))
+    return "{}";
+
+  std::string json = "{";
+  bool first = true;
+  auto append_key = [&](std::string_view key) {
+    if (!first) json += ',';
+    first = false;
+    json += '"';
+    json += key;
+    json += "\":";
+  };
+  auto append_string = [&](std::string_view key, std::optional<std::string> const& value) {
+    if (!value) return;
+    append_key(key);
+    json += '"';
+    json += ava::core::json::escape(*value);
+    json += '"';
+  };
+
+  append_string("text", ava::core::json::string_field(data_json, "text"));
+  if (!allow_attachments) {
+    json += '}';
+    return json;
+  }
+
+  auto const attachments = image_attachment_objects(data_json, "attachments");
+  if (attachments && !attachments->empty() && attachments->size() <= kMaxMessageAttachments) {
+    std::unordered_set<std::string> attachment_ids;
+    bool valid_attachments = true;
+    for (auto const& attachment : *attachments) {
+      if (!valid_image_attachment_object(attachment)) {
+        valid_attachments = false;
+        break;
+      }
+      auto const id = ava::core::json::string_field(attachment, "id").value_or("");
+      if (!attachment_ids.insert(id).second) {
+        valid_attachments = false;
+        break;
+      }
+    }
+    if (!valid_attachments) {
+      json += '}';
+      return json;
+    }
+
+    append_key("attachments");
+    json += '[';
+    bool first_attachment = true;
+    for (auto const& attachment : *attachments) {
+      if (!first_attachment) json += ',';
+      first_attachment = false;
+      json += '{';
+      bool first_field = true;
+      auto append_field_key = [&](std::string_view key) {
+        if (!first_field) json += ',';
+        first_field = false;
+        json += '"';
+        json += key;
+        json += "\":";
+      };
+      auto append_attachment_string = [&](std::string_view key, std::optional<std::string> const& value) {
+        if (!value) return;
+        append_field_key(key);
+        json += '"';
+        json += ava::core::json::escape(*value);
+        json += '"';
+      };
+      auto append_attachment_integer = [&](std::string_view key, std::optional<long long> value) {
+        if (!value) return;
+        append_field_key(key);
+        json += std::to_string(*value);
+      };
+      auto append_attachment_bool = [&](std::string_view key, bool value) {
+        append_field_key(key);
+        json += value ? "true" : "false";
+      };
+      append_attachment_string("id", ava::core::json::string_field(attachment, "id"));
+      append_attachment_string("type", ava::core::json::string_field(attachment, "type"));
+      append_attachment_string("mime_type", ava::core::json::string_field(attachment, "mime_type"));
+      append_attachment_integer("byte_size", strict_positive_integer_field(attachment, "byte_size"));
+      append_attachment_string("sha256", ava::core::json::string_field(attachment, "sha256"));
+      append_attachment_string("storage_path", ava::core::json::string_field(attachment, "storage_path"));
+      if (ava::core::json::field_value_start(attachment, "redacted")) {
+        append_attachment_bool("redacted", bool_field_is_true(attachment, "redacted"));
+      }
+      json += '}';
+    }
+    json += ']';
+  }
+  json += '}';
+  return json;
+}
+
 SessionReplayValidation validate_session_replay(std::vector<SessionEntry> const& entries, SessionReplayValidationOptions options)
 {
   SessionReplayValidation validation;
   std::unordered_set<std::string> seen_entry_ids;
+  std::unordered_map<std::string, std::size_t> seen_entry_indices;
   std::unordered_map<std::string, ToolCallState> tool_calls;
   std::unordered_map<std::string, std::vector<PendingPermissionPrompt>> pending_permissions;
   ActiveModelState active_model;
@@ -465,6 +1189,10 @@ SessionReplayValidation validate_session_replay(std::vector<SessionEntry> const&
     if (!seen_entry_ids.insert(entry.id).second)
     {
       add_error(validation, SessionReplayIssueKind::DuplicateEntryId, index, entry, "", "duplicate session entry id");
+    }
+    else
+    {
+      seen_entry_indices.emplace(entry.id, index);
     }
 
     if (options.require_model_reasoning_integrity)
@@ -497,10 +1225,28 @@ SessionReplayValidation validate_session_replay(std::vector<SessionEntry> const&
       continue;
     }
 
+    if (entry.type == EntryType::SessionMetadata)
+    {
+      validate_session_metadata_entry(validation, index, entry);
+      continue;
+    }
+
+    if (entry.type == EntryType::BranchSummary)
+    {
+      validate_branch_summary_entry(validation, index, entry, seen_entry_indices);
+      continue;
+    }
+
     if (entry.type == EntryType::Compaction && options.require_compaction_integrity)
     {
       validate_compaction_entry(validation, index, entry);
       validate_compaction_boundaries(validation, index, entry, tool_calls, pending_permissions, options);
+      continue;
+    }
+
+    if (entry.type == EntryType::UserMessage || entry.type == EntryType::AssistantMessage)
+    {
+      validate_message_entry(validation, index, entry);
       continue;
     }
 

@@ -221,6 +221,16 @@ bool is_valid_mcp_tool_name(std::string_view name)
   return true;
 }
 
+bool is_valid_mcp_resource_uri(std::string_view uri)
+{
+  if (uri.empty() || uri.size() > 2048) return false;
+  for (char const ch : uri) {
+    auto const byte = static_cast<unsigned char>(ch);
+    if (byte < 0x20 || byte == 0x7F) return false;
+  }
+  return true;
+}
+
 std::string mcp_text_content_from_result(std::string_view result_json)
 {
   std::string content;
@@ -257,6 +267,19 @@ std::string mcp_prompt_text_from_result(std::string_view result_json)
           content += '\n';
         content += *text;
       }
+    }
+  }
+  return content;
+}
+
+std::string mcp_resource_text_from_result(std::string_view result_json)
+{
+  std::string content;
+  for (auto const& item : ava::core::json::objects_in_array_field(result_json, "contents")) {
+    auto const text = ava::core::json::string_field(item, "text");
+    if (text) {
+      if (!content.empty()) content += '\n';
+      content += *text;
     }
   }
   return content;

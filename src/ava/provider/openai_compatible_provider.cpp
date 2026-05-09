@@ -404,6 +404,34 @@ ava::core::Result<HttpRequest> OpenAICompatibleProvider::build_request(ProviderR
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, options_.provider_name + " credential is required"));
   }
+  for (std::size_t message_index = 0; message_index < request.messages.size(); ++message_index) {
+    auto const& message = request.messages[message_index];
+    for (std::size_t part_index = 0; part_index < message.content_parts.size(); ++part_index) {
+      auto const& part = message.content_parts[part_index];
+      if (part.type != ContentPartType::Image) continue;
+      if (message.role != "user") {
+        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                      options_.provider_name + " image content requires user role");
+        error.with_context("message_index", std::to_string(message_index));
+        error.with_context("content_part_index", std::to_string(part_index));
+        return std::unexpected(std::move(error));
+      }
+      if (!is_supported_image_mime_type(part.mime_type)) {
+        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                      options_.provider_name + " image MIME type is not supported");
+        error.with_context("message_index", std::to_string(message_index));
+        error.with_context("content_part_index", std::to_string(part_index));
+        return std::unexpected(std::move(error));
+      }
+      if (part.data_base64.empty() || !is_valid_base64(part.data_base64)) {
+        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                      options_.provider_name + " image content requires verified attachment bytes");
+        error.with_context("message_index", std::to_string(message_index));
+        error.with_context("content_part_index", std::to_string(part_index));
+        return std::unexpected(std::move(error));
+      }
+    }
+  }
   if (auto valid_tools = validate_openai_compatible_tools_json(request); !valid_tools)
     return std::unexpected(std::move(valid_tools.error()));
   for (auto const& tool : request.tools_json)

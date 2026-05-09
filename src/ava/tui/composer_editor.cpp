@@ -349,6 +349,9 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
     case TuiAction::Interrupt:
     case TuiAction::Exit:
     case TuiAction::VariantCycle:
+    case TuiAction::MessagePrev:
+    case TuiAction::MessageNext:
+    case TuiAction::JumpToBottom:
       return false;
   }
   return false;

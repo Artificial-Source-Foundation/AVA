@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <string_view>
 
 namespace ava::app {
@@ -26,7 +27,12 @@ struct PluginEventObserverOptions
   ava::agent::Mode mode = ava::agent::Mode::Build;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   ava::tools::PermissionAuditSink permission_audit_sink = nullptr;
+  std::function<bool()> cancel_requested = nullptr;
   PluginEventHookFailureSink hook_failure_sink = nullptr;
+  std::string session_id;
+  std::string provider_id;
+  std::string model_id;
+  std::filesystem::path current_dir;
 };
 
 [[nodiscard]] PluginEventObserverOptions plugin_event_observer_options(RuntimeSession& session,

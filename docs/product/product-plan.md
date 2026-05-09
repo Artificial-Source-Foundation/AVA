@@ -210,28 +210,21 @@ Provider abstraction requirements:
 
 Avoid building a large model registry before the first loop works.
 
-## TUI Strategy
+## Backend Interface Boundary
 
-MVP interface should be usable but not fancy.
+Frontend/TUI planning is Carlo-owned and intentionally not tracked in this backend plan.
 
-Frontend sequencing from the current TUI through AVA 1.0 is tracked in `docs/roadmap/frontend-tui.md`.
+Required backend contracts:
 
-Required:
+- Semantic message and runtime events for transcript clients.
+- Structured tool lifecycle events with bounded output, diffs, changed paths, and truncation metadata where available.
+- Abort and cancellation paths for active provider and tool work.
+- Provider/model, workspace, session, context, and mode metadata through app/RPC surfaces.
+- Slash-command handlers own parsing, authorization, session mutation, tool execution, and mode changes outside frontend rendering.
 
-- Message transcript.
-- Tool call display with collapsible output later.
-- Input editor with multiline support.
-- Abort current turn.
-- Show current model, directory, session, and mode.
-- The slash-command palette owns input collection, candidate display, and rendering only; parsing, authorization, session mutation, tool execution, and mode changes stay in app command handlers outside the TUI.
+Frontend-only items are out of scope here:
 
-Deferred:
-
-- Theme system.
-- Complex overlays.
-- Session tree UI.
-- Images and clipboard handling.
-- Desktop/web UI.
+- Theme systems, overlays, frontend session tree presentation, image rendering, clipboard handling, and desktop/web UI.
 
 ## Non-Goals For Version 0
 

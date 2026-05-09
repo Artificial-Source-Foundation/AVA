@@ -12,6 +12,7 @@ namespace ava::session {
 struct SessionEntryCounts
 {
   std::size_t session_start = 0;
+  std::size_t session_metadata = 0;
   std::size_t user_message = 0;
   std::size_t assistant_message = 0;
   std::size_t tool_call = 0;
@@ -22,6 +23,7 @@ struct SessionEntryCounts
   std::size_t reasoning_block = 0;
   std::size_t reasoning_change = 0;
   std::size_t compaction = 0;
+  std::size_t branch_summary = 0;
   std::size_t error = 0;
   std::size_t cancel = 0;
 };

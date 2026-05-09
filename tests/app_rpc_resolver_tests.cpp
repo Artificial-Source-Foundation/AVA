@@ -2,6 +2,7 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "ava/app/headless_policy.h"
+#include "ava/app/rpc/output.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/session/session_store.h"
@@ -21,6 +22,37 @@
 namespace {
 
 using namespace ava::tests;
+
+void test_app_rpc_resolver_payload_builders_preserve_wire_shapes()
+{
+  auto const permission_payload_json = std::string("{\"resolver_request_id\":\"permission_1\",\"operation\":\"read\",\"reason\":\"needs read\"}");
+  auto permission = ava::app::rpc::resolver_event_envelope("permission_requested", "request_1", "correlation_1", "session_1",
+                                                           ava::app::rpc::resolver_permission_payload(permission_payload_json));
+  expect(permission.payload_type == "permission" && permission.payload_json == permission_payload_json,
+         "typed permission resolver payload builder preserves the existing JSON fields");
+  auto const permission_json = ava::app::serialize_event_envelope_json(permission);
+  expect(permission_json.find("\"payload_type\":\"permission\"") != std::string::npos &&
+             permission_json.find("\"payload\":" + permission_payload_json) != std::string::npos &&
+             permission_json.find("\"reason\":\"needs read\"") != std::string::npos,
+         "typed permission resolver envelope keeps payload family and compatibility aliases");
+
+  auto const question_payload_json = std::string(
+      "{\"resolver_request_id\":\"question_1\",\"prompt\":\"Choose\",\"options\":[\"yes\"],"
+      "\"multiple\":false}");
+  auto question = ava::app::rpc::resolver_event_envelope("question_requested", "request_2", "correlation_2", "session_1",
+                                                         ava::app::rpc::resolver_question_payload(question_payload_json));
+  expect(question.payload_type == "question" && question.payload_json == question_payload_json,
+         "typed question resolver payload builder preserves the existing JSON fields");
+
+  auto const queue_payload_json = std::string("{\"message\":\"follow next\",\"reason\":\"canceled\"}");
+  auto queue = ava::app::rpc::resolver_event_envelope("follow_up_skipped", "request_3", "correlation_3", "session_1",
+                                                      ava::app::rpc::resolver_queue_payload(queue_payload_json));
+  expect(queue.payload_type == "queue" && queue.payload_json == queue_payload_json, "typed queue resolver payload builder preserves the existing JSON fields");
+  auto const queue_json = ava::app::serialize_event_envelope_json(queue);
+  expect(queue_json.find("\"payload_type\":\"queue\"") != std::string::npos && queue_json.find("\"message\":\"follow next\"") != std::string::npos &&
+             queue_json.find("\"reason\":\"canceled\"") != std::string::npos,
+         "typed queue resolver envelope keeps payload family and top-level aliases");
+}
 
 void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
 {
@@ -194,9 +226,9 @@ void test_app_rpc_permission_reply_session_grant_flow()
 
   auto const jsonl = output_buffer.str();
   expect(result.has_value() && first_completed && grant_listed && second_completed, "RPC permission session grant loop exits successfully");
-  expect(count_substrings(jsonl, "\"name\":\"permission_requested\"") == 1 && jsonl.find("\"decision\":\"allow_session\"") != std::string::npos &&
-             jsonl.find("\"id\":\"grants\"") != std::string::npos && jsonl.find("\"operation\":\"read\"") != std::string::npos &&
-             jsonl.find("\"target_path\":\"" + outside_path.string() + "\"") != std::string::npos,
+  expect(count_substrings(jsonl, "\"name\":\"permission_requested\"") == 1 && jsonl.find("\"payload_type\":\"permission\"") != std::string::npos &&
+             jsonl.find("\"decision\":\"allow_session\"") != std::string::npos && jsonl.find("\"id\":\"grants\"") != std::string::npos &&
+             jsonl.find("\"operation\":\"read\"") != std::string::npos && jsonl.find("\"target_path\":\"" + outside_path.string() + "\"") != std::string::npos,
          "RPC session grant is inspectable and suppresses a repeated matching permission prompt");
 
   auto entries = session->store.load();
@@ -251,12 +283,86 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview()
 
   auto const jsonl = output_buffer.str();
   expect(result.has_value() && completed && !std::filesystem::exists(outside_path), "RPC permission diff test completes after denied mutation without writing");
-  expect(jsonl.find("\"name\":\"permission_requested\"") != std::string::npos &&
+  expect(jsonl.find("\"name\":\"permission_requested\"") != std::string::npos && jsonl.find("\"payload_type\":\"permission\"") != std::string::npos &&
              jsonl.find("\"permission_request_id\":\"" + permission_request_id + "\"") != std::string::npos &&
              jsonl.find("\"diff_preview\"") != std::string::npos && jsonl.find("+rpc new") != std::string::npos &&
              jsonl.find("\"diff_truncated\":false") != std::string::npos && jsonl.find("\"name\":\"permission_replied\"") != std::string::npos &&
              jsonl.find("\"decision\":\"deny\"") != std::string::npos,
          "RPC permission request payload includes backend-provided unified diff preview and reply event");
+}
+
+void test_app_rpc_persistent_permission_rule_lifecycle()
+{
+  auto const root = temp_root() / "app-rpc-persistent-permission-rule";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  auto const outside_path = root / "outside.txt";
+  {
+    std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
+    file << "outside persistent rule note";
+  }
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC persistent permission rule test opens runtime session");
+  if (!session)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {sse_response(read_file_call_sse(outside_path.generic_string())), sse_response(final_text_sse("persistent rule allow done"))});
+  ava::app::RuntimeRunOptions runtime_options;
+  runtime_options.access_token = "token";
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult result;
+  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  auto const rpc_timeout = std::chrono::seconds(10);
+
+  input_buffer.push(
+      "{\"id\":\"bad-rule\",\"type\":\"permission_rule_add\",\"action\":\"allow\","
+      "\"target_path\":\"" +
+      outside_path.string() + "\",\"reason\":\"missing operation\"}\n");
+  bool const invalid_rejected = output_buffer.wait_contains("permission_rule_add requires operation", rpc_timeout);
+  input_buffer.push(
+      "{\"id\":\"add-rule\",\"type\":\"permission_rule_add\",\"action\":\"allow\","
+      "\"operation\":\"read\",\"target_path\":\"" +
+      outside_path.string() + "\",\"reason\":\"allow exact outside read\"}\n");
+  bool const added = output_buffer.wait_contains("\"name\":\"permission_rule_added\"", rpc_timeout);
+  auto const rule_id = extract_json_string_field(output_buffer.str(), "rule_id");
+  input_buffer.push("{\"id\":\"rules\",\"type\":\"permission_rules\"}\n");
+  bool const listed =
+      output_buffer.wait_contains("\"id\":\"rules\"", rpc_timeout) && output_buffer.wait_contains("\"rule_id\":\"" + rule_id + "\"", rpc_timeout);
+  input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"read outside via persistent rule\"}\n");
+  bool const completed = output_buffer.wait_contains("persistent rule allow done", rpc_timeout) && output_buffer.wait_contains("\"id\":\"p1\"", rpc_timeout) &&
+                         output_buffer.wait_contains("\"success\":true", rpc_timeout);
+  input_buffer.push("{\"id\":\"remove-rule\",\"type\":\"permission_rule_remove\",\"rule_id\":\"" + rule_id + "\"}\n");
+  bool const removed = output_buffer.wait_contains("\"name\":\"permission_rule_removed\"", rpc_timeout);
+  input_buffer.close();
+  rpc_thread.join();
+
+  auto const jsonl = output_buffer.str();
+  auto entries = session->store.load();
+  auto audits = entries ? permission_entries(*entries) : std::vector<ava::session::SessionEntry>{};
+  bool persistent_audited = false;
+  for (auto const& audit : audits)
+  {
+    persistent_audited = persistent_audited || (ava::core::json::string_field(audit.data_json, "resolution_source") == "persistent_rule" &&
+                                                ava::core::json::string_field(audit.data_json, "rule_id") == rule_id &&
+                                                ava::core::json::string_field(audit.data_json, "actor") == "agent");
+  }
+  expect(result.has_value() && invalid_rejected && added && !rule_id.empty() && listed && completed && removed,
+         "RPC persistent permission rule add/list/apply/remove flow completes");
+  expect(jsonl.find("\"name\":\"permission_requested\"") == std::string::npos && persistent_audited,
+         "persistent permission rules resolve matching RPC permission prompts without resolver events and are audited");
 }
 
 void test_app_rpc_question_reply_flow()
@@ -301,8 +407,8 @@ void test_app_rpc_question_reply_flow()
   auto const jsonl = output_buffer.str();
   expect(result.has_value() && completed, "RPC question reply loop exits successfully");
   expect(jsonl.find("\"id\":\"reply\"") != std::string::npos && jsonl.find("\"success\":true") != std::string::npos &&
-             jsonl.find("question done") != std::string::npos && jsonl.find("\"name\":\"question_replied\"") != std::string::npos &&
-             jsonl.find("\"answer\":\"custom ok\"") != std::string::npos,
+             jsonl.find("question done") != std::string::npos && jsonl.find("\"payload_type\":\"question\"") != std::string::npos &&
+             jsonl.find("\"name\":\"question_replied\"") != std::string::npos && jsonl.find("\"answer\":\"custom ok\"") != std::string::npos,
          "RPC question reply emits a reply event and unblocks question tool");
 }
 
@@ -416,10 +522,12 @@ void test_app_rpc_question_reply_selected_options_flow()
 
 void run_app_rpc_resolver_tests()
 {
+  test_app_rpc_resolver_payload_builders_preserve_wire_shapes();
   test_app_rpc_permission_policy_auto_allows_before_resolver_event();
   test_app_rpc_permission_reply_allow_and_deny_flows();
   test_app_rpc_permission_reply_session_grant_flow();
   test_app_rpc_permission_request_includes_mutation_diff_preview();
+  test_app_rpc_persistent_permission_rule_lifecycle();
   test_app_rpc_question_reply_flow();
   test_app_rpc_question_reply_selected_option_flow();
   test_app_rpc_question_reply_selected_options_flow();

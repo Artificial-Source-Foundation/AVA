@@ -156,6 +156,9 @@ SessionStats compute_session_stats(std::vector<SessionEntry> const& entries)
       case EntryType::SessionStart:
         ++stats.counts.session_start;
         break;
+      case EntryType::SessionMetadata:
+        ++stats.counts.session_metadata;
+        break;
       case EntryType::UserMessage:
         if (!is_internal_replay_user_message(entry))
           ++stats.counts.user_message;
@@ -186,6 +189,9 @@ SessionStats compute_session_stats(std::vector<SessionEntry> const& entries)
         break;
       case EntryType::Compaction:
         ++stats.counts.compaction;
+        break;
+      case EntryType::BranchSummary:
+        ++stats.counts.branch_summary;
         break;
       case EntryType::Error:
         ++stats.counts.error;

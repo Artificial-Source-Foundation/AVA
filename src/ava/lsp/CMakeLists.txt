@@ -1,4 +1,5 @@
 add_library(ava_lsp
+  "configured_provider.cpp"
   "lsp_client.cpp"
 )
 

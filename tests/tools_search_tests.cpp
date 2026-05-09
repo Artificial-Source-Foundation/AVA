@@ -55,8 +55,13 @@ void test_search_tools()
 
   auto bracket_glob = ava::tools::glob_files(context, "*.[ch]");
   expect(!bracket_glob && bracket_glob.error().category() == ava::core::ErrorCategory::InvalidArgument &&
-             bracket_glob.error().message().find("bracket") != std::string::npos,
-         "glob_files rejects unsupported bracket character classes instead of silently mis-matching them");
+              bracket_glob.error().message().find("bracket") != std::string::npos,
+          "glob_files rejects unsupported bracket character classes instead of silently mis-matching them");
+
+  auto oversized_glob = ava::tools::glob_files(context, std::string(513, '*'));
+  expect(!oversized_glob && oversized_glob.error().category() == ava::core::ErrorCategory::InvalidArgument &&
+             oversized_glob.error().message().find("maximum length") != std::string::npos,
+         "glob_files rejects oversized patterns before traversal");
 
   auto result_capped = ava::tools::glob_files(context, "**/*.cpp", ava::tools::GlobOptions{.max_results = 1});
   expect(result_capped && result_capped->paths.size() == 1 && result_capped->total_matches == 2 && result_capped->truncated,

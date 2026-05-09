@@ -11,7 +11,8 @@ namespace ava::config {
 
 struct ModelInfo;
 
-struct ProviderProfile {
+struct ProviderProfile
+{
   std::string provider_id = {};
   std::string display_name = {};
   std::string connect_detail = {};
@@ -54,8 +55,7 @@ struct ProviderProfile {
 [[nodiscard]] std::string provider_display_name(std::string_view provider_id);
 [[nodiscard]] bool provider_accepts_reasoning_format(ModelInfo const& model, std::string_view format);
 
-[[nodiscard]] ava::core::VoidResult validate_reasoning_request(ModelInfo const& model, std::string_view level,
-                                                               std::optional<long long> budget_tokens,
+[[nodiscard]] ava::core::VoidResult validate_reasoning_request(ModelInfo const& model, std::string_view level, std::optional<long long> budget_tokens,
                                                                std::string_view display);
 
 }  // namespace ava::config

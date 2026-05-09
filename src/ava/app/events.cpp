@@ -1,5 +1,4 @@
 #include "ava/app/events.h"
-
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 

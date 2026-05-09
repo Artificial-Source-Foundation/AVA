@@ -45,6 +45,8 @@ ctest --preset sanitize
 
 GitHub Actions runs both the normal and sanitizer test jobs on pushes and pull requests targeting `develop`. Dependabot is enabled for GitHub Actions updates on `develop`.
 
+**For detailed cmake configuration options and build instructions see [CONTRIBUTING](CONTRIBUTING.md).**
+
 ## Run
 
 ```sh

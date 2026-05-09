@@ -1,9 +1,7 @@
 #pragma once
 
 #include "ava/tools/file_tools.h"
-
 #include "ava/session/session_store.h"
-
 #include "ava/core/error.h"
 
 #include <filesystem>
@@ -20,7 +18,8 @@ int failures();
 
 void expect(bool condition, std::string const& message);
 
-class FailingStreambuf final : public std::streambuf {
+class FailingStreambuf final : public std::streambuf
+{
  protected:
   int overflow(int ch) override;
   std::streamsize xsputn(char const* s, std::streamsize count) override;
@@ -28,7 +27,8 @@ class FailingStreambuf final : public std::streambuf {
 
 std::filesystem::path temp_root();
 
-class ScopedEnvVar {
+class ScopedEnvVar
+{
  public:
   ScopedEnvVar(std::string name, std::string value);
 
@@ -46,7 +46,6 @@ class ScopedEnvVar {
 
 std::string strip_sgr(std::string_view text);
 bool has_active_sgr_at_text(std::string_view line, std::string_view text, std::string_view sgr);
-ava::core::VoidResult append_permission_audit_for_test(ava::session::SessionStore& store,
-                                                       ava::tools::PermissionAuditEvent const& event);
+ava::core::VoidResult append_permission_audit_for_test(ava::session::SessionStore& store, ava::tools::PermissionAuditEvent const& event);
 std::vector<ava::session::SessionEntry> permission_entries(std::vector<ava::session::SessionEntry> const& entries);
 std::size_t visible_columns(std::string_view text);

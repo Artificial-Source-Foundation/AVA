@@ -3,7 +3,6 @@
 #include "ava/app/events.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/runtime.h"
-
 #include "ava/core/result.h"
 
 #include <mutex>

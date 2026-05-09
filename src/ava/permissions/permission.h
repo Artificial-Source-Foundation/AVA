@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/agent/mode.h"
-
 #include "ava/core/result.h"
 
 #include <filesystem>
@@ -12,20 +11,23 @@
 
 namespace ava::permissions {
 
-enum class PermissionAction {
+enum class PermissionAction
+{
   Allow,
   Ask,
   Deny,
 };
 
-enum class PermissionRisk {
+enum class PermissionRisk
+{
   Low,
   Medium,
   High,
   Critical,
 };
 
-enum class Operation {
+enum class Operation
+{
   ReadFile,
   SearchFiles,
   EditFile,
@@ -45,7 +47,8 @@ enum class Operation {
   McpResourceRead,
 };
 
-struct PermissionRequest {
+struct PermissionRequest
+{
   Operation operation;
   ava::agent::Mode mode;
   std::filesystem::path workspace_dir;
@@ -53,19 +56,22 @@ struct PermissionRequest {
   std::string command;
 };
 
-struct PermissionDecision {
+struct PermissionDecision
+{
   PermissionAction action;
   std::string reason;
   PermissionRisk risk = PermissionRisk::Low;
 };
 
-enum class PermissionResolution {
+enum class PermissionResolution
+{
   Allow,
   Deny,
   AllowSessionGrant,
 };
 
-struct PermissionResolutionDecision {
+struct PermissionResolutionDecision
+{
   PermissionResolution resolution = PermissionResolution::Deny;
   std::string reason;
   std::string resolution_source;
@@ -77,7 +83,8 @@ struct PermissionResolutionDecision {
   PermissionResolutionDecision(PermissionResolution resolution_in, std::string reason_in);
 };
 
-struct PermissionPrompt {
+struct PermissionPrompt
+{
   std::string permission_request_id = {};
   Operation operation;
   ava::agent::Mode mode;

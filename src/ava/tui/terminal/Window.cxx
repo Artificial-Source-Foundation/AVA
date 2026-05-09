@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "Window.h"
 
 #include <array>
@@ -5,7 +6,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
 #include "debug.h"
 
 // This header must be included last.
@@ -441,45 +441,42 @@ struct Window::Impl
     return ::wstandend(handle_);
   }
 
-  void addstr(char const* str)
-  {
-    // https://invisible-island.net/ncurses/man/curs_addstr.3x.html
-    //
-    // The addstr, addnstr, waddstr, and waddnstr routines write all characters of the null-terminated string str on
-    // the given window. The n variants write at most n characters.
-    ::waddstr(handle_, str);
-  }
-
-  void addstr(char8_t const* utf8_str)
-  {
-    // Instead of using waddwstr, which would require application-side conversion from char8_t (utf8) to wchar_t,
-    // it is better to just cast to `char const*` and let the terminal do that.
-    ::waddstr(handle_, reinterpret_cast<char const*>(utf8_str));
-  }
-
-  void addstr(Position pos, char const* str) { ::mvwaddstr(handle_, pos.row(), pos.col(), str); }
-
-  void addstr(Position pos, char8_t const* utf8_str)
-  {
-    // Instead of using mvwaddwstr, which would require application-side conversion from char8_t (utf8) to wchar_t,
-    // it is better to just cast to `char const*` and let the terminal do that.
-    ::mvwaddstr(handle_, pos.row(), pos.col(), reinterpret_cast<char const*>(utf8_str));
-  }
-
+  // https://invisible-island.net/ncurses/man/curs_addstr.3x.html
+  //
+  // The addstr, addnstr, waddstr, and waddnstr routines write all characters of the null-terminated string str on the given window.
+  // The n variants write at most n characters. The mv variants first move the cursor to the given Position.
+  //
+  void addstr(char const* str) { ::waddstr(handle_, str); }
   void addstr(char const* str, int n) { ::waddnstr(handle_, str, n); }
-
+  void addstr(char8_t const* utf8_str) { ::waddstr(handle_, reinterpret_cast<char const*>(utf8_str)); }
   void addstr(char8_t const* utf8_str, int n) { ::waddnstr(handle_, reinterpret_cast<char const*>(utf8_str), n); }
-
+  void addstr(Position pos, char const* str) { ::mvwaddstr(handle_, pos.row(), pos.col(), str); }
   void addstr(Position pos, char const* str, int n) { ::mvwaddnstr(handle_, pos.row(), pos.col(), str, n); }
-
+  // Instead of using waddwstr, which would require application-side conversion from char8_t (utf8) to wchar_t,
+  // it is better to just cast to `char const*` and let the terminal do that.
+  void addstr(Position pos, char8_t const* utf8_str) { ::mvwaddstr(handle_, pos.row(), pos.col(), reinterpret_cast<char const*>(utf8_str)); }
   void addstr(Position pos, char8_t const* utf8_str, int n) { ::mvwaddnstr(handle_, pos.row(), pos.col(), reinterpret_cast<char const*>(utf8_str), n); }
 
+  // https://invisible-island.net/ncurses/man/curs_addwstr.3x.html
+  //
+  // waddwstr writes a null-terminated wide-character string to the window starting at the cursor.
+  // The n variants write at most n characters. The mv variants first move the cursor to the given Position.
+  //
+  int addstr(wchar_t const* str) { return ::waddwstr(handle_, str); }
+  int addstr(wchar_t const* str, int n) { return ::waddnwstr(handle_, str, n); }
+  int addstr(Position pos, wchar_t const* str) { return ::mvwaddwstr(handle_, pos.row(), pos.col(), str); }
+  int addstr(Position pos, wchar_t const* str, int n) { return ::mvwaddnwstr(handle_, pos.row(), pos.col(), str, n); }
+
+#if 0 // FIXME: Lets not do this; instead pass a string + Rendition to build the cchar_t array.
+  // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
+  //
+  // The wadd_wchstr functions copy the array of complex characters into the window image structure at and after the cursor position.
+  // The n variants write at most n characters. The mv variants first move the cursor to the given Position.
+  //
   int addstr(ComplexChar const* str)
   {
     // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
     //
-    // wadd_wchstr copies an array of complex characters into the window at and after the cursor; the cursor position
-    // is not advanced and cells past the right edge are not wrapped.
     ASSERT(str);
     int n = 0;
     while (str[n].cell_character().length() != 0) ++n;
@@ -516,84 +513,27 @@ struct Window::Impl
     auto converted = convert_to_cchar_vector(str, n);
     return ::mvwadd_wchnstr(handle_, pos.row(), pos.col(), converted.data(), n);
   }
+#endif
 
-  int addstr(wchar_t const* str)
-  {
-    // https://invisible-island.net/ncurses/man/curs_addwstr.3x.html
-    //
-    // waddwstr writes a null-terminated wide-character string to the window starting at the cursor.
-    return ::waddwstr(handle_, str);
-  }
-
-  int addstr(wchar_t const* str, int n)
-  {
-    // https://invisible-island.net/ncurses/man/curs_addwstr.3x.html
-    //
-    // waddnwstr writes at most n wide characters to the window, stopping early at a terminating null wide character.
-    return ::waddnwstr(handle_, str, n);
-  }
-
-  int addstr(Position pos, wchar_t const* str)
-  {
-    // https://invisible-island.net/ncurses/man/curs_addwstr.3x.html
-    //
-    // mvwaddwstr moves the cursor, then writes a null-terminated wide-character string to the window.
-    return ::mvwaddwstr(handle_, pos.row(), pos.col(), str);
-  }
-
-  int addstr(Position pos, wchar_t const* str, int n)
-  {
-    // https://invisible-island.net/ncurses/man/curs_addwstr.3x.html
-    //
-    // mvwaddnwstr moves the cursor, then writes at most n wide characters to the window.
-    return ::mvwaddnwstr(handle_, pos.row(), pos.col(), str, n);
-  }
-
-  void addstr(cchar_t const* wchstr)
-  {
-    // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
-    //
-    // The wadd_wchstr functions copy the array of complex characters into the window image structure at and after the
-    // cursor position. The four functions with n as the last argument copy at most n elements.
-    ::wadd_wchstr(handle_, wchstr);
-  }
-
-  void addstr(cchar_t const* wchstr, int n)
-  {
-    ::wadd_wchnstr(handle_, wchstr, n);
-  }
-
-  void addstr(Position pos, cchar_t const* wchstr)
-  {
-    ::mvwadd_wchstr(handle_, pos.row(), pos.col(), wchstr);
-  }
-
-  void addstr(Position pos, cchar_t const* wchstr, int n)
-  {
-    ::mvwadd_wchnstr(handle_, pos.row(), pos.col(), wchstr, n);
-  }
-
+  // https://invisible-island.net/ncurses/man/curs_add_wch.3x.html
+  //
+  // The wadd_wch function places the complex character at the current cursor position of the specified window, then advances the cursor position.
+  // The mv variant first move the cursor to the given Position.
+  //
+  // The wecho_wchar function is functionally equivalent to calling wadd_wch followed by wrefresh.
+  //
   void addch(ComplexChar const& complex_char)
   {
-    // https://invisible-island.net/ncurses/man/curs_add_wch.3x.html
-    //
-    // The wadd_wch function places the complex character at the current cursor position of the specified window, then
-    // advances the cursor position.
     cchar_t wch = convert_to_cchar(complex_char);
     ::wadd_wch(handle_, &wch);
   }
-
   void addch(Position pos, ComplexChar const& complex_char)
   {
     cchar_t wch = convert_to_cchar(complex_char);
     ::mvwadd_wch(handle_, pos.row(), pos.col(), &wch);
   }
-
   void echochar(ComplexChar const& complex_char)
   {
-    // https://invisible-island.net/ncurses/man/curs_add_wch.3x.html
-    //
-    // The wecho_wchar function is functionally equivalent to calling wadd_wch followed by wrefresh.
     cchar_t wch = convert_to_cchar(complex_char);
     ::wecho_wchar(handle_, &wch);
   }
@@ -901,7 +841,7 @@ struct Window::Impl
     return ::key_name(key);
   }
 
-  void move(Position pos)
+  int move(Position pos)
   {
     // https://invisible-island.net/ncurses/man/curs_move.3x.html
     //
@@ -909,7 +849,207 @@ struct Window::Impl
     // line y and column x. The terminal's cursor does not move until
     // refresh(3x) is called. The position (y, x) is relative to the upper
     // left-hand corner of the window, which has coordinates (0, 0).
-    ::wmove(handle_, pos.row(), pos.col());
+    return ::wmove(handle_, pos.row(), pos.col());
+  }
+
+  int resize(Dimension size)
+  {
+    // https://invisible-island.net/ncurses/man/wresize.3x.html
+    //
+    // wresize reallocates storage for win, adjusting its dimensions to lines and columns.
+    // If either dimension is larger than its current value, ncurses fills the expanded part
+    // of the window with the window's background character as configured by wbkgrndset.
+    return ::wresize(handle_, size.height(), size.width());
+  }
+
+  Position getyx() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_getyx.3x.html
+    //
+    // getyx stores the current cursor row and column of the specified window in caller-provided variables.
+    int y = ::getcury(handle_);
+    int x = ::getcurx(handle_);
+    ASSERT(y >= 0 && x >= 0);
+    return Position(static_cast<uint32_t>(y), static_cast<uint32_t>(x));
+  }
+
+  Position getbegyx() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_getyx.3x.html
+    //
+    // getbegyx stores the beginning row and column of the specified window in screen coordinates.
+    int y = ::getbegy(handle_);
+    int x = ::getbegx(handle_);
+    ASSERT(y >= 0 && x >= 0);
+    return Position(static_cast<uint32_t>(y), static_cast<uint32_t>(x));
+  }
+
+  Dimension getmaxyx() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_getyx.3x.html
+    //
+    // getmaxyx stores the size of the specified window as row and column counts.
+    int y = ::getmaxy(handle_);
+    int x = ::getmaxx(handle_);
+    ASSERT(y >= 0 && x >= 0);
+    return Dimension(static_cast<uint32_t>(y), static_cast<uint32_t>(x));
+  }
+
+  std::optional<Position> getparyx() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_getyx.3x.html
+    //
+    // getparyx stores a subwindow's beginning row and column relative to its parent, or (-1, -1) for no parent.
+    int y = ::getpary(handle_);
+    int x = ::getparx(handle_);
+    if (y == -1 && x == -1)
+      return std::nullopt;
+    ASSERT(y >= 0 && x >= 0);
+    return Position(static_cast<uint32_t>(y), static_cast<uint32_t>(x));
+  }
+
+  bool enclose(Position pos) const
+  {
+    // https://invisible-island.net/ncurses/man/curs_mouse.3x.html
+    //
+    // wenclose tests whether the given screen-relative row and column fall inside the specified window.
+    return ::wenclose(handle_, pos.row(), pos.col());
+  }
+
+  bool mouse_trafo(Position& pos, bool to_screen) const
+  {
+    // https://invisible-island.net/ncurses/man/curs_mouse.3x.html
+    //
+    // wmouse_trafo converts coordinates between screen-relative and window-relative coordinate systems when possible.
+    int y = static_cast<int>(pos.row());
+    int x = static_cast<int>(pos.col());
+    bool const res = ::wmouse_trafo(handle_, &y, &x, to_screen);
+    if (res)
+    {
+      ASSERT(y >= 0 && x >= 0);
+      pos = Position(static_cast<uint32_t>(y), static_cast<uint32_t>(x));
+    }
+    return res;
+  }
+
+  bool is_cleared() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // is_cleared returns whether clearok has marked the window to be cleared on the next refresh.
+    return ::is_cleared(handle_);
+  }
+
+  bool is_idcok() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // is_idcok returns whether use of terminal insert/delete character capabilities is enabled for the window.
+    return ::is_idcok(handle_);
+  }
+
+  bool is_idlok() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // is_idlok returns whether use of terminal insert/delete line capabilities is enabled for the window.
+    return ::is_idlok(handle_);
+  }
+
+  bool is_immedok() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // is_immedok returns whether window changes automatically trigger a refresh.
+    return ::is_immedok(handle_);
+  }
+
+  bool is_keypad() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // is_keypad returns whether keypad translation is enabled for the window.
+    return ::is_keypad(handle_);
+  }
+
+  bool is_leaveok() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // is_leaveok returns whether refresh may leave the physical cursor wherever ncurses chooses.
+    return ::is_leaveok(handle_);
+  }
+
+  bool is_nodelay() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // is_nodelay returns whether input reads are configured to return immediately when no input is ready.
+    return ::is_nodelay(handle_);
+  }
+
+  bool is_notimeout() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // is_notimeout returns whether escape-sequence timer behavior is disabled for the window.
+    return ::is_notimeout(handle_);
+  }
+
+  bool is_pad() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // is_pad returns whether the window is a pad rather than a normal screen-bounded window.
+    return ::is_pad(handle_);
+  }
+
+  bool is_scrollok() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // is_scrollok returns whether the window may scroll when output passes the bottom edge.
+    return ::is_scrollok(handle_);
+  }
+
+  bool is_subwin() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // is_subwin returns whether the window is a subwindow sharing storage with another window.
+    return ::is_subwin(handle_);
+  }
+
+  bool is_syncok() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // is_syncok returns whether window changes automatically propagate touched state to ancestors.
+    return ::is_syncok(handle_);
+  }
+
+  int getdelay() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // wgetdelay returns the input delay for the window as set by nodelay or wtimeout.
+    return ::wgetdelay(handle_);
+  }
+
+  WINDOW* getparent() const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // wgetparent returns a pointer to the parent WINDOW of a subwindow, or null if there is no parent.
+    return ::wgetparent(handle_);
+  }
+
+  int getscrreg(ScrollRegion& region) const
+  {
+    // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+    //
+    // wgetscrreg stores the top and bottom row numbers of the window's scrolling region.
+    return ::wgetscrreg(handle_, &region.top, &region.bottom);
   }
 };
 
@@ -946,9 +1086,23 @@ Window Window::subwin(Dimension size, Position pos)
   return Window(std::make_unique<Impl>(impl_->subwin(size, pos)));
 }
 
+Window Window::subwin(Margin margin)
+{
+  Dimension size = getmaxyx();
+  Position pos = getbegyx();
+  return subwin(size - margin, pos + margin);
+}
+
 Window Window::derwin(Dimension size, Position pos)
 {
   return Window(std::make_unique<Impl>(impl_->derwin(size, pos)));
+}
+
+Window Window::derwin(Margin margin)
+{
+  Dimension size = getmaxyx();
+  Position pos{0, 0};
+  return derwin(size - margin, pos + margin);
 }
 
 void Window::derwin(Position pos)
@@ -1195,6 +1349,7 @@ void Window::addstr(Position pos, char8_t const* wstr, int n)
   impl_->addstr(pos, wstr, n);
 }
 
+#if 0
 void Window::addstr(ComplexChar const* str)
 {
   int res = impl_->addstr(str);
@@ -1218,6 +1373,7 @@ void Window::addstr(Position pos, ComplexChar const* str, int n)
   int res = impl_->addstr(pos, str, n);
   ASSERT(res != ERR);
 }
+#endif
 
 void Window::addstr(wchar_t const* str)
 {
@@ -1478,7 +1634,117 @@ void Window::key_name(wint_t key, std::string& name)
 
 void Window::move(Position pos)
 {
-  impl_->move(pos);
+  int res = impl_->move(pos);
+  ASSERT(res != ERR);
+}
+
+void Window::resize(Dimension size)
+{
+  int res = impl_->resize(size);
+  ASSERT(res != ERR);
+}
+
+Position Window::getyx() const
+{
+  return impl_->getyx();
+}
+
+Position Window::getbegyx() const
+{
+  return impl_->getbegyx();
+}
+
+Dimension Window::getmaxyx() const
+{
+  return impl_->getmaxyx();
+}
+
+std::optional<Position> Window::getparyx() const
+{
+  return impl_->getparyx();
+}
+
+bool Window::enclose(Position pos) const
+{
+  return impl_->enclose(pos);
+}
+
+bool Window::mouse_trafo(Position& pos, bool to_screen) const
+{
+  return impl_->mouse_trafo(pos, to_screen);
+}
+
+bool Window::is_cleared() const
+{
+  return impl_->is_cleared();
+}
+
+bool Window::is_idcok() const
+{
+  return impl_->is_idcok();
+}
+
+bool Window::is_idlok() const
+{
+  return impl_->is_idlok();
+}
+
+bool Window::is_immedok() const
+{
+  return impl_->is_immedok();
+}
+
+bool Window::is_keypad() const
+{
+  return impl_->is_keypad();
+}
+
+bool Window::is_leaveok() const
+{
+  return impl_->is_leaveok();
+}
+
+bool Window::is_nodelay() const
+{
+  return impl_->is_nodelay();
+}
+
+bool Window::is_notimeout() const
+{
+  return impl_->is_notimeout();
+}
+
+bool Window::is_pad() const
+{
+  return impl_->is_pad();
+}
+
+bool Window::is_scrollok() const
+{
+  return impl_->is_scrollok();
+}
+
+bool Window::is_subwin() const
+{
+  return impl_->is_subwin();
+}
+
+bool Window::is_syncok() const
+{
+  return impl_->is_syncok();
+}
+
+int Window::getdelay() const
+{
+  return impl_->getdelay();
+}
+
+ScrollRegion Window::getscrreg() const
+{
+  ScrollRegion region{};
+  int res = impl_->getscrreg(region);
+  ASSERT(res != ERR);
+  return region;
 }
 
 } // namespace terminal

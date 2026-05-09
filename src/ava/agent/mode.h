@@ -6,7 +6,8 @@
 
 namespace ava::agent {
 
-enum class Mode {
+enum class Mode
+{
   Build,
   Plan,
 };

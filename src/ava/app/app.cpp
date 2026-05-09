@@ -1,18 +1,13 @@
 #include "ava/app/app.h"
-
 #include "ava/app/connect_openai.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/line_shell.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
-
 #include "ava/agent/mode.h"
-
 #include "ava/tui/composer.h"
-
 #include "ava/config/xdg_paths.h"
-
 #include "ava/core/version.h"
 
 #include <cstdlib>
@@ -22,7 +17,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-
 #include <unistd.h>
 
 namespace {
@@ -61,15 +55,16 @@ bool stdout_is_tty()
 
 bool is_cli_option(std::string_view arg)
 {
-  return arg == "--help" || arg == "-h" || arg == "--version" || arg == "--mode" || arg == "--session" ||
-         arg == "--continue" || arg == "-c" || arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--json" ||
-         arg == "--output" || arg == "--allow" || arg == "--allow-tool";
+  return arg == "--help" || arg == "-h" || arg == "--version" || arg == "--mode" || arg == "--session" || arg == "--continue" || arg == "-c" ||
+         arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--json" || arg == "--output" || arg == "--allow" || arg == "--allow-tool";
 }
 
 std::string_view exit_status_text(int status)
 {
-  if (status == 0) return "session saved";
-  if (status == 130) return "interrupted, session saved";
+  if (status == 0)
+    return "session saved";
+  if (status == 130)
+    return "interrupted, session saved";
   return "session saved with warnings";
 }
 
@@ -82,7 +77,8 @@ void print_exit_card(ava::app::RuntimeSession const& session, int status)
   auto const reset = use_color ? std::string_view("\x1b[0m") : std::string_view("");
   auto art = [&](std::string_view text) { std::cout << blue << text << reset << '\n'; };
 
-  if (stdout_is_tty()) std::cout << "\x1b(B\x1b[0m";
+  if (stdout_is_tty())
+    std::cout << "\x1b(B\x1b[0m";
   std::cout << '\n';
   art("  █████████   █████   █████   █████████");
   art("  ███░░░░░███ ░░███   ░░███   ███░░░░░███");
@@ -93,8 +89,7 @@ void print_exit_card(ava::app::RuntimeSession const& session, int status)
   art(" █████   █████    ░░███      █████   █████");
   art("░░░░░   ░░░░░      ░░░      ░░░░░   ░░░░░");
   std::cout << '\n';
-  std::cout << bold << "AVA " << reset << exit_status_text(status) << ". " << muted << "Ready when you are." << reset
-            << '\n';
+  std::cout << bold << "AVA " << reset << exit_status_text(status) << ". " << muted << "Ready when you are." << reset << '\n';
   std::cout << muted << "Resume: " << reset << "ava --session " << session.store.session_id() << '\n';
   std::cout << muted << "Saved:  " << reset << session.store.session_path().string() << '\n';
 }
@@ -119,7 +114,8 @@ int run(int argc, char** argv)
   auto const paths = ava::config::xdg_paths();
 
   auto parse_connect_like_command = [&](int& index, std::optional<std::string> provider) -> int {
-    enum class CredentialSource {
+    enum class CredentialSource
+    {
       None,
       Stdin,
       Env,
@@ -132,7 +128,8 @@ int run(int argc, char** argv)
     std::optional<std::string> env_var;
 
     auto set_source = [&](CredentialSource next_source, ava::app::ConnectCredentialType next_type) -> bool {
-      if (source != CredentialSource::None) {
+      if (source != CredentialSource::None)
+      {
         std::cerr << "connect accepts only one credential source\n";
         return false;
       }
@@ -141,29 +138,40 @@ int run(int argc, char** argv)
       return true;
     };
 
-    while (index + 1 < argc) {
+    while (index + 1 < argc)
+    {
       std::string_view const option(argv[++index]);
-      if (option == "--api-key") {
-        if (!set_source(CredentialSource::Prompt, ava::app::ConnectCredentialType::ApiKey)) return 2;
+      if (option == "--api-key")
+      {
+        if (!set_source(CredentialSource::Prompt, ava::app::ConnectCredentialType::ApiKey))
+          return 2;
         continue;
       }
-      if (option == "--browser-oauth") {
-        if (!set_source(CredentialSource::BrowserOAuth, ava::app::ConnectCredentialType::ApiKey)) return 2;
+      if (option == "--browser-oauth")
+      {
+        if (!set_source(CredentialSource::BrowserOAuth, ava::app::ConnectCredentialType::ApiKey))
+          return 2;
         continue;
       }
-      if (option == "--headless-oauth") {
-        if (!set_source(CredentialSource::HeadlessOAuth, ava::app::ConnectCredentialType::ApiKey)) return 2;
+      if (option == "--headless-oauth")
+      {
+        if (!set_source(CredentialSource::HeadlessOAuth, ava::app::ConnectCredentialType::ApiKey))
+          return 2;
         continue;
       }
-      if (option == "--api-key-stdin") {
-        if (!set_source(CredentialSource::Stdin, ava::app::ConnectCredentialType::ApiKey)) return 2;
+      if (option == "--api-key-stdin")
+      {
+        if (!set_source(CredentialSource::Stdin, ava::app::ConnectCredentialType::ApiKey))
+          return 2;
         continue;
       }
-      if (option == "--api-key-env") {
-        if (!set_source(CredentialSource::Env, ava::app::ConnectCredentialType::ApiKey)) return 2;
-        if (index + 1 >= argc) {
-          std::cerr << ava::tui::sanitize_terminal_text(std::string(option))
-                    << " requires an environment variable name\n";
+      if (option == "--api-key-env")
+      {
+        if (!set_source(CredentialSource::Env, ava::app::ConnectCredentialType::ApiKey))
+          return 2;
+        if (index + 1 >= argc)
+        {
+          std::cerr << ava::tui::sanitize_terminal_text(std::string(option)) << " requires an environment variable name\n";
           return 2;
         }
         env_var = std::string(argv[++index]);
@@ -173,91 +181,108 @@ int run(int argc, char** argv)
       return 2;
     }
 
-    if (source == CredentialSource::BrowserOAuth || source == CredentialSource::HeadlessOAuth) {
-      if (!provider || *provider != "openai") {
+    if (source == CredentialSource::BrowserOAuth || source == CredentialSource::HeadlessOAuth)
+    {
+      if (!provider || *provider != "openai")
+      {
         std::cerr << "OpenAI OAuth flags require provider `openai`\n";
         return 2;
       }
-      if (source == CredentialSource::BrowserOAuth) return run_connect_openai_browser(paths, std::cout, std::cerr);
+      if (source == CredentialSource::BrowserOAuth)
+        return run_connect_openai_browser(paths, std::cout, std::cerr);
       return run_connect_openai_headless(paths, std::cout, std::cerr);
     }
 
-    if (source == CredentialSource::Stdin || source == CredentialSource::Env) {
-      if (!provider) {
+    if (source == CredentialSource::Stdin || source == CredentialSource::Env)
+    {
+      if (!provider)
+      {
         std::cerr << "connect requires a provider with headless credential sources\n";
         return 2;
       }
       return run_connect_provider_credential(
-          paths,
-          ava::app::ConnectProviderCredentialOptions{
-              .provider_id = *provider, .credential_type = credential_type.value(), .env_var = env_var},
-          std::cin, std::cout, std::cerr);
+          paths, ava::app::ConnectProviderCredentialOptions{.provider_id = *provider, .credential_type = credential_type.value(), .env_var = env_var}, std::cin,
+          std::cout, std::cerr);
     }
 
-    if (source == CredentialSource::Prompt) {
+    if (source == CredentialSource::Prompt)
+    {
       return run_connect_provider_wizard(
-          paths,
-          ava::app::ConnectProviderWizardOptions{
-              .provider_id = provider, .credential_type = credential_type, .stdin_is_tty = stdin_is_tty()},
-          std::cin, std::cout, std::cerr);
+          paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .credential_type = credential_type, .stdin_is_tty = stdin_is_tty()}, std::cin,
+          std::cout, std::cerr);
     }
 
-    if (provider && *provider == "openai") {
-      return run_connect_openai_wizard(
-          paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .stdin_is_tty = stdin_is_tty()},
-          std::cin, std::cout, std::cerr);
+    if (provider && *provider == "openai")
+    {
+      return run_connect_openai_wizard(paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .stdin_is_tty = stdin_is_tty()}, std::cin,
+                                       std::cout, std::cerr);
     }
-    return run_connect_provider_wizard(
-        paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .stdin_is_tty = stdin_is_tty()},
-        std::cin, std::cout, std::cerr);
+    return run_connect_provider_wizard(paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .stdin_is_tty = stdin_is_tty()}, std::cin,
+                                       std::cout, std::cerr);
   };
 
-  for (int index = 1; index < argc; ++index) {
+  for (int index = 1; index < argc; ++index)
+  {
     std::string_view const arg(argv[index]);
-    if (arg == "connect") {
+    if (arg == "connect")
+    {
       std::optional<std::string> provider;
-      if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--")) provider = argv[++index];
+      if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--"))
+        provider = argv[++index];
       return parse_connect_like_command(index, provider);
     }
-    if (arg == "login") {
+    if (arg == "login")
+    {
       std::optional<std::string> provider;
-      if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--")) provider = argv[++index];
+      if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--"))
+        provider = argv[++index];
       return parse_connect_like_command(index, provider);
     }
-    if (arg == "auth") {
-      if (index + 1 >= argc || std::string_view(argv[++index]) != "login") {
+    if (arg == "auth")
+    {
+      if (index + 1 >= argc || std::string_view(argv[++index]) != "login")
+      {
         std::cerr << "auth requires login\n";
         return 2;
       }
       std::optional<std::string> provider;
-      if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--")) provider = argv[++index];
+      if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--"))
+        provider = argv[++index];
       return parse_connect_like_command(index, provider);
     }
-    if (arg == "--help" || arg == "-h") {
+    if (arg == "--help" || arg == "-h")
+    {
       print_help();
       return 0;
     }
-    if (arg == "--version") {
+    if (arg == "--version")
+    {
       std::cout << "ava " << version::kFullVersion << '\n';
       return 0;
     }
-    if (arg == "--mode") {
-      if (index + 1 >= argc) {
+    if (arg == "--mode")
+    {
+      if (index + 1 >= argc)
+      {
         std::cerr << "--mode requires build or plan\n";
         return 2;
       }
       auto parsed = ava::agent::parse_mode(argv[++index]);
-      if (!parsed) {
+      if (!parsed)
+      {
         std::cerr << parsed.error().format() << '\n';
         return 2;
       }
       mode = *parsed;
       continue;
     }
-    if (arg == "--print" || arg == "-p") {
+    if (arg == "--print" || arg == "-p")
+    {
       print_mode = true;
-      if (index + 1 < argc && !is_cli_option(argv[index + 1])) {
-        if (print_prompt) {
+      if (index + 1 < argc && !is_cli_option(argv[index + 1]))
+      {
+        if (print_prompt)
+        {
           std::cerr << "print mode accepts at most one prompt argument\n";
           return 2;
         }
@@ -265,74 +290,95 @@ int run(int argc, char** argv)
       }
       continue;
     }
-    if (arg == "--rpc") {
+    if (arg == "--rpc")
+    {
       rpc_mode = true;
       continue;
     }
-    if (arg == "--json") {
+    if (arg == "--json")
+    {
       print_output_format = ava::app::PrintOutputFormat::Json;
       print_output_flag_seen = true;
       continue;
     }
-    if (arg == "--output") {
-      if (index + 1 >= argc) {
+    if (arg == "--output")
+    {
+      if (index + 1 >= argc)
+      {
         std::cerr << "--output requires json, text, or rpc\n";
         return 2;
       }
       std::string_view const output(argv[++index]);
-      if (output == "json") {
+      if (output == "json")
+      {
         print_output_format = ava::app::PrintOutputFormat::Json;
-      } else if (output == "text") {
+      }
+      else if (output == "text")
+      {
         print_output_format = ava::app::PrintOutputFormat::Text;
-      } else if (output == "rpc") {
+      }
+      else if (output == "rpc")
+      {
         rpc_mode = true;
-      } else {
+      }
+      else
+      {
         std::cerr << "--output requires json, text, or rpc\n";
         return 2;
       }
       print_output_flag_seen = true;
       continue;
     }
-    if (arg == "--allow") {
-      if (index + 1 >= argc || is_cli_option(argv[index + 1])) {
+    if (arg == "--allow")
+    {
+      if (index + 1 >= argc || is_cli_option(argv[index + 1]))
+      {
         std::cerr << "--allow requires read-only\n";
         return 2;
       }
       auto added = ava::app::add_headless_allow_policy(headless_permission_policy, argv[++index]);
-      if (!added) {
+      if (!added)
+      {
         std::cerr << added.error().format() << '\n';
         return 2;
       }
       print_permission_flag_seen = true;
       continue;
     }
-    if (arg == "--allow-tool") {
-      if (index + 1 >= argc || is_cli_option(argv[index + 1])) {
+    if (arg == "--allow-tool")
+    {
+      if (index + 1 >= argc || is_cli_option(argv[index + 1]))
+      {
         std::cerr << "--allow-tool requires a comma-separated tool list\n";
         return 2;
       }
       auto added = ava::app::add_headless_allowed_tools(headless_permission_policy, argv[++index]);
-      if (!added) {
+      if (!added)
+      {
         std::cerr << added.error().format() << '\n';
         return 2;
       }
       print_permission_flag_seen = true;
       continue;
     }
-    if (arg == "--session") {
-      if (index + 1 >= argc) {
+    if (arg == "--session")
+    {
+      if (index + 1 >= argc)
+      {
         std::cerr << "--session requires a session id\n";
         return 2;
       }
       requested_session_id = std::string(argv[++index]);
       continue;
     }
-    if (arg == "--continue" || arg == "-c") {
+    if (arg == "--continue" || arg == "-c")
+    {
       continue_last_session = true;
       continue;
     }
 
-    if (print_mode && !print_prompt) {
+    if (print_mode && !print_prompt)
+    {
       print_prompt = std::string(arg);
       continue;
     }
@@ -341,22 +387,26 @@ int run(int argc, char** argv)
     return 2;
   }
 
-  if (print_mode && rpc_mode) {
+  if (print_mode && rpc_mode)
+  {
     std::cerr << "use either --print or --rpc, not both\n";
     return 2;
   }
 
-  if (!print_mode && !rpc_mode && print_output_flag_seen) {
+  if (!print_mode && !rpc_mode && print_output_flag_seen)
+  {
     std::cerr << "--json and --output text/json are only supported with --print; use --rpc or --output rpc for RPC\n";
     return 2;
   }
 
-  if (!print_mode && !rpc_mode && print_permission_flag_seen) {
+  if (!print_mode && !rpc_mode && print_permission_flag_seen)
+  {
     std::cerr << "--allow and --allow-tool are only supported with --print or --rpc\n";
     return 2;
   }
 
-  if (requested_session_id && continue_last_session) {
+  if (requested_session_id && continue_last_session)
+  {
     std::cerr << "use either --session or --continue, not both\n";
     return 2;
   }
@@ -369,33 +419,35 @@ int run(int argc, char** argv)
   open_options.mode = mode;
   open_options.paths = paths;
 
-  if (print_mode) {
-    return ava::app::run_print_mode(
-        ava::app::PrintModeOptions{.open_options = open_options,
-                                   .explicit_prompt = print_prompt,
-                                   .read_stdin = !stdin_is_tty(),
-                                   .output_format = print_output_format,
-                                   .permission_policy = std::move(headless_permission_policy),
-                                   .provider_override = std::nullopt,
-                                   .transport_override = std::nullopt},
-        std::cin, std::cout, std::cerr);
+  if (print_mode)
+  {
+    return ava::app::run_print_mode(ava::app::PrintModeOptions{.open_options = open_options,
+                                                               .explicit_prompt = print_prompt,
+                                                               .read_stdin = !stdin_is_tty(),
+                                                               .output_format = print_output_format,
+                                                               .permission_policy = std::move(headless_permission_policy),
+                                                               .provider_override = std::nullopt,
+                                                               .transport_override = std::nullopt},
+                                    std::cin, std::cout, std::cerr);
   }
 
-  if (rpc_mode) {
-    return ava::app::run_rpc_mode(ava::app::RpcModeOptions{.open_options = open_options,
-                                                           .permission_policy = std::move(headless_permission_policy)},
-                                  std::cin, std::cout, std::cerr);
+  if (rpc_mode)
+  {
+    return ava::app::run_rpc_mode(ava::app::RpcModeOptions{.open_options = open_options, .permission_policy = std::move(headless_permission_policy)}, std::cin,
+                                  std::cout, std::cerr);
   }
 
   auto session = ava::app::open_runtime_session(open_options);
-  if (!session) {
+  if (!session)
+  {
     std::cerr << session.error().format() << '\n';
     return 1;
   }
 
   bool const print_farewell = stdin_is_tty() && stdout_is_tty();
   int const status = run_interactive(*session);
-  if (print_farewell) print_exit_card(*session, status);
+  if (print_farewell)
+    print_exit_card(*session, status);
   return status;
 }
 

@@ -3,9 +3,7 @@
 #include "ava/agent/tool_metadata.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_types.h"
-
 #include "ava/tools/file_tools.h"
-
 #include "ava/core/result.h"
 
 #include <span>
@@ -14,7 +12,8 @@
 
 namespace ava::agent {
 
-class ToolDispatcher {
+class ToolDispatcher
+{
  public:
   explicit ToolDispatcher(ava::tools::ToolContext context);
 

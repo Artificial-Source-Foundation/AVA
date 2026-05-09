@@ -3,11 +3,13 @@
 #include "Border.h"
 #include "ComplexChar.h"
 #include "Dimension.h"
+#include "Margin.h"
 #include "Position.h"
 
 #include <cstdarg>
 #include <cwchar>
 #include <memory>
+#include <optional>
 #include <string>
 
 // To print all implemented ncurses functions (from the comments):
@@ -18,14 +20,17 @@
 //
 // grep '^extern.*WINDOW *\*.*implemented' /usr/include/curses.h | grep -v SCREEN | sed -re 's/^extern NCURSES_EXPORT\([^)]*\) ([^ (]*).*/\1/' | sort -u
 //
-// Missing members:
-//
-//   mvwin
-//
 namespace terminal {
 
 // Forward declaration.
 class Session;
+
+// Inclusive top and bottom rows of a Window scrolling region.
+struct ScrollRegion
+{
+  int top;
+  int bottom;
+};
 
 class Window
 {
@@ -60,17 +65,25 @@ class Window
 
   // https://invisible-island.net/ncurses/man/curs_window.3x.html
 
-  // Create a Window that is a subwindow of the current Window, with dimensions `size` and top-left screen position `pos`.
+  // Create a Window that is a subwindow of the current Window.
+  //
+  // Either pass dimension `size` and top-left screen position `pos`,
+  // or pass a Margin that is relative to this Window.
   //
   // The returned Window shares storage with this Window. The caller must keep parent
   // and child lifetimes ordered so the subwindow is destroyed before its parent.
   Window subwin(Dimension size, Position pos);                          // subwin
+  Window subwin(Margin margin);                                         //
 
-  // Create a Window that is a derived subwindow of the current Window, with dimensions `size` and top-left position `pos` relative to this Window.
+  // Create a Window that is a derived subwindow of the current Window.
+  //
+  // Either pass dimension `size` and top-left position `pos` relative to this Window,
+  // or pass a Margin that is relative to this Window.
   //
   // The returned Window shares storage with this Window. The caller must keep parent
   // and child lifetimes ordered so the subwindow is destroyed before its parent.
   Window derwin(Dimension size, Position pos);                          // derwin
+  Window derwin(Margin margin);                                         //
 
   // Move this derived subwindow to `pos` (relative to its parent).
   //
@@ -85,6 +98,8 @@ class Window
 
   // Enable or disable automatic syncup upon mutations.
   void syncok(bool enabled);                                            // syncok
+
+  // https://invisible-island.net/ncurses/man/curs_bkgrnd.3x.html
 
   void set_background(ComplexChar background, bool erase = true);       // wbkgrndset / wbkgrnd
   ComplexChar get_background() const;                                   // wgetbkgrnd
@@ -113,6 +128,28 @@ class Window
   // https://invisible-island.net/ncurses/man/curs_move.3x.html
 
   void move(Position pos);                                              // wmove
+
+  // https://invisible-island.net/ncurses/man/wresize.3x.html
+
+  void resize(Dimension size);                                          // wresize
+
+  // https://invisible-island.net/ncurses/man/curs_getyx.3x.html
+
+  // Return the cursor position relative to this Window's top-left corner.
+  Position getyx() const;                                               // getyx
+  // Return this Window's top-left position in screen coordinates.
+  Position getbegyx() const;                                            // getbegyx
+  // Return this Window's current dimensions in rows and columns.
+  Dimension getmaxyx() const;                                           // getmaxyx
+  // Return this subwindow's parent-relative origin, or no value when it has no parent.
+  std::optional<Position> getparyx() const;                             // getparyx
+
+  // https://invisible-island.net/ncurses/man/curs_mouse.3x.html
+
+  // Return whether screen-relative `pos` lies within this Window.
+  bool enclose(Position pos) const;                                     // wenclose
+  // Convert `pos` between Window-local and screen coordinates; false means no valid conversion exists.
+  bool mouse_trafo(Position& pos, bool to_screen) const;                // wmouse_trafo
 
   // https://invisible-island.net/ncurses/man/curs_outopts.3x.html
 
@@ -169,6 +206,7 @@ class Window
   void vline_set(ComplexChar const& complex_char, int n);               // wvline_set
   void vline_set(Position pos, ComplexChar const& complex_char, int n); // mvwvline_set
 
+#if 0
   // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
 
   void addstr(ComplexChar const* str);                                  // wadd_wchstr
@@ -177,6 +215,7 @@ class Window
   void addstr(Position pos, ComplexChar const* str);                    // mvwadd_wchstr
   // Move to `pos` and add at most `n` complex characters without advancing the cursor.
   void addstr(Position pos, ComplexChar const* str, int n);             // mvwadd_wchnstr
+#endif
 
   // https://invisible-island.net/ncurses/man/curs_addwstr.3x.html
 
@@ -316,6 +355,28 @@ class Window
 
   // Store the printable name for `key` in `name`; function-key codes are supported.
   static void key_name(wint_t key, std::string& name);                  // key_name
+
+  // https://invisible-island.net/ncurses/man/curs_opaque.3x.html
+
+  bool is_cleared() const;                                              // is_cleared
+  bool is_idcok() const;                                                // is_idcok
+  bool is_idlok() const;                                                // is_idlok
+  bool is_immedok() const;                                              // is_immedok
+  bool is_keypad() const;                                               // is_keypad
+  bool is_leaveok() const;                                              // is_leaveok
+  bool is_nodelay() const;                                              // is_nodelay
+  bool is_notimeout() const;                                            // is_notimeout
+  bool is_pad() const;                                                  // is_pad
+  bool is_scrollok() const;                                             // is_scrollok
+  bool is_subwin() const;                                               // is_subwin
+  bool is_syncok() const;                                               // is_syncok
+  // Return this Window's input delay in milliseconds, or ncurses sentinel values for blocking/nonblocking modes.
+  int getdelay() const;                                                 // wgetdelay
+  // Return a non-owning wrapper for this Window's parent, or null when it has no parent.
+  // Commented out because this requires a central registry of Window objects that we don't have (yet).
+// std::optional<Window> getparent() const;                              // wgetparent
+  //  Return this Window's inclusive scrolling-region row bounds.
+  ScrollRegion getscrreg() const;                                      // wgetscrreg
 };
 
 } // namespace terminal

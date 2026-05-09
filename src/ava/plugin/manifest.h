@@ -14,40 +14,47 @@ inline constexpr std::string_view kPluginProxyReadCapability = "proxy.read";
 inline constexpr std::string_view kPluginProxySearchCapability = "proxy.search";
 inline constexpr std::string_view kPluginProxySessionCapability = "proxy.session";
 
-enum class PluginScope {
+enum class PluginScope
+{
   Global,
   Project,
 };
 
 [[nodiscard]] std::string_view to_string(PluginScope scope);
 
-struct PluginEntrypoint {
+struct PluginEntrypoint
+{
   std::string command;
   std::vector<std::string> args;
 };
 
-struct PluginToolContribution {
+struct PluginToolContribution
+{
   std::string name;
   std::string description;
   std::string input_schema_json;
 };
 
-struct PluginCommandContribution {
+struct PluginCommandContribution
+{
   std::string name;
   std::string description;
 };
 
-struct PluginResourceContribution {
+struct PluginResourceContribution
+{
   std::string name;
   std::string description;
   std::string path;
 };
 
-struct PluginEventHookContribution {
+struct PluginEventHookContribution
+{
   std::string event;
 };
 
-struct PluginContributions {
+struct PluginContributions
+{
   std::vector<PluginToolContribution> tools;
   std::vector<PluginCommandContribution> commands;
   std::vector<PluginResourceContribution> prompts;
@@ -55,7 +62,8 @@ struct PluginContributions {
   std::vector<PluginEventHookContribution> event_hooks;
 };
 
-struct PluginManifest {
+struct PluginManifest
+{
   int schema_version = 0;
   std::string id;
   std::string name;
@@ -69,13 +77,13 @@ struct PluginManifest {
   std::filesystem::path directory;
 };
 
-struct DiscoveredPlugin {
+struct DiscoveredPlugin
+{
   PluginManifest manifest;
   PluginScope scope = PluginScope::Global;
 };
 
-[[nodiscard]] ava::core::Result<PluginManifest> parse_plugin_manifest(std::string_view json,
-                                                                      std::filesystem::path manifest_path = {});
+[[nodiscard]] ava::core::Result<PluginManifest> parse_plugin_manifest(std::string_view json, std::filesystem::path manifest_path = {});
 [[nodiscard]] ava::core::Result<PluginManifest> load_plugin_manifest(std::filesystem::path const& manifest_path);
 [[nodiscard]] bool plugin_has_capability(PluginManifest const& manifest, std::string_view capability);
 

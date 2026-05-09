@@ -7,7 +7,8 @@
 
 namespace ava::config {
 
-struct ReasoningProfile {
+struct ReasoningProfile
+{
   std::string api_family;
   std::string format;
   std::vector<std::string> levels;

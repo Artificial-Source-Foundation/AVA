@@ -23,8 +23,8 @@ namespace {
 constexpr int kTerminalEscapeDelayMs = 100;
 
 sig_atomic_t volatile g_terminal_signal = 0;
-struct sigaction g_curses_previous_sigint {};
-struct sigaction g_curses_previous_sigterm {};
+struct sigaction g_curses_previous_sigint{};
+struct sigaction g_curses_previous_sigterm{};
 
 void mark_terminal_signal(int signal_number)
 {
@@ -33,7 +33,7 @@ void mark_terminal_signal(int signal_number)
 
 void install_curses_signal_flags()
 {
-  struct sigaction action {};
+  struct sigaction action{};
   action.sa_handler = mark_terminal_signal;
   sigemptyset(&action.sa_mask);
   sigaddset(&action.sa_mask, SIGINT);
@@ -51,7 +51,8 @@ void uninstall_curses_signal_flags()
 
 void configure_curses_colors()
 {
-  if (!has_colors()) return;
+  if (!has_colors())
+    return;
   static_cast<void>(start_color());
   static_cast<void>(use_default_colors());
 }
@@ -59,7 +60,8 @@ void configure_curses_colors()
 void configure_curses_mouse()
 {
 #ifdef NCURSES_MOUSE_VERSION
-  if (!has_mouse()) return;
+  if (!has_mouse())
+    return;
   mmask_t previous_mask = 0;
   mmask_t mask = BUTTON1_CLICKED | BUTTON4_PRESSED | BUTTON5_PRESSED;
   static_cast<void>(mousemask(mask, &previous_mask));
@@ -79,20 +81,27 @@ bool is_utf8_continuation(unsigned char byte)
 
 std::size_t utf8_sequence_length(unsigned char byte)
 {
-  if ((byte & 0x80U) == 0) return 1;
-  if (byte >= 0xC2U && byte <= 0xDFU) return 2;
-  if ((byte & 0xF0U) == 0xE0U) return 3;
-  if (byte >= 0xF0U && byte <= 0xF4U) return 4;
+  if ((byte & 0x80U) == 0)
+    return 1;
+  if (byte >= 0xC2U && byte <= 0xDFU)
+    return 2;
+  if ((byte & 0xF0U) == 0xE0U)
+    return 3;
+  if (byte >= 0xF0U && byte <= 0xF4U)
+    return 4;
   return 0;
 }
 
 std::optional<int> parse_unsigned_int(std::string_view text, std::size_t& index)
 {
-  if (index >= text.size() || text[index] < '0' || text[index] > '9') return std::nullopt;
+  if (index >= text.size() || text[index] < '0' || text[index] > '9')
+    return std::nullopt;
   int value = 0;
-  while (index < text.size() && text[index] >= '0' && text[index] <= '9') {
+  while (index < text.size() && text[index] >= '0' && text[index] <= '9')
+  {
     auto const digit = text[index] - '0';
-    if (value > (std::numeric_limits<int>::max() - digit) / 10) return std::nullopt;
+    if (value > (std::numeric_limits<int>::max() - digit) / 10)
+      return std::nullopt;
     value = (value * 10) + digit;
     ++index;
   }
@@ -101,67 +110,91 @@ std::optional<int> parse_unsigned_int(std::string_view text, std::size_t& index)
 
 bool consume_char(std::string_view text, std::size_t& index, char expected)
 {
-  if (index >= text.size() || text[index] != expected) return false;
+  if (index >= text.size() || text[index] != expected)
+    return false;
   ++index;
   return true;
 }
 
 bool is_shift_enter_csi_u(std::string_view sequence)
 {
-  if (!sequence.starts_with('[')) return false;
+  if (!sequence.starts_with('['))
+    return false;
   auto index = std::size_t{1};
   auto const codepoint = parse_unsigned_int(sequence, index);
-  if (!codepoint || *codepoint != 13) return false;
-  if (!consume_char(sequence, index, ';')) return false;
+  if (!codepoint || *codepoint != 13)
+    return false;
+  if (!consume_char(sequence, index, ';'))
+    return false;
   auto const modifiers = parse_unsigned_int(sequence, index);
-  if (!modifiers || *modifiers != 2) return false;
+  if (!modifiers || *modifiers != 2)
+    return false;
   return index + 1 == sequence.size() && (sequence[index] == 'u' || sequence[index] == '~');
 }
 
 bool is_legacy_shift_enter_sequence(std::string_view sequence)
 {
-  if (!sequence.starts_with('[')) return false;
+  if (!sequence.starts_with('['))
+    return false;
   auto index = std::size_t{1};
   auto const escape_code = parse_unsigned_int(sequence, index);
-  if (!escape_code || *escape_code != 27) return false;
-  if (!consume_char(sequence, index, ';')) return false;
+  if (!escape_code || *escape_code != 27)
+    return false;
+  if (!consume_char(sequence, index, ';'))
+    return false;
   auto const modifiers = parse_unsigned_int(sequence, index);
-  if (!modifiers || *modifiers != 2) return false;
-  if (!consume_char(sequence, index, ';')) return false;
+  if (!modifiers || *modifiers != 2)
+    return false;
+  if (!consume_char(sequence, index, ';'))
+    return false;
   auto const key_code = parse_unsigned_int(sequence, index);
   return key_code && *key_code == 13 && index + 1 == sequence.size() && sequence[index] == '~';
 }
 
 Key page_key_from_csi_tilde(std::string_view sequence)
 {
-  if (!sequence.starts_with('[') || sequence.empty() || sequence.back() != '~') return Key::Unknown;
+  if (!sequence.starts_with('[') || sequence.empty() || sequence.back() != '~')
+    return Key::Unknown;
 
   auto index = std::size_t{1};
   auto const code = parse_unsigned_int(sequence, index);
-  if (!code) return Key::Unknown;
+  if (!code)
+    return Key::Unknown;
 
-  while (index + 1 < sequence.size()) {
-    if (!consume_char(sequence, index, ';') && !consume_char(sequence, index, ':')) return Key::Unknown;
-    if (!parse_unsigned_int(sequence, index)) return Key::Unknown;
+  while (index + 1 < sequence.size())
+  {
+    if (!consume_char(sequence, index, ';') && !consume_char(sequence, index, ':'))
+      return Key::Unknown;
+    if (!parse_unsigned_int(sequence, index))
+      return Key::Unknown;
   }
-  if (index + 1 != sequence.size()) return Key::Unknown;
+  if (index + 1 != sequence.size())
+    return Key::Unknown;
 
-  if (*code == 5) return Key::PageUp;
-  if (*code == 6) return Key::PageDown;
+  if (*code == 5)
+    return Key::PageUp;
+  if (*code == 6)
+    return Key::PageDown;
   return Key::Unknown;
 }
 
 Key sgr_mouse_key(std::string_view sequence)
 {
-  if (!sequence.starts_with("[<") || sequence.size() < 7) return Key::Unknown;
+  if (!sequence.starts_with("[<") || sequence.size() < 7)
+    return Key::Unknown;
   auto index = std::size_t{2};
   auto const button = parse_unsigned_int(sequence, index);
-  if (!button || !consume_char(sequence, index, ';')) return Key::Unknown;
-  if (!parse_unsigned_int(sequence, index) || !consume_char(sequence, index, ';')) return Key::Unknown;
-  if (!parse_unsigned_int(sequence, index)) return Key::Unknown;
-  if (index + 1 != sequence.size() || sequence[index] != 'M') return Key::Unknown;
+  if (!button || !consume_char(sequence, index, ';'))
+    return Key::Unknown;
+  if (!parse_unsigned_int(sequence, index) || !consume_char(sequence, index, ';'))
+    return Key::Unknown;
+  if (!parse_unsigned_int(sequence, index))
+    return Key::Unknown;
+  if (index + 1 != sequence.size() || sequence[index] != 'M')
+    return Key::Unknown;
 
-  if ((*button & 64) == 0) return Key::Unknown;
+  if ((*button & 64) == 0)
+    return Key::Unknown;
   return (*button & 1) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
 }
 
@@ -172,11 +205,14 @@ bool is_legacy_mouse_sequence(std::string_view sequence)
 
 Key legacy_mouse_key(std::string_view sequence)
 {
-  if (!is_legacy_mouse_sequence(sequence)) return Key::Unknown;
+  if (!is_legacy_mouse_sequence(sequence))
+    return Key::Unknown;
   auto const button_byte = static_cast<unsigned char>(sequence[2]);
-  if (button_byte < 32) return Key::Unknown;
+  if (button_byte < 32)
+    return Key::Unknown;
   auto const button = static_cast<unsigned int>(button_byte - 32U);
-  if ((button & 64U) == 0) return Key::Unknown;
+  if ((button & 64U) == 0)
+    return Key::Unknown;
   return (button & 1U) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
 }
 
@@ -197,8 +233,10 @@ bool ends_with_string_terminator(std::string_view sequence)
 
 bool is_control_string_complete(std::string_view sequence)
 {
-  if (sequence.empty() || !is_control_string_intro(sequence.front())) return false;
-  if (ends_with_string_terminator(sequence)) return true;
+  if (sequence.empty() || !is_control_string_intro(sequence.front()))
+    return false;
+  if (ends_with_string_terminator(sequence))
+    return true;
   return sequence.front() == ']' && sequence.find('\a') != std::string_view::npos;
 }
 
@@ -209,15 +247,14 @@ CursesSession::CursesSession(void* screen) : screen_(screen), active_(screen != 
 }
 
 CursesSession::CursesSession(CursesSession&& other) noexcept
-    : screen_(std::move(other.screen_)),
-      previous_locale_(std::move(other.previous_locale_)),
-      active_(std::exchange(other.active_, false))
+    : screen_(std::move(other.screen_)), previous_locale_(std::move(other.previous_locale_)), active_(std::exchange(other.active_, false))
 {
 }
 
 CursesSession& CursesSession::operator=(CursesSession&& other) noexcept
 {
-  if (this == &other) return *this;
+  if (this == &other)
+    return *this;
   restore();
   screen_ = std::move(other.screen_);
   previous_locale_ = std::move(other.previous_locale_);
@@ -234,7 +271,8 @@ ava::core::Result<CursesSession> CursesSession::enter()
 {
   char const* current_locale = std::setlocale(LC_ALL, nullptr);
   std::string const previous_locale = current_locale == nullptr ? "C" : current_locale;
-  if (std::setlocale(LC_ALL, "") == nullptr) {
+  if (std::setlocale(LC_ALL, "") == nullptr)
+  {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to configure terminal locale"));
   }
 
@@ -245,11 +283,13 @@ ava::core::Result<CursesSession> CursesSession::enter()
   sigaddset(&blocked_signals, SIGTERM);
   bool const blocked = sigprocmask(SIG_BLOCK, &blocked_signals, &previous_mask) == 0;
   auto restore_signal_mask = [&]() {
-    if (blocked) static_cast<void>(sigprocmask(SIG_SETMASK, &previous_mask, nullptr));
+    if (blocked)
+      static_cast<void>(sigprocmask(SIG_SETMASK, &previous_mask, nullptr));
   };
 
   SCREEN* screen = newterm(nullptr, stdout, stdin);
-  if (screen == nullptr) {
+  if (screen == nullptr)
+  {
     restore_signal_mask();
     static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to initialize ncurses screen"));
@@ -260,7 +300,8 @@ ava::core::Result<CursesSession> CursesSession::enter()
   static_cast<void>(set_term(screen));
   install_curses_signal_flags();
 
-  if (cbreak() == ERR || noecho() == ERR || keypad(stdscr, TRUE) == ERR) {
+  if (cbreak() == ERR || noecho() == ERR || keypad(stdscr, TRUE) == ERR)
+  {
     session.restore();
     restore_signal_mask();
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to configure ncurses terminal mode"));
@@ -282,7 +323,8 @@ ava::core::Result<CursesSession> CursesSession::enter()
 
 void CursesSession::restore() noexcept
 {
-  if (!active_) return;
+  if (!active_)
+    return;
   static_cast<void>(set_term(static_cast<SCREEN*>(screen_.get())));
   set_bracketed_paste(false);
   static_cast<void>(curs_set(1));
@@ -290,37 +332,46 @@ void CursesSession::restore() noexcept
   uninstall_curses_signal_flags();
   active_ = false;
   screen_.reset();
-  if (!previous_locale_.empty()) static_cast<void>(std::setlocale(LC_ALL, previous_locale_.c_str()));
+  if (!previous_locale_.empty())
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale_.c_str()));
 }
 
 void CursesSession::ScreenDeleter::operator()(void* screen) const noexcept
 {
-  if (screen == nullptr) return;
+  if (screen == nullptr)
+    return;
   delscreen(static_cast<SCREEN*>(screen));
 }
 
 void erase_last_utf8_codepoint(std::string& text)
 {
-  if (text.empty()) return;
-  if (!is_utf8_continuation(static_cast<unsigned char>(text.back()))) {
+  if (text.empty())
+    return;
+  if (!is_utf8_continuation(static_cast<unsigned char>(text.back())))
+  {
     text.pop_back();
     return;
   }
 
   auto start = text.size();
-  while (start > 0 && is_utf8_continuation(static_cast<unsigned char>(text[start - 1]))) {
+  while (start > 0 && is_utf8_continuation(static_cast<unsigned char>(text[start - 1])))
+  {
     --start;
   }
-  if (start == 0) {
+  if (start == 0)
+  {
     text.pop_back();
     return;
   }
 
   auto const expected_length = utf8_sequence_length(static_cast<unsigned char>(text[start - 1]));
   auto const actual_length = text.size() - (start - 1);
-  if (expected_length > 1 && expected_length == actual_length) {
+  if (expected_length > 1 && expected_length == actual_length)
+  {
     text.erase(start - 1);
-  } else {
+  }
+  else
+  {
     text.pop_back();
   }
 }
@@ -332,37 +383,53 @@ int terminal_escape_delay_ms()
 
 Key terminal_escape_sequence_key(std::string_view sequence)
 {
-  if (sequence == "y" || sequence == "Y") return Key::AltY;
-  if (is_legacy_shift_enter_sequence(sequence) || is_shift_enter_csi_u(sequence)) return Key::ShiftEnter;
-  if (auto const key = page_key_from_csi_tilde(sequence); key != Key::Unknown) return key;
-  if (auto const key = sgr_mouse_key(sequence); key != Key::Unknown) return key;
-  if (auto const key = legacy_mouse_key(sequence); key != Key::Unknown) return key;
+  if (sequence == "y" || sequence == "Y")
+    return Key::AltY;
+  if (is_legacy_shift_enter_sequence(sequence) || is_shift_enter_csi_u(sequence))
+    return Key::ShiftEnter;
+  if (auto const key = page_key_from_csi_tilde(sequence); key != Key::Unknown)
+    return key;
+  if (auto const key = sgr_mouse_key(sequence); key != Key::Unknown)
+    return key;
+  if (auto const key = legacy_mouse_key(sequence); key != Key::Unknown)
+    return key;
   return Key::Unknown;
 }
 
 bool terminal_escape_sequence_complete(std::string_view sequence)
 {
-  if (sequence.empty()) return false;
-  if (is_control_string_complete(sequence)) return true;
-  if (is_control_string_intro(sequence.front())) return false;
+  if (sequence.empty())
+    return false;
+  if (is_control_string_complete(sequence))
+    return true;
+  if (is_control_string_intro(sequence.front()))
+    return false;
 
-  if (sequence.starts_with('[')) {
-    if (sequence.size() <= 1) return false;
-    if (sequence.starts_with("[M")) return is_legacy_mouse_sequence(sequence);
+  if (sequence.starts_with('['))
+  {
+    if (sequence.size() <= 1)
+      return false;
+    if (sequence.starts_with("[M"))
+      return is_legacy_mouse_sequence(sequence);
     return is_csi_final_byte(static_cast<unsigned char>(sequence.back()));
   }
 
-  if (sequence.starts_with('O')) {
-    if (sequence.size() <= 1) return false;
+  if (sequence.starts_with('O'))
+  {
+    if (sequence.size() <= 1)
+      return false;
     return is_csi_final_byte(static_cast<unsigned char>(sequence.back()));
   }
 
-  if (sequence.starts_with('#')) {
-    if (sequence.size() <= 1) return false;
+  if (sequence.starts_with('#'))
+  {
+    if (sequence.size() <= 1)
+      return false;
     return is_csi_final_byte(static_cast<unsigned char>(sequence.back()));
   }
 
-  if (sequence.size() == 1) {
+  if (sequence.size() == 1)
+  {
     auto const byte = static_cast<unsigned char>(sequence.front());
     return byte >= 0x30U && byte <= 0x7EU;
   }
@@ -372,8 +439,10 @@ bool terminal_escape_sequence_complete(std::string_view sequence)
 
 bool terminal_escape_sequence_should_discard(std::string_view sequence)
 {
-  if (!terminal_escape_sequence_complete(sequence)) return false;
-  if (sequence == "[200~") return false;
+  if (!terminal_escape_sequence_complete(sequence))
+    return false;
+  if (sequence == "[200~")
+    return false;
   return terminal_escape_sequence_key(sequence) == Key::Unknown;
 }
 

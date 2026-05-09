@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/agent/mode.h"
-
 #include "ava/core/result.h"
 
 #include <filesystem>
@@ -12,7 +11,8 @@ namespace ava::session {
 
 inline constexpr long long kCurrentSessionEntryVersion = 3;
 
-enum class EntryType {
+enum class EntryType
+{
   SessionStart,
   SessionMetadata,
   UserMessage,
@@ -30,7 +30,8 @@ enum class EntryType {
   Cancel,
 };
 
-struct SessionEntry {
+struct SessionEntry
+{
   std::string id;
   std::string parent_id;
   EntryType type;
@@ -39,20 +40,23 @@ struct SessionEntry {
   long long version = kCurrentSessionEntryVersion;
 };
 
-struct SessionStoreOptions {
+struct SessionStoreOptions
+{
   std::filesystem::path root_dir;
   std::filesystem::path workspace_dir;
   std::string session_id;
 };
 
-struct SessionSummary {
+struct SessionSummary
+{
   std::string session_id;
   std::filesystem::path path;
   std::string last_updated;
   std::size_t entry_count = 0;
 };
 
-class SessionStore {
+class SessionStore
+{
  public:
   explicit SessionStore(SessionStoreOptions options);
 
@@ -62,13 +66,12 @@ class SessionStore {
   [[nodiscard]] ava::core::VoidResult append(SessionEntry const& entry);
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load() const;
 
-  [[nodiscard]] static ava::core::Result<SessionStore> create(
-      std::filesystem::path const& workspace_dir, std::filesystem::path const& root_dir = default_root_dir());
-  [[nodiscard]] static ava::core::Result<SessionStore> open(std::filesystem::path const& workspace_dir,
-                                                            std::string session_id,
+  [[nodiscard]] static ava::core::Result<SessionStore> create(std::filesystem::path const& workspace_dir,
+                                                              std::filesystem::path const& root_dir = default_root_dir());
+  [[nodiscard]] static ava::core::Result<SessionStore> open(std::filesystem::path const& workspace_dir, std::string session_id,
                                                             std::filesystem::path const& root_dir = default_root_dir());
-  [[nodiscard]] static ava::core::Result<std::vector<SessionSummary>> list_sessions(
-      std::filesystem::path const& workspace_dir, std::filesystem::path const& root_dir = default_root_dir());
+  [[nodiscard]] static ava::core::Result<std::vector<SessionSummary>> list_sessions(std::filesystem::path const& workspace_dir,
+                                                                                    std::filesystem::path const& root_dir = default_root_dir());
   [[nodiscard]] static std::filesystem::path default_root_dir();
 
  private:

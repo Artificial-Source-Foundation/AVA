@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Margin.h"
+
 #include <cstdint>
 
 namespace terminal {
@@ -24,6 +26,8 @@ class Position
   // Accessors.
   uint32_t row() const { return row_; }
   uint32_t col() const { return col_; }
+
+  friend Position operator+(Position pos, Margin margin) { return {pos.row_ + margin.top, pos.col_ + margin.left}; }
 };
 
 } // namespace terminal

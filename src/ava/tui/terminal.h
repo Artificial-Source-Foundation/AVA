@@ -9,7 +9,8 @@
 
 namespace ava::tui {
 
-enum class Key {
+enum class Key
+{
   Character,
   Enter,
   Backspace,
@@ -42,7 +43,8 @@ enum class Key {
   Unknown
 };
 
-struct InputEvent {
+struct InputEvent
+{
   Key key = Key::Unknown;
   char character = '\0';
   std::string text = {};
@@ -50,7 +52,8 @@ struct InputEvent {
   std::size_t mouse_row = 0;
 };
 
-class CursesSession {
+class CursesSession
+{
  public:
   CursesSession(CursesSession const&) = delete;
   CursesSession& operator=(CursesSession const&) = delete;
@@ -61,7 +64,8 @@ class CursesSession {
   [[nodiscard]] static ava::core::Result<CursesSession> enter();
 
  private:
-  struct ScreenDeleter {
+  struct ScreenDeleter
+  {
     void operator()(void* screen) const noexcept;
   };
 

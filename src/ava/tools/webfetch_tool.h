@@ -1,9 +1,7 @@
 #pragma once
 
 #include "ava/tools/file_tools.h"
-
 #include "ava/provider/provider.h"
-
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -11,13 +9,15 @@
 
 namespace ava::tools {
 
-enum class WebFetchFormat {
+enum class WebFetchFormat
+{
   Markdown,
   Text,
   Html,
 };
 
-struct WebFetchOptions {
+struct WebFetchOptions
+{
   std::size_t max_bytes = 1024 * 1024;
   std::size_t offset_line = 1;
   std::size_t max_lines = 200;
@@ -26,7 +26,8 @@ struct WebFetchOptions {
   ava::provider::Transport* transport = nullptr;
 };
 
-struct WebFetchResult {
+struct WebFetchResult
+{
   std::string url;
   int status_code = 0;
   std::string content_type;
@@ -43,7 +44,6 @@ struct WebFetchResult {
   std::size_t next_offset_line = 0;
 };
 
-[[nodiscard]] ava::core::Result<WebFetchResult> webfetch(ToolContext const& context, std::string_view url,
-                                                         WebFetchOptions options = {});
+[[nodiscard]] ava::core::Result<WebFetchResult> webfetch(ToolContext const& context, std::string_view url, WebFetchOptions options = {});
 
 }  // namespace ava::tools

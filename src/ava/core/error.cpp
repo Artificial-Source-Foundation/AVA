@@ -33,7 +33,8 @@ std::string Error::format() const
 {
   std::ostringstream out;
   out << to_string(category_) << ": " << message_;
-  for (auto const& item : context_) {
+  for (auto const& item : context_)
+  {
     out << "\n  " << item.key << ": " << item.value;
   }
   return out.str();
@@ -41,7 +42,8 @@ std::string Error::format() const
 
 std::string to_string(ErrorCategory category)
 {
-  switch (category) {
+  switch (category)
+  {
     case ErrorCategory::InvalidArgument:
       return "invalid_argument";
     case ErrorCategory::Io:

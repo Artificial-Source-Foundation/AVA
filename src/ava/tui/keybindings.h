@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/tui/terminal.h"
-
 #include "ava/core/result.h"
 
 #include <filesystem>
@@ -13,7 +12,8 @@
 
 namespace ava::tui {
 
-enum class TuiAction {
+enum class TuiAction
+{
   Submit,
   NewLine,
   Cancel,
@@ -51,11 +51,13 @@ enum class TuiAction {
   JumpToBottom,
 };
 
-struct TuiKeyBindings {
+struct TuiKeyBindings
+{
   std::vector<std::pair<TuiAction, std::vector<Key>>> bindings;
 };
 
-struct TuiKeyBindingHelpItem {
+struct TuiKeyBindingHelpItem
+{
   std::string action;
   std::string description;
   std::string keys;

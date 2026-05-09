@@ -4,7 +4,6 @@
 #include "ava/app/rpc/resolvers.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/runtime.h"
-
 #include "ava/provider/provider.h"
 
 #include <mutex>
@@ -13,7 +12,8 @@
 
 namespace ava::app::rpc {
 
-struct RpcPromptWorkerOptions {
+struct RpcPromptWorkerOptions
+{
   RuntimeSession& session;
   std::mutex& session_mutex;
   RpcOutput& output;

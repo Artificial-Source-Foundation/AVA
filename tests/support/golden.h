@@ -1,8 +1,7 @@
 #pragma once
 
-#include "ava/core/json.h"
-
 #include "tests/support/test_harness.h"
+#include "ava/core/json.h"
 
 #include <cctype>
 #include <filesystem>
@@ -43,36 +42,43 @@ inline std::string canonical_json_for_golden(std::string_view value)
   canonical.reserve(value.size());
   bool in_string = false;
   bool escaped = false;
-  for (char const ch : value) {
-    if (in_string) {
+  for (char const ch : value)
+  {
+    if (in_string)
+    {
       canonical.push_back(ch);
-      if (escaped) {
+      if (escaped)
+      {
         escaped = false;
-      } else if (ch == '\\') {
+      }
+      else if (ch == '\\')
+      {
         escaped = true;
-      } else if (ch == '"') {
+      }
+      else if (ch == '"')
+      {
         in_string = false;
       }
       continue;
     }
-    if (ch == '"') {
+    if (ch == '"')
+    {
       in_string = true;
       canonical.push_back(ch);
       continue;
     }
-    if (std::isspace(static_cast<unsigned char>(ch)) == 0) canonical.push_back(ch);
+    if (std::isspace(static_cast<unsigned char>(ch)) == 0)
+      canonical.push_back(ch);
   }
   return canonical;
 }
 
-inline void expect_json_matches_golden(std::string_view actual, std::filesystem::path const& relative_path,
-                                       std::string const& message)
+inline void expect_json_matches_golden(std::string_view actual, std::filesystem::path const& relative_path, std::string const& message)
 {
   auto const expected = read_golden_fixture(relative_path);
   auto const expected_json = canonical_json_for_golden(expected);
   auto const actual_json = canonical_json_for_golden(actual);
-  expect(ava::core::json::is_valid_object(expected_json),
-         "golden fixture is a valid JSON object: " + relative_path.string());
+  expect(ava::core::json::is_valid_object(expected_json), "golden fixture is a valid JSON object: " + relative_path.string());
   expect(ava::core::json::is_valid_object(actual_json), message + " actual JSON is a valid object");
   expect(actual_json == expected_json, message + "\nexpected: " + expected_json + "\nactual:   " + actual_json);
 }

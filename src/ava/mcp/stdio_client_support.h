@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/mcp/stdio_client.h"
-
 #include "ava/core/result.h"
 
 #include <array>
@@ -11,7 +10,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
 #include <signal.h>
 #include <sys/types.h>
 
@@ -19,7 +17,8 @@ namespace ava::mcp {
 
 inline constexpr char kTrustedExecPath[] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
-class UniqueFd {
+class UniqueFd
+{
  public:
   explicit UniqueFd(int fd = -1) noexcept;
   UniqueFd(UniqueFd const&) = delete;
@@ -36,7 +35,8 @@ class UniqueFd {
   int fd_ = -1;
 };
 
-class ScopedSignalIgnore {
+class ScopedSignalIgnore
+{
  public:
   explicit ScopedSignalIgnore(int signal);
   ScopedSignalIgnore(ScopedSignalIgnore const&) = delete;
@@ -47,12 +47,11 @@ class ScopedSignalIgnore {
 
  private:
   int signal_ = 0;
-  struct sigaction previous_ {};
+  struct sigaction previous_{};
   bool installed_ = false;
 };
 
-[[nodiscard]] ava::core::Error mcp_error(ava::core::ErrorCategory category, std::string message,
-                                         McpServerConfig const& server);
+[[nodiscard]] ava::core::Error mcp_error(ava::core::ErrorCategory category, std::string message, McpServerConfig const& server);
 [[nodiscard]] ava::core::Error errno_error(std::string message, McpServerConfig const& server);
 [[nodiscard]] ava::core::Error protocol_error(std::string message, McpServerConfig const& server);
 [[nodiscard]] bool is_canceled(CancelCallback const& cancel_requested);

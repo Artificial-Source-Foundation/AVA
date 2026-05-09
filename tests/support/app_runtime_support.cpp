@@ -1,5 +1,4 @@
 #include "tests/support/app_runtime_support.h"
-
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
@@ -55,9 +54,8 @@ std::string app_test_plugin_manifest_json(std::string_view id, std::string_view 
 
 std::string app_test_mcp_config_json(std::string_view id, std::string_view name, std::string_view command)
 {
-  return std::string("{\"servers\":[{\"id\":\"") + ava::core::json::escape(id) + "\",\"name\":\"" +
-         ava::core::json::escape(name) + "\",\"command\":\"" + ava::core::json::escape(command) +
-         "\",\"enabled\":true}]}";
+  return std::string("{\"servers\":[{\"id\":\"") + ava::core::json::escape(id) + "\",\"name\":\"" + ava::core::json::escape(name) + "\",\"command\":\"" +
+         ava::core::json::escape(command) + "\",\"enabled\":true}]}";
 }
 
 void write_app_test_file(std::filesystem::path const& path, std::string const& text)
@@ -89,7 +87,8 @@ int BlockingInputBuf::underflow()
 {
   std::unique_lock lock(mutex_);
   cv_.wait(lock, [&] { return closed_ || !buffer_.empty(); });
-  if (buffer_.empty()) return traits_type::eof();
+  if (buffer_.empty())
+    return traits_type::eof();
   current_ = buffer_.front();
   buffer_.pop_front();
   setg(&current_, &current_, &current_ + 1);
@@ -110,7 +109,8 @@ bool ThreadSafeStringBuf::wait_contains(std::string_view value, std::chrono::mil
 
 int ThreadSafeStringBuf::overflow(int ch)
 {
-  if (ch == traits_type::eof()) return traits_type::not_eof(ch);
+  if (ch == traits_type::eof())
+    return traits_type::not_eof(ch);
   {
     std::lock_guard lock(mutex_);
     text_.push_back(static_cast<char>(ch));
@@ -129,14 +129,12 @@ std::streamsize ThreadSafeStringBuf::xsputn(char const* s, std::streamsize count
   return count;
 }
 
-ChunkedStreamingTransport::ChunkedStreamingTransport(std::vector<std::string> chunks, int status_code)
-    : chunks_(std::move(chunks)), status_code_(status_code)
+ChunkedStreamingTransport::ChunkedStreamingTransport(std::vector<std::string> chunks, int status_code) : chunks_(std::move(chunks)), status_code_(status_code)
 {
   for (auto const& chunk : chunks_) response_body_ += chunk;
 }
 
-ava::core::Result<ava::provider::HttpResponse> ChunkedStreamingTransport::send(
-    ava::provider::HttpRequest const& request)
+ava::core::Result<ava::provider::HttpResponse> ChunkedStreamingTransport::send(ava::provider::HttpRequest const& request)
 {
   requests_.push_back(request);
   return ava::provider::HttpResponse{.status_code = status_code_, .headers = {}, .body = response_body_};
@@ -147,15 +145,18 @@ bool ChunkedStreamingTransport::supports_streaming() const noexcept
   return true;
 }
 
-ava::core::Result<ava::provider::HttpResponse> ChunkedStreamingTransport::send_streaming(
-    ava::provider::HttpRequest const& request, BodyChunkSink on_body_chunk, CancelCallback cancel_requested)
+ava::core::Result<ava::provider::HttpResponse> ChunkedStreamingTransport::send_streaming(ava::provider::HttpRequest const& request, BodyChunkSink on_body_chunk,
+                                                                                         CancelCallback cancel_requested)
 {
   requests_.push_back(request);
-  for (auto const& chunk : chunks_) {
-    if (cancel_requested && cancel_requested()) {
+  for (auto const& chunk : chunks_)
+  {
+    if (cancel_requested && cancel_requested())
+    {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "stream canceled"));
     }
-    if (auto delivered = on_body_chunk(chunk); !delivered) return std::unexpected(std::move(delivered.error()));
+    if (auto delivered = on_body_chunk(chunk); !delivered)
+      return std::unexpected(std::move(delivered.error()));
   }
   return ava::provider::HttpResponse{.status_code = status_code_, .headers = {}, .body = response_body_};
 }
@@ -165,13 +166,11 @@ std::vector<ava::provider::HttpRequest> const& ChunkedStreamingTransport::reques
   return requests_;
 }
 
-BlockingResponseTransport::BlockingResponseTransport(ava::provider::HttpResponse response)
-    : response_(std::move(response))
+BlockingResponseTransport::BlockingResponseTransport(ava::provider::HttpResponse response) : response_(std::move(response))
 {
 }
 
-ava::core::Result<ava::provider::HttpResponse> BlockingResponseTransport::send(
-    ava::provider::HttpRequest const& request)
+ava::core::Result<ava::provider::HttpResponse> BlockingResponseTransport::send(ava::provider::HttpRequest const& request)
 {
   {
     std::lock_guard lock(mutex_);
@@ -223,8 +222,7 @@ std::string read_file_call_sse(std::string_view path)
 
 std::string write_file_call_sse(std::string_view path, std::string_view content)
 {
-  auto const args =
-      "{\"path\":\"" + ava::core::json::escape(path) + "\",\"content\":\"" + ava::core::json::escape(content) + "\"}";
+  auto const args = "{\"path\":\"" + ava::core::json::escape(path) + "\",\"content\":\"" + ava::core::json::escape(content) + "\"}";
   return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_write\",\"name\":\"write_file\"}\n\n"
          "data: "
          "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_write\",\"delta\":\"" +
@@ -265,10 +263,12 @@ std::string extract_json_string_field(std::string_view text, std::string_view ke
 {
   std::string const needle = "\"" + std::string(key) + "\":\"";
   auto const start = text.find(needle);
-  if (start == std::string_view::npos) return "";
+  if (start == std::string_view::npos)
+    return "";
   auto const value_start = start + needle.size();
   auto const value_end = text.find('"', value_start);
-  if (value_end == std::string_view::npos) return "";
+  if (value_end == std::string_view::npos)
+    return "";
   return std::string(text.substr(value_start, value_end - value_start));
 }
 
@@ -276,10 +276,12 @@ std::string extract_last_json_string_field(std::string_view text, std::string_vi
 {
   std::string const needle = "\"" + std::string(key) + "\":\"";
   auto const start = text.rfind(needle);
-  if (start == std::string_view::npos) return "";
+  if (start == std::string_view::npos)
+    return "";
   auto const value_start = start + needle.size();
   auto const value_end = text.find('"', value_start);
-  if (value_end == std::string_view::npos) return "";
+  if (value_end == std::string_view::npos)
+    return "";
   return std::string(text.substr(value_start, value_end - value_start));
 }
 
@@ -287,7 +289,8 @@ std::size_t count_substrings(std::string_view text, std::string_view needle)
 {
   std::size_t count = 0;
   std::size_t position = 0;
-  while ((position = text.find(needle, position)) != std::string_view::npos) {
+  while ((position = text.find(needle, position)) != std::string_view::npos)
+  {
     ++count;
     position += needle.size();
   }
@@ -296,21 +299,20 @@ std::size_t count_substrings(std::string_view text, std::string_view needle)
 
 std::size_t count_compaction_entries(std::vector<ava::session::SessionEntry> const& entries)
 {
-  return static_cast<std::size_t>(std::ranges::count_if(
-      entries, [](auto const& entry) { return entry.type == ava::session::EntryType::Compaction; }));
+  return static_cast<std::size_t>(std::ranges::count_if(entries, [](auto const& entry) { return entry.type == ava::session::EntryType::Compaction; }));
 }
 
-std::optional<ava::session::SessionEntry> latest_compaction_entry(
-    std::vector<ava::session::SessionEntry> const& entries)
+std::optional<ava::session::SessionEntry> latest_compaction_entry(std::vector<ava::session::SessionEntry> const& entries)
 {
-  for (auto iterator = entries.rbegin(); iterator != entries.rend(); ++iterator) {
-    if (iterator->type == ava::session::EntryType::Compaction) return *iterator;
+  for (auto iterator = entries.rbegin(); iterator != entries.rend(); ++iterator)
+  {
+    if (iterator->type == ava::session::EntryType::Compaction)
+      return *iterator;
   }
   return std::nullopt;
 }
 
-MutatingSummaryTransport::MutatingSummaryTransport(ava::session::SessionStore& store,
-                                                   std::vector<ava::provider::HttpResponse> responses,
+MutatingSummaryTransport::MutatingSummaryTransport(ava::session::SessionStore& store, std::vector<ava::provider::HttpResponse> responses,
                                                    std::size_t mutate_requests)
     : store_(store), responses_(std::move(responses)), mutate_requests_(mutate_requests)
 {
@@ -319,15 +321,16 @@ MutatingSummaryTransport::MutatingSummaryTransport(ava::session::SessionStore& s
 ava::core::Result<ava::provider::HttpResponse> MutatingSummaryTransport::send(ava::provider::HttpRequest const& request)
 {
   requests_.push_back(request);
-  if (requests_.size() <= mutate_requests_) {
-    static_cast<void>(
-        store_.append(ava::session::SessionEntry{.id = "entry_concurrent_change_" + std::to_string(requests_.size()),
-                                                 .parent_id = "",
-                                                 .type = ava::session::EntryType::UserMessage,
-                                                 .timestamp = ava::session::now_timestamp(),
-                                                 .data_json = "{\"text\":\"concurrent change\"}"}));
+  if (requests_.size() <= mutate_requests_)
+  {
+    static_cast<void>(store_.append(ava::session::SessionEntry{.id = "entry_concurrent_change_" + std::to_string(requests_.size()),
+                                                               .parent_id = "",
+                                                               .type = ava::session::EntryType::UserMessage,
+                                                               .timestamp = ava::session::now_timestamp(),
+                                                               .data_json = "{\"text\":\"concurrent change\"}"}));
   }
-  if (responses_.empty()) {
+  if (responses_.empty())
+  {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "fake transport has no response"));
   }
   auto response = responses_.front();

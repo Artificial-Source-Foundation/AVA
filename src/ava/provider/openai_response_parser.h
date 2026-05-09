@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/provider/provider.h"
-
 #include "ava/core/result.h"
 
 #include <optional>

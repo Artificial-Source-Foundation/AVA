@@ -1,42 +1,32 @@
+#include "tests/support/fake_transport.h"
+#include "tests/support/test_harness.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
-
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_dispatcher.h"
-
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/search_tools.h"
-
 #include "ava/tui/composer.h"
 #include "ava/tui/terminal.h"
-
 #include "ava/config/auth.h"
 #include "ava/config/model_config.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/config/prompt_config.h"
 #include "ava/config/xdg_paths.h"
-
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
 #include "ava/session/session_store.h"
-
 #include "ava/permissions/permission.h"
-
 #include "ava/provider/openai_provider.h"
-
 #include "ava/context/context_loader.h"
-
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
-
-#include "tests/support/fake_transport.h"
-#include "tests/support/test_harness.h"
 
 #include <algorithm>
 #include <chrono>
@@ -52,7 +42,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -88,28 +77,21 @@ void test_core_json_top_level_lookup()
   std::string const arrays_first = "{\"items\":[{\"models\":[{\"id\":\"bad\"}]}],\"models\":[{\"id\":\"ok\"}]}";
   auto const models = ava::core::json::objects_in_array_field(arrays_first, "models");
   auto const model_id = models.empty() ? std::optional<std::string>{} : ava::core::json::string_field(models[0], "id");
-  expect(models.size() == 1 && model_id && *model_id == "ok",
-         "JSON array lookup ignores nested arrays before top-level field");
+  expect(models.size() == 1 && model_id && *model_id == "ok", "JSON array lookup ignores nested arrays before top-level field");
   auto const paths = ava::core::json::strings_in_array_field(
-      "{\"items\":[\"bad\"],\"changed_paths\":[\"src/main.cpp\",\"a\\\\b\",{\"skip\":\"nested\"},[\"also skip\"]]}",
-      "changed_paths");
-  expect(paths.size() == 2 && paths[0] == "src/main.cpp" && paths[1] == "a\\b",
-         "JSON string array lookup reads only top-level string array elements");
+      "{\"items\":[\"bad\"],\"changed_paths\":[\"src/main.cpp\",\"a\\\\b\",{\"skip\":\"nested\"},[\"also skip\"]]}", "changed_paths");
+  expect(paths.size() == 2 && paths[0] == "src/main.cpp" && paths[1] == "a\\b", "JSON string array lookup reads only top-level string array elements");
 
   auto const surrogate_pair = ava::core::json::string_field("{\"text\":\"\\uD834\\uDD1E\"}", "text");
-  expect(surrogate_pair && *surrogate_pair == std::string("\xF0\x9D\x84\x9E"),
-         "JSON string_field decodes UTF-16 surrogate pairs");
+  expect(surrogate_pair && *surrogate_pair == std::string("\xF0\x9D\x84\x9E"), "JSON string_field decodes UTF-16 surrogate pairs");
   auto const lone_high_surrogate = ava::core::json::string_field("{\"text\":\"\\uD834x\"}", "text");
-  expect(lone_high_surrogate && *lone_high_surrogate == std::string("\xEF\xBF\xBDx"),
-         "JSON string_field replaces lone high surrogates");
+  expect(lone_high_surrogate && *lone_high_surrogate == std::string("\xEF\xBF\xBDx"), "JSON string_field replaces lone high surrogates");
   auto const lone_low_surrogate = ava::core::json::string_field("{\"text\":\"\\uDD1E\"}", "text");
-  expect(lone_low_surrogate && *lone_low_surrogate == std::string("\xEF\xBF\xBD"),
-         "JSON string_field replaces lone low surrogates");
+  expect(lone_low_surrogate && *lone_low_surrogate == std::string("\xEF\xBF\xBD"), "JSON string_field replaces lone low surrogates");
   auto const high_then_non_low = ava::core::json::string_field("{\"text\":\"\\uD834\\u0061\"}", "text");
   expect(high_then_non_low && *high_then_non_low == std::string("\xEF\xBF\xBD") + "a",
          "JSON string_field leaves non-low escape after replacing high surrogate");
-  expect(!ava::core::json::string_field("{\"text\":\"\\u12xz\"}", "text"),
-         "JSON string_field rejects malformed unicode escapes");
+  expect(!ava::core::json::string_field("{\"text\":\"\\u12xz\"}", "text"), "JSON string_field rejects malformed unicode escapes");
   expect(!ava::core::json::string_field("{\"text\":\"\\q\"}", "text"), "JSON string_field rejects invalid escapes");
 }
 
@@ -124,8 +106,7 @@ void test_permission_defaults()
       .target_path = workspace / "src/main.cpp",
       .command = "",
   });
-  expect(normal_edit.action == ava::permissions::PermissionAction::Allow &&
-             normal_edit.risk == ava::permissions::PermissionRisk::Medium,
+  expect(normal_edit.action == ava::permissions::PermissionAction::Allow && normal_edit.risk == ava::permissions::PermissionRisk::Medium,
          "build mode allows workspace edits with medium mutation risk");
 
   auto const plan_source_edit = ava::permissions::decide(ava::permissions::PermissionRequest{
@@ -135,8 +116,7 @@ void test_permission_defaults()
       .target_path = workspace / "src/main.cpp",
       .command = "",
   });
-  expect(plan_source_edit.action == ava::permissions::PermissionAction::Deny &&
-             plan_source_edit.risk == ava::permissions::PermissionRisk::High,
+  expect(plan_source_edit.action == ava::permissions::PermissionAction::Deny && plan_source_edit.risk == ava::permissions::PermissionRisk::High,
          "plan mode denies source edits with high semantic risk");
 
   auto const plan_doc_edit = ava::permissions::decide(ava::permissions::PermissionRequest{
@@ -155,8 +135,7 @@ void test_permission_defaults()
       .target_path = workspace / ".env",
       .command = "",
   });
-  expect(secret_read.action == ava::permissions::PermissionAction::Deny &&
-             secret_read.risk == ava::permissions::PermissionRisk::Critical,
+  expect(secret_read.action == ava::permissions::PermissionAction::Deny && secret_read.risk == ava::permissions::PermissionRisk::Critical,
          "secret files are denied with critical semantic risk");
 
   auto const npmrc_read = ava::permissions::decide(ava::permissions::PermissionRequest{
@@ -184,8 +163,7 @@ void test_permission_defaults()
       .target_path = workspace.parent_path() / "outside.txt",
       .command = "",
   });
-  expect(external_read.action == ava::permissions::PermissionAction::Ask &&
-             external_read.risk == ava::permissions::PermissionRisk::High,
+  expect(external_read.action == ava::permissions::PermissionAction::Ask && external_read.risk == ava::permissions::PermissionRisk::High,
          "external paths ask with high semantic risk");
 
   auto const workspace_lsp = ava::permissions::decide(ava::permissions::PermissionRequest{
@@ -196,14 +174,10 @@ void test_permission_defaults()
       .command = "",
   });
   expect(workspace_lsp.action == ava::permissions::PermissionAction::Allow, "workspace LSP diagnostics are allowed");
-  expect(ava::permissions::to_string(ava::permissions::Operation::LspQuery) == "lsp.query",
-         "LSP query operation string is stable");
-  expect(ava::permissions::to_string(ava::permissions::Operation::NetworkSearch) == "network.search",
-         "network search operation string is stable");
-  expect(ava::permissions::to_string(ava::permissions::Operation::SkillLoad) == "skill",
-         "skill operation string is stable");
-  expect(ava::permissions::to_string(ava::permissions::PermissionRisk::Critical) == "critical",
-         "permission risk string is stable");
+  expect(ava::permissions::to_string(ava::permissions::Operation::LspQuery) == "lsp.query", "LSP query operation string is stable");
+  expect(ava::permissions::to_string(ava::permissions::Operation::NetworkSearch) == "network.search", "network search operation string is stable");
+  expect(ava::permissions::to_string(ava::permissions::Operation::SkillLoad) == "skill", "skill operation string is stable");
+  expect(ava::permissions::to_string(ava::permissions::PermissionRisk::Critical) == "critical", "permission risk string is stable");
 
   auto const secret_lsp = ava::permissions::decide(ava::permissions::PermissionRequest{
       .operation = ava::permissions::Operation::LspQuery,
@@ -231,7 +205,8 @@ void test_permission_defaults()
   auto const link = symlink_workspace / "link-outside";
   std::filesystem::remove(link, symlink_error);
   std::filesystem::create_directory_symlink(outside, link, symlink_error);
-  if (!symlink_error) {
+  if (!symlink_error)
+  {
     auto const symlink_escape = ava::permissions::decide(ava::permissions::PermissionRequest{
         .operation = ava::permissions::Operation::ReadFile,
         .mode = ava::agent::Mode::Build,

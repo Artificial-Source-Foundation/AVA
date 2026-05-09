@@ -1,5 +1,4 @@
 #include "ava/app/runtime_retry.h"
-
 #include "ava/session/session_store.h"
 
 #include <mutex>
@@ -20,7 +19,8 @@ RuntimeEvent base_retry_event(RuntimeSession const& session, RuntimeRunOptions c
     event.trigger = "provider_transport";
     return event;
   };
-  if (!options.session_mutex) return build();
+  if (!options.session_mutex)
+    return build();
   std::lock_guard lock(*options.session_mutex);
   return build();
 }
@@ -40,7 +40,8 @@ ava::provider::RetryOptions runtime_retry_options(RuntimeSession const& session,
     event.max_attempts = retry.max_attempts;
     event.delay_ms = retry.delay_ms;
     event.remaining_ms = retry.remaining_ms;
-    if (retry.status_code > 0) {
+    if (retry.status_code > 0)
+    {
       event.text = "HTTP status " + std::to_string(retry.status_code);
     }
     return emit_event(options.event_sink, event);

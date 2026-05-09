@@ -14,26 +14,30 @@
 
 namespace ava::app::rpc {
 
-struct RpcOutput {
-  explicit RpcOutput(std::ostream& output) : out(output) {}
+struct RpcOutput
+{
+  explicit RpcOutput(std::ostream& output) : out(output) { }
 
   std::ostream& out;
   std::mutex mutex;
   std::function<void()> on_write_failure;
 };
 
-struct QueuedRpcMessage {
+struct QueuedRpcMessage
+{
   std::string request_id;
   std::string correlation_id;
   std::string message;
 };
 
-struct ClearedRpcQueues {
+struct ClearedRpcQueues
+{
   std::vector<QueuedRpcMessage> steering_messages;
   std::vector<QueuedRpcMessage> follow_up_messages;
 };
 
-struct RpcRunState {
+struct RpcRunState
+{
   std::mutex mutex;
   std::atomic_bool cancel_requested = false;
   bool active_run = false;
@@ -54,11 +58,9 @@ struct RpcRunState {
 void set_active_run(RpcRunState& state, bool active, std::string request_id = {});
 void set_active_request_id(RpcRunState& state, std::string request_id);
 
-[[nodiscard]] ava::core::Result<QueuedRpcMessage> queue_rpc_message(std::deque<QueuedRpcMessage>& queue,
-                                                                    RpcRunState& state, std::string command_type,
+[[nodiscard]] ava::core::Result<QueuedRpcMessage> queue_rpc_message(std::deque<QueuedRpcMessage>& queue, RpcRunState& state, std::string command_type,
                                                                     std::string request_id, std::string message);
-[[nodiscard]] std::vector<QueuedRpcMessage> take_queued_steering_messages(RpcRunState& state,
-                                                                          std::string_view correlation_id);
+[[nodiscard]] std::vector<QueuedRpcMessage> take_queued_steering_messages(RpcRunState& state, std::string_view correlation_id);
 [[nodiscard]] std::optional<QueuedRpcMessage> take_next_follow_up_message(RpcRunState& state);
 [[nodiscard]] std::vector<QueuedRpcMessage> clear_queued_steering_messages(RpcRunState& state);
 [[nodiscard]] ClearedRpcQueues deactivate_and_clear_queued_messages(RpcRunState& state);

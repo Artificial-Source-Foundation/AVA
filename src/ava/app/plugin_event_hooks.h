@@ -1,13 +1,9 @@
 #pragma once
 
 #include "ava/app/events.h"
-
 #include "ava/agent/mode.h"
-
 #include "ava/tools/file_tools.h"
-
 #include "ava/permissions/permission.h"
-
 #include "ava/core/error.h"
 
 #include <filesystem>
@@ -20,10 +16,10 @@ namespace ava::app {
 
 struct RuntimeSession;
 
-using PluginEventHookFailureSink =
-    std::function<void(std::string_view plugin_id, std::string_view event_name, ava::core::Error const& error)>;
+using PluginEventHookFailureSink = std::function<void(std::string_view plugin_id, std::string_view event_name, ava::core::Error const& error)>;
 
-struct PluginEventObserverOptions {
+struct PluginEventObserverOptions
+{
   std::filesystem::path workspace_dir;
   std::filesystem::path plugin_global_plugins_dir;
   std::filesystem::path plugin_project_plugins_dir;
@@ -39,13 +35,12 @@ struct PluginEventObserverOptions {
   std::filesystem::path current_dir;
 };
 
-[[nodiscard]] PluginEventObserverOptions plugin_event_observer_options(
-    RuntimeSession& session, ava::permissions::PermissionResolver permission_resolver = nullptr,
-    std::mutex* session_mutex = nullptr);
+[[nodiscard]] PluginEventObserverOptions plugin_event_observer_options(RuntimeSession& session,
+                                                                       ava::permissions::PermissionResolver permission_resolver = nullptr,
+                                                                       std::mutex* session_mutex = nullptr);
 
 // Event hooks are observational and best-effort: hook launch, protocol, timeout,
 // and shutdown failures are intentionally not surfaced to the originating event.
-[[nodiscard]] RuntimeEventSink make_plugin_event_observer_sink(PluginEventObserverOptions options,
-                                                               RuntimeEventSink next = nullptr);
+[[nodiscard]] RuntimeEventSink make_plugin_event_observer_sink(PluginEventObserverOptions options, RuntimeEventSink next = nullptr);
 
 }  // namespace ava::app

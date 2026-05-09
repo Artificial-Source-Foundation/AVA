@@ -9,9 +9,11 @@
 
 namespace ava::tools {
 
-class MutationQueue {
+class MutationQueue
+{
  public:
-  class Lock {
+  class Lock
+  {
    public:
     Lock() = default;
     explicit Lock(std::vector<std::unique_lock<std::mutex>> locks);
@@ -29,7 +31,8 @@ class MutationQueue {
   [[nodiscard]] Lock lock_paths(std::span<std::filesystem::path const> paths);
 
  private:
-  struct Entry {
+  struct Entry
+  {
     std::mutex mutex;
   };
 

@@ -1,5 +1,4 @@
 #include "ava/app/rpc/serialization_json.h"
-
 #include "ava/core/json.h"
 
 #include <iomanip>
@@ -16,14 +15,16 @@ std::string decimal_field_json(std::string_view key, long double value)
 
 void append_optional_bool(std::string& json, std::string_view key, std::optional<bool> const& value)
 {
-  if (!value) return;
+  if (!value)
+    return;
   json += ',';
   json += bool_field_json(key, *value);
 }
 
 void append_optional_integer(std::string& json, std::string_view key, std::optional<long long> const& value)
 {
-  if (!value) return;
+  if (!value)
+    return;
   json += ',';
   json += integer_field_json(key, *value);
 }
@@ -51,8 +52,10 @@ std::string integer_field_json(std::string_view key, long long value)
 std::string output_array_json(std::vector<std::string> const& output)
 {
   std::string json = "[";
-  for (std::size_t index = 0; index < output.size(); ++index) {
-    if (index > 0) json += ',';
+  for (std::size_t index = 0; index < output.size(); ++index)
+  {
+    if (index > 0)
+      json += ',';
     json += '"';
     json += ava::core::json::escape(output[index]);
     json += '"';
@@ -64,8 +67,10 @@ std::string output_array_json(std::vector<std::string> const& output)
 std::string string_array_json(std::vector<std::string> const& values)
 {
   std::string json = "[";
-  for (std::size_t index = 0; index < values.size(); ++index) {
-    if (index > 0) json += ',';
+  for (std::size_t index = 0; index < values.size(); ++index)
+  {
+    if (index > 0)
+      json += ',';
     json += '"';
     json += ava::core::json::escape(values[index]);
     json += '"';

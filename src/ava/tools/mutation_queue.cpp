@@ -21,7 +21,8 @@ MutationQueue::Lock MutationQueue::lock_paths(std::span<std::filesystem::path co
 {
   std::vector<std::filesystem::path> keys;
   keys.reserve(paths.size());
-  for (auto const& path : paths) {
+  for (auto const& path : paths)
+  {
     keys.push_back(normalized_key(path));
   }
   std::ranges::sort(keys);
@@ -31,9 +32,11 @@ MutationQueue::Lock MutationQueue::lock_paths(std::span<std::filesystem::path co
   entries.reserve(keys.size());
   {
     std::scoped_lock guard(entries_mutex_);
-    for (auto const& key : keys) {
+    for (auto const& key : keys)
+    {
       auto found = std::ranges::find_if(entries_, [&key](auto const& item) { return item.first == key; });
-      if (found == entries_.end()) {
+      if (found == entries_.end())
+      {
         found = entries_.insert(entries_.end(), {key, std::make_shared<Entry>()});
       }
       entries.push_back(found->second);
@@ -42,7 +45,8 @@ MutationQueue::Lock MutationQueue::lock_paths(std::span<std::filesystem::path co
 
   std::vector<std::unique_lock<std::mutex>> locks;
   locks.reserve(entries.size());
-  for (auto& entry : entries) {
+  for (auto& entry : entries)
+  {
     locks.emplace_back(entry->mutex);
   }
   return Lock(std::move(locks));
@@ -52,9 +56,11 @@ std::filesystem::path MutationQueue::normalized_key(std::filesystem::path const&
 {
   std::error_code error;
   auto canonical = std::filesystem::weakly_canonical(path, error);
-  if (!error) return canonical.lexically_normal();
+  if (!error)
+    return canonical.lexically_normal();
   auto absolute = std::filesystem::absolute(path, error);
-  if (!error) return absolute.lexically_normal();
+  if (!error)
+    return absolute.lexically_normal();
   return path.lexically_normal();
 }
 

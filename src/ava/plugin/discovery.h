@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/plugin/manifest.h"
-
 #include "ava/core/result.h"
 
 #include <filesystem>
@@ -9,7 +8,8 @@
 
 namespace ava::plugin {
 
-struct PluginDiscoveryOptions {
+struct PluginDiscoveryOptions
+{
   std::filesystem::path global_plugins_dir;
   std::filesystem::path project_plugins_dir;
 };

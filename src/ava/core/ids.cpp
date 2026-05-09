@@ -14,11 +14,14 @@ std::string make_id(std::string_view prefix)
 {
   auto const now = std::chrono::system_clock::now().time_since_epoch().count();
   std::uint64_t seed = static_cast<std::uint64_t>(now);
-  try {
+  try
+  {
     std::random_device device;
     seed ^= static_cast<std::uint64_t>(device()) << 32;
     seed ^= static_cast<std::uint64_t>(device());
-  } catch (...) {
+  }
+  catch (...)
+  {
     seed ^= std::hash<std::thread::id>{}(std::this_thread::get_id());
   }
   std::mt19937_64 generator(seed);

@@ -6,7 +6,8 @@
 
 namespace ava::tests {
 
-class FakeTransport final : public ava::provider::Transport {
+class FakeTransport final : public ava::provider::Transport
+{
  public:
   explicit FakeTransport(std::vector<ava::provider::HttpResponse> responses);
   [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override;

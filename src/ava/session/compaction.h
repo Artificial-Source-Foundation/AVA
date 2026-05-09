@@ -1,9 +1,7 @@
 #pragma once
 
 #include "ava/config/xdg_paths.h"
-
 #include "ava/session/session_store.h"
-
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -14,7 +12,8 @@
 
 namespace ava::session {
 
-struct CompactionConfig {
+struct CompactionConfig
+{
   std::size_t auto_threshold_tokens = 0;
   bool auto_threshold_tokens_explicit = false;
   std::size_t keep_recent_tokens = 2048;
@@ -23,13 +22,15 @@ struct CompactionConfig {
   std::size_t max_summary_bytes = 16 * 1024;
 };
 
-struct CompactionDecision {
+struct CompactionDecision
+{
   bool should_compact = false;
   std::size_t estimated_tokens = 0;
   std::size_t threshold_tokens = 0;
 };
 
-struct ManualCompactionRequest {
+struct ManualCompactionRequest
+{
   std::string summary;
   std::string instructions;
   CompactionConfig config;
@@ -44,12 +45,9 @@ struct ManualCompactionRequest {
 [[nodiscard]] ava::core::Result<CompactionConfig> load_compaction_config(ava::config::XdgPaths const& paths);
 [[nodiscard]] std::size_t estimate_tokens(std::string_view text) noexcept;
 [[nodiscard]] std::size_t estimate_session_tokens(std::vector<SessionEntry> const& entries) noexcept;
-[[nodiscard]] std::size_t effective_auto_threshold_tokens(CompactionConfig const& config,
-                                                          std::optional<long long> context_window_tokens) noexcept;
-[[nodiscard]] CompactionDecision should_auto_compact(std::vector<SessionEntry> const& entries,
-                                                     CompactionConfig const& config) noexcept;
-[[nodiscard]] CompactionDecision should_auto_compact(std::vector<SessionEntry> const& entries,
-                                                     CompactionConfig const& config,
+[[nodiscard]] std::size_t effective_auto_threshold_tokens(CompactionConfig const& config, std::optional<long long> context_window_tokens) noexcept;
+[[nodiscard]] CompactionDecision should_auto_compact(std::vector<SessionEntry> const& entries, CompactionConfig const& config) noexcept;
+[[nodiscard]] CompactionDecision should_auto_compact(std::vector<SessionEntry> const& entries, CompactionConfig const& config,
                                                      std::optional<long long> context_window_tokens) noexcept;
 [[nodiscard]] ava::core::VoidResult append_manual_compaction(SessionStore& store, ManualCompactionRequest request);
 

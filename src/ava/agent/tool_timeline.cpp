@@ -1,17 +1,18 @@
-#include "ava/agent/tool_timeline.h"
-
 #include "ava/agent/tool_result.h"
+#include "ava/agent/tool_timeline.h"
 
 namespace ava::agent {
 
 void publish_tool_event(AgentLoopOptions const& options, ToolTimelineEntry const& event)
 {
-  if (options.on_tool_event) options.on_tool_event(event);
+  if (options.on_tool_event)
+    options.on_tool_event(event);
 }
 
 ava::core::VoidResult publish_tool_progress(AgentLoopOptions const& options, ToolProgressEntry const& event)
 {
-  if (!options.on_tool_progress) return {};
+  if (!options.on_tool_progress)
+    return {};
   return options.on_tool_progress(event);
 }
 

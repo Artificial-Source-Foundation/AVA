@@ -9,7 +9,8 @@
 
 namespace ava::tui {
 
-enum class TextColorRole {
+enum class TextColorRole
+{
   Default,
   Muted,
   Accent,
@@ -22,7 +23,8 @@ enum class TextColorRole {
   Removed,
 };
 
-struct Rendition {
+struct Rendition
+{
   bool bold = false;
   bool dim = false;
   bool underline = false;
@@ -31,20 +33,25 @@ struct Rendition {
   TextColorRole color = TextColorRole::Default;
 };
 
-struct NewLine {};
+struct NewLine
+{
+};
 
-struct String {
+struct String
+{
   std::string text;
 };
 
-struct TextSpan {
+struct TextSpan
+{
   std::string text;
   Rendition rendition;
 };
 
 using TextRun = std::variant<NewLine, String, TextSpan>;
 
-struct Text {
+struct Text
+{
   std::vector<TextRun> runs;
 };
 

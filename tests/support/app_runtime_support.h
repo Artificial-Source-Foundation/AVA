@@ -1,9 +1,7 @@
 #pragma once
 
 #include "ava/config/xdg_paths.h"
-
 #include "ava/session/session_store.h"
-
 #include "ava/provider/provider.h"
 
 #include <chrono>
@@ -24,7 +22,8 @@ std::string app_test_plugin_manifest_json(std::string_view id, std::string_view 
 std::string app_test_mcp_config_json(std::string_view id, std::string_view name, std::string_view command);
 void write_app_test_file(std::filesystem::path const& path, std::string const& text);
 
-class BlockingInputBuf final : public std::streambuf {
+class BlockingInputBuf final : public std::streambuf
+{
  public:
   void push(std::string text);
   void close();
@@ -40,7 +39,8 @@ class BlockingInputBuf final : public std::streambuf {
   char current_ = 0;
 };
 
-class ThreadSafeStringBuf final : public std::streambuf {
+class ThreadSafeStringBuf final : public std::streambuf
+{
  public:
   std::string str() const;
   bool wait_contains(std::string_view value, std::chrono::milliseconds timeout) const;
@@ -55,15 +55,15 @@ class ThreadSafeStringBuf final : public std::streambuf {
   std::string text_;
 };
 
-class ChunkedStreamingTransport final : public ava::provider::Transport {
+class ChunkedStreamingTransport final : public ava::provider::Transport
+{
  public:
   explicit ChunkedStreamingTransport(std::vector<std::string> chunks, int status_code = 200);
 
   [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override;
   [[nodiscard]] bool supports_streaming() const noexcept override;
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send_streaming(
-      ava::provider::HttpRequest const& request, BodyChunkSink on_body_chunk,
-      CancelCallback cancel_requested = nullptr) override;
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send_streaming(ava::provider::HttpRequest const& request, BodyChunkSink on_body_chunk,
+                                                                              CancelCallback cancel_requested = nullptr) override;
   [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept;
 
  private:
@@ -73,7 +73,8 @@ class ChunkedStreamingTransport final : public ava::provider::Transport {
   std::vector<ava::provider::HttpRequest> requests_;
 };
 
-class BlockingResponseTransport final : public ava::provider::Transport {
+class BlockingResponseTransport final : public ava::provider::Transport
+{
  public:
   explicit BlockingResponseTransport(ava::provider::HttpResponse response);
 
@@ -101,13 +102,12 @@ std::string extract_json_string_field(std::string_view text, std::string_view ke
 std::string extract_last_json_string_field(std::string_view text, std::string_view key);
 std::size_t count_substrings(std::string_view text, std::string_view needle);
 std::size_t count_compaction_entries(std::vector<ava::session::SessionEntry> const& entries);
-std::optional<ava::session::SessionEntry> latest_compaction_entry(
-    std::vector<ava::session::SessionEntry> const& entries);
+std::optional<ava::session::SessionEntry> latest_compaction_entry(std::vector<ava::session::SessionEntry> const& entries);
 
-class MutatingSummaryTransport final : public ava::provider::Transport {
+class MutatingSummaryTransport final : public ava::provider::Transport
+{
  public:
-  MutatingSummaryTransport(ava::session::SessionStore& store, std::vector<ava::provider::HttpResponse> responses,
-                           std::size_t mutate_requests = 1);
+  MutatingSummaryTransport(ava::session::SessionStore& store, std::vector<ava::provider::HttpResponse> responses, std::size_t mutate_requests = 1);
 
   ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override;
   [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept;

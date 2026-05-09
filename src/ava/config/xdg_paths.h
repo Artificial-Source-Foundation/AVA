@@ -4,7 +4,8 @@
 
 namespace ava::config {
 
-struct XdgPaths {
+struct XdgPaths
+{
   std::filesystem::path config_home;
   std::filesystem::path state_home;
   std::filesystem::path data_home;

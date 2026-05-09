@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/app/events.h"
-
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -18,20 +17,23 @@ inline constexpr std::size_t kMaxInteractiveQueuedMessages = 64;
 inline constexpr std::size_t kMaxInteractiveQueuedMessageBytes = 64 * 1024;
 inline constexpr std::size_t kMaxInteractiveQueueEventMessageBytes = 512;
 
-struct InteractiveQueuedMessage {
+struct InteractiveQueuedMessage
+{
   std::string request_id;
   std::string correlation_id;
   std::string message;
   std::size_t sequence = 0;
 };
 
-struct InteractiveRestoredMessage {
+struct InteractiveRestoredMessage
+{
   std::string request_id;
   std::string message;
   bool steering = false;
 };
 
-class InteractiveRunQueue {
+class InteractiveRunQueue
+{
  public:
   InteractiveRunQueue(std::string session_id, std::string active_request_id, EventEnvelopeSink event_sink);
 
@@ -46,10 +48,8 @@ class InteractiveRunQueue {
   [[nodiscard]] ava::core::VoidResult finish(bool canceled);
 
  private:
-  [[nodiscard]] ava::core::VoidResult queue_message_locked(std::deque<InteractiveQueuedMessage>& queue,
-                                                           std::string message, std::string_view event_name);
-  [[nodiscard]] ava::core::VoidResult emit_event(std::string_view name, InteractiveQueuedMessage const& message,
-                                                 std::string_view reason = {}) const;
+  [[nodiscard]] ava::core::VoidResult queue_message_locked(std::deque<InteractiveQueuedMessage>& queue, std::string message, std::string_view event_name);
+  [[nodiscard]] ava::core::VoidResult emit_event(std::string_view name, InteractiveQueuedMessage const& message, std::string_view reason = {}) const;
 
   std::string session_id_;
   std::string active_request_id_;

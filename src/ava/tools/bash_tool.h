@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/tools/file_tools.h"
-
 #include "ava/core/result.h"
 
 #include <chrono>
@@ -11,13 +10,15 @@
 
 namespace ava::tools {
 
-struct BashOptions {
+struct BashOptions
+{
   std::chrono::milliseconds timeout = std::chrono::milliseconds(30'000);
   std::size_t max_bytes = 50 * 1024;
   std::size_t max_lines = 200;
 };
 
-struct BashResult {
+struct BashResult
+{
   int exit_code = -1;
   bool timed_out = false;
   bool canceled = false;
@@ -34,7 +35,6 @@ struct BashResult {
   std::filesystem::path spill_path;
 };
 
-[[nodiscard]] ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_view command,
-                                                     BashOptions options = {});
+[[nodiscard]] ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_view command, BashOptions options = {});
 
 }  // namespace ava::tools

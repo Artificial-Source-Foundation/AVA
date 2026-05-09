@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <climits>
 #include <string_view>
 #include <vector>
 #include <curses.h>

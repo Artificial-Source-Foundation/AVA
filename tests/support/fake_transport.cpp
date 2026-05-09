@@ -11,7 +11,8 @@ FakeTransport::FakeTransport(std::vector<ava::provider::HttpResponse> responses)
 ava::core::Result<ava::provider::HttpResponse> FakeTransport::send(ava::provider::HttpRequest const& request)
 {
   requests_.push_back(request);
-  if (responses_.empty()) {
+  if (responses_.empty())
+  {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "fake transport has no response"));
   }
   auto response = responses_.front();

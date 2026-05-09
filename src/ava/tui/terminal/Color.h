@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <limits>
-
 #include "debug.h"
 
 namespace terminal {

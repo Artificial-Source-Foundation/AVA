@@ -2,9 +2,7 @@
 
 #include "ava/agent/tool_metadata.h"
 #include "ava/agent/tool_types.h"
-
 #include "ava/tools/file_tools.h"
-
 #include "ava/core/result.h"
 
 #include <functional>
@@ -16,7 +14,8 @@
 
 namespace ava::agent {
 
-enum class ToolSource {
+enum class ToolSource
+{
   Builtin,
   Plugin,
   Mcp,
@@ -26,10 +25,10 @@ enum class ToolSource {
 
 // Built-in handlers receive the full ToolContext. External plugin/MCP tools should register AVA-owned broker
 // executors here, not plugin code with direct access to internal safety escape hatches.
-using ToolExecutor =
-    std::function<ToolDispatchResult(ava::tools::ToolContext const& context, ProviderToolCall const& call)>;
+using ToolExecutor = std::function<ToolDispatchResult(ava::tools::ToolContext const& context, ProviderToolCall const& call)>;
 
-struct RegisteredToolMetadata {
+struct RegisteredToolMetadata
+{
   std::string name;
   std::string description;
   std::string schema_json;
@@ -44,7 +43,8 @@ struct RegisteredToolMetadata {
 
 [[nodiscard]] RegisteredToolMetadata own_tool_metadata(ToolMetadata const& metadata);
 
-struct RegisteredTool {
+struct RegisteredTool
+{
   RegisteredToolMetadata metadata;
   ToolExecutor executor = nullptr;
   ToolSource source = ToolSource::Builtin;
@@ -53,7 +53,8 @@ struct RegisteredTool {
   bool requires_lsp_diagnostics = false;
 };
 
-class ToolRegistry {
+class ToolRegistry
+{
  public:
   [[nodiscard]] ava::core::VoidResult register_tool(RegisteredTool tool);
   [[nodiscard]] RegisteredTool const* find(std::string_view name) const noexcept;

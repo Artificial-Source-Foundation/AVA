@@ -10,12 +10,17 @@ std::string sanitize_terminal_text(std::string_view text)
 {
   std::string sanitized;
   sanitized.reserve(text.size());
-  for (std::size_t index = 0; index < text.size();) {
+  for (std::size_t index = 0; index < text.size();)
+  {
     auto const byte = static_cast<unsigned char>(text[index]);
-    if (byte < 0x20 || byte == 0x7F) {
-      if (byte == '\t') {
+    if (byte < 0x20 || byte == 0x7F)
+    {
+      if (byte == '\t')
+      {
         sanitized += "  ";
-      } else {
+      }
+      else
+      {
         sanitized.push_back('?');
       }
       ++index;
@@ -24,15 +29,19 @@ std::string sanitize_terminal_text(std::string_view text)
 
     auto const length = detail::utf8_sequence_length(byte);
     char32_t codepoint = 0;
-    if (!detail::decode_utf8_codepoint(text, index, length, codepoint)) {
+    if (!detail::decode_utf8_codepoint(text, index, length, codepoint))
+    {
       sanitized.push_back('?');
       ++index;
       continue;
     }
 
-    if (codepoint >= 0x80 && codepoint <= 0x9F) {
+    if (codepoint >= 0x80 && codepoint <= 0x9F)
+    {
       sanitized.push_back('?');
-    } else {
+    }
+    else
+    {
       sanitized.append(text.substr(index, length));
     }
     index += length;
@@ -44,20 +53,25 @@ std::vector<std::string> split_lines(std::string_view text)
 {
   std::vector<std::string> lines;
   std::size_t start = 0;
-  for (std::size_t index = 0; index <= text.size(); ++index) {
-    if (index == text.size()) {
+  for (std::size_t index = 0; index <= text.size(); ++index)
+  {
+    if (index == text.size())
+    {
       lines.emplace_back(text.substr(start, index - start));
       break;
     }
-    if (text[index] != '\n' && text[index] != '\r') continue;
+    if (text[index] != '\n' && text[index] != '\r')
+      continue;
 
     lines.emplace_back(text.substr(start, index - start));
-    if (text[index] == '\r' && index + 1 < text.size() && text[index + 1] == '\n') {
+    if (text[index] == '\r' && index + 1 < text.size() && text[index + 1] == '\n')
+    {
       ++index;
     }
     start = index + 1;
   }
-  if (lines.empty()) lines.emplace_back();
+  if (lines.empty())
+    lines.emplace_back();
   return lines;
 }
 
@@ -70,87 +84,99 @@ bool is_utf8_continuation(unsigned char byte)
 
 std::size_t utf8_sequence_length(unsigned char byte)
 {
-  if ((byte & 0x80U) == 0) return 1;
-  if (byte >= 0xC2U && byte <= 0xDFU) return 2;
-  if ((byte & 0xF0U) == 0xE0U) return 3;
-  if (byte >= 0xF0U && byte <= 0xF4U) return 4;
+  if ((byte & 0x80U) == 0)
+    return 1;
+  if (byte >= 0xC2U && byte <= 0xDFU)
+    return 2;
+  if ((byte & 0xF0U) == 0xE0U)
+    return 3;
+  if (byte >= 0xF0U && byte <= 0xF4U)
+    return 4;
   return 0;
 }
 
 bool decode_utf8_codepoint(std::string_view text, std::size_t start, std::size_t length, char32_t& codepoint)
 {
-  if (start + length > text.size() || length == 0) return false;
+  if (start + length > text.size() || length == 0)
+    return false;
   auto const first = static_cast<unsigned char>(text[start]);
-  if (utf8_sequence_length(first) != length) return false;
-  if (length == 1) {
+  if (utf8_sequence_length(first) != length)
+    return false;
+  if (length == 1)
+  {
     codepoint = first;
     return true;
   }
   codepoint = first & ((1U << (7 - length)) - 1U);
-  for (std::size_t offset = 1; offset < length; ++offset) {
+  for (std::size_t offset = 1; offset < length; ++offset)
+  {
     auto const byte = static_cast<unsigned char>(text[start + offset]);
-    if (!is_utf8_continuation(byte)) return false;
+    if (!is_utf8_continuation(byte))
+      return false;
     codepoint = (codepoint << 6U) | (byte & 0x3FU);
   }
-  if (length == 2 && codepoint < 0x80) return false;
-  if (length == 3 && codepoint < 0x800) return false;
-  if (length == 4 && codepoint < 0x10000) return false;
-  if (codepoint >= 0xD800 && codepoint <= 0xDFFF) return false;
-  if (codepoint > 0x10FFFF) return false;
+  if (length == 2 && codepoint < 0x80)
+    return false;
+  if (length == 3 && codepoint < 0x800)
+    return false;
+  if (length == 4 && codepoint < 0x10000)
+    return false;
+  if (codepoint >= 0xD800 && codepoint <= 0xDFFF)
+    return false;
+  if (codepoint > 0x10FFFF)
+    return false;
   return true;
 }
 
 bool is_wide_codepoint(char32_t codepoint)
 {
-  return (codepoint >= 0x1100 && codepoint <= 0x115F) || (codepoint >= 0x2329 && codepoint <= 0x232A) ||
-         (codepoint >= 0x2E80 && codepoint <= 0xA4CF) || (codepoint >= 0xAC00 && codepoint <= 0xD7A3) ||
-         (codepoint >= 0xF900 && codepoint <= 0xFAFF) || (codepoint >= 0xFE10 && codepoint <= 0xFE19) ||
-         (codepoint >= 0xFE30 && codepoint <= 0xFE6F) || (codepoint >= 0xFF00 && codepoint <= 0xFF60) ||
-         (codepoint >= 0xFFE0 && codepoint <= 0xFFE6) || (codepoint >= 0x1F300 && codepoint <= 0x1FAFF) ||
-         (codepoint >= 0x20000 && codepoint <= 0x3FFFD);
+  return (codepoint >= 0x1100 && codepoint <= 0x115F) || (codepoint >= 0x2329 && codepoint <= 0x232A) || (codepoint >= 0x2E80 && codepoint <= 0xA4CF) ||
+         (codepoint >= 0xAC00 && codepoint <= 0xD7A3) || (codepoint >= 0xF900 && codepoint <= 0xFAFF) || (codepoint >= 0xFE10 && codepoint <= 0xFE19) ||
+         (codepoint >= 0xFE30 && codepoint <= 0xFE6F) || (codepoint >= 0xFF00 && codepoint <= 0xFF60) || (codepoint >= 0xFFE0 && codepoint <= 0xFFE6) ||
+         (codepoint >= 0x1F300 && codepoint <= 0x1FAFF) || (codepoint >= 0x20000 && codepoint <= 0x3FFFD);
 }
 
 bool is_zero_width_codepoint(char32_t codepoint)
 {
-  return (codepoint >= 0x0300 && codepoint <= 0x036F) || (codepoint >= 0x0483 && codepoint <= 0x0489) ||
-         (codepoint >= 0x0591 && codepoint <= 0x05BD) || codepoint == 0x05BF ||
-         (codepoint >= 0x05C1 && codepoint <= 0x05C2) || (codepoint >= 0x05C4 && codepoint <= 0x05C5) ||
-         codepoint == 0x05C7 || (codepoint >= 0x0610 && codepoint <= 0x061A) ||
-         (codepoint >= 0x064B && codepoint <= 0x065F) || codepoint == 0x0670 ||
-         (codepoint >= 0x06D6 && codepoint <= 0x06DC) || (codepoint >= 0x06DF && codepoint <= 0x06E4) ||
-         (codepoint >= 0x06E7 && codepoint <= 0x06E8) || (codepoint >= 0x06EA && codepoint <= 0x06ED) ||
-         (codepoint >= 0x0711 && codepoint <= 0x0711) || (codepoint >= 0x0730 && codepoint <= 0x074A) ||
-         (codepoint >= 0x07A6 && codepoint <= 0x07B0) || (codepoint >= 0x07EB && codepoint <= 0x07F3) ||
-         (codepoint >= 0x0816 && codepoint <= 0x0819) || (codepoint >= 0x081B && codepoint <= 0x0823) ||
-         (codepoint >= 0x0825 && codepoint <= 0x0827) || (codepoint >= 0x0829 && codepoint <= 0x082D) ||
-         (codepoint >= 0x0859 && codepoint <= 0x085B) || (codepoint >= 0x08D3 && codepoint <= 0x08E1) ||
-         (codepoint >= 0x08E3 && codepoint <= 0x0903) || (codepoint >= 0x093A && codepoint <= 0x093C) ||
-         (codepoint >= 0x0941 && codepoint <= 0x0948) || codepoint == 0x094D ||
-         (codepoint >= 0x0951 && codepoint <= 0x0957) || (codepoint >= 0x0962 && codepoint <= 0x0963) ||
-         codepoint == 0x200C || codepoint == 0x200D || (codepoint >= 0x20D0 && codepoint <= 0x20FF) ||
-         (codepoint >= 0xFE00 && codepoint <= 0xFE0F) || (codepoint >= 0xFE20 && codepoint <= 0xFE2F) ||
+  return (codepoint >= 0x0300 && codepoint <= 0x036F) || (codepoint >= 0x0483 && codepoint <= 0x0489) || (codepoint >= 0x0591 && codepoint <= 0x05BD) ||
+         codepoint == 0x05BF || (codepoint >= 0x05C1 && codepoint <= 0x05C2) || (codepoint >= 0x05C4 && codepoint <= 0x05C5) || codepoint == 0x05C7 ||
+         (codepoint >= 0x0610 && codepoint <= 0x061A) || (codepoint >= 0x064B && codepoint <= 0x065F) || codepoint == 0x0670 ||
+         (codepoint >= 0x06D6 && codepoint <= 0x06DC) || (codepoint >= 0x06DF && codepoint <= 0x06E4) || (codepoint >= 0x06E7 && codepoint <= 0x06E8) ||
+         (codepoint >= 0x06EA && codepoint <= 0x06ED) || (codepoint >= 0x0711 && codepoint <= 0x0711) || (codepoint >= 0x0730 && codepoint <= 0x074A) ||
+         (codepoint >= 0x07A6 && codepoint <= 0x07B0) || (codepoint >= 0x07EB && codepoint <= 0x07F3) || (codepoint >= 0x0816 && codepoint <= 0x0819) ||
+         (codepoint >= 0x081B && codepoint <= 0x0823) || (codepoint >= 0x0825 && codepoint <= 0x0827) || (codepoint >= 0x0829 && codepoint <= 0x082D) ||
+         (codepoint >= 0x0859 && codepoint <= 0x085B) || (codepoint >= 0x08D3 && codepoint <= 0x08E1) || (codepoint >= 0x08E3 && codepoint <= 0x0903) ||
+         (codepoint >= 0x093A && codepoint <= 0x093C) || (codepoint >= 0x0941 && codepoint <= 0x0948) || codepoint == 0x094D ||
+         (codepoint >= 0x0951 && codepoint <= 0x0957) || (codepoint >= 0x0962 && codepoint <= 0x0963) || codepoint == 0x200C || codepoint == 0x200D ||
+         (codepoint >= 0x20D0 && codepoint <= 0x20FF) || (codepoint >= 0xFE00 && codepoint <= 0xFE0F) || (codepoint >= 0xFE20 && codepoint <= 0xFE2F) ||
          (codepoint >= 0xE0100 && codepoint <= 0xE01EF);
 }
 
 std::size_t codepoint_columns(char32_t codepoint)
 {
-  if (is_zero_width_codepoint(codepoint)) return 0;
-  if (codepoint == 0 || codepoint > static_cast<char32_t>(WCHAR_MAX)) return 1;
+  if (is_zero_width_codepoint(codepoint))
+    return 0;
+  if (codepoint == 0 || codepoint > static_cast<char32_t>(WCHAR_MAX))
+    return 1;
   auto const width = ::wcwidth(static_cast<wchar_t>(codepoint));
-  if (width >= 0) return static_cast<std::size_t>(width);
+  if (width >= 0)
+    return static_cast<std::size_t>(width);
   return is_wide_codepoint(codepoint) ? std::size_t{2} : std::size_t{1};
 }
 
 bool skip_sgr_sequence(std::string_view text, std::size_t& index)
 {
-  if (index + 1 >= text.size() || text[index] != '\x1b' || text[index + 1] != '[') {
+  if (index + 1 >= text.size() || text[index] != '\x1b' || text[index + 1] != '[')
+  {
     return false;
   }
   auto end = index + 2;
-  while (end < text.size() && text[end] != 'm') {
+  while (end < text.size() && text[end] != 'm')
+  {
     ++end;
   }
-  if (end >= text.size()) {
+  if (end >= text.size())
+  {
     return false;
   }
   index = end + 1;
@@ -160,16 +186,21 @@ bool skip_sgr_sequence(std::string_view text, std::size_t& index)
 std::size_t terminal_text_columns(std::string_view text)
 {
   std::size_t columns = 0;
-  for (std::size_t index = 0; index < text.size();) {
-    if (skip_sgr_sequence(text, index)) {
+  for (std::size_t index = 0; index < text.size();)
+  {
+    if (skip_sgr_sequence(text, index))
+    {
       continue;
     }
     auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
     char32_t codepoint = 0;
-    if (decode_utf8_codepoint(text, index, length, codepoint)) {
+    if (decode_utf8_codepoint(text, index, length, codepoint))
+    {
       index += length;
       columns += codepoint_columns(codepoint);
-    } else {
+    }
+    else
+    {
       ++index;
       ++columns;
     }
@@ -179,22 +210,30 @@ std::size_t terminal_text_columns(std::string_view text)
 
 std::string fit_line(std::string text, std::size_t width)
 {
-  if (width == 0) return {};
+  if (width == 0)
+    return {};
   text = sanitize_terminal_text(text);
-  if (terminal_text_columns(text) <= width) return text;
-  if (width <= 3) {
+  if (terminal_text_columns(text) <= width)
+    return text;
+  if (width <= 3)
+  {
     std::string output;
     std::size_t visible = 0;
-    for (std::size_t index = 0; index < text.size() && visible < width;) {
+    for (std::size_t index = 0; index < text.size() && visible < width;)
+    {
       auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
       char32_t cp = 0;
-      if (decode_utf8_codepoint(text, index, length, cp)) {
+      if (decode_utf8_codepoint(text, index, length, cp))
+      {
         auto const cp_width = codepoint_columns(cp);
-        if (visible + cp_width > width) break;
+        if (visible + cp_width > width)
+          break;
         output.append(text.substr(index, length));
         index += length;
         visible += cp_width;
-      } else {
+      }
+      else
+      {
         output.push_back('?');
         ++index;
         ++visible;
@@ -206,16 +245,21 @@ std::string fit_line(std::string text, std::size_t width)
   auto const visible_budget = width - 3;
   std::string output;
   std::size_t visible = 0;
-  for (std::size_t index = 0; index < text.size() && visible < visible_budget;) {
+  for (std::size_t index = 0; index < text.size() && visible < visible_budget;)
+  {
     auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
     char32_t cp = 0;
-    if (decode_utf8_codepoint(text, index, length, cp)) {
+    if (decode_utf8_codepoint(text, index, length, cp))
+    {
       auto const cp_width = codepoint_columns(cp);
-      if (visible + cp_width > visible_budget) break;
+      if (visible + cp_width > visible_budget)
+        break;
       output.append(text.substr(index, length));
       index += length;
       visible += cp_width;
-    } else {
+    }
+    else
+    {
       output.push_back('?');
       ++index;
       ++visible;
@@ -227,10 +271,13 @@ std::string fit_line(std::string text, std::size_t width)
 
 std::string fit_line_preserving_sgr(std::string text, std::size_t width)
 {
-  if (width == 0) return {};
+  if (width == 0)
+    return {};
   auto const cols = terminal_text_columns(text);
-  if (cols <= width) return text;
-  if (width <= 3) {
+  if (cols <= width)
+    return text;
+  if (width <= 3)
+  {
     return std::string(width, '.');
   }
 
@@ -238,9 +285,11 @@ std::string fit_line_preserving_sgr(std::string text, std::size_t width)
   std::size_t visible = 0;
   bool emitted_sgr = false;
   std::string output;
-  for (std::size_t index = 0; index < text.size() && visible < visible_budget;) {
+  for (std::size_t index = 0; index < text.size() && visible < visible_budget;)
+  {
     auto const before_sgr = index;
-    if (skip_sgr_sequence(text, index)) {
+    if (skip_sgr_sequence(text, index))
+    {
       output.append(text.substr(before_sgr, index - before_sgr));
       emitted_sgr = true;
       continue;
@@ -248,20 +297,25 @@ std::string fit_line_preserving_sgr(std::string text, std::size_t width)
 
     auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
     char32_t cp = 0;
-    if (decode_utf8_codepoint(text, index, length, cp)) {
+    if (decode_utf8_codepoint(text, index, length, cp))
+    {
       auto const cp_width = codepoint_columns(cp);
-      if (visible + cp_width > visible_budget) break;
+      if (visible + cp_width > visible_budget)
+        break;
       output.append(text.substr(index, length));
       index += length;
       visible += cp_width;
-    } else {
+    }
+    else
+    {
       output.push_back('?');
       ++index;
       ++visible;
     }
   }
   output += "...";
-  if (emitted_sgr) output += kSgrReset;
+  if (emitted_sgr)
+    output += kSgrReset;
   return output;
 }
 
@@ -271,8 +325,10 @@ std::string surface_line(std::string_view background_sgr, std::string line, std:
   std::string painted;
   painted.reserve(background.size() + line.size());
   painted += background;
-  for (std::size_t index = 0; index < line.size();) {
-    if (line.compare(index, kSgrReset.size(), kSgrReset) == 0) {
+  for (std::size_t index = 0; index < line.size();)
+  {
+    if (line.compare(index, kSgrReset.size(), kSgrReset) == 0)
+    {
       painted += std::string(kSgrReset);
       painted += background;
       index += kSgrReset.size();
@@ -284,7 +340,8 @@ std::string surface_line(std::string_view background_sgr, std::string line, std:
 
   line = fit_line_preserving_sgr(std::move(painted), width);
   auto const cols = terminal_text_columns(line);
-  if (cols < width) {
+  if (cols < width)
+  {
     line += background + std::string(width - cols, ' ');
   }
   line += std::string(kSgrReset);
@@ -308,14 +365,16 @@ std::vector<std::string> wrap_transcript_text(std::string_view text, std::size_t
   std::vector<std::string> wrapped;
   std::string current;
   std::size_t columns = 0;
-  for (std::size_t index = 0; index < sanitized.size();) {
+  for (std::size_t index = 0; index < sanitized.size();)
+  {
     auto const byte = static_cast<unsigned char>(sanitized[index]);
     auto const length = utf8_sequence_length(byte);
     char32_t codepoint = 0;
     auto const valid = decode_utf8_codepoint(sanitized, index, length, codepoint);
     auto const chunk_length = valid ? length : std::size_t{1};
     auto const chunk_columns = valid ? codepoint_columns(codepoint) : std::size_t{1};
-    if (columns + chunk_columns > content_width && !current.empty()) {
+    if (columns + chunk_columns > content_width && !current.empty())
+    {
       wrapped.push_back(std::move(current));
       current.clear();
       columns = 0;
@@ -324,7 +383,8 @@ std::vector<std::string> wrap_transcript_text(std::string_view text, std::size_t
     columns += chunk_columns;
     index += chunk_length;
   }
-  if (!current.empty() || wrapped.empty()) wrapped.push_back(std::move(current));
+  if (!current.empty() || wrapped.empty())
+    wrapped.push_back(std::move(current));
   return wrapped;
 }
 

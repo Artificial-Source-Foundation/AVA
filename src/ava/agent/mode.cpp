@@ -7,7 +7,8 @@ namespace ava::agent {
 
 std::string to_string(Mode mode)
 {
-  switch (mode) {
+  switch (mode)
+  {
     case Mode::Build:
       return "build";
     case Mode::Plan:
@@ -18,10 +19,12 @@ std::string to_string(Mode mode)
 
 ava::core::Result<Mode> parse_mode(std::string_view value)
 {
-  if (value == "build") {
+  if (value == "build")
+  {
     return Mode::Build;
   }
-  if (value == "plan") {
+  if (value == "plan")
+  {
     return Mode::Plan;
   }
 

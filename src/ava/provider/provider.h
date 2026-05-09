@@ -13,14 +13,16 @@
 
 namespace ava::provider {
 
-enum class ContentPartType {
+enum class ContentPartType
+{
   Text,
   Reasoning,
   ToolUse,
   ToolResult,
 };
 
-struct ContentPart {
+struct ContentPart
+{
   // Provider-neutral native content item. Providers that do not support native
   // parts can ignore these fields and serialize ChatMessage::content instead.
   ContentPartType type = ContentPartType::Text;
@@ -38,7 +40,8 @@ struct ContentPart {
   bool redacted = false;
 };
 
-struct ChatMessage {
+struct ChatMessage
+{
   std::string role = {};
   // Readable legacy fallback content. This remains populated for providers that
   // do not understand content_parts and for diagnostics/session reconstruction.
@@ -50,13 +53,15 @@ struct ChatMessage {
   std::vector<ContentPart> content_parts = {};
 };
 
-struct ProviderReasoningOptions {
+struct ProviderReasoningOptions
+{
   std::string type = {};
   std::optional<long long> budget_tokens = std::nullopt;
   std::string display = {};
 };
 
-struct ProviderRequest {
+struct ProviderRequest
+{
   std::string provider_id;
   std::string model_id;
   std::string system_prompt;
@@ -68,13 +73,15 @@ struct ProviderRequest {
   std::string system_prompt_cache_ttl = {};
 };
 
-struct ProviderAuthContext {
+struct ProviderAuthContext
+{
   std::string access_token;
   std::string credential_type;
   std::string account_id;
 };
 
-struct TokenUsage {
+struct TokenUsage
+{
   std::optional<long long> input_tokens;
   std::optional<long long> output_tokens;
   std::optional<long long> reasoning_tokens;
@@ -87,7 +94,8 @@ struct TokenUsage {
   bool estimated = false;
 };
 
-struct HttpRequest {
+struct HttpRequest
+{
   std::string method;
   std::string url;
   std::map<std::string, std::string> headers;
@@ -99,13 +107,15 @@ struct HttpRequest {
   std::vector<std::string> resolve_hosts;
 };
 
-struct HttpResponse {
+struct HttpResponse
+{
   int status_code = 0;
   std::map<std::string, std::string> headers;
   std::string body;
 };
 
-enum class StreamEventType {
+enum class StreamEventType
+{
   TextDelta,
   ReasoningStart,
   ReasoningDelta,
@@ -117,7 +127,8 @@ enum class StreamEventType {
   Error,
 };
 
-enum class ProviderErrorKind {
+enum class ProviderErrorKind
+{
   Authentication,
   RateLimited,
   Quota,
@@ -129,7 +140,8 @@ enum class ProviderErrorKind {
   Unknown,
 };
 
-struct StreamEvent {
+struct StreamEvent
+{
   StreamEventType type = StreamEventType::Done;
   std::string text;
   std::string tool_call_id;
@@ -144,48 +156,47 @@ struct StreamEvent {
   bool reasoning_signature_present = false;
 };
 
-class StreamParser {
+class StreamParser
+{
  public:
   virtual ~StreamParser() = default;
   [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> append(std::string_view chunk) = 0;
   [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> finish() = 0;
 };
 
-class Provider {
+class Provider
+{
  public:
   virtual ~Provider() = default;
-  [[nodiscard]] virtual ava::core::Result<HttpRequest> build_request(ProviderRequest const& request,
-                                                                     std::string_view access_token) const = 0;
-  [[nodiscard]] virtual ava::core::Result<HttpRequest> build_request(ProviderRequest const& request,
-                                                                     ProviderAuthContext const& auth) const;
-  [[nodiscard]] virtual ava::core::VoidResult apply_auth_options(HttpRequest& request,
-                                                                 ProviderAuthContext const& auth) const;
+  [[nodiscard]] virtual ava::core::Result<HttpRequest> build_request(ProviderRequest const& request, std::string_view access_token) const = 0;
+  [[nodiscard]] virtual ava::core::Result<HttpRequest> build_request(ProviderRequest const& request, ProviderAuthContext const& auth) const;
+  [[nodiscard]] virtual ava::core::VoidResult apply_auth_options(HttpRequest& request, ProviderAuthContext const& auth) const;
   [[nodiscard]] virtual std::unique_ptr<StreamParser> create_stream_parser() const;
-  [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> parse_response(HttpResponse const& response,
-                                                                                   bool stream) const;
+  [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> parse_response(HttpResponse const& response, bool stream) const;
 };
 
-class Transport {
+class Transport
+{
  public:
   using BodyChunkSink = std::function<ava::core::VoidResult(std::string_view)>;
   using CancelCallback = std::function<bool()>;
 
   virtual ~Transport() = default;
   [[nodiscard]] virtual ava::core::Result<HttpResponse> send(HttpRequest const& request) = 0;
-  [[nodiscard]] virtual ava::core::Result<HttpResponse> send(HttpRequest const& request,
-                                                             CancelCallback cancel_requested);
+  [[nodiscard]] virtual ava::core::Result<HttpResponse> send(HttpRequest const& request, CancelCallback cancel_requested);
   [[nodiscard]] virtual bool supports_streaming() const noexcept;
-  [[nodiscard]] virtual ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request,
-                                                                       BodyChunkSink on_body_chunk,
+  [[nodiscard]] virtual ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
                                                                        CancelCallback cancel_requested = nullptr);
 };
 
-struct RetryOptions {
+struct RetryOptions
+{
   int max_attempts = 3;
   int base_delay_ms = 250;
   int max_retry_after_ms = 60'000;
   int countdown_tick_ms = 1000;
-  struct Event {
+  struct Event
+  {
     std::size_t attempt = 0;
     std::size_t max_attempts = 0;
     std::size_t delay_ms = 0;
@@ -199,12 +210,12 @@ struct RetryOptions {
   Transport::CancelCallback cancel_requested = nullptr;
 };
 
-class RetryTransport final : public Transport {
+class RetryTransport final : public Transport
+{
  public:
   RetryTransport(Transport& inner, RetryOptions options = {});
   [[nodiscard]] ava::core::Result<HttpResponse> send(HttpRequest const& request) override;
-  [[nodiscard]] ava::core::Result<HttpResponse> send(HttpRequest const& request,
-                                                     CancelCallback cancel_requested) override;
+  [[nodiscard]] ava::core::Result<HttpResponse> send(HttpRequest const& request, CancelCallback cancel_requested) override;
   [[nodiscard]] bool supports_streaming() const noexcept override;
   [[nodiscard]] ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
                                                                CancelCallback cancel_requested = nullptr) override;

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/agent/tool_registry.h"
-
 #include "ava/tools/file_tools.h"
 
 #include <string>

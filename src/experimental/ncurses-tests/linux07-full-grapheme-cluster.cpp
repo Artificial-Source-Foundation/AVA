@@ -3,6 +3,7 @@
 #include "terminal/GraphemeCluster.h"
 #include "terminal/Session.h"
 #include "terminal/Window.h"
+
 #include <array>
 #include <cstdlib>
 #include <iostream>
@@ -32,7 +33,7 @@ bool same_storage(terminal::GraphemeCluster const& grapheme_cluster, Storage con
 
 int main()
 {
-  Storage const expected_full_cluster = { L'a', L'\u0301', L'\u0302', L'\u0303', L'\u0308' };
+  Storage const expected_full_cluster = {L'a', L'\u0301', L'\u0302', L'\u0303', L'\u0308'};
 
   terminal::GraphemeCluster const full_cluster{L"a\u0301\u0302\u0303\u0308"};
   if (!require(full_cluster.length() == terminal::GraphemeCluster::capacity, "full cluster should use every storage slot") ||
@@ -62,10 +63,11 @@ int main()
     terminal::ComplexChar const round_trip = window.get_background();
     round_trip_ok =
         require(same_storage(round_trip.cell_character(), expected_full_cluster), "Window background round-trip should preserve full cluster storage") &&
-        require(round_trip.cell_character().length() == terminal::GraphemeCluster::capacity, "round-tripped full cluster should still use every storage slot") &&
+        require(round_trip.cell_character().length() == terminal::GraphemeCluster::capacity,
+                "round-tripped full cluster should still use every storage slot") &&
         require(!round_trip.cell_character().is_zero_terminated(), "round-tripped full cluster should still be unterminated in-place") &&
         require((round_trip.rendition().attributes().mask() & static_cast<terminal::Attributes::attr_t>(terminal::Attribute::bold)) != 0,
-            "Window background round-trip should preserve bold attribute");
+                "Window background round-trip should preserve bold attribute");
 
     window.move({1, 1});
     terminal_session.stdscr().refresh();

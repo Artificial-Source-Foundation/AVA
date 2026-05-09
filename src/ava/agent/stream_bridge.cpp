@@ -4,10 +4,10 @@ namespace ava::agent {
 
 ava::core::VoidResult publish_stream_event(AgentLoopOptions const& options, ava::provider::StreamEvent const& event)
 {
-  if (!options.on_stream_event) return {};
+  if (!options.on_stream_event)
+    return {};
   auto safe_event = event;
-  safe_event.reasoning_signature_present =
-      safe_event.reasoning_signature_present || !safe_event.reasoning_signature.empty();
+  safe_event.reasoning_signature_present = safe_event.reasoning_signature_present || !safe_event.reasoning_signature.empty();
   safe_event.reasoning_signature.clear();
   safe_event.reasoning_redacted_data.clear();
   return options.on_stream_event(safe_event);

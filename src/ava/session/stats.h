@@ -9,7 +9,8 @@
 
 namespace ava::session {
 
-struct SessionEntryCounts {
+struct SessionEntryCounts
+{
   std::size_t session_start = 0;
   std::size_t user_message = 0;
   std::size_t assistant_message = 0;
@@ -25,7 +26,8 @@ struct SessionEntryCounts {
   std::size_t cancel = 0;
 };
 
-struct SessionStats {
+struct SessionStats
+{
   std::size_t entry_count = 0;
   std::string first_timestamp;
   std::string last_timestamp;

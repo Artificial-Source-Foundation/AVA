@@ -11,7 +11,8 @@
 
 namespace ava::app {
 
-struct RpcCommand {
+struct RpcCommand
+{
   std::string id;
   std::string type;
   std::optional<long long> protocol_version;

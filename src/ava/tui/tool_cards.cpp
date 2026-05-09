@@ -1,7 +1,5 @@
-#include "ava/tui/tool_cards.h"
-
 #include "ava/tui/composer_internal.h"
-
+#include "ava/tui/tool_cards.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
@@ -34,11 +32,14 @@ std::string lower_ascii(std::string_view text)
 bool bool_json_field(std::string_view object, std::string_view key)
 {
   auto const start = ava::core::json::field_value_start(object, key);
-  if (!start) return false;
+  if (!start)
+    return false;
   auto value = object.substr(*start);
-  while (!value.empty()) {
+  while (!value.empty())
+  {
     auto const byte = static_cast<unsigned char>(value.front());
-    if (byte != ' ' && byte != '\n' && byte != '\r' && byte != '\t') break;
+    if (byte != ' ' && byte != '\n' && byte != '\r' && byte != '\t')
+      break;
     value.remove_prefix(1);
   }
   return value.starts_with("true");
@@ -46,25 +47,32 @@ bool bool_json_field(std::string_view object, std::string_view key)
 
 std::optional<std::string> first_json_string(std::string_view object, std::initializer_list<std::string_view> keys)
 {
-  for (auto const key : keys) {
-    if (auto value = ava::core::json::string_field(object, key); value && !value->empty()) return value;
+  for (auto const key : keys)
+  {
+    if (auto value = ava::core::json::string_field(object, key); value && !value->empty())
+      return value;
   }
   return std::nullopt;
 }
 
 std::optional<long long> first_json_integer(std::string_view object, std::initializer_list<std::string_view> keys)
 {
-  for (auto const key : keys) {
-    if (auto value = ava::core::json::integer_field(object, key)) return value;
+  for (auto const key : keys)
+  {
+    if (auto value = ava::core::json::integer_field(object, key))
+      return value;
   }
   return std::nullopt;
 }
 
 std::string format_duration_ms(long long milliseconds)
 {
-  if (milliseconds < 0) return {};
-  if (milliseconds < 1000) return std::to_string(milliseconds) + "ms";
-  if (milliseconds < 60'000) {
+  if (milliseconds < 0)
+    return {};
+  if (milliseconds < 1000)
+    return std::to_string(milliseconds) + "ms";
+  if (milliseconds < 60'000)
+  {
     auto const whole = milliseconds / 1000;
     auto const tenths = (milliseconds % 1000) / 100;
     return std::to_string(whole) + "." + std::to_string(tenths) + "s";
@@ -77,9 +85,11 @@ std::string format_duration_ms(long long milliseconds)
 std::optional<std::string> duration_text(ToolTimelineItem const& item)
 {
   auto const value = first_json_integer(item.result_json, {"duration_ms", "elapsed_ms", "runtime_ms"});
-  if (!value) return std::nullopt;
+  if (!value)
+    return std::nullopt;
   auto formatted = format_duration_ms(*value);
-  if (formatted.empty()) return std::nullopt;
+  if (formatted.empty())
+    return std::nullopt;
   return formatted;
 }
 
@@ -87,47 +97,59 @@ std::optional<std::string> command_from_summary(std::string_view summary)
 {
   constexpr std::string_view marker = "command=";
   auto const marker_offset = summary.find(marker);
-  if (marker_offset == std::string_view::npos) return std::nullopt;
+  if (marker_offset == std::string_view::npos)
+    return std::nullopt;
   auto value = summary.substr(marker_offset + marker.size());
   bool in_single_quote = false;
   bool in_double_quote = false;
   bool escaped = false;
-  for (std::size_t index = 0; index + 1 < value.size(); ++index) {
+  for (std::size_t index = 0; index + 1 < value.size(); ++index)
+  {
     auto const ch = value[index];
-    if (escaped) {
+    if (escaped)
+    {
       escaped = false;
       continue;
     }
-    if (ch == '\\' && !in_single_quote) {
+    if (ch == '\\' && !in_single_quote)
+    {
       escaped = true;
       continue;
     }
-    if (ch == '\'' && !in_double_quote) {
+    if (ch == '\'' && !in_double_quote)
+    {
       in_single_quote = !in_single_quote;
       continue;
     }
-    if (ch == '"' && !in_single_quote) {
+    if (ch == '"' && !in_single_quote)
+    {
       in_double_quote = !in_double_quote;
       continue;
     }
-    if (!in_single_quote && !in_double_quote && ch == ',' && value[index + 1] == ' ') {
+    if (!in_single_quote && !in_double_quote && ch == ',' && value[index + 1] == ' ')
+    {
       value = value.substr(0, index);
       break;
     }
   }
   while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) value.remove_prefix(1);
   while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) value.remove_suffix(1);
-  if (value.empty()) return std::nullopt;
+  if (value.empty())
+    return std::nullopt;
   return std::string(value);
 }
 
 std::optional<std::string> command_text(ToolTimelineItem const& item)
 {
-  if (auto command = first_json_string(item.arguments_json, {"command", "cmd", "shell_command"})) return command;
-  if (auto command = first_json_string(item.result_json, {"command", "cmd", "shell_command"})) return command;
-  if (auto command = command_from_summary(item.argument_summary)) return command;
+  if (auto command = first_json_string(item.arguments_json, {"command", "cmd", "shell_command"}))
+    return command;
+  if (auto command = first_json_string(item.result_json, {"command", "cmd", "shell_command"}))
+    return command;
+  if (auto command = command_from_summary(item.argument_summary))
+    return command;
   auto const lowered = lower_ascii(item.name);
-  if ((lowered == "bash" || lowered == "shell" || lowered == "run_command") && !item.argument_summary.empty()) {
+  if ((lowered == "bash" || lowered == "shell" || lowered == "run_command") && !item.argument_summary.empty())
+  {
     return item.argument_summary;
   }
   return std::nullopt;
@@ -136,39 +158,50 @@ std::optional<std::string> command_text(ToolTimelineItem const& item)
 bool shell_tool(ToolTimelineItem const& item)
 {
   auto const lowered_name = lower_ascii(item.name);
-  if (lowered_name == "bash" || lowered_name == "shell" || lowered_name == "run_command" ||
-      lowered_name == "shell_run") {
+  if (lowered_name == "bash" || lowered_name == "shell" || lowered_name == "run_command" || lowered_name == "shell_run")
+  {
     return true;
   }
-  if (auto tool = first_json_string(item.arguments_json, {"tool", "type"})) {
+  if (auto tool = first_json_string(item.arguments_json, {"tool", "type"}))
+  {
     auto const lowered_tool = lower_ascii(*tool);
-    if (lowered_tool == "bash" || lowered_tool == "shell") return true;
+    if (lowered_tool == "bash" || lowered_tool == "shell")
+      return true;
   }
-  if (auto tool = first_json_string(item.result_json, {"tool", "type"})) {
+  if (auto tool = first_json_string(item.result_json, {"tool", "type"}))
+  {
     auto const lowered_tool = lower_ascii(*tool);
-    if (lowered_tool == "bash" || lowered_tool == "shell") return true;
+    if (lowered_tool == "bash" || lowered_tool == "shell")
+      return true;
   }
   return command_text(item).has_value() && lowered_name.find("bash") != std::string::npos;
 }
 
 std::optional<std::string> exit_status_text(ToolTimelineItem const& item)
 {
-  if (item.status == ToolTimelineStatus::Running) return std::string("running");
-  if (bool_json_field(item.result_json, "canceled")) return std::string("canceled");
-  if (bool_json_field(item.result_json, "timed_out")) return std::string("timed out");
-  if (auto exit_code = first_json_integer(item.result_json, {"exit_code", "status_code"})) {
+  if (item.status == ToolTimelineStatus::Running)
+    return std::string("running");
+  if (bool_json_field(item.result_json, "canceled"))
+    return std::string("canceled");
+  if (bool_json_field(item.result_json, "timed_out"))
+    return std::string("timed out");
+  if (auto exit_code = first_json_integer(item.result_json, {"exit_code", "status_code"}))
+  {
     return "exit " + std::to_string(*exit_code);
   }
-  if (!item.result_summary.empty()) return item.result_summary;
+  if (!item.result_summary.empty())
+    return item.result_summary;
   return to_string(item.status);
 }
 
 std::optional<std::string> output_preview_text(ToolTimelineItem const& item)
 {
-  if (auto output = first_json_string(item.result_json, {"output", "stdout", "stderr", "content", "preview"})) {
+  if (auto output = first_json_string(item.result_json, {"output", "stdout", "stderr", "content", "preview"}))
+  {
     return output;
   }
-  if (item.result_summary.find('\n') != std::string::npos || item.result_summary.find('\r') != std::string::npos) {
+  if (item.result_summary.find('\n') != std::string::npos || item.result_summary.find('\r') != std::string::npos)
+  {
     return item.result_summary;
   }
   return std::nullopt;
@@ -178,16 +211,19 @@ std::size_t known_total_output_lines(ToolTimelineItem const& item, std::size_t a
 {
   auto total = item.total_lines.value_or(actual_lines);
   total = std::max(total, actual_lines);
-  if (item.omitted_lines) total = std::max(total, actual_lines + *item.omitted_lines);
+  if (item.omitted_lines)
+    total = std::max(total, actual_lines + *item.omitted_lines);
   return total;
 }
 
-void append_output_preview_lines(std::vector<std::string>& lines, ToolTimelineItem const& item, std::string_view label,
-                                 std::string const& text, std::size_t width, std::size_t max_visible)
+void append_output_preview_lines(std::vector<std::string>& lines, ToolTimelineItem const& item, std::string_view label, std::string const& text,
+                                 std::size_t width, std::size_t max_visible)
 {
-  if (text.empty() || max_visible == 0) return;
+  if (text.empty() || max_visible == 0)
+    return;
   auto raw_lines = split_lines(text);
-  if (raw_lines.size() == 1 && raw_lines.front().empty()) return;
+  if (raw_lines.size() == 1 && raw_lines.front().empty())
+    return;
 
   auto const prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
   auto const content_prefix = wide_blocks(width) ? std::string("  │       ") : std::string("        ");
@@ -198,92 +234,115 @@ void append_output_preview_lines(std::vector<std::string>& lines, ToolTimelineIt
   auto const hidden_by_omitted = item.omitted_lines.value_or(0) + hidden_by_local;
   auto const hidden = std::max(hidden_by_total, hidden_by_omitted);
 
-  std::string header =
-      prefix + std::string(detail::kSgrDim) + std::string(label) + ": " + std::to_string(visible) + " shown";
-  if (known_total > visible || hidden > 0) header += "/" + std::to_string(known_total);
+  std::string header = prefix + std::string(detail::kSgrDim) + std::string(label) + ": " + std::to_string(visible) + " shown";
+  if (known_total > visible || hidden > 0)
+    header += "/" + std::to_string(known_total);
   header += visible == 1 ? " line" : " lines";
-  if (hidden > 0) header += " · " + std::to_string(hidden) + " hidden";
+  if (hidden > 0)
+    header += " · " + std::to_string(hidden) + " hidden";
   header += std::string(detail::kSgrReset);
   lines.push_back(detail::fit_line_preserving_sgr(std::move(header), width));
 
-  for (std::size_t index = 0; index < visible; ++index) {
+  for (std::size_t index = 0; index < visible; ++index)
+  {
     auto sanitized = sanitize_terminal_text(raw_lines[index]);
-    lines.push_back(detail::fit_line_preserving_sgr(
-        content_prefix + std::string(detail::kSgrMuted) + std::move(sanitized) + std::string(detail::kSgrReset),
-        width));
+    lines.push_back(
+        detail::fit_line_preserving_sgr(content_prefix + std::string(detail::kSgrMuted) + std::move(sanitized) + std::string(detail::kSgrReset), width));
   }
 }
 
-void append_tool_detail_lines(std::vector<std::string>& lines, std::string_view label, std::string const& text,
-                              std::size_t width)
+void append_tool_detail_lines(std::vector<std::string>& lines, std::string_view label, std::string const& text, std::size_t width)
 {
-  if (text.empty()) return;
+  if (text.empty())
+    return;
   auto const prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
-  auto const label_prefix =
-      prefix + std::string(detail::kSgrDim) + std::string(label) + ": " + std::string(detail::kSgrReset);
-  for (auto const& raw_line : split_lines(text)) {
+  auto const label_prefix = prefix + std::string(detail::kSgrDim) + std::string(label) + ": " + std::string(detail::kSgrReset);
+  for (auto const& raw_line : split_lines(text))
+  {
     lines.push_back(detail::fit_line_preserving_sgr(label_prefix + sanitize_terminal_text(raw_line), width));
   }
 }
 
 void append_diff_lines(std::vector<std::string>& lines, ToolTimelineItem const& item, std::size_t width)
 {
-  if (item.diff.empty()) return;
+  if (item.diff.empty())
+    return;
   auto const prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
   auto label = std::string("diff");
-  if (!item.changed_paths.empty()) {
+  if (!item.changed_paths.empty())
+  {
     label += " ";
-    for (std::size_t index = 0; index < item.changed_paths.size() && index < 3; ++index) {
-      if (index > 0) label += ", ";
+    for (std::size_t index = 0; index < item.changed_paths.size() && index < 3; ++index)
+    {
+      if (index > 0)
+        label += ", ";
       label += sanitize_terminal_text(item.changed_paths[index]);
     }
-    if (item.changed_paths.size() > 3) label += ", +" + std::to_string(item.changed_paths.size() - 3) + " more";
+    if (item.changed_paths.size() > 3)
+      label += ", +" + std::to_string(item.changed_paths.size() - 3) + " more";
   }
-  lines.push_back(detail::fit_line_preserving_sgr(
-      prefix + std::string(detail::kSgrDim) + std::move(label) + ":" + std::string(detail::kSgrReset), width));
+  lines.push_back(detail::fit_line_preserving_sgr(prefix + std::string(detail::kSgrDim) + std::move(label) + ":" + std::string(detail::kSgrReset), width));
   auto const content_prefix = wide_blocks(width) ? std::string("  │       ") : std::string("        ");
-  auto diff_lines = detail::render_unified_diff_body(item.diff, item.diff_truncated, width, content_prefix,
-                                                     kExpandedDiffPreviewLines);
+  auto diff_lines = detail::render_unified_diff_body(item.diff, item.diff_truncated, width, content_prefix, kExpandedDiffPreviewLines);
   lines.insert(lines.end(), diff_lines.begin(), diff_lines.end());
 }
 
 std::string truncation_summary(ToolTimelineItem const& item)
 {
-  if (!item.truncated && item.spill_path.empty() && !item.spill_truncated) return {};
+  if (!item.truncated && item.spill_path.empty() && !item.spill_truncated)
+    return {};
 
   std::string summary;
-  if (item.truncated) {
-    if (item.start_line && item.end_line && item.total_lines) {
-      summary = "truncated lines " + std::to_string(*item.start_line) + "-" + std::to_string(*item.end_line) + "/" +
-                std::to_string(*item.total_lines);
-    } else if (item.output_lines && item.total_lines) {
+  if (item.truncated)
+  {
+    if (item.start_line && item.end_line && item.total_lines)
+    {
+      summary = "truncated lines " + std::to_string(*item.start_line) + "-" + std::to_string(*item.end_line) + "/" + std::to_string(*item.total_lines);
+    }
+    else if (item.output_lines && item.total_lines)
+    {
       summary = "truncated " + std::to_string(*item.output_lines) + "/" + std::to_string(*item.total_lines) + " lines";
-    } else if (item.visible_matches && item.total_matches) {
-      summary =
-          "truncated " + std::to_string(*item.visible_matches) + "/" + std::to_string(*item.total_matches) + " matches";
-    } else if (item.output_bytes && item.total_bytes) {
+    }
+    else if (item.visible_matches && item.total_matches)
+    {
+      summary = "truncated " + std::to_string(*item.visible_matches) + "/" + std::to_string(*item.total_matches) + " matches";
+    }
+    else if (item.output_bytes && item.total_bytes)
+    {
       summary = "truncated " + std::to_string(*item.output_bytes) + "/" + std::to_string(*item.total_bytes) + " bytes";
-    } else {
+    }
+    else
+    {
       summary = "truncated output";
     }
-    if (item.next_offset_line) summary += "; next offset " + std::to_string(*item.next_offset_line);
+    if (item.next_offset_line)
+      summary += "; next offset " + std::to_string(*item.next_offset_line);
     std::vector<std::string> omitted;
-    if (item.omitted_bytes) omitted.push_back(std::to_string(*item.omitted_bytes) + " bytes");
-    if (item.omitted_lines) omitted.push_back(std::to_string(*item.omitted_lines) + " lines");
-    if (!omitted.empty()) {
+    if (item.omitted_bytes)
+      omitted.push_back(std::to_string(*item.omitted_bytes) + " bytes");
+    if (item.omitted_lines)
+      omitted.push_back(std::to_string(*item.omitted_lines) + " lines");
+    if (!omitted.empty())
+    {
       summary += "; omitted ";
-      for (std::size_t index = 0; index < omitted.size(); ++index) {
-        if (index > 0) summary += ", ";
+      for (std::size_t index = 0; index < omitted.size(); ++index)
+      {
+        if (index > 0)
+          summary += ", ";
         summary += omitted[index];
       }
     }
   }
-  if (!item.spill_path.empty()) {
-    if (!summary.empty()) summary += "; ";
+  if (!item.spill_path.empty())
+  {
+    if (!summary.empty())
+      summary += "; ";
     summary += "spill " + item.spill_path;
   }
-  if (item.spill_truncated) {
-    if (!summary.empty()) summary += "; ";
+  if (item.spill_truncated)
+  {
+    if (!summary.empty())
+      summary += "; ";
     summary += "spill truncated";
   }
   return summary;
@@ -291,7 +350,8 @@ std::string truncation_summary(ToolTimelineItem const& item)
 
 std::string status_marker(ToolTimelineStatus status)
 {
-  switch (status) {
+  switch (status)
+  {
     case ToolTimelineStatus::Running:
       return "[~]";
     case ToolTimelineStatus::Success:
@@ -304,7 +364,8 @@ std::string status_marker(ToolTimelineStatus status)
 
 std::string_view status_sgr(ToolTimelineStatus status)
 {
-  switch (status) {
+  switch (status)
+  {
     case ToolTimelineStatus::Running:
       return detail::kSgrWarning;
     case ToolTimelineStatus::Success:
@@ -319,7 +380,8 @@ std::string_view status_sgr(ToolTimelineStatus status)
 
 std::string to_string(ToolLifecycleState state)
 {
-  switch (state) {
+  switch (state)
+  {
     case ToolLifecycleState::ProviderAnnounced:
       return "announced";
     case ToolLifecycleState::ArgumentsStreaming:
@@ -359,7 +421,8 @@ std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::siz
   auto const output = output_preview_text(item);
   auto const shell_status = is_shell ? exit_status_text(item) : std::optional<std::string>{};
   auto const shell_duration = is_shell ? duration_text(item) : std::optional<std::string>{};
-  if (args_raw.empty() && command) args_raw = sanitize_terminal_text(*command);
+  if (args_raw.empty() && command)
+    args_raw = sanitize_terminal_text(*command);
 
   auto prefix_text = wide_blocks(width) ? std::string("  │ ") : std::string("  ");
   auto prefix_cols = terminal_text_columns(prefix_text + marker + " ");
@@ -367,56 +430,73 @@ std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::siz
   auto lifecycle_cols = terminal_text_columns(std::string("  ") + lifecycle_raw);
   auto args_cols = args_raw.empty() ? 0 : terminal_text_columns(std::string("  ") + args_raw);
 
-  if (prefix_cols + name_cols + lifecycle_cols + args_cols > width) {
-    if (!args_raw.empty() && width > prefix_cols + name_cols + lifecycle_cols) {
+  if (prefix_cols + name_cols + lifecycle_cols + args_cols > width)
+  {
+    if (!args_raw.empty() && width > prefix_cols + name_cols + lifecycle_cols)
+    {
       auto budget = width - prefix_cols - name_cols - lifecycle_cols;
       args_raw = fit_line(std::move(args_raw), budget);
       args_cols = terminal_text_columns(args_raw);
     }
-    if (prefix_cols + name_cols + lifecycle_cols + args_cols > width && width > prefix_cols + lifecycle_cols) {
+    if (prefix_cols + name_cols + lifecycle_cols + args_cols > width && width > prefix_cols + lifecycle_cols)
+    {
       auto budget = width - prefix_cols - lifecycle_cols;
       name_raw = fit_line(std::move(name_raw), budget);
     }
   }
 
-  std::string line1 = prefix_text + std::string(status_sgr(item.status)) + marker + std::string(kSgrReset) + " " +
-                      std::string(kSgrBold) + std::string(kSgrAccent) + name_raw + std::string(kSgrReset) + "  " +
-                      std::string(kSgrMuted) + lifecycle_raw + std::string(kSgrReset);
-  if (!args_raw.empty()) {
+  std::string line1 = prefix_text + std::string(status_sgr(item.status)) + marker + std::string(kSgrReset) + " " + std::string(kSgrBold) +
+                      std::string(kSgrAccent) + name_raw + std::string(kSgrReset) + "  " + std::string(kSgrMuted) + lifecycle_raw + std::string(kSgrReset);
+  if (!args_raw.empty())
+  {
     line1 += "  " + std::string(kSgrDim) + args_raw + std::string(kSgrReset);
   }
   lines.push_back(fit_line_preserving_sgr(line1, width));
 
   auto const truncation = truncation_summary(item);
-  if (details_visible) {
+  if (details_visible)
+  {
     append_tool_detail_lines(lines, "args", item.argument_summary, width);
-    if (is_shell && command) append_tool_detail_lines(lines, "command", *command, width);
-    if (is_shell && shell_status) append_tool_detail_lines(lines, "status", *shell_status, width);
-    if (is_shell && shell_duration) append_tool_detail_lines(lines, "duration", *shell_duration, width);
+    if (is_shell && command)
+      append_tool_detail_lines(lines, "command", *command, width);
+    if (is_shell && shell_status)
+      append_tool_detail_lines(lines, "status", *shell_status, width);
+    if (is_shell && shell_duration)
+      append_tool_detail_lines(lines, "duration", *shell_duration, width);
     if (is_shell && item.status == ToolTimelineStatus::Running)
       append_tool_detail_lines(lines, "cancel", "Esc or Ctrl+C requests stop", width);
     append_tool_detail_lines(lines, "result", item.result_summary, width);
-    if (output) append_output_preview_lines(lines, item, "output", *output, width, kExpandedOutputPreviewLines);
-    if (!truncation.empty()) append_tool_detail_lines(lines, "truncation", truncation, width);
-    if (!item.spill_path.empty()) append_tool_detail_lines(lines, "spill", item.spill_path, width);
+    if (output)
+      append_output_preview_lines(lines, item, "output", *output, width, kExpandedOutputPreviewLines);
+    if (!truncation.empty())
+      append_tool_detail_lines(lines, "truncation", truncation, width);
+    if (!item.spill_path.empty())
+      append_tool_detail_lines(lines, "spill", item.spill_path, width);
     append_diff_lines(lines, item, width);
-  } else {
+  }
+  else
+  {
     auto compact = !item.result_summary.empty() ? item.result_summary : truncation;
-    if (is_shell && shell_status) {
+    if (is_shell && shell_status)
+    {
       compact = *shell_status;
-      if (shell_duration) compact += " · " + *shell_duration;
-      if (item.status == ToolTimelineStatus::Running) compact += " · Esc/Ctrl+C stop";
+      if (shell_duration)
+        compact += " · " + *shell_duration;
+      if (item.status == ToolTimelineStatus::Running)
+        compact += " · Esc/Ctrl+C stop";
     }
-    if (!compact.empty()) {
+    if (!compact.empty())
+    {
       auto result_raw = sanitize_terminal_text(compact);
-      std::string line2 = (wide_blocks(width) ? std::string("  │     ") : std::string("      ")) +
-                          std::string(kSgrMuted) + result_raw + std::string(kSgrReset);
+      std::string line2 = (wide_blocks(width) ? std::string("  │     ") : std::string("      ")) + std::string(kSgrMuted) + result_raw + std::string(kSgrReset);
       lines.push_back(fit_line_preserving_sgr(line2, width));
     }
-    if (output) append_output_preview_lines(lines, item, "output", *output, width, kCollapsedOutputPreviewLines);
-    if (!item.result_summary.empty() && !truncation.empty()) {
-      std::string line3 = (wide_blocks(width) ? std::string("  │     ") : std::string("      ")) +
-                          std::string(kSgrWarning) + sanitize_terminal_text(truncation) + std::string(kSgrReset);
+    if (output)
+      append_output_preview_lines(lines, item, "output", *output, width, kCollapsedOutputPreviewLines);
+    if (!item.result_summary.empty() && !truncation.empty())
+    {
+      std::string line3 = (wide_blocks(width) ? std::string("  │     ") : std::string("      ")) + std::string(kSgrWarning) +
+                          sanitize_terminal_text(truncation) + std::string(kSgrReset);
       lines.push_back(fit_line_preserving_sgr(line3, width));
     }
   }

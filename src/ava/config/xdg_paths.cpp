@@ -2,7 +2,6 @@
 
 #include <cstdlib>
 #include <string_view>
-
 #include <pwd.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -13,15 +12,19 @@ namespace {
 std::filesystem::path home_dir()
 {
   char const* home = std::getenv("HOME");
-  if (home != nullptr && !std::string_view(home).empty()) {
+  if (home != nullptr && !std::string_view(home).empty())
+  {
     auto home_path = std::filesystem::path(home).lexically_normal();
-    if (home_path.is_absolute()) return home_path;
+    if (home_path.is_absolute())
+      return home_path;
   }
 
   passwd const* entry = ::getpwuid(::getuid());
-  if (entry != nullptr && entry->pw_dir != nullptr && !std::string_view(entry->pw_dir).empty()) {
+  if (entry != nullptr && entry->pw_dir != nullptr && !std::string_view(entry->pw_dir).empty())
+  {
     auto passwd_home = std::filesystem::path(entry->pw_dir).lexically_normal();
-    if (passwd_home.is_absolute()) return passwd_home;
+    if (passwd_home.is_absolute())
+      return passwd_home;
   }
 
   return std::filesystem::path("/nonexistent");
@@ -31,9 +34,11 @@ std::filesystem::path env_path_or(std::string_view name, std::filesystem::path c
 {
   std::string const key(name);
   char const* value = std::getenv(key.c_str());
-  if (value == nullptr || std::string_view(value).empty()) return fallback;
+  if (value == nullptr || std::string_view(value).empty())
+    return fallback;
   auto path = std::filesystem::path(value).lexically_normal();
-  if (!path.is_absolute()) return fallback;
+  if (!path.is_absolute())
+    return fallback;
   return path;
 }
 

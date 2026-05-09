@@ -3,11 +3,8 @@
 #include "ava/app/command_catalog.h"
 #include "ava/app/events.h"
 #include "ava/app/runtime.h"
-
 #include "ava/agent/agent_loop.h"
-
 #include "ava/permissions/permission.h"
-
 #include "ava/core/result.h"
 
 #include <functional>
@@ -18,7 +15,8 @@
 
 namespace ava::app {
 
-struct CommandRequest {
+struct CommandRequest
+{
   std::string command;
   RuntimeEventSink event_sink = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
@@ -30,7 +28,8 @@ struct CommandRequest {
   std::vector<CommandHotkey> hotkeys = {};
 };
 
-struct CommandResult {
+struct CommandResult
+{
   bool handled = false;
   bool quit = false;
   std::vector<std::string> output;

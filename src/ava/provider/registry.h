@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/provider/provider.h"
-
 #include "ava/core/result.h"
 
 #include <functional>
@@ -12,7 +11,8 @@
 
 namespace ava::provider {
 
-class ProviderRegistry {
+class ProviderRegistry
+{
  public:
   using Factory = std::function<std::unique_ptr<Provider>()>;
 

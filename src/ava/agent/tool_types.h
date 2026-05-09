@@ -7,19 +7,22 @@
 
 namespace ava::agent {
 
-struct ProviderToolCall {
+struct ProviderToolCall
+{
   std::string id;
   std::string name;
   std::string arguments_json;
 };
 
-enum class ToolResultStatus {
+enum class ToolResultStatus
+{
   Success,
   Error,
   Canceled,
 };
 
-struct ToolResultPayload {
+struct ToolResultPayload
+{
   ToolResultStatus status = ToolResultStatus::Success;
   std::string summary;
   std::string content;
@@ -50,7 +53,8 @@ struct ToolResultPayload {
   bool spill_truncated = false;
 };
 
-struct ToolDispatchResult {
+struct ToolDispatchResult
+{
   std::string call_id;
   std::string name;
   bool success = false;

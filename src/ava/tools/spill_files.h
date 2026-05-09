@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/tools/file_tools.h"
-
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -13,7 +12,8 @@ namespace ava::tools {
 
 inline constexpr std::size_t kMaxSpillFileBytes = 5 * 1024 * 1024;
 
-class SpillBuffer {
+class SpillBuffer
+{
  public:
   explicit SpillBuffer(std::size_t max_bytes = kMaxSpillFileBytes);
 
@@ -30,18 +30,16 @@ class SpillBuffer {
   std::string content_;
 };
 
-struct SpillFileResult {
+struct SpillFileResult
+{
   std::filesystem::path path;
   bool truncated = false;
   std::size_t bytes_written = 0;
 };
 
-[[nodiscard]] ava::core::Result<SpillFileResult> write_spill_file(ToolContext const& context,
-                                                                  std::string_view tool_name,
-                                                                  std::string_view extension,
+[[nodiscard]] ava::core::Result<SpillFileResult> write_spill_file(ToolContext const& context, std::string_view tool_name, std::string_view extension,
                                                                   SpillBuffer const& buffer);
 
-[[nodiscard]] ava::core::VoidResult emit_tool_progress(ToolContext const& context, std::string text,
-                                                       std::string status = "running");
+[[nodiscard]] ava::core::VoidResult emit_tool_progress(ToolContext const& context, std::string text, std::string status = "running");
 
 }  // namespace ava::tools

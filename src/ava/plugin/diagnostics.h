@@ -8,27 +8,29 @@
 
 namespace ava::plugin {
 
-struct PluginFailure {
+struct PluginFailure
+{
   PluginScope scope = PluginScope::Project;
   std::filesystem::path path;
   std::string message;
   std::string details;
 };
 
-struct PluginStatus {
+struct PluginStatus
+{
   DiscoveredPlugin plugin;
   bool enabled = false;
 };
 
-struct PluginDiagnostics {
+struct PluginDiagnostics
+{
   PluginDiscoveryOptions discovery_options;
   std::filesystem::path enablement_file;
   std::vector<PluginStatus> plugins;
   std::vector<PluginFailure> failures;
 };
 
-[[nodiscard]] PluginDiagnostics collect_plugin_diagnostics(PluginDiscoveryOptions const& options,
-                                                           std::filesystem::path const& enablement_file,
+[[nodiscard]] PluginDiagnostics collect_plugin_diagnostics(PluginDiscoveryOptions const& options, std::filesystem::path const& enablement_file,
                                                            std::filesystem::path const& workspace_root);
 
 }  // namespace ava::plugin

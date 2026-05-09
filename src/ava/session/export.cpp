@@ -1,5 +1,4 @@
 #include "ava/session/export.h"
-
 #include "ava/core/json.h"
 
 #include <algorithm>
@@ -18,11 +17,15 @@ std::size_t longest_backtick_run(std::string_view text) noexcept
 {
   std::size_t longest = 0;
   std::size_t current = 0;
-  for (char const ch : text) {
-    if (ch == '`') {
+  for (char const ch : text)
+  {
+    if (ch == '`')
+    {
       ++current;
       longest = std::max(longest, current);
-    } else {
+    }
+    else
+    {
       current = 0;
     }
   }
@@ -39,13 +42,17 @@ std::string sanitize_fenced_content(std::string_view content)
   std::string sanitized;
   sanitized.reserve(content.size());
   constexpr char kHex[] = "0123456789ABCDEF";
-  for (char const ch : content) {
+  for (char const ch : content)
+  {
     auto const byte = static_cast<unsigned char>(ch);
-    if ((byte < 0x20 && ch != '\n' && ch != '\t') || byte == 0x7F) {
+    if ((byte < 0x20 && ch != '\n' && ch != '\t') || byte == 0x7F)
+    {
       sanitized += "\\u00";
       sanitized.push_back(kHex[(byte >> 4U) & 0x0FU]);
       sanitized.push_back(kHex[byte & 0x0FU]);
-    } else {
+    }
+    else
+    {
       sanitized.push_back(ch);
     }
   }
@@ -59,37 +66,39 @@ void append_heading(std::string& out, std::string_view heading)
   out += "\n\n";
 }
 
-void append_fenced_block(std::string& out, std::string_view label, std::string_view content,
-                         std::string_view language = "text")
+void append_fenced_block(std::string& out, std::string_view label, std::string_view content, std::string_view language = "text")
 {
   out += label;
   out += ":\n\n";
   auto const sanitized_content = sanitize_fenced_content(content);
   auto const fence = fence_for(sanitized_content);
   out += fence;
-  if (!language.empty()) out += language;
+  if (!language.empty())
+    out += language;
   out += '\n';
   out += sanitized_content;
-  if (!sanitized_content.empty() && sanitized_content.back() != '\n') out += '\n';
+  if (!sanitized_content.empty() && sanitized_content.back() != '\n')
+    out += '\n';
   out += fence;
   out += "\n\n";
 }
 
-void append_optional_fenced_block(std::string& out, std::string_view label, std::optional<std::string> const& content,
-                                  std::string_view language = "text")
+void append_optional_fenced_block(std::string& out, std::string_view label, std::optional<std::string> const& content, std::string_view language = "text")
 {
-  if (content && !content->empty()) append_fenced_block(out, label, *content, language);
+  if (content && !content->empty())
+    append_fenced_block(out, label, *content, language);
 }
 
 std::string metadata_json(SessionEntry const& entry)
 {
-  return "{\"id\":" + json_string(entry.id) + ",\"parent_id\":" + json_string(entry.parent_id) +
-         ",\"type\":" + json_string(to_string(entry.type)) + ",\"timestamp\":" + json_string(entry.timestamp) + "}";
+  return "{\"id\":" + json_string(entry.id) + ",\"parent_id\":" + json_string(entry.parent_id) + ",\"type\":" + json_string(to_string(entry.type)) +
+         ",\"timestamp\":" + json_string(entry.timestamp) + "}";
 }
 
 void append_metadata(std::string& out, SessionEntry const& entry, ExportOptions const& options)
 {
-  if (!options.include_metadata) return;
+  if (!options.include_metadata)
+    return;
   append_fenced_block(out, "Metadata", metadata_json(entry), "json");
 }
 
@@ -117,9 +126,12 @@ bool bool_field_is_true(SessionEntry const& entry, std::string_view key)
 std::string success_text(SessionEntry const& entry)
 {
   auto const start = ava::core::json::field_value_start(entry.data_json, "success");
-  if (!start) return "unknown";
-  if (entry.data_json.substr(*start, 4) == "true") return "true";
-  if (entry.data_json.substr(*start, 5) == "false") return "false";
+  if (!start)
+    return "unknown";
+  if (entry.data_json.substr(*start, 4) == "true")
+    return "true";
+  if (entry.data_json.substr(*start, 5) == "false")
+    return "false";
   return "unknown";
 }
 
@@ -185,7 +197,8 @@ void append_reasoning_block(std::string& out, SessionEntry const& entry, ExportO
   bool const redacted = bool_field_is_true(entry, "redacted");
   append_fenced_block(out, "Redacted", redacted ? "true" : "false");
   append_fenced_block(out, "Signature present", string_field(entry, "signature").has_value() ? "true" : "false");
-  if (!redacted) append_optional_fenced_block(out, "Text", string_field(entry, "text"));
+  if (!redacted)
+    append_optional_fenced_block(out, "Text", string_field(entry, "text"));
 }
 
 void append_reasoning_change(std::string& out, SessionEntry const& entry, ExportOptions const& options)
@@ -196,7 +209,8 @@ void append_reasoning_change(std::string& out, SessionEntry const& entry, Export
   append_optional_fenced_block(out, "Model", string_field(entry, "model"));
   append_optional_fenced_block(out, "Format", string_field(entry, "format"));
   append_optional_fenced_block(out, "Level", string_field(entry, "level"));
-  if (auto const budget_tokens = integer_field(entry, "budget_tokens")) {
+  if (auto const budget_tokens = integer_field(entry, "budget_tokens"))
+  {
     append_fenced_block(out, "Budget tokens", std::to_string(*budget_tokens));
   }
   append_optional_fenced_block(out, "Display", string_field(entry, "display"));
@@ -213,23 +227,23 @@ void append_session_start(std::string& out, SessionEntry const& entry, ExportOpt
 
 void append_compaction_number(std::string& out, SessionEntry const& entry, std::string_view label, std::string_view key)
 {
-  if (auto const value = integer_field(entry, key)) append_fenced_block(out, label, std::to_string(*value));
+  if (auto const value = integer_field(entry, key))
+    append_fenced_block(out, label, std::to_string(*value));
 }
 
 void append_compaction(std::string& out, SessionEntry const& entry, ExportOptions const& options)
 {
   append_heading(out, "Compaction");
   append_metadata(out, entry, options);
-  auto const summary =
-      string_field(entry, "summary").value_or("Prior context was compacted, but the summary is unavailable.");
+  auto const summary = string_field(entry, "summary").value_or("Prior context was compacted, but the summary is unavailable.");
   append_fenced_block(out, "Summary", summary);
   append_optional_fenced_block(out, "Carry-forward instructions", string_field(entry, "instructions"));
-  if (options.include_metadata) {
+  if (options.include_metadata)
+  {
     append_optional_fenced_block(out, "Trigger", string_field(entry, "trigger"));
     append_optional_fenced_block(out, "Status", string_field(entry, "status"));
     append_optional_fenced_block(out, "Model", string_field(entry, "model"));
-    append_fenced_block(out, "Summary unavailable",
-                        bool_field_is_true(entry, "summary_unavailable") ? "true" : "false");
+    append_fenced_block(out, "Summary unavailable", bool_field_is_true(entry, "summary_unavailable") ? "true" : "false");
     append_compaction_number(out, entry, "Estimated tokens", "estimated_tokens");
     append_compaction_number(out, entry, "Threshold tokens", "threshold_tokens");
     append_compaction_number(out, entry, "Keep recent tokens", "keep_recent_tokens");
@@ -266,9 +280,12 @@ std::string format_session_markdown(std::vector<SessionEntry> const& entries, Ex
 {
   std::string out = "# AVA Session Export\n\n";
 
-  for (auto const& entry : entries) {
-    if (is_internal_replay_user_message(entry)) continue;
-    switch (entry.type) {
+  for (auto const& entry : entries)
+  {
+    if (is_internal_replay_user_message(entry))
+      continue;
+    switch (entry.type)
+    {
       case EntryType::SessionStart:
         append_session_start(out, entry, options);
         break;
@@ -279,10 +296,12 @@ std::string format_session_markdown(std::vector<SessionEntry> const& entries, Ex
         append_assistant_message(out, entry, options);
         break;
       case EntryType::ToolCall:
-        if (options.include_tool_details) append_tool_call(out, entry, options);
+        if (options.include_tool_details)
+          append_tool_call(out, entry, options);
         break;
       case EntryType::ToolResult:
-        if (options.include_tool_details) append_tool_result(out, entry, options);
+        if (options.include_tool_details)
+          append_tool_result(out, entry, options);
         break;
       case EntryType::PermissionDecision:
         append_permission_decision(out, entry, options);
@@ -300,7 +319,8 @@ std::string format_session_markdown(std::vector<SessionEntry> const& entries, Ex
         append_reasoning_change(out, entry, options);
         break;
       case EntryType::Compaction:
-        if (options.include_compactions) append_compaction(out, entry, options);
+        if (options.include_compactions)
+          append_compaction(out, entry, options);
         break;
       case EntryType::Error:
         append_error(out, entry, options);

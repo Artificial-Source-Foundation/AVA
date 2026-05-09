@@ -11,13 +11,15 @@
 
 namespace ava::tui {
 
-enum class ToolTimelineStatus {
+enum class ToolTimelineStatus
+{
   Running,
   Success,
   Error,
 };
 
-enum class ToolLifecycleState {
+enum class ToolLifecycleState
+{
   ProviderAnnounced,
   ArgumentsStreaming,
   ArgumentsComplete,
@@ -27,7 +29,8 @@ enum class ToolLifecycleState {
   Error,
 };
 
-struct ToolTimelineItem {
+struct ToolTimelineItem
+{
   ToolTimelineStatus status = ToolTimelineStatus::Running;
   std::string name = {};
   std::string argument_summary = {};
@@ -60,7 +63,8 @@ struct ToolTimelineItem {
   bool spill_truncated = false;
 };
 
-struct TranscriptItem {
+struct TranscriptItem
+{
   std::string label = {};
   std::string text = {};
   Text text_model = {};
@@ -70,26 +74,30 @@ struct TranscriptItem {
   std::optional<ToolTimelineItem> tool = std::nullopt;
 };
 
-struct SidebarActivityItem {
+struct SidebarActivityItem
+{
   std::string id = {};
   std::string label = {};
   std::string detail = {};
   ToolTimelineStatus status = ToolTimelineStatus::Running;
 };
 
-struct SidebarModifiedFile {
+struct SidebarModifiedFile
+{
   std::string path = {};
   std::optional<int> added = std::nullopt;
   std::optional<int> removed = std::nullopt;
 };
 
-struct QueuedMessageItem {
+struct QueuedMessageItem
+{
   std::string id = {};
   std::string kind = {};
   std::string text = {};
 };
 
-struct SlashCommandArgumentCompletion {
+struct SlashCommandArgumentCompletion
+{
   std::string value = {};
   std::string description = {};
   std::string category = {};
@@ -100,7 +108,8 @@ struct SlashCommandArgumentCompletion {
   std::string disabled_reason = "";
 };
 
-struct SidebarSnapshot {
+struct SidebarSnapshot
+{
   std::vector<SidebarActivityItem> activity = {};
   std::vector<SidebarModifiedFile> modified_files = {};
   std::string session_id = {};
@@ -117,7 +126,8 @@ struct SidebarSnapshot {
   std::optional<std::size_t> session_entry_count = std::nullopt;
 };
 
-struct SlashCommandItem {
+struct SlashCommandItem
+{
   std::string command;
   std::string description;
   std::string hint = "";
@@ -131,24 +141,28 @@ struct SlashCommandItem {
   std::string completion_insert_text = "";
 };
 
-enum class PermissionPromptChoice {
+enum class PermissionPromptChoice
+{
   Deny,
   Allow,
 };
 
-enum class PermissionPromptInputAction {
+enum class PermissionPromptInputAction
+{
   None,
   Redraw,
   ResolveAllow,
   ResolveDeny,
 };
 
-struct PermissionPromptInputResult {
+struct PermissionPromptInputResult
+{
   PermissionPromptChoice selected_choice = PermissionPromptChoice::Deny;
   PermissionPromptInputAction action = PermissionPromptInputAction::None;
 };
 
-struct PermissionPromptView {
+struct PermissionPromptView
+{
   std::string tool_name;
   std::string operation;
   std::string target;
@@ -159,13 +173,15 @@ struct PermissionPromptView {
   PermissionPromptChoice selected_choice = PermissionPromptChoice::Deny;
 };
 
-struct QuestionPromptOptionView {
+struct QuestionPromptOptionView
+{
   std::string value;
   std::string label;
   bool selected = false;
 };
 
-enum class QuestionPromptInputAction {
+enum class QuestionPromptInputAction
+{
   None,
   Redraw,
   Copy,
@@ -173,7 +189,8 @@ enum class QuestionPromptInputAction {
   Cancel,
 };
 
-struct QuestionPromptInputResult {
+struct QuestionPromptInputResult
+{
   std::size_t selected_option_index = 0;
   std::vector<QuestionPromptOptionView> options;
   std::string custom_text;
@@ -181,7 +198,8 @@ struct QuestionPromptInputResult {
   QuestionPromptInputAction action = QuestionPromptInputAction::None;
 };
 
-struct QuestionPromptView {
+struct QuestionPromptView
+{
   std::string header;
   std::string question;
   std::vector<QuestionPromptOptionView> options;
@@ -194,7 +212,8 @@ struct QuestionPromptView {
   std::string custom_text;
 };
 
-struct SelectListItemView {
+struct SelectListItemView
+{
   std::string value;
   std::string label;
   std::string description;
@@ -206,20 +225,23 @@ struct SelectListItemView {
   std::string disabled_reason;
 };
 
-enum class SelectListInputAction {
+enum class SelectListInputAction
+{
   None,
   Redraw,
   Resolve,
   Cancel,
 };
 
-struct SelectListInputResult {
+struct SelectListInputResult
+{
   std::size_t selected_item_index = 0;
   std::string query;
   SelectListInputAction action = SelectListInputAction::None;
 };
 
-struct SelectListView {
+struct SelectListView
+{
   std::string title;
   std::string subtitle;
   std::vector<SelectListItemView> items;
@@ -230,7 +252,8 @@ struct SelectListView {
   std::string footer_hint;
 };
 
-struct ComposerSnapshot {
+struct ComposerSnapshot
+{
   std::string mode;
   std::string provider;
   std::string model;
@@ -259,34 +282,22 @@ struct ComposerSnapshot {
   bool thinking_visible = true;
 };
 
-[[nodiscard]] std::vector<SlashCommandItem> filter_slash_commands(std::string_view input,
-                                                                  std::vector<SlashCommandItem> const& commands);
+[[nodiscard]] std::vector<SlashCommandItem> filter_slash_commands(std::string_view input, std::vector<SlashCommandItem> const& commands);
 [[nodiscard]] bool slash_palette_visible(std::string_view input, std::vector<SlashCommandItem> const& commands);
-[[nodiscard]] std::size_t clamp_slash_palette_selection(std::string_view input,
-                                                        std::vector<SlashCommandItem> const& commands,
-                                                        std::size_t selected_index);
-[[nodiscard]] std::size_t previous_slash_palette_selection(std::string_view input,
-                                                           std::vector<SlashCommandItem> const& commands,
-                                                           std::size_t selected_index);
-[[nodiscard]] std::size_t next_slash_palette_selection(std::string_view input,
-                                                       std::vector<SlashCommandItem> const& commands,
-                                                       std::size_t selected_index);
-[[nodiscard]] std::string slash_command_selection_text(std::string_view input,
-                                                       std::vector<SlashCommandItem> const& commands,
-                                                       std::size_t selected_index);
-[[nodiscard]] std::optional<std::string> slash_command_selection_disabled_reason(
-    std::string_view input, std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
-[[nodiscard]] std::optional<std::size_t> slash_palette_selection_for_screen_row(ComposerSnapshot const& snapshot,
-                                                                                std::size_t row);
+[[nodiscard]] std::size_t clamp_slash_palette_selection(std::string_view input, std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
+[[nodiscard]] std::size_t previous_slash_palette_selection(std::string_view input, std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
+[[nodiscard]] std::size_t next_slash_palette_selection(std::string_view input, std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
+[[nodiscard]] std::string slash_command_selection_text(std::string_view input, std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
+[[nodiscard]] std::optional<std::string> slash_command_selection_disabled_reason(std::string_view input, std::vector<SlashCommandItem> const& commands,
+                                                                                 std::size_t selected_index);
+[[nodiscard]] std::optional<std::size_t> slash_palette_selection_for_screen_row(ComposerSnapshot const& snapshot, std::size_t row);
 [[nodiscard]] std::vector<std::string> render_composer(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::size_t composer_main_width(ComposerSnapshot const& snapshot);
 [[nodiscard]] bool draw_screen(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::string sanitize_terminal_text(std::string_view text);
 [[nodiscard]] std::vector<std::string> split_lines(std::string_view text);
-[[nodiscard]] PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice,
-                                                                         InputEvent event);
-[[nodiscard]] QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const& prompt,
-                                                                     InputEvent event);
+[[nodiscard]] PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event);
+[[nodiscard]] QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const& prompt, InputEvent event);
 [[nodiscard]] std::vector<std::size_t> filter_select_list_items(SelectListView const& view);
 [[nodiscard]] std::size_t clamp_select_list_selection(SelectListView const& view, std::size_t selected_index);
 [[nodiscard]] std::size_t previous_select_list_selection(SelectListView const& view, std::size_t selected_index);

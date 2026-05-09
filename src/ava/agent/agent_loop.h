@@ -3,15 +3,10 @@
 #include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/question.h"
-
 #include "ava/config/model_config.h"
-
 #include "ava/session/session_store.h"
-
 #include "ava/permissions/permission.h"
-
 #include "ava/provider/provider.h"
-
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -24,13 +19,15 @@
 
 namespace ava::agent {
 
-enum class ToolTimelineStatus {
+enum class ToolTimelineStatus
+{
   Running,
   Success,
   Error,
 };
 
-struct ToolTimelineEntry {
+struct ToolTimelineEntry
+{
   ToolTimelineStatus status = ToolTimelineStatus::Running;
   std::string call_id = {};
   std::string name = {};
@@ -66,7 +63,8 @@ struct ToolTimelineEntry {
   bool spill_truncated = false;
 };
 
-struct ToolProgressEntry {
+struct ToolProgressEntry
+{
   std::string call_id = {};
   std::string name = {};
   std::string text = {};
@@ -75,7 +73,8 @@ struct ToolProgressEntry {
 
 [[nodiscard]] std::string to_string(ToolTimelineStatus status);
 
-struct AgentLoopOptions {
+struct AgentLoopOptions
+{
   std::filesystem::path workspace_dir;
   Mode mode = Mode::Build;
   std::string provider_id = "openai";
@@ -102,14 +101,14 @@ struct AgentLoopOptions {
   QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
-  std::function<ava::core::Result<bool>(ava::session::SessionStore&, std::string_view,
-                                        std::vector<std::string> const& replayed_user_messages)>
+  std::function<ava::core::Result<bool>(ava::session::SessionStore&, std::string_view, std::vector<std::string> const& replayed_user_messages)>
       compact_context = nullptr;
   std::mutex* session_mutex = nullptr;
   std::optional<ava::config::ModelPricing> model_pricing = std::nullopt;
 };
 
-struct AgentLoopResult {
+struct AgentLoopResult
+{
   std::string final_text;
   std::optional<ava::provider::TokenUsage> usage = std::nullopt;
   std::optional<long double> cost_usd = std::nullopt;
@@ -122,14 +121,13 @@ struct AgentLoopResult {
   std::vector<ToolTimelineEntry> tool_timeline;
 };
 
-class AgentLoop {
+class AgentLoop
+{
  public:
   explicit AgentLoop(AgentLoopOptions options);
 
-  [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn(std::string const& user_message,
-                                                            ava::session::SessionStore& store,
-                                                            ava::provider::Provider const& provider,
-                                                            ava::provider::Transport& transport);
+  [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn(std::string const& user_message, ava::session::SessionStore& store,
+                                                            ava::provider::Provider const& provider, ava::provider::Transport& transport);
 
  private:
   AgentLoopOptions options_;

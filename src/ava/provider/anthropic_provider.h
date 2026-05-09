@@ -9,13 +9,16 @@
 
 namespace ava::provider {
 
-class AnthropicStreamParser final : public StreamParser {
+class AnthropicStreamParser final : public StreamParser
+{
  public:
-  struct ToolBlock {
+  struct ToolBlock
+  {
     std::string id;
     std::string name;
   };
-  struct ReasoningBlock {
+  struct ReasoningBlock
+  {
     std::string signature;
     std::string redacted_data;
     bool redacted = false;
@@ -37,18 +40,16 @@ class AnthropicStreamParser final : public StreamParser {
   bool error_seen_ = false;
 };
 
-class AnthropicProvider final : public Provider {
+class AnthropicProvider final : public Provider
+{
  public:
   using Provider::build_request;
 
   explicit AnthropicProvider(std::string base_url = "");
-  [[nodiscard]] ava::core::Result<HttpRequest> build_request(ProviderRequest const& request,
-                                                             std::string_view access_token) const override;
-  [[nodiscard]] ava::core::VoidResult apply_auth_options(HttpRequest& request,
-                                                         ProviderAuthContext const& auth) const override;
+  [[nodiscard]] ava::core::Result<HttpRequest> build_request(ProviderRequest const& request, std::string_view access_token) const override;
+  [[nodiscard]] ava::core::VoidResult apply_auth_options(HttpRequest& request, ProviderAuthContext const& auth) const override;
   [[nodiscard]] std::unique_ptr<StreamParser> create_stream_parser() const override;
-  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_response(HttpResponse const& response,
-                                                                           bool stream) const override;
+  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_response(HttpResponse const& response, bool stream) const override;
 
  private:
   std::string base_url_;

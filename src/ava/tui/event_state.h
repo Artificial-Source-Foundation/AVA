@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/app/events.h"
-
 #include "ava/tui/composer.h"
 
 #include <cstddef>
@@ -11,7 +10,8 @@
 
 namespace ava::tui {
 
-enum class TuiEventRunStatus {
+enum class TuiEventRunStatus
+{
   Idle,
   Running,
   Completed,
@@ -20,14 +20,16 @@ enum class TuiEventRunStatus {
   Done,
 };
 
-struct PendingToolItem {
+struct PendingToolItem
+{
   std::string call_id;
   std::string request_id;
   std::string correlation_id;
   ToolTimelineItem item;
 };
 
-struct TuiEventState {
+struct TuiEventState
+{
   // Completed transcript, pending assistant/reasoning/tool state, prompt audit activity, and
   // sidebar/status data are intentionally separate so live runs and replayed event streams settle
   // into the same visible story without mutating completed transcript history.

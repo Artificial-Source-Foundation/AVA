@@ -3,12 +3,9 @@
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/runtime.h"
-
 #include "ava/agent/mode.h"
 #include "ava/agent/question.h"
-
 #include "ava/permissions/permission.h"
-
 #include "ava/core/result.h"
 
 #include <condition_variable>
@@ -23,7 +20,8 @@
 
 namespace ava::app::rpc {
 
-struct PendingPermissionRequest {
+struct PendingPermissionRequest
+{
   bool resolved = false;
   std::string correlation_id;
   std::string permission_request_id;
@@ -38,7 +36,8 @@ struct PendingPermissionRequest {
   std::optional<ava::core::Error> error;
 };
 
-struct PermissionSessionGrant {
+struct PermissionSessionGrant
+{
   std::string grant_id;
   std::string permission_request_id;
   ava::permissions::Operation operation = ava::permissions::Operation::ReadFile;
@@ -50,7 +49,8 @@ struct PermissionSessionGrant {
   ava::permissions::PermissionRisk risk = ava::permissions::PermissionRisk::Low;
 };
 
-struct PendingQuestionRequest {
+struct PendingQuestionRequest
+{
   bool resolved = false;
   std::string correlation_id;
   bool multiple = false;
@@ -60,7 +60,8 @@ struct PendingQuestionRequest {
   std::optional<ava::core::Error> error;
 };
 
-struct PendingResolverState {
+struct PendingResolverState
+{
   std::mutex mutex;
   std::condition_variable cv;
   std::map<std::string, std::shared_ptr<PendingPermissionRequest>> permission_requests;
@@ -70,26 +71,20 @@ struct PendingResolverState {
 
 [[nodiscard]] bool cancel_pending_resolvers(PendingResolverState& pending_state);
 [[nodiscard]] std::string permission_session_grants_result_json(PendingResolverState& pending_state);
-[[nodiscard]] ava::core::Result<std::string> permission_session_grant_revoke_result_json(
-    PendingResolverState& pending_state, std::string_view grant_id);
+[[nodiscard]] ava::core::Result<std::string> permission_session_grant_revoke_result_json(PendingResolverState& pending_state, std::string_view grant_id);
 [[nodiscard]] std::string permission_session_grants_clear_result_json(PendingResolverState& pending_state);
 
-[[nodiscard]] ava::permissions::PermissionResolver make_rpc_permission_resolver(
-    PendingResolverState& pending_state, RpcOutput& output, RpcRunState& run_state, RuntimeSession const& session,
-    std::mutex& session_mutex, ava::permissions::PermissionResolver policy_resolver, std::string prompt_request_id);
-[[nodiscard]] ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pending_state,
-                                                                      RpcOutput& output, RpcRunState& run_state,
-                                                                      RuntimeSession const& session,
-                                                                      std::mutex& session_mutex,
-                                                                      std::string prompt_request_id);
+[[nodiscard]] ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolverState& pending_state, RpcOutput& output, RpcRunState& run_state,
+                                                                                RuntimeSession const& session, std::mutex& session_mutex,
+                                                                                ava::permissions::PermissionResolver policy_resolver,
+                                                                                std::string prompt_request_id);
+[[nodiscard]] ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pending_state, RpcOutput& output, RpcRunState& run_state,
+                                                                      RuntimeSession const& session, std::mutex& session_mutex, std::string prompt_request_id);
 
-[[nodiscard]] ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_state,
-                                                             std::string_view request_id,
-                                                             std::string_view correlation_id, std::string_view decision,
-                                                             std::optional<std::string> const& reason = std::nullopt);
-[[nodiscard]] ava::core::VoidResult resolve_question_reply(
-    PendingResolverState& pending_state, std::string_view request_id, std::string_view correlation_id,
-    std::optional<std::string> const& answer, std::optional<std::string> const& selected,
-    std::optional<std::vector<std::string>> const& selected_options = std::nullopt);
+[[nodiscard]] ava::core::VoidResult resolve_permission_reply(PendingResolverState& pending_state, std::string_view request_id, std::string_view correlation_id,
+                                                             std::string_view decision, std::optional<std::string> const& reason = std::nullopt);
+[[nodiscard]] ava::core::VoidResult resolve_question_reply(PendingResolverState& pending_state, std::string_view request_id, std::string_view correlation_id,
+                                                           std::optional<std::string> const& answer, std::optional<std::string> const& selected,
+                                                           std::optional<std::vector<std::string>> const& selected_options = std::nullopt);
 
 }  // namespace ava::app::rpc

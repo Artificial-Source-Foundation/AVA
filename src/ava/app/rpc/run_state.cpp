@@ -1,6 +1,5 @@
-#include "ava/app/rpc/run_state.h"
-
 #include "ava/app/rpc/protocol.h"
+#include "ava/app/rpc/run_state.h"
 
 #include <utility>
 
@@ -41,12 +40,14 @@ ClearedRpcQueues clear_queued_messages_locked(RpcRunState& state)
 {
   ClearedRpcQueues cleared;
   cleared.steering_messages.reserve(state.steering_messages.size());
-  while (!state.steering_messages.empty()) {
+  while (!state.steering_messages.empty())
+  {
     cleared.steering_messages.push_back(std::move(state.steering_messages.front()));
     state.steering_messages.pop_front();
   }
   cleared.follow_up_messages.reserve(state.follow_up_messages.size());
-  while (!state.follow_up_messages.empty()) {
+  while (!state.follow_up_messages.empty())
+  {
     cleared.follow_up_messages.push_back(std::move(state.follow_up_messages.front()));
     state.follow_up_messages.pop_front();
   }
@@ -106,22 +107,24 @@ void set_active_request_id(RpcRunState& state, std::string request_id)
   state.active_request_id = std::move(request_id);
 }
 
-ava::core::Result<QueuedRpcMessage> queue_rpc_message(std::deque<QueuedRpcMessage>& queue, RpcRunState& state,
-                                                      std::string command_type, std::string request_id,
+ava::core::Result<QueuedRpcMessage> queue_rpc_message(std::deque<QueuedRpcMessage>& queue, RpcRunState& state, std::string command_type, std::string request_id,
                                                       std::string message)
 {
   std::lock_guard lock(state.mutex);
-  if (state.input_closed) return std::unexpected(input_closed_error(command_type));
-  if (state.cancel_requested.load(std::memory_order_relaxed)) return std::unexpected(canceled_error());
-  if (!state.active_run || state.active_request_id.empty()) {
+  if (state.input_closed)
+    return std::unexpected(input_closed_error(command_type));
+  if (state.cancel_requested.load(std::memory_order_relaxed))
+    return std::unexpected(canceled_error());
+  if (!state.active_run || state.active_request_id.empty())
+  {
     return std::unexpected(requires_active_prompt_error(command_type));
   }
   if (queue.size() >= kMaxRpcQueuedMessages || message.size() > kMaxRpcQueuedMessageBytes ||
-      queued_message_bytes(queue) + message.size() > kMaxRpcQueuedMessageBytes) {
+      queued_message_bytes(queue) + message.size() > kMaxRpcQueuedMessageBytes)
+  {
     return std::unexpected(queue_limit_error(command_type));
   }
-  QueuedRpcMessage queued{
-      .request_id = std::move(request_id), .correlation_id = state.active_request_id, .message = std::move(message)};
+  QueuedRpcMessage queued{.request_id = std::move(request_id), .correlation_id = state.active_request_id, .message = std::move(message)};
   queue.push_back(queued);
   return queued;
 }
@@ -131,10 +134,14 @@ std::vector<QueuedRpcMessage> take_queued_steering_messages(RpcRunState& state, 
   std::lock_guard lock(state.mutex);
   std::vector<QueuedRpcMessage> queued;
   std::deque<QueuedRpcMessage> remaining;
-  while (!state.steering_messages.empty()) {
-    if (state.steering_messages.front().correlation_id == correlation_id) {
+  while (!state.steering_messages.empty())
+  {
+    if (state.steering_messages.front().correlation_id == correlation_id)
+    {
       queued.push_back(std::move(state.steering_messages.front()));
-    } else {
+    }
+    else
+    {
       remaining.push_back(std::move(state.steering_messages.front()));
     }
     state.steering_messages.pop_front();
@@ -146,8 +153,10 @@ std::vector<QueuedRpcMessage> take_queued_steering_messages(RpcRunState& state, 
 std::optional<QueuedRpcMessage> take_next_follow_up_message(RpcRunState& state)
 {
   std::lock_guard lock(state.mutex);
-  if (state.cancel_requested.load(std::memory_order_relaxed) || state.input_closed) return std::nullopt;
-  if (state.follow_up_messages.empty()) return std::nullopt;
+  if (state.cancel_requested.load(std::memory_order_relaxed) || state.input_closed)
+    return std::nullopt;
+  if (state.follow_up_messages.empty())
+    return std::nullopt;
   auto queued = std::move(state.follow_up_messages.front());
   state.follow_up_messages.pop_front();
   return queued;
@@ -158,7 +167,8 @@ std::vector<QueuedRpcMessage> clear_queued_steering_messages(RpcRunState& state)
   std::lock_guard lock(state.mutex);
   std::vector<QueuedRpcMessage> cleared;
   cleared.reserve(state.steering_messages.size());
-  while (!state.steering_messages.empty()) {
+  while (!state.steering_messages.empty())
+  {
     cleared.push_back(std::move(state.steering_messages.front()));
     state.steering_messages.pop_front();
   }
@@ -184,7 +194,8 @@ ClearedRpcQueues close_input_and_cancel(RpcRunState& state)
 void record_async_error(RpcRunState& state, ava::core::Error error)
 {
   std::lock_guard lock(state.mutex);
-  if (!state.async_error) state.async_error = std::move(error);
+  if (!state.async_error)
+    state.async_error = std::move(error);
 }
 
 std::optional<ava::core::Error> take_async_error(RpcRunState& state)

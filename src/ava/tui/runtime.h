@@ -1,14 +1,10 @@
 #pragma once
 
 #include "ava/app/events.h"
-
 #include "ava/agent/question.h"
-
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
-
 #include "ava/permissions/permission.h"
-
 #include "ava/core/result.h"
 #include "ava/core/version.h"
 
@@ -20,23 +16,27 @@
 
 namespace ava::tui {
 
-struct TuiSubmitResult {
+struct TuiSubmitResult
+{
   bool quit = false;
   std::vector<std::string> output;
   std::vector<ToolTimelineItem> tool_timeline;
 };
 
-struct TuiQueuedFollowUp {
+struct TuiQueuedFollowUp
+{
   std::string request_id;
   std::string message;
 };
 
-struct TuiRestoredQueuedMessage {
+struct TuiRestoredQueuedMessage
+{
   std::string message;
   bool steering = false;
 };
 
-struct TuiActiveRunQueues {
+struct TuiActiveRunQueues
+{
   std::string active_request_id;
   std::function<ava::core::VoidResult(std::string)> queue_steering;
   std::function<ava::core::VoidResult(std::string)> queue_follow_up;
@@ -48,7 +48,8 @@ struct TuiActiveRunQueues {
   std::function<ava::core::VoidResult(bool)> finish;
 };
 
-struct TuiRuntimeStateSnapshot {
+struct TuiRuntimeStateSnapshot
+{
   std::string mode;
   std::string provider;
   std::string model;
@@ -61,7 +62,8 @@ struct TuiRuntimeStateSnapshot {
   std::vector<SlashCommandItem> slash_commands = {};
 };
 
-struct TuiSubmitContext {
+struct TuiSubmitContext
+{
   ava::permissions::PermissionResolver permission_resolver;
   ava::agent::QuestionResolver question_resolver;
   ava::app::RuntimeEventSink event_sink;
@@ -72,7 +74,8 @@ struct TuiSubmitContext {
   std::function<ava::core::VoidResult(TuiQueuedFollowUp const&)> mark_follow_up_started;
 };
 
-struct TuiRuntimeOptions {
+struct TuiRuntimeOptions
+{
   std::string mode;
   std::string provider;
   std::string model;
@@ -101,7 +104,6 @@ struct TuiRuntimeOptions {
 [[nodiscard]] int run_interactive_composer(TuiRuntimeOptions options);
 [[nodiscard]] SelectListView hotkeys_select_list_view(TuiKeyBindings const& bindings, std::string footer_hint = {});
 [[nodiscard]] SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, std::string footer_hint = {});
-[[nodiscard]] ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_prompt_view(
-    QuestionPromptView const& prompt);
+[[nodiscard]] ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_prompt_view(QuestionPromptView const& prompt);
 
 }  // namespace ava::tui

@@ -13,9 +13,11 @@ namespace ava::tools {
 [[nodiscard]] bool is_git_dir(std::filesystem::path const& path);
 [[nodiscard]] bool is_generated_dir(std::filesystem::path const& path);
 
-class IgnoreMatcher {
+class IgnoreMatcher
+{
  private:
-  struct Rule {
+  struct Rule
+  {
     std::string base_relative;
     std::string pattern;
     std::regex matcher;

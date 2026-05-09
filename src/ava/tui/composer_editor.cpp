@@ -1,5 +1,4 @@
 #include "ava/tui/composer_editor.h"
-
 #include "ava/tui/composer_internal.h"
 
 #include <algorithm>
@@ -14,7 +13,8 @@ constexpr std::size_t kMaxKillRingItems = 16;
 
 bool is_ascii_space_at(std::string_view text, std::size_t cursor)
 {
-  if (cursor >= text.size()) return false;
+  if (cursor >= text.size())
+    return false;
   auto const byte = static_cast<unsigned char>(text[cursor]);
   return (byte & 0x80U) == 0 && std::isspace(byte) != 0;
 }
@@ -22,44 +22,55 @@ bool is_ascii_space_at(std::string_view text, std::size_t cursor)
 std::size_t previous_input_cursor(std::string_view text, std::size_t cursor)
 {
   cursor = clamp_composer_draft_cursor(text, cursor);
-  if (cursor == 0) return 0;
-  if (!detail::is_utf8_continuation(static_cast<unsigned char>(text[cursor - 1]))) return cursor - 1;
+  if (cursor == 0)
+    return 0;
+  if (!detail::is_utf8_continuation(static_cast<unsigned char>(text[cursor - 1])))
+    return cursor - 1;
 
   auto start = cursor;
-  while (start > 0 && detail::is_utf8_continuation(static_cast<unsigned char>(text[start - 1]))) {
+  while (start > 0 && detail::is_utf8_continuation(static_cast<unsigned char>(text[start - 1])))
+  {
     --start;
   }
-  if (start == 0) return cursor - 1;
+  if (start == 0)
+    return cursor - 1;
 
   auto const starter = start - 1;
   auto const expected_length = detail::utf8_sequence_length(static_cast<unsigned char>(text[starter]));
   auto const actual_length = cursor - starter;
-  if (expected_length > 1 && expected_length == actual_length) return starter;
+  if (expected_length > 1 && expected_length == actual_length)
+    return starter;
   return cursor - 1;
 }
 
 std::size_t next_input_cursor(std::string_view text, std::size_t cursor)
 {
   cursor = clamp_composer_draft_cursor(text, cursor);
-  if (cursor >= text.size()) return text.size();
+  if (cursor >= text.size())
+    return text.size();
 
   auto const length = detail::utf8_sequence_length(static_cast<unsigned char>(text[cursor]));
   char32_t codepoint = 0;
-  if (length > 1 && detail::decode_utf8_codepoint(text, cursor, length, codepoint)) return cursor + length;
+  if (length > 1 && detail::decode_utf8_codepoint(text, cursor, length, codepoint))
+    return cursor + length;
   return cursor + 1;
 }
 
 std::size_t previous_word_cursor(std::string_view text, std::size_t cursor)
 {
   cursor = clamp_composer_draft_cursor(text, cursor);
-  while (cursor > 0) {
+  while (cursor > 0)
+  {
     auto const previous = previous_input_cursor(text, cursor);
-    if (!is_ascii_space_at(text, previous)) break;
+    if (!is_ascii_space_at(text, previous))
+      break;
     cursor = previous;
   }
-  while (cursor > 0) {
+  while (cursor > 0)
+  {
     auto const previous = previous_input_cursor(text, cursor);
-    if (is_ascii_space_at(text, previous)) break;
+    if (is_ascii_space_at(text, previous))
+      break;
     cursor = previous;
   }
   return cursor;
@@ -68,10 +79,12 @@ std::size_t previous_word_cursor(std::string_view text, std::size_t cursor)
 std::size_t next_word_cursor(std::string_view text, std::size_t cursor)
 {
   cursor = clamp_composer_draft_cursor(text, cursor);
-  while (cursor < text.size() && !is_ascii_space_at(text, cursor)) {
+  while (cursor < text.size() && !is_ascii_space_at(text, cursor))
+  {
     cursor = next_input_cursor(text, cursor);
   }
-  while (cursor < text.size() && is_ascii_space_at(text, cursor)) {
+  while (cursor < text.size() && is_ascii_space_at(text, cursor))
+  {
     cursor = next_input_cursor(text, cursor);
   }
   return cursor;
@@ -80,7 +93,8 @@ std::size_t next_word_cursor(std::string_view text, std::size_t cursor)
 std::size_t line_start_cursor(std::string_view text, std::size_t cursor)
 {
   cursor = clamp_composer_draft_cursor(text, cursor);
-  if (cursor == 0) return 0;
+  if (cursor == 0)
+    return 0;
   auto const line_break = text.rfind('\n', cursor - 1);
   return line_break == std::string_view::npos ? std::size_t{0} : line_break + 1;
 }
@@ -107,9 +121,11 @@ ComposerDraftSnapshot current_snapshot(ComposerDraftState const& draft)
 
 void push_snapshot(std::vector<ComposerDraftSnapshot>& stack, ComposerDraftSnapshot snapshot)
 {
-  if (!stack.empty() && stack.back().text == snapshot.text && stack.back().cursor == snapshot.cursor) return;
+  if (!stack.empty() && stack.back().text == snapshot.text && stack.back().cursor == snapshot.cursor)
+    return;
   stack.push_back(std::move(snapshot));
-  if (stack.size() > kMaxUndoItems) {
+  if (stack.size() > kMaxUndoItems)
+  {
     stack.erase(stack.begin(), stack.begin() + static_cast<std::ptrdiff_t>(stack.size() - kMaxUndoItems));
   }
 }
@@ -133,18 +149,22 @@ void record_undo(ComposerDraftState& draft)
 
 void remember_kill(ComposerDraftState& draft, std::string killed)
 {
-  if (killed.empty()) return;
+  if (killed.empty())
+    return;
   draft.kill_buffer = std::move(killed);
-  if (draft.kill_ring.empty() || draft.kill_ring.front() != draft.kill_buffer) {
+  if (draft.kill_ring.empty() || draft.kill_ring.front() != draft.kill_buffer)
+  {
     draft.kill_ring.insert(draft.kill_ring.begin(), draft.kill_buffer);
-    if (draft.kill_ring.size() > kMaxKillRingItems) draft.kill_ring.resize(kMaxKillRingItems);
+    if (draft.kill_ring.size() > kMaxKillRingItems)
+      draft.kill_ring.resize(kMaxKillRingItems);
   }
   clear_yank_tracking(draft);
 }
 
 void ensure_kill_ring(ComposerDraftState& draft)
 {
-  if (!draft.kill_ring.empty() || draft.kill_buffer.empty()) return;
+  if (!draft.kill_ring.empty() || draft.kill_buffer.empty())
+    return;
   draft.kill_ring.push_back(draft.kill_buffer);
 }
 
@@ -152,8 +172,10 @@ bool erase_range(ComposerDraftState& draft, std::size_t start, std::size_t end)
 {
   start = clamp_composer_draft_cursor(draft.text, start);
   end = clamp_composer_draft_cursor(draft.text, end);
-  if (end < start) std::swap(start, end);
-  if (start == end) return false;
+  if (end < start)
+    std::swap(start, end);
+  if (start == end)
+    return false;
   auto killed = draft.text.substr(start, end - start);
   record_undo(draft);
   remember_kill(draft, std::move(killed));
@@ -167,7 +189,8 @@ bool erase_range(ComposerDraftState& draft, std::size_t start, std::size_t end)
 std::size_t clamp_composer_draft_cursor(std::string_view text, std::size_t cursor)
 {
   cursor = std::min(cursor, text.size());
-  while (cursor > 0 && cursor < text.size() && detail::is_utf8_continuation(static_cast<unsigned char>(text[cursor]))) {
+  while (cursor > 0 && cursor < text.size() && detail::is_utf8_continuation(static_cast<unsigned char>(text[cursor])))
+  {
     --cursor;
   }
   return cursor;
@@ -185,7 +208,8 @@ void reset_composer_draft(ComposerDraftState& draft, std::string text, std::size
 bool replace_composer_draft(ComposerDraftState& draft, std::string text, std::size_t cursor)
 {
   auto const next_cursor = cursor == std::string::npos ? text.size() : clamp_composer_draft_cursor(text, cursor);
-  if (draft.text == text && clamp_composer_draft_cursor(draft.text, draft.cursor) == next_cursor) return false;
+  if (draft.text == text && clamp_composer_draft_cursor(draft.text, draft.cursor) == next_cursor)
+    return false;
   record_undo(draft);
   draft.text = std::move(text);
   draft.cursor = next_cursor;
@@ -194,7 +218,8 @@ bool replace_composer_draft(ComposerDraftState& draft, std::string text, std::si
 
 bool insert_composer_draft_text(ComposerDraftState& draft, std::string_view text)
 {
-  if (text.empty()) return false;
+  if (text.empty())
+    return false;
   record_undo(draft);
   draft.cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
   draft.text.insert(draft.cursor, text);
@@ -205,9 +230,11 @@ bool insert_composer_draft_text(ComposerDraftState& draft, std::string_view text
 bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
 {
   draft.cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
-  switch (action) {
+  switch (action)
+  {
     case TuiAction::ClearInput:
-      if (draft.text.empty()) return false;
+      if (draft.text.empty())
+        return false;
       {
         auto killed = draft.text;
         record_undo(draft);
@@ -249,7 +276,8 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
       draft.cursor = next_word_cursor(draft.text, draft.cursor);
       return true;
     case TuiAction::Undo: {
-      if (draft.undo_stack.empty()) return false;
+      if (draft.undo_stack.empty())
+        return false;
       push_redo(draft);
       auto previous = std::move(draft.undo_stack.back());
       draft.undo_stack.pop_back();
@@ -259,7 +287,8 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
       return true;
     }
     case TuiAction::Redo: {
-      if (draft.redo_stack.empty()) return false;
+      if (draft.redo_stack.empty())
+        return false;
       push_undo(draft);
       auto next = std::move(draft.redo_stack.back());
       draft.redo_stack.pop_back();
@@ -270,7 +299,8 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
     }
     case TuiAction::Yank: {
       ensure_kill_ring(draft);
-      if (draft.kill_ring.empty() || draft.kill_ring.front().empty()) return false;
+      if (draft.kill_ring.empty() || draft.kill_ring.front().empty())
+        return false;
       auto const yanked = draft.kill_ring.front();
       record_undo(draft);
       auto const start = draft.cursor;
@@ -284,9 +314,9 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
     }
     case TuiAction::YankPop: {
       ensure_kill_ring(draft);
-      if (draft.kill_ring.size() < 2 || draft.yank_start == std::string::npos || draft.yank_end == std::string::npos ||
-          draft.yank_start > draft.text.size() || draft.yank_end > draft.text.size() ||
-          draft.yank_start > draft.yank_end) {
+      if (draft.kill_ring.size() < 2 || draft.yank_start == std::string::npos || draft.yank_end == std::string::npos || draft.yank_start > draft.text.size() ||
+          draft.yank_end > draft.text.size() || draft.yank_start > draft.yank_end)
+      {
         return false;
       }
       auto const start = draft.yank_start;
@@ -328,14 +358,18 @@ std::string normalize_composer_paste_text(std::string_view text)
 {
   std::string output;
   output.reserve(text.size());
-  for (std::size_t index = 0; index < text.size(); ++index) {
+  for (std::size_t index = 0; index < text.size(); ++index)
+  {
     auto const byte = static_cast<unsigned char>(text[index]);
-    if (byte == '\r') {
-      if (index + 1 < text.size() && text[index + 1] == '\n') ++index;
+    if (byte == '\r')
+    {
+      if (index + 1 < text.size() && text[index + 1] == '\n')
+        ++index;
       output.push_back('\n');
       continue;
     }
-    if (byte == '\n' || byte == '\t' || byte >= 0x20) output.push_back(static_cast<char>(byte));
+    if (byte == '\n' || byte == '\t' || byte >= 0x20)
+      output.push_back(static_cast<char>(byte));
   }
   return output;
 }

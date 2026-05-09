@@ -1,8 +1,8 @@
+#include <cctype>
+#include <clocale>
+#include <cstring>
 #include <iostream>
 #include <sstream>
-#include <cctype>
-#include <cstring>
-#include <clocale>
 #include <curses.h>
 
 // Test resizing of terminal windows and being notified.
@@ -48,8 +48,7 @@ int main()
     addstr("Received: [");
     addstr(input_buf);
     addstr("]\n");
-  }
-  while (std::strcmp(input_buf, "quit") != 0);
+  } while (std::strcmp(input_buf, "quit") != 0);
 
   cbreak();
   noecho();
@@ -64,7 +63,7 @@ int main()
   // [...]
   // Except for the special case KEY_RESIZE, it is necessary to enable keypad for getch to return these codes.
 
-  //keypad(stdscr, TRUE);       // Not necessary for KEY_RESIZE.
+  // keypad(stdscr, TRUE);       // Not necessary for KEY_RESIZE.
 
   // In cbreak mode we receive one character at a time, including KEY_RESIZE.
   int ch = 0;
@@ -95,8 +94,7 @@ int main()
     refresh();
     // getch() is the same as wgetch(stdscr).
     ch = getch();
-  }
-  while (ch != 'q');
+  } while (ch != 'q');
   // Note that KEY_RESIZE is delivered despite the nocbreak() because it doesn't originate from the terminal.
 
   //---------------------------------------------------------------------------

@@ -1,11 +1,8 @@
 #pragma once
 
 #include "ava/app/runtime.h"
-
 #include "ava/mcp/stdio_client.h"
-
 #include "ava/permissions/permission.h"
-
 #include "ava/core/result.h"
 
 #include <filesystem>
@@ -17,7 +14,8 @@
 
 namespace ava::app {
 
-enum class UnifiedCommandSource {
+enum class UnifiedCommandSource
+{
   Builtin,
   PromptProject,
   PromptGlobal,
@@ -26,7 +24,8 @@ enum class UnifiedCommandSource {
   PluginCommand,
 };
 
-enum class UnifiedCommandKind {
+enum class UnifiedCommandKind
+{
   Backend,
   PromptTemplate,
   SkillPrompt,
@@ -34,7 +33,8 @@ enum class UnifiedCommandKind {
   PluginCommand,
 };
 
-struct CommandRegistryEntry {
+struct CommandRegistryEntry
+{
   std::string command = {};
   std::vector<std::string> aliases = {};
   std::string description = {};
@@ -56,7 +56,8 @@ struct CommandRegistryEntry {
   std::string plugin_command_name = {};
 };
 
-struct CommandRegistryDiagnostic {
+struct CommandRegistryDiagnostic
+{
   std::string command = {};
   std::string source = {};
   std::string source_id = {};
@@ -67,12 +68,14 @@ struct CommandRegistryDiagnostic {
   std::filesystem::path winner_path = {};
 };
 
-struct CommandRegistry {
+struct CommandRegistry
+{
   std::vector<CommandRegistryEntry> entries;
   std::vector<CommandRegistryDiagnostic> diagnostics;
 };
 
-struct CommandRegistryOptions {
+struct CommandRegistryOptions
+{
   bool include_builtins = true;
   bool include_prompt_commands = true;
   bool include_skills = true;
@@ -85,12 +88,9 @@ struct CommandRegistryOptions {
 [[nodiscard]] std::string to_string(UnifiedCommandSource source);
 [[nodiscard]] std::string to_string(UnifiedCommandKind kind);
 [[nodiscard]] CommandRegistry load_command_registry(RuntimeSession& session, CommandRegistryOptions options = {});
-[[nodiscard]] CommandRegistryEntry const* find_command_registry_entry(CommandRegistry const& registry,
-                                                                      std::string_view line) noexcept;
+[[nodiscard]] CommandRegistryEntry const* find_command_registry_entry(CommandRegistry const& registry, std::string_view line) noexcept;
 [[nodiscard]] bool command_registry_contains(RuntimeSession& session, std::string_view line);
-[[nodiscard]] ava::core::Result<std::string> expand_prompt_command_template(std::string_view template_text,
-                                                                            std::string_view argument_text);
-[[nodiscard]] ava::core::Result<std::string> mcp_prompt_arguments_json(CommandRegistryEntry const& entry,
-                                                                       std::string_view argument_text);
+[[nodiscard]] ava::core::Result<std::string> expand_prompt_command_template(std::string_view template_text, std::string_view argument_text);
+[[nodiscard]] ava::core::Result<std::string> mcp_prompt_arguments_json(CommandRegistryEntry const& entry, std::string_view argument_text);
 
 }  // namespace ava::app

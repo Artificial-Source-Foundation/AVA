@@ -1,6 +1,7 @@
 #include "terminal/Session.h"
-#include <iostream>
+
 #include <array>
+#include <iostream>
 #include <sstream>
 #include <curses.h>
 
@@ -10,7 +11,7 @@ int main()
 
   move(10, 0);
 
-  std::array<int, 7> color_pair_index = { 1, 2, 3, 4, 5, 6, 7 };
+  std::array<int, 7> color_pair_index = {1, 2, 3, 4, 5, 6, 7};
   init_extended_pair(color_pair_index[0], COLOR_RED, COLOR_BLACK);
   init_extended_pair(color_pair_index[1], COLOR_GREEN, COLOR_BLACK);
   init_extended_pair(color_pair_index[2], COLOR_YELLOW, COLOR_BLACK);

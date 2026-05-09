@@ -1,5 +1,4 @@
 #include "ava/app/events.h"
-
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
@@ -10,7 +9,8 @@ namespace {
 
 void append_string_field(std::string& out, std::string_view key, std::string_view value)
 {
-  if (value.empty()) return;
+  if (value.empty())
+    return;
   out += ",\"";
   out += key;
   out += "\":\"";
@@ -20,7 +20,8 @@ void append_string_field(std::string& out, std::string_view key, std::string_vie
 
 void append_number_field(std::string& out, std::string_view key, std::size_t value)
 {
-  if (value == 0) return;
+  if (value == 0)
+    return;
   out += ",\"";
   out += key;
   out += "\":";
@@ -29,7 +30,8 @@ void append_number_field(std::string& out, std::string_view key, std::size_t val
 
 void append_bool_field(std::string& out, std::string_view key, bool value)
 {
-  if (!value) return;
+  if (!value)
+    return;
   out += ",\"";
   out += key;
   out += "\":true";
@@ -46,12 +48,15 @@ void append_required_string_field(std::string& out, std::string_view key, std::s
 
 void append_string_array_field(std::string& out, std::string_view key, std::vector<std::string> const& values)
 {
-  if (values.empty()) return;
+  if (values.empty())
+    return;
   out += ",\"";
   out += key;
   out += "\":[";
-  for (std::size_t index = 0; index < values.size(); ++index) {
-    if (index > 0) out += ',';
+  for (std::size_t index = 0; index < values.size(); ++index)
+  {
+    if (index > 0)
+      out += ',';
     out += '"';
     out += ava::core::json::escape(values[index]);
     out += '"';
@@ -61,10 +66,12 @@ void append_string_array_field(std::string& out, std::string_view key, std::vect
 
 void append_json_object_field(std::string& out, std::string_view key, std::string_view value)
 {
-  if (value.empty()) return;
+  if (value.empty())
+    return;
   out += ",\"";
   out += key;
-  if (ava::core::json::is_valid_object(value)) {
+  if (ava::core::json::is_valid_object(value))
+  {
     out += "\":";
     out += value;
     return;
@@ -76,14 +83,17 @@ void append_json_object_field(std::string& out, std::string_view key, std::strin
 
 void append_optional_string_field(std::string& out, std::string_view key, std::optional<std::string> const& value)
 {
-  if (!value || value->empty()) return;
+  if (!value || value->empty())
+    return;
   append_required_string_field(out, key, *value);
 }
 
 void append_payload_string_field(std::string& out, bool& has_field, std::string_view key, std::string_view value)
 {
-  if (value.empty()) return;
-  if (has_field) out += ',';
+  if (value.empty())
+    return;
+  if (has_field)
+    out += ',';
   out += '"';
   out += key;
   out += "\":\"";
@@ -94,8 +104,10 @@ void append_payload_string_field(std::string& out, bool& has_field, std::string_
 
 void append_payload_number_field(std::string& out, bool& has_field, std::string_view key, std::size_t value)
 {
-  if (value == 0) return;
-  if (has_field) out += ',';
+  if (value == 0)
+    return;
+  if (has_field)
+    out += ',';
   out += '"';
   out += key;
   out += "\":";
@@ -105,8 +117,10 @@ void append_payload_number_field(std::string& out, bool& has_field, std::string_
 
 void append_payload_bool_field(std::string& out, bool& has_field, std::string_view key, bool value)
 {
-  if (!value) return;
-  if (has_field) out += ',';
+  if (!value)
+    return;
+  if (has_field)
+    out += ',';
   out += '"';
   out += key;
   out += "\":true";
@@ -115,14 +129,19 @@ void append_payload_bool_field(std::string& out, bool& has_field, std::string_vi
 
 void append_payload_json_object_field(std::string& out, bool& has_field, std::string_view key, std::string_view value)
 {
-  if (value.empty()) return;
-  if (has_field) out += ',';
+  if (value.empty())
+    return;
+  if (has_field)
+    out += ',';
   out += '"';
   out += key;
-  if (ava::core::json::is_valid_object(value)) {
+  if (ava::core::json::is_valid_object(value))
+  {
     out += "\":";
     out += value;
-  } else {
+  }
+  else
+  {
     out += "_json\":\"";
     out += ava::core::json::escape(value);
     out += '"';
@@ -130,16 +149,19 @@ void append_payload_json_object_field(std::string& out, bool& has_field, std::st
   has_field = true;
 }
 
-void append_payload_string_array_field(std::string& out, bool& has_field, std::string_view key,
-                                       std::vector<std::string> const& values)
+void append_payload_string_array_field(std::string& out, bool& has_field, std::string_view key, std::vector<std::string> const& values)
 {
-  if (values.empty()) return;
-  if (has_field) out += ',';
+  if (values.empty())
+    return;
+  if (has_field)
+    out += ',';
   out += '"';
   out += key;
   out += "\":[";
-  for (std::size_t index = 0; index < values.size(); ++index) {
-    if (index > 0) out += ',';
+  for (std::size_t index = 0; index < values.size(); ++index)
+  {
+    if (index > 0)
+      out += ',';
     out += '"';
     out += ava::core::json::escape(values[index]);
     out += '"';
@@ -152,7 +174,8 @@ std::string payload_json_for_runtime_event(RuntimeEvent const& event)
 {
   std::string out = "{";
   bool has_field = false;
-  if (event.type == RuntimeEventType::SessionStart) {
+  if (event.type == RuntimeEventType::SessionStart)
+  {
     append_payload_string_field(out, has_field, "mode", ava::agent::to_string(event.mode));
     append_payload_string_field(out, has_field, "provider", event.provider_id);
     append_payload_string_field(out, has_field, "model", event.model_id);
@@ -212,20 +235,21 @@ std::string payload_json_for_runtime_event(RuntimeEvent const& event)
 
 void append_payload_aliases(std::string& out, std::string_view payload_json)
 {
-  for (std::string_view key :
-       {"mode", "provider", "model", "text", "call_id", "tool", "status", "category", "error_code", "message",
-        "details", "content_type", "stop_reason", "trigger", "reason", "reasoning_format", "diff", "spill_path"}) {
-    if (auto value = ava::core::json::string_field(payload_json, key); value && !value->empty()) {
+  for (std::string_view key : {"mode", "provider", "model", "text", "call_id", "tool", "status", "category", "error_code", "message", "details", "content_type",
+                               "stop_reason", "trigger", "reason", "reasoning_format", "diff", "spill_path"})
+  {
+    if (auto value = ava::core::json::string_field(payload_json, key); value && !value->empty())
+    {
       append_required_string_field(out, key, *value);
     }
   }
-  for (std::string_view key :
-       {"provider_iterations", "tool_calls",       "attempt",          "max_attempts",  "delay_ms",
-        "remaining_ms",        "estimated_tokens", "threshold_tokens", "summary_bytes", "snapshot_entries",
-        "current_entries",     "output_bytes",     "total_bytes",      "output_lines",  "total_lines",
-        "start_line",          "end_line",         "next_offset_line", "omitted_bytes", "omitted_lines",
-        "visible_matches",     "total_matches"}) {
-    if (auto value = ava::core::json::integer_field(payload_json, key); value && *value > 0) {
+  for (std::string_view key : {"provider_iterations", "tool_calls",       "attempt",         "max_attempts",     "delay_ms",        "remaining_ms",
+                               "estimated_tokens",    "threshold_tokens", "summary_bytes",   "snapshot_entries", "current_entries", "output_bytes",
+                               "total_bytes",         "output_lines",     "total_lines",     "start_line",       "end_line",        "next_offset_line",
+                               "omitted_bytes",       "omitted_lines",    "visible_matches", "total_matches"})
+  {
+    if (auto value = ava::core::json::integer_field(payload_json, key); value && *value > 0)
+    {
       out += ",\"";
       out += key;
       out += "\":";
@@ -238,7 +262,8 @@ void append_payload_aliases(std::string& out, std::string_view payload_json)
 
 std::string to_string(RuntimeEventType type)
 {
-  switch (type) {
+  switch (type)
+  {
     case RuntimeEventType::SessionStart:
       return "session_start";
     case RuntimeEventType::UserMessage:
@@ -286,7 +311,8 @@ std::string serialize_event_json(RuntimeEvent const& event)
   std::string out = "{\"type\":\"" + to_string(event.type) + "\"";
   append_string_field(out, "timestamp", event.timestamp);
   append_string_field(out, "session_id", event.session_id);
-  if (event.type == RuntimeEventType::SessionStart) {
+  if (event.type == RuntimeEventType::SessionStart)
+  {
     append_string_field(out, "mode", ava::agent::to_string(event.mode));
     append_string_field(out, "provider", event.provider_id);
     append_string_field(out, "model", event.model_id);
@@ -351,19 +377,23 @@ std::string serialize_event_jsonl(RuntimeEvent const& event)
 
 ava::core::VoidResult emit_event(RuntimeEventSink const& sink, RuntimeEvent const& event)
 {
-  if (!sink) return {};
+  if (!sink)
+    return {};
   return sink(event);
 }
 
 void EventBus::subscribe(EventEnvelopeSink sink)
 {
-  if (sink) sinks_.push_back(std::move(sink));
+  if (sink)
+    sinks_.push_back(std::move(sink));
 }
 
 ava::core::VoidResult EventBus::publish(EventEnvelope const& envelope) const
 {
-  for (auto const& sink : sinks_) {
-    if (auto published = sink(envelope); !published) return std::unexpected(std::move(published.error()));
+  for (auto const& sink : sinks_)
+  {
+    if (auto published = sink(envelope); !published)
+      return std::unexpected(std::move(published.error()));
   }
   return {};
 }
@@ -408,13 +438,12 @@ std::string serialize_event_envelope_jsonl(EventEnvelope const& envelope)
   return serialize_event_envelope_json(envelope) + '\n';
 }
 
-RuntimeEventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context,
-                                                RuntimeEventSink legacy_sink)
+RuntimeEventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context, RuntimeEventSink legacy_sink)
 {
-  return [&bus, context = std::move(context),
-          legacy_sink = std::move(legacy_sink)](RuntimeEvent const& event) -> ava::core::VoidResult {
+  return [&bus, context = std::move(context), legacy_sink = std::move(legacy_sink)](RuntimeEvent const& event) -> ava::core::VoidResult {
     auto envelope = to_event_envelope(event, context);
-    if (auto published = bus.publish(envelope); !published) return std::unexpected(std::move(published.error()));
+    if (auto published = bus.publish(envelope); !published)
+      return std::unexpected(std::move(published.error()));
     return emit_event(legacy_sink, event);
   };
 }

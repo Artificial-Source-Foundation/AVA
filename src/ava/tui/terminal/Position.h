@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Margin.h"
+
 #include <cstdint>
 
 namespace terminal {

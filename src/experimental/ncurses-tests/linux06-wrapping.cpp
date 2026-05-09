@@ -1,5 +1,6 @@
 #include "terminal/Session.h"
 #include "terminal/Window.h"
+
 #include <iostream>
 
 int main()

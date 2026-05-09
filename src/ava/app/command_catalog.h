@@ -7,7 +7,8 @@
 
 namespace ava::app {
 
-struct CommandCatalogEntry {
+struct CommandCatalogEntry
+{
   std::string command;
   std::vector<std::string> aliases = {};
   std::string description;
@@ -17,7 +18,8 @@ struct CommandCatalogEntry {
   std::string disabled_reason = "";
 };
 
-struct CommandHotkey {
+struct CommandHotkey
+{
   std::string action;
   std::string description;
   std::string keys;

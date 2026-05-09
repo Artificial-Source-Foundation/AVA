@@ -3,8 +3,8 @@
 #include "Border.h"
 #include "ComplexChar.h"
 #include "Dimension.h"
-#include "Position.h"
 #include "Margin.h"
+#include "Position.h"
 
 #include <cstdarg>
 #include <cwchar>
@@ -373,9 +373,9 @@ class Window
   // Return this Window's input delay in milliseconds, or ncurses sentinel values for blocking/nonblocking modes.
   int getdelay() const;                                                 // wgetdelay
   // Return a non-owning wrapper for this Window's parent, or null when it has no parent.
-  //Commented out because this requires a central registry of Window objects that we don't have (yet).
-//std::optional<Window> getparent() const;                              // wgetparent
-  // Return this Window's inclusive scrolling-region row bounds.
+  // Commented out because this requires a central registry of Window objects that we don't have (yet).
+// std::optional<Window> getparent() const;                              // wgetparent
+  //  Return this Window's inclusive scrolling-region row bounds.
   ScrollRegion getscrreg() const;                                      // wgetscrreg
 };
 

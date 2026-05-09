@@ -1,5 +1,4 @@
 #include "ava/session/stats.h"
-
 #include "ava/core/json.h"
 
 #include <cctype>
@@ -13,24 +12,29 @@ namespace {
 
 void add_optional_integer(std::optional<long long>& total, std::optional<long long> value)
 {
-  if (!value || *value < 0) return;
-  if (!total) total = 0;
+  if (!value || *value < 0)
+    return;
+  if (!total)
+    total = 0;
   *total += *value;
 }
 
 std::optional<long long> integer_field_from_usage_or_entry(std::string_view data_json, std::string_view key)
 {
-  if (auto const usage = ava::core::json::object_field(data_json, "usage")) {
-    if (auto const value = ava::core::json::integer_field(*usage, key)) return value;
+  if (auto const usage = ava::core::json::object_field(data_json, "usage"))
+  {
+    if (auto const value = ava::core::json::integer_field(*usage, key))
+      return value;
   }
   return ava::core::json::integer_field(data_json, key);
 }
 
-std::optional<long long> integer_field_from_usage_or_entry(std::string_view data_json,
-                                                           std::initializer_list<std::string_view> keys)
+std::optional<long long> integer_field_from_usage_or_entry(std::string_view data_json, std::initializer_list<std::string_view> keys)
 {
-  for (auto const key : keys) {
-    if (auto const value = integer_field_from_usage_or_entry(data_json, key)) return value;
+  for (auto const key : keys)
+  {
+    if (auto const value = integer_field_from_usage_or_entry(data_json, key))
+      return value;
   }
   return std::nullopt;
 }
@@ -43,7 +47,8 @@ bool bool_field_is_true(std::string_view object, std::string_view key)
 
 bool usage_is_estimated(std::string_view usage)
 {
-  if (bool_field_is_true(usage, "estimated")) return true;
+  if (bool_field_is_true(usage, "estimated"))
+    return true;
   return ava::core::json::string_field(usage, "source").value_or("") == "estimated";
 }
 
@@ -57,10 +62,8 @@ bool object_has_billable_tokens(std::string_view object)
 {
   return positive_integer_field(object, "input_tokens") || positive_integer_field(object, "output_tokens") ||
          positive_integer_field(object, "reasoning_tokens") || positive_integer_field(object, "cache_read_tokens") ||
-         positive_integer_field(object, "cache_read_input_tokens") ||
-         positive_integer_field(object, "cache_write_tokens") ||
-         positive_integer_field(object, "cache_creation_input_tokens") ||
-         positive_integer_field(object, "total_tokens");
+         positive_integer_field(object, "cache_read_input_tokens") || positive_integer_field(object, "cache_write_tokens") ||
+         positive_integer_field(object, "cache_creation_input_tokens") || positive_integer_field(object, "total_tokens");
 }
 
 bool is_number_delimiter(char ch)
@@ -71,49 +74,67 @@ bool is_number_delimiter(char ch)
 std::optional<long double> number_field(std::string_view object, std::string_view key)
 {
   auto const start = ava::core::json::field_value_start(object, key);
-  if (!start || *start >= object.size()) return std::nullopt;
+  if (!start || *start >= object.size())
+    return std::nullopt;
 
   std::size_t index = *start;
-  if (object[index] == '-') ++index;
+  if (object[index] == '-')
+    ++index;
   auto const digits_start = index;
   while (index < object.size() && std::isdigit(static_cast<unsigned char>(object[index])) != 0) ++index;
-  if (index == digits_start) return std::nullopt;
-  if (index < object.size() && object[index] == '.') {
+  if (index == digits_start)
+    return std::nullopt;
+  if (index < object.size() && object[index] == '.')
+  {
     ++index;
     auto const fraction_start = index;
     while (index < object.size() && std::isdigit(static_cast<unsigned char>(object[index])) != 0) ++index;
-    if (index == fraction_start) return std::nullopt;
+    if (index == fraction_start)
+      return std::nullopt;
   }
-  if (index < object.size() && (object[index] == 'e' || object[index] == 'E')) {
+  if (index < object.size() && (object[index] == 'e' || object[index] == 'E'))
+  {
     ++index;
-    if (index < object.size() && (object[index] == '+' || object[index] == '-')) ++index;
+    if (index < object.size() && (object[index] == '+' || object[index] == '-'))
+      ++index;
     auto const exponent_start = index;
     while (index < object.size() && std::isdigit(static_cast<unsigned char>(object[index])) != 0) ++index;
-    if (index == exponent_start) return std::nullopt;
+    if (index == exponent_start)
+      return std::nullopt;
   }
-  if (index < object.size() && !is_number_delimiter(object[index])) return std::nullopt;
+  if (index < object.size() && !is_number_delimiter(object[index]))
+    return std::nullopt;
 
-  try {
+  try
+  {
     return std::stold(std::string(object.substr(*start, index - *start)));
-  } catch (...) {
+  }
+  catch (...)
+  {
     return std::nullopt;
   }
 }
 
 std::optional<long double> cost_field_from_usage_or_entry(std::string_view data_json)
 {
-  if (auto const usage = ava::core::json::object_field(data_json, "usage")) {
-    if (auto const value = number_field(*usage, "cost_usd")) return value;
-    if (auto const value = number_field(*usage, "total_cost_usd")) return value;
+  if (auto const usage = ava::core::json::object_field(data_json, "usage"))
+  {
+    if (auto const value = number_field(*usage, "cost_usd"))
+      return value;
+    if (auto const value = number_field(*usage, "total_cost_usd"))
+      return value;
   }
-  if (auto const value = number_field(data_json, "cost_usd")) return value;
+  if (auto const value = number_field(data_json, "cost_usd"))
+    return value;
   return number_field(data_json, "total_cost_usd");
 }
 
 void add_optional_cost(std::optional<long double>& total, std::optional<long double> value)
 {
-  if (!value || *value < 0.0L) return;
-  if (!total) total = 0.0L;
+  if (!value || *value < 0.0L)
+    return;
+  if (!total)
+    total = 0.0L;
   *total += *value;
 }
 
@@ -124,16 +145,20 @@ SessionStats compute_session_stats(std::vector<SessionEntry> const& entries)
   SessionStats stats;
   stats.entry_count = entries.size();
 
-  for (auto const& entry : entries) {
-    if (stats.first_timestamp.empty()) stats.first_timestamp = entry.timestamp;
+  for (auto const& entry : entries)
+  {
+    if (stats.first_timestamp.empty())
+      stats.first_timestamp = entry.timestamp;
     stats.last_timestamp = entry.timestamp;
 
-    switch (entry.type) {
+    switch (entry.type)
+    {
       case EntryType::SessionStart:
         ++stats.counts.session_start;
         break;
       case EntryType::UserMessage:
-        if (!is_internal_replay_user_message(entry)) ++stats.counts.user_message;
+        if (!is_internal_replay_user_message(entry))
+          ++stats.counts.user_message;
         break;
       case EntryType::AssistantMessage:
         ++stats.counts.assistant_message;
@@ -171,46 +196,44 @@ SessionStats compute_session_stats(std::vector<SessionEntry> const& entries)
     }
 
     auto const usage = ava::core::json::object_field(entry.data_json, "usage");
-    if (usage) {
-      if (usage_is_estimated(*usage)) {
-        add_optional_integer(stats.estimated_input_bytes,
-                             integer_field_from_usage_or_entry(entry.data_json, "estimated_input_bytes"));
-        add_optional_integer(stats.estimated_output_bytes,
-                             integer_field_from_usage_or_entry(entry.data_json, "estimated_output_bytes"));
-        add_optional_integer(stats.estimated_total_bytes,
-                             integer_field_from_usage_or_entry(entry.data_json, "estimated_total_bytes"));
+    if (usage)
+    {
+      if (usage_is_estimated(*usage))
+      {
+        add_optional_integer(stats.estimated_input_bytes, integer_field_from_usage_or_entry(entry.data_json, "estimated_input_bytes"));
+        add_optional_integer(stats.estimated_output_bytes, integer_field_from_usage_or_entry(entry.data_json, "estimated_output_bytes"));
+        add_optional_integer(stats.estimated_total_bytes, integer_field_from_usage_or_entry(entry.data_json, "estimated_total_bytes"));
         ++stats.estimated_usage_entries;
         continue;
-      } else {
+      }
+      else
+      {
         ++stats.exact_usage_entries;
       }
     }
 
     add_optional_integer(stats.input_tokens, integer_field_from_usage_or_entry(entry.data_json, "input_tokens"));
     add_optional_integer(stats.output_tokens, integer_field_from_usage_or_entry(entry.data_json, "output_tokens"));
-    add_optional_integer(stats.reasoning_tokens,
-                         integer_field_from_usage_or_entry(entry.data_json, "reasoning_tokens"));
-    add_optional_integer(
-        stats.cache_read_tokens,
-        integer_field_from_usage_or_entry(entry.data_json, {"cache_read_tokens", "cache_read_input_tokens"}));
-    add_optional_integer(
-        stats.cache_write_tokens,
-        integer_field_from_usage_or_entry(entry.data_json, {"cache_write_tokens", "cache_creation_input_tokens"}));
+    add_optional_integer(stats.reasoning_tokens, integer_field_from_usage_or_entry(entry.data_json, "reasoning_tokens"));
+    add_optional_integer(stats.cache_read_tokens, integer_field_from_usage_or_entry(entry.data_json, {"cache_read_tokens", "cache_read_input_tokens"}));
+    add_optional_integer(stats.cache_write_tokens, integer_field_from_usage_or_entry(entry.data_json, {"cache_write_tokens", "cache_creation_input_tokens"}));
     add_optional_integer(stats.total_tokens, integer_field_from_usage_or_entry(entry.data_json, "total_tokens"));
 
     auto const cost = cost_field_from_usage_or_entry(entry.data_json);
     bool const has_known_cost = cost && *cost >= 0.0L;
-    if (has_known_cost) add_optional_cost(stats.known_cost_usd, cost);
+    if (has_known_cost)
+      add_optional_cost(stats.known_cost_usd, cost);
     bool const has_billable_usage_tokens = usage && object_has_billable_tokens(*usage);
-    bool const has_billable_legacy_assistant_tokens =
-        !usage && entry.type == EntryType::AssistantMessage && object_has_billable_tokens(entry.data_json);
-    if ((has_billable_usage_tokens || has_billable_legacy_assistant_tokens) && !has_known_cost) {
+    bool const has_billable_legacy_assistant_tokens = !usage && entry.type == EntryType::AssistantMessage && object_has_billable_tokens(entry.data_json);
+    if ((has_billable_usage_tokens || has_billable_legacy_assistant_tokens) && !has_known_cost)
+    {
       ++stats.unknown_cost_entries;
     }
   }
 
   stats.cost_complete = stats.unknown_cost_entries == 0;
-  if (stats.cost_complete) stats.total_cost_usd = stats.known_cost_usd;
+  if (stats.cost_complete)
+    stats.total_cost_usd = stats.known_cost_usd;
 
   return stats;
 }

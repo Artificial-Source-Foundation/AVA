@@ -9,19 +9,22 @@
 
 namespace ava::context {
 
-enum class ContextSourceType {
+enum class ContextSourceType
+{
   Workspace,
   Global,
 };
 
-struct LoadedContextFile {
+struct LoadedContextFile
+{
   std::filesystem::path path;
   ContextSourceType source_type = ContextSourceType::Workspace;
   std::size_t byte_count = 0;
   std::string content;
 };
 
-struct ContextLoadOptions {
+struct ContextLoadOptions
+{
   std::filesystem::path workspace_root;
   std::filesystem::path current_dir;
   std::filesystem::path global_agents_file;

@@ -1,18 +1,13 @@
+#include "tests/support/golden.h"
+#include "tests/support/test_harness.h"
 #include "ava/agent/tool_dispatcher.h"
-
 #include "ava/tools/file_tools.h"
-
 #include "ava/mcp/config.h"
 #include "ava/mcp/protocol.h"
 #include "ava/mcp/stdio_client.h"
 #include "ava/mcp/tool_broker.h"
-
 #include "ava/permissions/permission.h"
-
 #include "ava/core/json.h"
-
-#include "tests/support/golden.h"
-#include "tests/support/test_harness.h"
 
 #include <algorithm>
 #include <chrono>
@@ -37,9 +32,8 @@ void write_text(std::filesystem::path const& path, std::string const& text)
 
 std::string mcp_config_json(std::string id, std::string command, bool enabled = true, std::string args_json = "[]")
 {
-  return std::string("{\"servers\":[{\"id\":\"") + ava::core::json::escape(id) +
-         "\",\"name\":\"Demo MCP\",\"command\":\"" + ava::core::json::escape(command) + "\",\"args\":" + args_json +
-         ",\"enabled\":" + (enabled ? "true" : "false") + "}]}";
+  return std::string("{\"servers\":[{\"id\":\"") + ava::core::json::escape(id) + "\",\"name\":\"Demo MCP\",\"command\":\"" + ava::core::json::escape(command) +
+         "\",\"args\":" + args_json + ",\"enabled\":" + (enabled ? "true" : "false") + "}]}";
 }
 
 ava::mcp::McpServerConfig fake_server_config(std::filesystem::path const& root)
@@ -71,44 +65,37 @@ std::string nested_arrays_json(std::size_t depth)
   return text;
 }
 
-ava::permissions::PermissionPrompt const* prompt_for_operation(
-    std::vector<ava::permissions::PermissionPrompt> const& prompts, ava::permissions::Operation operation)
+ava::permissions::PermissionPrompt const* prompt_for_operation(std::vector<ava::permissions::PermissionPrompt> const& prompts,
+                                                               ava::permissions::Operation operation)
 {
-  auto const found =
-      std::find_if(prompts.begin(), prompts.end(), [&](auto const& prompt) { return prompt.operation == operation; });
+  auto const found = std::find_if(prompts.begin(), prompts.end(), [&](auto const& prompt) { return prompt.operation == operation; });
   return found == prompts.end() ? nullptr : &*found;
 }
 
-bool has_audit_for_prompt(std::vector<ava::tools::PermissionAuditEvent> const& audits,
-                          ava::permissions::PermissionPrompt const& prompt, std::string const& resolution,
-                          std::string const& resolution_source)
+bool has_audit_for_prompt(std::vector<ava::tools::PermissionAuditEvent> const& audits, ava::permissions::PermissionPrompt const& prompt,
+                          std::string const& resolution, std::string const& resolution_source)
 {
   return std::any_of(audits.begin(), audits.end(), [&](auto const& event) {
-    return event.permission_request_id == prompt.permission_request_id && event.operation == prompt.operation &&
-           event.resolution == resolution && event.resolution_source == resolution_source;
+    return event.permission_request_id == prompt.permission_request_id && event.operation == prompt.operation && event.resolution == resolution &&
+           event.resolution_source == resolution_source;
   });
 }
 
 void test_mcp_config_parsing()
 {
-  auto global =
-      ava::mcp::parse_mcp_config("{\"servers\":[{\"id\":\"demo\",\"command\":\"/bin/demo\",\"args\":[\"--stdio\"]}]}",
-                                 "/tmp/global-mcp.json", ava::mcp::McpServerScope::Global);
+  auto global = ava::mcp::parse_mcp_config("{\"servers\":[{\"id\":\"demo\",\"command\":\"/bin/demo\",\"args\":[\"--stdio\"]}]}", "/tmp/global-mcp.json",
+                                           ava::mcp::McpServerScope::Global);
   expect(global && global->servers.size() == 1 && global->servers[0].enabled && global->servers[0].args.size() == 1 &&
              global->servers[0].scope == ava::mcp::McpServerScope::Global,
-         global ? "MCP config parses global server defaults"
-                : "MCP config parses global server defaults: " + global.error().format());
+         global ? "MCP config parses global server defaults" : "MCP config parses global server defaults: " + global.error().format());
 
-  auto project = ava::mcp::parse_mcp_config("{\"servers\":[{\"id\":\"demo-project\",\"command\":\"/bin/demo\"}]}",
-                                            "/tmp/project-mcp.json", ava::mcp::McpServerScope::Project);
+  auto project = ava::mcp::parse_mcp_config("{\"servers\":[{\"id\":\"demo-project\",\"command\":\"/bin/demo\"}]}", "/tmp/project-mcp.json",
+                                            ava::mcp::McpServerScope::Project);
   expect(project && project->servers.size() == 1 && !project->servers[0].enabled,
-         project ? "MCP project config servers default to disabled"
-                 : "MCP project config servers default to disabled: " + project.error().format());
+         project ? "MCP project config servers default to disabled" : "MCP project config servers default to disabled: " + project.error().format());
 
-  auto bad_id = ava::mcp::parse_mcp_config("{\"servers\":[{\"id\":\"bad id\",\"command\":\"demo\"}]}",
-                                           "/tmp/bad-mcp.json", ava::mcp::McpServerScope::Global);
-  expect(!bad_id && bad_id.error().message().find("valid id") != std::string::npos,
-         "MCP config rejects invalid server ids");
+  auto bad_id = ava::mcp::parse_mcp_config("{\"servers\":[{\"id\":\"bad id\",\"command\":\"demo\"}]}", "/tmp/bad-mcp.json", ava::mcp::McpServerScope::Global);
+  expect(!bad_id && bad_id.error().message().find("valid id") != std::string::npos, "MCP config rejects invalid server ids");
 
   auto const root = temp_root() / "mcp-config";
   std::error_code remove_error;
@@ -117,30 +104,25 @@ void test_mcp_config_parsing()
   auto const project_path = root / "workspace" / ".ava" / "mcp.json";
   write_text(global_path, mcp_config_json("same", "/bin/demo"));
   write_text(project_path, mcp_config_json("same", "/bin/demo", true));
-  auto duplicate = ava::mcp::load_mcp_config(ava::mcp::McpConfigLoadOptions{
-      .workspace_dir = root / "workspace", .global_config_file = global_path, .project_config_file = project_path});
-  expect(!duplicate && duplicate.error().message().find("duplicate") != std::string::npos,
-         "MCP config rejects duplicate server ids across scopes");
+  auto duplicate = ava::mcp::load_mcp_config(
+      ava::mcp::McpConfigLoadOptions{.workspace_dir = root / "workspace", .global_config_file = global_path, .project_config_file = project_path});
+  expect(!duplicate && duplicate.error().message().find("duplicate") != std::string::npos, "MCP config rejects duplicate server ids across scopes");
 }
 
 void test_mcp_protocol_parsing()
 {
   auto const server = fake_server_config("/tmp/mcp-protocol");
 
-  auto content_length =
-      ava::mcp::parse_mcp_content_length("X-Test: ignored\r\n content-length : 42\r\n\r\n", server, 64);
-  expect(content_length && *content_length == 42,
-         content_length
-             ? "MCP protocol parses trimmed case-insensitive Content-Length"
-             : "MCP protocol parses trimmed case-insensitive Content-Length: " + content_length.error().format());
+  auto content_length = ava::mcp::parse_mcp_content_length("X-Test: ignored\r\n content-length : 42\r\n\r\n", server, 64);
+  expect(content_length && *content_length == 42, content_length
+                                                      ? "MCP protocol parses trimmed case-insensitive Content-Length"
+                                                      : "MCP protocol parses trimmed case-insensitive Content-Length: " + content_length.error().format());
 
   auto invalid_length = ava::mcp::parse_mcp_content_length("Content-Length: 4x\r\n\r\n", server, 64);
-  expect(!invalid_length && invalid_length.error().message().find("invalid") != std::string::npos,
-         "MCP protocol rejects invalid Content-Length values");
+  expect(!invalid_length && invalid_length.error().message().find("invalid") != std::string::npos, "MCP protocol rejects invalid Content-Length values");
 
   auto oversized_length = ava::mcp::parse_mcp_content_length("Content-Length: 65\r\n\r\n", server, 64);
-  expect(!oversized_length && oversized_length.error().message().find("size cap") != std::string::npos,
-         "MCP protocol rejects oversized Content-Length values");
+  expect(!oversized_length && oversized_length.error().message().find("size cap") != std::string::npos, "MCP protocol rejects oversized Content-Length values");
 
   expect(ava::mcp::mcp_header_end_offset("Content-Length: 2\r\n\r\n{}").value_or(0) == 21 &&
              ava::mcp::mcp_header_end_offset("Content-Length: 2\n\n{}").value_or(0) == 19,
@@ -150,11 +132,9 @@ void test_mcp_protocol_parsing()
              ava::mcp::mcp_response_id("{\"jsonrpc\":\"2.0\",\"id\":42,\"result\":{}}").value_or("") == "42",
          "MCP protocol parses string and numeric response IDs");
 
-  expect(ava::mcp::mcp_bool_field("{\"isError\":false}", "isError").value_or(true) == false,
-         "MCP protocol parses boolean result fields");
+  expect(ava::mcp::mcp_bool_field("{\"isError\":false}", "isError").value_or(true) == false, "MCP protocol parses boolean result fields");
 
-  expect(ava::mcp::is_valid_mcp_tool_name("server.tool") && !ava::mcp::is_valid_mcp_tool_name("") &&
-             !ava::mcp::is_valid_mcp_tool_name("bad\nname"),
+  expect(ava::mcp::is_valid_mcp_tool_name("server.tool") && !ava::mcp::is_valid_mcp_tool_name("") && !ava::mcp::is_valid_mcp_tool_name("bad\nname"),
          "MCP protocol validates model-facing tool names");
 
   auto text_content = ava::mcp::mcp_text_content_from_result(
@@ -165,8 +145,7 @@ void test_mcp_protocol_parsing()
   auto structured_content = ava::mcp::mcp_text_content_from_result("{\"structuredContent\":{\"ok\":true}}");
   expect(structured_content == "{\"ok\":true}", "MCP protocol falls back to structuredContent JSON");
 
-  expect(!ava::mcp::mcp_json_depth_within_limit("{\"deep\":" + nested_arrays_json(130) + "}"),
-         "MCP protocol rejects excessively deep JSON records");
+  expect(!ava::mcp::mcp_json_depth_within_limit("{\"deep\":" + nested_arrays_json(130) + "}"), "MCP protocol rejects excessively deep JSON records");
 }
 
 void test_mcp_permission_audit_golden_shape()
@@ -200,50 +179,44 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   auto startup_cancel_server = fake_server_config(root);
   startup_cancel_server.args = {"timeout-initialize"};
   int startup_cancel_checks = 0;
-  auto startup_canceled = ava::mcp::McpStdioClient::start(startup_cancel_server, fake_client_options(workspace),
-                                                          [&] { return ++startup_cancel_checks > 2; });
-  expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos,
-         "MCP stdio client cancels hung startup before timeout");
+  auto startup_canceled = ava::mcp::McpStdioClient::start(startup_cancel_server, fake_client_options(workspace), [&] { return ++startup_cancel_checks > 2; });
+  expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos, "MCP stdio client cancels hung startup before timeout");
 
   auto malformed_server = fake_server_config(root);
   malformed_server.args = {"malformed"};
   auto malformed = ava::mcp::McpStdioClient::start(malformed_server, fake_client_options(workspace));
-  expect(!malformed && malformed.error().message().find("valid JSON object") != std::string::npos,
-         "MCP stdio client contains malformed initialize responses");
+  expect(!malformed && malformed.error().message().find("valid JSON object") != std::string::npos, "MCP stdio client contains malformed initialize responses");
 
   auto exit_start_server = fake_server_config(root);
   exit_start_server.args = {"exit-initialize"};
   auto exit_start = ava::mcp::McpStdioClient::start(exit_start_server, fake_client_options(workspace));
   auto const exit_start_format = exit_start ? std::string{} : exit_start.error().format();
   expect(!exit_start && exit_start.error().message().find("closed stdout") != std::string::npos &&
-             exit_start_format.find("status: exit 42") != std::string::npos &&
-             exit_start_format.find("fake MCP exited during initialize") != std::string::npos,
+             exit_start_format.find("status: exit 42") != std::string::npos && exit_start_format.find("fake MCP exited during initialize") != std::string::npos,
          "MCP stdio client reports early startup exit with status and stderr diagnostics: " + exit_start_format);
 
   auto client = ava::mcp::McpStdioClient::start(fake_server_config(root), fake_client_options(workspace));
-  expect(client.has_value(), client ? "MCP stdio client initializes fake server"
-                                    : "MCP stdio client initializes fake server: " + client.error().format());
-  if (!client) return;
+  expect(client.has_value(), client ? "MCP stdio client initializes fake server" : "MCP stdio client initializes fake server: " + client.error().format());
+  if (!client)
+    return;
 
   expect((*client)->initialization().server_name == "fake-mcp", "MCP stdio client records server info");
   auto tools = (*client)->list_tools();
-  expect(tools && tools->size() == 1 && tools->front().name == "echo" &&
-             tools->front().input_schema_json.find("required") != std::string::npos,
+  expect(tools && tools->size() == 1 && tools->front().name == "echo" && tools->front().input_schema_json.find("required") != std::string::npos,
          tools ? "MCP stdio client lists tools" : "MCP stdio client lists tools: " + tools.error().format());
   auto result = (*client)->call_tool("echo", "{\"text\":\"hello\"}");
   expect(result && !result->is_error && result->content == "MCP call ok",
          result ? "MCP stdio client calls tools" : "MCP stdio client calls tools: " + result.error().format());
   auto shutdown = (*client)->shutdown(std::chrono::milliseconds(500));
-  expect(shutdown.has_value(), shutdown ? "MCP stdio client shuts down cleanly"
-                                        : "MCP stdio client shuts down cleanly: " + shutdown.error().format());
+  expect(shutdown.has_value(), shutdown ? "MCP stdio client shuts down cleanly" : "MCP stdio client shuts down cleanly: " + shutdown.error().format());
 
   auto tool_error_server = fake_server_config(root);
   tool_error_server.args = {"tool-error"};
   auto tool_error_client = ava::mcp::McpStdioClient::start(tool_error_server, fake_client_options(workspace));
   expect(tool_error_client.has_value(), tool_error_client ? "MCP stdio client initializes tool-error fake server"
-                                                          : "MCP stdio client initializes tool-error fake server: " +
-                                                                tool_error_client.error().format());
-  if (tool_error_client) {
+                                                          : "MCP stdio client initializes tool-error fake server: " + tool_error_client.error().format());
+  if (tool_error_client)
+  {
     auto tool_error = (*tool_error_client)->call_tool("echo", "{\"text\":\"hello\"}");
     expect(tool_error && tool_error->is_error && tool_error->content == "MCP tool failed",
            tool_error ? "MCP stdio client preserves tool-level error results"
@@ -255,11 +228,10 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   auto error_call_server = fake_server_config(root);
   error_call_server.args = {"error-call"};
   auto error_call_client = ava::mcp::McpStdioClient::start(error_call_server, fake_client_options(workspace));
-  expect(error_call_client.has_value(),
-         error_call_client
-             ? "MCP stdio client initializes JSON-RPC error fake server"
-             : "MCP stdio client initializes JSON-RPC error fake server: " + error_call_client.error().format());
-  if (error_call_client) {
+  expect(error_call_client.has_value(), error_call_client ? "MCP stdio client initializes JSON-RPC error fake server"
+                                                          : "MCP stdio client initializes JSON-RPC error fake server: " + error_call_client.error().format());
+  if (error_call_client)
+  {
     auto error_call = (*error_call_client)->call_tool("echo", "{\"text\":\"hello\"}");
     expect(!error_call && error_call.error().message().find("fake MCP JSON-RPC call failed") != std::string::npos,
            "MCP stdio client surfaces JSON-RPC tool-call errors");
@@ -270,11 +242,11 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   auto exit_list_server = fake_server_config(root);
   exit_list_server.args = {"exit-after-initialize"};
   auto exit_list_client = ava::mcp::McpStdioClient::start(exit_list_server, fake_client_options(workspace));
-  expect(exit_list_client.has_value(),
-         exit_list_client
-             ? "MCP stdio client initializes exit-after-initialize fake server"
-             : "MCP stdio client initializes exit-after-initialize fake server: " + exit_list_client.error().format());
-  if (exit_list_client) {
+  expect(exit_list_client.has_value(), exit_list_client
+                                           ? "MCP stdio client initializes exit-after-initialize fake server"
+                                           : "MCP stdio client initializes exit-after-initialize fake server: " + exit_list_client.error().format());
+  if (exit_list_client)
+  {
     auto exited_tools = (*exit_list_client)->list_tools();
     expect(!exited_tools && exited_tools.error().message().find("closed stdout") != std::string::npos &&
                exited_tools.error().format().find("status: exit 43") != std::string::npos &&
@@ -289,10 +261,10 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   auto stderr_options = fake_client_options(workspace);
   stderr_options.max_stderr_bytes = 16;
   auto stderr_client = ava::mcp::McpStdioClient::start(stderr_server, stderr_options);
-  expect(stderr_client.has_value(),
-         stderr_client ? "MCP stdio client initializes noisy fake server"
-                       : "MCP stdio client initializes noisy fake server: " + stderr_client.error().format());
-  if (stderr_client) {
+  expect(stderr_client.has_value(), stderr_client ? "MCP stdio client initializes noisy fake server"
+                                                  : "MCP stdio client initializes noisy fake server: " + stderr_client.error().format());
+  if (stderr_client)
+  {
     auto stderr_tools = (*stderr_client)->list_tools();
     expect(stderr_tools.has_value(), "MCP stdio client drains stderr while listing tools");
     auto stderr_shutdown = (*stderr_client)->shutdown(std::chrono::milliseconds(500));
@@ -305,13 +277,12 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   slow_server.args = {"slow-tool"};
   auto slow_client = ava::mcp::McpStdioClient::start(slow_server, fake_client_options(workspace));
   expect(slow_client.has_value(),
-         slow_client ? "MCP stdio client initializes slow fake server"
-                     : "MCP stdio client initializes slow fake server: " + slow_client.error().format());
-  if (slow_client) {
+         slow_client ? "MCP stdio client initializes slow fake server" : "MCP stdio client initializes slow fake server: " + slow_client.error().format());
+  if (slow_client)
+  {
     int cancel_checks = 0;
     auto canceled = (*slow_client)->call_tool("echo", "{\"text\":\"hello\"}", [&] { return ++cancel_checks > 2; });
-    expect(!canceled && canceled.error().message().find("canceled") != std::string::npos,
-           "MCP stdio client cancels hung tool calls before timeout");
+    expect(!canceled && canceled.error().message().find("canceled") != std::string::npos, "MCP stdio client cancels hung tool calls before timeout");
     auto slow_shutdown = (*slow_client)->shutdown(std::chrono::milliseconds(500));
     expect(slow_shutdown.has_value(), "MCP stdio client shuts down after canceled tool call");
   }
@@ -319,10 +290,10 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   auto exit_tool_server = fake_server_config(root);
   exit_tool_server.args = {"exit-tool"};
   auto exit_tool_client = ava::mcp::McpStdioClient::start(exit_tool_server, fake_client_options(workspace));
-  expect(exit_tool_client.has_value(),
-         exit_tool_client ? "MCP stdio client initializes exit-tool fake server"
-                          : "MCP stdio client initializes exit-tool fake server: " + exit_tool_client.error().format());
-  if (exit_tool_client) {
+  expect(exit_tool_client.has_value(), exit_tool_client ? "MCP stdio client initializes exit-tool fake server"
+                                                        : "MCP stdio client initializes exit-tool fake server: " + exit_tool_client.error().format());
+  if (exit_tool_client)
+  {
     auto exited_tool = (*exit_tool_client)->call_tool("echo", "{\"text\":\"hello\"}");
     auto const exited_tool_format = exited_tool ? std::string{} : exited_tool.error().format();
     expect(!exited_tool && exited_tool.error().message().find("closed stdout") != std::string::npos &&
@@ -337,13 +308,11 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   slow_prompt_server.args = {"slow-prompt"};
   auto slow_prompt_client = ava::mcp::McpStdioClient::start(slow_prompt_server, fake_client_options(workspace));
   expect(slow_prompt_client.has_value(), slow_prompt_client ? "MCP stdio client initializes slow-prompt fake server"
-                                                            : "MCP stdio client initializes slow-prompt fake server: " +
-                                                                  slow_prompt_client.error().format());
-  if (slow_prompt_client) {
+                                                            : "MCP stdio client initializes slow-prompt fake server: " + slow_prompt_client.error().format());
+  if (slow_prompt_client)
+  {
     int prompt_cancel_checks = 0;
-    auto canceled_prompt = (*slow_prompt_client)->get_prompt("release-notes", "{\"topic\":\"demo\"}", [&] {
-      return ++prompt_cancel_checks > 2;
-    });
+    auto canceled_prompt = (*slow_prompt_client)->get_prompt("release-notes", "{\"topic\":\"demo\"}", [&] { return ++prompt_cancel_checks > 2; });
     expect(!canceled_prompt && canceled_prompt.error().message().find("canceled") != std::string::npos,
            "MCP stdio client cancels hung prompts/get calls before timeout");
     auto slow_prompt_shutdown = (*slow_prompt_client)->shutdown(std::chrono::milliseconds(500));
@@ -368,8 +337,8 @@ void test_mcp_tool_dispatcher()
   context.workspace_dir = workspace;
   context.mcp_global_config_file = root / "missing-global-mcp.json";
   context.mcp_project_config_file = project_config;
-  context.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
-      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+  context.permission_resolver =
+      [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
@@ -382,56 +351,45 @@ void test_mcp_tool_dispatcher()
   auto const model_tool_name = ava::mcp::mcp_model_tool_name("demo", "echo");
   auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(context);
   auto const mcp_schema = std::find_if(schemas.begin(), schemas.end(), [&](std::string const& schema) {
-    return schema.find("\"name\":\"" + model_tool_name + "\"") != std::string::npos &&
-           schema.find("\"parameters\"") != std::string::npos;
+    return schema.find("\"name\":\"" + model_tool_name + "\"") != std::string::npos && schema.find("\"parameters\"") != std::string::npos;
   });
   expect(mcp_schema != schemas.end(), "enabled MCP tool is exported as a provider schema");
-  if (mcp_schema != schemas.end()) {
-    ava::test::expect_json_matches_golden(*mcp_schema, "mcp-tool-schema.json",
-                                          "MCP tool provider schema matches AVA 0.80 golden fixture");
+  if (mcp_schema != schemas.end())
+  {
+    ava::test::expect_json_matches_golden(*mcp_schema, "mcp-tool-schema.json", "MCP tool provider schema matches AVA 0.80 golden fixture");
   }
 
   ava::agent::ToolDispatcher dispatcher(context);
-  auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
-      .id = "call_mcp", .name = model_tool_name, .arguments_json = "{\"text\":\"hello\"}"});
+  auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_mcp", .name = model_tool_name, .arguments_json = "{\"text\":\"hello\"}"});
   expect(dispatched && dispatched->success && dispatched->result_text.find("MCP call ok") != std::string::npos,
-         dispatched ? "dispatcher calls enabled MCP tool through broker"
-                    : "dispatcher calls enabled MCP tool through broker: " + dispatched.error().format());
-  expect(dispatched && dispatched->payload.status == ava::agent::ToolResultStatus::Success &&
-             dispatched->payload.content_type == "application/json" &&
+         dispatched ? "dispatcher calls enabled MCP tool through broker" : "dispatcher calls enabled MCP tool through broker: " + dispatched.error().format());
+  expect(dispatched && dispatched->payload.status == ava::agent::ToolResultStatus::Success && dispatched->payload.content_type == "application/json" &&
              dispatched->payload.content.find("\"server\":\"demo\"") != std::string::npos &&
              dispatched->payload.content.find("MCP call ok") != std::string::npos,
          "MCP tool dispatcher attaches structured semantic result payloads");
 
-  auto const has_launch = std::any_of(prompts.begin(), prompts.end(), [](auto const& prompt) {
-    return prompt.operation == ava::permissions::Operation::McpServerLaunch;
-  });
-  auto const has_connect = std::any_of(prompts.begin(), prompts.end(), [](auto const& prompt) {
-    return prompt.operation == ava::permissions::Operation::McpServerConnect;
-  });
+  auto const has_launch =
+      std::any_of(prompts.begin(), prompts.end(), [](auto const& prompt) { return prompt.operation == ava::permissions::Operation::McpServerLaunch; });
+  auto const has_connect =
+      std::any_of(prompts.begin(), prompts.end(), [](auto const& prompt) { return prompt.operation == ava::permissions::Operation::McpServerConnect; });
   auto const has_tool_call = std::any_of(prompts.begin(), prompts.end(), [&](auto const& prompt) {
-    return prompt.operation == ava::permissions::Operation::McpToolCall && prompt.tool_name == model_tool_name &&
-           prompt.command == "demo:echo";
+    return prompt.operation == ava::permissions::Operation::McpToolCall && prompt.tool_name == model_tool_name && prompt.command == "demo:echo";
   });
-  expect(has_launch && has_connect && has_tool_call,
-         "MCP tools require launch, connect, and mcp.tool.call permission approval");
+  expect(has_launch && has_connect && has_tool_call, "MCP tools require launch, connect, and mcp.tool.call permission approval");
   auto const audited_tool_call = std::any_of(audits.begin(), audits.end(), [](auto const& event) {
     return event.operation == ava::permissions::Operation::McpToolCall && event.resolution == "allow";
   });
   expect(audited_tool_call, "MCP tool permission decisions are audited");
 
-  auto invalid_args = dispatcher.dispatch(
-      ava::agent::ProviderToolCall{.id = "call_bad_args", .name = model_tool_name, .arguments_json = "[]"});
+  auto invalid_args = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_bad_args", .name = model_tool_name, .arguments_json = "[]"});
   expect(invalid_args && !invalid_args->success && invalid_args->result_text.find("JSON object") != std::string::npos,
          "MCP tool dispatcher rejects non-object arguments before execution");
-  expect(invalid_args && invalid_args->payload.status == ava::agent::ToolResultStatus::Error &&
-             invalid_args->payload.error_category == "invalid_argument",
+  expect(invalid_args && invalid_args->payload.status == ava::agent::ToolResultStatus::Error && invalid_args->payload.error_category == "invalid_argument",
          "MCP tool dispatcher attaches structured semantic error payloads");
 
   auto const prompts_before_cancel = prompts.size();
   cancel_requested = true;
-  auto canceled = dispatcher.dispatch(
-      ava::agent::ProviderToolCall{.id = "call_canceled", .name = model_tool_name, .arguments_json = "{}"});
+  auto canceled = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_canceled", .name = model_tool_name, .arguments_json = "{}"});
   expect(canceled && !canceled->success && canceled->payload.status == ava::agent::ToolResultStatus::Canceled &&
              canceled->result_text.find("canceled") != std::string::npos && prompts.size() == prompts_before_cancel,
          "MCP tool dispatcher reports semantic cancellation before permission or process execution");
@@ -439,8 +397,7 @@ void test_mcp_tool_dispatcher()
 
 void test_mcp_tool_dispatcher_audits_permission_denials()
 {
-  auto run_denial_case = [](std::string const& suffix, ava::permissions::Operation denied_operation,
-                            std::string const& expected_error) {
+  auto run_denial_case = [](std::string const& suffix, ava::permissions::Operation denied_operation, std::string const& expected_error) {
     auto const root = temp_root() / ("mcp-denial-" + suffix);
     std::error_code remove_error;
     std::filesystem::remove_all(root, remove_error);
@@ -456,15 +413,13 @@ void test_mcp_tool_dispatcher_audits_permission_denials()
     context.workspace_dir = workspace;
     context.mcp_global_config_file = root / "missing-global-mcp.json";
     context.mcp_project_config_file = project_config;
-    context.permission_resolver = [&](ava::permissions::PermissionPrompt const& prompt)
-        -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    context.permission_resolver = [&](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
       prompts.push_back(prompt);
-      if (operation_to_deny && prompt.operation == *operation_to_deny) {
-        return ava::permissions::PermissionResolutionDecision(ava::permissions::PermissionResolution::Deny,
-                                                              "denied by contract test");
+      if (operation_to_deny && prompt.operation == *operation_to_deny)
+      {
+        return ava::permissions::PermissionResolutionDecision(ava::permissions::PermissionResolution::Deny, "denied by contract test");
       }
-      return ava::permissions::PermissionResolutionDecision(ava::permissions::PermissionResolution::Allow,
-                                                            "allowed by contract test setup");
+      return ava::permissions::PermissionResolutionDecision(ava::permissions::PermissionResolution::Allow, "allowed by contract test setup");
     };
     context.permission_audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
       audits.push_back(event);
@@ -477,26 +432,23 @@ void test_mcp_tool_dispatcher_audits_permission_denials()
     audits.clear();
     operation_to_deny = denied_operation;
 
-    auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
-        .id = "call_mcp_denied_" + suffix, .name = model_tool_name, .arguments_json = "{\"text\":\"hello\"}"});
+    auto dispatched =
+        dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_mcp_denied_" + suffix, .name = model_tool_name, .arguments_json = "{\"text\":\"hello\"}"});
     expect(dispatched && !dispatched->success && dispatched->result_text.find(expected_error) != std::string::npos,
            dispatched ? "MCP dispatcher reports permission denial for " + suffix
                       : "MCP dispatcher reports permission denial for " + suffix + ": " + dispatched.error().format());
 
     auto const* denied_prompt = prompt_for_operation(prompts, denied_operation);
-    expect(denied_prompt != nullptr && !denied_prompt->permission_request_id.empty(),
-           "MCP denial prompt carries a request id for " + suffix);
-    if (denied_prompt != nullptr) {
-      auto const linked_audits = std::count_if(audits.begin(), audits.end(), [&](auto const& event) {
-        return event.permission_request_id == denied_prompt->permission_request_id;
-      });
-      expect(linked_audits >= 2,
-             "MCP denial records policy and resolver audit events with the prompt request id for " + suffix);
-      expect(has_audit_for_prompt(audits, *denied_prompt, "deny", "resolver"),
-             "MCP denial audit records resolver denial for " + suffix);
-      if (dispatched) {
-        expect(std::find(dispatched->payload.permission_request_ids.begin(),
-                         dispatched->payload.permission_request_ids.end(),
+    expect(denied_prompt != nullptr && !denied_prompt->permission_request_id.empty(), "MCP denial prompt carries a request id for " + suffix);
+    if (denied_prompt != nullptr)
+    {
+      auto const linked_audits =
+          std::count_if(audits.begin(), audits.end(), [&](auto const& event) { return event.permission_request_id == denied_prompt->permission_request_id; });
+      expect(linked_audits >= 2, "MCP denial records policy and resolver audit events with the prompt request id for " + suffix);
+      expect(has_audit_for_prompt(audits, *denied_prompt, "deny", "resolver"), "MCP denial audit records resolver denial for " + suffix);
+      if (dispatched)
+      {
+        expect(std::find(dispatched->payload.permission_request_ids.begin(), dispatched->payload.permission_request_ids.end(),
                          denied_prompt->permission_request_id) != dispatched->payload.permission_request_ids.end(),
                "MCP denial result payload links the permission request id for " + suffix);
       }
@@ -504,8 +456,7 @@ void test_mcp_tool_dispatcher_audits_permission_denials()
   };
 
   run_denial_case("launch", ava::permissions::Operation::McpServerLaunch, "MCP server launch requires permission");
-  run_denial_case("connect", ava::permissions::Operation::McpServerConnect,
-                  "MCP server connection requires permission");
+  run_denial_case("connect", ava::permissions::Operation::McpServerConnect, "MCP server connection requires permission");
   run_denial_case("tool", ava::permissions::Operation::McpToolCall, "MCP tool call requires permission");
 }
 
@@ -524,23 +475,21 @@ void test_mcp_tool_dispatcher_contains_tool_errors()
   context.workspace_dir = workspace;
   context.mcp_global_config_file = root / "missing-global-mcp.json";
   context.mcp_project_config_file = project_config;
-  context.permission_resolver = [&prompts](ava::permissions::PermissionPrompt const& prompt)
-      -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+  context.permission_resolver =
+      [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
 
   auto const model_tool_name = ava::mcp::mcp_model_tool_name("demo", "echo");
   ava::agent::ToolDispatcher dispatcher(context);
-  auto dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{
-      .id = "call_mcp_tool_error", .name = model_tool_name, .arguments_json = "{\"text\":\"hello\"}"});
+  auto dispatched =
+      dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_mcp_tool_error", .name = model_tool_name, .arguments_json = "{\"text\":\"hello\"}"});
   expect(dispatched && !dispatched->success && dispatched->payload.status == ava::agent::ToolResultStatus::Error &&
-             dispatched->payload.content_type == "application/json" &&
-             dispatched->payload.content.find("\"ok\":false") != std::string::npos &&
+             dispatched->payload.content_type == "application/json" && dispatched->payload.content.find("\"ok\":false") != std::string::npos &&
              dispatched->payload.content.find("MCP tool failed") != std::string::npos,
          dispatched ? "MCP tool dispatcher contains tool-level error results as semantic payloads"
-                    : "MCP tool dispatcher contains tool-level error results as semantic payloads: " +
-                          dispatched.error().format());
+                    : "MCP tool dispatcher contains tool-level error results as semantic payloads: " + dispatched.error().format());
   expect(!prompts.empty(), "MCP tool dispatcher still gates tool-level error calls through permission prompts");
 }
 

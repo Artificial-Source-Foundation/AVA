@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/agent/mode.h"
-
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -12,7 +11,8 @@
 
 namespace ava::app {
 
-enum class RuntimeEventType {
+enum class RuntimeEventType
+{
   SessionStart,
   UserMessage,
   AssistantMessage,
@@ -34,7 +34,8 @@ enum class RuntimeEventType {
   Done,
 };
 
-struct RuntimeEvent {
+struct RuntimeEvent
+{
   RuntimeEventType type = RuntimeEventType::Done;
   std::string timestamp;
   std::string session_id;
@@ -94,7 +95,8 @@ struct RuntimeEvent {
 
 using RuntimeEventSink = std::function<ava::core::VoidResult(RuntimeEvent const&)>;
 
-struct EventEnvelope {
+struct EventEnvelope
+{
   int schema_version = 1;
   std::string event_id;
   std::string timestamp;
@@ -108,7 +110,8 @@ struct EventEnvelope {
   std::string payload_json = "{}";
 };
 
-struct EventEnvelopeContext {
+struct EventEnvelopeContext
+{
   std::optional<std::string> event_id;
   std::optional<std::string> run_id;
   std::optional<std::string> turn_id;
@@ -119,7 +122,8 @@ struct EventEnvelopeContext {
 
 using EventEnvelopeSink = std::function<ava::core::VoidResult(EventEnvelope const&)>;
 
-class EventBus {
+class EventBus
+{
  public:
   void subscribe(EventEnvelopeSink sink);
   // Subscribers are called synchronously in registration order. Publishing stops on the first failure.
@@ -138,7 +142,6 @@ class EventBus {
 [[nodiscard]] std::string serialize_event_envelope_json(EventEnvelope const& envelope);
 [[nodiscard]] std::string serialize_event_envelope_jsonl(EventEnvelope const& envelope);
 // The returned sink captures `bus` by reference and must not outlive it.
-[[nodiscard]] RuntimeEventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context = {},
-                                                              RuntimeEventSink legacy_sink = nullptr);
+[[nodiscard]] RuntimeEventSink make_runtime_event_bus_adapter(EventBus& bus, EventEnvelopeContext context = {}, RuntimeEventSink legacy_sink = nullptr);
 
 }  // namespace ava::app

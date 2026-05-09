@@ -6,7 +6,8 @@
 
 namespace ava::core {
 
-enum class ErrorCategory {
+enum class ErrorCategory
+{
   InvalidArgument,
   Io,
   NotFound,
@@ -17,12 +18,14 @@ enum class ErrorCategory {
   Unknown,
 };
 
-struct ErrorContext {
+struct ErrorContext
+{
   std::string key;
   std::string value;
 };
 
-class Error {
+class Error
+{
  public:
   Error(ErrorCategory category, std::string message);
 

@@ -1,11 +1,8 @@
+#include "tests/support/test_harness.h"
 #include "ava/app/events.h"
 #include "ava/app/interactive_run_queue.h"
-
 #include "ava/agent/mode.h"
-
 #include "ava/core/json.h"
-
-#include "tests/support/test_harness.h"
 
 #include <iostream>
 #include <string>
@@ -63,8 +60,7 @@ void test_runtime_event_conversion_preserves_legacy_payload_shape()
   expect(envelope.session_id == "session_1", "runtime event conversion carries session id");
   expect(envelope.run_id == "run_1" && envelope.turn_id == "turn_2", "runtime event conversion carries optional ids");
   expect(envelope.name == "tool_result", "runtime event conversion maps event name");
-  expect(envelope.payload_json ==
-             "{\"text\":\"read ok\",\"call_id\":\"call_1\",\"tool\":\"read\",\"status\":\"completed\"}",
+  expect(envelope.payload_json == "{\"text\":\"read ok\",\"call_id\":\"call_1\",\"tool\":\"read\",\"status\":\"completed\"}",
          "runtime event conversion maps legacy event fields into payload object");
 }
 
@@ -94,11 +90,9 @@ void test_runtime_event_bus_adapter_publishes_and_forwards()
 
   auto const emitted = sink(event);
   expect(emitted.has_value(), "runtime event bus adapter succeeds when bus and legacy sink succeed");
-  expect(published.size() == 1 && published.front().name == "assistant_message" &&
-             published.front().correlation_id == "correlation_1",
+  expect(published.size() == 1 && published.front().name == "assistant_message" && published.front().correlation_id == "correlation_1",
          "runtime event bus adapter publishes converted envelopes");
-  expect(forwarded.size() == 1 && forwarded.front().text == "done",
-         "runtime event bus adapter forwards runtime events to legacy sink");
+  expect(forwarded.size() == 1 && forwarded.front().text == "done", "runtime event bus adapter forwards runtime events to legacy sink");
 }
 
 void test_runtime_event_bus_adapter_allows_default_legacy_sink()
@@ -117,8 +111,7 @@ void test_runtime_event_bus_adapter_allows_default_legacy_sink()
   event.session_id = "session_1";
 
   auto const emitted = sink(event);
-  expect(emitted.has_value() && published.size() == 1 && published.front().name == "done",
-         "runtime event bus adapter supports a null legacy sink");
+  expect(emitted.has_value() && published.size() == 1 && published.front().name == "done", "runtime event bus adapter supports a null legacy sink");
 }
 
 void test_tool_progress_runtime_event_serialization_and_bus_adapter()
@@ -149,10 +142,8 @@ void test_tool_progress_runtime_event_serialization_and_bus_adapter()
   context.event_id = "event_progress";
   auto sink = ava::app::make_runtime_event_bus_adapter(bus, context);
   auto const emitted = sink(event);
-  expect(emitted.has_value() && published.size() == 1 && published.front().name == "tool_progress",
-         "event bus adapter publishes tool progress envelopes");
-  expect(published.front().payload_json ==
-             "{\"text\":\"reading\",\"call_id\":\"call_2\",\"tool\":\"read_file\",\"status\":\"running\"}",
+  expect(emitted.has_value() && published.size() == 1 && published.front().name == "tool_progress", "event bus adapter publishes tool progress envelopes");
+  expect(published.front().payload_json == "{\"text\":\"reading\",\"call_id\":\"call_2\",\"tool\":\"read_file\",\"status\":\"running\"}",
          "tool progress envelope payload keeps existing tool event fields");
 }
 
@@ -198,12 +189,9 @@ void test_tool_runtime_event_serializes_semantic_frontend_payloads()
              json.find("\"structured_result\":{\"schema_version\":1") != std::string::npos &&
              json.find("\"content_type\":\"application/json\"") != std::string::npos &&
              json.find("\"changed_paths\":[\"src/main.cpp\",\"include/ava/app/events.h\"]") != std::string::npos &&
-             json.find("\"permission_request_ids\":[\"permreq_edit\"]") != std::string::npos &&
-             json.find("\"diff_truncated\":true") != std::string::npos &&
-             json.find("\"byte_limited\":true") != std::string::npos &&
-             json.find("\"line_limited\":true") != std::string::npos &&
-             json.find("\"output_lines\":4") != std::string::npos &&
-             json.find("\"next_offset_line\":6") != std::string::npos &&
+             json.find("\"permission_request_ids\":[\"permreq_edit\"]") != std::string::npos && json.find("\"diff_truncated\":true") != std::string::npos &&
+             json.find("\"byte_limited\":true") != std::string::npos && json.find("\"line_limited\":true") != std::string::npos &&
+             json.find("\"output_lines\":4") != std::string::npos && json.find("\"next_offset_line\":6") != std::string::npos &&
              json.find("\"omitted_lines\":7") != std::string::npos,
          "tool runtime events serialize semantic args, result, permission ids, diffs, and truncation metadata");
 
@@ -215,13 +203,10 @@ void test_tool_runtime_event_serializes_semantic_frontend_payloads()
   auto const structured_result = ava::core::json::object_field(envelope.payload_json, "structured_result");
   auto const paths = ava::core::json::strings_in_array_field(envelope.payload_json, "changed_paths");
   auto const permission_ids = ava::core::json::strings_in_array_field(envelope.payload_json, "permission_request_ids");
-  expect(envelope.name == "tool_result" && args && *args == "{\"path\":\"src/main.cpp\"}" && result &&
-             *result == "{\"ok\":true,\"path\":\"src/main.cpp\"}" && structured_result &&
-             structured_result->find("\"status\":\"success\"") != std::string::npos && paths.size() == 2 &&
-             paths[1] == "include/ava/app/events.h" && permission_ids.size() == 1 &&
-             permission_ids[0] == "permreq_edit" &&
-             envelope.payload_json.find("\"output_lines\":4") != std::string::npos &&
-             envelope.payload_json.find("\"total_lines\":11") != std::string::npos &&
+  expect(envelope.name == "tool_result" && args && *args == "{\"path\":\"src/main.cpp\"}" && result && *result == "{\"ok\":true,\"path\":\"src/main.cpp\"}" &&
+             structured_result && structured_result->find("\"status\":\"success\"") != std::string::npos && paths.size() == 2 &&
+             paths[1] == "include/ava/app/events.h" && permission_ids.size() == 1 && permission_ids[0] == "permreq_edit" &&
+             envelope.payload_json.find("\"output_lines\":4") != std::string::npos && envelope.payload_json.find("\"total_lines\":11") != std::string::npos &&
              envelope.payload_json.find("\"next_offset_line\":6") != std::string::npos &&
              envelope.payload_json.find("\"spill_path\":\"/tmp/ava-spill/tool.txt\"") != std::string::npos,
          "tool event envelopes preserve semantic payloads for frontend replay");
@@ -249,14 +234,12 @@ void test_reasoning_runtime_event_serialization_hides_provider_private_state()
   ava::app::EventEnvelopeContext context;
   context.event_id = "event_reasoning";
   auto const envelope = ava::app::to_event_envelope(event, context);
-  expect(envelope.name == "reasoning_delta" &&
-             envelope.payload_json ==
-                 "{\"text\":\"visible reasoning summary\",\"reasoning_format\":\"anthropic_thinking\","
-                 "\"reasoning_redacted\":true,\"reasoning_signature_present\":true}",
+  expect(envelope.name == "reasoning_delta" && envelope.payload_json ==
+                                                   "{\"text\":\"visible reasoning summary\",\"reasoning_format\":\"anthropic_thinking\","
+                                                   "\"reasoning_redacted\":true,\"reasoning_signature_present\":true}",
          "reasoning envelope carries frontend-visible reasoning payload");
   auto const envelope_json = ava::app::serialize_event_envelope_json(envelope);
-  expect(envelope_json.find("super-secret-signature") == std::string::npos &&
-             envelope_json.find("reasoning_signature\":") == std::string::npos &&
+  expect(envelope_json.find("super-secret-signature") == std::string::npos && envelope_json.find("reasoning_signature\":") == std::string::npos &&
              envelope_json.find("\"signature\":") == std::string::npos,
          "reasoning frontend event envelope never exposes provider-private signatures");
 }
@@ -287,10 +270,8 @@ void test_lifecycle_runtime_event_serialization_and_aliases()
   context.event_id = "event_compaction";
   auto const envelope = ava::app::to_event_envelope(event, context);
   auto const envelope_json = ava::app::serialize_event_envelope_json(envelope);
-  expect(envelope.name == "compaction_end" &&
-             envelope.payload_json.find("\"trigger\":\"context_overflow\"") != std::string::npos &&
-             envelope.payload_json.find("\"max_attempts\":2") != std::string::npos &&
-             envelope_json.find("\"summary_bytes\":512") != std::string::npos,
+  expect(envelope.name == "compaction_end" && envelope.payload_json.find("\"trigger\":\"context_overflow\"") != std::string::npos &&
+             envelope.payload_json.find("\"max_attempts\":2") != std::string::npos && envelope_json.find("\"summary_bytes\":512") != std::string::npos,
          "compaction lifecycle envelope preserves payload and top-level aliases for stream clients");
 
   event.type = ava::app::RuntimeEventType::Canceled;
@@ -318,67 +299,58 @@ void test_lifecycle_runtime_event_serialization_and_aliases()
   event.snapshot_entries = 0;
   event.current_entries = 0;
   auto const retry_tick_json = ava::app::serialize_event_json(event);
-  expect(retry_tick_json.find("\"type\":\"retry_tick\"") != std::string::npos &&
-             retry_tick_json.find("\"remaining_ms\":500") != std::string::npos,
+  expect(retry_tick_json.find("\"type\":\"retry_tick\"") != std::string::npos && retry_tick_json.find("\"remaining_ms\":500") != std::string::npos,
          "retry countdown tick runtime events serialize explicit backend timing data");
 }
 
 void test_interactive_run_queue_emits_steer_queued_and_applied_events()
 {
   std::vector<ava::app::EventEnvelope> events;
-  ava::app::InteractiveRunQueue queue("session_queue", "request_active",
-                                      [&events](ava::app::EventEnvelope const& envelope) {
-                                        events.push_back(envelope);
-                                        return ava::core::VoidResult{};
-                                      });
+  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::app::EventEnvelope const& envelope) {
+    events.push_back(envelope);
+    return ava::core::VoidResult{};
+  });
 
   auto queued = queue.queue_steering("adjust this turn");
   expect(queued.has_value(), "interactive run queue accepts a bounded active-run steering message");
-  expect(events.size() == 1 && events.back().name == "steer_queued" &&
-             events.back().correlation_id == "request_active" && events.back().request_id &&
-             *events.back().request_id != "request_active" &&
-             events.back().payload_json.find("\"message\":\"adjust this turn\"") != std::string::npos,
+  expect(events.size() == 1 && events.back().name == "steer_queued" && events.back().correlation_id == "request_active" && events.back().request_id &&
+             *events.back().request_id != "request_active" && events.back().payload_json.find("\"message\":\"adjust this turn\"") != std::string::npos,
          "interactive run queue emits a correlated steer queued event");
 
   auto taken = queue.take_steering_messages();
   expect(taken.has_value() && taken->size() == 1 && taken->front() == "adjust this turn",
          "interactive run queue returns queued steering at the backend safe point");
-  expect(
-      events.size() == 2 && events.back().name == "steer_applied" && events.back().correlation_id == "request_active",
-      "interactive run queue emits a steer applied event when consumed by the backend");
+  expect(events.size() == 2 && events.back().name == "steer_applied" && events.back().correlation_id == "request_active",
+         "interactive run queue emits a steer applied event when consumed by the backend");
 }
 
 void test_interactive_run_queue_runs_follow_up_lifecycle()
 {
   std::vector<ava::app::EventEnvelope> events;
-  ava::app::InteractiveRunQueue queue("session_queue", "request_active",
-                                      [&events](ava::app::EventEnvelope const& envelope) {
-                                        events.push_back(envelope);
-                                        return ava::core::VoidResult{};
-                                      });
+  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::app::EventEnvelope const& envelope) {
+    events.push_back(envelope);
+    return ava::core::VoidResult{};
+  });
 
   auto queued = queue.queue_follow_up("next turn");
   auto next = queue.take_next_follow_up();
   auto started = next ? queue.mark_follow_up_started(*next) : ava::core::VoidResult{};
   auto steer_after_start = queue.queue_steering("steer follow-up");
 
-  expect(queued.has_value() && next && next->message == "next turn" && started.has_value() &&
-             steer_after_start.has_value(),
+  expect(queued.has_value() && next && next->message == "next turn" && started.has_value() && steer_after_start.has_value(),
          "interactive run queue accepts and starts a queued follow-up");
-  expect(events.size() == 3 && events[0].name == "follow_up_queued" && events[1].name == "follow_up_started" &&
-             events[1].request_id == next->request_id && events[1].correlation_id == next->request_id &&
-             events[2].name == "steer_queued" && events[2].correlation_id == next->request_id,
+  expect(events.size() == 3 && events[0].name == "follow_up_queued" && events[1].name == "follow_up_started" && events[1].request_id == next->request_id &&
+             events[1].correlation_id == next->request_id && events[2].name == "steer_queued" && events[2].correlation_id == next->request_id,
          "interactive run queue retargets active correlation when a follow-up starts");
 }
 
 void test_interactive_run_queue_skips_pending_messages_on_finish()
 {
   std::vector<ava::app::EventEnvelope> events;
-  ava::app::InteractiveRunQueue queue("session_queue", "request_active",
-                                      [&events](ava::app::EventEnvelope const& envelope) {
-                                        events.push_back(envelope);
-                                        return ava::core::VoidResult{};
-                                      });
+  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::app::EventEnvelope const& envelope) {
+    events.push_back(envelope);
+    return ava::core::VoidResult{};
+  });
 
   auto steer = queue.queue_steering("too late");
   auto follow = queue.queue_follow_up("also too late");
@@ -395,11 +367,10 @@ void test_interactive_run_queue_skips_pending_messages_on_finish()
 void test_interactive_run_queue_restores_latest_pending_message()
 {
   std::vector<ava::app::EventEnvelope> events;
-  ava::app::InteractiveRunQueue queue("session_queue", "request_active",
-                                      [&events](ava::app::EventEnvelope const& envelope) {
-                                        events.push_back(envelope);
-                                        return ava::core::VoidResult{};
-                                      });
+  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::app::EventEnvelope const& envelope) {
+    events.push_back(envelope);
+    return ava::core::VoidResult{};
+  });
 
   auto follow = queue.queue_follow_up("first follow-up");
   auto steer = queue.queue_steering("latest steer");
@@ -407,8 +378,7 @@ void test_interactive_run_queue_restores_latest_pending_message()
   auto taken = queue.take_steering_messages();
   auto next = queue.take_next_follow_up();
 
-  expect(follow.has_value() && steer.has_value() && restored.has_value() && restored->steering &&
-             restored->message == "latest steer",
+  expect(follow.has_value() && steer.has_value() && restored.has_value() && restored->steering && restored->message == "latest steer",
          "interactive run queue restores the latest queued message with its kind");
   expect(taken.has_value() && taken->empty() && next && next->message == "first follow-up",
          "interactive run queue removes restored steering without disturbing older follow-up messages");
@@ -420,11 +390,10 @@ void test_interactive_run_queue_restores_latest_pending_message()
 void test_interactive_run_queue_bounds_and_truncates_event_payloads()
 {
   std::vector<ava::app::EventEnvelope> events;
-  ava::app::InteractiveRunQueue queue("session_queue", "request_active",
-                                      [&events](ava::app::EventEnvelope const& envelope) {
-                                        events.push_back(envelope);
-                                        return ava::core::VoidResult{};
-                                      });
+  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::app::EventEnvelope const& envelope) {
+    events.push_back(envelope);
+    return ava::core::VoidResult{};
+  });
 
   std::string const long_message(ava::app::kMaxInteractiveQueueEventMessageBytes + 16, 'x');
   auto queued = queue.queue_steering(long_message);
@@ -433,8 +402,7 @@ void test_interactive_run_queue_bounds_and_truncates_event_payloads()
 
   expect(queued.has_value(), "interactive run queue accepts messages within the aggregate byte limit");
   expect(!rejected.has_value(), "interactive run queue rejects oversized messages");
-  expect(events.size() == 1 && events.back().name == "steer_queued" &&
-             events.back().payload_json.find("\"message_truncated\":true") != std::string::npos &&
+  expect(events.size() == 1 && events.back().name == "steer_queued" && events.back().payload_json.find("\"message_truncated\":true") != std::string::npos &&
              events.back().payload_json.find("\"message_bytes\":") != std::string::npos,
          "interactive run queue truncates event payloads without truncating queued content");
   auto taken = queue.take_steering_messages();

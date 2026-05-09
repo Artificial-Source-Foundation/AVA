@@ -31,7 +31,8 @@ void run_tui_composer_tests();
 
 namespace {
 
-struct TestSuite {
+struct TestSuite
+{
   std::string_view name;
   void (*run)();
 };
@@ -68,7 +69,8 @@ void run_suite(TestSuite const& suite)
   suite.run();
 
   int const failures = ava::test::failures();
-  if (failures == 0) {
+  if (failures == 0)
+  {
     std::cout << suite.name << " tests passed\n";
   }
 }
@@ -76,7 +78,8 @@ void run_suite(TestSuite const& suite)
 int print_failures()
 {
   int const failures = ava::test::failures();
-  if (failures != 0) {
+  if (failures != 0)
+  {
     std::cerr << failures << " test failure(s)\n";
     return 1;
   }
@@ -87,15 +90,19 @@ int print_failures()
 
 int main(int argc, char** argv)
 {
-  if (argc > 2) {
+  if (argc > 2)
+  {
     std::cerr << "usage: ava_tests [suite]\n";
     return 2;
   }
 
-  if (argc == 2) {
+  if (argc == 2)
+  {
     std::string_view const requested_suite = argv[1];
-    for (auto const& suite : kTestSuites) {
-      if (suite.name == requested_suite) {
+    for (auto const& suite : kTestSuites)
+    {
+      if (suite.name == requested_suite)
+      {
         run_suite(suite);
         return print_failures();
       }
@@ -103,19 +110,22 @@ int main(int argc, char** argv)
 
     std::cerr << "unknown test suite: " << requested_suite << "\n";
     std::cerr << "available test suites:";
-    for (auto const& suite : kTestSuites) {
+    for (auto const& suite : kTestSuites)
+    {
       std::cerr << ' ' << suite.name;
     }
     std::cerr << '\n';
     return 2;
   }
 
-  for (auto const& suite : kTestSuites) {
+  for (auto const& suite : kTestSuites)
+  {
     suite.run();
   }
 
   int const failure_status = print_failures();
-  if (failure_status == 0) {
+  if (failure_status == 0)
+  {
     std::cout << "ava tests passed\n";
   }
   return failure_status;

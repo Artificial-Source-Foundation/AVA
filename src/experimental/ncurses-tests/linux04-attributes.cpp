@@ -1,5 +1,6 @@
-#include "terminal/Session.h"
 #include "terminal/Attributes.h"
+#include "terminal/Session.h"
+
 #include <iostream>
 #include <string>
 #include <curses.h>

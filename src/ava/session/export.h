@@ -7,13 +7,13 @@
 
 namespace ava::session {
 
-struct ExportOptions {
+struct ExportOptions
+{
   bool include_tool_details = false;
   bool include_metadata = false;
   bool include_compactions = true;
 };
 
-[[nodiscard]] std::string format_session_markdown(std::vector<SessionEntry> const& entries,
-                                                  ExportOptions const& options = {});
+[[nodiscard]] std::string format_session_markdown(std::vector<SessionEntry> const& entries, ExportOptions const& options = {});
 
 }  // namespace ava::session

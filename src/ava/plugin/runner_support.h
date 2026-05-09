@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ava/plugin/runner.h"
-
 #include "ava/core/result.h"
 
 #include <array>
@@ -11,7 +10,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -20,7 +18,8 @@ namespace ava::plugin {
 
 inline constexpr char kTrustedExecPath[] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
-class UniqueFd {
+class UniqueFd
+{
  public:
   explicit UniqueFd(int fd = -1);
   UniqueFd(UniqueFd const&) = delete;
@@ -37,7 +36,8 @@ class UniqueFd {
   int fd_ = -1;
 };
 
-class ScopedSignalIgnore {
+class ScopedSignalIgnore
+{
  public:
   explicit ScopedSignalIgnore(int signal);
   ScopedSignalIgnore(ScopedSignalIgnore const&) = delete;
@@ -48,12 +48,11 @@ class ScopedSignalIgnore {
 
  private:
   int signal_ = 0;
-  struct sigaction previous_ {};
+  struct sigaction previous_{};
   bool installed_ = false;
 };
 
-[[nodiscard]] ava::core::Error plugin_error(ava::core::ErrorCategory category, std::string message,
-                                            PluginManifest const& manifest);
+[[nodiscard]] ava::core::Error plugin_error(ava::core::ErrorCategory category, std::string message, PluginManifest const& manifest);
 [[nodiscard]] ava::core::Error errno_error(std::string message, PluginManifest const& manifest);
 [[nodiscard]] ava::core::Error protocol_error(std::string message, PluginManifest const& manifest);
 [[nodiscard]] bool is_canceled(CancelCallback const& cancel_requested);
@@ -69,7 +68,6 @@ void close_nonstandard_fds();
 [[nodiscard]] std::string json_string(std::string_view value);
 [[nodiscard]] std::string exit_detail(int status);
 [[nodiscard]] std::vector<std::string> plugin_argv(PluginManifest const& manifest);
-[[nodiscard]] std::filesystem::path child_working_dir(PluginManifest const& manifest,
-                                                      PluginRunnerOptions const& options);
+[[nodiscard]] std::filesystem::path child_working_dir(PluginManifest const& manifest, PluginRunnerOptions const& options);
 
 }  // namespace ava::plugin

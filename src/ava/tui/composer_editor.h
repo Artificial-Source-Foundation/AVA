@@ -9,12 +9,14 @@
 
 namespace ava::tui {
 
-struct ComposerDraftSnapshot {
+struct ComposerDraftSnapshot
+{
   std::string text;
   std::size_t cursor = 0;
 };
 
-struct ComposerDraftState {
+struct ComposerDraftState
+{
   std::string text;
   std::size_t cursor = 0;
   std::string kill_buffer;

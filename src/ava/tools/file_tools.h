@@ -2,9 +2,7 @@
 
 #include "ava/agent/mode.h"
 #include "ava/agent/question.h"
-
 #include "ava/permissions/permission.h"
-
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -22,7 +20,8 @@ namespace ava::tools {
 
 class MutationQueue;
 
-struct PermissionAuditEvent {
+struct PermissionAuditEvent
+{
   std::string permission_request_id = {};
   ava::permissions::Operation operation;
   ava::agent::Mode mode = ava::agent::Mode::Build;
@@ -39,7 +38,8 @@ struct PermissionAuditEvent {
 
 using PermissionAuditSink = std::function<ava::core::VoidResult(PermissionAuditEvent const&)>;
 
-struct ToolProgressEvent {
+struct ToolProgressEvent
+{
   std::string text;
   std::string call_id;
   std::string tool_name;
@@ -48,7 +48,8 @@ struct ToolProgressEvent {
 
 using ToolProgressSink = std::function<ava::core::VoidResult(ToolProgressEvent const&)>;
 
-struct ToolContext {
+struct ToolContext
+{
   std::filesystem::path workspace_dir;
   std::filesystem::path spill_dir = {};
   ava::agent::Mode mode = ava::agent::Mode::Build;
@@ -72,7 +73,8 @@ struct ToolContext {
   std::vector<std::filesystem::path> skill_project_dirs = {};
 };
 
-struct TextOutput {
+struct TextOutput
+{
   std::string content;
   bool truncated = false;
   bool byte_limited = false;
@@ -86,7 +88,8 @@ struct TextOutput {
   std::size_t next_offset_line = 0;
 };
 
-struct FileMutationResult {
+struct FileMutationResult
+{
   std::filesystem::path path;
   std::size_t bytes_written = 0;
   std::string diff;
@@ -95,34 +98,30 @@ struct FileMutationResult {
   bool had_utf8_bom = false;
 };
 
-struct ReadOptions {
+struct ReadOptions
+{
   std::size_t max_bytes = 50 * 1024;
   std::size_t offset_line = 1;
   std::size_t max_lines = 200;
   bool permission_already_checked = false;
 };
 
-struct WriteOptions {
+struct WriteOptions
+{
   bool permission_already_checked = false;
   bool mutation_already_locked = false;
 };
 
-[[nodiscard]] ava::core::Result<TextOutput> read_file(ToolContext const& context, std::filesystem::path const& path,
-                                                      ReadOptions options = {});
-[[nodiscard]] ava::core::Result<FileMutationResult> write_file(ToolContext const& context,
-                                                               std::filesystem::path const& path,
-                                                               std::string_view content, WriteOptions options = {});
-[[nodiscard]] ava::core::Result<FileMutationResult> edit_file(ToolContext const& context,
-                                                              std::filesystem::path const& path,
-                                                              std::string_view old_text, std::string_view new_text);
+[[nodiscard]] ava::core::Result<TextOutput> read_file(ToolContext const& context, std::filesystem::path const& path, ReadOptions options = {});
+[[nodiscard]] ava::core::Result<FileMutationResult> write_file(ToolContext const& context, std::filesystem::path const& path, std::string_view content,
+                                                               WriteOptions options = {});
+[[nodiscard]] ava::core::Result<FileMutationResult> edit_file(ToolContext const& context, std::filesystem::path const& path, std::string_view old_text,
+                                                              std::string_view new_text);
 [[nodiscard]] ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permissions::Operation operation,
-                                                      std::filesystem::path const& target_path,
-                                                      std::string_view command, std::string_view tool_name,
-                                                      std::string_view error_message,
-                                                      std::string_view diff_preview = {}, bool diff_truncated = false);
+                                                      std::filesystem::path const& target_path, std::string_view command, std::string_view tool_name,
+                                                      std::string_view error_message, std::string_view diff_preview = {}, bool diff_truncated = false);
 [[nodiscard]] std::string permission_audit_data_json(PermissionAuditEvent const& event);
-[[nodiscard]] ava::core::VoidResult replace_file_with_staged_file(std::filesystem::path const& staged_path,
-                                                                  std::filesystem::path const& target_path);
+[[nodiscard]] ava::core::VoidResult replace_file_with_staged_file(std::filesystem::path const& staged_path, std::filesystem::path const& target_path);
 void remove_staged_file_best_effort(std::filesystem::path const& staged_path);
 
 }  // namespace ava::tools

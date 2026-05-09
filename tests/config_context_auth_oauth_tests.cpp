@@ -1482,13 +1482,14 @@ void test_model_and_prompt_config()
                                           .estimated_total_bytes = std::nullopt,
                                           .estimated = false};
     auto cost = selected.pricing ? ava::config::usage_cost_usd(*selected.pricing, usage) : std::nullopt;
+    auto const cost_value = cost.value_or(0.0L);
     expect(selected.context_window_tokens == 12345 && selected.max_output_tokens == 678 &&
                selected.api_family == "openai_responses" && selected.input_modalities.size() == 2 &&
                selected.output_modalities.size() == 1 && selected.output_modalities[0] == "text" &&
                selected.reasoning_format == "reasoning_content" && selected.supports_tools == false &&
                selected.supports_streaming == true && selected.supports_reasoning == true &&
                selected.reports_usage == true && selected.reasoning_levels.size() == 2 &&
-               selected.compatibility_quirks.size() == 1 && cost && *cost > 0.0064L && *cost < 0.0066L,
+               selected.compatibility_quirks.size() == 1 && cost && cost_value > 0.0064L && cost_value < 0.0066L,
            "model registry parses local capability and pricing metadata and calculates cost");
     expect(!ava::config::usage_cost_usd(ava::config::ModelPricing{}, usage),
            "usage cost remains unknown when pricing rates are absent");

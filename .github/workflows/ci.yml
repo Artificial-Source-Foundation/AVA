@@ -12,21 +12,35 @@ jobs:
   test:
     name: Build and test
     runs-on: ubuntu-latest
+    env:
+      GITACHE_ROOT: ${{ github.workspace }}/.gitache
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libncursesw5-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libncursesw5-dev pkg-config libdw-dev
+
+      - name: Restore gitache cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.GITACHE_ROOT }}
+          key: gitache-${{ runner.os }}-${{ hashFiles('.gitmodules') }}
+          restore-keys: |
+            gitache-${{ runner.os }}-
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DAVA_BUILD_TESTS=ON
+        run: |
+          mkdir -p "$GITACHE_ROOT"
+          cmake -S . -B build -G Ninja -DAVA_BUILD_TESTS=ON
 
       - name: Build
         run: cmake --build build --parallel
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --parallel
 
   sanitizer:
     name: Sanitizers
@@ -34,6 +48,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libncursesw5-dev pkg-config
@@ -45,4 +61,4 @@ jobs:
         run: cmake --build build-sanitize --parallel
 
       - name: Test
-        run: ctest --test-dir build-sanitize --output-on-failure
+        run: ctest --test-dir build-sanitize --output-on-failure --parallel

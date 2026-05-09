@@ -1,9 +1,11 @@
-#include "private_convert.h"
+#include "sys.h"
 
 #include <array>
 #include <cwchar>
-
 #include "debug.h"
+
+// This header must be included last.
+#include "private_convert.h"
 
 attr_t convert_to_attr(Attributes attributes)
 {

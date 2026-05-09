@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "Window.h"
 
 #include <array>
@@ -5,7 +6,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
 #include "debug.h"
 
 // This header must be included last.

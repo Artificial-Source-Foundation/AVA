@@ -132,7 +132,7 @@ ava::core::VoidResult append_span(Text& text, std::string value, Rendition rendi
 
 void append_newline(Text& text)
 {
-  text.runs.push_back(NewLine{});
+  text.runs.emplace_back(std::in_place_type<NewLine>);
 }
 
 void append_plain_text(Text& text, std::string_view value)

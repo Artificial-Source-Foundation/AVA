@@ -1,10 +1,11 @@
+#include "sys.h"
 #include "ComplexChar.h"
 
-#include "private_convert.h"
-
 #include <cwchar>
-
 #include "debug.h"
+
+// This header must be included last.
+#include "private_convert.h"
 
 namespace terminal {
 

@@ -11,9 +11,12 @@ target_sources(terminal_ObjLib
 )
 
 # Set required include directories.
+get_target_property(CWDS_INTERFACE_INCLUDE_DIRECTORIES AICxx::cwds INTERFACE_INCLUDE_DIRECTORIES)
 target_include_directories(terminal_ObjLib
-  PRIVATE
-    "${CWDS_INTERFACE_INCLUDE_DIRECTORIES}"
+  PUBLIC
+    "${CWDS_INTERFACE_INCLUDE_DIRECTORIES}" # For sys.h and debug.h.
+  INTERFACE
+    "${CMAKE_SOURCE_DIR}/src/ava/tui"
 )
 
 # Set link dependencies.

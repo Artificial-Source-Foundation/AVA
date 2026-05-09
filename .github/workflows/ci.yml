@@ -21,7 +21,7 @@ jobs:
           submodules: recursive
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libncursesw5-dev pkg-config libdw-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev
 
       - name: Restore gitache cache
         uses: actions/cache@v4
@@ -52,7 +52,7 @@ jobs:
           submodules: recursive
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libncursesw5-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libncursesw5-dev pkg-config libboost-dev
 
       - name: Configure
         run: cmake -S . -B build-sanitize -G Ninja -DAVA_BUILD_TESTS=ON -DAVA_ENABLE_SANITIZERS=ON

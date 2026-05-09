@@ -6,6 +6,7 @@
 #include "ava/plugin/discovery.h"
 #include "ava/plugin/enablement.h"
 #include "ava/plugin/runner.h"
+#include "ava/plugin/tool_broker.h"
 
 #include "ava/core/ids.h"
 
@@ -77,7 +78,12 @@ class PluginEventObserverState final {
         notify_failure(binding, process.error());
         continue;
       }
-      auto observed = (*process)->observe_event(event_name, payload, event.call_id);
+      auto const hook_label = binding.manifest.id + ":" + binding.hook.event;
+      auto proxy_handler = ava::plugin::make_core_service_proxy_handler(
+          permission_context("plugin_event_observe"), binding.manifest, "event_hook", binding.hook.event,
+          hook_label, event.call_id);
+      auto observed = (*process)->observe_event(event_name, payload, event.call_id, options_.cancel_requested,
+                                                 std::move(proxy_handler));
       if (!observed) notify_failure(binding, observed.error());
       auto shutdown = (*process)->shutdown();
       if (!shutdown) notify_failure(binding, shutdown.error());
@@ -123,11 +129,16 @@ class PluginEventObserverState final {
   ava::tools::ToolContext permission_context(std::string_view tool_name) const
   {
     return ava::tools::ToolContext{.workspace_dir = options_.workspace_dir,
-                                   .mode = options_.mode,
-                                   .permission_resolver = options_.permission_resolver,
-                                   .permission_audit_sink = options_.permission_audit_sink,
-                                   .permission_tool_name = std::string(tool_name),
-                                   .current_tool_name = std::string(tool_name)};
+                                    .mode = options_.mode,
+                                    .permission_resolver = options_.permission_resolver,
+                                     .permission_audit_sink = options_.permission_audit_sink,
+                                     .cancel_requested = options_.cancel_requested,
+                                     .permission_tool_name = std::string(tool_name),
+                                     .current_tool_name = std::string(tool_name),
+                                     .session_id = options_.session_id,
+                                     .provider_id = options_.provider_id,
+                                     .model_id = options_.model_id,
+                                     .current_dir = options_.current_dir};
   }
 
   bool ensure_launch_permission(ava::plugin::PluginManifest const& manifest)
@@ -199,13 +210,18 @@ PluginEventObserverOptions plugin_event_observer_options(RuntimeSession& session
       .mode = session.mode,
       .permission_resolver = std::move(permission_resolver),
       .permission_audit_sink = [&store = session.store,
-                                session_mutex](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+                                  session_mutex](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
         if (session_mutex) {
           std::lock_guard lock(*session_mutex);
           return append_permission_decision(store, event);
         }
         return append_permission_decision(store, event);
-      }};
+      },
+      .cancel_requested = nullptr,
+      .session_id = session.store.session_id(),
+      .provider_id = session.model.provider_id,
+      .model_id = session.model.model_id,
+      .current_dir = session.current_dir};
 }
 
 RuntimeEventSink make_plugin_event_observer_sink(PluginEventObserverOptions options, RuntimeEventSink next)

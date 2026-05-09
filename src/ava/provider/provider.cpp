@@ -1,6 +1,7 @@
 #include "ava/provider/provider.h"
 
 #include "ava/core/json.h"
+#include "ava/provider/provider_utils.h"
 
 #include <algorithm>
 #include <cctype>
@@ -14,6 +15,12 @@
 
 namespace ava::provider {
 namespace {
+
+constexpr std::size_t kMaxImageAttachmentIdBytes = 128;
+constexpr std::size_t kMaxImageStoragePathBytes = 4096;
+constexpr std::size_t kMaxImageBytes = 20 * 1024 * 1024;
+constexpr std::size_t kMaxImageAttachmentsPerRequest = 16;
+constexpr std::size_t kMaxImageBytesPerRequest = 40 * 1024 * 1024;
 
 class DefaultStreamParser final : public StreamParser {
  public:
@@ -43,6 +50,29 @@ bool has_any(std::string_view haystack, std::initializer_list<std::string_view> 
     if (haystack.find(needle) != std::string_view::npos) return true;
   }
   return false;
+}
+
+bool has_control_byte(std::string_view value)
+{
+  return std::ranges::any_of(value, [](char ch) {
+    auto const byte = static_cast<unsigned char>(ch);
+    return byte < 0x20 || byte == 0x7f;
+  });
+}
+
+bool is_hex_string(std::string_view value)
+{
+  return std::ranges::all_of(value, [](char ch) {
+    return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
+  });
+}
+
+ava::core::Error image_part_error(std::string message, std::size_t message_index, std::size_t part_index)
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
+  error.with_context("message_index", std::to_string(message_index));
+  error.with_context("content_part_index", std::to_string(part_index));
+  return error;
 }
 
 bool looks_like_context_overflow(std::string_view text)
@@ -313,10 +343,12 @@ ava::core::Result<HttpResponse> RetryTransport::send(HttpRequest const& request)
 ava::core::Result<HttpResponse> RetryTransport::send(HttpRequest const& request, CancelCallback cancel_requested)
 {
   int const max_attempts = std::max(1, options_.max_attempts);
-  if (retry_cancel_requested(options_, cancel_requested)) return std::unexpected(retry_canceled_error());
-  ava::core::Result<HttpResponse> response = inner_.send(request, cancel_requested);
+  auto combined_cancel_requested = [this, cancel_requested] { return retry_cancel_requested(options_, cancel_requested); };
+  if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
+  ava::core::Result<HttpResponse> response = inner_.send(request, combined_cancel_requested);
+  if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
   for (int attempt = 1; attempt < max_attempts; ++attempt) {
-    if (retry_cancel_requested(options_, cancel_requested)) return std::unexpected(retry_canceled_error());
+    if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
     if (response) {
       if (!is_retryable_kind(classify_provider_error(*response))) break;
       auto const reason = to_string(classify_provider_error(*response));
@@ -350,8 +382,9 @@ ava::core::Result<HttpResponse> RetryTransport::send(HttpRequest const& request,
         return std::unexpected(std::move(slept.error()));
       }
     }
-    if (retry_cancel_requested(options_, cancel_requested)) return std::unexpected(retry_canceled_error());
-    response = inner_.send(request, cancel_requested);
+    if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
+    response = inner_.send(request, combined_cancel_requested);
+    if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
   }
   return response;
 }
@@ -365,10 +398,13 @@ ava::core::Result<HttpResponse> RetryTransport::send_streaming(HttpRequest const
                                                                CancelCallback cancel_requested)
 {
   int const max_attempts = std::max(1, options_.max_attempts);
+  auto combined_cancel_requested = [this, cancel_requested] { return retry_cancel_requested(options_, cancel_requested); };
+  if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
   ava::core::Result<HttpResponse> response =
       std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "streaming request was not attempted"));
   std::string final_body;
   for (int attempt = 1; attempt <= max_attempts; ++attempt) {
+    if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
     std::string attempt_body;
     bool delivered_chunks = false;
     response = inner_.send_streaming(
@@ -379,7 +415,8 @@ ava::core::Result<HttpResponse> RetryTransport::send_streaming(HttpRequest const
           delivered_chunks = true;
           return on_body_chunk(chunk);
         },
-        cancel_requested);
+        combined_cancel_requested);
+    if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
 
     bool const last_attempt = attempt == max_attempts;
     if (response) {
@@ -421,6 +458,7 @@ ava::core::Result<HttpResponse> RetryTransport::send_streaming(HttpRequest const
     }
   }
   if (!response) return std::unexpected(std::move(response.error()));
+  if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
   if (on_body_chunk && !final_body.empty()) {
     if (auto delivered = on_body_chunk(final_body); !delivered) return std::unexpected(std::move(delivered.error()));
   }
@@ -514,6 +552,93 @@ bool is_context_overflow_error(ava::core::Error const& error)
     if (looks_like_context_overflow(item.value)) return true;
   }
   return false;
+}
+
+bool is_supported_image_mime_type(std::string_view mime_type)
+{
+  return mime_type == "image/png" || mime_type == "image/jpeg" || mime_type == "image/webp" ||
+         mime_type == "image/gif";
+}
+
+bool request_has_image_parts(ProviderRequest const& request)
+{
+  for (auto const& message : request.messages) {
+    for (auto const& part : message.content_parts) {
+      if (part.type == ContentPartType::Image) return true;
+    }
+  }
+  return false;
+}
+
+bool valid_image_storage_path(std::string_view path)
+{
+  if (path.empty() || path.size() > kMaxImageStoragePathBytes || has_control_byte(path)) return false;
+  if (!path.starts_with("attachments/")) return false;
+  if (path.starts_with('/') || path.starts_with('~') || path.find('\\') != std::string_view::npos) return false;
+  if (path.find(':') != std::string_view::npos) return false;
+  std::size_t segment_start = 0;
+  while (segment_start <= path.size()) {
+    auto const slash = path.find('/', segment_start);
+    auto const segment = path.substr(segment_start, slash == std::string_view::npos ? std::string_view::npos : slash - segment_start);
+    if (segment.empty() || segment == "." || segment == "..") return false;
+    if (slash == std::string_view::npos) break;
+    segment_start = slash + 1;
+  }
+  return true;
+}
+
+ava::core::VoidResult validate_image_content_parts(ProviderRequest const& request, bool model_supports_images)
+{
+  std::size_t image_count = 0;
+  std::size_t total_image_bytes = 0;
+  for (std::size_t message_index = 0; message_index < request.messages.size(); ++message_index) {
+    auto const& message = request.messages[message_index];
+    for (std::size_t part_index = 0; part_index < message.content_parts.size(); ++part_index) {
+      auto const& part = message.content_parts[part_index];
+      if (part.type != ContentPartType::Image) continue;
+      if (!model_supports_images) {
+        return std::unexpected(image_part_error("selected model does not support image input", message_index,
+                                                part_index));
+      }
+      if (message.role != "user") {
+        return std::unexpected(image_part_error("image content requires user role", message_index, part_index));
+      }
+      if (part.attachment_id.empty() || part.attachment_id.size() > kMaxImageAttachmentIdBytes ||
+          has_control_byte(part.attachment_id)) {
+        return std::unexpected(image_part_error("image attachment id is invalid", message_index, part_index));
+      }
+      if (!is_supported_image_mime_type(part.mime_type)) {
+        return std::unexpected(image_part_error("image attachment MIME type is not supported", message_index,
+                                                part_index));
+      }
+      if (!valid_image_storage_path(part.storage_path)) {
+        return std::unexpected(image_part_error("image attachment storage path is invalid", message_index,
+                                                part_index));
+      }
+      if (part.byte_size == 0 || part.byte_size > kMaxImageBytes) {
+        return std::unexpected(image_part_error("image attachment byte size is outside supported limits",
+                                                message_index, part_index));
+      }
+      if (part.sha256.size() != 64 || !is_hex_string(part.sha256)) {
+        return std::unexpected(image_part_error("image attachment sha256 is invalid", message_index, part_index));
+      }
+      if (!part.data_base64.empty() && !is_valid_base64(part.data_base64)) {
+        return std::unexpected(image_part_error("image attachment base64 payload is invalid", message_index,
+                                                part_index));
+      }
+      ++image_count;
+      if (image_count > kMaxImageAttachmentsPerRequest) {
+        return std::unexpected(image_part_error("image attachment count exceeds supported limits", message_index,
+                                                part_index));
+      }
+      if (part.byte_size > kMaxImageBytesPerRequest - total_image_bytes) {
+        return std::unexpected(image_part_error("image attachment total byte size exceeds supported limits",
+                                                message_index, part_index));
+      }
+      total_image_bytes += part.byte_size;
+    }
+  }
+  return {};
 }
 
 }  // namespace ava::provider

@@ -1031,10 +1031,14 @@ void test_tool_dispatcher()
   bool grep_has_case_insensitive = false;
   bool question_has_allow_multiple = false;
   auto const default_has_lsp_schema = std::ranges::any_of(default_schemas, [](std::string const& schema) {
-    return schema.find("\"name\":\"lsp_diagnostics\"") != std::string::npos;
+    return schema.find("\"name\":\"lsp_") != std::string::npos;
   });
-  expect(!default_has_lsp_schema && default_schemas.size() + 1 == configured_schemas.size(),
-         "lsp_diagnostics schema is gated until a local diagnostics provider is configured");
+  auto const configured_lsp_schema_count = std::ranges::count_if(configured_schemas, [](std::string const& schema) {
+    return schema.find("\"name\":\"lsp_") != std::string::npos;
+  });
+  expect(!default_has_lsp_schema && configured_lsp_schema_count == 5 &&
+             default_schemas.size() + configured_lsp_schema_count == configured_schemas.size(),
+         "LSP schemas are gated until a local diagnostics provider is configured");
   expect(metadata.size() == schemas.size(),
          "tool metadata and configured schema exports cover the same built-in tools");
   for (std::size_t index = 0; index < metadata.size(); ++index) {
@@ -1055,8 +1059,8 @@ void test_tool_dispatcher()
     read_has_offset = read_has_offset ||
                       (schema.find("\"name\":\"read_file\"") != std::string::npos &&
                        schema.find("\"offset\"") != std::string::npos && schema.find("\"limit\"") != std::string::npos);
-    bool const is_lsp_schema = schema.find("\"name\":\"lsp_diagnostics\"") != std::string::npos;
-    has_lsp_diagnostics = has_lsp_diagnostics || is_lsp_schema;
+    bool const is_lsp_schema = schema.find("\"name\":\"lsp_") != std::string::npos;
+    has_lsp_diagnostics = has_lsp_diagnostics || schema.find("\"name\":\"lsp_diagnostics\"") != std::string::npos;
     lsp_schema_exposes_command =
         lsp_schema_exposes_command ||
         (is_lsp_schema && (schema.find("command") != std::string::npos || schema.find("argv") != std::string::npos));

@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -39,26 +40,89 @@ constexpr std::size_t kMaxQuestionAnswerStringBytes = 8192;
 constexpr std::size_t kMaxLspProviderDiagnostics = 200;
 constexpr std::size_t kMaxLspProviderJsonBytes = 64 * 1024;
 constexpr std::size_t kMaxLspProviderPathBytes = 4096;
+constexpr std::size_t kMaxLspProviderQueryBytes = 1024;
 
 using namespace ava::agent::tool_dispatch;
 
 bool is_lsp_diagnostics_metadata(ToolMetadata const& tool)
 {
-  return tool.name == std::string_view("lsp_diagnostics");
+  return tool.name == std::string_view("lsp_diagnostics") || tool.name == std::string_view("lsp_document_symbols") ||
+         tool.name == std::string_view("lsp_workspace_symbols") || tool.name == std::string_view("lsp_definition") ||
+         tool.name == std::string_view("lsp_references");
 }
 
 ToolDispatchResult lsp_error_result(ProviderToolCall const& call, ava::core::Error const& error)
 {
   if (error.message().find("canceled") != std::string::npos || error.message().find("cancelled") != std::string::npos) {
-    return tool_error_result(call, error);
+    auto redacted = ava::core::Error(error.category(), "LSP query canceled");
+    redacted.with_context("tool", call.name);
+    return tool_error_result(call, redacted);
   }
-  if (error.category() == ava::core::ErrorCategory::PermissionDenied ||
-      error.category() == ava::core::ErrorCategory::InvalidArgument) {
-    return tool_error_result(call, error);
-  }
-  auto redacted = ava::core::Error(error.category(), "LSP diagnostics failed");
+  auto redacted = ava::core::Error(error.category(), "LSP query failed");
   redacted.with_context("tool", call.name);
   return tool_error_result(call, redacted);
+}
+
+std::string lsp_range_json(ava::lsp::Range const& range)
+{
+  return "{\"start_line\":" + std::to_string(range.start_line) + ",\"start_column\":" +
+         std::to_string(range.start_column) + ",\"end_line\":" + std::to_string(range.end_line) +
+         ",\"end_column\":" + std::to_string(range.end_column) + "}";
+}
+
+std::string lsp_path_for_result(ava::tools::ToolContext const& context, std::filesystem::path const& path)
+{
+  std::error_code error;
+  auto relative = std::filesystem::relative(path, context.workspace_dir, error);
+  if (!error && !relative.empty()) {
+    auto const native = relative.native();
+    if (native != ".." && native.rfind("../", 0) != 0) return relative.generic_string();
+  }
+  return path.generic_string();
+}
+
+std::string lsp_symbol_entry_json(ava::tools::ToolContext const& context, ava::lsp::Symbol const& symbol)
+{
+  return "{\"name\":\"" + ava::core::json::escape(symbol.name) + "\",\"kind\":" + std::to_string(symbol.kind) +
+         ",\"path\":\"" + ava::core::json::escape(lsp_path_for_result(context, symbol.path)) + "\",\"range\":" +
+         lsp_range_json(symbol.range) + ",\"container\":\"" + ava::core::json::escape(symbol.container) + "\"}";
+}
+
+std::string lsp_location_entry_json(ava::tools::ToolContext const& context, ava::lsp::Location const& location)
+{
+  return "{\"path\":\"" + ava::core::json::escape(lsp_path_for_result(context, location.path)) + "\",\"range\":" +
+         lsp_range_json(location.range) + "}";
+}
+
+template <typename Entry, typename Serializer>
+void append_lsp_entries(std::string& text, std::vector<Entry> const& entries, Serializer serializer, bool& truncated)
+{
+  for (std::size_t index = 0; index < entries.size(); ++index) {
+    if (index >= kMaxLspProviderDiagnostics) {
+      truncated = true;
+      break;
+    }
+    auto entry = serializer(entries[index]);
+    if (text.size() + entry.size() + 96 > kMaxLspProviderJsonBytes) {
+      truncated = true;
+      break;
+    }
+    if (index > 0) text += ',';
+    text += std::move(entry);
+  }
+}
+
+ava::core::Result<int> required_nonnegative_int_arg(std::string_view arguments, std::string_view field,
+                                                    std::string_view tool_name)
+{
+  auto value = ava::core::json::integer_field(arguments, field);
+  if (!value || *value < 0 || *value > static_cast<long long>(std::numeric_limits<int>::max())) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "tool integer argument is invalid");
+    error.with_context("tool", std::string(tool_name));
+    error.with_context("field", std::string(field));
+    return std::unexpected(std::move(error));
+  }
+  return static_cast<int>(*value);
 }
 
 ava::core::Error question_answer_error(std::string_view tool_name, std::string_view field, std::string message)
@@ -479,6 +543,114 @@ ToolDispatchResult lsp_diagnostics_result(ava::tools::ToolContext const& context
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
 }
 
+ToolDispatchResult lsp_document_symbols_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto path = required_safe_string_arg(call.arguments_json, "path", call.name);
+  if (!path) return tool_error_result(call, path.error());
+  if (path->size() > kMaxLspProviderPathBytes) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "lsp_document_symbols path is too long");
+    error.with_context("max_bytes", std::to_string(kMaxLspProviderPathBytes));
+    return tool_error_result(call, error);
+  }
+  auto const tool_context = context_for_provider_tool(context, call);
+  auto result = ava::tools::lsp_document_symbols(tool_context, workspace_path(context, *path));
+  if (!result) return lsp_error_result(call, result.error());
+
+  std::string text = "{\"tool\":\"lsp_document_symbols\",\"ok\":true,\"path\":\"" +
+                     ava::core::json::escape(*path) + "\",\"symbols\":[";
+  bool truncated = false;
+  append_lsp_entries(text, result->symbols, [&](ava::lsp::Symbol const& symbol) {
+    return lsp_symbol_entry_json(context, symbol);
+  }, truncated);
+  text += "],\"truncated\":" + json_bool(truncated) +
+          ",\"total_symbols\":" + std::to_string(result->symbols.size()) + "}";
+  return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
+}
+
+ToolDispatchResult lsp_workspace_symbols_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto query = required_safe_string_arg(call.arguments_json, "query", call.name);
+  if (!query) return tool_error_result(call, query.error());
+  if (query->size() > kMaxLspProviderQueryBytes) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "lsp_workspace_symbols query is too long");
+    error.with_context("max_bytes", std::to_string(kMaxLspProviderQueryBytes));
+    return tool_error_result(call, error);
+  }
+  auto const tool_context = context_for_provider_tool(context, call);
+  auto result = ava::tools::lsp_workspace_symbols(tool_context, *query);
+  if (!result) return lsp_error_result(call, result.error());
+
+  std::string text = "{\"tool\":\"lsp_workspace_symbols\",\"ok\":true,\"query\":\"" +
+                     ava::core::json::escape(*query) + "\",\"symbols\":[";
+  bool truncated = false;
+  append_lsp_entries(text, result->symbols, [&](ava::lsp::Symbol const& symbol) {
+    return lsp_symbol_entry_json(context, symbol);
+  }, truncated);
+  text += "],\"truncated\":" + json_bool(truncated) +
+          ",\"total_symbols\":" + std::to_string(result->symbols.size()) + "}";
+  return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
+}
+
+ToolDispatchResult lsp_definition_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto path = required_safe_string_arg(call.arguments_json, "path", call.name);
+  if (!path) return tool_error_result(call, path.error());
+  if (path->size() > kMaxLspProviderPathBytes) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "lsp_definition path is too long");
+    error.with_context("max_bytes", std::to_string(kMaxLspProviderPathBytes));
+    return tool_error_result(call, error);
+  }
+  auto line = required_nonnegative_int_arg(call.arguments_json, "line", call.name);
+  if (!line) return tool_error_result(call, line.error());
+  auto column = required_nonnegative_int_arg(call.arguments_json, "column", call.name);
+  if (!column) return tool_error_result(call, column.error());
+
+  auto const tool_context = context_for_provider_tool(context, call);
+  auto result = ava::tools::lsp_definition(tool_context, workspace_path(context, *path), *line, *column);
+  if (!result) return lsp_error_result(call, result.error());
+
+  std::string text = "{\"tool\":\"lsp_definition\",\"ok\":true,\"path\":\"" +
+                     ava::core::json::escape(*path) + "\",\"line\":" + std::to_string(*line) +
+                     ",\"column\":" + std::to_string(*column) + ",\"locations\":[";
+  bool truncated = false;
+  append_lsp_entries(text, result->locations, [&](ava::lsp::Location const& location) {
+    return lsp_location_entry_json(context, location);
+  }, truncated);
+  text += "],\"truncated\":" + json_bool(truncated) +
+          ",\"total_locations\":" + std::to_string(result->locations.size()) + "}";
+  return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
+}
+
+ToolDispatchResult lsp_references_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto path = required_safe_string_arg(call.arguments_json, "path", call.name);
+  if (!path) return tool_error_result(call, path.error());
+  if (path->size() > kMaxLspProviderPathBytes) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "lsp_references path is too long");
+    error.with_context("max_bytes", std::to_string(kMaxLspProviderPathBytes));
+    return tool_error_result(call, error);
+  }
+  auto line = required_nonnegative_int_arg(call.arguments_json, "line", call.name);
+  if (!line) return tool_error_result(call, line.error());
+  auto column = required_nonnegative_int_arg(call.arguments_json, "column", call.name);
+  if (!column) return tool_error_result(call, column.error());
+
+  auto const tool_context = context_for_provider_tool(context, call);
+  auto result = ava::tools::lsp_references(tool_context, workspace_path(context, *path), *line, *column);
+  if (!result) return lsp_error_result(call, result.error());
+
+  std::string text = "{\"tool\":\"lsp_references\",\"ok\":true,\"path\":\"" +
+                     ava::core::json::escape(*path) + "\",\"line\":" + std::to_string(*line) +
+                     ",\"column\":" + std::to_string(*column) + ",\"locations\":[";
+  bool truncated = false;
+  append_lsp_entries(text, result->locations, [&](ava::lsp::Location const& location) {
+    return lsp_location_entry_json(context, location);
+  }, truncated);
+  text += "],\"truncated\":" + json_bool(truncated) +
+          ",\"total_locations\":" + std::to_string(result->locations.size()) + "}";
+  return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
+}
+
 ToolDispatchResult question_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
 {
   auto prompt = parse_question_prompt(call.arguments_json, call.name);
@@ -512,6 +684,10 @@ ToolExecutor builtin_tool_executor(std::string_view name)
   if (name == "websearch") return websearch_result;
   if (name == "skill") return skill_result;
   if (name == "lsp_diagnostics") return lsp_diagnostics_result;
+  if (name == "lsp_document_symbols") return lsp_document_symbols_result;
+  if (name == "lsp_workspace_symbols") return lsp_workspace_symbols_result;
+  if (name == "lsp_definition") return lsp_definition_result;
+  if (name == "lsp_references") return lsp_references_result;
   if (name == "apply_patch") return apply_patch_result;
   if (name == "question") return question_result;
   return nullptr;
@@ -588,6 +764,7 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(ProviderToolCall 
       return with_tool_result_payload(tool_error_result(normalized, canceled_error(normalized)));
     auto context = context_;
     context.permission_request_ids = std::make_shared<std::vector<std::string>>();
+    if (context.lsp_diagnostics_provider) context.lsp_diagnostics_provider->set_permission_request_ids(context.permission_request_ids);
     auto result = tool->executor(context, normalized);
     if (context.permission_request_ids && !context.permission_request_ids->empty()) {
       result.payload.permission_request_ids = *context.permission_request_ids;

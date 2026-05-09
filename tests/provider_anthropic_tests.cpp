@@ -82,6 +82,52 @@ void test_anthropic_provider_contract()
            "Anthropic request does not send OpenAI parameters key");
   }
 
+  auto const auth_request = ava::provider::ProviderRequest{.provider_id = "anthropic",
+                                                          .model_id = "claude-sonnet-4-5",
+                                                          .system_prompt = "system",
+                                                          .messages = {ava::provider::ChatMessage{.role = "user",
+                                                                                                   .content = "hello"}},
+                                                          .tools_json = {},
+                                                          .stream = false};
+  auto const api_auth_request = provider.build_request(
+      auth_request, ava::provider::ProviderAuthContext{.access_token = "api-context-key",
+                                                       .credential_type = "api_key",
+                                                       .account_id = ""});
+  expect(api_auth_request && api_auth_request->headers.at("x-api-key") == "api-context-key" &&
+             api_auth_request->headers.find("Authorization") == api_auth_request->headers.end() &&
+             api_auth_request->headers.find("anthropic-beta") == api_auth_request->headers.end(),
+         "Anthropic API-key auth context keeps x-api-key behavior without OAuth beta marker");
+
+  auto const oauth_auth_request = provider.build_request(
+      auth_request, ava::provider::ProviderAuthContext{.access_token = "oauth-context-token",
+                                                       .credential_type = "oauth",
+                                                       .account_id = "acct"});
+  expect(oauth_auth_request && oauth_auth_request->headers.find("x-api-key") == oauth_auth_request->headers.end() &&
+             oauth_auth_request->headers.at("Authorization") == "Bearer oauth-context-token" &&
+             oauth_auth_request->headers.at("anthropic-beta") == "oauth-2025-04-20",
+         "Anthropic OAuth auth context uses bearer authorization and OAuth beta marker");
+
+  ava::provider::HttpRequest existing_beta{.method = "POST",
+                                           .url = "https://anthropic.example.test/v1/messages",
+                                           .headers = {{"x-api-key", "old-key"},
+                                                       {"anthropic-beta",
+                                                        "prompt-caching-2024-07-31, oauth-2025-04-20"}},
+                                           .body = "{}",
+                                           .timeout_ms = 60000,
+                                           .follow_redirects = false,
+                                           .include_response_headers = false,
+                                           .resolve_hosts = {}};
+  auto applied = provider.apply_auth_options(
+      existing_beta, ava::provider::ProviderAuthContext{.access_token = "oauth-context-token",
+                                                        .credential_type = "oauth",
+                                                        .account_id = "acct"});
+  auto const& beta = existing_beta.headers.at("anthropic-beta");
+  expect(applied && existing_beta.headers.find("x-api-key") == existing_beta.headers.end() &&
+             existing_beta.headers.at("Authorization") == "Bearer oauth-context-token" &&
+             beta.find("prompt-caching-2024-07-31") != std::string::npos &&
+             beta.find("oauth-2025-04-20") == beta.rfind("oauth-2025-04-20"),
+         "Anthropic OAuth auth preserves existing beta features without duplicating OAuth marker");
+
   auto const empty_system = provider.build_request(
       ava::provider::ProviderRequest{.provider_id = "anthropic",
                                      .model_id = "claude-sonnet-4-5",
@@ -569,6 +615,96 @@ void test_anthropic_native_content_parts_request()
   expect(!invalid_input && invalid_input.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "Anthropic request rejects invalid native tool_use input before serialization");
 
+  auto const image_input = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "anthropic",
+          .model_id = "claude-sonnet-4-5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+              .role = "user",
+              .content = "fallback image metadata",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Image,
+                                                           .attachment_id = "img_1",
+                                                           .mime_type = "image/png",
+                                                           .storage_path = "attachments/img_1.png",
+                                                           .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                                           .byte_size = 128}}}},
+          .tools_json = {},
+          .stream = false},
+      "anthropic-key");
+  expect(!image_input && image_input.error().message().find("verified attachment bytes") != std::string::npos,
+         "Anthropic request rejects image content without verified attachment bytes");
+
+  auto const serialized_image_input = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "anthropic",
+          .model_id = "claude-sonnet-4-5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+              .role = "user",
+              .content = "fallback image metadata",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text,
+                                                           .text = "describe this"},
+                                ava::provider::ContentPart{.type = ava::provider::ContentPartType::Image,
+                                                           .attachment_id = "img_1",
+                                                           .mime_type = "image/png",
+                                                           .storage_path = "attachments/img_1.png",
+                                                           .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                                           .byte_size = 3,
+                                                           .data_base64 = "aGk="}}}},
+          .tools_json = {},
+          .stream = false},
+      "anthropic-key");
+  expect(serialized_image_input && serialized_image_input->body.find(R"({"type":"text","text":"describe this"})") !=
+                                      std::string::npos &&
+             serialized_image_input->body.find(
+                 R"({"type":"image","source":{"type":"base64","media_type":"image/png","data":"aGk="}})") !=
+                  std::string::npos,
+         "Anthropic request serializes verified image content parts");
+
+  auto const oversized_image_input = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "anthropic",
+          .model_id = "claude-sonnet-4-5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+              .role = "user",
+              .content = "fallback image metadata",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Image,
+                                                           .attachment_id = "img_big",
+                                                           .mime_type = "image/png",
+                                                           .storage_path = "attachments/img_big.png",
+                                                           .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                                           .byte_size = 6 * 1024 * 1024,
+                                                           .data_base64 = "aGk="}}}},
+          .tools_json = {},
+          .stream = false},
+      "anthropic-key");
+  expect(!oversized_image_input && oversized_image_input.error().message().find("byte size") != std::string::npos,
+         "Anthropic request enforces provider image byte-size limits before serialization");
+
+  auto const invalid_base64_image_input = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "anthropic",
+          .model_id = "claude-sonnet-4-5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+              .role = "user",
+              .content = "fallback image metadata",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Image,
+                                                           .attachment_id = "img_1",
+                                                           .mime_type = "image/png",
+                                                           .storage_path = "attachments/img_1.png",
+                                                           .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                                           .byte_size = 3,
+                                                           .data_base64 = "not base64"}}}},
+          .tools_json = {},
+          .stream = false},
+      "anthropic-key");
+  expect(!invalid_base64_image_input &&
+             invalid_base64_image_input.error().message().find("verified attachment bytes") != std::string::npos,
+         "Anthropic request rejects invalid image base64 payloads");
+
   auto const wrong_role = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
@@ -1011,6 +1147,7 @@ void test_anthropic_registry_and_env_auth()
                                            .prompts_dir = ava_config / "prompts",
                                            .sessions_dir = ava_state / "sessions"};
   ava::tests::FakeTransport transport({});
+  ScopedEnvVar oauth_token("ANTHROPIC_OAUTH_TOKEN", "");
   ScopedEnvVar api_key("ANTHROPIC_API_KEY", "api-key-value");
   auto api_credential = ava::config::provider_credential_for_request(paths, "anthropic", transport);
   expect(api_credential && *api_credential && (*api_credential)->access_token == "api-key-value" &&

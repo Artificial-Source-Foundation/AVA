@@ -323,6 +323,8 @@ std::string to_string(EntryType type)
   switch (type) {
     case EntryType::SessionStart:
       return "session_start";
+    case EntryType::SessionMetadata:
+      return "session_metadata";
     case EntryType::UserMessage:
       return "user_message";
     case EntryType::AssistantMessage:
@@ -343,6 +345,8 @@ std::string to_string(EntryType type)
       return "reasoning_change";
     case EntryType::Compaction:
       return "compaction";
+    case EntryType::BranchSummary:
+      return "branch_summary";
     case EntryType::Error:
       return "error";
     case EntryType::Cancel:
@@ -354,6 +358,7 @@ std::string to_string(EntryType type)
 ava::core::Result<EntryType> parse_entry_type(std::string_view value)
 {
   if (value == "session_start") return EntryType::SessionStart;
+  if (value == "session_metadata") return EntryType::SessionMetadata;
   if (value == "user_message") return EntryType::UserMessage;
   if (value == "assistant_message") return EntryType::AssistantMessage;
   if (value == "tool_call") return EntryType::ToolCall;
@@ -364,6 +369,7 @@ ava::core::Result<EntryType> parse_entry_type(std::string_view value)
   if (value == "reasoning_block") return EntryType::ReasoningBlock;
   if (value == "reasoning_change") return EntryType::ReasoningChange;
   if (value == "compaction") return EntryType::Compaction;
+  if (value == "branch_summary") return EntryType::BranchSummary;
   if (value == "error") return EntryType::Error;
   if (value == "cancel") return EntryType::Cancel;
 

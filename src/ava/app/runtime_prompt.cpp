@@ -7,6 +7,11 @@
 
 #include "ava/context/skill_loader.h"
 
+#include "ava/lsp/configured_provider.h"
+
+#include "ava/permissions/permission_rules.h"
+
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -71,7 +76,8 @@ RuntimeEvent base_event_locked(RuntimeSession const& session, RuntimeEventType t
 
 bool is_agent_loop_canceled_error(ava::core::Error const& error)
 {
-  return error.message() == "agent loop canceled" || error.format().find("agent loop canceled") != std::string::npos;
+  return error.message() == "agent loop canceled" || error.message() == "transport retry canceled" ||
+         error.message() == "transport request canceled";
 }
 
 }  // namespace
@@ -95,8 +101,9 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
                                                           ava::provider::Transport& transport,
                                                           RuntimeRunOptions const& options)
 {
-  auto event_sink = make_plugin_event_observer_sink(
-      plugin_event_observer_options(session, options.permission_resolver, options.session_mutex), options.event_sink);
+  auto plugin_observer_options = plugin_event_observer_options(session, options.permission_resolver, options.session_mutex);
+  plugin_observer_options.cancel_requested = options.cancel_requested;
+  auto event_sink = make_plugin_event_observer_sink(std::move(plugin_observer_options), options.event_sink);
   auto runtime_options = options;
   runtime_options.event_sink = event_sink;
   std::optional<ava::provider::RetryTransport> retry_transport;
@@ -117,9 +124,24 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
     return std::unexpected(std::move(emitted.error()));
   }
 
+  ava::permissions::register_enforceable_permission_rule_files(
+      ava::permissions::PermissionRuleStore{.global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
+                                            .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
+                                            .workspace_dir = session.workspace_dir});
+
+  auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
+      .global_config_file = session.paths.ava_config_dir / "lsp.json",
+      .project_config_file = session.workspace_dir / ".ava" / "lsp.json",
+      .workspace_root = session.workspace_dir,
+      .mode = session.mode,
+      .permission_resolver = runtime_options.permission_resolver,
+  });
+  std::shared_ptr<ava::lsp::DiagnosticsProvider> configured_lsp_provider = lsp_provider ? *lsp_provider : nullptr;
+
   std::optional<ava::core::Error> sink_error;
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = session.workspace_dir,
+      .current_dir = session.current_dir,
       .mode = session.mode,
       .provider_id = session.model.provider_id,
       .model_id = session.model.model_id,
@@ -132,6 +154,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
       .stream = runtime_options.stream,
       .model_supports_tools = session.model.supports_tools.value_or(true),
       .model_supports_streaming = session.model.supports_streaming.value_or(true),
+      .model_input_modalities = session.model.input_modalities,
       .model_max_output_tokens = session.model.max_output_tokens,
       .reasoning =
           session.reasoning ? std::optional(runtime::provider_reasoning_options(*session.reasoning)) : std::nullopt,
@@ -227,8 +250,9 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
       .cancel_requested =
           [&runtime_options, &sink_error] {
             return sink_error.has_value() || (runtime_options.cancel_requested && runtime_options.cancel_requested());
-          },
+      },
       .take_steering_messages = runtime_options.take_steering_messages,
+      .lsp_diagnostics_provider = configured_lsp_provider,
       .compact_context = runtime_options.access_token.empty()
                              ? decltype(ava::agent::AgentLoopOptions{}.compact_context){}
                              : [&](ava::session::SessionStore& store, std::string_view trigger,

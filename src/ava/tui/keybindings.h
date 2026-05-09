@@ -46,6 +46,9 @@ enum class TuiAction {
   Interrupt,
   Exit,
   VariantCycle,
+  MessagePrev,
+  MessageNext,
+  JumpToBottom,
 };
 
 struct TuiKeyBindings {

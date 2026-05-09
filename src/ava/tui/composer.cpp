@@ -482,7 +482,7 @@ std::vector<std::string> overlay_select_list_modal(std::vector<std::string> line
 }
 
 std::vector<std::string> render_queued_message_lines(ComposerSnapshot const& snapshot, std::size_t width,
-                                                     std::size_t max_lines)
+                                                      std::size_t max_lines)
 {
   std::vector<std::string> lines;
   if (max_lines == 0 || snapshot.queued_messages.empty()) return lines;
@@ -504,6 +504,22 @@ std::vector<std::string> render_queued_message_lines(ComposerSnapshot const& sna
         std::string(kSgrDim) + "queued +" + std::to_string(start) + " more" + std::string(kSgrReset), width);
   }
   return lines;
+}
+
+std::string render_transcript_scroll_indicator(ComposerSnapshot const& snapshot, std::size_t width)
+{
+  auto line = std::string("  ") + std::string(kSgrWarning) + "↓" + std::string(kSgrReset) + " " +
+              std::string(kSgrDim) + "scrollback detached";
+  if (snapshot.transcript_new_output_count > 0) {
+    line += " · ";
+    if (snapshot.transcript_new_output_count == 1) {
+      line += "new output below";
+    } else {
+      line += "+" + std::to_string(snapshot.transcript_new_output_count) + " updates below";
+    }
+  }
+  line += " · jump_to_bottom" + std::string(kSgrReset);
+  return detail::fit_line_preserving_sgr(std::move(line), width);
 }
 
 }  // namespace
@@ -573,8 +589,11 @@ std::vector<std::string> render_composer(ComposerSnapshot const& snapshot)
   auto const transcript_height = height > non_transcript_lines ? height - non_transcript_lines : 0;
   auto const rendered_transcript = detail::render_transcript_lines(
       snapshot.transcript, width, snapshot.tool_details_visible, snapshot.thinking_visible);
-  auto const visible_transcript = detail::visible_transcript_lines(rendered_transcript, width, transcript_height,
-                                                                   snapshot.transcript_scroll_offset);
+  auto visible_transcript = detail::visible_transcript_lines(rendered_transcript, width, transcript_height,
+                                                             snapshot.transcript_scroll_offset);
+  if (snapshot.transcript_scroll_offset > 0 && !visible_transcript.empty()) {
+    visible_transcript.front() = render_transcript_scroll_indicator(snapshot, width);
+  }
 
   lines.insert(lines.end(), visible_transcript.begin(), visible_transcript.end());
   while (lines.size() < transcript_height) {

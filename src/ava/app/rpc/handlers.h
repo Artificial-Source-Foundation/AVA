@@ -3,6 +3,8 @@
 #include "ava/app/rpc/protocol.h"
 #include "ava/app/runtime.h"
 
+#include "ava/permissions/permission_rules.h"
+
 #include "ava/provider/provider.h"
 
 #include "ava/core/result.h"
@@ -35,6 +37,7 @@ struct ProviderHandle {
 [[nodiscard]] ava::core::Result<ProviderHandle> provider_for_session_model(
     RuntimeSession const& session, std::string_view injected_provider_id,
     ava::provider::Provider const& injected_provider);
+[[nodiscard]] ava::permissions::PermissionRuleStore permission_rule_store_for_session(RuntimeSession const& session);
 
 [[nodiscard]] bool is_plugin_rpc_command(std::string_view type);
 [[nodiscard]] bool is_mcp_rpc_command(std::string_view type);

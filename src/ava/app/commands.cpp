@@ -259,8 +259,9 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
 
   // RPC command execution already serializes session-store access around run_command; reacquiring
   // the same mutex from event-hook permission audits would deadlock nested command events.
-  request.event_sink = make_plugin_event_observer_sink(
-      plugin_event_observer_options(session, request.permission_resolver, nullptr), std::move(request.event_sink));
+  auto plugin_observer_options = plugin_event_observer_options(session, request.permission_resolver, nullptr);
+  plugin_observer_options.cancel_requested = request.cancel_requested;
+  request.event_sink = make_plugin_event_observer_sink(std::move(plugin_observer_options), std::move(request.event_sink));
 
   if (request.command == "/quit" || request.command == "/exit") {
     result.handled = true;

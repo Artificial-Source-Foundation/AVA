@@ -1,0 +1,59 @@
+# AVA 1.1 Backend Candidate Capabilities
+
+This document captures post-1.0 backend candidate work discovered from AVA code/docs audits plus behavior comparison against local reference repositories under `docs/reference-code/`. Reference repositories are product-behavior inputs only; do not copy their source code or architecture into AVA.
+
+The 1.0 backend MVP is shipped. This file is the backend planning surface for 1.1 and later; it is not a promise that every row ships in one release. Frontend/TUI planning is Carlo-owned and intentionally excluded.
+
+Priority legend:
+
+- `P0`: urgent backend correctness or contract gap.
+- `P1`: strong 1.1 backend candidate that unlocks major workflows.
+- `P2`: likely 1.2+ or needs a separate design/security pass.
+- `Research`: keep on roadmap, but decide only after deeper product or security design.
+
+## Reference Findings
+
+### Backend And Product Parity
+
+Backend/product capabilities that AVA does not fully match yet:
+
+- Session tree workflows: fork, clone, tree navigation, branch summaries, labels, and user-facing session names.
+- Multimodal/image support: image prompt parts, image-capable model metadata, attachment storage, and provider payload support.
+- Broader provider/auth matrix: completed backend Anthropic OAuth request/refresh handling still needs interactive login/live validation; opt-in live-smoke harnessing now exists; GitHub Copilot OAuth, Google, Bedrock, Vertex, Azure, and larger generated model catalogs remain separate follow-up work, not part of the current hardening batch.
+- Subagents/task workers: named agent definitions, isolated delegated runs, parallel or chained tasks.
+- Plugin ecosystem scale: package install/remove/list, remote package sources, dynamic resources, and custom provider registration.
+- Plugin core-service proxy: plugins asking AVA to perform file, shell, network, and session operations through AVA permissions instead of doing side effects directly.
+- Stronger sandbox options: Docker or OS-level sandboxing for shell/plugin execution where portability allows it.
+- Full LSP/code intelligence: document symbols, workspace symbols, definitions, references, and bounded on-disk `didOpen` sync now have a backend slice; explicit server discovery remains follow-up scope.
+- Unified settings: global plus project merge, validation, migrations, hot reload, and config write locking.
+
+## 1.1 Candidate Table
+
+| Capability | Priority | Scope | Current AVA State | 1.1 Acceptance Direction |
+| --- | --- | --- | --- | --- |
+| Session tree, fork, clone, labels, names, branch summaries | P1 | Backend + RPC | Backend/RPC commands for naming, labels, tree inspection, fork, clone, and caller-supplied branch summaries are implemented over append-only session entries. | Add richer frontend/TUI workflows, generated branch summaries, and broader UX polish without rewriting session storage. |
+| Persistent permission rules | P1 | Backend + RPC | Durable allow/deny rule storage, management commands, exact matching, fail-closed validation, and RPC lifecycle events are implemented. | Add richer rule-management UX, broader policy categories, and long-term migration/diagnostic polish. |
+| Unified settings and reload | P1 | Backend + RPC | Config is domain-specific; keybinds/model/auth/prompt settings exist separately. | Define global/project merge semantics, validation, diagnostics, safe writes, reload commands, and explicit changed/skipped/error reporting. |
+| Full LSP code intelligence | P1 | Backend tools + RPC | Diagnostics, document symbols, workspace symbols, definitions, references, bounded on-disk `didOpen` sync, and explicit `lsp.json` server config exist as capability-gated backend tools. | Add richer capability negotiation, automatic server recipe discovery/catalogs, incremental/unsaved-buffer document sync, and RPC/headless presentation fields. |
+| Multimodal/image attachments | P1 | Backend + provider + RPC | Provider-neutral image metadata, replay validation, sanitized message/RPC/export metadata, model modality checks, AVA-managed attachment byte loading, fork/clone copy, and OpenAI/compatible/Anthropic payload serialization are implemented; RPC upload/input plumbing remains deferred. | Add RPC input handling and any UX-facing attachment import flows while preserving AVA-managed storage, size/MIME/hash validation, and safe textual fallback metadata. |
+| Provider/auth breadth | P1 | Backend | OpenAI and Kimi have live evidence; Anthropic native path has deterministic OAuth request/refresh handling but still lacks interactive OAuth setup and live validation; compatible shims have deterministic fake coverage and an opt-in credential-gated live-smoke harness. | Current hardening batch stops at metadata/auth/fake/live-smoke foundations. Treat Google, Copilot, Bedrock, Vertex, Azure, generated model catalogs, and dynamic provider registration as separately scoped follow-up decisions with provider-specific auth/security designs. |
+| Plugin core-service proxy | P1 | Backend security/extensibility | Plugins can request AVA-mediated file read/search and read-only `session.status` through capability-gated `proxy.request` records that reuse AVA permissions, cancellation, audits, and output limits. Shell/network/edit/session mutation proxies remain deferred. | Add any broader shell/network/session mutation proxy operations only with explicit permission categories, cancellation, audits, and output limits. |
+| HTML/richer export | P2 | Backend/RPC | Markdown export exists. | Consider HTML export only if sharing/readability demand is concrete; keep markdown as canonical inspectable export. |
+| HTTP/server daemon mode | P2 | Backend protocol | Stdio JSONL RPC is the 1.0 contract. | Design only after stdio RPC remains stable; keep auth, local binding, and permission boundaries explicit. |
+| Subagents/task workers | P2/Research | Backend + plugins + sessions | Deferred pending process/session/permission boundaries. | Define agent files, isolated contexts, cancellation, audit, and concurrency limits before implementation. |
+| Plugin package manager/marketplace | P2 | Extensibility | Manual plugin install/discovery exists. | Add only after plugin compatibility, signing/trust, version pinning, and remote install security are designed. |
+| OS/container sandbox option | P2/Research | Security/tools/plugins | Bash/plugins run locally behind policy, not OS isolation. | Evaluate Docker/bubblewrap/sandbox-exec style options without weakening portability or giving a false sandbox guarantee. |
+| Advanced MCP | P2 | Extensibility | Stdio tools/prompts and read-style text MCP resources are implemented; remote transports and advanced resource behavior are deferred. | Evaluate HTTP/OAuth/subscriptions/sampling/resource templates/binary resources and richer pagination diagnostics separately without weakening `mcp.resource.read` boundaries. |
+
+## Not Counted As Gaps
+
+- `/compact`, `/export`, and `/bash` already have AVA command paths.
+- AVA already has prompt commands and skills; the remaining gap is broader settings/package-driven resource management.
+- Slack bots, GPU pod orchestration, web artifact workspaces, iframe sandboxes, and browser DOM injection are out of scope for AVA's local terminal-first product unless the product direction changes.
+- In-process extension APIs are not a default target. AVA's out-of-process plugin boundary is an intentional safety choice.
+
+## Validation Expectations
+
+1. Backend P1 work should include RPC/headless contract tests, session replay/export validation, permission audit coverage, and failure-mode tests.
+2. Provider/auth work should include fake-provider contract tests first and live smokes only when credentials are available.
+3. Plugin/security work should receive a security review before any side-effect proxy, package install, or sandbox claim ships.

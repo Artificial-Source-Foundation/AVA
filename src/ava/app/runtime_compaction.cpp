@@ -7,6 +7,8 @@
 
 #include "ava/core/json.h"
 
+#include "ava/session/validation.h"
+
 #include <algorithm>
 #include <optional>
 #include <utility>
@@ -52,6 +54,11 @@ ava::core::VoidResult emit_compaction_event(RuntimeSession const& session, Runti
   return emit_event(options.event_sink, event);
 }
 
+ava::core::Error agent_loop_canceled_error()
+{
+  return ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled");
+}
+
 std::string capped_entry_data(std::string_view data)
 {
   if (data.size() <= kMaxCompactionPromptEntryBytes) return std::string(data);
@@ -89,6 +96,10 @@ std::string sanitized_reasoning_data_for_compaction(ava::session::SessionEntry c
 std::string compaction_entry_data(ava::session::SessionEntry const& entry)
 {
   if (entry.type == ava::session::EntryType::ReasoningBlock) return sanitized_reasoning_data_for_compaction(entry);
+  if (entry.type == ava::session::EntryType::UserMessage || entry.type == ava::session::EntryType::AssistantMessage) {
+    return capped_entry_data(
+        ava::session::sanitized_message_data_json(entry.data_json, entry.type == ava::session::EntryType::UserMessage));
+  }
   return capped_entry_data(entry.data_json);
 }
 
@@ -289,7 +300,15 @@ ava::core::Result<std::string> generate_compaction_summary(
   if (!request) return std::unexpected(std::move(request.error()));
 
   auto response = summary_transport->send(*request, summary_options.cancel_requested);
-  if (!response) return std::unexpected(std::move(response.error()));
+  if (!response) {
+    if (summary_options.cancel_requested && summary_options.cancel_requested()) {
+      return std::unexpected(agent_loop_canceled_error());
+    }
+    return std::unexpected(std::move(response.error()));
+  }
+  if (summary_options.cancel_requested && summary_options.cancel_requested()) {
+    return std::unexpected(agent_loop_canceled_error());
+  }
   auto summary = parse_compaction_response_text(provider, *response, provider_request.stream);
   if (!summary) return std::unexpected(std::move(summary.error()));
   *summary = runtime::trimmed_copy(*summary);
@@ -331,7 +350,7 @@ ava::core::Result<bool> compact_runtime_context(RuntimeSession& session, ava::se
   bool context_retry_event_emitted = false;
   for (std::size_t attempt = 0; attempt < max_compaction_attempts; ++attempt) {
     if (options.cancel_requested && options.cancel_requested()) {
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled"));
+      return std::unexpected(agent_loop_canceled_error());
     }
 
     ava::core::Result<std::vector<ava::session::SessionEntry>> entries =
@@ -387,7 +406,7 @@ ava::core::Result<bool> compact_runtime_context(RuntimeSession& session, ava::se
                                                     replayed_user_messages);
     if (!recent_context) return std::unexpected(std::move(recent_context.error()));
     if (options.cancel_requested && options.cancel_requested()) {
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled"));
+      return std::unexpected(agent_loop_canceled_error());
     }
 
     bool snapshot_stale = false;
@@ -395,7 +414,7 @@ ava::core::Result<bool> compact_runtime_context(RuntimeSession& session, ava::se
       auto current_entries = store.load();
       if (!current_entries) return std::unexpected(std::move(current_entries.error()));
       if (options.cancel_requested && options.cancel_requested()) {
-        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled"));
+        return std::unexpected(agent_loop_canceled_error());
       }
       if (!same_session_snapshot(*entries, *current_entries)) {
         snapshot_stale = true;

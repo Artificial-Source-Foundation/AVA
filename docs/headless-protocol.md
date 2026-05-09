@@ -30,7 +30,7 @@ Headless modes are fail-closed by default for backend permission decisions whose
 Supported policy flags:
 
 - `--allow read-only`: allows read/search-style permission prompts (`read_file`, `list_directory`, `glob`, and `grep` shapes) when the backend asks. Network, write, edit, patch, bash, and question prompts remain denied.
-- `--allow-tool glob,grep,list_directory,read_file,webfetch`: allows only the listed exact tool names when those tools produce compatible ask prompts. Supported values are `glob`, `grep`, `list_directory`, `read_file`, and `webfetch`; unsupported values such as `bash`, `write_file`, `edit_file`, `apply_patch`, `question`, or arbitrary strings are rejected as usage errors. `webfetch` only auto-allows exact `network.fetch` prompts produced by the `webfetch` tool; `--allow read-only` never allows network prompts.
+- `--allow-tool glob,grep,list_directory,read_file,webfetch,mcp`: allows only the listed exact tool families when they produce compatible ask prompts. Supported values are `glob`, `grep`, `list_directory`, `read_file`, `webfetch`, and `mcp`; unsupported values such as `bash`, `write_file`, `edit_file`, `apply_patch`, `question`, or arbitrary strings are rejected as usage errors. `webfetch` only auto-allows exact `network.fetch` prompts produced by the `webfetch` tool; `mcp` auto-allows MCP server launch/connect plus `mcp.tool.call` and `mcp.resource.read` prompts for MCP-prefixed tools; `--allow read-only` never allows network or MCP prompts.
 
 Examples:
 
@@ -39,10 +39,11 @@ ava --print "summarize the repo" --allow read-only
 ava --print "inspect this file" --allow-tool read_file
 ava --print "find symbols" --allow-tool glob,grep,list_directory
 ava --print "fetch release notes" --allow-tool webfetch
+ava --print "use configured MCP context" --allow-tool mcp
 ava --rpc --allow read-only
 ```
 
-Invalid permission flag values exit with code `2` and write a usage error to stderr before provider/auth startup. AVA does not persist headless permission rules; every headless invocation must provide the desired policy explicitly. In RPC mode, matching read/search or exact `webfetch` network prompts are auto-allowed before `permission_requested`; non-matching ask prompts still require an explicit `permission_reply`. RPC clients may reply with `allow_session` to create an in-memory exact-match grant for the current RPC process. Those grants are inspectable, revocable, and clearable through RPC commands; they are not persisted across AVA restarts.
+Invalid permission flag values exit with code `2` and write a usage error to stderr before provider/auth startup. In RPC mode, matching read/search, exact `webfetch` network prompts, or MCP prompts covered by `--allow-tool mcp` are auto-allowed before `permission_requested`; non-matching ask prompts still require an explicit `permission_reply` unless a persistent permission rule matches. RPC clients may reply with `allow_session` to create an in-memory exact-match grant for the current RPC process. Those grants are inspectable, revocable, and clearable through RPC commands; they are not persisted across AVA restarts. Persistent rules are managed only by `permission_rule_add`/`permission_rule_remove` and are stored outside the model-writable workspace path.
 
 ## Stdout / Stderr Contract
 
@@ -59,7 +60,7 @@ Invalid permission flag values exit with code `2` and write a usage error to std
 
 ## Provider Credentials
 
-Runtime provider calls resolve credentials for the active session provider. OpenAI keeps its existing stored OAuth/API-key behavior and falls back to `OPENAI_API_KEY` when no stored OpenAI credential exists. Non-OpenAI connect setup stores provider-scoped API keys in `auth.json`, for example `{"anthropic":{"type":"api_key","api_key":"..."}}`, and can also read provider API-key environment variables such as `ANTHROPIC_API_KEY`, `KIMI_API_KEY`, `MOONSHOT_API_KEY`, and `OPENROUTER_API_KEY`. Interactive setup is available with `ava login [provider]`, `ava auth login [provider]`, `ava connect [provider]`, and TUI `/connect`; omitting the provider opens a searchable provider picker, and TUI `/connect` uses a modal. OpenAI interactive setup offers browser OAuth, headless OAuth, and API key methods. Secrets are read with terminal echo disabled where possible and masked in TUI prompts. Headless setup can store credentials without a browser or TTY, for example `ava connect openai --headless-oauth`, `printf '%s\n' "$ANTHROPIC_API_KEY" | ava connect anthropic --api-key-stdin`, or `ava connect moonshot --api-key-env MOONSHOT_API_KEY`. AVA only reads credential files when they are owned by the current user and not readable by group/other users; manually-created files should use owner-only permissions such as `chmod 600 ~/.config/ava/auth.json`. OpenAI OAuth credentials refresh automatically before use when a refresh token is present.
+Runtime provider calls resolve credentials for the active session provider. OpenAI keeps its existing stored OAuth/API-key behavior and falls back to `OPENAI_API_KEY` when no stored OpenAI credential exists. Non-OpenAI connect setup stores provider-scoped API keys in `auth.json`, for example `{"anthropic":{"type":"api_key","api_key":"..."}}`, and can also read provider API-key environment variables such as `ANTHROPIC_API_KEY`, `KIMI_API_KEY`, `MOONSHOT_API_KEY`, and `OPENROUTER_API_KEY`. Anthropic can additionally read Claude OAuth bearer tokens from `ANTHROPIC_OAUTH_TOKEN` or the Anthropic SDK-compatible `ANTHROPIC_AUTH_TOKEN`; when no stored Anthropic credential exists, precedence is `ANTHROPIC_OAUTH_TOKEN`, then `ANTHROPIC_AUTH_TOKEN`, then `ANTHROPIC_API_KEY`. Stored Anthropic Claude OAuth entries use `{"anthropic":{"type":"oauth","access_token":"...","refresh_token":"...","expires_at":1893456000}}` with optional `account_id`/`source` metadata. AVA writes canonical `refresh_token`/`expires_at` fields and accepts `refresh`/`expires` aliases when reading manually-created files. Interactive setup is available with `ava login [provider]`, `ava auth login [provider]`, `ava connect [provider]`, and TUI `/connect`; omitting the provider opens a searchable provider picker, and TUI `/connect` uses a modal. OpenAI interactive setup offers browser OAuth, headless OAuth, and API key methods. Secrets are read with terminal echo disabled where possible and masked in TUI prompts. Headless setup can store credentials without a browser or TTY, for example `ava connect openai --headless-oauth`, `printf '%s\n' "$ANTHROPIC_API_KEY" | ava connect anthropic --api-key-stdin`, or `ava connect moonshot --api-key-env MOONSHOT_API_KEY`. AVA only reads credential files when they are owned by the current user and not readable by group/other users; manually-created files should use owner-only permissions such as `chmod 600 ~/.config/ava/auth.json`. OpenAI and Anthropic OAuth credentials refresh automatically before use when a refresh token is present; expired/near-expiry stored Anthropic OAuth without a refresh token fails closed and requires updating or removing the stored Anthropic entry before environment credentials are considered.
 
 ## Provider Retry And Idempotency
 
@@ -92,6 +93,7 @@ Envelope fields:
 - `session_id`: active runtime session id when available.
 - `run_id`, `turn_id`, `message_id`, `request_id`, `correlation_id`: optional correlation metadata. RPC prompt and command events include `request_id` for the client request that caused the event.
 - `name`: event name.
+- `payload_type`: optional stable payload family for typed consumers. Runtime events use values such as `session`, `message`, `reasoning`, `provider`, `tool`, `compaction`, `retry`, `cancellation`, `error`, and `completion`; resolver/queue events may use `permission`, `question`, or `queue`.
 - `payload`: event-specific object. Payloads are intentionally minimal and must not require clients to parse session JSONL internals.
 - `type` and documented runtime fields such as `text`, `tool`, `status`, `category`, `message`, `stop_reason`, `trigger`, `reason`, and small counters: compatibility aliases for the pre-envelope flat event shape. New clients should prefer `name` and `payload`; unknown future payload fields are not automatically promoted to the top level.
 
@@ -106,12 +108,13 @@ Current event names:
 - `assistant_message`: final assistant text for a completed turn.
 - `tool_start`: tool call began; includes `call_id`, `tool`, a safe argument summary when available, and may include structured `args` or fallback `args_json`.
 - `tool_progress`: tool progress or partial result update; includes `call_id`, `tool`, `status`, bounded `text` when available, and may include partial `result` or fallback `result_json`.
-- `tool_result`: tool call completed; includes `call_id`, `tool`, `status`, a safe result summary when available, and may include `args`, `result`, `diff`, `changed_paths`, `diff_truncated`, output truncation/spill fields, and match/byte/line counters.
+- `tool_result`: tool call completed; includes `call_id`, `tool`, `status`, a safe result summary when available, and may include `args`, `result`, `structured_result`, `diff`, `changed_paths`, `permission_request_ids`, `diff_truncated`, output truncation/spill fields, and match/byte/line counters. `structured_result` is the canonical semantic tool result when present. It has `schema_version:1`, `call_id`, `tool`, `status` (`success`, `error`, or `canceled`), `ok`, `content_type`, optional `content`, optional `error`, and optional diff/path/truncation/spill counters. Flat `status` remains a compatibility field and mirrors the tool timeline lifecycle.
 - `compaction_start`, `compaction_end`: provider-backed compaction lifecycle events. Payloads include `trigger`, `attempt`, `max_attempts`, and known token/summary byte counters when available.
 - `retry`: bounded backend retry lifecycle event. Payloads include `attempt`, `max_attempts`, and `delay_ms` when the backend retry path has those values. Provider transport retries use `trigger:"provider_transport"` with provider-neutral reasons such as `rate_limited`, `transient`, or `transport_io`; context-overflow retries use `reason:"context_overflow"`; stale compaction snapshot retries use `reason:"stale_compaction_snapshot"`.
 - `retry_tick`: backend retry countdown tick emitted while a bounded retry delay is sleeping. Payloads include `remaining_ms` plus the same retry correlation metadata where available. Clients should treat it as status/progress, not a final failure.
 - `cancel_requested`: RPC cancel request was accepted. Payload includes `active_run`, `cleared_steer`, `cleared_follow_up`, and the active prompt request id when one exists.
 - `permission_grant_revoked`, `permission_grants_cleared`: RPC session-grant lifecycle events. Payloads include the revoked grant or the number of grants cleared.
+- `permission_rule_added`, `permission_rule_removed`: persistent permission rule lifecycle events emitted after successful rule changes. Payloads include the affected `rule` and, for removal, `removed:true`.
 - `canceled`: terminal event for a cooperatively canceled runtime turn.
 - `error`: runtime, provider, or tool boundary failure; includes `category`, `message`, and optional `details`.
 - `done`: terminal event for a successful turn; includes `stop_reason` and small counters when available.
@@ -126,7 +129,7 @@ RPC mode reads strict LF-delimited JSON objects from stdin and writes LF-delimit
 
 RPC requests may include `"protocol_version":1`. Omitting the field keeps current-version behavior. Present values must be JSON integers. Unsupported or malformed protocol versions produce an in-band error response and do not terminate the loop.
 
-Request ids are client-owned non-empty strings capped at 256 bytes. Resolver `request_id` and `correlation_id` fields are also capped at 256 bytes; over-limit identifiers produce an in-band `success:false` response when a response id can be parsed, or `"id":""` for malformed/no-id records. Permission reply `reason` text is optional, capped at 1024 bytes, and rejects control bytes before the resolver event is emitted. Successful command responses use:
+Request ids are client-owned non-empty strings capped at 256 bytes. Resolver `request_id` and `correlation_id` fields are also capped at 256 bytes; over-limit identifiers produce an in-band `success:false` response when a response id can be parsed, or `"id":""` for malformed/no-id records. Identifiers reject ASCII control bytes, spaces, and shell/metasyntax characters such as quotes, backslashes, dollar signs, ampersands, pipes, semicolons, angle brackets, parentheses, and brackets. Permission reply `reason` text is optional, capped at 1024 bytes, and rejects control bytes before the resolver event is emitted. Successful command responses use:
 
 ```json
 {"id":"req_1","type":"response","success":true,"result":{}}
@@ -148,7 +151,7 @@ Protocol version:
 {"id":"0","type":"get_protocol","protocol_version":1}
 ```
 
-Returns `protocol_version` and `supported_protocol_versions`.
+Returns `protocol_version`, `supported_protocol_versions`, `session_entry_version`, and `supported_session_entry_versions`. RPC protocol v1 currently writes session entry version `3` and reads legacy session entry versions `1`, `2`, and missing-version entries. Missing-version legacy records are exposed as version `0` in RPC responses.
 
 Prompt turn:
 
@@ -156,7 +159,7 @@ Prompt turn:
 {"id":"1","type":"prompt","message":"hello"}
 ```
 
-AVA starts the prompt turn asynchronously inside the RPC session, keeps reading stdin while it runs, streams normal runtime event envelopes (`session_start`, `user_message`, streaming `message_update`/`message_end`/`provider_event`, final `assistant_message`, tool events, compaction/retry events, retry countdown ticks, and `done`/`canceled`/`error`) to stdout, then writes exactly one RPC response with `final_text`, `stop_reason`, `provider_iterations`, `tool_calls`, and `session_id` on success or `success:false` on failure. Failures before runtime startup, such as missing auth, may return only the `success:false` RPC response. Prompt event envelopes include the prompt command id as `request_id`. Only one prompt may be active per RPC session; a second `prompt` while one is active returns an in-band error. Prompt requests require credentials for the active session provider unless the embedding test harness supplies runtime credentials.
+AVA starts the prompt turn asynchronously inside the RPC session, keeps reading stdin while it runs, streams normal runtime event envelopes (`session_start`, `user_message`, streaming `message_update`/`message_end`/`provider_event`, final `assistant_message`, tool events, compaction/retry events, retry countdown ticks, and `done`/`canceled`/`error`) to stdout, then writes exactly one RPC response with `final_text`, `stop_reason`, `provider_iterations`, `tool_calls`, optional `tool_timeline`, and `session_id` on success or `success:false` on failure. `tool_timeline[]` entries include `status`, `call_id`, `tool`, optional presentation text/summaries, optional `args`/`result`, optional `structured_result`, content/error fields, changed paths, permission request ids, and truncation/spill/diff counters using the same names as tool event payloads. Failures before runtime startup, such as missing auth, may return only the `success:false` RPC response. Prompt event envelopes include the prompt command id as `request_id`. Only one prompt may be active per RPC session; a second `prompt` while one is active returns an in-band error. Prompt requests require credentials for the active session provider unless the embedding test harness supplies runtime credentials.
 
 Steer an active prompt:
 
@@ -182,7 +185,7 @@ Cancel:
 {"id":"2","type":"cancel"}
 ```
 
-Sets the RPC session cancel flag, emits `cancel_requested`, and returns `{"cancel_requested":true,"active_run":true|false,"cleared_steer":N,"cleared_follow_up":N}`. When a prompt is active, pending permission/question resolver waits are unblocked fail-closed, queued steering/follow-up messages are cleared, skipped queue events are emitted, the cancel command response is written, and then queued follow-up commands receive `success:false` canceled responses. The active prompt emits terminal `canceled` when the runtime observes the cancellation. RPC clients must correlate responses by `id`: active prompt terminal events or the active prompt response may interleave with the cancel response because cancellation is observed by the prompt worker at cooperative runtime boundaries. Provider transport calls are not interrupted mid-request yet, so cancellation may complete after the in-flight provider call returns; this is the 1.0 cooperative provider boundary, while direct provider transport interruption remains hardening work. If RPC stdin reaches EOF while a prompt worker exists, AVA marks input closed, requests cancellation, clears queued steering/follow-up messages, cancels pending resolvers, and prevents queued follow-ups from starting after client disconnect.
+Sets the RPC session cancel flag, emits `cancel_requested`, and returns `{"cancel_requested":true,"active_run":true|false,"cleared_steer":N,"cleared_follow_up":N}`. When a prompt is active, pending permission/question resolver waits are unblocked fail-closed, queued steering/follow-up messages are cleared, skipped queue events are emitted, the cancel command response is written, and then queued follow-up commands receive `success:false` canceled responses. The active prompt emits terminal `canceled` when the runtime observes the cancellation. Idle or previous cancellation is not a future-turn latch; AVA clears a stale cancel flag when it accepts a new prompt/active run. RPC clients must correlate responses by `id`: active prompt terminal events or the active prompt response may interleave with the cancel response because cancellation is observed by the prompt worker at cooperative runtime boundaries. Cancellation is cooperative: AVA cancels retry waits promptly and may interrupt local transport/process work where the backend supports polling a cancel callback, but it does not guarantee provider-side request abort or exactly-once provider semantics after a request has been sent. If RPC stdin reaches EOF while a prompt worker exists, AVA marks input closed, requests cancellation, clears queued steering/follow-up messages, cancels pending resolvers, and prevents queued follow-ups from starting after client disconnect.
 
 State:
 
@@ -198,7 +201,7 @@ Example state response shape:
 {"id":"3","type":"response","success":true,"result":{"protocol_version":1,"session_id":"session_...","provider":"anthropic","model":"claude-sonnet-4-5","reasoning_enabled":true,"reasoning_level":"enabled","reasoning_budget_tokens":4096,"reasoning_display":"summarized"}}
 ```
 
-`get_state`, `list_models`, `list_sessions`, `permission_grants`, `permission_grant_revoke`, and `permission_grants_clear` remain available while a prompt is active. `get_messages`, `get_session_stats`, `validate_session`, `set_model`, `cycle_model`, `set_reasoning`, `clear_reasoning`, `compact`, `export`, and `context` materialize or mutate session history and are rejected while a prompt is active. RPC `/compact` also marks the session busy while it generates and records the provider summary, so a prompt cannot start midway through compaction.
+`get_state`, `list_models`, `list_sessions`, `session_tree`, `session_metadata`, `permission_grants`, `permission_grant_revoke`, and `permission_grants_clear` remain available while a prompt is active. `get_messages`, `get_session_stats`, `validate_session`, `permission_rules`, `permission_rule_add`, `permission_rule_remove`, `set_session_name`, `set_session_labels`, `fork_session`, `clone_session`, `summarize_branch`, `set_model`, `cycle_model`, `set_reasoning`, `clear_reasoning`, `compact`, `export`, and `context` materialize or mutate session history or durable policy and are rejected while a prompt is active. RPC `/compact` also marks the session busy while it generates and records the provider summary, so a prompt cannot start midway through compaction.
 
 Messages:
 
@@ -206,7 +209,9 @@ Messages:
 {"id":"3a","type":"get_messages"}
 ```
 
-Returns durable message-like session entries for the active session in append order. The current response is `{session_id,messages,truncated,message_count}` where each message includes `version`, `id`, `parent_id`, `type`, `timestamp`, and object-shaped `data` unless the individual entry is too large, in which case the entry is marked `truncated`. Responses are capped to protect headless clients and the AVA process. Reasoning entries are sanitized: visible non-redacted text may be returned, but raw provider signatures and opaque redacted-thinking payloads are replaced by safe status fields such as `signature_present` and `redacted`. This intentionally excludes non-message bookkeeping entries such as `session_start`, `model_change`, `compaction`, and permission audit rows. Internal replay user messages inserted after context compaction are also hidden because they are provider-context repair entries, not user-visible transcript turns.
+Returns durable message-like session entries for the active session in append order. The current response is `{session_id,messages,truncated,message_count}` where each message includes `version`, `id`, `parent_id`, `type`, `timestamp`, and object-shaped `data` unless the individual entry is too large, in which case the entry is marked `truncated`. Responses are capped to protect headless clients and the AVA process. Reasoning entries are sanitized: visible non-redacted text may be returned, but raw provider signatures and opaque redacted-thinking payloads are replaced by safe status fields such as `signature_present` and `redacted`. User image attachment metadata is also sanitized: `data.attachments[]` is user-message-only and contains only `id`, `type:"image"`, `mime_type`, `byte_size`, `sha256`, `storage_path`, and optional `redacted`; raw image bytes and unknown attachment fields are never returned. This intentionally excludes non-message bookkeeping entries such as `session_start`, `model_change`, `compaction`, and permission audit rows. Internal replay user messages inserted after context compaction are also hidden because they are provider-context repair entries, not user-visible transcript turns.
+
+Image attachment metadata is the backend-safe replay contract for image input. Valid metadata requires canonical unescaped object keys, `mime_type` to be one of `image/png`, `image/jpeg`, `image/webp`, or `image/gif`, `sha256` to be a 64-character hex digest, `byte_size` to be an unquoted base-10 JSON integer literal from `1` through `20971520` with no fraction or exponent notation, and `storage_path` to be a relative `attachments/...` path without absolute roots, `..`, backslashes, drive prefixes, or empty path segments. Inline image data fields such as base64 payloads are invalid. AVA reconstructs provider-neutral image content parts for replay, loads bytes only from the active session's `<session_id>.attachments` storage after path, symlink, byte-size, and SHA-256 checks, and serializes verified image payloads for OpenAI Responses, OpenAI-compatible chat-completions, and Anthropic Messages. Provider requests are capped at 16 images and 40 MiB total image bytes before base64 expansion; Anthropic image parts are additionally capped at 5 MiB each. RPC upload/input plumbing is still separate follow-up work, so headless clients should treat `attachments[]` as persisted metadata rather than an inline upload field.
 
 Session stats:
 
@@ -214,7 +219,7 @@ Session stats:
 {"id":"3b","type":"get_session_stats"}
 ```
 
-Returns `session_id`, `session_path`, `entry_count`, first/last timestamps, usage/cost totals when known, and counts for session entry types. User-message counts exclude internal replay entries. Session JSONL entry types are additive; clients that inspect session files directly should ignore unknown non-message bookkeeping entries and prefer RPC `get_messages`/`get_session_stats` for stable automation data. AVA writes session entry version `2` for all new entries and continues to read legacy version `1` and missing-version entries.
+Returns `session_id`, `session_path`, `entry_count`, first/last timestamps, usage/cost totals when known, and counts for session entry types including `session_metadata` and `branch_summary`. User-message counts exclude internal replay entries. Session JSONL entry types are additive; clients that inspect session files directly should ignore unknown non-message bookkeeping entries and prefer RPC `get_messages`/`get_session_stats` for stable automation data. AVA writes session entry version `3` for all new entries and continues to read legacy versions `1`, `2`, and missing-version entries under RPC protocol v1. Missing-version legacy entries are surfaced as version `0`.
 
 Usage fields are additive and appear only when present in saved assistant entries: `input_tokens`, `output_tokens`, `reasoning_tokens`, `cache_read_tokens`, `cache_write_tokens`, and `total_tokens`. Exact provider token totals are kept separate from byte-count fallback estimates: `estimated_input_bytes`, `estimated_output_bytes`, and `estimated_total_bytes` report fallback byte estimates when provider usage was unavailable. `exact_usage_entries` and `estimated_usage_entries` show how many assistant entries contributed to each category.
 
@@ -226,7 +231,7 @@ Session validation:
 {"id":"3b2","type":"validate_session"}
 ```
 
-Runs the backend replay validator over the active session and returns `{session_id,session_path,ok,error_count,warning_count,issues}`. Issues include stable `kind` strings, severity, entry index, entry id when available, tool call id when relevant, and a short diagnostic message. The validator currently checks entry versions, entry ids, parent links, tool call/result pairing, permission prompt/resolution pairing, structured tool results when required by callers, compaction integrity, and durable model/reasoning entry shape. Compaction validation requires a durable summary and reports compaction boundaries that occur while tool calls or permission prompts are unresolved.
+Runs the backend replay validator over the active session and returns `{session_id,session_path,ok,error_count,warning_count,issues}`. Issues include stable `kind` strings, severity, entry index, entry id when available, tool call id when relevant, and a short diagnostic message. The validator currently checks entry versions, entry ids, parent links, tool call/result pairing, permission prompt/resolution pairing, structured tool results when required by callers, compaction integrity, durable model/reasoning entry shape, and image attachment metadata shape. Compaction validation requires a durable summary and reports compaction boundaries that occur while tool calls or permission prompts are unresolved.
 
 Model catalog and switching:
 
@@ -249,7 +254,7 @@ Unsupported reasoning selections fail before a provider request is built:
 {"id":"bad_reasoning","type":"response","success":false,"error":{"category":"invalid_argument","message":"Kimi reasoning supports level only"}}
 ```
 
-The provider-native MVP adds two compatibility rules to model switching: clients should only offer reasoning controls for models that declare support, and AVA rejects provider switches that cannot safely replay the existing conversation history instead of silently dropping tool or reasoning context. A switch is rejected before any `model_change` entry is appended when replayed tool-call history would target a model without explicit tool support, or when provider-native reasoning blocks use a format the target provider/model cannot replay. Compatibility is checked only for the active replay window after the latest compaction entry. Anthropic `anthropic_thinking` blocks require an Anthropic Messages model. OpenAI-compatible `reasoning_content` replay requires matching model metadata plus the `preserve_reasoning_content` compatibility quirk.
+The provider-native MVP adds compatibility rules to model switching: clients should only offer reasoning controls for models that declare support, and AVA rejects provider switches that cannot safely replay the existing conversation history instead of silently dropping tool, reasoning, or image context. A switch is rejected before any `model_change` entry is appended when replayed tool-call history would target a model without explicit tool support, when provider-native reasoning blocks use a format the target provider/model cannot replay, or when the active replay window contains non-redacted image attachments the target cannot replay. Image replay compatibility requires `image` in `input_modalities` and applies the same replay caps used before provider requests: at most 16 images, at most 40 MiB aggregate image bytes, and Anthropic's lower 5 MiB per-image limit for Anthropic Messages targets. Compaction/redaction is required before switching when active image history exceeds the target provider's replay limits. Compatibility is checked only for the active replay window after the latest compaction entry. Anthropic `anthropic_thinking` blocks require an Anthropic Messages model. OpenAI-compatible `reasoning_content` replay requires matching model metadata plus the `preserve_reasoning_content` compatibility quirk.
 
 List sessions:
 
@@ -276,6 +281,28 @@ New session:
 
 Creates a new session for the current workspace/current directory, makes it active, clears the cancel flag, and returns the same state shape as `get_state`. `new_session` is rejected while a prompt is active.
 
+Session metadata, tree, fork, clone, and branch summaries:
+
+```json
+{"id":"5d","type":"session_metadata"}
+{"id":"5e","type":"set_session_name","session_name":"Auth follow-up"}
+{"id":"5f","type":"set_session_labels","labels":["auth","bug"]}
+{"id":"5g","type":"session_tree"}
+{"id":"5h","type":"fork_session","session_id":"session_source","branch_from_entry_id":"entry_...","session_name":"Experiment","labels":["branch"]}
+{"id":"5i","type":"clone_session","session_id":"session_source","session_name":"Copy"}
+{"id":"5j","type":"summarize_branch","session_id":"session_source","branch_root_entry_id":"entry_root","branch_tip_entry_id":"entry_tip","summary":"Branch explored X and was abandoned because Y.","provider":"openai","model":"gpt-test","reason":"manual review"}
+```
+
+`session_metadata` returns the current session's append-only metadata view: `session_id`, `name`, `labels`, `parent_session_id`, `source_session_id`, `branch_from_entry_id`, `branch_origin`, and `actor`. `set_session_name` and `set_session_labels` append `session_metadata` entries and return the same metadata shape. Names are capped at 256 bytes; labels are unique non-empty strings, capped at 32 labels and 64 bytes per label. Metadata writes are rejected while a prompt is active.
+
+`session_tree` returns `{current_session_id,roots,leaves,path,sessions}` for the current workspace. Each session node includes summary fields, metadata fields, `actor`, `children`, `leaf`, and `current`. Parent metadata cycles are cut for tree output: affected nodes remain visible as usable roots/leaves instead of making `roots`, `leaves`, or `path` unusable.
+
+`fork_session` creates a new session by copying the source through `branch_from_entry_id`, appends provenance metadata (`parent_session_id`, `source_session_id`, `branch_from_entry_id`, `branch_origin:"fork"`, `actor:"rpc"`), switches to the new session, and returns the state shape with `created:true`. If `session_id` is omitted, the current session is the source; if `branch_from_entry_id` is omitted, the source tip is used. When provided, `session_id` and `branch_from_entry_id` must be non-empty strings. `clone_session` copies the full source session, appends provenance metadata with `branch_origin:"clone"`, switches to it, and returns the state shape with `created:true`. `clone_session` rejects `branch_from_entry_id` because clones always copy the full source. Both commands leave the source session file untouched and are rejected while a prompt is active.
+
+`summarize_branch` explicitly appends a durable `branch_summary` entry to the selected source session and does not switch the active session. If `session_id` is omitted, the current session is the source. `branch_root_entry_id`, `branch_tip_entry_id`, `summary`, `provider`, `model`, and `reason` are required. The root and tip entry ids must exist in the source session and root must not appear after tip. `summary` is capped at 8192 bytes and may contain newlines/tabs but not other control bytes. The response returns `{source_session_id,entry_id,parent_id,timestamp,entry}` where `entry` is the persisted branch-summary session entry. Provider-backed summary generation remains deferred; this command stores caller-supplied summary text with explicit provider/model/reason provenance.
+
+Session metadata and branch-summary entries use `data.schema_version:1` inside session entry version `3` JSONL records. Unsupported metadata/summary `schema_version` values are replay-validation errors. `branch_summary.data` includes required `summary`, `source_session_id`, `branch_root_entry_id`, `branch_tip_entry_id`, `provider`, `model`, and `reason`; `actor` is optional.
+
 Backend slash-command equivalents:
 
 ```json
@@ -292,18 +319,18 @@ Backend slash-command equivalents:
 {"id":"16","type":"get_plugin_prompt","plugin_id":"com.example.tool","name":"review"}
 {"id":"17","type":"list_plugin_skills","plugin_id":"com.example.tool"}
 {"id":"18","type":"get_plugin_skill","plugin_id":"com.example.tool","name":"triage"}
-{"id":"19","type":"run_plugin_command","plugin_id":"com.example.tool","name":"status","arguments":"{}"}
+{"id":"19","type":"run_plugin_command","plugin_id":"com.example.tool","name":"status","arguments":{}}
 {"id":"20","type":"list_mcp_servers"}
 {"id":"21","type":"inspect_mcp_server","server_id":"demo"}
 {"id":"22","type":"list_mcp_tools","server_id":"demo"}
 {"id":"23","type":"restart_mcp_server","server_id":"demo"}
 ```
 
-These dispatch `/compact`, `/export`, `/context`, `/plugins`, `/plugin run`, and `/mcp` through the shared backend command dispatcher. Plugin commands require `plugin_id` for plugin-specific operations, `path` for validate, and `name` for prompt/skill retrieval or command execution. MCP server commands require `server_id` except `list_mcp_servers`. Responses include `handled`, `quit`, `output` (array of strings), and `text` (joined output). Command-side permission asks use the supplied headless policy and fail closed when no policy allows the operation.
+These dispatch `/compact`, `/export`, `/context`, `/plugins`, `/plugin run`, and `/mcp` through the shared backend command dispatcher. Plugin commands require `plugin_id` for plugin-specific operations, `path` for validate, and `name` for prompt/skill retrieval or command execution. MCP server commands require `server_id` except `list_mcp_servers`. Responses include `handled`, `quit`, `output` (array of strings), and `text` (joined output). Responses may also include `tool_timeline[]` using the same entry shape and status semantics as prompt `tool_timeline[]`, including `structured_result.status:"canceled"` for canceled command-side tools. Command-side permission asks use the supplied headless policy and fail closed when no policy allows the operation.
 
 `compact` requires credentials for the active session provider and asks that provider to generate the compaction summary before appending a compaction boundary. RPC compact emits `compaction_start` and `compaction_end` events around successful provider-backed compaction; stale-session retries emit `retry` with `reason:"stale_compaction_snapshot"` and bounded `attempt`/`max_attempts` metadata. It returns `success:false` for missing auth, provider summary failure, empty or oversized summaries, stale-session append failures, or active-run conflicts. On success, the recorded compaction entry contains summary metadata such as trigger, estimated tokens, threshold, retained recent context, and keep-recent settings.
 
-Most plugin RPC commands only discover, inspect, validate, read static prompt/skill files, or record enablement state. `run_plugin_command` starts the enabled plugin entrypoint, emits command tool events, and requires `plugin.execute` plus `plugin.command.run` permission approval. `list_mcp_tools` starts a fresh stdio MCP process for discovery, emits `mcp_tools` tool events, and requires `mcp.server.launch` plus `mcp.server.connect` permission approval. `restart_mcp_server` is informational because current stdio MCP servers are launched per discovery or tool call, not kept resident.
+Most plugin RPC commands only discover, inspect, validate, read static prompt/skill files, or record enablement state. `run_plugin_command` starts the enabled plugin entrypoint, emits command tool events, and requires `plugin.execute` plus `plugin.command.run` permission approval. Its `arguments` field is canonically a JSON object; legacy clients may send a string containing a JSON object, but present non-object values are rejected. `list_mcp_tools` starts a fresh stdio MCP process for discovery, emits `mcp_tools` tool events, and requires `mcp.server.launch` plus `mcp.server.connect` permission approval. `restart_mcp_server` is informational because current stdio MCP servers are launched per discovery or tool call, not kept resident.
 
 Unknown command types return an error response and do not terminate the RPC loop.
 
@@ -321,7 +348,7 @@ File mutation prompts may include a backend-provided unified diff preview. Clien
 {"schema_version":1,"name":"permission_requested","type":"permission_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","operation":"edit","mode":"build","target_path":"/workspace/file","command":"","tool_name":"edit_file","reason":"...","diff_preview":"--- /workspace/file\n+++ /workspace/file\n@@ -1,1 +1,1 @@\n-old\n+new\n","diff_truncated":false}}
 ```
 
-Permission `operation` values are backend policy categories such as `read`, `search`, `edit`, `bash`, `network.fetch`, `lsp.query`, `plugin.execute`, `plugin.tool.call`, `plugin.command.run`, `plugin.event.observe`, `mcp.server.launch`, `mcp.server.connect`, and `mcp.tool.call`. Network fetch prompts use an empty `target_path` and carry the URL in `command`:
+Permission `operation` values are backend policy categories such as `read`, `search`, `edit`, `bash`, `network.fetch`, `lsp.server.launch`, `lsp.query`, `plugin.execute`, `plugin.tool.call`, `plugin.command.run`, `plugin.event.observe`, `mcp.server.launch`, `mcp.server.connect`, `mcp.tool.call`, and `mcp.resource.read`. Network fetch prompts use an empty `target_path` and carry the URL in `command`:
 
 ```json
 {"schema_version":1,"name":"permission_requested","type":"permission_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","operation":"network.fetch","mode":"build","target_path":"","command":"https://example.com/page","tool_name":"webfetch","reason":"network fetch requires explicit approval"}}
@@ -353,6 +380,24 @@ RPC session grants can be inspected, revoked by id, or cleared:
 
 `permission_grants` returns `{"grants":[...]}`. Each grant includes `grant_id`, the original `permission_request_id`, `operation`, `mode`, `tool_name`, `target_path`, `command`, `reason`, and `risk`. `permission_grant_revoke` returns `success:false` if the grant id is unknown; otherwise it emits `permission_grant_revoked` and returns the revoked grant. `permission_grants_clear` emits `permission_grants_cleared` and returns the number of grants removed. Session grants are process-local RPC state, not durable permission rules.
 
+Persistent permission rules can be listed, added, and removed:
+
+```json
+{"id":"rules_1","type":"permission_rules"}
+{"id":"rules_2","type":"permission_rule_add","action":"allow","operation":"read","scope":"workspace","mode":"any","target_path":"/path/to/file","reason":"approved by operator"}
+{"id":"rules_3","type":"permission_rule_remove","rule_id":"permrule_..."}
+```
+
+`permission_rules` returns `global_rules_file`, the enforceable `workspace_rules_file`, and `rules`. Workspace rules are keyed to the normalized workspace directory but are stored under AVA config outside `$workspace/.ava`, because normal model file tools can write workspace files. Legacy `$workspace/.ava/permission-rules.json` files are not enforceable. Rule files are JSON with `schema_version:1`; malformed, too-broad, corrupt, or unsupported-version rule storage fails closed before resolver prompts.
+
+`permission_rule_add` requires `action` (`allow` or `deny`), `operation`, and non-empty `reason`. Optional `scope` is `workspace` (default) or `global`; optional `mode` is `any` (default), `build`, or `plan`. Path operations (`read`, `search`, `edit`, `lsp.query`) require `target_path`; relative workspace rule paths must stay inside the workspace, while global path rules require absolute paths. Command/network operations, `lsp.server.launch`, and `mcp.resource.read` match exact `command`; LSP server launch commands are JSON-array encoded argv vectors such as `["clangd","--background-index"]`, and MCP resource read commands are formatted as `<server_id>:<resource_uri>`. Other operations may match exact `tool_name`. Matching deny rules win over allows. Within the same action, rules with more explicit constraints (`target_path`, `command`, `tool_name`, and non-`any` mode) win before insertion order; workspace rules are preferred when specificity ties. Persistent rules are consulted only after built-in hard policy allows an `ask` path to continue. Built-in hard denies are never upgraded by persistent allow rules. Successful add/remove commands emit `permission_rule_added` or `permission_rule_removed` before the success response. Unknown `rule_id`, invalid fields, unsupported schema versions, and active-run conflicts return `success:false`.
+
+Example MCP resource rule:
+
+```json
+{"id":"rules_mcp_resource","type":"permission_rule_add","action":"allow","operation":"mcp.resource.read","command":"demo:file:///workspace/notes.md","reason":"approved configured MCP notes resource"}
+```
+
 When an active prompt reaches the `question` tool, RPC emits:
 
 ```json
@@ -373,7 +418,7 @@ Successful replies emit `question_replied` with the submitted value before the i
 {"schema_version":1,"name":"question_replied","type":"question_replied","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"question_...","selected":"yes"}}
 ```
 
-Missing, unknown, or wrong-correlation resolver ids; replies without exactly one of `answer` or `selected`; custom answers when `allow_custom` is false; and unknown `selected` values return in-band errors. Cancellation unblocks pending question requests with a canceled error.
+Missing, unknown, or wrong-correlation resolver ids; replies without exactly one supported answer shape; custom answers when `allow_custom` is false; unknown `selected` values; and invalid `selected_options` values return in-band errors. Single-select replies use exactly one of `answer` or `selected`. Multi-select replies may use `selected_options` and may also include `answer` only when custom text is allowed; `selected_options` values must be strings from the current option set and remain within backend count/size limits. Cancellation unblocks pending question requests with a canceled error.
 
 ## Future RPC Envelope (Deferred)
 
@@ -401,7 +446,7 @@ RPC notifications may reuse the event envelopes above. Request ids are client-ow
 
 Headless operation is fail-closed by default:
 
-- Permission decisions that require user approval fail unless headless policy supplies `--allow read-only`/`--allow-tool` for a supported read/search tool, `--allow-tool webfetch` for exact `network.fetch` webfetch prompts, or RPC mode receives an explicit `permission_reply` for the active resolver request.
+- Permission decisions that require user approval fail unless headless policy supplies `--allow read-only`/`--allow-tool` for a supported read/search tool, `--allow-tool webfetch` for exact `network.fetch` webfetch prompts, `--allow-tool mcp` for MCP launch/connect/tool/resource prompts, or RPC mode receives an explicit `permission_reply` for the active resolver request.
 - The `question` tool fails with an unavailable interaction error unless RPC mode receives an explicit `question_reply` for the active resolver request.
 - Destructive operations remain behind existing backend permission policy checks.
 

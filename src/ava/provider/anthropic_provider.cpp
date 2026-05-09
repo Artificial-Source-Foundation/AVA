@@ -5,8 +5,10 @@
 
 #include "ava/core/json.h"
 
+#include <cctype>
 #include <cstddef>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -15,6 +17,37 @@ namespace ava::provider {
 namespace {
 
 constexpr std::size_t kMaxReasoningOpaqueBytes = 64 * 1024;
+constexpr std::string_view kAnthropicOAuthBeta = "oauth-2025-04-20";
+
+std::string_view trim_ascii(std::string_view value)
+{
+  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) value.remove_prefix(1);
+  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) value.remove_suffix(1);
+  return value;
+}
+
+bool anthropic_beta_has_marker(std::string_view value, std::string_view marker)
+{
+  std::size_t start = 0;
+  while (start <= value.size()) {
+    auto const comma = value.find(',', start);
+    auto const item =
+        trim_ascii(comma == std::string_view::npos ? value.substr(start) : value.substr(start, comma - start));
+    if (item == marker) return true;
+    if (comma == std::string_view::npos) break;
+    start = comma + 1;
+  }
+  return false;
+}
+
+std::string anthropic_beta_with_marker(std::string existing, std::string_view marker)
+{
+  if (anthropic_beta_has_marker(existing, marker)) return existing;
+  if (trim_ascii(existing).empty()) return std::string(marker);
+  existing += ',';
+  existing += marker;
+  return existing;
+}
 
 std::string normalized_anthropic_stop_reason(std::string_view reason)
 {
@@ -328,8 +361,17 @@ std::unique_ptr<StreamParser> AnthropicProvider::create_stream_parser() const
 
 ava::core::VoidResult AnthropicProvider::apply_auth_options(HttpRequest& request, ProviderAuthContext const& auth) const
 {
-  static_cast<void>(request);
-  static_cast<void>(auth);
+  if (auth.credential_type != "oauth") return {};
+  if (auth.access_token.empty()) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Anthropic OAuth token is required"));
+  }
+
+  request.headers.erase("x-api-key");
+  request.headers["Authorization"] = "Bearer " + auth.access_token;
+  auto existing_beta = request.headers.find("anthropic-beta");
+  std::string beta = existing_beta == request.headers.end() ? std::string{} : existing_beta->second;
+  request.headers["anthropic-beta"] = anthropic_beta_with_marker(std::move(beta), kAnthropicOAuthBeta);
   return {};
 }
 

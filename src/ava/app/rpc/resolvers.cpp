@@ -173,7 +173,10 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(
       auto policy_result = policy_resolver(prompt);
       if (!policy_result) return std::unexpected(std::move(policy_result.error()));
       if (*policy_result == ava::permissions::PermissionResolution::Allow) {
-        return ava::permissions::PermissionResolution::Allow;
+        return *policy_result;
+      }
+      if (*policy_result == ava::permissions::PermissionResolution::Deny && policy_result->authoritative) {
+        return *policy_result;
       }
     }
     {

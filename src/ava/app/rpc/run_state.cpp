@@ -96,6 +96,7 @@ void set_active_run(RpcRunState& state, bool active, std::string request_id)
 {
   std::lock_guard lock(state.mutex);
   state.active_run = active;
+  if (active) state.cancel_requested.store(false, std::memory_order_relaxed);
   state.active_request_id = active ? std::move(request_id) : std::string{};
 }
 

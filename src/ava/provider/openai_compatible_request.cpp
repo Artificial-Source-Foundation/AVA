@@ -105,6 +105,33 @@ std::string tool_result_message_json(ContentPart const& part)
          ava::core::json::escape(part.text) + "\"}";
 }
 
+std::string image_data_url(ContentPart const& part)
+{
+  return "data:" + ava::core::json::escape(part.mime_type) + ";base64," + ava::core::json::escape(part.data_base64);
+}
+
+std::string multimodal_content_message_json(std::string_view role, std::vector<ContentPart> const& parts,
+                                            std::string_view fallback)
+{
+  std::string json = "{\"role\":\"" + ava::core::json::escape(role) + "\",\"content\":[";
+  bool first = true;
+  for (auto const& part : parts) {
+    if (part.type == ContentPartType::Text) {
+      if (part.text.empty()) continue;
+      if (!first) json += ',';
+      first = false;
+      json += "{\"type\":\"text\",\"text\":\"" + ava::core::json::escape(part.text) + "\"}";
+    } else if (part.type == ContentPartType::Image) {
+      if (!first) json += ',';
+      first = false;
+      json += "{\"type\":\"image_url\",\"image_url\":{\"url\":\"" + image_data_url(part) + "\"}}";
+    }
+  }
+  if (first) json += "{\"type\":\"text\",\"text\":\"" + ava::core::json::escape(fallback) + "\"}";
+  json += "]}";
+  return json;
+}
+
 std::vector<std::string> chat_messages_for_message(ChatMessage const& message, std::string_view reasoning_format,
                                                    bool preserve_reasoning_content)
 {
@@ -147,6 +174,7 @@ std::vector<std::string> chat_messages_for_message(ChatMessage const& message, s
 
   std::string text;
   bool has_tool_result = false;
+  bool has_image = false;
   for (auto const& part : message.content_parts) {
     if (part.type == ContentPartType::Text) {
       if (!text.empty()) text += "\n\n";
@@ -154,9 +182,16 @@ std::vector<std::string> chat_messages_for_message(ChatMessage const& message, s
     } else if (part.type == ContentPartType::ToolResult) {
       has_tool_result = true;
       result.push_back(tool_result_message_json(part));
+    } else if (part.type == ContentPartType::Image) {
+      has_image = true;
     }
   }
   if (has_tool_result) return result;
+  if (has_image) {
+    result.push_back(multimodal_content_message_json(message.role, message.content_parts,
+                                                     text.empty() ? message.content : text));
+    return result;
+  }
   if (result.empty() || !text.empty() || !message.content.empty()) {
     result.insert(result.begin(), role_content_message_json(message.role, text.empty() ? message.content : text));
   }

@@ -39,7 +39,7 @@ The default plugin shape is an out-of-process executable that speaks a versioned
 
 AVA does not load third-party native shared libraries in-process for 1.0. A native plugin ABI would make crashes, memory corruption, and C++ ABI compatibility part of the public support burden.
 
-The compatibility rules for this surface live in [`docs/plugin-compatibility-policy.md`](plugin-compatibility-policy.md). That policy defines compatible `ava.plugin.v1` additions, breaking-change handling, golden contract expectations, and the explicit MCP resource deferral.
+The compatibility rules for this surface live in [`docs/plugin-compatibility-policy.md`](plugin-compatibility-policy.md). That policy defines compatible `ava.plugin.v1` additions, breaking-change handling, golden contract expectations, and MCP resource containment requirements.
 
 ## Goals
 
@@ -127,7 +127,7 @@ Permissions:
 - Tool calls require `plugin.tool.call` after launch permission.
 - Command calls require `plugin.command.run` after launch permission.
 - Event hooks require `plugin.event.observe` after launch permission.
-- A manifest `permissions` block is useful documentation for reviewers, but the current 1.0 runtime enforcement is the permission prompt around process launch and contributed operations. The deferred core-service proxy below is not available yet.
+- A manifest `permissions` block is useful documentation for reviewers, but runtime enforcement is the permission prompt around process launch and contributed operations. The current core-service proxy slice additionally gates AVA-mediated read/search/status access behind explicit `proxy.read`, `proxy.search`, or `proxy.session` manifest capabilities.
 
 Local workflow:
 
@@ -163,7 +163,19 @@ Troubleshooting:
 - Missing prompt or skill content: check that the resource path is relative, inside the plugin directory, a regular file, and below the resource size cap.
 - Duplicate ids are disabled and reported through `/plugins failures`.
 
-Current core-service proxy limit: plugins cannot yet ask AVA over the plugin protocol to read files, edit files, run shell commands, fetch network resources, or inspect session state. If a plugin performs those side effects directly inside its own process, AVA only mediates the plugin launch/call permission and cannot provide built-in file/shell/network policy for the internal operation. Keep early plugins narrow and prefer static resources or explicit AVA built-in tools until the proxy surface lands.
+Current core-service proxy slice: plugins that explicitly declare `proxy.read`, `proxy.search`, or `proxy.session` can ask AVA over the plugin protocol to perform bounded read/search operations or read a small session status snapshot. File/search work routes through AVA's existing file/search permission, audit, and cancellation paths. Edit, shell, network, and session mutation proxy operations are still unavailable. If a plugin performs those side effects directly inside its own process, AVA only mediates the plugin launch/call permission and cannot provide built-in file/shell/network policy for the internal operation. Keep early plugins narrow and prefer static resources or explicit AVA built-in tools for unsupported effects.
+
+Proxy contract for the 1.1 hardening slice:
+
+- Capability gate: proxy access is opt-in through manifest capabilities. The current slice recognizes `proxy.read`, `proxy.search`, and `proxy.session`; shell, network, edit, and session mutation are intentionally not implied.
+- Protocol records: plugins send `proxy.request` JSONL records with required `type:"proxy.request"`, `id`, `operation`, and `arguments` fields, for example `{"type":"proxy.request","id":"px1","operation":"file.read","arguments":{"path":"README.md"}}`. AVA replies with `proxy.response` using the same `id`, `ok`, `content`, and optional `metadata`/`error`. Successful `content` is a JSON string containing presentation JSON for the proxied operation, not a nested protocol record. Error responses use `error.category`, `error.message`, and optional `error.details` strings. Proxy responses are bounded by the same plugin record limits as tool results.
+- Initial operations: `file.read` accepts a workspace-relative or absolute `path` plus optional positive integer `max_bytes`, `limit`, and `offset` bounds, resolves relative paths inside the workspace, rejects non-regular resolved files, and routes through AVA's existing read-file permission checks. `file.search` accepts either grep-style `query` plus optional `include`, `literal` (must be `true` if present), `case_insensitive`, `max_matches`, and `max_line_length`, or glob-style `pattern` plus optional `max_results`. Search skips symlinks, does not evaluate repository ignore files in the proxy path, and routes through AVA's existing search policy; `root` and regex mode (`literal:false`) are rejected until scoped roots and interruptible regex execution are implemented. `session.status` requires empty `{}` arguments and returns read-only session metadata: `session_id`, `mode`, `provider_id`, `model_id`, `workspace`, and `current_dir`; it does not expose transcript content, session entries, credentials, or mutation APIs. Results are presentation JSON strings, not raw model messages.
+- Permission model: a proxy request never inherits blanket plugin trust. AVA evaluates underlying file/search operations (`ReadFile` or `SearchFiles`) with `permission_tool_name`/audit context identifying the plugin and contributed tool/command. `session.status` is capability-gated and read-only, and does not trigger a separate file/search/command permission prompt. Persistent rules, session grants, and deny policies apply exactly as they do for built-in tools when an underlying permissioned service is used.
+- Audit model: current session/audit entries identify proxy activity through existing fields: `actor="plugin:<plugin_id>:<kind>:<name>"`, `tool_name="<model_operation>:proxy:<operation>"`, and the normal tool call/request IDs where available. Dedicated `plugin_id`, `proxy_operation`, and proxy call-id fields remain a future additive audit schema change. A denied proxy request is returned to the plugin as a structured error and is not retried internally.
+- Cancellation and timeouts: the parent plugin request cancellation token and plugin request deadline are shared with proxied operations. A canceled or timed-out parent call cancels pending proxy work, and a proxy timeout must not leave partial writes or unbounded output.
+- Recursion guard: proxy dispatch cannot invoke plugin-contributed tools or commands. The current read/search/status slice may call only built-in file/search service functions or the in-memory session status snapshot, preventing plugin A -> proxy -> plugin A cycles.
+- Output limits: proxied read/search output must carry truncation/spill metadata when large; plugins receive bounded content and cannot request arbitrary unbounded file or search dumps.
+- Threat model: project plugins are untrusted local code. The proxy exists to bring their requested file/search effects back under AVA policy/audit, not to make plugin processes safe. Plugins that bypass AVA and read files directly remain outside AVA mediation; users should only enable plugins they trust to run local code.
 
 ## Plugin Manifest
 
@@ -277,6 +289,7 @@ Event observation:
 Cancellation:
 
 ```json
+// Future extension; not sent by the current runner.
 {"id":"ava_2","type":"cancel","reason":"user_cancelled"}
 ```
 
@@ -284,7 +297,7 @@ Protocol rules:
 
 - Every request has a string `id`; every response echoes it exactly.
 - Requests time out independently from plugin process startup.
-- AVA sends cancellation before killing a plugin process when there is time to do so.
+- Current AVA cancellation is cooperative through the request cancel callback and process termination path; the `cancel` protocol record above is reserved for a future plugin-visible cancellation extension and is not part of the stable v1 runtime today.
 - Malformed records, unknown response ids, oversized records, or invalid result schemas are plugin errors.
 - Plugin logs use explicit protocol records or bounded stderr; they are never mixed into tool results unless requested.
 - AVA records plugin errors as runtime events and session audit entries.
@@ -305,7 +318,7 @@ Provider plugins, custom UI renderers, and prompt/provider interception can come
 
 ## Permissions And Audit
 
-Plugin-contributed operations must not get side-effect authority merely by registering a tool. AVA enforces launch and call permissions today; future core-service proxy operations will reuse the existing file, shell, network, and session permission categories.
+Plugin-contributed operations must not get side-effect authority merely by registering a tool. AVA enforces launch and call permissions today; the current read/search/status core-service proxy slice reuses existing file/search permission categories for file/search work and exposes only capability-gated read-only status metadata for `session.status`. Future side-effecting proxy operations must reuse the relevant shell, network, file mutation, or session permission categories.
 
 Permission categories:
 
@@ -316,12 +329,13 @@ Permission categories:
 - `mcp.server.launch`: launch a local MCP server process.
 - `mcp.server.connect`: connect to a configured MCP server.
 - `mcp.tool.call`: call an MCP tool.
+- `mcp.resource.read`: read a configured MCP resource through an MCP server.
 - Existing categories such as `file.read`, `file.write`, `shell.run`, `network.fetch`, and `external.directory` still apply when a plugin asks AVA to perform those operations through a core service proxy.
 
 Audit records emitted today include:
 
 - Permission request id.
-- Operation, such as `plugin.execute`, `plugin.tool.call`, `plugin.command.run`, `plugin.event.observe`, `mcp.server.launch`, `mcp.server.connect`, or `mcp.tool.call`.
+- Operation, such as `plugin.execute`, `plugin.tool.call`, `plugin.command.run`, `plugin.event.observe`, `mcp.server.launch`, `mcp.server.connect`, `mcp.tool.call`, or `mcp.resource.read`.
 - Agent mode.
 - Model-facing tool or command name when applicable.
 - Policy action, reason, and risk.
@@ -332,15 +346,16 @@ Dedicated plugin id/version, contribution id/type, requested capability, core op
 
 ## Deferred Core Service Proxy
 
-AVA should eventually expose safe operations to plugins through protocol requests instead of encouraging plugins to perform side effects directly. The 1.0 foundation keeps plugin execution permissioned and audited, but does not yet provide this proxy surface.
+AVA exposes an initial safe-operation proxy through protocol requests instead of encouraging plugins to perform side effects directly. The current slice keeps plugin execution permissioned and audited and additionally provides read/search proxy operations plus a read-only `session.status` metadata operation; broader shell/network/edit/session operations remain future work.
 
 Initial proxy operations:
 
-- Read/search files through AVA file/search tools.
-- Request file mutations through AVA write/edit/apply-patch paths.
-- Run shell commands through AVA process policy.
-- Fetch network resources through AVA network policy when `webfetch` exists.
-- Read limited session metadata through explicit session permissions.
+- Implemented now: read/search files through AVA file/search tools when the manifest declares `proxy.read` or `proxy.search`.
+- Implemented now: read-only `session.status` metadata when the manifest declares `proxy.session`.
+- Deferred: file mutations through AVA write/edit/apply-patch paths.
+- Deferred: shell commands through AVA process policy.
+- Deferred: network fetch/search through AVA network policy.
+- Deferred: transcript reads, richer session statistics, session mutation, and any session operation requiring explicit session permissions.
 
 This does not sandbox arbitrary plugin code. It makes well-behaved plugins easy to write safely and gives AVA one auditable path for operations that go through AVA.
 
@@ -378,16 +393,17 @@ Current 1.0 MCP scope:
 - Explicit `enabled:true` for project MCP servers before command execution.
 - MCP `initialize` lifecycle with server capability capture.
 - `tools/list` and `tools/call`, adapted into AVA's tool registry.
+- `resources/list` and `resources/read`, adapted into opaque no-argument read-style AVA tools with explicit `mcp.resource.read` permission. Resource listing follows bounded pagination and does not expose server-controlled resource names, URIs, MIME types, or descriptions to provider tool schemas before read approval.
 - `prompts/list` and `prompts/get`, surfaced through the command registry as dynamic `/mcp:<server_id>:<prompt_name>` prompt commands.
 - Per-server startup timeout, initialize timeout, request timeout, cancellation, and process-tree cleanup.
 - Health status and diagnostics visible through plugin/MCP inspect commands.
 - Schema conversion from MCP tool input schemas to AVA/provider-compatible tool schemas, with unsupported schemas disabled and explained.
 - Tool naming that avoids collisions, such as `mcp_<server_id>_<tool_name>` or another deterministic sanitized prefix.
-- Session audit entries for server launch, tool calls, errors, and permission decisions.
+- Session audit entries for server launch, tool calls, resource reads, errors, and permission decisions.
 
 Deferred MCP scope:
 
-- `resources/list` and `resources/read`, deferred until a separate read-style command/tool design with explicit permissions and bounds lands; they are not implemented or silently injected into context for 1.0 contract hardening.
+- Plugin manifests cannot contribute MCP server definitions yet; MCP servers are discovered through explicit MCP config files.
 - Streamable HTTP transport for remote MCP servers.
 - Progress/log notifications surfaced as runtime events.
 - Resource subscriptions if they can be made bounded and cancellable.
@@ -401,9 +417,10 @@ MCP safety rules:
 
 - MCP servers are programs chosen by the user. Treat them as untrusted at the AVA boundary, but do not claim they are OS-sandboxed unless a real sandbox exists.
 - Calling an MCP tool is a permissioned operation even if its schema looks read-only.
+- Reading an MCP resource is exposed as a no-argument read-style tool and requires `mcp.resource.read` approval; resources are never silently injected into prompt context. Resource read output is text-only for this slice: AVA accepts MCP `contents[].text`, preserves the first text item's URI/MIME metadata in the tool result, and rejects missing `contents`, blob-only, or otherwise non-text resource responses instead of reporting false success.
 - Launching a local MCP server is a permissioned process execution event.
 - Connecting to an MCP server session is permissioned; future remote transports also need explicit network permission.
-- MCP tool results are bounded before they enter the model context.
+- MCP tool and resource results are bounded before they enter the model context.
 - MCP server stderr is diagnostics only and is kept as a bounded tail.
 - MCP errors are surfaced as MCP/plugin failures, not as core AVA crashes.
 
@@ -440,6 +457,7 @@ Minimum regression coverage:
 - Permission denial for plugin execution and plugin tool calls.
 - Audit/session records for plugin execution and tool calls.
 - Fake MCP server initialize/list-tools/call-tool success.
+- Fake MCP server `resources/list`/`resources/read` success, bounded pagination, no-argument resource tool dispatch, opaque pre-approval schema metadata, text-only read enforcement, cancellation, and headless `--allow-tool mcp` approval.
 - Fake MCP server prompt list/get success through command-registry discovery and invocation.
 - Fake MCP server tool error, malformed initialize response, early startup/discovery exit, timeout, cancellation,
   stderr bounding, and process cleanup.
@@ -457,7 +475,7 @@ Minimum regression coverage:
 - Plugin tool contributions, plugin command contributions, static prompt/skill resources, and non-mutating event hooks.
 - Direct headless RPC plugin command smokes for discovery, diagnostics, static resources, real-sample project plugin
   coverage, enablement, and fail-closed execution.
-- Stdio MCP config loading, initialize, `tools/list`, `tools/call`, `prompts/list`, `prompts/get`, bounded stderr
+- Stdio MCP config loading, initialize, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`, bounded stderr
   diagnostics, tool broker registration, command-registry prompt exposure, slash/RPC diagnostics, direct headless
   command smokes, and fake-server success/error/exit regression coverage.
 
@@ -466,7 +484,7 @@ Minimum regression coverage:
 - Plugin manifests are JSON only for 1.0. TOML can be reconsidered later if AVA's broader config format settles on TOML.
 - Project plugin enablement is stored outside the repository by default under `$XDG_STATE_HOME/ava/plugin-enablement.json`, falling back to `~/.local/state/ava/plugin-enablement.json`. The state file is keyed by canonical workspace path and plugin id so a repository cannot enable executable plugin code for other users by committing `.ava` files.
 - Global plugin enablement uses the same state file with a global scope key. Explicit config may discover global plugins, but execution still requires enablement unless the plugin ships as a trusted built-in later.
-- Built-in tool names are reserved. Plugin tool model names use `plugin_<sanitized_plugin_id>_<tool_name>` by default. MCP tool model names use `mcp_<sanitized_server_id>_<tool_name>` by default. Name collisions disable the later contribution and produce diagnostics instead of overriding a tool silently.
+- Built-in tool names are reserved. Plugin tool model names use `plugin_<sanitized_plugin_id>_<tool_name>` by default. MCP tool model names use `mcp_<sanitized_server_id>_<tool_name>` by default. MCP resource tool names use `mcp_<sanitized_server_id>_resource_<16_hex_server_id_hash>_<16_hex_uri_hash>` so provider-visible names are bounded, stable by server id and resource URI, and do not reveal raw resource inventory before `mcp.resource.read` approval. Name collisions disable the later contribution and produce diagnostics instead of overriding a tool silently.
 - Stdio MCP transport is required for 1.0. Streamable HTTP MCP remains strongly desired, not required.
 - Plugin process launch uses a separate permission category from shell commands. If a plugin asks AVA to run a shell command through the core service proxy, that proxied command still goes through the normal shell policy.
 - Plugin and MCP stderr capture is bounded. The initial target is an in-memory tail of the last 64 KiB per process, with larger log spill files deferred until diagnostics prove the need.
@@ -474,10 +492,10 @@ Minimum regression coverage:
 - Plugins do not get a plugin-to-plugin event bus in 1.0. Event hooks observe AVA runtime events only, and inter-plugin communication is deferred.
 - `ava.plugin.v1` compatibility is governed by the plugin/MCP compatibility policy; additive optional fields are preferred, while breaking manifest/protocol/schema changes require an explicit versioned transition.
 
-## Remaining Implementation Choices
+## Deferred/Future Implementation Choices
 
 - Exact JSON schema subset accepted for plugin and MCP tool inputs.
-- Exact timeout defaults for plugin startup, per-request calls, MCP initialize, and MCP tool/resource/prompt calls.
+- Broader timeout configurability beyond the current bounded plugin startup/request and MCP call defaults.
 - Whether plugin enablement should support a separate machine-local project nickname for moved worktrees.
 - Plugin-manifest MCP server contributions.
-- MCP resources, Streamable HTTP, and progress/log notification surfacing.
+- MCP resource subscriptions, resource templates, binary/blob resource surfacing, Streamable HTTP, and progress/log notification surfacing.

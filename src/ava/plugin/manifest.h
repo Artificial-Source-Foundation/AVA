@@ -4,11 +4,15 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ava::plugin {
 
 inline constexpr std::string_view kPluginApiVersion = "ava.plugin.v1";
+inline constexpr std::string_view kPluginProxyReadCapability = "proxy.read";
+inline constexpr std::string_view kPluginProxySearchCapability = "proxy.search";
+inline constexpr std::string_view kPluginProxySessionCapability = "proxy.session";
 
 enum class PluginScope {
   Global,
@@ -73,5 +77,6 @@ struct DiscoveredPlugin {
 [[nodiscard]] ava::core::Result<PluginManifest> parse_plugin_manifest(std::string_view json,
                                                                       std::filesystem::path manifest_path = {});
 [[nodiscard]] ava::core::Result<PluginManifest> load_plugin_manifest(std::filesystem::path const& manifest_path);
+[[nodiscard]] bool plugin_has_capability(PluginManifest const& manifest, std::string_view capability);
 
 }  // namespace ava::plugin

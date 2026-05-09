@@ -14,6 +14,8 @@
 namespace ava::provider {
 namespace {
 
+constexpr std::size_t kAnthropicMaxImageBytes = 5 * 1024 * 1024;
+
 constexpr std::string_view kDefaultAnthropicBaseUrl = "https://api.anthropic.com";
 constexpr std::string_view kAnthropicVersion = "2023-06-01";
 constexpr int kDefaultMaxTokens = 4096;
@@ -161,6 +163,28 @@ ava::core::VoidResult validate_anthropic_content_parts(std::vector<ChatMessage> 
       switch (part.type) {
         case ContentPartType::Text:
           break;
+        case ContentPartType::Image:
+          if (role != "user") {
+            return std::unexpected(invalid_content_part_error("Anthropic image content requires user role",
+                                                              message_index, part_index));
+          }
+          if (!is_supported_image_mime_type(part.mime_type)) {
+            return std::unexpected(invalid_content_part_error("Anthropic image MIME type is not supported",
+                                                              message_index, part_index));
+          }
+          if (part.byte_size == 0 || part.byte_size > kAnthropicMaxImageBytes) {
+            return std::unexpected(invalid_content_part_error("Anthropic image byte size is outside supported limits",
+                                                              message_index, part_index));
+          }
+          if (part.data_base64.empty() || !is_valid_base64(part.data_base64)) {
+            return std::unexpected(invalid_content_part_error(
+                "Anthropic image content requires verified attachment bytes", message_index, part_index));
+          }
+          if (!part.cache_control_ttl.empty()) {
+            return std::unexpected(invalid_content_part_error(
+                "Anthropic cache_control is not supported on image content", message_index, part_index));
+          }
+          break;
         case ContentPartType::Reasoning:
           if (role != "assistant") {
             return std::unexpected(invalid_content_part_error("Anthropic reasoning content requires assistant role",
@@ -238,6 +262,10 @@ std::string anthropic_content_part_json(ContentPart const& part)
     case ContentPartType::Text:
       return "{\"type\":\"text\",\"text\":\"" + ava::core::json::escape(part.text) + "\"" +
              cache_control_suffix(part.cache_control_ttl) + "}";
+    case ContentPartType::Image:
+      return "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"" +
+             ava::core::json::escape(part.mime_type) + "\",\"data\":\"" +
+             ava::core::json::escape(part.data_base64) + "\"}}";
     case ContentPartType::Reasoning: {
       if (part.redacted) {
         return "{\"type\":\"redacted_thinking\",\"data\":\"" + ava::core::json::escape(part.reasoning_redacted_data) +

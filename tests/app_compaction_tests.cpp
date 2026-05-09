@@ -21,11 +21,33 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
 
 using namespace ava::tests;
+
+class CancelAfterRequestTransport final : public ava::provider::Transport {
+ public:
+  explicit CancelAfterRequestTransport(ava::provider::HttpResponse response) : response_(std::move(response)) {}
+
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
+      ava::provider::HttpRequest const& request) override
+  {
+    requests_.push_back(request);
+    canceled_ = true;
+    return response_;
+  }
+
+  [[nodiscard]] bool canceled() const noexcept { return canceled_; }
+  [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept { return requests_; }
+
+ private:
+  ava::provider::HttpResponse response_;
+  bool canceled_ = false;
+  std::vector<ava::provider::HttpRequest> requests_;
+};
 
 void test_app_compact_provider_summary_success()
 {
@@ -194,10 +216,50 @@ void test_app_compact_provider_failure_leaves_session_untouched()
              compact->output[0].find("boom") != std::string::npos,
          "provider-backed /compact reports provider failure with status and body details");
   expect(entries && std::ranges::none_of(*entries,
-                                         [](ava::session::SessionEntry const& entry) {
-                                           return entry.type == ava::session::EntryType::Compaction;
-                                         }),
+                                          [](ava::session::SessionEntry const& entry) {
+                                            return entry.type == ava::session::EntryType::Compaction;
+                                          }),
          "provider-backed /compact failure leaves session without compaction entry");
+}
+
+void test_app_auto_compaction_provider_cancellation_leaves_session_untouched()
+{
+  auto const root = temp_root() / "app-auto-compact-canceled";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "provider cancellation auto compaction test opens runtime session");
+  if (!session) return;
+  session->model.context_window_tokens = 100;
+  static_cast<void>(
+      session->store.append(ava::session::SessionEntry{.id = "entry_canceled_auto_compact",
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::UserMessage,
+                                                       .timestamp = ava::session::now_timestamp(),
+                                                       .data_json = "{\"text\":\"" + std::string(420, 'c') + "\"}"}));
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  CancelAfterRequestTransport transport(
+      ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"CANCELED SUMMARY\"}"});
+  ava::app::RuntimeRunOptions run_options;
+  run_options.access_token = "token";
+  run_options.cancel_requested = [&transport] { return transport.canceled(); };
+
+  auto result = ava::app::run_prompt(*session, "cancel during compaction", provider, transport, run_options);
+  auto entries = session->store.load();
+  expect(!result && result.error().message() == "agent loop canceled",
+         "auto compaction reports cancellation raised during the provider summary request");
+  expect(transport.requests().size() == 1, "canceled auto compaction dispatches only the summary request");
+  expect(entries && count_compaction_entries(*entries) == 0,
+         "canceled auto compaction leaves no partial compaction entry");
 }
 
 void test_app_compact_oversized_summary_leaves_session_untouched()
@@ -235,10 +297,46 @@ void test_app_compact_oversized_summary_leaves_session_untouched()
              compact->output[0].find("generated compaction summary is too large") != std::string::npos,
          "/compact reports oversized generated summary");
   expect(entries && std::ranges::none_of(*entries,
-                                         [](ava::session::SessionEntry const& entry) {
-                                           return entry.type == ava::session::EntryType::Compaction;
-                                         }),
+                                          [](ava::session::SessionEntry const& entry) {
+                                            return entry.type == ava::session::EntryType::Compaction;
+                                          }),
          "oversized generated summary leaves session without compaction entry");
+}
+
+void test_app_compact_cancellation_before_append_leaves_session_untouched()
+{
+  auto const root = temp_root() / "app-compact-cancel-before-append";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "manual compaction cancellation test opens runtime session");
+  if (!session) return;
+
+  bool cancel = false;
+  auto compact = ava::app::run_command(
+      *session, ava::app::CommandRequest{
+                    .command = "/compact",
+                    .compaction_summary_generator = [&cancel](std::vector<ava::session::SessionEntry> const&,
+                                                               ava::session::CompactionConfig const&, std::string_view,
+                                                               std::size_t) -> ava::core::Result<std::string> {
+                      cancel = true;
+                      return std::string("summary generated just before cancellation");
+                    },
+                    .cancel_requested = [&cancel] { return cancel; },
+                    .propagate_compaction_errors = true});
+  auto entries = session->store.load();
+  expect(!compact && compact.error().message() == "agent loop canceled",
+         "manual compaction observes cancellation before appending the generated summary");
+  expect(entries && count_compaction_entries(*entries) == 0,
+         "manual compaction cancellation leaves no partial compaction entry");
 }
 
 void test_app_compaction_prompt_builder_sections()
@@ -810,7 +908,9 @@ void run_app_compaction_tests()
   test_app_compact_provider_summary_success();
   test_app_compact_openai_oauth_streaming_summary_success();
   test_app_compact_provider_failure_leaves_session_untouched();
+  test_app_auto_compaction_provider_cancellation_leaves_session_untouched();
   test_app_compact_oversized_summary_leaves_session_untouched();
+  test_app_compact_cancellation_before_append_leaves_session_untouched();
   test_app_compaction_prompt_builder_sections();
   test_app_auto_compaction_appends_summary_and_rebuilds_context();
   test_app_auto_compaction_recent_context_respects_token_budget();

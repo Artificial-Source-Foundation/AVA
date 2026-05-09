@@ -120,6 +120,38 @@ class FailingOnceTransport final : public ava::provider::Transport {
   std::vector<ava::provider::HttpRequest> requests_;
 };
 
+class CancelDuringSendTransport final : public ava::provider::Transport {
+ public:
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
+      ava::provider::HttpRequest const& request) override
+  {
+    requests_.push_back(request);
+    return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"};
+  }
+
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(
+      ava::provider::HttpRequest const& request, CancelCallback cancel_requested) override
+  {
+    requests_.push_back(request);
+    saw_cancel_callback_ = static_cast<bool>(cancel_requested);
+    if (before_cancel_check_) before_cancel_check_();
+    if (cancel_requested && cancel_requested()) {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown,
+                                             "transport request canceled during callback"));
+    }
+    return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "ok"};
+  }
+
+  void before_cancel_check(std::function<void()> callback) { before_cancel_check_ = std::move(callback); }
+  [[nodiscard]] bool saw_cancel_callback() const noexcept { return saw_cancel_callback_; }
+  [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept { return requests_; }
+
+ private:
+  std::function<void()> before_cancel_check_;
+  bool saw_cancel_callback_ = false;
+  std::vector<ava::provider::HttpRequest> requests_;
+};
+
 void test_openai_provider_contract()
 {
   ava::provider::OpenAIProvider const provider("https://api.example.test");
@@ -216,7 +248,75 @@ void test_openai_provider_contract()
              native_parts_request->body.find("content_parts") == std::string::npos &&
              native_parts_request->body.find("tool_result") == std::string::npos &&
              native_parts_request->body.find("call_ignored") == std::string::npos,
-         "OpenAI request ignores native content parts and serializes fallback content only");
+          "OpenAI request ignores native content parts and serializes fallback content only");
+
+  auto const image_parts_request = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "openai",
+          .model_id = "gpt-5.5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+              .role = "user",
+              .content = "fallback image metadata",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Image,
+                                                           .attachment_id = "img_1",
+                                                           .mime_type = "image/png",
+                                                           .storage_path = "attachments/img_1.png",
+                                                           .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                                           .byte_size = 128}}}},
+          .tools_json = {}},
+      "oauth-token");
+  expect(!image_parts_request && image_parts_request.error().message().find("verified attachment bytes") != std::string::npos,
+         "OpenAI request rejects image content without verified attachment bytes");
+
+  auto const serialized_image_request = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "openai",
+          .model_id = "gpt-5.5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+              .role = "user",
+              .content = "fallback image metadata",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text,
+                                                           .text = "describe this"},
+                                ava::provider::ContentPart{.type = ava::provider::ContentPartType::Image,
+                                                           .attachment_id = "img_1",
+                                                           .mime_type = "image/png",
+                                                           .storage_path = "attachments/img_1.png",
+                                                           .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                                           .byte_size = 3,
+                                                           .data_base64 = "aGk="}}}},
+          .tools_json = {},
+          .stream = false},
+      "oauth-token");
+  expect(serialized_image_request &&
+              serialized_image_request->body.find(R"({"type":"input_text","text":"describe this"})") !=
+                  std::string::npos &&
+              serialized_image_request->body.find(
+                  R"({"type":"input_image","image_url":"data:image/png;base64,aGk="})") != std::string::npos,
+         "OpenAI request serializes verified image content parts");
+
+  auto const invalid_base64_image_request = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "openai",
+          .model_id = "gpt-5.5",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{
+              .role = "user",
+              .content = "fallback image metadata",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Image,
+                                                           .attachment_id = "img_1",
+                                                           .mime_type = "image/png",
+                                                           .storage_path = "attachments/img_1.png",
+                                                           .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                                           .byte_size = 3,
+                                                           .data_base64 = "not base64"}}}},
+          .tools_json = {},
+          .stream = false},
+      "oauth-token");
+  expect(!invalid_base64_image_request &&
+             invalid_base64_image_request.error().message().find("verified attachment bytes") != std::string::npos,
+         "OpenAI request rejects invalid image base64 payloads");
 
   auto const expired_credential_request = provider.build_request(
       ava::provider::ProviderRequest{
@@ -496,6 +596,18 @@ void test_openai_provider_contract()
              retry_call_cancel_inner.requests().empty(),
          "retry transport cancellable send checks cancellation before dispatch");
 
+  CancelDuringSendTransport cancel_during_send_inner;
+  bool cancel_during_send = false;
+  cancel_during_send_inner.before_cancel_check([&cancel_during_send] { cancel_during_send = true; });
+  ava::provider::RetryTransport cancel_during_send_transport(
+      cancel_during_send_inner, ava::provider::RetryOptions{.max_attempts = 2, .base_delay_ms = 0});
+  auto send_callback_canceled =
+      cancel_during_send_transport.send(retry_request, [&cancel_during_send] { return cancel_during_send; });
+  expect(!send_callback_canceled &&
+             send_callback_canceled.error().message().find("retry canceled") != std::string::npos &&
+             cancel_during_send_inner.saw_cancel_callback() && cancel_during_send_inner.requests().size() == 1,
+         "retry transport observes cancellation raised by the transport callback without retrying");
+
   FailingOnceTransport failing_once;
   ava::provider::RetryTransport retry_transport_error(
       failing_once, ava::provider::RetryOptions{.max_attempts = 2, .base_delay_ms = 0, .max_retry_after_ms = 0});
@@ -517,6 +629,17 @@ void test_openai_provider_contract()
   expect(streaming_retry && streaming_retry->status_code == 200 && streaming_inner.requests().size() == 2 &&
              streamed_body == "data: [DONE]\n\n",
          "retry transport retries rate-limited streaming responses and only delivers final chunks");
+
+  StreamingFakeTransport streaming_cancel_inner(
+      {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "data: [DONE]\n\n"}});
+  ava::provider::RetryTransport streaming_cancel_transport(
+      streaming_cancel_inner, ava::provider::RetryOptions{.max_attempts = 2, .base_delay_ms = 0});
+  auto streaming_pre_canceled = streaming_cancel_transport.send_streaming(
+      retry_request, [](std::string_view) -> ava::core::VoidResult { return {}; }, [] { return true; });
+  expect(!streaming_pre_canceled &&
+             streaming_pre_canceled.error().message().find("retry canceled") != std::string::npos &&
+             streaming_cancel_inner.requests().empty(),
+         "retry streaming transport checks cancellation before dispatching the first attempt");
 
   auto completed = ava::provider::parse_openai_sse(
       "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n");
@@ -786,9 +909,76 @@ void test_openai_compatible_provider_contract()
     expect(request->body.find("fallback tool output") == std::string::npos,
            "OpenAI-compatible request does not insert fallback user text before native tool results");
     expect(request->body.find("\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"read_file\"") !=
-               std::string::npos,
-           "OpenAI-compatible request converts Responses-style tool schemas to chat-completions tools");
+                std::string::npos,
+            "OpenAI-compatible request converts Responses-style tool schemas to chat-completions tools");
   }
+
+  auto const image_request = provider.build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "moonshot",
+          .model_id = "kimi-k2.6",
+          .system_prompt = "",
+          .messages = {ava::provider::ChatMessage{
+              .role = "user",
+              .content = "fallback image metadata",
+              .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text,
+                                                           .text = "describe this"},
+                                ava::provider::ContentPart{.type = ava::provider::ContentPartType::Image,
+                                                           .attachment_id = "img_1",
+                                                           .mime_type = "image/png",
+                                                           .storage_path = "attachments/img_1.png",
+                                                           .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                                           .byte_size = 3,
+                                                           .data_base64 = "aGk="}}}},
+          .tools_json = {},
+          .stream = false},
+      "compat-token");
+  expect(image_request && image_request->body.find(R"({"type":"text","text":"describe this"})") !=
+                              std::string::npos &&
+             image_request->body.find(R"({"type":"image_url","image_url":{"url":"data:image/png;base64,aGk="}})") !=
+                 std::string::npos,
+         "OpenAI-compatible request serializes verified image content parts");
+
+  auto const missing_image_bytes = provider.build_request(
+      ava::provider::ProviderRequest{.provider_id = "moonshot",
+                                     .model_id = "kimi-k2.6",
+                                     .system_prompt = "",
+                                     .messages = {ava::provider::ChatMessage{
+                                         .role = "user",
+                                         .content = "fallback image metadata",
+                                         .content_parts = {ava::provider::ContentPart{
+                                             .type = ava::provider::ContentPartType::Image,
+                                             .attachment_id = "img_1",
+                                             .mime_type = "image/png",
+                                             .storage_path = "attachments/img_1.png",
+                                             .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                             .byte_size = 3}}}},
+                                     .tools_json = {},
+                                     .stream = false},
+      "compat-token");
+  expect(!missing_image_bytes && missing_image_bytes.error().message().find("verified attachment bytes") != std::string::npos,
+         "OpenAI-compatible request rejects image content without verified attachment bytes");
+
+  auto const invalid_image_bytes = provider.build_request(
+      ava::provider::ProviderRequest{.provider_id = "moonshot",
+                                     .model_id = "kimi-k2.6",
+                                     .system_prompt = "",
+                                     .messages = {ava::provider::ChatMessage{
+                                         .role = "user",
+                                         .content = "fallback image metadata",
+                                         .content_parts = {ava::provider::ContentPart{
+                                             .type = ava::provider::ContentPartType::Image,
+                                             .attachment_id = "img_1",
+                                             .mime_type = "image/png",
+                                             .storage_path = "attachments/img_1.png",
+                                             .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                             .byte_size = 3,
+                                             .data_base64 = "not base64"}}}},
+                                     .tools_json = {},
+                                     .stream = false},
+      "compat-token");
+  expect(!invalid_image_bytes && invalid_image_bytes.error().message().find("verified attachment bytes") != std::string::npos,
+         "OpenAI-compatible request rejects invalid image base64 payloads");
 
   auto const invalid_tool =
       provider.build_request(ava::provider::ProviderRequest{.provider_id = "moonshot",
@@ -935,8 +1125,31 @@ void test_openai_compatible_parsing()
                                           "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":0}}"},
       false);
   expect(filtered && filtered->size() == 1 && (*filtered)[0].type == ava::provider::StreamEventType::Done &&
-             (*filtered)[0].stop_reason == "content_filter",
-         "OpenAI-compatible non-stream parser treats filtered empty responses as completed provider turns");
+              (*filtered)[0].stop_reason == "content_filter",
+          "OpenAI-compatible non-stream parser treats filtered empty responses as completed provider turns");
+  auto const empty_stop = moonshot.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"choices\":[{\"message\":{\"content\":\"\"},"
+                                          "\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,"
+                                          "\"completion_tokens\":0,\"total_tokens\":2}}"},
+      false);
+  expect(empty_stop && empty_stop->size() == 1 && (*empty_stop)[0].type == ava::provider::StreamEventType::Done &&
+             (*empty_stop)[0].usage && (*empty_stop)[0].usage->input_tokens == 2 &&
+             (*empty_stop)[0].usage->output_tokens == 0 && (*empty_stop)[0].stop_reason == "completed",
+         "OpenAI-compatible non-stream parser accepts empty completed output with usage");
+
+  auto const unicode_text = std::string("rocket ") + "\xF0\x9F\x9A\x80" + " bad " + "\xEF\xBF\xBD";
+  auto const unicode = moonshot.parse_response(
+      ava::provider::HttpResponse{.status_code = 200,
+                                  .headers = {},
+                                  .body = "{\"choices\":[{\"message\":{\"content\":"
+                                          "\"rocket \\ud83d\\ude80 bad \\ud800\"},\"finish_reason\":\"stop\"}]}"},
+      false);
+  expect(unicode && unicode->size() == 2 && (*unicode)[0].type == ava::provider::StreamEventType::TextDelta &&
+             (*unicode)[0].text == unicode_text && (*unicode)[1].type == ava::provider::StreamEventType::Done,
+         "OpenAI-compatible non-stream parser preserves surrogate pairs and replaces dangling surrogates");
+
   auto const unknown_finish =
       moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200,
                                                           .headers = {},

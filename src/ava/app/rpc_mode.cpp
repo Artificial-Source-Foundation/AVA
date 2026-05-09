@@ -17,6 +17,7 @@
 #include "ava/provider/registry.h"
 
 #include <atomic>
+#include <functional>
 #include <istream>
 #include <mutex>
 #include <optional>
@@ -40,6 +41,8 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
   if (!runtime_options.permission_resolver) {
     runtime_options.permission_resolver = build_headless_permission_resolver(HeadlessPermissionPolicyOptions{});
   }
+  runtime_options.permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(
+      rpc::permission_rule_store_for_session(session), std::move(runtime_options.permission_resolver));
   std::string const injected_provider_id = session.model.provider_id;
 
   auto reap_finished_prompt = [&] {
@@ -485,6 +488,14 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       }
       EventBus event_bus;
       rpc::subscribe_event_envelope_writer(event_bus, output);
+      std::function<bool()> compact_cancel_requested;
+      if (command->type == "compact") {
+        auto base_cancel_requested = runtime_options.cancel_requested;
+        compact_cancel_requested = [&run_state, base_cancel_requested] {
+          return rpc::cancel_requested(run_state) || (base_cancel_requested && base_cancel_requested());
+        };
+        if (compact_runtime_options) compact_runtime_options->cancel_requested = compact_cancel_requested;
+      }
       std::unique_lock lock(session_mutex, std::defer_lock);
       if (command->type != "compact") lock.lock();
       auto summary_generator =
@@ -499,10 +510,11 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       auto result = run_command(session, CommandRequest{.command = std::move(slash_command),
                                                         .event_sink = make_runtime_event_bus_adapter(
                                                             event_bus, rpc::rpc_event_context(command->id)),
-                                                        .permission_resolver = runtime_options.permission_resolver,
-                                                        .compaction_summary_generator = std::move(summary_generator),
-                                                        .session_mutex = &session_mutex,
-                                                        .propagate_compaction_errors = command->type == "compact"});
+                                                         .permission_resolver = runtime_options.permission_resolver,
+                                                         .compaction_summary_generator = std::move(summary_generator),
+                                                         .cancel_requested = compact_cancel_requested,
+                                                         .session_mutex = &session_mutex,
+                                                         .propagate_compaction_errors = command->type == "compact"});
       if (!result) {
         if (auto written = write_command_error(result.error()); !written) return written;
         continue;

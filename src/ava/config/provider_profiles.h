@@ -34,6 +34,10 @@ struct ProviderProfile {
   bool include_stream_usage = false;
   std::optional<double> default_temperature = std::nullopt;
   bool supports_oauth = false;
+  // True when the profile has a built-in runtime Provider factory and can back
+  // model selection. Some profiles are intentionally connect/auth metadata only
+  // until their runtime provider is implemented.
+  bool runtime_selectable = true;
 };
 
 [[nodiscard]] ProviderProfile const& anthropic_provider_profile();

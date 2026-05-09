@@ -91,13 +91,14 @@ ava::core::VoidResult append_tool_call(ava::session::SessionStore& store, Provid
 
 ava::core::VoidResult append_tool_result(ava::session::SessionStore& store, ToolDispatchResult const& result)
 {
+  auto const materialized = with_tool_result_payload(result);
   return append_entry(store, ava::session::EntryType::ToolResult,
-                      "{\"call_id\":\"" + ava::core::json::escape(result.call_id) + "\",\"name\":\"" +
-                          ava::core::json::escape(result.name) +
-                          "\",\"success\":" + (result.success ? std::string("true") : std::string("false")) +
-                          ",\"status\":\"" + ava::core::json::escape(to_string(result.payload.status)) +
-                          "\",\"result\":\"" + ava::core::json::escape(result.result_text) +
-                          "\",\"structured_result\":" + serialize_tool_result_payload_json(result) + "}");
+                      "{\"call_id\":\"" + ava::core::json::escape(materialized.call_id) + "\",\"name\":\"" +
+                          ava::core::json::escape(materialized.name) + "\",\"success\":" +
+                          (materialized.success ? std::string("true") : std::string("false")) +
+                          ",\"status\":\"" + ava::core::json::escape(to_string(materialized.payload.status)) +
+                          "\",\"result\":\"" + ava::core::json::escape(materialized.result_text) +
+                          "\",\"structured_result\":" + serialize_tool_result_payload_json(materialized) + "}");
 }
 
 ava::core::VoidResult append_permission_decision(ava::session::SessionStore& store,

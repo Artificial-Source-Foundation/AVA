@@ -110,7 +110,7 @@ std::optional<PluginCommandCallResult> parse_command_result_response(std::string
 }
 
 std::optional<PluginEventObserveResult> parse_event_observed_response(std::string_view record,
-                                                                      std::string_view request_id)
+                                                                       std::string_view request_id)
 {
   if (!json_depth_within_limit(record, kMaxPluginJsonDepth)) return std::nullopt;
   if (!ava::core::json::is_valid_object(record)) return std::nullopt;
@@ -123,7 +123,25 @@ std::optional<PluginEventObserveResult> parse_event_observed_response(std::strin
   return PluginEventObserveResult{.ok = *ok,
                                   .content = std::move(content),
                                   .metadata_json = metadata.value_or(std::string{}),
-                                  .raw_json = std::string(record)};
+                                   .raw_json = std::string(record)};
+}
+
+std::optional<PluginProxyRequest> parse_proxy_request(std::string_view record)
+{
+  if (!json_depth_within_limit(record, kMaxPluginJsonDepth)) return std::nullopt;
+  if (!ava::core::json::is_valid_object(record)) return std::nullopt;
+  auto id = ava::core::json::string_field(record, "id");
+  auto type = ava::core::json::string_field(record, "type");
+  auto operation = ava::core::json::string_field(record, "operation");
+  auto arguments = ava::core::json::object_field(record, "arguments");
+  if (!id || id->empty() || !type || *type != "proxy.request" || !operation || operation->empty() || !arguments ||
+      !ava::core::json::is_valid_object(*arguments)) {
+    return std::nullopt;
+  }
+  return PluginProxyRequest{.id = std::move(*id),
+                            .operation = std::move(*operation),
+                            .arguments_json = std::move(*arguments),
+                            .raw_json = std::string(record)};
 }
 
 }  // namespace ava::plugin

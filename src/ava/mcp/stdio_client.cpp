@@ -25,6 +25,7 @@ namespace ava::mcp {
 namespace {
 
 constexpr int kMaxDrainReadsPerPoll = 16;
+constexpr std::size_t kMaxMcpResourceListPages = 8;
 
 }  // namespace
 
@@ -307,8 +308,8 @@ ava::core::Result<std::vector<McpPromptDescription>> McpStdioClient::list_prompt
 }
 
 ava::core::Result<McpPromptGetResult> McpStdioClient::get_prompt(std::string_view prompt_name,
-                                                                 std::string_view arguments_json,
-                                                                 CancelCallback cancel_requested)
+                                                                  std::string_view arguments_json,
+                                                                  CancelCallback cancel_requested)
 {
   if (!ava::mcp::is_valid_mcp_tool_name(prompt_name)) {
     return std::unexpected(mcp_error(ava::core::ErrorCategory::InvalidArgument, "MCP prompt name is invalid", server_));
@@ -333,8 +334,102 @@ ava::core::Result<McpPromptGetResult> McpStdioClient::get_prompt(std::string_vie
                             .raw_json = response->raw_json};
 }
 
+ava::core::Result<std::vector<McpResourceDescription>> McpStdioClient::list_resources(
+    CancelCallback cancel_requested)
+{
+  if (is_canceled(cancel_requested)) {
+    return std::unexpected(canceled_error("MCP resources/list canceled", server_));
+  }
+
+  std::vector<McpResourceDescription> resources;
+  std::optional<std::string> cursor;
+  for (std::size_t page = 0; page < kMaxMcpResourceListPages; ++page) {
+    std::string const params = cursor ? ("{\"cursor\":" + json_string(*cursor) + "}") : "{}";
+    auto response = request("resources/list", params, options_.request_timeout,
+                            "timed out waiting for MCP resources/list", cancel_requested);
+    if (!response) return std::unexpected(std::move(response.error()));
+    auto const resources_start = ava::core::json::field_value_start(response->result_json, "resources");
+    if (resources_start &&
+        (*resources_start >= response->result_json.size() || response->result_json[*resources_start] != '[')) {
+      auto error = protocol_error("MCP resources/list result has invalid resources field", server_);
+      error.with_context("response", response->raw_json.substr(0, 512));
+      return std::unexpected(std::move(error));
+    }
+    for (auto const& resource_json : ava::core::json::objects_in_array_field(response->result_json, "resources")) {
+      auto uri = ava::core::json::string_field(resource_json, "uri");
+      if (!uri || !ava::mcp::is_valid_mcp_resource_uri(*uri)) {
+        auto error = protocol_error("MCP resource has invalid uri", server_);
+        error.with_context("response", resource_json.substr(0, 512));
+        return std::unexpected(std::move(error));
+      }
+      resources.push_back(McpResourceDescription{
+          .uri = std::move(*uri),
+          .name = ava::core::json::string_field(resource_json, "name").value_or(""),
+          .description = ava::core::json::string_field(resource_json, "description").value_or(""),
+          .mime_type = ava::core::json::string_field(resource_json, "mimeType").value_or("")});
+    }
+    cursor = ava::core::json::string_field(response->result_json, "nextCursor");
+    if (!cursor || cursor->empty()) return resources;
+  }
+  auto error = protocol_error("MCP resources/list exceeded pagination limit", server_);
+  error.with_context("max_pages", std::to_string(kMaxMcpResourceListPages));
+  return std::unexpected(std::move(error));
+}
+
+ava::core::Result<McpResourceReadResult> parse_resource_read_result(std::string_view result_json,
+                                                                    std::string_view raw_json,
+                                                                    McpServerConfig const& server)
+{
+  auto const contents_start = ava::core::json::field_value_start(result_json, "contents");
+  if (!contents_start || *contents_start >= result_json.size() || result_json[*contents_start] != '[') {
+    auto error = protocol_error("MCP resources/read result has invalid contents field", server);
+    error.with_context("response", std::string(raw_json.substr(0, 512)));
+    return std::unexpected(std::move(error));
+  }
+
+  McpResourceReadResult result;
+  result.raw_json = std::string(raw_json);
+  bool saw_text = false;
+  for (auto const& item : ava::core::json::objects_in_array_field(result_json, "contents")) {
+    auto text = ava::core::json::string_field(item, "text");
+    if (!text) continue;
+    if (!saw_text) {
+      result.uri = ava::core::json::string_field(item, "uri").value_or("");
+      result.mime_type = ava::core::json::string_field(item, "mimeType").value_or("");
+    } else {
+      result.content += '\n';
+    }
+    saw_text = true;
+    result.content += *text;
+  }
+  if (!saw_text) {
+    auto error = protocol_error("MCP resources/read returned no text content", server);
+    error.with_context("response", std::string(raw_json.substr(0, 512)));
+    return std::unexpected(std::move(error));
+  }
+  return result;
+}
+
+ava::core::Result<McpResourceReadResult> McpStdioClient::read_resource(std::string_view uri,
+                                                                       CancelCallback cancel_requested)
+{
+  if (!ava::mcp::is_valid_mcp_resource_uri(uri)) {
+    return std::unexpected(mcp_error(ava::core::ErrorCategory::InvalidArgument, "MCP resource uri is invalid", server_));
+  }
+  if (is_canceled(cancel_requested)) {
+    auto error = canceled_error("MCP resources/read canceled", server_);
+    error.with_context("uri", std::string(uri));
+    return std::unexpected(std::move(error));
+  }
+  std::string const params = "{\"uri\":" + json_string(uri) + "}";
+  auto response = request("resources/read", params, options_.request_timeout,
+                          "timed out waiting for MCP resources/read", cancel_requested);
+  if (!response) return std::unexpected(std::move(response.error()));
+  return parse_resource_read_result(response->result_json, response->raw_json, server_);
+}
+
 ava::core::Result<McpStdioClient::JsonRpcResponse> McpStdioClient::request(std::string_view method,
-                                                                           std::string_view params_json,
+                                                                            std::string_view params_json,
                                                                            std::chrono::milliseconds timeout,
                                                                            std::string_view timeout_message,
                                                                            CancelCallback cancel_requested)

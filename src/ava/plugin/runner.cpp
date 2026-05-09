@@ -5,6 +5,8 @@
 
 #include "ava/core/json.h"
 
+#include "ava/core/error.h"
+
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -22,6 +24,59 @@ namespace ava::plugin {
 namespace {
 
 constexpr int kMaxDrainReadsPerPoll = 16;
+
+std::string proxy_response_json(std::string_view request_id, PluginProxyResponse const& response)
+{
+  std::string text = "{\"id\":" + json_string(request_id) + ",\"type\":\"proxy.response\",\"ok\":" +
+                     std::string(response.ok ? "true" : "false") + ",\"content\":" + json_string(response.content);
+  if (!response.metadata_json.empty() && ava::core::json::is_valid_object(response.metadata_json)) {
+    text += ",\"metadata\":" + response.metadata_json;
+  }
+  if (!response.ok) {
+    auto const category = response.error_category.empty() ? std::string("tool") : response.error_category;
+    auto const message = response.error_message.empty() ? std::string("plugin proxy request failed") : response.error_message;
+    text += ",\"error\":{\"category\":" + json_string(category) + ",\"message\":" + json_string(message);
+    if (!response.error_details.empty()) text += ",\"details\":" + json_string(response.error_details);
+    text += '}';
+  }
+  text += '}';
+  return text;
+}
+
+PluginProxyResponse proxy_error_response(ava::core::Error const& error)
+{
+  return PluginProxyResponse{.ok = false,
+                             .content = "",
+                             .metadata_json = "",
+                             .error_category = ava::core::to_string(error.category()),
+                             .error_message = error.message(),
+                             .error_details = error.format()};
+}
+
+PluginProxyResponse proxy_error_response(ava::core::ErrorCategory category, std::string message,
+                                         PluginManifest const& manifest)
+{
+  auto error = plugin_error(category, std::move(message), manifest);
+  return proxy_error_response(error);
+}
+
+bool error_is_canceled(ava::core::Error const& error)
+{
+  for (auto const& context : error.context()) {
+    if (context.key == "canceled" && context.value == "true") return true;
+  }
+  return error.message() == "plugin startup canceled" || error.message() == "plugin tool call canceled" ||
+         error.message() == "plugin command call canceled" || error.message() == "plugin event observation canceled" ||
+         error.message() == "plugin request canceled" || error.message() == "tool canceled";
+}
+
+std::string_view proxy_capability_for_operation(std::string_view operation)
+{
+  if (operation == "file.read") return kPluginProxyReadCapability;
+  if (operation == "file.search") return kPluginProxySearchCapability;
+  if (operation == "session.status") return kPluginProxySessionCapability;
+  return {};
+}
 
 }  // namespace
 
@@ -194,9 +249,10 @@ ava::core::VoidResult PluginProcess::initialize(CancelCallback cancel_requested)
 }
 
 ava::core::Result<PluginToolCallResult> PluginProcess::call_tool(std::string_view tool_name,
-                                                                 std::string_view arguments_json,
-                                                                 std::string_view call_id,
-                                                                 CancelCallback cancel_requested)
+                                                                  std::string_view arguments_json,
+                                                                  std::string_view call_id,
+                                                                  CancelCallback cancel_requested,
+                                                                  PluginProxyHandler proxy_handler)
 {
   if (tool_name.empty()) {
     return std::unexpected(
@@ -227,23 +283,27 @@ ava::core::Result<PluginToolCallResult> PluginProcess::call_tool(std::string_vie
     return std::unexpected(std::move(written.error()));
   }
 
-  auto record = read_record(deadline, options_.request_timeout, "timed out waiting for plugin tool result",
-                            "plugin process closed stdout before plugin tool result", cancel_requested);
-  if (!record) return std::unexpected(std::move(record.error()));
-  auto result = parse_tool_result_response(*record, request_id);
-  if (!result) {
+  while (true) {
+    auto record = read_record(deadline, options_.request_timeout, "timed out waiting for plugin tool result",
+                              "plugin process closed stdout before plugin tool result", cancel_requested);
+    if (!record) return std::unexpected(std::move(record.error()));
+    auto result = parse_tool_result_response(*record, request_id);
+    if (result) return *result;
+    auto proxy_handled = handle_proxy_record(*record, deadline, options_.request_timeout, proxy_handler, cancel_requested);
+    if (!proxy_handled) return std::unexpected(std::move(proxy_handled.error()));
+    if (*proxy_handled) continue;
     auto error = protocol_error("plugin tool result is malformed", manifest_);
     error.with_context("tool", std::string(tool_name));
     error.with_context("response", record->substr(0, 512));
     return std::unexpected(std::move(error));
   }
-  return *result;
 }
 
 ava::core::Result<PluginCommandCallResult> PluginProcess::call_command(std::string_view command_name,
-                                                                       std::string_view arguments_json,
-                                                                       std::string_view call_id,
-                                                                       CancelCallback cancel_requested)
+                                                                        std::string_view arguments_json,
+                                                                        std::string_view call_id,
+                                                                        CancelCallback cancel_requested,
+                                                                        PluginProxyHandler proxy_handler)
 {
   if (command_name.empty()) {
     return std::unexpected(
@@ -274,23 +334,27 @@ ava::core::Result<PluginCommandCallResult> PluginProcess::call_command(std::stri
     return std::unexpected(std::move(written.error()));
   }
 
-  auto record = read_record(deadline, options_.request_timeout, "timed out waiting for plugin command result",
-                            "plugin process closed stdout before plugin command result", cancel_requested);
-  if (!record) return std::unexpected(std::move(record.error()));
-  auto result = parse_command_result_response(*record, request_id);
-  if (!result) {
+  while (true) {
+    auto record = read_record(deadline, options_.request_timeout, "timed out waiting for plugin command result",
+                              "plugin process closed stdout before plugin command result", cancel_requested);
+    if (!record) return std::unexpected(std::move(record.error()));
+    auto result = parse_command_result_response(*record, request_id);
+    if (result) return *result;
+    auto proxy_handled = handle_proxy_record(*record, deadline, options_.request_timeout, proxy_handler, cancel_requested);
+    if (!proxy_handled) return std::unexpected(std::move(proxy_handled.error()));
+    if (*proxy_handled) continue;
     auto error = protocol_error("plugin command result is malformed", manifest_);
     error.with_context("command", std::string(command_name));
     error.with_context("response", record->substr(0, 512));
     return std::unexpected(std::move(error));
   }
-  return *result;
 }
 
 ava::core::Result<PluginEventObserveResult> PluginProcess::observe_event(std::string_view event_name,
-                                                                         std::string_view payload_json,
-                                                                         std::string_view call_id,
-                                                                         CancelCallback cancel_requested)
+                                                                          std::string_view payload_json,
+                                                                          std::string_view call_id,
+                                                                          CancelCallback cancel_requested,
+                                                                          PluginProxyHandler proxy_handler)
 {
   if (event_name.empty()) {
     return std::unexpected(
@@ -321,17 +385,20 @@ ava::core::Result<PluginEventObserveResult> PluginProcess::observe_event(std::st
     return std::unexpected(std::move(written.error()));
   }
 
-  auto record = read_record(deadline, options_.request_timeout, "timed out waiting for plugin event response",
-                            "plugin process closed stdout before plugin event response", cancel_requested);
-  if (!record) return std::unexpected(std::move(record.error()));
-  auto result = parse_event_observed_response(*record, request_id);
-  if (!result) {
+  while (true) {
+    auto record = read_record(deadline, options_.request_timeout, "timed out waiting for plugin event response",
+                              "plugin process closed stdout before plugin event response", cancel_requested);
+    if (!record) return std::unexpected(std::move(record.error()));
+    auto result = parse_event_observed_response(*record, request_id);
+    if (result) return *result;
+    auto proxy_handled = handle_proxy_record(*record, deadline, options_.request_timeout, proxy_handler, cancel_requested);
+    if (!proxy_handled) return std::unexpected(std::move(proxy_handled.error()));
+    if (*proxy_handled) continue;
     auto error = protocol_error("plugin event response is malformed", manifest_);
     error.with_context("event", std::string(event_name));
     error.with_context("response", record->substr(0, 512));
     return std::unexpected(std::move(error));
   }
-  return *result;
 }
 
 ava::core::VoidResult PluginProcess::write_record(std::string_view record,
@@ -436,9 +503,9 @@ ava::core::Result<std::string> PluginProcess::read_record(std::chrono::steady_cl
 }
 
 ava::core::VoidResult PluginProcess::wait_for_writable(std::chrono::steady_clock::time_point deadline,
-                                                       std::chrono::milliseconds timeout,
-                                                       std::string_view timeout_message,
-                                                       CancelCallback cancel_requested)
+                                                        std::chrono::milliseconds timeout,
+                                                        std::string_view timeout_message,
+                                                        CancelCallback cancel_requested)
 {
   while (true) {
     if (is_canceled(cancel_requested)) {
@@ -471,6 +538,121 @@ ava::core::VoidResult PluginProcess::wait_for_writable(std::chrono::steady_clock
       return std::unexpected(std::move(error));
     }
   }
+}
+
+ava::core::Result<bool> PluginProcess::handle_proxy_record(std::string_view record,
+                                                           std::chrono::steady_clock::time_point deadline,
+                                                           std::chrono::milliseconds timeout,
+                                                           PluginProxyHandler const& proxy_handler,
+                                                           CancelCallback cancel_requested)
+{
+  auto const type = ava::core::json::string_field(record, "type");
+  if (!type || *type != "proxy.request") return false;
+
+  auto request = parse_proxy_request(record);
+  if (!request) {
+    auto id = ava::core::json::string_field(record, "id");
+    if (id && !id->empty()) {
+      auto response = proxy_error_response(ava::core::ErrorCategory::InvalidArgument,
+                                           "plugin proxy request is malformed", manifest_);
+      if (auto written = write_proxy_response(*id, response, deadline, timeout, cancel_requested); !written) {
+        return std::unexpected(std::move(written.error()));
+      }
+      return true;
+    }
+    auto error = protocol_error("plugin proxy request is malformed", manifest_);
+    error.with_context("response", std::string(record.substr(0, 512)));
+    return std::unexpected(std::move(error));
+  }
+
+  auto response = dispatch_proxy_request(*request, proxy_handler, deadline, cancel_requested);
+  if (!response) {
+    terminate_child();
+    return std::unexpected(std::move(response.error()));
+  }
+  if (auto written = write_proxy_response(request->id, *response, deadline, timeout, cancel_requested); !written) {
+    return std::unexpected(std::move(written.error()));
+  }
+  return true;
+}
+
+ava::core::Result<PluginProxyResponse> PluginProcess::dispatch_proxy_request(
+    PluginProxyRequest const& request, PluginProxyHandler const& proxy_handler,
+    std::chrono::steady_clock::time_point deadline, CancelCallback cancel_requested)
+{
+  if (is_canceled(cancel_requested)) {
+    return std::unexpected(canceled_error("plugin request canceled", manifest_));
+  }
+  auto proxy_cancel_requested = [cancel_requested, deadline] {
+    return is_canceled(cancel_requested) || std::chrono::steady_clock::now() >= deadline;
+  };
+
+  auto const required_capability = proxy_capability_for_operation(request.operation);
+  if (required_capability.empty()) {
+    auto error = plugin_error(ava::core::ErrorCategory::InvalidArgument, "plugin proxy operation is not supported",
+                              manifest_);
+    error.with_context("operation", request.operation);
+    return proxy_error_response(error);
+  }
+  if (!plugin_has_capability(manifest_, required_capability)) {
+    auto error = plugin_error(ava::core::ErrorCategory::PermissionDenied,
+                              "plugin manifest does not declare required proxy capability", manifest_);
+    error.with_context("operation", request.operation);
+    error.with_context("required_capability", std::string(required_capability));
+    return proxy_error_response(error);
+  }
+  if (!proxy_handler) {
+    auto error = plugin_error(ava::core::ErrorCategory::Tool, "plugin proxy handler is unavailable", manifest_);
+    error.with_context("operation", request.operation);
+    return proxy_error_response(error);
+  }
+
+  auto response = proxy_handler(request, proxy_cancel_requested);
+  if (!response) {
+    if (!is_canceled(cancel_requested) && std::chrono::steady_clock::now() >= deadline) {
+      auto error = plugin_error(ava::core::ErrorCategory::Tool, "timed out handling plugin proxy request", manifest_);
+      error.with_context("operation", request.operation);
+      error.with_context("timeout_ms", std::to_string(options_.request_timeout.count()));
+      return std::unexpected(std::move(error));
+    }
+    if (is_canceled(cancel_requested) || error_is_canceled(response.error())) {
+      return std::unexpected(std::move(response.error()));
+    }
+    return proxy_error_response(response.error());
+  }
+  if (!is_canceled(cancel_requested) && std::chrono::steady_clock::now() >= deadline) {
+    auto error = plugin_error(ava::core::ErrorCategory::Tool, "timed out handling plugin proxy request", manifest_);
+    error.with_context("operation", request.operation);
+    error.with_context("timeout_ms", std::to_string(options_.request_timeout.count()));
+    return std::unexpected(std::move(error));
+  }
+  if (is_canceled(cancel_requested)) {
+    return std::unexpected(canceled_error("plugin request canceled", manifest_));
+  }
+  return *response;
+}
+
+ava::core::VoidResult PluginProcess::write_proxy_response(std::string_view request_id,
+                                                          PluginProxyResponse const& response,
+                                                          std::chrono::steady_clock::time_point deadline,
+                                                          std::chrono::milliseconds timeout,
+                                                          CancelCallback cancel_requested)
+{
+  auto record = proxy_response_json(request_id, response);
+  if (record.size() > options_.max_record_bytes) {
+    auto error = plugin_error(ava::core::ErrorCategory::Tool, "plugin proxy response exceeds size cap", manifest_);
+    error.with_context("response_bytes", std::to_string(record.size()));
+    error.with_context("max_bytes", std::to_string(options_.max_record_bytes));
+    auto bounded = proxy_error_response(error);
+    bounded.metadata_json = "{\"truncated\":true,\"max_record_bytes\":" + std::to_string(options_.max_record_bytes) + "}";
+    record = proxy_response_json(request_id, bounded);
+    if (record.size() > options_.max_record_bytes) {
+      auto protocol = protocol_error("plugin proxy error response exceeds size cap", manifest_);
+      protocol.with_context("max_bytes", std::to_string(options_.max_record_bytes));
+      return std::unexpected(std::move(protocol));
+    }
+  }
+  return write_record(record, deadline, timeout, "timed out writing plugin proxy response", cancel_requested);
 }
 
 ava::core::VoidResult PluginProcess::drain_stdout()

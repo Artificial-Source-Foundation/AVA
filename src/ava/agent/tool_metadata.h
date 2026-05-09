@@ -19,7 +19,7 @@ struct ToolMetadata {
   std::optional<std::string_view> description_family;
 };
 
-inline constexpr std::array<ToolMetadata, 13>
+inline constexpr std::array<ToolMetadata, 17>
     kBuiltinToolMetadata{
         {
             ToolMetadata{
@@ -132,9 +132,53 @@ inline constexpr std::array<ToolMetadata, 13>
                     R"({"type":"function","name":"lsp_diagnostics","description":"Query configured local language-server diagnostics for one workspace file.","parameters":{"type":"object","properties":{"path":{"type":"string","maxLength":4096}},"required":["path"]}})",
                 .permission_category = "lsp.query",
                 .output_bound_summary =
-                    "Returns structured diagnostics only; server command configuration is local-only.",
+                    "Returns structured diagnostics only; local server configuration stays hidden.",
                 .execution_mode = "synchronous_process",
                 .event_rendering_hint = "lsp_diagnostics",
+                .description_family = std::string_view("lsp")},
+            ToolMetadata{
+                .name = "lsp_document_symbols",
+                .description = "Query configured local language-server symbols for one workspace file.",
+                .schema_json =
+                    R"({"type":"function","name":"lsp_document_symbols","description":"Query configured local language-server document symbols for one workspace file. Returns bounded symbol names, kinds, ranges, and containers; local server details stay hidden.","parameters":{"type":"object","properties":{"path":{"type":"string","maxLength":4096}},"required":["path"]}})",
+                .permission_category = "lsp.query",
+                .output_bound_summary =
+                    "Returns bounded structured document symbols only; local server configuration stays hidden.",
+                .execution_mode = "synchronous_process",
+                .event_rendering_hint = "lsp_symbols",
+                .description_family = std::string_view("lsp")},
+            ToolMetadata{
+                .name = "lsp_workspace_symbols",
+                .description = "Query configured local language-server workspace symbols by name.",
+                .schema_json =
+                    R"({"type":"function","name":"lsp_workspace_symbols","description":"Query configured local language-server workspace symbols by name. Use a short query string; results are bounded and normalized to workspace-relative paths when possible.","parameters":{"type":"object","properties":{"query":{"type":"string","maxLength":1024}},"required":["query"]}})",
+                .permission_category = "lsp.query",
+                .output_bound_summary =
+                    "Returns bounded structured workspace symbols only; local server configuration stays hidden.",
+                .execution_mode = "synchronous_process",
+                .event_rendering_hint = "lsp_symbols",
+                .description_family = std::string_view("lsp")},
+            ToolMetadata{
+                .name = "lsp_definition",
+                .description = "Query configured local language-server definitions for one file position.",
+                .schema_json =
+                    R"({"type":"function","name":"lsp_definition","description":"Query configured local language-server definitions for one workspace file position. Lines and columns are zero-based, matching LSP positions.","parameters":{"type":"object","properties":{"path":{"type":"string","maxLength":4096},"line":{"type":"integer","minimum":0},"column":{"type":"integer","minimum":0}},"required":["path","line","column"]}})",
+                .permission_category = "lsp.query",
+                .output_bound_summary =
+                    "Returns bounded definition locations only; local server configuration stays hidden.",
+                .execution_mode = "synchronous_process",
+                .event_rendering_hint = "lsp_definition",
+                .description_family = std::string_view("lsp")},
+            ToolMetadata{
+                .name = "lsp_references",
+                .description = "Query configured local language-server references for one file position.",
+                .schema_json =
+                    R"({"type":"function","name":"lsp_references","description":"Query configured local language-server references for one workspace file position. Lines and columns are zero-based, matching LSP positions. Results are bounded and normalized to workspace-relative paths when possible.","parameters":{"type":"object","properties":{"path":{"type":"string","maxLength":4096},"line":{"type":"integer","minimum":0},"column":{"type":"integer","minimum":0}},"required":["path","line","column"]}})",
+                .permission_category = "lsp.query",
+                .output_bound_summary =
+                    "Returns bounded reference locations only; local server configuration stays hidden.",
+                .execution_mode = "synchronous_process",
+                .event_rendering_hint = "lsp_references",
                 .description_family = std::string_view("lsp")},
             ToolMetadata{
                 .name = "apply_patch",

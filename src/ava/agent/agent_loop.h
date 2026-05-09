@@ -12,6 +12,8 @@
 
 #include "ava/provider/provider.h"
 
+#include "ava/lsp/lsp_client.h"
+
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -27,6 +29,7 @@ namespace ava::agent {
 enum class ToolTimelineStatus {
   Running,
   Success,
+  Canceled,
   Error,
 };
 
@@ -77,6 +80,7 @@ struct ToolProgressEntry {
 
 struct AgentLoopOptions {
   std::filesystem::path workspace_dir;
+  std::filesystem::path current_dir = {};
   Mode mode = Mode::Build;
   std::string provider_id = "openai";
   std::string model_id = "gpt-5.5";
@@ -93,6 +97,7 @@ struct AgentLoopOptions {
   bool stream = true;
   bool model_supports_tools = true;
   bool model_supports_streaming = true;
+  std::vector<std::string> model_input_modalities = {"text"};
   std::optional<long long> model_max_output_tokens = std::nullopt;
   std::optional<ava::provider::ProviderReasoningOptions> reasoning = std::nullopt;
   std::function<void(ToolTimelineEntry const&)> on_tool_event = nullptr;
@@ -102,6 +107,7 @@ struct AgentLoopOptions {
   QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
+  std::shared_ptr<ava::lsp::DiagnosticsProvider> lsp_diagnostics_provider = nullptr;
   std::function<ava::core::Result<bool>(ava::session::SessionStore&, std::string_view,
                                         std::vector<std::string> const& replayed_user_messages)>
       compact_context = nullptr;

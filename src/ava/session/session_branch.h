@@ -1,0 +1,61 @@
+#pragma once
+
+#include "ava/session/session_metadata.h"
+#include "ava/session/session_store.h"
+
+#include "ava/core/result.h"
+
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace ava::session {
+
+enum class SessionBranchMode { Fork, Clone };
+
+struct SessionBranchOptions
+{
+  std::filesystem::path workspace_dir;
+  std::filesystem::path root_dir;
+  std::string source_session_id;
+  std::string branch_from_entry_id;
+  std::optional<std::string> name;
+  std::optional<std::vector<std::string>> labels;
+  SessionBranchMode mode = SessionBranchMode::Fork;
+  std::string actor = "rpc";
+};
+
+struct SessionBranchResult
+{
+  SessionStore store;
+  std::string source_session_id;
+  std::string branch_from_entry_id;
+  std::size_t copied_entry_count = 0;
+  SessionMetadataView metadata;
+};
+
+struct BranchSummaryOptions
+{
+  std::filesystem::path workspace_dir;
+  std::filesystem::path root_dir;
+  std::string source_session_id;
+  std::string branch_root_entry_id;
+  std::string branch_tip_entry_id;
+  std::string summary;
+  std::string provider;
+  std::string model;
+  std::string reason;
+  std::string actor = "rpc";
+};
+
+struct BranchSummaryResult
+{
+  std::string source_session_id;
+  SessionEntry entry;
+};
+
+[[nodiscard]] ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOptions options);
+[[nodiscard]] ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOptions options);
+
+}  // namespace ava::session

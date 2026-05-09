@@ -4,13 +4,15 @@ These files track AVA release-position documentation. The shipped backend MVP ru
 
 Current position:
 
+- `1.1.md`: planning notes for the next release line. The compiled runtime still reports `1.0.0`; 1.1 needs a dedicated implementation and release-bump slice before it becomes shipped evidence.
 - `1.0.md`: current shipped backend MVP. The compiled runtime reports `1.0.0` after the 0.90 release-candidate evidence map, OpenAI and Kimi-for-coding live smokes, focused/full CTest, and release-bump validation passed.
 - `0.90.md`: v1 release-candidate completion ledger. It owns the 1.0 capability disposition, test evidence map, and provider live-smoke status that justified the 1.0 runtime bump.
-- `0.80.md`: extension API stabilization target. The local plugin authoring guide, sample plugin, real-sample headless RPC smoke coverage, compatibility policy, minimal golden fixtures, MCP resource deferral decision, focused audit/failure contract tests, and OpenAI 5.5 manual headless release-validation pass are implemented.
+- `0.80.md`: extension API stabilization target. The local plugin authoring guide, sample plugin, real-sample headless RPC smoke coverage, compatibility policy, minimal golden fixtures, the then-current MCP resource deferral decision, focused audit/failure contract tests, and OpenAI 5.5 manual headless release-validation pass are implemented; read-style MCP resources later landed behind `mcp.resource.read`.
 - `0.75.md`: source-backed extension foundation line. Unified command discovery/invocation, plugin diagnostics, plugin prompt/skill resources and commands, and MCP stdio tool/prompt foundations are implemented and validated by later release-candidate evidence.
 
 Post-1.0 path:
 
+- Use `docs/product/capabilities-1.1.md` for the current backend-only 1.1 candidate capability list.
 - Keep Anthropic, Moonshot, and OpenRouter-compatible live smokes as follow-up provider-breadth validation unless the product decision changes.
 - Use `docs/roadmap/backend.md` and the post-1.0 roadmap sections for 1.1+ follow-up planning.
 

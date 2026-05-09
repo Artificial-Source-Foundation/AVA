@@ -956,6 +956,19 @@ void test_tui_composer_rendering_and_input()
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::YankPop, ava::tui::Key::AltY) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Interrupt, ava::tui::Key::CtrlC),
       "tui default keybinds preserve context-specific semantic actions for shared keys");
+  auto const navigation_key_bindings = ava::tui::parse_key_bindings_json(
+      "{\"message_prev\":\"PageUp\",\"message_next\":\"PageDown\",\"jump_to_bottom\":\"Ctrl+T\"}");
+  expect(navigation_key_bindings &&
+             ava::tui::key_matches_action(*navigation_key_bindings, ava::tui::TuiAction::MessagePrev,
+                                          ava::tui::Key::PageUp) &&
+             ava::tui::key_matches_action(*navigation_key_bindings, ava::tui::TuiAction::MessageNext,
+                                          ava::tui::Key::PageDown) &&
+             ava::tui::key_matches_action(*navigation_key_bindings, ava::tui::TuiAction::JumpToBottom,
+                                          ava::tui::Key::CtrlT) &&
+             ava::tui::action_name(ava::tui::TuiAction::MessagePrev) == "message_prev" &&
+             ava::tui::action_name(ava::tui::TuiAction::MessageNext) == "message_next" &&
+             ava::tui::action_name(ava::tui::TuiAction::JumpToBottom) == "jump_to_bottom",
+         "tui keybind parser exposes message-boundary navigation and jump-to-bottom action names");
   auto const help_items = ava::tui::key_binding_help_items(default_bindings);
   expect(std::ranges::any_of(help_items,
                              [](ava::tui::TuiKeyBindingHelpItem const& item) {
@@ -2308,6 +2321,26 @@ void test_tui_composer_rendering_and_input()
                                   [](std::string const& line) { return line.find("item 19") != std::string::npos; }),
          "tui transcript viewport supports an explicit scroll offset");
 
+  auto const detached_scroll = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                    .provider = "openai",
+                                                                                    .model = "gpt-5.5",
+                                                                                    .session_id = "session_test",
+                                                                                    .input = "",
+                                                                                    .status = "ready",
+                                                                                    .transcript = many_items,
+                                                                                    .transcript_scroll_offset = 4,
+                                                                                    .transcript_new_output_count = 3,
+                                                                                    .width = 80,
+                                                                                    .height = 12});
+  expect(std::ranges::any_of(detached_scroll,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("scrollback detached") != std::string::npos &&
+                                      visible.find("+3 updates below") != std::string::npos &&
+                                      visible.find("jump_to_bottom") != std::string::npos;
+                             }),
+         "tui transcript scrollback shows a detached/new-output indicator with the jump-to-bottom action name");
+
   auto const wrapped_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
       .provider = "openai",
@@ -2436,6 +2469,41 @@ void test_tui_composer_rendering_and_input()
   expect(std::ranges::none_of(tool_card,
                               [](std::string const& line) { return line.find("\x1b[31m") != std::string::npos; }),
          "tui tool card rendering removes untrusted raw sgr escape sequences");
+
+  auto const grouped_context_tools = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{.tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                                 .name = "glob",
+                                                                                 .argument_summary = "pattern=src/**/*.cpp",
+                                                                                 .result_summary = "12 files"}},
+                     ava::tui::TranscriptItem{.tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                                 .name = "grep",
+                                                                                 .argument_summary = "pattern=TODO",
+                                                                                 .result_summary = "3 matches"}},
+                     ava::tui::TranscriptItem{.tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                                 .name = "read_file",
+                                                                                 .argument_summary = "path=src/main.cpp",
+                                                                                 .result_summary = "read lines 1-40"}}},
+      .width = 96,
+      .height = 16});
+  expect(std::ranges::count_if(grouped_context_tools,
+                               [](std::string const& line) {
+                                 return strip_sgr(line).find("context gathering · 3 tools") != std::string::npos;
+                               }) == 1 &&
+             std::ranges::any_of(grouped_context_tools,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("glob") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(grouped_context_tools,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("read_file") != std::string::npos;
+                                 }),
+         "tui groups consecutive context-gathering tool cards with a single readable heading while keeping details");
 
   auto const empty_tool_card = ava::tui::render_composer(
       ava::tui::ComposerSnapshot{.mode = "build",
@@ -3793,6 +3861,51 @@ void test_tui_event_state_reduces_runtime_events()
              streaming_error_state.transcript[1].text == "provider: curl transport failed" &&
              streaming_error_state.transcript[1].text.find("output: event:") == std::string::npos,
          "tui event state commits partial assistant text before compact provider error messages");
+  auto const collapsed_streaming_error = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "ready",
+                                 .transcript = ava::tui::event_state_transcript_snapshot(streaming_error_state),
+                                 .width = 88,
+                                 .height = 12,
+                                 .tool_details_visible = false});
+  auto const expanded_streaming_error = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "ready",
+                                 .transcript = ava::tui::event_state_transcript_snapshot(streaming_error_state),
+                                 .width = 88,
+                                 .height = 16,
+                                 .tool_details_visible = true});
+  expect(std::ranges::any_of(collapsed_streaming_error,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("partial answer") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(collapsed_streaming_error,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("! provider: curl transport failed") !=
+                                          std::string::npos;
+                                 }) &&
+             std::ranges::any_of(collapsed_streaming_error,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("details hidden · /details") != std::string::npos;
+                                 }) &&
+             std::ranges::none_of(collapsed_streaming_error,
+                                  [](std::string const& line) {
+                                    return strip_sgr(line).find("output: event:") != std::string::npos;
+                                  }) &&
+             std::ranges::any_of(expanded_streaming_error,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("output: event: response.created") !=
+                                          std::string::npos;
+                                 }),
+         "tui renders concise collapsed errors while preserving partial assistant text and details-on-demand");
 
   ava::tui::TuiEventState canceled_state;
   ava::app::RuntimeEvent canceled;

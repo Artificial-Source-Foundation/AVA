@@ -45,6 +45,24 @@ std::string trim_ascii(std::string text)
   return std::string(begin, end);
 }
 
+std::string lower_ascii(std::string_view text)
+{
+  std::string lowered;
+  lowered.reserve(text.size());
+  for (char const ch : text) lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  return lowered;
+}
+
+std::string join_lines(std::vector<std::string> const& lines, std::size_t first)
+{
+  std::string joined;
+  for (std::size_t index = first; index < lines.size(); ++index) {
+    if (index > first) joined.push_back('\n');
+    joined += lines[index];
+  }
+  return joined;
+}
+
 std::string remove_redacted_markers(std::string text)
 {
   constexpr std::string_view marker = "[REDACTED]";
@@ -484,6 +502,53 @@ std::string render_error_line(std::string const& text, std::size_t width)
   return prefix + content;
 }
 
+std::vector<std::string> render_error_detail_lines(std::string const& details, std::size_t width)
+{
+  if (details.empty()) return {};
+  constexpr auto kMaxErrorDetailLines = std::size_t{8};
+  auto raw_lines = split_lines(details);
+  std::vector<std::string> lines;
+  auto const prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
+  auto const content_prefix = wide_blocks(width) ? std::string("  │       ") : std::string("        ");
+  auto header = prefix + std::string(kSgrDim) + "details:" + std::string(kSgrReset);
+  lines.push_back(fit_line_preserving_sgr(std::move(header), width));
+  auto const visible = std::min(raw_lines.size(), kMaxErrorDetailLines);
+  for (std::size_t index = 0; index < visible; ++index) {
+    lines.push_back(fit_line_preserving_sgr(
+        content_prefix + std::string(kSgrMuted) + sanitize_terminal_text(raw_lines[index]) + std::string(kSgrReset),
+        width));
+  }
+  if (raw_lines.size() > visible) {
+    auto hidden = content_prefix + std::string(kSgrDim) + "… " + std::to_string(raw_lines.size() - visible) +
+                  " more detail lines" + std::string(kSgrReset);
+    lines.push_back(fit_line_preserving_sgr(std::move(hidden), width));
+  }
+  return lines;
+}
+
+std::vector<std::string> render_error_block(std::string const& text, std::string const& meta, std::size_t width,
+                                            bool details_visible)
+{
+  auto raw_lines = split_lines(text);
+  auto summary = raw_lines.empty() ? std::string{} : raw_lines.front();
+  if (summary.empty()) summary = "error";
+
+  auto details = meta.empty() && raw_lines.size() > 1 ? join_lines(raw_lines, 1) : meta;
+  std::vector<std::string> lines{render_error_line(summary, width)};
+  if (details.empty()) return lines;
+
+  if (!details_visible) {
+    auto const prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
+    auto hint = prefix + std::string(kSgrDim) + "details hidden · /details" + std::string(kSgrReset);
+    lines.push_back(fit_line_preserving_sgr(std::move(hint), width));
+    return lines;
+  }
+
+  auto detail_lines = render_error_detail_lines(details, width);
+  lines.insert(lines.end(), detail_lines.begin(), detail_lines.end());
+  return lines;
+}
+
 std::vector<std::string> render_compaction_block(std::string const& text, std::size_t width)
 {
   auto const sanitized = sanitize_terminal_text(text);
@@ -505,50 +570,106 @@ std::string render_generic_line(std::string const& text, std::size_t width)
   return prefix + content;
 }
 
+namespace {
+
+bool is_context_gathering_tool(TranscriptItem const& item)
+{
+  if (!item.tool) return false;
+  auto const name = lower_ascii(item.tool->name);
+  return name == "read_file" || name == "glob" || name == "grep" || name == "list_directory" ||
+         name == "lsp_diagnostics";
+}
+
+std::size_t context_tool_run_size(std::vector<TranscriptItem> const& transcript, std::size_t index)
+{
+  std::size_t count = 0;
+  while (index + count < transcript.size() && is_context_gathering_tool(transcript[index + count])) ++count;
+  return count;
+}
+
+std::string render_context_tool_group_heading(std::size_t count, std::size_t width)
+{
+  auto label = std::string(kSgrAccent) + "context gathering" + std::string(kSgrReset) + " " + std::string(kSgrDim) +
+               "· " + std::to_string(count) + (count == 1 ? " tool" : " tools") + std::string(kSgrReset);
+  if (wide_blocks(width)) return render_wide_content(kSgrMuted, std::move(label), width);
+  return fit_line_preserving_sgr("  " + std::move(label), width);
+}
+
+std::vector<std::string> render_transcript_item_lines(TranscriptItem const& item, std::size_t width,
+                                                      bool tool_details_visible, bool thinking_visible)
+{
+  if (item.tool) return render_tool_card(*item.tool, width, tool_details_visible);
+  if (item.label == "you") return render_user_block(text_model_or(item.text_model, item.text), width);
+  if (item.label == "ava") {
+    auto assistant_text = item.text;
+    if (assistant_text.empty() && !text_empty(item.text_model)) assistant_text = to_plain_text(item.text_model);
+    auto thinking_text = thinking_visible ? text_model_or(item.thinking_model, item.thinking) : std::string{};
+    return render_assistant_block(assistant_text, item.meta, thinking_text, width);
+  }
+  if (item.label == "thinking" && thinking_visible) {
+    return render_thinking_block(text_model_or(item.text_model, item.text), width);
+  }
+  if (item.label == "compaction") return render_compaction_block(text_model_or(item.text_model, item.text), width);
+  if (item.label == "error") {
+    return render_error_block(text_model_or(item.text_model, item.text), item.meta, width, tool_details_visible);
+  }
+
+  std::vector<std::string> lines;
+  auto const text = text_model_or(item.text_model, item.text);
+  auto const text_lines = split_lines(text);
+  for (auto const& part : text_lines) {
+    for (auto const& wrapped : wrap_transcript_text(part, width)) {
+      lines.push_back(render_generic_line(wrapped, width));
+    }
+  }
+  return lines;
+}
+
+}  // namespace
+
 std::vector<std::string> render_transcript_lines(std::vector<TranscriptItem> const& transcript, std::size_t width,
-                                                 bool tool_details_visible, bool thinking_visible)
+                                                  bool tool_details_visible, bool thinking_visible)
 {
   std::vector<std::string> rendered_transcript;
-  for (auto const& item : transcript) {
+  for (std::size_t index = 0; index < transcript.size(); ++index) {
+    auto const& item = transcript[index];
     auto const should_space = width >= kTurnSpacingMinWidth && !rendered_transcript.empty() &&
                               (item.label == "you" || item.label == "ava" || item.tool);
     if (should_space) rendered_transcript.emplace_back();
-    if (item.tool) {
-      auto card = render_tool_card(*item.tool, width, tool_details_visible);
-      rendered_transcript.insert(rendered_transcript.end(), card.begin(), card.end());
-      continue;
+
+    auto const context_run_size = context_tool_run_size(transcript, index);
+    if (context_run_size >= 2 && (index == 0 || !is_context_gathering_tool(transcript[index - 1]))) {
+      rendered_transcript.push_back(render_context_tool_group_heading(context_run_size, width));
     }
-    if (item.label == "you") {
-      auto block = render_user_block(text_model_or(item.text_model, item.text), width);
-      rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
-    } else if (item.label == "ava") {
-      auto assistant_text = item.text;
-      if (assistant_text.empty() && !text_empty(item.text_model)) assistant_text = to_plain_text(item.text_model);
-      auto thinking_text = thinking_visible ? text_model_or(item.thinking_model, item.thinking) : std::string{};
-      auto block = render_assistant_block(assistant_text, item.meta, thinking_text, width);
-      rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
-    } else if (item.label == "thinking" && thinking_visible) {
-      auto block = render_thinking_block(text_model_or(item.text_model, item.text), width);
-      rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
-    } else if (item.label == "compaction") {
-      auto block = render_compaction_block(text_model_or(item.text_model, item.text), width);
-      rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
-    } else {
-      auto const text = text_model_or(item.text_model, item.text);
-      auto const text_lines = split_lines(text);
-      for (auto const& part : text_lines) {
-        for (auto const& wrapped : wrap_transcript_text(part, width)) {
-          if (item.label == "error") {
-            rendered_transcript.push_back(render_error_line(wrapped, width));
-          } else {
-            rendered_transcript.push_back(render_generic_line(wrapped, width));
-          }
-        }
-      }
-    }
+
+    auto block = render_transcript_item_lines(item, width, tool_details_visible, thinking_visible);
+    rendered_transcript.insert(rendered_transcript.end(), block.begin(), block.end());
   }
   if (!rendered_transcript.empty() && wide_blocks(width)) rendered_transcript.emplace_back();
   return rendered_transcript;
+}
+
+std::vector<std::size_t> transcript_message_start_lines(std::vector<TranscriptItem> const& transcript,
+                                                        std::size_t width, bool tool_details_visible,
+                                                        bool thinking_visible)
+{
+  std::vector<std::size_t> starts;
+  std::size_t cursor = 0;
+  for (std::size_t index = 0; index < transcript.size(); ++index) {
+    auto const& item = transcript[index];
+    auto const should_space = width >= kTurnSpacingMinWidth && cursor > 0 &&
+                              (item.label == "you" || item.label == "ava" || item.tool);
+    if (should_space) ++cursor;
+
+    auto const item_start = cursor;
+    auto const context_run_size = context_tool_run_size(transcript, index);
+    if (context_run_size >= 2 && (index == 0 || !is_context_gathering_tool(transcript[index - 1]))) ++cursor;
+
+    auto block = render_transcript_item_lines(item, width, tool_details_visible, thinking_visible);
+    if (!block.empty()) starts.push_back(item_start);
+    cursor += block.size();
+  }
+  return starts;
 }
 
 std::vector<std::string> visible_transcript_lines(std::vector<std::string> const& rendered_transcript,

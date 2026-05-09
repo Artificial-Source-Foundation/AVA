@@ -12,6 +12,8 @@
 #include "ava/agent/usage_accounting.h"
 
 #include "ava/core/json.h"
+#include "ava/provider/provider_utils.h"
+#include "ava/session/attachments.h"
 
 #include <algorithm>
 #include <map>
@@ -52,6 +54,25 @@ ava::core::VoidResult check_canceled(AgentLoopOptions const& options, ava::sessi
   return std::unexpected(std::move(error));
 }
 
+ava::core::VoidResult attach_verified_image_payloads(ava::provider::ProviderRequest& request,
+                                                     ava::session::SessionStore const& store)
+{
+  for (auto& message : request.messages) {
+    for (auto& part : message.content_parts) {
+      if (part.type != ava::provider::ContentPartType::Image) continue;
+      ava::session::ImageAttachmentRef const attachment{.id = part.attachment_id,
+                                                        .mime_type = part.mime_type,
+                                                        .storage_path = part.storage_path,
+                                                        .sha256 = part.sha256,
+                                                        .byte_size = part.byte_size};
+      auto loaded = ava::session::load_image_attachment(store, attachment);
+      if (!loaded) return std::unexpected(std::move(loaded.error()));
+      part.data_base64 = ava::provider::base64_encode(loaded->bytes);
+    }
+  }
+  return {};
+}
+
 }  // namespace
 
 AgentLoop::AgentLoop(AgentLoopOptions options) : options_(std::move(options))
@@ -65,6 +86,8 @@ std::string to_string(ToolTimelineStatus status)
       return "running";
     case ToolTimelineStatus::Success:
       return "success";
+    case ToolTimelineStatus::Canceled:
+      return "canceled";
     case ToolTimelineStatus::Error:
       return "error";
   }
@@ -246,7 +269,12 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
                 .call_id = event.call_id, .name = event.tool_name, .text = event.text, .status = event.status});
       },
       .cancel_requested = options_.cancel_requested,
-      .question_resolver = options_.question_resolver};
+      .question_resolver = options_.question_resolver,
+      .lsp_diagnostics_provider = options_.lsp_diagnostics_provider,
+      .session_id = store.session_id(),
+      .provider_id = options_.provider_id,
+      .model_id = options_.model_id,
+      .current_dir = options_.current_dir.empty() ? options_.workspace_dir : options_.current_dir};
   ToolDispatcher const dispatcher(tool_context);
 
   std::size_t tool_iterations = 0;
@@ -285,7 +313,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
     if (!messages) return std::unexpected(messages.error());
     auto const tool_schemas =
         options_.model_supports_tools ? ToolDispatcher::tool_schemas_json(tool_context) : std::vector<std::string>{};
-    ava::provider::ProviderRequest const provider_request{
+    ava::provider::ProviderRequest provider_request{
         .provider_id = options_.provider_id,
         .model_id = options_.model_id,
         .system_prompt = options_.system_prompt,
@@ -294,6 +322,18 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
         .stream = options_.stream && options_.model_supports_streaming,
         .max_output_tokens = options_.model_max_output_tokens,
         .reasoning = options_.reasoning};
+    bool const model_supports_images = std::find(options_.model_input_modalities.begin(),
+                                                 options_.model_input_modalities.end(), "image") !=
+                                       options_.model_input_modalities.end();
+    if (auto valid_images = ava::provider::validate_image_content_parts(provider_request, model_supports_images);
+        !valid_images) {
+      static_cast<void>(append_error_locked(valid_images.error()));
+      return std::unexpected(std::move(valid_images.error()));
+    }
+    if (auto attached_images = attach_verified_image_payloads(provider_request, store); !attached_images) {
+      static_cast<void>(append_error_locked(attached_images.error()));
+      return std::unexpected(std::move(attached_images.error()));
+    }
     ava::provider::ProviderAuthContext const auth_context{
         .access_token = options_.access_token,
         .credential_type =
@@ -561,6 +601,9 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       if (auto not_canceled = check_canceled_locked("before_tool_dispatch"); !not_canceled) {
         return std::unexpected(std::move(not_canceled.error()));
       }
+      if (auto not_canceled = check_canceled_locked("before_tool_call_append"); !not_canceled) {
+        return std::unexpected(std::move(not_canceled.error()));
+      }
       if (auto appended = append_tool_call_locked(call); !appended) return std::unexpected(appended.error());
       ToolTimelineEntry timeline_entry{.status = ToolTimelineStatus::Running,
                                        .call_id = call.id,
@@ -569,9 +612,6 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
                                        .result_summary = "",
                                        .arguments_json = call.arguments_json};
       publish_tool_event(options_, timeline_entry);
-      if (auto not_canceled = check_canceled_locked("after_tool_start_event"); !not_canceled) {
-        return std::unexpected(std::move(not_canceled.error()));
-      }
       auto dispatch = dispatcher.dispatch(call);
       auto dispatch_result = dispatch ? *dispatch : synthetic_failed_dispatch_result(call, dispatch.error());
       dispatch_result.payload.summary = summarize_tool_result(dispatch_result);
@@ -580,6 +620,8 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       }
       if (!dispatch) {
         timeline_entry.status = ToolTimelineStatus::Error;
+      } else if (dispatch_result.payload.status == ToolResultStatus::Canceled) {
+        timeline_entry.status = ToolTimelineStatus::Canceled;
       } else {
         timeline_entry.status = dispatch_result.success ? ToolTimelineStatus::Success : ToolTimelineStatus::Error;
       }

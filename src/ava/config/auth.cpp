@@ -11,6 +11,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,6 +20,11 @@ namespace ava::config {
 namespace {
 
 constexpr long long kOAuthRefreshSkewSeconds = 300;
+constexpr std::string_view kAnthropicProviderId = "anthropic";
+constexpr std::string_view kAnthropicOAuthTokenEnv = "ANTHROPIC_OAUTH_TOKEN";
+constexpr std::string_view kAnthropicAuthTokenEnv = "ANTHROPIC_AUTH_TOKEN";
+constexpr std::string_view kAnthropicOAuthTokenUrl = "https://platform.claude.com/v1/oauth/token";
+constexpr std::string_view kAnthropicOAuthClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
 std::string env_key_from_provider_id(std::string_view provider_id)
 {
@@ -48,6 +54,17 @@ std::vector<std::string> provider_env_keys(std::string_view provider_id)
 
 std::optional<ProviderCredential> provider_credential_from_env(std::string_view provider_id)
 {
+  if (provider_id == kAnthropicProviderId) {
+    for (auto const env_key : {kAnthropicOAuthTokenEnv, kAnthropicAuthTokenEnv}) {
+      char const* oauth = std::getenv(std::string(env_key).c_str());
+      if (oauth == nullptr || std::string_view(oauth).empty()) continue;
+      return ProviderCredential{.provider_id = std::string(provider_id),
+                                .access_token = oauth,
+                                .credential_type = "oauth",
+                                .account_id = "",
+                                .source = "env:" + std::string(env_key)};
+    }
+  }
   for (auto const& key : provider_env_keys(provider_id)) {
     char const* value = std::getenv(key.c_str());
     if (value == nullptr || std::string_view(value).empty()) continue;
@@ -84,6 +101,20 @@ std::optional<std::string> generic_api_key_from(std::string_view scope)
   return key;
 }
 
+bool field_present(std::string_view object, std::string_view key)
+{
+  return ava::core::json::field_value_start(object, key).has_value();
+}
+
+ava::core::Error malformed_provider_credential_error(std::string_view provider_id, std::filesystem::path const& source)
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                "stored provider credential is malformed or unsupported");
+  error.with_context("provider", std::string(provider_id));
+  error.with_context("source", source.string());
+  return error;
+}
+
 std::optional<ProviderCredential> parse_provider_credential(std::string_view content, std::string_view provider_id,
                                                             std::filesystem::path const& source_path)
 {
@@ -91,7 +122,34 @@ std::optional<ProviderCredential> parse_provider_credential(std::string_view con
   if (!provider) return std::nullopt;
   std::string_view const scope(*provider);
   auto const type = ava::core::json::string_field(scope, "type");
+  if (!type && field_present(scope, "type")) return std::nullopt;
   auto account_id = ava::core::json::string_field(scope, "account_id");
+  if (!account_id && field_present(scope, "account_id")) return std::nullopt;
+  if (!account_id) account_id = ava::core::json::string_field(scope, "accountId");
+  if (!account_id && field_present(scope, "accountId")) return std::nullopt;
+  auto source_metadata = ava::core::json::string_field(scope, "source");
+  if (!source_metadata && field_present(scope, "source")) return std::nullopt;
+
+  if (provider_id == kAnthropicProviderId && type && *type == "oauth") {
+    auto access = oauth_token_from(scope);
+    if (!access || access->empty()) return std::nullopt;
+    auto refresh = ava::core::json::string_field(scope, "refresh_token");
+    if (!refresh && field_present(scope, "refresh_token")) return std::nullopt;
+    if (!refresh) refresh = ava::core::json::string_field(scope, "refresh");
+    if (!refresh && field_present(scope, "refresh")) return std::nullopt;
+    auto expires = ava::core::json::integer_field(scope, "expires_at");
+    if (!expires && field_present(scope, "expires_at")) return std::nullopt;
+    if (!expires) expires = ava::core::json::integer_field(scope, "expires");
+    if (!expires && field_present(scope, "expires")) return std::nullopt;
+    return ProviderCredential{.provider_id = std::string(provider_id),
+                              .access_token = *access,
+                              .credential_type = "oauth",
+                              .account_id = account_id.value_or(""),
+                              .source = source_path.string(),
+                              .refresh_token = refresh.value_or(""),
+                              .expires_at = expires.value_or(0),
+                              .source_metadata = source_metadata.value_or("")};
+  }
 
   if (type && *type != "api" && *type != "api_key") return std::nullopt;
   auto key = generic_api_key_from(scope);
@@ -109,7 +167,12 @@ ava::core::Result<std::optional<ProviderCredential>> load_provider_credential_fr
   auto content = read_text_if_exists(paths.auth_file, true);
   if (!content) return std::unexpected(std::move(content.error()));
   if (!content->content) return std::optional<ProviderCredential>{};
-  return parse_provider_credential(*content->content, provider_id, paths.auth_file);
+  auto credential = parse_provider_credential(*content->content, provider_id, paths.auth_file);
+  if (credential) return credential;
+  if (provider_id == kAnthropicProviderId && field_present(*content->content, provider_id)) {
+    return std::unexpected(malformed_provider_credential_error(provider_id, paths.auth_file));
+  }
+  return std::optional<ProviderCredential>{};
 }
 
 std::optional<OpenAICredential> parse_oauth_credential(std::string_view scope, std::filesystem::path const& source_path)
@@ -157,6 +220,122 @@ bool should_refresh_openai_credential(OpenAICredential const& credential, long l
 {
   return credential.type == OpenAICredentialType::OAuth && credential.expires_at > 0 &&
          credential.expires_at <= now_seconds + kOAuthRefreshSkewSeconds;
+}
+
+bool should_refresh_anthropic_credential(ProviderCredential const& credential, long long now_seconds)
+{
+  return credential.provider_id == kAnthropicProviderId && credential.credential_type == "oauth" &&
+         credential.expires_at > 0 && credential.expires_at <= now_seconds + kOAuthRefreshSkewSeconds;
+}
+
+ava::core::Result<ProviderCredential> parse_anthropic_oauth_refresh_response(
+    std::string_view body, ProviderCredential const& credential, long long now_seconds)
+{
+  if (!ava::core::json::is_valid_object(body)) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::Provider, "Anthropic OAuth refresh response was malformed JSON"));
+  }
+  auto access = ava::core::json::string_field(body, "access_token");
+  if (!access || access->empty()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider,
+                                            "Anthropic OAuth refresh response did not include an access token"));
+  }
+  auto refresh = ava::core::json::string_field(body, "refresh_token");
+  if (!refresh || refresh->empty()) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider,
+                                            "Anthropic OAuth refresh response did not include a refresh token"));
+  }
+  auto expires_in = ava::core::json::integer_field(body, "expires_in");
+  if (!expires_in || *expires_in <= 0 || now_seconds > std::numeric_limits<long long>::max() - *expires_in) {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider,
+                                            "Anthropic OAuth refresh response did not include a valid expires_in"));
+  }
+  auto account_id = ava::core::json::string_field(body, "account_id");
+  if (!account_id || account_id->empty()) account_id = credential.account_id;
+
+  return ProviderCredential{.provider_id = std::string(kAnthropicProviderId),
+                            .access_token = *access,
+                            .credential_type = "oauth",
+                            .account_id = account_id.value_or(""),
+                            .source = credential.source,
+                            .refresh_token = *refresh,
+                            .expires_at = now_seconds + *expires_in,
+                            .source_metadata = credential.source_metadata};
+}
+
+ava::core::Result<ProviderCredential> refresh_anthropic_oauth_credential(ProviderCredential const& credential,
+                                                                         ava::provider::Transport& transport,
+                                                                         long long now_seconds)
+{
+  if (credential.provider_id != kAnthropicProviderId || credential.credential_type != "oauth") {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                            "Anthropic OAuth refresh requires an Anthropic OAuth credential"));
+  }
+  if (credential.refresh_token.empty()) {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "Anthropic OAuth refresh token is missing"));
+  }
+
+  std::string body = "{\"grant_type\":\"refresh_token\",\"client_id\":\"" +
+                     ava::core::json::escape(kAnthropicOAuthClientId) + "\",\"refresh_token\":\"" +
+                     ava::core::json::escape(credential.refresh_token) + "\"}";
+  auto response = transport.send(ava::provider::HttpRequest{.method = "POST",
+                                                            .url = std::string(kAnthropicOAuthTokenUrl),
+                                                            .headers = {{"Content-Type", "application/json"},
+                                                                        {"Accept", "application/json"}},
+                                                            .body = std::move(body),
+                                                            .timeout_ms = 60000,
+                                                            .follow_redirects = false,
+                                                            .include_response_headers = false,
+                                                            .resolve_hosts = {}});
+  if (!response) return std::unexpected(response.error());
+  if (response->status_code < 200 || response->status_code >= 300) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "Anthropic OAuth refresh failed");
+    error.with_context("status", std::to_string(response->status_code));
+    return std::unexpected(std::move(error));
+  }
+  return parse_anthropic_oauth_refresh_response(response->body, credential, now_seconds);
+}
+
+ava::core::Result<ProviderCredential> anthropic_credential_for_request(XdgPaths const& paths,
+                                                                       ProviderCredential const& credential,
+                                                                       ava::provider::Transport& transport,
+                                                                       long long now_seconds)
+{
+  if (credential.credential_type != "oauth") return credential;
+  if (credential.access_token.empty()) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
+                                  "Anthropic OAuth credential access token is missing");
+    if (!credential.source.empty()) error.with_context("source", credential.source);
+    return std::unexpected(std::move(error));
+  }
+  if (!should_refresh_anthropic_credential(credential, now_seconds)) return credential;
+
+  if (credential.refresh_token.empty()) {
+    auto error = ava::core::Error(
+        ava::core::ErrorCategory::PermissionDenied,
+        "Anthropic OAuth credential needs refresh but has no refresh token; update auth.json with a fresh Anthropic "
+        "OAuth credential or remove the stored Anthropic entry to use environment credentials");
+    error.with_context("expires_at", std::to_string(credential.expires_at));
+    if (!credential.source.empty()) error.with_context("source", credential.source);
+    return std::unexpected(std::move(error));
+  }
+
+  auto refreshed = refresh_anthropic_oauth_credential(credential, transport, now_seconds);
+  if (!refreshed) {
+    auto error = ava::core::Error(
+        ava::core::ErrorCategory::PermissionDenied,
+        "failed to refresh Anthropic OAuth credential; update auth.json with a fresh Anthropic OAuth credential or "
+        "remove the stored Anthropic entry to use environment credentials");
+    error.with_context("cause", refreshed.error().format());
+    if (!credential.source.empty()) error.with_context("source", credential.source);
+    return std::unexpected(std::move(error));
+  }
+
+  refreshed->source = paths.auth_file.string();
+  auto stored = store_provider_credential(paths, *refreshed);
+  if (!stored) return std::unexpected(std::move(stored.error()));
+  return refreshed;
 }
 
 }  // namespace
@@ -302,13 +481,19 @@ ava::core::Result<OpenAICredential> openai_credential_for_request(XdgPaths const
 ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(
     XdgPaths const& paths, std::string_view provider_id, ava::provider::Transport& transport)
 {
+  return provider_credential_for_request(paths, provider_id, transport, unix_time_seconds());
+}
+
+ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(
+    XdgPaths const& paths, std::string_view provider_id, ava::provider::Transport& transport, long long now_seconds)
+{
   if (provider_id == "openai") {
     auto stored = load_openai_credential(paths);
     if (!stored) return std::unexpected(std::move(stored.error()));
     if (*stored) {
-      auto credential = openai_credential_for_request(paths, **stored, transport);
+      auto credential = openai_credential_for_request(paths, **stored, transport, now_seconds);
       if (!credential) return std::unexpected(std::move(credential.error()));
-      auto access_token = openai_access_token_for_request(*credential);
+      auto access_token = openai_access_token_for_request(*credential, now_seconds);
       if (!access_token) return std::unexpected(std::move(access_token.error()));
       std::string account_id = credential->account_id;
       if (credential->type == OpenAICredentialType::OAuth && account_id.empty()) {
@@ -324,7 +509,14 @@ ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_req
   } else {
     auto stored = load_provider_credential_from_auth_file(paths, provider_id);
     if (!stored) return std::unexpected(std::move(stored.error()));
-    if (*stored) return *stored;
+    if (*stored) {
+      if (provider_id == kAnthropicProviderId) {
+        auto credential = anthropic_credential_for_request(paths, **stored, transport, now_seconds);
+        if (!credential) return std::unexpected(std::move(credential.error()));
+        return credential;
+      }
+      return *stored;
+    }
   }
 
   if (auto env_credential = provider_credential_from_env(provider_id)) return env_credential;

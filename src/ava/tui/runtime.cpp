@@ -838,6 +838,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   std::size_t selected_slash_command_index = 0;
   bool slash_palette_suppressed = false;
   std::size_t transcript_scroll_offset = 0;
+  std::size_t detached_new_output_count = 0;
   std::optional<SidebarSnapshot> detached_sidebar_snapshot;
   std::size_t draft_scroll_offset = 0;
   bool pending_escape_clear = false;
@@ -884,7 +885,10 @@ int run_interactive_composer(TuiRuntimeOptions options)
       snapshot.input_cursor = draft.cursor;
       snapshot.selected_slash_command_index = selected_slash_command_index;
       snapshot.slash_palette_suppressed = slash_palette_suppressed;
-      if (transcript_scroll_offset == 0) detached_sidebar_snapshot.reset();
+      if (transcript_scroll_offset == 0) {
+        detached_new_output_count = 0;
+        detached_sidebar_snapshot.reset();
+      }
       snapshot.sidebar =
           transcript_scroll_offset > 0 && detached_sidebar_snapshot ? *detached_sidebar_snapshot : sidebar;
       auto const [width, height] = terminal_size();
@@ -895,7 +899,13 @@ int run_interactive_composer(TuiRuntimeOptions options)
       auto const main_width = composer_main_width(snapshot);
       transcript_scroll_offset =
           std::min(transcript_scroll_offset, max_transcript_scroll_offset_for_snapshot(snapshot, main_width, height));
+      if (transcript_scroll_offset == 0) {
+        detached_new_output_count = 0;
+        detached_sidebar_snapshot.reset();
+        snapshot.sidebar = sidebar;
+      }
       snapshot.transcript_scroll_offset = transcript_scroll_offset;
+      snapshot.transcript_new_output_count = transcript_scroll_offset > 0 ? detached_new_output_count : 0;
       wrote = draw_screen(snapshot);
     }
     return wrote && !terminal_signal_received();
@@ -1319,7 +1329,77 @@ int run_interactive_composer(TuiRuntimeOptions options)
     auto const max_scroll = max_transcript_scroll_offset_for_snapshot(snapshot, composer_main_width(snapshot), height);
     auto const clamped_scroll = std::min(transcript_scroll_offset, max_scroll);
     transcript_scroll_offset = amount >= clamped_scroll ? 0 : clamped_scroll - amount;
-    if (transcript_scroll_offset == 0) detached_sidebar_snapshot.reset();
+    if (transcript_scroll_offset == 0) {
+      detached_new_output_count = 0;
+      detached_sidebar_snapshot.reset();
+    }
+  };
+
+  auto jump_to_bottom = [&](std::string status) {
+    pending_escape_clear = false;
+    transcript_scroll_offset = 0;
+    detached_new_output_count = 0;
+    detached_sidebar_snapshot.reset();
+    snapshot.status = std::move(status);
+  };
+
+  auto scroll_to_message_boundary = [&](bool previous) {
+    pending_escape_clear = false;
+    auto const [width, height] = terminal_size();
+    snapshot.width = width;
+    snapshot.height = height;
+    auto const main_width = composer_main_width(snapshot);
+    auto const transcript_height = transcript_height_for_snapshot(snapshot, main_width, height);
+    auto const rendered_transcript = detail::render_transcript_lines(
+        snapshot.transcript, main_width, snapshot.tool_details_visible, snapshot.thinking_visible);
+    if (transcript_height == 0 || rendered_transcript.size() <= transcript_height) {
+      transcript_scroll_offset = 0;
+      detached_new_output_count = 0;
+      detached_sidebar_snapshot.reset();
+      snapshot.status = "transcript fits on screen";
+      return;
+    }
+
+    auto const max_scroll = rendered_transcript.size() - transcript_height;
+    auto const clamped_scroll = std::min(transcript_scroll_offset, max_scroll);
+    auto const current_start = max_scroll - clamped_scroll;
+    auto const starts = detail::transcript_message_start_lines(
+        snapshot.transcript, main_width, snapshot.tool_details_visible, snapshot.thinking_visible);
+    if (starts.empty()) {
+      snapshot.status = "no message boundaries";
+      return;
+    }
+
+    auto target_start = std::optional<std::size_t>{};
+    if (previous) {
+      for (auto const start : starts) {
+        if (start >= current_start) break;
+        target_start = start;
+      }
+      if (!target_start) {
+        snapshot.status = "oldest message visible";
+        return;
+      }
+    } else {
+      for (auto const start : starts) {
+        if (start > current_start) {
+          target_start = start;
+          break;
+        }
+      }
+      if (!target_start || *target_start >= max_scroll) {
+        jump_to_bottom("live tail");
+        return;
+      }
+    }
+
+    transcript_scroll_offset = max_scroll > *target_start ? max_scroll - *target_start : 0;
+    if (transcript_scroll_offset > 0 && !detached_sidebar_snapshot) detached_sidebar_snapshot = sidebar;
+    if (transcript_scroll_offset == 0) {
+      detached_new_output_count = 0;
+      detached_sidebar_snapshot.reset();
+    }
+    snapshot.status = previous ? "previous message" : "next message";
   };
 
   enum class InputLoopAction { None, ContinueLoop, BreakLoop };
@@ -1558,6 +1638,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           apply_event_envelope(event_state, event);
         }
         auto turn_transcript = event_state_transcript_snapshot(event_state);
+        auto detached_indicator_changed = false;
         {
           std::lock_guard<std::recursive_mutex> lock(ui_mutex);
           auto const preserve_viewport = transcript_scroll_offset > 0;
@@ -1596,8 +1677,15 @@ int run_interactive_composer(TuiRuntimeOptions options)
                 detail::render_transcript_lines(snapshot.transcript, composer_main_width(snapshot),
                                                 snapshot.tool_details_visible, snapshot.thinking_visible)
                     .size();
-            if (new_rendered_lines > old_rendered_lines)
+            if (new_rendered_lines > old_rendered_lines) {
+              auto const added_lines = new_rendered_lines - old_rendered_lines;
+              detached_new_output_count += added_lines;
+              detached_indicator_changed = true;
               transcript_scroll_offset += new_rendered_lines - old_rendered_lines;
+            } else {
+              ++detached_new_output_count;
+              detached_indicator_changed = true;
+            }
           } else {
             transcript_scroll_offset = 0;
           }
@@ -1613,7 +1701,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
         if (transcript_scroll_offset > 0 && !snapshot.permission_prompt && !snapshot.question_prompt &&
             !snapshot.select_list) {
-          return RuntimeEventDrainResult::UpdatedNoRender;
+          if (!detached_indicator_changed) return RuntimeEventDrainResult::UpdatedNoRender;
+          return render() ? RuntimeEventDrainResult::Rendered : RuntimeEventDrainResult::RenderFailed;
         }
         return render() ? RuntimeEventDrainResult::Rendered : RuntimeEventDrainResult::RenderFailed;
       };
@@ -1812,6 +1901,18 @@ int run_interactive_composer(TuiRuntimeOptions options)
           if (active_is_action(TuiAction::PageDown)) {
             auto const [_, height] = terminal_size();
             scroll_down(std::max<std::size_t>(1, height / 2));
+            return render();
+          }
+          if (active_is_action(TuiAction::MessagePrev)) {
+            scroll_to_message_boundary(true);
+            return render();
+          }
+          if (active_is_action(TuiAction::MessageNext)) {
+            scroll_to_message_boundary(false);
+            return render();
+          }
+          if (active_is_action(TuiAction::JumpToBottom)) {
+            jump_to_bottom("live tail");
             return render();
           }
           if (active_is_action(TuiAction::HistoryPrev)) {
@@ -2153,6 +2254,12 @@ int run_interactive_composer(TuiRuntimeOptions options)
     } else if (is_action(TuiAction::PageDown)) {
       auto const [_, height] = terminal_size();
       scroll_down(std::max<std::size_t>(1, height / 2));
+    } else if (is_action(TuiAction::MessagePrev)) {
+      scroll_to_message_boundary(true);
+    } else if (is_action(TuiAction::MessageNext)) {
+      scroll_to_message_boundary(false);
+    } else if (is_action(TuiAction::JumpToBottom)) {
+      jump_to_bottom("live tail");
     } else if (event.key == Key::MouseWheelUp) {
       scroll_up(kMouseWheelScrollRows);
     } else if (event.key == Key::MouseWheelDown) {

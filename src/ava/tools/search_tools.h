@@ -17,6 +17,7 @@ struct GlobOptions {
   std::size_t max_visited = 100000;
   std::size_t max_depth = 32;
   bool no_ignore = false;
+  bool skip_symlinks = false;
 };
 
 struct GrepOptions {
@@ -25,6 +26,7 @@ struct GrepOptions {
   bool no_ignore = false;
   bool literal = true;
   bool case_insensitive = false;
+  bool skip_symlinks = false;
 };
 
 struct ListDirectoryOptions {

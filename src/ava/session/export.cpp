@@ -1,5 +1,7 @@
 #include "ava/session/export.h"
 
+#include "ava/session/validation.h"
+
 #include "ava/core/json.h"
 
 #include <algorithm>
@@ -123,11 +125,31 @@ std::string success_text(SessionEntry const& entry)
   return "unknown";
 }
 
+std::string image_attachment_export_text(std::string_view data_json)
+{
+  std::string text;
+  for (auto const& attachment : ava::core::json::objects_in_array_field(data_json, "attachments")) {
+    auto const id = ava::core::json::string_field(attachment, "id").value_or("");
+    auto const mime_type = ava::core::json::string_field(attachment, "mime_type").value_or("");
+    auto const byte_size = ava::core::json::integer_field(attachment, "byte_size").value_or(0);
+    if (id.empty() || mime_type.empty() || byte_size <= 0) continue;
+    if (!text.empty()) text += '\n';
+    text += "[image attachment: id=" + id + " mime=" + mime_type + " bytes=" + std::to_string(byte_size);
+    auto const redacted_start = ava::core::json::field_value_start(attachment, "redacted");
+    if (redacted_start && attachment.substr(*redacted_start, 4) == "true") text += " redacted=true";
+    text += ']';
+  }
+  return text;
+}
+
 void append_user_message(std::string& out, SessionEntry const& entry, ExportOptions const& options)
 {
   append_heading(out, "User");
   append_metadata(out, entry, options);
-  append_fenced_block(out, "Message", string_field(entry, "text").value_or(""));
+  auto const sanitized = sanitized_message_data_json(entry.data_json);
+  append_fenced_block(out, "Message", ava::core::json::string_field(sanitized, "text").value_or(""));
+  auto const attachments = image_attachment_export_text(sanitized);
+  append_optional_fenced_block(out, "Attachments", attachments.empty() ? std::nullopt : std::optional<std::string>(attachments));
 }
 
 void append_assistant_message(std::string& out, SessionEntry const& entry, ExportOptions const& options)
@@ -211,6 +233,17 @@ void append_session_start(std::string& out, SessionEntry const& entry, ExportOpt
   append_optional_fenced_block(out, "Model", string_field(entry, "model"));
 }
 
+void append_session_metadata(std::string& out, SessionEntry const& entry, ExportOptions const& options)
+{
+  append_heading(out, "Session Metadata");
+  append_metadata(out, entry, options);
+  append_optional_fenced_block(out, "Name", string_field(entry, "name"));
+  append_optional_fenced_block(out, "Parent session", string_field(entry, "parent_session_id"));
+  append_optional_fenced_block(out, "Source session", string_field(entry, "source_session_id"));
+  append_optional_fenced_block(out, "Branch origin", string_field(entry, "branch_origin"));
+  append_fenced_block(out, "Data", entry.data_json, "json");
+}
+
 void append_compaction_number(std::string& out, SessionEntry const& entry, std::string_view label, std::string_view key)
 {
   if (auto const value = integer_field(entry, key)) append_fenced_block(out, label, std::to_string(*value));
@@ -235,6 +268,14 @@ void append_compaction(std::string& out, SessionEntry const& entry, ExportOption
     append_compaction_number(out, entry, "Keep recent tokens", "keep_recent_tokens");
     append_compaction_number(out, entry, "Keep recent messages", "keep_recent_messages");
   }
+}
+
+void append_branch_summary(std::string& out, SessionEntry const& entry, ExportOptions const& options)
+{
+  append_heading(out, "Branch Summary");
+  append_metadata(out, entry, options);
+  append_fenced_block(out, "Summary", string_field(entry, "summary").value_or(""));
+  if (options.include_metadata) append_fenced_block(out, "Data", entry.data_json, "json");
 }
 
 void append_error(std::string& out, SessionEntry const& entry, ExportOptions const& options)
@@ -272,6 +313,9 @@ std::string format_session_markdown(std::vector<SessionEntry> const& entries, Ex
       case EntryType::SessionStart:
         append_session_start(out, entry, options);
         break;
+      case EntryType::SessionMetadata:
+        append_session_metadata(out, entry, options);
+        break;
       case EntryType::UserMessage:
         append_user_message(out, entry, options);
         break;
@@ -301,6 +345,9 @@ std::string format_session_markdown(std::vector<SessionEntry> const& entries, Ex
         break;
       case EntryType::Compaction:
         if (options.include_compactions) append_compaction(out, entry, options);
+        break;
+      case EntryType::BranchSummary:
+        append_branch_summary(out, entry, options);
         break;
       case EntryType::Error:
         append_error(out, entry, options);

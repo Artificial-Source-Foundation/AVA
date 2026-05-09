@@ -2,6 +2,11 @@
 
 AVA is a native C++23 terminal coding agent. Treat the codebase as a small systems program: keep interfaces narrow, preserve backend safety boundaries, and make local behavior easy to verify with CMake tests.
 
+## Current Scope
+
+- AVA agent work in this repo is backend-only unless the user explicitly says otherwise.
+- Carlo owns frontend/TUI planning and implementation. Do not create or follow frontend/TUI plans; backend work may expose semantic events, RPC, session, provider, and tool contracts that Carlo's frontend can consume.
+
 ## Source Map
 
 - `src/main.cpp`: application entry point, CLI argument handling, OpenAI connect flow, TUI startup, and non-TTY line shell wiring.
@@ -70,6 +75,7 @@ git --no-pager diff --check
 
 ## Reference Code
 
-- Reference repositories may live under `docs/reference-code/` and can contain their own `.git` directories.
+- Reference repositories are expected under `docs/reference-code/` and can contain their own `.git` directories.
+- For Pi parity or comparison work, check `docs/reference-code/` first for the Pi reference repository; do not assume Pi is the only reference repo there.
 - Use reference code only for product and behavior comparison. Do not copy architecture or source code into AVA.
 - Do not include reference repositories in builds, tests, formatting, or source searches unless the task explicitly asks for reference analysis.

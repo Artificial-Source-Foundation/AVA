@@ -1115,6 +1115,16 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
         "supports_streaming":true,
         "input_modalities":["text"],
         "output_modalities":["text"]
+      },{
+        "provider":"anthropic",
+        "id":"claude-image",
+        "name":"Claude Image",
+        "family":"claude-test",
+        "api_family":"anthropic_messages",
+        "supports_tools":true,
+        "supports_streaming":true,
+        "input_modalities":["text","image"],
+        "output_modalities":["text"]
       }]
     })JSON";
   }
@@ -1195,7 +1205,30 @@ void test_app_runtime_model_switch_rejects_incompatible_history()
   expect(switched_no_tools_after_compaction.has_value() && *switched_no_tools_after_compaction,
          "runtime ignores pre-compaction native history for switch compatibility");
   expect(session->model.provider_id == "openai" && session->model.model_id == "no-tools",
-         "post-compaction switch updates active model");
+          "post-compaction switch updates active model");
+
+  auto appended_large_image = session->store.append(ava::session::SessionEntry{
+      .id = ava::core::make_id("entry"),
+      .parent_id = "",
+      .type = ava::session::EntryType::UserMessage,
+      .timestamp = ava::session::now_timestamp(),
+      .data_json = R"({"text":"large image","attachments":[{"id":"img_big","type":"image","mime_type":"image/png","byte_size":6291456,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","storage_path":"attachments/img_big.png"}]})"});
+  expect(appended_large_image.has_value(), "model switch compatibility test seeds large image history");
+  auto anthropic_image = ava::app::resolve_runtime_model(paths, "anthropic", "claude-image");
+  expect(anthropic_image.has_value(), "runtime resolves Anthropic image model");
+  if (!anthropic_image) return;
+  auto rejected_large_image = ava::app::switch_runtime_model(*session, *anthropic_image);
+  expect(!rejected_large_image.has_value() && rejected_large_image.error().format().find("byte-size") != std::string::npos,
+         "runtime rejects model switches that exceed provider-specific image limits");
+  expect(session->model.provider_id == "openai" && session->model.model_id == "no-tools",
+         "rejected image-limit switch leaves active model unchanged");
+  auto appended_post_image_compaction =
+      session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::Compaction,
+                                                       .timestamp = ava::session::now_timestamp(),
+                                                       .data_json = "{\"summary\":\"image history compacted\"}"});
+  expect(appended_post_image_compaction.has_value(), "model switch compatibility test clears image history with compaction");
 
   auto appended_kimi_reasoning =
       session->store.append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),

@@ -33,6 +33,7 @@
 #include "ava/permissions/permission.h"
 
 #include "ava/provider/openai_provider.h"
+#include "ava/provider/registry.h"
 
 #include "ava/context/context_loader.h"
 #include "ava/context/skill_loader.h"
@@ -52,9 +53,12 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -62,6 +66,11 @@
 #include <unistd.h>
 
 namespace {
+
+bool contains_string(std::vector<std::string> const& values, std::string_view value)
+{
+  return std::ranges::find(values, value) != values.end();
+}
 
 void test_xdg_paths()
 {
@@ -343,7 +352,24 @@ void test_auth_record_helpers()
                                                                                    .source = "test"});
   expect(api_object && api_object->find("\"type\": \"api_key\"") != std::string::npos &&
              api_object->find("token\\\"with-quote") != std::string::npos,
-         "auth record serializes provider API key credential object with JSON escaping");
+          "auth record serializes provider API key credential object with JSON escaping");
+
+  auto const anthropic_oauth_object = ava::config::provider_credential_object_json(
+      ava::config::ProviderCredential{.provider_id = "anthropic",
+                                      .access_token = "oauth-token",
+                                      .credential_type = "oauth",
+                                      .account_id = "acct_anthropic",
+                                      .source = "test",
+                                      .refresh_token = "refresh-token",
+                                      .expires_at = 1234,
+                                      .source_metadata = "claude"});
+  expect(anthropic_oauth_object && anthropic_oauth_object->find("\"type\": \"oauth\"") != std::string::npos &&
+             anthropic_oauth_object->find("\"access_token\": \"oauth-token\"") != std::string::npos &&
+             anthropic_oauth_object->find("\"refresh_token\": \"refresh-token\"") != std::string::npos &&
+             anthropic_oauth_object->find("\"expires_at\": 1234") != std::string::npos &&
+             anthropic_oauth_object->find("\"account_id\": \"acct_anthropic\"") != std::string::npos &&
+             anthropic_oauth_object->find("\"source\": \"claude\"") != std::string::npos,
+         "auth record serializes Anthropic OAuth provider credentials");
 
   auto const unsupported_provider_credential =
       ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "custom",
@@ -353,7 +379,7 @@ void test_auth_record_helpers()
                                                                                    .source = "test"});
   expect(!unsupported_provider_credential &&
              unsupported_provider_credential.error().category() == ava::core::ErrorCategory::InvalidArgument,
-         "auth record rejects non-OpenAI provider credential types other than API key");
+          "auth record rejects generic provider credential types other than API key");
 
   auto const bad_provider =
       ava::config::provider_credential_object_json(ava::config::ProviderCredential{.provider_id = "bad provider",
@@ -673,6 +699,7 @@ void test_auth_load_and_store()
              (*stored_anthropic_credential)->source == paths.auth_file.string(),
          "provider credential discovery loads non-OpenAI API keys from auth file");
   std::filesystem::remove(paths.auth_file, remove_error);
+  unsetenv("ANTHROPIC_OAUTH_TOKEN");
   setenv("ANTHROPIC_API_KEY", "env-anthropic-key", 1);
   auto anthropic_credential = ava::config::provider_credential_for_request(paths, "anthropic", env_transport);
   expect(anthropic_credential && anthropic_credential->has_value() &&
@@ -983,6 +1010,359 @@ void test_openai_oauth_refresh()
   }
 }
 
+void test_anthropic_oauth_request_resolution()
+{
+  auto const root = temp_root() / "anthropic-oauth-resolution";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  setenv("HOME", (root / "home").c_str(), 1);
+  setenv("XDG_CONFIG_HOME", (root / "config").c_str(), 1);
+  setenv("XDG_STATE_HOME", (root / "state").c_str(), 1);
+  setenv("XDG_DATA_HOME", (root / "data").c_str(), 1);
+  auto const paths = ava::config::xdg_paths();
+  std::filesystem::create_directories(paths.auth_file.parent_path());
+
+  {
+    ScopedEnvVar const api_key("ANTHROPIC_API_KEY", "env-api-key");
+    ScopedEnvVar const auth_token("ANTHROPIC_AUTH_TOKEN", "env-auth-token");
+    ScopedEnvVar const oauth_token("ANTHROPIC_OAUTH_TOKEN", "env-oauth-token");
+    ava::tests::FakeTransport env_transport({});
+    auto credential = ava::config::provider_credential_for_request(paths, "anthropic", env_transport, 1000);
+    expect(credential && credential->has_value() && (*credential)->provider_id == "anthropic" &&
+               (*credential)->access_token == "env-oauth-token" && (*credential)->credential_type == "oauth" &&
+               (*credential)->source == "env:ANTHROPIC_OAUTH_TOKEN" && env_transport.requests().empty(),
+           "Anthropic OAuth environment token takes precedence over API-key environment fallback");
+  }
+
+  {
+    ScopedEnvVar const api_key("ANTHROPIC_API_KEY", "env-api-key");
+    ScopedEnvVar const oauth_token("ANTHROPIC_OAUTH_TOKEN", "");
+    ScopedEnvVar const auth_token("ANTHROPIC_AUTH_TOKEN", "env-auth-token");
+    ava::tests::FakeTransport env_transport({});
+    auto credential = ava::config::provider_credential_for_request(paths, "anthropic", env_transport, 1000);
+    expect(credential && credential->has_value() && (*credential)->access_token == "env-auth-token" &&
+               (*credential)->credential_type == "oauth" && (*credential)->source == "env:ANTHROPIC_AUTH_TOKEN" &&
+               env_transport.requests().empty(),
+           "Anthropic AUTH token environment alias is used before API-key fallback when OAuth token env is absent");
+  }
+
+  {
+    std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
+    file << "{\"anthropic\":{\"type\":\"oauth\",\"access_token\":\"stored-oauth\",";
+    file << "\"refresh_token\":\"stored-refresh\",\"expires_at\":2000,";
+    file << "\"account_id\":\"acct_anthropic\",\"source\":\"claude\"}}";
+  }
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
+  ava::tests::FakeTransport stored_transport({});
+  auto stored = ava::config::provider_credential_for_request(paths, "anthropic", stored_transport, 1000);
+  expect(stored && stored->has_value() && (*stored)->access_token == "stored-oauth" &&
+             (*stored)->credential_type == "oauth" && (*stored)->refresh_token == "stored-refresh" &&
+             (*stored)->expires_at == 2000 && (*stored)->account_id == "acct_anthropic" &&
+             (*stored)->source == paths.auth_file.string() && (*stored)->source_metadata == "claude" &&
+             stored_transport.requests().empty(),
+         "stored Anthropic OAuth auth.json credentials parse token, refresh, expiry, account, and source metadata");
+
+  {
+    std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
+    file << "{\"anthropic\":{\"type\":\"oauth\",\"access_token\":\"old-oauth\",";
+    file << "\"refresh_token\":\"refresh value\",\"expires_at\":1200,";
+    file << "\"account_id\":\"acct_old\",\"source\":\"claude\"}}";
+  }
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
+  ava::tests::FakeTransport refresh_transport({ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = "{\"access_token\":\"refreshed-oauth\",\"refresh_token\":\"rotated-refresh\","
+              "\"expires_in\":600,\"account_id\":\"acct_refreshed\"}",
+  }});
+  auto refreshed = ava::config::provider_credential_for_request(paths, "anthropic", refresh_transport, 1000);
+  expect(refreshed && refreshed->has_value() && (*refreshed)->access_token == "refreshed-oauth" &&
+             (*refreshed)->refresh_token == "rotated-refresh" && (*refreshed)->expires_at == 1600 &&
+             (*refreshed)->account_id == "acct_refreshed" && (*refreshed)->credential_type == "oauth" &&
+             (*refreshed)->source_metadata == "claude",
+         "near-expiry Anthropic OAuth credential refreshes before request use");
+  auto const& refresh_requests = refresh_transport.requests();
+  expect(refresh_requests.size() == 1 &&
+             refresh_requests.front().url == "https://platform.claude.com/v1/oauth/token" &&
+             refresh_requests.front().method == "POST",
+         "Anthropic OAuth refresh posts to the Claude token endpoint");
+  if (!refresh_requests.empty()) {
+    expect(refresh_requests.front().headers.at("Content-Type") == "application/json" &&
+               !refresh_requests.front().follow_redirects &&
+               refresh_requests.front().body.find("\"grant_type\":\"refresh_token\"") != std::string::npos &&
+               refresh_requests.front().body.find("\"client_id\":\"9d1c250a-e61b-44d9-88ed-5944d1962f5e\"") !=
+                   std::string::npos &&
+               refresh_requests.front().body.find("\"refresh_token\":\"refresh value\"") != std::string::npos,
+           "Anthropic OAuth refresh sends non-redirecting JSON refresh-token body with compatibility client id");
+  }
+  struct stat refreshed_auth_stat {};
+  expect(::stat(paths.auth_file.c_str(), &refreshed_auth_stat) == 0 &&
+             (refreshed_auth_stat.st_mode & (S_IRWXG | S_IRWXO)) == 0,
+         "Anthropic OAuth refresh persists auth file with owner-only permissions");
+  ava::tests::FakeTransport persisted_transport({});
+  auto persisted = ava::config::provider_credential_for_request(paths, "anthropic", persisted_transport, 1000);
+  expect(persisted && persisted->has_value() && (*persisted)->access_token == "refreshed-oauth" &&
+             (*persisted)->refresh_token == "rotated-refresh" && (*persisted)->expires_at == 1600,
+         "Anthropic OAuth refresh persists rotated credentials for later requests");
+
+  {
+    std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
+    file << "{\"anthropic\":{\"type\":\"oauth\",\"access_token\":\"expired-oauth\",\"expires_at\":900}}";
+  }
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
+  ava::tests::FakeTransport expired_transport({});
+  auto expired = ava::config::provider_credential_for_request(paths, "anthropic", expired_transport, 1000);
+  expect(!expired && expired.error().category() == ava::core::ErrorCategory::PermissionDenied &&
+             expired.error().format().find("remove the stored Anthropic entry") != std::string::npos &&
+             expired_transport.requests().empty(),
+         "expired Anthropic OAuth credential without refresh token fails closed before provider use");
+
+  {
+    ScopedEnvVar const oauth_token("ANTHROPIC_OAUTH_TOKEN", "fresh-env-oauth");
+    ava::tests::FakeTransport blocked_transport({});
+    auto blocked = ava::config::provider_credential_for_request(paths, "anthropic", blocked_transport, 1000);
+    expect(!blocked && blocked.error().category() == ava::core::ErrorCategory::PermissionDenied &&
+               blocked.error().format().find("remove the stored Anthropic entry") != std::string::npos &&
+               blocked_transport.requests().empty(),
+           "stored expired Anthropic OAuth credential fails closed instead of falling through to env OAuth token");
+  }
+
+  {
+    std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
+    file << "{\"anthropic\":{\"type\":\"oauth\",\"refresh_token\":\"missing-access\"}}";
+  }
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
+  {
+    ScopedEnvVar const oauth_token("ANTHROPIC_OAUTH_TOKEN", "fresh-env-oauth");
+    ava::tests::FakeTransport malformed_transport({});
+    auto malformed = ava::config::provider_credential_for_request(paths, "anthropic", malformed_transport, 1000);
+    expect(!malformed && malformed.error().category() == ava::core::ErrorCategory::InvalidArgument &&
+               malformed.error().format().find("stored provider credential is malformed") != std::string::npos &&
+               malformed_transport.requests().empty(),
+           "malformed stored Anthropic credential fails closed instead of falling through to env credentials");
+  }
+
+  {
+    std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
+    file << "{\"anthropic\":\"not-an-object\"}";
+  }
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
+  {
+    ScopedEnvVar const oauth_token("ANTHROPIC_OAUTH_TOKEN", "fresh-env-oauth");
+    ava::tests::FakeTransport non_object_transport({});
+    auto non_object = ava::config::provider_credential_for_request(paths, "anthropic", non_object_transport, 1000);
+    expect(!non_object && non_object.error().category() == ava::core::ErrorCategory::InvalidArgument &&
+               non_object.error().format().find("stored provider credential is malformed") != std::string::npos &&
+               non_object_transport.requests().empty(),
+           "non-object stored Anthropic credential fails closed instead of falling through to env credentials");
+  }
+
+  {
+    std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
+    file << "{\"anthropic\":{\"type\":\"oauth\",\"access_token\":\"stored\",\"expires_at\":\"soon\"}}";
+  }
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
+  {
+    ScopedEnvVar const oauth_token("ANTHROPIC_OAUTH_TOKEN", "fresh-env-oauth");
+    ava::tests::FakeTransport bad_expiry_transport({});
+    auto bad_expiry = ava::config::provider_credential_for_request(paths, "anthropic", bad_expiry_transport, 1000);
+    expect(!bad_expiry && bad_expiry.error().category() == ava::core::ErrorCategory::InvalidArgument &&
+               bad_expiry.error().format().find("stored provider credential is malformed") != std::string::npos &&
+               bad_expiry_transport.requests().empty(),
+            "wrong-type Anthropic OAuth expiry fails closed instead of disabling refresh or falling through to env");
+  }
+
+  {
+    std::ofstream file(paths.auth_file, std::ios::binary | std::ios::trunc);
+    file << "{\"kimi\":\"not-an-object\"}";
+  }
+  ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
+  {
+    ScopedEnvVar const kimi_key("KIMI_API_KEY", "env-kimi-key");
+    ava::tests::FakeTransport kimi_transport({});
+    auto kimi = ava::config::provider_credential_for_request(paths, "kimi", kimi_transport, 1000);
+    expect(kimi && kimi->has_value() && (*kimi)->access_token == "env-kimi-key" &&
+               (*kimi)->credential_type == "api_key" && (*kimi)->source == "env:KIMI_API_KEY" &&
+               kimi_transport.requests().empty(),
+           "malformed stored non-Anthropic provider entries preserve legacy environment fallback behavior");
+  }
+}
+
+void test_builtin_provider_model_metadata_contracts()
+{
+  auto const builtin = ava::config::builtin_model_registry();
+  auto provider_registry = ava::provider::builtin_provider_registry();
+
+  std::map<std::string, ava::config::ProviderProfile> profiles;
+  for (auto const& profile : ava::config::builtin_provider_profiles()) {
+    expect(!profile.provider_id.empty(), "builtin provider profiles have ids");
+    auto const inserted = profiles.emplace(profile.provider_id, profile).second;
+    expect(inserted, "builtin provider profile ids are unique");
+    if (profile.runtime_selectable) {
+      expect(provider_registry.contains(profile.provider_id),
+             "runtime-selectable provider profile has a registered factory: " + profile.provider_id);
+      auto provider = provider_registry.create(profile.provider_id);
+      expect(provider && *provider, "runtime-selectable provider factory creates a provider: " + profile.provider_id);
+    } else {
+      expect(!provider_registry.contains(profile.provider_id),
+             "connect-only provider profile is not registered as a runtime provider: " + profile.provider_id);
+      expect(!profile.connect_detail.empty(),
+             "connect-only provider profile keeps explicit credential guidance: " + profile.provider_id);
+    }
+  }
+
+  std::map<std::string, std::set<std::string>> model_ids_by_provider;
+  std::set<std::string> selectable_provider_ids;
+  for (auto const& model : builtin.models) {
+    expect(!model.provider_id.empty() && !model.model_id.empty(), "builtin models have provider and model ids");
+    auto const profile = profiles.find(model.provider_id);
+    expect(profile != profiles.end(), "builtin model provider has a provider profile: " + model.provider_id);
+    expect(provider_registry.contains(model.provider_id),
+           "builtin selectable model provider has a registered factory: " + model.provider_id);
+    if (profile != profiles.end()) {
+      expect(profile->second.runtime_selectable,
+             "builtin selectable model provider is marked runtime-selectable: " + model.provider_id);
+      for (auto const& quirk : profile->second.default_compatibility_quirks) {
+        expect(contains_string(model.compatibility_quirks, quirk),
+               "builtin model inherits provider compatibility quirk " + quirk + ": " + model.provider_id + "/" +
+                   model.model_id);
+      }
+    }
+
+    selectable_provider_ids.insert(model.provider_id);
+    expect(model_ids_by_provider[model.provider_id].insert(model.model_id).second,
+           "builtin model ids are unique per provider: " + model.provider_id + "/" + model.model_id);
+    expect(!model.display_name.empty() && !model.family.empty(),
+           "builtin model display and family metadata is populated: " + model.provider_id + "/" + model.model_id);
+    expect(model.context_window_tokens && *model.context_window_tokens > 0,
+           "builtin model context window metadata is populated: " + model.provider_id + "/" + model.model_id);
+    expect(contains_string(model.input_modalities, "text") && contains_string(model.output_modalities, "text"),
+           "builtin model modality metadata declares text input and output: " + model.provider_id + "/" +
+               model.model_id);
+    expect(model.supports_tools.has_value() && model.supports_streaming.has_value() &&
+               model.supports_reasoning.has_value() && model.reports_usage.has_value(),
+           "builtin model capability booleans are explicitly populated: " + model.provider_id + "/" +
+               model.model_id);
+    if (model.supports_reasoning.value_or(false)) {
+      expect(!model.reasoning_levels.empty() && !model.reasoning_format.empty() &&
+                 !ava::config::reasoning_parameter_text(model).empty(),
+             "reasoning-capable builtin model declares levels, format, and request parameters: " +
+                 model.provider_id + "/" + model.model_id);
+    } else {
+      expect(model.reasoning_levels.empty() && model.reasoning_format.empty(),
+             "non-reasoning builtin model does not advertise reasoning levels or format: " + model.provider_id +
+                 "/" + model.model_id);
+    }
+    if (model.pricing) {
+      expect(model.pricing->input_per_million || model.pricing->output_per_million ||
+                 model.pricing->cache_read_per_million || model.pricing->cache_write_per_million ||
+                 model.pricing->reasoning_per_million,
+             "builtin pricing metadata has at least one populated rate: " + model.provider_id + "/" +
+                 model.model_id);
+    }
+  }
+
+  for (auto const& [provider_id, profile] : profiles) {
+    bool const has_builtin_model = selectable_provider_ids.contains(provider_id);
+    if (profile.runtime_selectable) {
+      expect(has_builtin_model, "runtime-selectable provider has at least one builtin selectable model: " + provider_id);
+    } else {
+      expect(!has_builtin_model, "connect-only provider has no builtin selectable models: " + provider_id);
+    }
+  }
+
+  auto const openai = ava::config::find_model(builtin, "openai", "gpt-5.5");
+  expect(openai.has_value(), "OpenAI reasoning metadata fixture exists");
+  if (openai) {
+    expect(contains_string(openai->input_modalities, "image"),
+           "OpenAI builtin model metadata declares image input for storage-backed serialization");
+    expect(!ava::config::provider_accepts_reasoning_format(*openai, "openai_responses"),
+           "OpenAI metadata does not claim native reasoning replay until the request builder supports it");
+    expect(ava::config::validate_reasoning_request(*openai, "high", std::nullopt, "").has_value(),
+           "OpenAI reasoning accepts effort-only requests");
+    expect(!ava::config::validate_reasoning_request(*openai, "high", std::optional<long long>(1024), ""),
+           "OpenAI reasoning rejects budget tokens");
+    expect(!ava::config::validate_reasoning_request(*openai, "high", std::nullopt, "summarized"),
+           "OpenAI reasoning rejects display options");
+  }
+
+  auto const anthropic = ava::config::find_model(builtin, "anthropic", "claude-sonnet-4-5");
+  expect(anthropic.has_value(), "Anthropic reasoning metadata fixture exists");
+  auto const anthropic_profile = profiles.find("anthropic");
+  expect(anthropic_profile != profiles.end() && anthropic_profile->second.supports_oauth,
+         "Anthropic provider profile advertises OAuth bearer credential support");
+  if (anthropic) {
+    expect(contains_string(anthropic->input_modalities, "image"),
+           "Anthropic builtin model metadata declares image input for storage-backed serialization");
+    expect(contains_string(anthropic->reasoning_levels, "enabled") &&
+               !contains_string(anthropic->reasoning_levels, "adaptive"),
+           "Claude Sonnet 4.5 metadata narrows Anthropic thinking to enabled-only reasoning");
+    expect(ava::config::provider_accepts_reasoning_format(*anthropic, "anthropic_thinking"),
+           "Anthropic provider accepts replay of native thinking blocks");
+    expect(ava::config::validate_reasoning_request(*anthropic, "enabled", std::optional<long long>(2048),
+                                                   "summarized")
+               .has_value(),
+           "Anthropic enabled reasoning accepts a valid budget and display");
+    expect(!ava::config::validate_reasoning_request(*anthropic, "enabled", std::nullopt, ""),
+           "Anthropic enabled reasoning requires a budget");
+    expect(!ava::config::validate_reasoning_request(*anthropic, "enabled", std::optional<long long>(512), ""),
+           "Anthropic enabled reasoning rejects budgets below the provider minimum");
+    expect(!ava::config::validate_reasoning_request(*anthropic, "enabled", std::optional<long long>(64'000), ""),
+           "Anthropic reasoning budget must stay below max output tokens");
+    expect(!ava::config::validate_reasoning_request(*anthropic, "adaptive", std::optional<long long>(2048), ""),
+           "Anthropic adaptive reasoning rejects fixed budgets");
+    expect(!ava::config::validate_reasoning_request(*anthropic, "enabled", std::optional<long long>(2048), "full"),
+           "Anthropic reasoning rejects unsupported display values");
+  }
+
+  auto const kimi = ava::config::find_model(builtin, "kimi", "kimi-k2-thinking");
+  expect(kimi.has_value(), "Kimi reasoning metadata fixture exists");
+  if (kimi) {
+    expect(ava::config::provider_accepts_reasoning_format(*kimi, "reasoning_content"),
+           "Kimi provider accepts replay of preserved reasoning_content blocks");
+    expect(ava::config::validate_reasoning_request(*kimi, "enabled", std::nullopt, "").has_value(),
+           "OpenAI-compatible reasoning accepts enabled level-only requests");
+    expect(!ava::config::validate_reasoning_request(*kimi, "disabled", std::nullopt, ""),
+           "OpenAI-compatible reasoning rejects disabled requests in favor of clear_reasoning");
+    expect(!ava::config::validate_reasoning_request(*kimi, "enabled", std::optional<long long>(1024), ""),
+           "OpenAI-compatible reasoning rejects budget tokens");
+    expect(!ava::config::validate_reasoning_request(*kimi, "enabled", std::nullopt, "summarized"),
+           "OpenAI-compatible reasoning rejects display values");
+  }
+
+  auto const moonshot = ava::config::find_model(builtin, "moonshot", "kimi-k2.6");
+  expect(moonshot.has_value(), "Moonshot reasoning metadata fixture exists");
+  if (moonshot) {
+    expect(!ava::config::provider_accepts_reasoning_format(*moonshot, "reasoning_content"),
+           "Moonshot metadata does not claim replay of reasoning_content without preserve_reasoning_content support");
+  }
+
+  auto const openrouter = ava::config::find_model(builtin, "openrouter", "moonshotai/kimi-k2.6");
+  expect(openrouter.has_value(), "OpenRouter metadata fixture exists");
+  if (openrouter) {
+    expect(!openrouter->supports_reasoning.value_or(false) &&
+               !ava::config::provider_accepts_reasoning_format(*openrouter, "reasoning_content"),
+           "OpenRouter Kimi metadata stays non-reasoning until OpenRouter-native reasoning is implemented");
+  }
+
+  auto const kimi_profile = ava::config::find_provider_profile("kimi");
+  auto const moonshot_profile = ava::config::find_provider_profile("moonshot");
+  auto const openrouter_profile = ava::config::find_provider_profile("openrouter");
+  expect(kimi_profile && kimi_profile->include_stream_usage && kimi_profile->preserve_reasoning_content &&
+             kimi_profile->default_temperature == 1.0 &&
+             contains_string(kimi_profile->default_compatibility_quirks, "temperature_1") &&
+             contains_string(kimi_profile->default_compatibility_quirks, "preserve_reasoning_content"),
+         "Kimi profile records request-builder quirks for stream usage, preserved reasoning, and temperature=1");
+  expect(moonshot_profile && moonshot_profile->include_stream_usage &&
+             contains_string(moonshot_profile->default_compatibility_quirks, "moonshot") &&
+             contains_string(moonshot_profile->default_compatibility_quirks, "reasoning_content"),
+         "Moonshot profile records OpenAI-compatible stream-usage and reasoning-content quirks");
+  expect(openrouter_profile && openrouter_profile->include_stream_usage &&
+             contains_string(openrouter_profile->default_compatibility_quirks, "openai_compatible") &&
+             contains_string(openrouter_profile->default_compatibility_quirks, "reasoning_content"),
+         "OpenRouter profile records OpenAI-compatible stream-usage and reasoning-content quirks");
+}
+
 void test_model_and_prompt_config()
 {
   auto const root = temp_root() / "model";
@@ -998,13 +1378,14 @@ void test_model_and_prompt_config()
   auto selected = ava::config::select_default_model(builtin);
   auto const openai_profile = ava::config::find_provider_profile("openai");
   expect(openai_profile && openai_profile->display_name == "OpenAI" &&
-             openai_profile->api_family == selected.api_family && openai_profile->supports_oauth,
-         "provider profile centralizes OpenAI display, API family, and OAuth capability");
+             openai_profile->api_family == selected.api_family && openai_profile->supports_oauth &&
+             openai_profile->runtime_selectable,
+          "provider profile centralizes OpenAI display, API family, and OAuth capability");
   expect(ava::config::model_display_label("gpt-5.5") == "GPT-5.5", "model profile centralizes GPT display labels");
   auto const vercel_profile = ava::config::find_provider_profile("vercel");
   expect(vercel_profile && vercel_profile->display_name == "Vercel AI Gateway" &&
-             vercel_profile->connect_detail == "API key",
-         "provider profile centralizes non-runtime gateway connect metadata");
+             vercel_profile->connect_detail == "API key" && !vercel_profile->runtime_selectable,
+          "provider profile centralizes explicit connect-only gateway metadata");
   expect(selected.provider_id == "openai" && selected.model_id == "gpt-5.5", "default model is OpenAI GPT-5.5");
   expect(selected.context_window_tokens && *selected.context_window_tokens == 200'000,
          "default model carries context window metadata");
@@ -1183,5 +1564,7 @@ void run_config_context_auth_oauth_tests()
   test_auth_load_and_store();
   test_openai_oauth_helpers();
   test_openai_oauth_refresh();
+  test_anthropic_oauth_request_resolution();
+  test_builtin_provider_model_metadata_contracts();
   test_model_and_prompt_config();
 }

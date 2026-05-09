@@ -30,6 +30,9 @@ enum class SessionReplayIssueKind {
   PermissionResolutionWithoutAsk,
   UnresolvedPermissionPrompt,
   InvalidCompactionEntry,
+  InvalidSessionMetadataEntry,
+  InvalidBranchSummaryEntry,
+  InvalidMessageEntry,
   CompactionWithUnresolvedToolCall,
   CompactionWithUnresolvedPermissionPrompt,
   InvalidModelEntry,
@@ -65,6 +68,7 @@ struct SessionReplayValidation {
 
 [[nodiscard]] std::string_view to_string(SessionReplayIssueSeverity severity) noexcept;
 [[nodiscard]] std::string_view to_string(SessionReplayIssueKind kind) noexcept;
+[[nodiscard]] std::string sanitized_message_data_json(std::string_view data_json, bool allow_attachments = true);
 [[nodiscard]] SessionReplayValidation validate_session_replay(std::vector<SessionEntry> const& entries,
                                                               SessionReplayValidationOptions options = {});
 

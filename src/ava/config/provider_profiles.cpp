@@ -29,7 +29,8 @@ std::optional<ProviderProfile> fallback_profile_for_api_family(std::string_view 
         .api_family = openai_compatible_reasoning_content_profile().api_family,
         .default_reasoning_levels = openai_compatible_reasoning_content_profile().levels,
         .default_reasoning_format = openai_compatible_reasoning_content_profile().format,
-        .reasoning_request_parameters = openai_compatible_reasoning_content_profile().request_parameters};
+        .reasoning_request_parameters = openai_compatible_reasoning_content_profile().request_parameters,
+        .runtime_selectable = false};
   }
   if (api_family == anthropic_thinking_reasoning_profile().api_family) {
     return anthropic_provider_profile();
@@ -55,7 +56,7 @@ ProviderProfile const& anthropic_provider_profile()
   static ProviderProfile const profile{
       .provider_id = "anthropic",
       .display_name = "Anthropic",
-      .connect_detail = "Claude API key",
+      .connect_detail = "Claude API key; OAuth bearer via env or auth.json",
       .api_family = anthropic_thinking_reasoning_profile().api_family,
       .default_compatibility_quirks = {"anthropic_messages"},
       .default_reasoning_levels = anthropic_thinking_reasoning_profile().levels,
@@ -66,7 +67,8 @@ ProviderProfile const& anthropic_provider_profile()
       .adaptive_reasoning_rejects_budget_tokens = true,
       .default_reasoning_budget_tokens = kDefaultAnthropicThinkingBudgetTokens,
       .minimum_reasoning_budget_tokens = kMinimumAnthropicThinkingBudgetTokens,
-      .reasoning_display_values = {"summarized", "omitted"}};
+      .reasoning_display_values = {"summarized", "omitted"},
+      .supports_oauth = true};
   return profile;
 }
 
@@ -144,7 +146,10 @@ ProviderProfile const& openrouter_provider_profile()
 ProviderProfile const& vercel_provider_profile()
 {
   static ProviderProfile const profile{
-      .provider_id = "vercel", .display_name = "Vercel AI Gateway", .connect_detail = "API key"};
+      .provider_id = "vercel",
+      .display_name = "Vercel AI Gateway",
+      .connect_detail = "API key",
+      .runtime_selectable = false};
   return profile;
 }
 

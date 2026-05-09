@@ -4,6 +4,8 @@
 
 #include "ava/agent/tool_result.h"
 
+#include "ava/lsp/configured_provider.h"
+
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/search_tools.h"
 
@@ -103,7 +105,11 @@ ava::agent::ToolTimelineEntry command_result_entry(std::string const& call_id, s
       .result_text = result_content,
   });
   dispatch_result.payload.summary = result_summary;
-  if (status == ava::agent::ToolTimelineStatus::Error && !ava::core::json::is_valid_object(result_content)) {
+  if (status == ava::agent::ToolTimelineStatus::Canceled) {
+    dispatch_result.payload.status = ava::agent::ToolResultStatus::Canceled;
+    dispatch_result.payload.error_category = "canceled";
+    dispatch_result.payload.error_message = result_summary;
+  } else if (status == ava::agent::ToolTimelineStatus::Error && !ava::core::json::is_valid_object(result_content)) {
     dispatch_result.payload.error_message = result_summary;
     if (result_content != result_summary) dispatch_result.payload.error_details = result_content;
   }
@@ -157,8 +163,15 @@ ava::core::VoidResult record_tool_event(RuntimeSession const& session, RuntimeEv
 }  // namespace
 
 ava::tools::ToolContext make_tool_context(RuntimeSession& session,
-                                          ava::permissions::PermissionResolver permission_resolver)
+                                           ava::permissions::PermissionResolver permission_resolver)
 {
+  auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
+      .global_config_file = session.paths.ava_config_dir / "lsp.json",
+      .project_config_file = session.workspace_dir / ".ava" / "lsp.json",
+      .workspace_root = session.workspace_dir,
+      .mode = session.mode,
+      .permission_resolver = permission_resolver,
+  });
   return ava::tools::ToolContext{
       .workspace_dir = session.workspace_dir,
       .spill_dir = session.store.session_path().parent_path() / "spill",
@@ -174,11 +187,16 @@ ava::tools::ToolContext make_tool_context(RuntimeSession& session,
             .data_json = ava::tools::permission_audit_data_json(event),
         });
       },
+      .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
       .plugin_global_plugins_dir = session.paths.ava_config_dir / "plugins",
       .plugin_project_plugins_dir = session.workspace_dir / ".ava" / "plugins",
       .plugin_enablement_file = session.paths.ava_state_dir / "plugin-enablement.json",
       .mcp_global_config_file = session.paths.ava_config_dir / "mcp.json",
-      .mcp_project_config_file = session.workspace_dir / ".ava" / "mcp.json"};
+      .mcp_project_config_file = session.workspace_dir / ".ava" / "mcp.json",
+      .session_id = session.store.session_id(),
+      .provider_id = session.model.provider_id,
+      .model_id = session.model.model_id,
+      .current_dir = session.current_dir};
 }
 
 ava::core::VoidResult record_tool_start(RuntimeSession const& session, RuntimeEventSink const& sink,
@@ -427,9 +445,10 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
     bash_result_json += "}";
     if (auto recorded =
             record_tool_result(session, request.event_sink, result, call_id, "bash",
-                               bash->exit_code == 0 && !bash->canceled ? ava::agent::ToolTimelineStatus::Success
-                                                                       : ava::agent::ToolTimelineStatus::Error,
-                               "exit " + std::to_string(bash->exit_code), bash_result_json);
+                                bash->canceled                                ? ava::agent::ToolTimelineStatus::Canceled
+                                : bash->exit_code == 0 && !bash->timed_out ? ava::agent::ToolTimelineStatus::Success
+                                                                           : ava::agent::ToolTimelineStatus::Error,
+                                "exit " + std::to_string(bash->exit_code), bash_result_json);
         !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }

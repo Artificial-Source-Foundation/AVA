@@ -43,7 +43,13 @@ ModelInfo reasoning_model(std::string model_id, std::string display_name, std::s
   return text_model(provider.provider_id, std::move(model_id), std::move(display_name), std::move(family),
                     context_window_tokens, max_output_tokens, std::nullopt, provider, true,
                     provider.default_reasoning_levels, provider.default_reasoning_format,
-                    std::move(compatibility_quirks));
+                     std::move(compatibility_quirks));
+}
+
+ModelInfo image_capable(ModelInfo model)
+{
+  model.input_modalities = {"text", "image"};
+  return model;
 }
 
 }  // namespace
@@ -59,17 +65,17 @@ ModelRegistry builtin_model_profiles()
   return ModelRegistry{
       .default_provider_id = openai.provider_id,
       .default_model_id = "gpt-5.5",
-      .models = {reasoning_model("gpt-5.5", "GPT-5.5", "gpt-5", 200'000, std::nullopt, openai, {}),
-                 text_model(openai.provider_id, "gpt-4.1-mini", "GPT-4.1 mini", "gpt-4.1", 1'048'576, 32'768,
-                            ModelPricing{.input_per_million = 0.40L,
-                                         .output_per_million = 1.60L,
-                                         .cache_read_per_million = 0.10L,
-                                         .cache_write_per_million = std::nullopt,
-                                         .reasoning_per_million = std::nullopt},
-                            openai, false),
-                 text_model(anthropic.provider_id, "claude-sonnet-4-5", "Claude Sonnet 4.5", "claude-sonnet", 200'000,
-                            64'000, std::nullopt, anthropic, true, {"enabled"}, anthropic.default_reasoning_format,
-                            anthropic.default_compatibility_quirks),
+      .models = {image_capable(reasoning_model("gpt-5.5", "GPT-5.5", "gpt-5", 200'000, std::nullopt, openai, {})),
+                 image_capable(text_model(openai.provider_id, "gpt-4.1-mini", "GPT-4.1 mini", "gpt-4.1", 1'048'576, 32'768,
+                                           ModelPricing{.input_per_million = 0.40L,
+                                                        .output_per_million = 1.60L,
+                                                        .cache_read_per_million = 0.10L,
+                                                        .cache_write_per_million = std::nullopt,
+                                                        .reasoning_per_million = std::nullopt},
+                                           openai, false)),
+                 image_capable(text_model(anthropic.provider_id, "claude-sonnet-4-5", "Claude Sonnet 4.5", "claude-sonnet", 200'000,
+                                           64'000, std::nullopt, anthropic, true, {"enabled"}, anthropic.default_reasoning_format,
+                                           anthropic.default_compatibility_quirks)),
                  reasoning_model("kimi-k2-thinking", "Kimi K2 Thinking", "kimi-thinking", 262'144, 32'768, kimi),
                  reasoning_model("kimi-for-coding", "Kimi For Coding", "kimi-coding", 262'144, 32'768, kimi),
                   reasoning_model("kimi-k2.6", "Kimi K2.6", "kimi-thinking", 262'144, 32'768, moonshot),

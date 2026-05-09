@@ -51,6 +51,13 @@ struct McpPromptDescription {
   std::vector<McpPromptArgumentDescription> arguments;
 };
 
+struct McpResourceDescription {
+  std::string uri;
+  std::string name;
+  std::string description;
+  std::string mime_type;
+};
+
 struct McpToolCallResult {
   bool is_error = false;
   std::string content;
@@ -59,6 +66,13 @@ struct McpToolCallResult {
 
 struct McpPromptGetResult {
   std::string content;
+  std::string raw_json;
+};
+
+struct McpResourceReadResult {
+  std::string content;
+  std::string uri;
+  std::string mime_type;
   std::string raw_json;
 };
 
@@ -88,8 +102,12 @@ class McpStdioClient final {
   [[nodiscard]] ava::core::Result<std::vector<McpPromptDescription>> list_prompts(
       CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::Result<McpPromptGetResult> get_prompt(std::string_view prompt_name,
-                                                                 std::string_view arguments_json,
-                                                                 CancelCallback cancel_requested = nullptr);
+                                                                  std::string_view arguments_json,
+                                                                  CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::Result<std::vector<McpResourceDescription>> list_resources(
+      CancelCallback cancel_requested = nullptr);
+  [[nodiscard]] ava::core::Result<McpResourceReadResult> read_resource(std::string_view uri,
+                                                                       CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult shutdown(std::chrono::milliseconds grace = std::chrono::milliseconds(250));
 
  private:

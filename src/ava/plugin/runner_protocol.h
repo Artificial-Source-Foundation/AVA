@@ -11,8 +11,9 @@ namespace ava::plugin {
 [[nodiscard]] std::optional<PluginToolCallResult> parse_tool_result_response(std::string_view record,
                                                                              std::string_view request_id);
 [[nodiscard]] std::optional<PluginCommandCallResult> parse_command_result_response(std::string_view record,
-                                                                                   std::string_view request_id);
-[[nodiscard]] std::optional<PluginEventObserveResult> parse_event_observed_response(std::string_view record,
                                                                                     std::string_view request_id);
+[[nodiscard]] std::optional<PluginEventObserveResult> parse_event_observed_response(std::string_view record,
+                                                                                     std::string_view request_id);
+[[nodiscard]] std::optional<PluginProxyRequest> parse_proxy_request(std::string_view record);
 
 }  // namespace ava::plugin

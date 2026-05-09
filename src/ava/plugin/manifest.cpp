@@ -13,10 +13,43 @@ namespace ava::plugin {
 namespace {
 
 constexpr std::size_t kMaxManifestBytes = 256 * 1024;
+constexpr std::size_t kMaxManifestJsonDepth = 64;
 
 ava::core::Error manifest_error(std::string message)
 {
   return ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
+}
+
+ava::core::VoidResult validate_manifest_json_depth(std::string_view json)
+{
+  bool in_string = false;
+  bool escaped = false;
+  std::size_t depth = 0;
+  for (char const ch : json) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (in_string && ch == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"') {
+      in_string = !in_string;
+      continue;
+    }
+    if (in_string) continue;
+    if (ch == '{' || ch == '[') {
+      ++depth;
+      if (depth > kMaxManifestJsonDepth) {
+        return std::unexpected(manifest_error("plugin manifest exceeds maximum JSON depth")
+                                   .with_context("max_depth", std::to_string(kMaxManifestJsonDepth)));
+      }
+    } else if ((ch == '}' || ch == ']') && depth > 0) {
+      --depth;
+    }
+  }
+  return {};
 }
 
 bool is_valid_plugin_id(std::string_view id)
@@ -257,6 +290,9 @@ ava::core::Result<PluginManifest> parse_plugin_manifest(std::string_view json, s
     return std::unexpected(manifest_error("plugin manifest exceeds maximum size")
                                .with_context("max_bytes", std::to_string(kMaxManifestBytes)));
   }
+  if (auto depth = validate_manifest_json_depth(json); !depth) {
+    return std::unexpected(depth.error());
+  }
   if (!ava::core::json::is_valid_object(json)) {
     return std::unexpected(manifest_error("plugin manifest must be a valid JSON object"));
   }
@@ -347,6 +383,14 @@ ava::core::Result<PluginManifest> load_plugin_manifest(std::filesystem::path con
   auto parsed = parse_plugin_manifest(contents, manifest_path);
   if (!parsed) parsed.error().with_context("path", manifest_path.string());
   return parsed;
+}
+
+bool plugin_has_capability(PluginManifest const& manifest, std::string_view capability)
+{
+  for (auto const& declared : manifest.capabilities) {
+    if (declared == capability) return true;
+  }
+  return false;
 }
 
 }  // namespace ava::plugin

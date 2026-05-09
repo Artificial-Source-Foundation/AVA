@@ -7,6 +7,8 @@
 
 #include "ava/provider/registry.h"
 
+#include "ava/session/validation.h"
+
 #include "ava/core/json.h"
 
 #include <algorithm>
@@ -15,6 +17,10 @@
 
 namespace ava::app::runtime {
 namespace {
+
+constexpr std::size_t kMaxImageAttachmentsPerRequest = 16;
+constexpr std::size_t kMaxImageBytesPerRequest = 40 * 1024 * 1024;
+constexpr std::size_t kAnthropicMaxImageBytes = 5 * 1024 * 1024;
 
 ava::config::ModelInfo fallback_persisted_model(
     std::string provider_id, std::string model_id, std::string display_name, std::string family, std::string api_family,
@@ -51,6 +57,32 @@ bool model_accepts_reasoning_format(ava::config::ModelInfo const& model, std::st
   return ava::config::provider_accepts_reasoning_format(model, format);
 }
 
+bool model_accepts_images(ava::config::ModelInfo const& model)
+{
+  return std::find(model.input_modalities.begin(), model.input_modalities.end(), "image") !=
+         model.input_modalities.end();
+}
+
+bool bool_json_field_is_true(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  return start && object.substr(*start, 4) == "true";
+}
+
+std::vector<std::string> non_redacted_image_attachments(ava::session::SessionEntry const& entry)
+{
+  std::vector<std::string> attachments;
+  if (entry.type != ava::session::EntryType::UserMessage) return attachments;
+  auto const data_json = ava::session::sanitized_message_data_json(entry.data_json);
+  for (auto const& attachment : ava::core::json::objects_in_array_field(data_json, "attachments")) {
+    if (ava::core::json::string_field(attachment, "type").value_or("") == "image" &&
+        !bool_json_field_is_true(attachment, "redacted")) {
+      attachments.push_back(attachment);
+    }
+  }
+  return attachments;
+}
+
 ava::core::Error incompatible_model_switch_error(ava::config::ModelInfo const& model, std::string_view reason,
                                                  ava::session::SessionEntry const& entry)
 {
@@ -74,12 +106,38 @@ ava::core::VoidResult validate_model_switch_history(RuntimeSession const& sessio
     if (it->type == ava::session::EntryType::Compaction) replay_start = std::next(it);
   }
 
+  std::size_t image_count = 0;
+  std::size_t total_image_bytes = 0;
   for (auto it = replay_start; it != entries->end(); ++it) {
     auto const& entry = *it;
     if ((entry.type == ava::session::EntryType::ToolCall || entry.type == ava::session::EntryType::ToolResult) &&
         !target.supports_tools.value_or(false)) {
       return std::unexpected(incompatible_model_switch_error(
           target, "target model does not declare tool support required by existing tool history", entry));
+    }
+
+    for (auto const& attachment : non_redacted_image_attachments(entry)) {
+      if (!model_accepts_images(target)) {
+        return std::unexpected(incompatible_model_switch_error(
+            target, "target model does not declare image input support required by existing image attachments", entry));
+      }
+      ++image_count;
+      if (image_count > kMaxImageAttachmentsPerRequest) {
+        return std::unexpected(incompatible_model_switch_error(
+            target, "target model cannot safely replay current image attachment count", entry));
+      }
+      auto const byte_size = ava::core::json::integer_field(attachment, "byte_size").value_or(0);
+      if (byte_size <= 0) continue;
+      auto const image_bytes = static_cast<std::size_t>(byte_size);
+      if (target.api_family == "anthropic_messages" && image_bytes > kAnthropicMaxImageBytes) {
+        return std::unexpected(incompatible_model_switch_error(
+            target, "target provider image byte-size limit is lower than existing image attachments", entry));
+      }
+      if (image_bytes > kMaxImageBytesPerRequest - total_image_bytes) {
+        return std::unexpected(incompatible_model_switch_error(
+            target, "target model cannot safely replay current aggregate image bytes", entry));
+      }
+      total_image_bytes += image_bytes;
     }
 
     if (entry.type != ava::session::EntryType::ReasoningBlock) continue;

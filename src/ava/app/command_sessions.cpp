@@ -90,6 +90,16 @@ ava::core::VoidResult emit_command_event(CommandRequest const& request, RuntimeE
   return emit_event(request.event_sink, event);
 }
 
+bool command_canceled(CommandRequest const& request)
+{
+  return request.cancel_requested && request.cancel_requested();
+}
+
+ava::core::Error command_canceled_error()
+{
+  return ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled");
+}
+
 template <typename Value>
 void append_known_value(std::ostringstream& output, bool& wrote_any, std::string_view label,
                         std::optional<Value> const& value)
@@ -294,6 +304,7 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, Co
   std::size_t last_snapshot_entries = 0;
   std::size_t last_current_entries = 0;
   for (std::size_t attempt = 0; attempt < max_compaction_attempts; ++attempt) {
+    if (command_canceled(request)) return fail_compaction(command_canceled_error());
     ava::core::Result<std::vector<ava::session::SessionEntry>> entries =
         std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session entries were not loaded"));
     if (request.session_mutex) {
@@ -319,6 +330,7 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, Co
     if (!summary) {
       return fail_compaction(std::move(summary.error()));
     }
+    if (command_canceled(request)) return fail_compaction(command_canceled_error());
     if (summary->empty()) {
       return fail_compaction(ava::core::Error(ava::core::ErrorCategory::Provider,
                                               "compaction summary generation returned an empty summary"));
@@ -335,6 +347,7 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, Co
     auto validate_and_append = [&]() -> ava::core::VoidResult {
       auto current_entries = session.store.load();
       if (!current_entries) return std::unexpected(std::move(current_entries.error()));
+      if (command_canceled(request)) return std::unexpected(command_canceled_error());
       if (!same_session_snapshot(*entries, *current_entries)) {
         snapshot_stale = true;
         last_snapshot_entries = entries->size();

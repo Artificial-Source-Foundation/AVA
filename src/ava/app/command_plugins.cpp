@@ -7,6 +7,7 @@
 #include "ava/plugin/enablement.h"
 #include "ava/plugin/manifest.h"
 #include "ava/plugin/runner.h"
+#include "ava/plugin/tool_broker.h"
 
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -566,6 +567,7 @@ ava::core::Result<CommandResult> run_plugin_command(RuntimeSession& session, Com
 
   auto context = make_tool_context(session, request.permission_resolver);
   context.permission_tool_name = "plugin_command";
+  context.cancel_requested = request.cancel_requested;
   auto const call_id = ava::core::make_id("cmd");
   auto const command_label = status->plugin.manifest.id + ":" + command->name;
   if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "plugin_command", command_label);
@@ -599,9 +601,12 @@ ava::core::Result<CommandResult> run_plugin_command(RuntimeSession& session, Com
 
   ava::plugin::PluginRunnerOptions options;
   options.workspace_dir = session.workspace_dir;
-  auto process = ava::plugin::PluginProcess::start(status->plugin.manifest, options);
+  auto process = ava::plugin::PluginProcess::start(status->plugin.manifest, options, request.cancel_requested);
   if (!process) return fail(process.error());
-  auto command_result = (*process)->call_command(command->name, run_args->arguments_json, call_id);
+  auto proxy_handler = ava::plugin::make_core_service_proxy_handler(
+      context, status->plugin.manifest, "command", command->name, command_label, call_id);
+  auto command_result = (*process)->call_command(command->name, run_args->arguments_json, call_id,
+                                                 request.cancel_requested, std::move(proxy_handler));
   auto shutdown = (*process)->shutdown();
   if (!command_result) return fail(command_result.error());
   if (!shutdown) return fail(shutdown.error());

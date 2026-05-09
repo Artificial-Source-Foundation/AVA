@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -31,6 +32,7 @@ enum class Operation {
   RunCommand,
   NetworkFetch,
   NetworkSearch,
+  LspServerLaunch,
   LspQuery,
   SkillLoad,
   PluginExecute,
@@ -40,6 +42,7 @@ enum class Operation {
   McpServerLaunch,
   McpServerConnect,
   McpToolCall,
+  McpResourceRead,
 };
 
 struct PermissionRequest {
@@ -65,6 +68,9 @@ enum class PermissionResolution {
 struct PermissionResolutionDecision {
   PermissionResolution resolution = PermissionResolution::Deny;
   std::string reason;
+  std::string resolution_source;
+  std::string rule_id;
+  bool authoritative = false;
 
   PermissionResolutionDecision() = default;
   PermissionResolutionDecision(PermissionResolution resolution_in);
@@ -91,6 +97,8 @@ using PermissionResolver = std::function<ava::core::Result<PermissionResolutionD
 [[nodiscard]] PermissionDecision classify_command(std::string_view command);
 [[nodiscard]] bool operator==(PermissionResolutionDecision const& decision, PermissionResolution resolution);
 [[nodiscard]] bool operator==(PermissionResolution resolution, PermissionResolutionDecision const& decision);
+[[nodiscard]] std::optional<PermissionAction> parse_permission_action(std::string_view value);
+[[nodiscard]] std::optional<Operation> parse_operation(std::string_view value);
 [[nodiscard]] std::string to_string(PermissionAction action);
 [[nodiscard]] std::string to_string(PermissionResolution resolution);
 [[nodiscard]] std::string to_string(PermissionResolutionDecision const& decision);

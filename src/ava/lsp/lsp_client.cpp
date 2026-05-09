@@ -8,7 +8,9 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
+#include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <optional>
 #include <string_view>
 #include <system_error>
@@ -27,6 +29,7 @@ namespace {
 constexpr char kTrustedExecPath[] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 constexpr std::size_t kMaxLspHeaderBytes = 64 * 1024;
 constexpr std::size_t kMaxLspMessageBytes = 4 * 1024 * 1024;
+constexpr std::uintmax_t kMaxDidOpenBytes = 512 * 1024;
 
 class ScopedSignalIgnore {
  public:
@@ -165,9 +168,105 @@ std::string file_uri(std::filesystem::path const& path)
   return "file://" + percent_encoded_file_path(path);
 }
 
+int hex_value(char ch)
+{
+  if (ch >= '0' && ch <= '9') return ch - '0';
+  if (ch >= 'a' && ch <= 'f') return 10 + (ch - 'a');
+  if (ch >= 'A' && ch <= 'F') return 10 + (ch - 'A');
+  return -1;
+}
+
+ava::core::Result<std::filesystem::path> path_from_file_uri(std::string_view uri, ServerConfig const& config)
+{
+  constexpr std::string_view prefix = "file://";
+  if (!uri.starts_with(prefix)) {
+    return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP location URI is not a file URI", config));
+  }
+  std::string decoded;
+  auto const path = uri.substr(prefix.size());
+  decoded.reserve(path.size());
+  for (std::size_t index = 0; index < path.size(); ++index) {
+    if (path[index] == '%') {
+      if (index + 2 >= path.size()) {
+        return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP location URI has invalid escaping", config));
+      }
+      int const hi = hex_value(path[index + 1]);
+      int const lo = hex_value(path[index + 2]);
+      if (hi < 0 || lo < 0) {
+        return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP location URI has invalid escaping", config));
+      }
+      char const byte = static_cast<char>((hi << 4) | lo);
+      if (byte == '/' || byte == '\0') {
+        return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP location URI escapes a path separator", config));
+      }
+      decoded.push_back(byte);
+      index += 2;
+    } else {
+      decoded.push_back(path[index]);
+    }
+  }
+  auto const candidate = std::filesystem::path(decoded).lexically_normal();
+  auto const workspace = std::filesystem::absolute(config.workspace_root).lexically_normal().generic_string();
+  auto const value = std::filesystem::absolute(candidate).lexically_normal().generic_string();
+  if (value != workspace && !value.starts_with(workspace + "/")) {
+    return std::unexpected(lsp_error(ava::core::ErrorCategory::PermissionDenied, "LSP location is outside the workspace", config));
+  }
+  return std::filesystem::path(value);
+}
+
 std::string json_string(std::string_view value)
 {
   return "\"" + ava::core::json::escape(value) + "\"";
+}
+
+ava::core::Result<std::string> read_text_document(std::filesystem::path const& path, ServerConfig const& config)
+{
+  std::error_code status_error;
+  auto const status = std::filesystem::symlink_status(path, status_error);
+  if (status_error) {
+    auto error = lsp_error(ava::core::ErrorCategory::Io, "failed to inspect LSP document", config);
+    error.with_context("path", path.string());
+    error.with_context("cause", status_error.message());
+    return std::unexpected(std::move(error));
+  }
+  if (std::filesystem::is_symlink(status)) {
+    auto error = lsp_error(ava::core::ErrorCategory::PermissionDenied, "LSP document must not be a symlink", config);
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
+  }
+  if (!std::filesystem::is_regular_file(status)) {
+    auto error = lsp_error(ava::core::ErrorCategory::InvalidArgument, "LSP document is not a regular file", config);
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
+  }
+  std::error_code size_error;
+  auto const size = std::filesystem::file_size(path, size_error);
+  if (size_error) {
+    auto error = lsp_error(ava::core::ErrorCategory::Io, "failed to inspect LSP document size", config);
+    error.with_context("path", path.string());
+    error.with_context("cause", size_error.message());
+    return std::unexpected(std::move(error));
+  }
+  if (size > kMaxDidOpenBytes) {
+    auto error = lsp_error(ava::core::ErrorCategory::InvalidArgument, "LSP document exceeds didOpen size cap", config);
+    error.with_context("path", path.string());
+    error.with_context("max_bytes", std::to_string(kMaxDidOpenBytes));
+    return std::unexpected(std::move(error));
+  }
+  std::ifstream file(path, std::ios::binary);
+  if (!file) {
+    auto error = lsp_error(ava::core::ErrorCategory::Io, "failed to open LSP document", config);
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
+  }
+  std::string content(static_cast<std::size_t>(size), '\0');
+  if (!content.empty()) file.read(content.data(), static_cast<std::streamsize>(content.size()));
+  if (file.bad() || file.gcount() != static_cast<std::streamsize>(content.size())) {
+    auto error = lsp_error(ava::core::ErrorCategory::Io, "failed to read LSP document", config);
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
+  }
+  return content;
 }
 
 std::size_t remaining_ms(std::chrono::steady_clock::time_point deadline)
@@ -221,8 +320,8 @@ std::string diagnostic_code(std::string_view object)
 }
 
 ava::core::Result<std::vector<Diagnostic>> parse_diagnostics_response(std::string_view response,
-                                                                      ServerConfig const& config,
-                                                                      std::filesystem::path const& path)
+                                                                       ServerConfig const& config,
+                                                                       std::filesystem::path const& path)
 {
   auto const result = ava::core::json::object_field(response, "result");
   if (!result) {
@@ -259,7 +358,177 @@ ava::core::Result<std::vector<Diagnostic>> parse_diagnostics_response(std::strin
   return diagnostics;
 }
 
+ava::core::Result<Range> parse_range(std::string_view object, ServerConfig const& config)
+{
+  auto range = ava::core::json::object_field(object, "range");
+  auto start = range ? ava::core::json::object_field(*range, "start") : std::optional<std::string>{};
+  auto end = range ? ava::core::json::object_field(*range, "end") : std::optional<std::string>{};
+  if (!start || !end) {
+    return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP range is malformed", config));
+  }
+  auto const start_line = ava::core::json::integer_field(*start, "line");
+  auto const start_character = ava::core::json::integer_field(*start, "character");
+  auto const end_line = ava::core::json::integer_field(*end, "line");
+  auto const end_character = ava::core::json::integer_field(*end, "character");
+  if (!start_line || !start_character || !end_line || !end_character || *start_line < 0 || *start_character < 0 ||
+      *end_line < 0 || *end_character < 0) {
+    return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP range is malformed", config));
+  }
+  return Range{.start_line = static_cast<int>(*start_line),
+               .start_column = static_cast<int>(*start_character),
+               .end_line = static_cast<int>(*end_line),
+               .end_column = static_cast<int>(*end_character)};
+}
+
+ava::core::Result<Location> parse_location(std::string_view object, ServerConfig const& config)
+{
+  auto uri = ava::core::json::string_field(object, "uri");
+  if (!uri) return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP location is missing URI", config));
+  auto path = path_from_file_uri(*uri, config);
+  if (!path) return std::unexpected(std::move(path.error()));
+  auto range = parse_range(object, config);
+  if (!range) return std::unexpected(std::move(range.error()));
+  return Location{.path = std::move(*path), .range = *range};
+}
+
+ava::core::VoidResult parse_document_symbol_object(std::string_view object, ServerConfig const& config,
+                                                   std::filesystem::path const& path, std::string const& container,
+                                                   std::vector<Symbol>& symbols)
+{
+  auto name = ava::core::json::string_field(object, "name");
+  auto kind = ava::core::json::integer_field(object, "kind");
+  auto range = parse_range(object, config);
+  if (!name || !kind || !range) {
+    return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP document symbol item is malformed", config));
+  }
+  symbols.push_back(Symbol{.name = std::move(*name),
+                           .kind = static_cast<int>(*kind),
+                           .path = path,
+                           .range = *range,
+                           .container = container});
+  auto const child_container = symbols.back().name;
+  for (auto const& child : ava::core::json::objects_in_array_field(object, "children")) {
+    if (auto parsed = parse_document_symbol_object(child, config, path, child_container, symbols); !parsed) {
+      return parsed;
+    }
+  }
+  return {};
+}
+
+ava::core::Result<std::vector<Symbol>> parse_document_symbols_response(std::string_view response,
+                                                                       ServerConfig const& config,
+                                                                       std::filesystem::path const& path)
+{
+  auto result = ava::core::json::field_value_start(response, "result");
+  if (result && *result < response.size() && response[*result] == 'n') return std::vector<Symbol>{};
+  if (!result || *result >= response.size() || response[*result] != '[') {
+    return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP document symbols response is missing result", config));
+  }
+  std::vector<Symbol> symbols;
+  for (auto const& object : ava::core::json::objects_in_array_field(response, "result")) {
+    if (ava::core::json::object_field(object, "location")) {
+      auto name = ava::core::json::string_field(object, "name");
+      auto kind = ava::core::json::integer_field(object, "kind");
+      auto location = ava::core::json::object_field(object, "location");
+      if (!name || !kind || !location) {
+        return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP symbol item is malformed", config));
+      }
+      auto parsed = parse_location(*location, config);
+      if (!parsed) return std::unexpected(std::move(parsed.error()));
+      symbols.push_back(Symbol{.name = std::move(*name),
+                               .kind = static_cast<int>(*kind),
+                               .path = parsed->path,
+                               .range = parsed->range,
+                               .container = ava::core::json::string_field(object, "containerName").value_or(std::string{})});
+      continue;
+    }
+    if (auto parsed = parse_document_symbol_object(object, config, path, {}, symbols); !parsed) {
+      return std::unexpected(std::move(parsed.error()));
+    }
+  }
+  return symbols;
+}
+
+ava::core::Result<std::vector<Symbol>> parse_workspace_symbols_response(std::string_view response,
+                                                                        ServerConfig const& config)
+{
+  auto result = ava::core::json::field_value_start(response, "result");
+  if (result && *result < response.size() && response[*result] == 'n') return std::vector<Symbol>{};
+  if (!result || *result >= response.size() || response[*result] != '[') {
+    return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP workspace symbols response is missing result", config));
+  }
+  std::vector<Symbol> symbols;
+  for (auto const& object : ava::core::json::objects_in_array_field(response, "result")) {
+    auto name = ava::core::json::string_field(object, "name");
+    auto kind = ava::core::json::integer_field(object, "kind");
+    auto location = ava::core::json::object_field(object, "location");
+    if (!name || !kind || !location) {
+      return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP workspace symbol item is malformed", config));
+    }
+    auto parsed = parse_location(*location, config);
+    if (!parsed) return std::unexpected(std::move(parsed.error()));
+    symbols.push_back(Symbol{.name = std::move(*name),
+                             .kind = static_cast<int>(*kind),
+                             .path = parsed->path,
+                             .range = parsed->range,
+                             .container = ava::core::json::string_field(object, "containerName").value_or(std::string{})});
+  }
+  return symbols;
+}
+
+ava::core::Result<std::vector<Location>> parse_definition_response(std::string_view response, ServerConfig const& config)
+{
+  auto result_start = ava::core::json::field_value_start(response, "result");
+  if (!result_start) {
+    return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP definition response is missing result", config));
+  }
+  std::vector<Location> locations;
+  if (*result_start < response.size() && response[*result_start] == '[') {
+    for (auto const& object : ava::core::json::objects_in_array_field(response, "result")) {
+      auto location = parse_location(object, config);
+      if (!location) return std::unexpected(std::move(location.error()));
+      locations.push_back(std::move(*location));
+    }
+    return locations;
+  }
+  if (*result_start < response.size() && response[*result_start] == '{') {
+    auto result = ava::core::json::object_field(response, "result");
+    if (!result) return std::unexpected(lsp_error(ava::core::ErrorCategory::Tool, "LSP definition result is malformed", config));
+    auto location = parse_location(*result, config);
+    if (!location) return std::unexpected(std::move(location.error()));
+    locations.push_back(std::move(*location));
+    return locations;
+  }
+  return locations;
+}
+
 }  // namespace
+
+ava::core::Result<std::vector<Symbol>> DiagnosticsProvider::document_symbols(std::filesystem::path const&, CancelCallback)
+{
+  return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "LSP document symbols provider is unavailable"));
+}
+
+ava::core::Result<std::vector<Symbol>> DiagnosticsProvider::workspace_symbols(std::string_view, CancelCallback)
+{
+  return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "LSP workspace symbols provider is unavailable"));
+}
+
+ava::core::Result<std::vector<Location>> DiagnosticsProvider::definitions(std::filesystem::path const&, int, int,
+                                                                           CancelCallback)
+{
+  return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "LSP definitions provider is unavailable"));
+}
+
+ava::core::Result<std::vector<Location>> DiagnosticsProvider::references(std::filesystem::path const&, int, int,
+                                                                          CancelCallback)
+{
+  return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "LSP references provider is unavailable"));
+}
+
+void DiagnosticsProvider::set_permission_request_ids(std::shared_ptr<std::vector<std::string>>)
+{
+}
 
 SubprocessLspClient::SubprocessLspClient(ServerConfig config) : config_(std::move(config))
 {
@@ -373,7 +642,7 @@ ava::core::VoidResult SubprocessLspClient::initialize(CancelCallback cancel_requ
 }
 
 ava::core::Result<std::vector<Diagnostic>> SubprocessLspClient::diagnostics(std::filesystem::path const& path,
-                                                                            CancelCallback cancel_requested)
+                                                                             CancelCallback cancel_requested)
 {
   if (is_canceled(cancel_requested)) {
     auto error = canceled_error("LSP diagnostics canceled", config_);
@@ -387,12 +656,88 @@ ava::core::Result<std::vector<Diagnostic>> SubprocessLspClient::diagnostics(std:
   return parse_diagnostics_response(*response, config_, path);
 }
 
+ava::core::Result<std::vector<Symbol>> SubprocessLspClient::document_symbols(std::filesystem::path const& path,
+                                                                              CancelCallback cancel_requested)
+{
+  if (is_canceled(cancel_requested)) return std::unexpected(canceled_error("LSP document symbols canceled", config_));
+  auto const uri = file_uri(path);
+  std::string const params = "{\"textDocument\":{\"uri\":" + json_string(uri) + "}}";
+  auto response = request_response("textDocument/documentSymbol", params, cancel_requested);
+  if (!response) return std::unexpected(std::move(response.error()));
+  return parse_document_symbols_response(*response, config_, path);
+}
+
+ava::core::Result<std::vector<Symbol>> SubprocessLspClient::workspace_symbols(std::string_view query,
+                                                                              CancelCallback cancel_requested)
+{
+  if (is_canceled(cancel_requested)) return std::unexpected(canceled_error("LSP workspace symbols canceled", config_));
+  std::string const params = "{\"query\":" + json_string(query) + "}";
+  auto response = request_response("workspace/symbol", params, cancel_requested);
+  if (!response) return std::unexpected(std::move(response.error()));
+  return parse_workspace_symbols_response(*response, config_);
+}
+
+ava::core::Result<std::vector<Location>> SubprocessLspClient::definitions(std::filesystem::path const& path, int line,
+                                                                           int column, CancelCallback cancel_requested)
+{
+  if (is_canceled(cancel_requested)) return std::unexpected(canceled_error("LSP definition canceled", config_));
+  if (line < 0 || column < 0) {
+    return std::unexpected(lsp_error(ava::core::ErrorCategory::InvalidArgument, "LSP definition position is invalid", config_));
+  }
+  if (auto opened = send_did_open(path, cancel_requested); !opened) return std::unexpected(std::move(opened.error()));
+  auto const uri = file_uri(path);
+  std::string const params = "{\"textDocument\":{\"uri\":" + json_string(uri) + "},\"position\":{\"line\":" +
+                             std::to_string(line) + ",\"character\":" + std::to_string(column) + "}}";
+  auto response = request_response("textDocument/definition", params, cancel_requested);
+  if (!response) return std::unexpected(std::move(response.error()));
+  return parse_definition_response(*response, config_);
+}
+
+ava::core::Result<std::vector<Location>> SubprocessLspClient::references(std::filesystem::path const& path, int line,
+                                                                          int column, CancelCallback cancel_requested)
+{
+  if (is_canceled(cancel_requested)) return std::unexpected(canceled_error("LSP references canceled", config_));
+  if (line < 0 || column < 0) {
+    return std::unexpected(lsp_error(ava::core::ErrorCategory::InvalidArgument, "LSP references position is invalid", config_));
+  }
+  if (auto opened = send_did_open(path, cancel_requested); !opened) return std::unexpected(std::move(opened.error()));
+  auto const uri = file_uri(path);
+  std::string const params = "{\"textDocument\":{\"uri\":" + json_string(uri) + "},\"position\":{\"line\":" +
+                             std::to_string(line) + ",\"character\":" + std::to_string(column) +
+                             "},\"context\":{\"includeDeclaration\":true}}";
+  auto response = request_response("textDocument/references", params, cancel_requested);
+  if (!response) return std::unexpected(std::move(response.error()));
+  return parse_definition_response(*response, config_);
+}
+
 ava::core::VoidResult SubprocessLspClient::send_notification(std::string_view method, std::string_view params_json,
-                                                             CancelCallback cancel_requested)
+                                                              CancelCallback cancel_requested)
 {
   std::string const body =
       "{\"jsonrpc\":\"2.0\",\"method\":" + json_string(method) + ",\"params\":" + std::string(params_json) + "}";
   return write_message(body, cancel_requested);
+}
+
+bool SubprocessLspClient::is_alive()
+{
+  return check_child_running().has_value();
+}
+
+ava::core::VoidResult SubprocessLspClient::send_did_open(std::filesystem::path const& path,
+                                                         CancelCallback cancel_requested)
+{
+  if (is_canceled(cancel_requested)) return std::unexpected(canceled_error("LSP didOpen canceled", config_));
+  auto content = read_text_document(path, config_);
+  if (!content) return std::unexpected(std::move(content.error()));
+  auto const uri = file_uri(path);
+  if (open_documents_.contains(uri)) return {};
+  std::string const params = "{\"textDocument\":{\"uri\":" + json_string(uri) +
+                             ",\"languageId\":" + json_string(config_.language_id) +
+                             ",\"version\":1,\"text\":" + json_string(*content) + "}}";
+  auto sent = send_notification("textDocument/didOpen", params, cancel_requested);
+  if (!sent) return sent;
+  open_documents_.insert(uri);
+  return {};
 }
 
 ava::core::Result<std::string> SubprocessLspClient::request_response(std::string_view method,

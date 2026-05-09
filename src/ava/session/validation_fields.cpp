@@ -49,9 +49,11 @@ bool valid_status(std::string_view status)
 bool valid_operation(std::string_view operation)
 {
   return operation == "read" || operation == "search" || operation == "edit" || operation == "bash" ||
-         operation == "network.fetch" || operation == "lsp.query" || operation == "plugin.execute" ||
-         operation == "plugin.tool.call" || operation == "plugin.command.run" || operation == "plugin.event.observe" ||
-         operation == "mcp.server.launch" || operation == "mcp.server.connect" || operation == "mcp.tool.call";
+         operation == "network.fetch" || operation == "network.search" || operation == "lsp.server.launch" || operation == "lsp.query" ||
+         operation == "skill" || operation == "plugin.execute" || operation == "plugin.tool.call" ||
+         operation == "plugin.command.run" || operation == "plugin.event.observe" ||
+         operation == "mcp.server.launch" || operation == "mcp.server.connect" || operation == "mcp.tool.call" ||
+         operation == "mcp.resource.read";
 }
 
 bool valid_mode(std::string_view mode)
@@ -72,7 +74,7 @@ bool valid_resolution(std::string_view resolution)
 bool valid_resolution_source(std::string_view source)
 {
   return source == "policy" || source == "resolver" || source == "session_grant" || source == "no_resolver" ||
-         source == "resolver_failed";
+         source == "resolver_failed" || source == "persistent_rule" || source == "persistent_rule_error";
 }
 
 bool valid_risk(std::string_view risk)

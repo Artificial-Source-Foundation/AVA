@@ -14,16 +14,20 @@
 #include "tests/support/test_harness.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include <signal.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
 namespace {
 
@@ -33,6 +37,31 @@ std::string read_text_file_for_test(std::filesystem::path const& path)
   std::ostringstream out;
   out << file.rdbuf();
   return out.str();
+}
+
+std::optional<pid_t> read_pid_file_for_test(std::filesystem::path const& path)
+{
+  std::ifstream file(path, std::ios::binary);
+  long long value = 0;
+  file >> value;
+  if (!file || value <= 0) return std::nullopt;
+  return static_cast<pid_t>(value);
+}
+
+bool process_group_exists(pid_t pgid)
+{
+  errno = 0;
+  if (::kill(-pgid, 0) == 0) return true;
+  return errno != ESRCH;
+}
+
+bool wait_for_process_group_exit(pid_t pgid)
+{
+  for (int index = 0; index < 100; ++index) {
+    if (!process_group_exists(pgid)) return true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  return !process_group_exists(pgid);
 }
 
 class StaticTransport final : public ava::provider::Transport {
@@ -194,8 +223,8 @@ void test_bash_tool()
       ava::tools::run_bash(context, "sleep 2", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(50)});
   expect(timeout && timeout->timed_out, "run_bash times out long command");
 
-  auto const timeout_marker = temp_root() / "bash-timeout-child-leak.txt";
-  std::filesystem::remove(timeout_marker, remove_error);
+  auto const timeout_group_file = temp_root() / "bash-timeout-child-pgid.txt";
+  std::filesystem::remove(timeout_group_file, remove_error);
   int timeout_tree_prompts = 0;
   ava::tools::ToolContext const timeout_tree_context{
       .workspace_dir = temp_root(),
@@ -208,12 +237,13 @@ void test_bash_tool()
         return ava::permissions::PermissionResolution::Allow;
       }};
   auto timeout_tree = ava::tools::run_bash(
-      timeout_tree_context, "/bin/sh -c \"sleep 1; printf leaked > " + timeout_marker.generic_string() + " & wait\"",
-      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(50), .max_bytes = 1024});
-  std::this_thread::sleep_for(std::chrono::milliseconds(1200));
-  expect(
-      timeout_tree && timeout_tree->timed_out && timeout_tree_prompts == 1 && !std::filesystem::exists(timeout_marker),
-      "run_bash timeout terminates child processes in the command process group");
+      timeout_tree_context,
+      "/bin/sh -c \"sleep 30 & printf $$ > " + timeout_group_file.generic_string() + "; wait\"",
+      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(500), .max_bytes = 1024});
+  auto const timeout_pgid = read_pid_file_for_test(timeout_group_file);
+  expect(timeout_tree && timeout_tree->timed_out && timeout_tree_prompts == 1 && timeout_pgid &&
+             wait_for_process_group_exit(*timeout_pgid),
+         "run_bash timeout terminates child processes in the command process group");
 
   int cancel_checks = 0;
   ava::tools::ToolContext const cancel_context{
@@ -225,6 +255,29 @@ void test_bash_tool()
                                        ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(canceled && canceled->canceled && !canceled->timed_out && canceled->exit_code == -1,
          "run_bash observes tool cancellation and reports a canceled process result");
+
+  auto const cancel_group_file = temp_root() / "bash-cancel-child-pgid.txt";
+  std::filesystem::remove(cancel_group_file, remove_error);
+  int cancel_tree_prompts = 0;
+  ava::tools::ToolContext const cancel_tree_context{
+      .workspace_dir = temp_root(),
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&cancel_tree_prompts](ava::permissions::PermissionPrompt const& prompt)
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++cancel_tree_prompts;
+        expect(prompt.operation == ava::permissions::Operation::RunCommand,
+               "bash process-tree cancel resolver receives run operation");
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .cancel_requested = [&cancel_group_file] { return std::filesystem::exists(cancel_group_file); }};
+  auto cancel_tree = ava::tools::run_bash(
+      cancel_tree_context,
+      "/bin/sh -c \"sleep 30 & printf $$ > " + cancel_group_file.generic_string() + "; wait\"",
+      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000), .max_bytes = 1024});
+  auto const cancel_pgid = read_pid_file_for_test(cancel_group_file);
+  expect(cancel_tree && cancel_tree->canceled && !cancel_tree->timed_out && cancel_tree_prompts == 1 && cancel_pgid &&
+             wait_for_process_group_exit(*cancel_pgid),
+         "run_bash cancellation terminates child processes in the command process group");
 
   auto ask_without_resolver = ava::tools::run_bash(context, "true");
   expect(!ask_without_resolver &&

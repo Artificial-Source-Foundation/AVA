@@ -703,6 +703,41 @@ std::string error_text_for_event(ava::app::RuntimeEvent const& event)
   return event.text;
 }
 
+std::string first_error_line(std::string_view text)
+{
+  auto const end = text.find_first_of("\r\n");
+  auto line = end == std::string_view::npos ? text : text.substr(0, end);
+  while (!line.empty()) {
+    auto const byte = static_cast<unsigned char>(line.front());
+    if (byte != ' ' && byte != '\t') break;
+    line.remove_prefix(1);
+  }
+  while (!line.empty()) {
+    auto const byte = static_cast<unsigned char>(line.back());
+    if (byte != ' ' && byte != '\t') break;
+    line.remove_suffix(1);
+  }
+  return std::string(line);
+}
+
+std::string strip_duplicate_error_summary(std::string details, std::string_view summary)
+{
+  if (summary.empty() || !details.starts_with(summary)) return details;
+  details.erase(0, summary.size());
+  while (!details.empty() && (details.front() == '\r' || details.front() == '\n')) details.erase(details.begin());
+  return details;
+}
+
+TranscriptItem error_transcript_item(std::string text, std::string details)
+{
+  auto summary = first_error_line(text);
+  if (summary.empty()) summary = "error";
+  details = strip_duplicate_error_summary(std::move(details), summary);
+  auto item = transcript_text_item("error", std::move(summary));
+  item.meta = std::move(details);
+  return item;
+}
+
 bool is_provider_tool_call_status(std::string_view status)
 {
   return status == "tool_call_start" || status == "tool_call_delta" || status == "tool_call_end";
@@ -1078,8 +1113,8 @@ void apply_runtime_event(TuiEventState& state, ava::app::RuntimeEvent const& eve
       state.error_text = error_text_for_event(event);
       state.error_details = event.error_details;
       if (!state.error_text.empty() || !state.error_details.empty()) {
-        auto const transcript_text = state.error_text.empty() ? state.error_details : state.error_text;
-        state.transcript.push_back(transcript_text_item("error", transcript_text));
+        auto transcript_text = state.error_text.empty() ? state.error_details : state.error_text;
+        state.transcript.push_back(error_transcript_item(std::move(transcript_text), state.error_details));
       }
       settle_responding_activity(state, ToolTimelineStatus::Error, "assistant failed");
       state.run_status = TuiEventRunStatus::Error;

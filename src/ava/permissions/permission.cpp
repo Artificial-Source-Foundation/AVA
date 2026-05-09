@@ -28,6 +28,36 @@ bool operator==(PermissionResolution resolution, PermissionResolutionDecision co
   return decision == resolution;
 }
 
+std::optional<PermissionAction> parse_permission_action(std::string_view value)
+{
+  if (value == "allow") return PermissionAction::Allow;
+  if (value == "ask") return PermissionAction::Ask;
+  if (value == "deny") return PermissionAction::Deny;
+  return std::nullopt;
+}
+
+std::optional<Operation> parse_operation(std::string_view value)
+{
+  if (value == "read") return Operation::ReadFile;
+  if (value == "search") return Operation::SearchFiles;
+  if (value == "edit") return Operation::EditFile;
+  if (value == "bash") return Operation::RunCommand;
+  if (value == "network.fetch") return Operation::NetworkFetch;
+  if (value == "network.search") return Operation::NetworkSearch;
+  if (value == "lsp.server.launch") return Operation::LspServerLaunch;
+  if (value == "lsp.query") return Operation::LspQuery;
+  if (value == "skill") return Operation::SkillLoad;
+  if (value == "plugin.execute") return Operation::PluginExecute;
+  if (value == "plugin.tool.call") return Operation::PluginToolCall;
+  if (value == "plugin.command.run") return Operation::PluginCommandRun;
+  if (value == "plugin.event.observe") return Operation::PluginEventObserve;
+  if (value == "mcp.server.launch") return Operation::McpServerLaunch;
+  if (value == "mcp.server.connect") return Operation::McpServerConnect;
+  if (value == "mcp.tool.call") return Operation::McpToolCall;
+  if (value == "mcp.resource.read") return Operation::McpResourceRead;
+  return std::nullopt;
+}
+
 namespace {
 
 struct ParsedCommand {
@@ -303,6 +333,7 @@ PermissionRisk default_allow_risk(Operation operation)
     case Operation::RunCommand:
     case Operation::NetworkFetch:
     case Operation::NetworkSearch:
+    case Operation::LspServerLaunch:
     case Operation::SkillLoad:
     case Operation::PluginExecute:
     case Operation::PluginToolCall:
@@ -311,6 +342,7 @@ PermissionRisk default_allow_risk(Operation operation)
     case Operation::McpServerLaunch:
     case Operation::McpServerConnect:
     case Operation::McpToolCall:
+    case Operation::McpResourceRead:
       return PermissionRisk::Medium;
     case Operation::ReadFile:
     case Operation::SearchFiles:
@@ -353,6 +385,10 @@ PermissionDecision decide(PermissionRequest const& request)
     return decision(PermissionAction::Ask, "network search requires explicit approval", PermissionRisk::Medium);
   }
 
+  if (request.operation == Operation::LspServerLaunch) {
+    return decision(PermissionAction::Ask, "LSP server launch requires explicit approval", PermissionRisk::High);
+  }
+
   if (request.operation == Operation::SkillLoad) {
     return decision(PermissionAction::Ask, "skill loading requires explicit approval", PermissionRisk::Medium);
   }
@@ -385,6 +421,10 @@ PermissionDecision decide(PermissionRequest const& request)
 
   if (request.operation == Operation::McpToolCall) {
     return decision(PermissionAction::Ask, "MCP tool calls require explicit approval", PermissionRisk::High);
+  }
+
+  if (request.operation == Operation::McpResourceRead) {
+    return decision(PermissionAction::Ask, "MCP resource reads require explicit approval", PermissionRisk::Medium);
   }
 
   return decision(PermissionAction::Allow, "allowed by default workspace policy",
@@ -519,6 +559,8 @@ std::string to_string(Operation operation)
       return "network.fetch";
     case Operation::NetworkSearch:
       return "network.search";
+    case Operation::LspServerLaunch:
+      return "lsp.server.launch";
     case Operation::LspQuery:
       return "lsp.query";
     case Operation::SkillLoad:
@@ -537,6 +579,8 @@ std::string to_string(Operation operation)
       return "mcp.server.connect";
     case Operation::McpToolCall:
       return "mcp.tool.call";
+    case Operation::McpResourceRead:
+      return "mcp.resource.read";
   }
   return "unknown";
 }

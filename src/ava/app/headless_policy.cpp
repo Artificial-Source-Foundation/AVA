@@ -63,7 +63,8 @@ bool prompt_matches_allowed_tool(ava::permissions::PermissionPrompt const& promp
   if (prompt.tool_name.starts_with("mcp_") || prompt.tool_name == "mcp_discovery" || prompt.tool_name == "mcp_tools") {
     return (prompt.operation == ava::permissions::Operation::McpServerLaunch ||
             prompt.operation == ava::permissions::Operation::McpServerConnect ||
-            prompt.operation == ava::permissions::Operation::McpToolCall) &&
+            prompt.operation == ava::permissions::Operation::McpToolCall ||
+            prompt.operation == ava::permissions::Operation::McpResourceRead) &&
            tools.contains("mcp");
   }
   return false;

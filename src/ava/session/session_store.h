@@ -10,10 +10,11 @@
 
 namespace ava::session {
 
-inline constexpr long long kCurrentSessionEntryVersion = 2;
+inline constexpr long long kCurrentSessionEntryVersion = 3;
 
 enum class EntryType {
   SessionStart,
+  SessionMetadata,
   UserMessage,
   AssistantMessage,
   ToolCall,
@@ -24,6 +25,7 @@ enum class EntryType {
   ReasoningBlock,
   ReasoningChange,
   Compaction,
+  BranchSummary,
   Error,
   Cancel,
 };

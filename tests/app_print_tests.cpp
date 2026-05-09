@@ -7,6 +7,7 @@
 #include "ava/config/openai_oauth.h"
 
 #include "ava/permissions/permission.h"
+#include "ava/permissions/permission_rules.h"
 
 #include "ava/provider/openai_provider.h"
 
@@ -399,6 +400,68 @@ void test_app_print_mode_uses_headless_permission_policy()
          "print mode continuation includes allow-tool-approved read_file result");
 }
 
+void test_app_print_mode_uses_persistent_permission_rules()
+{
+  auto const root = temp_root() / "app-print-persistent-permission-rule";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  auto const outside_path = root / "outside-print-rule.txt";
+  write_app_test_file(outside_path, "outside print persistent rule note");
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "print persistent permission rule test opens runtime session");
+  if (!session) return;
+
+  ava::permissions::PermissionRuleStore const store{
+      .global_rules_file = paths.ava_config_dir / "permission-rules.json",
+      .workspace_rules_file = workspace / ".ava" / "permission-rules.json",
+      .workspace_dir = workspace,
+  };
+  auto added = ava::permissions::add_persistent_permission_rule(
+      store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                   .action = ava::permissions::PermissionAction::Allow,
+                                                   .operation = ava::permissions::Operation::ReadFile,
+                                                   .mode = ava::permissions::PermissionRuleMode::Any,
+                                                   .tool_name = "",
+                                                   .target_path = outside_path,
+                                                   .command = "",
+                                                   .reason = "allow exact print outside read",
+                                                   .actor = "test"});
+  expect(added.has_value(), "print persistent permission rule test stores allow rule");
+  if (!added) return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string())),
+                                       sse_response(final_text_sse("persistent print allowed"))});
+  ava::app::RuntimeRunOptions runtime_options;
+  runtime_options.access_token = "token";
+  ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text,
+                                                  .runtime_options = std::move(runtime_options)};
+  std::ostringstream out;
+  std::ostringstream err;
+  auto result = ava::app::run_print_prompt(*session, "read outside with persistent print rule", provider, transport,
+                                           run_options, out, err);
+
+  auto entries = session->store.load();
+  auto audits = entries ? permission_entries(*entries) : std::vector<ava::session::SessionEntry>{};
+  bool persistent_audited = false;
+  for (auto const& audit : audits) {
+    persistent_audited = persistent_audited ||
+                         (ava::core::json::string_field(audit.data_json, "resolution_source") == "persistent_rule" &&
+                          ava::core::json::string_field(audit.data_json, "rule_id") == added->rule_id);
+  }
+  expect(result && result->final_text == "persistent print allowed" && result->tool_calls == 1,
+         "print mode applies matching persistent permission rules before deny fallback");
+  expect(persistent_audited, "print mode persistent permission decisions are audited with the matching rule id");
+}
+
 void test_app_print_mode_refreshes_expired_oauth_before_provider_request()
 {
   auto const root = temp_root() / "app-print-oauth-refresh";
@@ -771,6 +834,7 @@ void run_app_print_tests()
   test_app_print_text_mode_with_streaming_keeps_stdout_final_only();
   test_app_print_text_mode_reports_stdout_write_failure();
   test_app_print_mode_uses_headless_permission_policy();
+  test_app_print_mode_uses_persistent_permission_rules();
   test_app_print_mode_refreshes_expired_oauth_before_provider_request();
   test_app_connect_provider_credentials_headlessly();
   test_app_print_json_mode_outputs_runtime_events();

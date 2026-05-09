@@ -11,6 +11,7 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace ava::tools {
 
@@ -18,56 +19,75 @@ namespace {
 
 constexpr std::size_t kSearchVisitedProgressInterval = 10000;
 constexpr std::size_t kSearchMatchProgressInterval = 500;
+constexpr std::size_t kMaxGlobPatternLength = 512;
+constexpr std::size_t kMaxGlobMatchCells = 512 * 1024;
 
-std::string regex_escape(char ch)
+ava::core::VoidResult validate_glob_pattern(std::string_view pattern)
 {
-  static std::string const special = R"(\.^$|()[]{}+)";
-  if (special.find(ch) != std::string::npos) {
-    return std::string("\\") + ch;
+  if (pattern.size() > kMaxGlobPatternLength) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "glob pattern exceeds maximum length");
+    error.with_context("max_length", std::to_string(kMaxGlobPatternLength));
+    return std::unexpected(std::move(error));
   }
-  return std::string(1, ch);
-}
-
-ava::core::Result<std::regex> glob_to_regex(std::string_view pattern)
-{
   if (pattern.find('[') != std::string_view::npos || pattern.find(']') != std::string_view::npos) {
     auto error =
         ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "glob bracket character classes are not supported");
     error.with_context("pattern", std::string(pattern));
     return std::unexpected(std::move(error));
   }
+  return {};
+}
 
-  std::string out = "^";
-  for (std::size_t i = 0; i < pattern.size(); ++i) {
-    char const ch = pattern[i];
-    if (ch == '*') {
-      if (i + 1 < pattern.size() && pattern[i + 1] == '*') {
-        if (i + 2 < pattern.size() && pattern[i + 2] == '/') {
-          out += "(?:.*/)?";
-          i += 2;
-        } else {
-          out += ".*";
-          ++i;
-        }
-      } else {
-        out += "[^/]*";
-      }
-    } else if (ch == '?') {
-      out += "[^/]";
-    } else {
-      out += regex_escape(ch);
-    }
-  }
-  out += "$";
-
-  try {
-    return std::regex(out, std::regex::ECMAScript);
-  } catch (std::regex_error const& err) {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid glob pattern");
-    error.with_context("pattern", std::string(pattern));
-    error.with_context("cause", err.what());
+ava::core::Result<bool> glob_matches(std::string_view pattern, std::string_view text)
+{
+  auto const pattern_size = pattern.size();
+  auto const text_size = text.size();
+  if ((pattern_size + 1) > kMaxGlobMatchCells / (text_size + 1)) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "glob match exceeds maximum complexity");
+    error.with_context("max_cells", std::to_string(kMaxGlobMatchCells));
     return std::unexpected(std::move(error));
   }
+  std::vector<unsigned char> matches((pattern_size + 1) * (text_size + 1), 0);
+  auto at = [&](std::size_t pattern_index, std::size_t text_index) -> unsigned char& {
+    return matches[(pattern_index * (text_size + 1)) + text_index];
+  };
+
+  at(pattern_size, text_size) = 1;
+  for (std::size_t pattern_offset = 0; pattern_offset < pattern_size; ++pattern_offset) {
+    auto const pattern_index = pattern_size - pattern_offset - 1;
+    bool const globstar_directory = pattern[pattern_index] == '*' && pattern_index + 2 < pattern_size &&
+                                    pattern[pattern_index + 1] == '*' && pattern[pattern_index + 2] == '/';
+    unsigned char directory_prefix_match = 0;
+    for (std::size_t text_offset = 0; text_offset <= text_size; ++text_offset) {
+      auto const text_index = text_size - text_offset;
+      if (globstar_directory && text_index < text_size && text[text_index] == '/') {
+        directory_prefix_match = at(pattern_index, text_index + 1);
+      }
+      char const ch = pattern[pattern_index];
+      if (ch == '*') {
+        if (pattern_index + 1 < pattern_size && pattern[pattern_index + 1] == '*') {
+          if (pattern_index + 2 < pattern_size && pattern[pattern_index + 2] == '/') {
+            bool const zero_directories = at(pattern_index + 3, text_index) != 0;
+            bool const consume_directory = text_index < text_size && text[text_index] != '/' && directory_prefix_match != 0;
+            at(pattern_index, text_index) = zero_directories || consume_directory;
+          } else {
+            bool const zero_chars = at(pattern_index + 2, text_index) != 0;
+            bool const consume_char = text_index < text_size && at(pattern_index, text_index + 1) != 0;
+            at(pattern_index, text_index) = zero_chars || consume_char;
+          }
+        } else {
+          bool const zero_chars = at(pattern_index + 1, text_index) != 0;
+          bool const consume_char = text_index < text_size && text[text_index] != '/' && at(pattern_index, text_index + 1) != 0;
+          at(pattern_index, text_index) = zero_chars || consume_char;
+        }
+      } else if (ch == '?') {
+        at(pattern_index, text_index) = text_index < text_size && text[text_index] != '/' && at(pattern_index + 1, text_index + 1) != 0;
+      } else {
+        at(pattern_index, text_index) = text_index < text_size && ch == text[text_index] && at(pattern_index + 1, text_index + 1) != 0;
+      }
+    }
+  }
+  return at(0, 0) != 0;
 }
 
 std::string relative_slash_path(std::filesystem::path const& root, std::filesystem::path const& path)
@@ -108,6 +128,7 @@ bool is_canceled(ToolContext const& context)
 ava::core::Error search_canceled_error(std::string_view tool_name)
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "tool canceled");
+  error.with_context("canceled", "true");
   error.with_context("tool", std::string(tool_name));
   return error;
 }
@@ -204,6 +225,9 @@ ava::core::Result<GlobResult> glob_files(ToolContext const& context, std::string
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "glob pattern must not be empty");
     return std::unexpected(std::move(error));
   }
+  if (auto valid_pattern = validate_glob_pattern(pattern); !valid_pattern) {
+    return std::unexpected(valid_pattern.error());
+  }
   if (auto canceled = check_canceled(context, "glob"); !canceled) return std::unexpected(std::move(canceled.error()));
   auto const tool_name = context.permission_tool_name.empty() ? std::string("search") : context.permission_tool_name;
   if (auto permission = ensure_permission(context, ava::permissions::Operation::SearchFiles, context.workspace_dir, "",
@@ -212,10 +236,6 @@ ava::core::Result<GlobResult> glob_files(ToolContext const& context, std::string
     return std::unexpected(permission.error());
   }
 
-  auto matcher = glob_to_regex(pattern);
-  if (!matcher) {
-    return std::unexpected(matcher.error());
-  }
   std::optional<IgnoreMatcher> ignore_matcher;
   if (!options.no_ignore) {
     auto loaded_ignore_matcher = IgnoreMatcher::load(context.workspace_dir);
@@ -238,6 +258,10 @@ ava::core::Result<GlobResult> glob_files(ToolContext const& context, std::string
     }
     auto const& entry = *it;
     ++visited;
+    if (options.skip_symlinks && entry.is_symlink(iter_error)) {
+      iter_error.clear();
+      continue;
+    }
     if (visited >= next_visited_progress) {
       if (auto progress = emit_tool_progress(context, "glob visited " + std::to_string(visited) + " paths", "running");
           !progress) {
@@ -280,16 +304,9 @@ ava::core::Result<GlobResult> glob_files(ToolContext const& context, std::string
     }
 
     auto const relative = relative_slash_path(context.workspace_dir, entry.path());
-    bool matched = false;
-    try {
-      matched = std::regex_match(relative, *matcher);
-    } catch (std::regex_error const& err) {
-      auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "glob regex match failed");
-      error.with_context("pattern", std::string(pattern));
-      error.with_context("cause", err.what());
-      return std::unexpected(std::move(error));
-    }
-    if (!matched) {
+    auto matched = glob_matches(pattern, relative);
+    if (!matched) return std::unexpected(std::move(matched.error()));
+    if (!*matched) {
       continue;
     }
 
@@ -351,7 +368,9 @@ ava::core::Result<GrepResult> grep_files(ToolContext const& context, std::string
   auto const case_folded_pattern =
       options.case_insensitive && options.literal ? lowercase_ascii(literal_pattern) : std::string{};
 
-  auto files = glob_files(context, include_glob, GlobOptions{.max_results = 100000, .no_ignore = options.no_ignore});
+  auto files = glob_files(context, include_glob, GlobOptions{.max_results = 100000,
+                                                             .no_ignore = options.no_ignore,
+                                                             .skip_symlinks = options.skip_symlinks});
   if (!files) {
     return std::unexpected(files.error());
   }

@@ -1,0 +1,290 @@
+#include "ava/session/session_metadata.h"
+
+#include "ava/session/record.h"
+
+#include "ava/core/ids.h"
+#include "ava/core/json.h"
+
+#include <algorithm>
+#include <string>
+#include <utility>
+
+namespace ava::session {
+namespace {
+
+bool has_control_byte(std::string_view value)
+{
+  return std::ranges::any_of(value, [](char ch) {
+    auto const byte = static_cast<unsigned char>(ch);
+    return byte < 0x20 || byte == 0x7F;
+  });
+}
+
+ava::core::Error metadata_error(std::string message, std::string_view field = {})
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
+  if (!field.empty())
+    error.with_context("field", std::string(field));
+  return error;
+}
+
+ava::core::VoidResult validate_name(std::optional<std::string> const& name)
+{
+  if (!name)
+    return {};
+  if (name->size() > kMaxSessionNameBytes || has_control_byte(*name))
+  {
+    auto error = metadata_error("session name is invalid", "name");
+    error.with_context("max_bytes", std::to_string(kMaxSessionNameBytes));
+    return std::unexpected(std::move(error));
+  }
+  return {};
+}
+
+ava::core::VoidResult validate_labels(std::optional<std::vector<std::string>> const& labels)
+{
+  if (!labels)
+    return {};
+  if (labels->size() > kMaxSessionLabels)
+  {
+    auto error = metadata_error("too many session labels", "labels");
+    error.with_context("max_labels", std::to_string(kMaxSessionLabels));
+    return std::unexpected(std::move(error));
+  }
+  std::vector<std::string> seen;
+  for (auto const& label : *labels)
+  {
+    if (label.empty() || label.size() > kMaxSessionLabelBytes || has_control_byte(label))
+    {
+      auto error = metadata_error("session label is invalid", "labels");
+      error.with_context("max_bytes", std::to_string(kMaxSessionLabelBytes));
+      return std::unexpected(std::move(error));
+    }
+    if (std::ranges::find(seen, label) != seen.end())
+    {
+      auto error = metadata_error("session labels must be unique", "labels");
+      error.with_context("label", label);
+      return std::unexpected(std::move(error));
+    }
+    seen.push_back(label);
+  }
+  return {};
+}
+
+ava::core::VoidResult validate_optional_session_id(std::string_view value, std::string_view field)
+{
+  if (value.empty())
+    return {};
+  auto valid = validate_session_id(value);
+  if (!valid)
+  {
+    auto error = metadata_error("session metadata contains invalid session id", field);
+    error.with_context("session_id", std::string(value));
+    return std::unexpected(std::move(error));
+  }
+  return {};
+}
+
+ava::core::VoidResult validate_optional_entry_id(std::string_view value, std::string_view field)
+{
+  if (value.empty())
+    return {};
+  auto valid = validate_parent_id(value, "session_metadata");
+  if (!valid)
+  {
+    auto error = metadata_error("session metadata contains invalid entry id", field);
+    error.with_context("entry_id", std::string(value));
+    return std::unexpected(std::move(error));
+  }
+  return {};
+}
+
+bool valid_branch_origin(std::string_view origin)
+{
+  return origin.empty() || origin == "root" || origin == "fork" || origin == "clone" || origin == "manual" || origin == "import";
+}
+
+ava::core::VoidResult validate_update(SessionMetadataUpdate const& update)
+{
+  if (!update.name && !update.labels && update.parent_session_id.empty() && update.source_session_id.empty() && update.branch_from_entry_id.empty() &&
+      update.branch_origin.empty())
+  {
+    return std::unexpected(metadata_error("session metadata update is empty"));
+  }
+  if (auto valid = validate_name(update.name); !valid)
+    return valid;
+  if (auto valid = validate_labels(update.labels); !valid)
+    return valid;
+  if (auto valid = validate_optional_session_id(update.parent_session_id, "parent_session_id"); !valid)
+    return valid;
+  if (auto valid = validate_optional_session_id(update.source_session_id, "source_session_id"); !valid)
+    return valid;
+  if (auto valid = validate_optional_entry_id(update.branch_from_entry_id, "branch_from_entry_id"); !valid)
+    return valid;
+  if (!valid_branch_origin(update.branch_origin))
+  {
+    auto error = metadata_error("session metadata branch_origin is unsupported", "branch_origin");
+    error.with_context("branch_origin", update.branch_origin);
+    return std::unexpected(std::move(error));
+  }
+  if (!update.actor.empty() && (update.actor.size() > kMaxSessionLabelBytes || has_control_byte(update.actor)))
+  {
+    return std::unexpected(metadata_error("session metadata actor is invalid", "actor"));
+  }
+  return {};
+}
+
+std::vector<std::string> labels_from_entry(SessionEntry const& entry)
+{
+  auto const start = ava::core::json::field_value_start(entry.data_json, "labels");
+  if (!start)
+    return {};
+  return ava::core::json::strings_in_array_field(entry.data_json, "labels");
+}
+
+std::string labels_json(std::vector<std::string> const& labels)
+{
+  std::string json = "[";
+  for (std::size_t index = 0; index < labels.size(); ++index)
+  {
+    if (index > 0)
+      json += ',';
+    json += "\"" + ava::core::json::escape(labels[index]) + "\"";
+  }
+  json += ']';
+  return json;
+}
+
+void append_string_field(std::string& json, bool& first, std::string_view key, std::string_view value)
+{
+  if (!first)
+    json += ',';
+  first = false;
+  json += "\"" + std::string(key) + "\":\"" + ava::core::json::escape(value) + "\"";
+}
+
+}  // namespace
+
+ava::core::Result<SessionMetadataView> session_metadata_from_entries(std::vector<SessionEntry> const& entries)
+{
+  SessionMetadataView metadata;
+  for (auto const& entry : entries)
+  {
+    if (entry.type != EntryType::SessionMetadata)
+      continue;
+    if (!ava::core::json::is_valid_object(entry.data_json))
+    {
+      return std::unexpected(metadata_error("session metadata entry data is not valid JSON"));
+    }
+    if (auto const name_start = ava::core::json::field_value_start(entry.data_json, "name"))
+    {
+      (void)name_start;
+      auto name = ava::core::json::string_field(entry.data_json, "name");
+      if (!name)
+        return std::unexpected(metadata_error("session metadata name must be a string", "name"));
+      metadata.name = std::move(*name);
+    }
+    if (ava::core::json::field_value_start(entry.data_json, "labels"))
+    {
+      metadata.labels = labels_from_entry(entry);
+    }
+    if (auto parent = ava::core::json::string_field(entry.data_json, "parent_session_id"); parent && !parent->empty())
+    {
+      metadata.parent_session_id = std::move(*parent);
+    }
+    if (auto source = ava::core::json::string_field(entry.data_json, "source_session_id"); source && !source->empty())
+    {
+      metadata.source_session_id = std::move(*source);
+    }
+    if (auto branch_from = ava::core::json::string_field(entry.data_json, "branch_from_entry_id"); branch_from && !branch_from->empty())
+    {
+      metadata.branch_from_entry_id = std::move(*branch_from);
+    }
+    if (auto origin = ava::core::json::string_field(entry.data_json, "branch_origin"); origin && !origin->empty())
+    {
+      metadata.branch_origin = std::move(*origin);
+    }
+    if (auto actor = ava::core::json::string_field(entry.data_json, "actor"); actor && !actor->empty())
+    {
+      metadata.actor = std::move(*actor);
+    }
+  }
+  return metadata;
+}
+
+ava::core::Result<SessionMetadataView> load_session_metadata(SessionStore const& store)
+{
+  auto entries = store.load();
+  if (!entries)
+    return std::unexpected(std::move(entries.error()));
+  return session_metadata_from_entries(*entries);
+}
+
+ava::core::Result<SessionEntry> make_session_metadata_entry(SessionMetadataUpdate update, std::string parent_entry_id)
+{
+  if (auto valid = validate_update(update); !valid)
+    return std::unexpected(std::move(valid.error()));
+  auto const entry_id = ava::core::make_id("entry");
+  if (auto valid_parent = validate_parent_id(parent_entry_id, entry_id); !valid_parent)
+  {
+    return std::unexpected(std::move(valid_parent.error()));
+  }
+
+  std::string data = "{\"schema_version\":1";
+  bool first = false;
+  if (update.name)
+    append_string_field(data, first, "name", *update.name);
+  if (update.labels)
+  {
+    if (!first)
+      data += ',';
+    first = false;
+    data += "\"labels\":" + labels_json(*update.labels);
+  }
+  if (!update.parent_session_id.empty())
+    append_string_field(data, first, "parent_session_id", update.parent_session_id);
+  if (!update.source_session_id.empty())
+    append_string_field(data, first, "source_session_id", update.source_session_id);
+  if (!update.branch_from_entry_id.empty())
+    append_string_field(data, first, "branch_from_entry_id", update.branch_from_entry_id);
+  if (!update.branch_origin.empty())
+    append_string_field(data, first, "branch_origin", update.branch_origin);
+  if (!update.actor.empty())
+    append_string_field(data, first, "actor", update.actor);
+  data += '}';
+
+  return SessionEntry{
+      .id = entry_id, .parent_id = std::move(parent_entry_id), .type = EntryType::SessionMetadata, .timestamp = now_timestamp(), .data_json = std::move(data)};
+}
+
+ava::core::Result<SessionMetadataView> append_session_metadata(SessionStore& store, SessionMetadataUpdate update)
+{
+  auto entries = store.load();
+  if (!entries)
+    return std::unexpected(std::move(entries.error()));
+  auto parent_entry_id = entries->empty() ? std::string{} : entries->back().id;
+  auto entry = make_session_metadata_entry(std::move(update), std::move(parent_entry_id));
+  if (!entry)
+    return std::unexpected(std::move(entry.error()));
+  if (auto appended = store.append(*entry); !appended)
+    return std::unexpected(std::move(appended.error()));
+  entries->push_back(std::move(*entry));
+  return session_metadata_from_entries(*entries);
+}
+
+std::string session_metadata_json(std::string_view session_id, SessionMetadataView const& metadata)
+{
+  std::string json = "{";
+  json += "\"session_id\":\"" + ava::core::json::escape(session_id) + "\"";
+  json += ",\"name\":\"" + ava::core::json::escape(metadata.name) + "\"";
+  json += ",\"labels\":" + labels_json(metadata.labels);
+  json += ",\"parent_session_id\":\"" + ava::core::json::escape(metadata.parent_session_id) + "\"";
+  json += ",\"source_session_id\":\"" + ava::core::json::escape(metadata.source_session_id) + "\"";
+  json += ",\"branch_from_entry_id\":\"" + ava::core::json::escape(metadata.branch_from_entry_id) + "\"";
+  json += ",\"branch_origin\":\"" + ava::core::json::escape(metadata.branch_origin) + "\"";
+  json += ",\"actor\":\"" + ava::core::json::escape(metadata.actor) + "\"";
+  json += '}';
+  return json;
+}
+
+}  // namespace ava::session

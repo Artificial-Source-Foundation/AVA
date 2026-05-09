@@ -42,7 +42,7 @@ These changes are breaking and require an explicit versioned transition rather t
 - Tightening accepted schemas or resource paths in a way that rejects previously valid safe plugins without a security rationale and migration note.
 - Removing permission prompts, weakening default-deny behavior, or changing audit field meanings.
 - Treating MCP server-declared read-only or safety metadata as sufficient to bypass AVA permissions.
-- Injecting MCP resources into model context without an explicit read-style command/tool design.
+- Injecting MCP resources into model context outside the explicit read-style `mcp.resource.read` tool path.
 
 Security containment fixes may intentionally reject unsafe behavior that previously slipped through validation. Those changes still need tests, release notes, and clear diagnostics.
 
@@ -78,6 +78,6 @@ At minimum, representative golden coverage should include plugin tool schemas, M
 
 ## MCP Boundary And Resource Decision
 
-AVA's current 1.0 MCP boundary is stdio server configuration plus `initialize`, `tools/list`, `tools/call`, `prompts/list`, and `prompts/get`. Launching, connecting, and calling tools are permissioned and audited AVA operations.
+AVA's current 1.0 MCP boundary is stdio server configuration plus `initialize`, `tools/list`, `tools/call`, bounded-paginated `resources/list`, text-only `resources/read`, `prompts/list`, and `prompts/get`. Launching, connecting, calling tools, and reading resources are permissioned and audited AVA operations.
 
-`resources/list` and `resources/read` are explicitly deferred. They should land only in a separate bounded design that treats resources as read-style operations with clear command/tool names, permission prompts, size limits, cancellation, diagnostics, and tests. MCP resources must not be silently injected into prompt context as part of this contract-hardening slice.
+`resources/list` and `resources/read` are exposed only through bounded no-argument model tools with opaque URI-hash tool names, generic provider-facing schema metadata, `mcp.resource.read` permission prompts, JSON-RPC message size limits, cancellation, diagnostics, and tests. Server-controlled resource names, URIs, MIME types, and descriptions are not sent to provider tool schemas before read approval. MCP resources must not be silently injected into prompt context as part of this contract-hardening slice. Blob/binary resource surfacing, resource templates, subscriptions, and remote transports remain future work.

@@ -61,7 +61,7 @@ bool parse_hunk_header(std::string_view line, DiffLineNumbers& numbers)
   return true;
 }
 
-std::string number_cell(std::optional<std::size_t> value)
+std::string number_cell(std::optional<std::size_t> const& value)
 {
   constexpr auto kWidth = std::size_t{4};
   if (!value)
@@ -85,8 +85,8 @@ std::string diff_markup_line(std::string_view raw_line, DiffLineNumbers& numbers
     return std::string(kSgrMuted) + sanitized + std::string(kSgrReset);
   }
 
-  auto old_display = numbers.old_line;
-  auto new_display = numbers.new_line;
+  auto old_cell = number_cell(numbers.old_line);
+  auto new_cell = number_cell(numbers.new_line);
   std::string_view sgr = kSgrMuted;
   auto marker = char{' '};
   auto content = std::string_view(sanitized);
@@ -95,7 +95,7 @@ std::string diff_markup_line(std::string_view raw_line, DiffLineNumbers& numbers
   {
     marker = '+';
     content = std::string_view(sanitized).substr(1);
-    old_display = std::nullopt;
+    old_cell = number_cell(std::nullopt);
     sgr = kSgrSuccess;
     if (numbers.new_line)
       ++(*numbers.new_line);
@@ -104,7 +104,7 @@ std::string diff_markup_line(std::string_view raw_line, DiffLineNumbers& numbers
   {
     marker = '-';
     content = std::string_view(sanitized).substr(1);
-    new_display = std::nullopt;
+    new_cell = number_cell(std::nullopt);
     sgr = kSgrError;
     if (numbers.old_line)
       ++(*numbers.old_line);
@@ -119,18 +119,18 @@ std::string diff_markup_line(std::string_view raw_line, DiffLineNumbers& numbers
   }
   else if (sanitized.starts_with("\\"))
   {
-    old_display = std::nullopt;
-    new_display = std::nullopt;
+    old_cell = number_cell(std::nullopt);
+    new_cell = number_cell(std::nullopt);
     content = sanitized;
   }
   else
   {
-    old_display = std::nullopt;
-    new_display = std::nullopt;
+    old_cell = number_cell(std::nullopt);
+    new_cell = number_cell(std::nullopt);
     content = sanitized;
   }
 
-  return std::string(kSgrMuted) + number_cell(old_display) + " " + number_cell(new_display) + " " + std::string(kSgrReset) + std::string(sgr) + marker +
+  return std::string(kSgrMuted) + old_cell + " " + new_cell + " " + std::string(kSgrReset) + std::string(sgr) + marker +
          std::string(content) + std::string(kSgrReset);
 }
 

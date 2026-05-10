@@ -72,6 +72,7 @@ where **`OPTIONS`** is one or more of the following:
 
 * `-GNinja` : use ninja instead of make (highly recommended)
 * `--log-level=NOTICE` : reduce CMake output to notices, warnings and errors. Possible values are `ERROR`, `WARNING`, `NOTICE`, `STATUS` (default), `VERBOSE`, `DEBUG`, and `TRACE`.
+  As a developer you should use the default (STATUS) or more verbose, otherwise the CMake options are not shown.
 * `-DCMAKE_CXX_COMPILER_LAUNCHER=ccache` : also set the environment variable `CCACHE_DIR` to a writable directory. As an active developer this is a must to speed up recompilations.
 * `-DAVA_BUILD_TESTS=ON` : to compile the testsuite of ava.
 * `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` : generate the `compile_commands.json` compilation database, useful for tools that need the exact compiler command line for each source file.
@@ -80,7 +81,8 @@ where **`OPTIONS`** is one or more of the following:
   - `clang-tidy`, for static analysis and automated lint/fix checks.
   - other Clang-based tooling, including custom LibTooling tools, refactoring tools, include analyzers and source indexers.
 
-Other options are printed, using colors, during configuration. For example:
+Provided the `--log-level` is `STATUS` other options are printed, using colors, during configuration.
+For example:
 ```
 -- Option EnableDebug (Build for debugging) =
         ON (default)

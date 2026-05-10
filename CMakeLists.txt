@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.25...4.3.2)
 
-project(ava VERSION 1.0.0 LANGUAGES CXX)
+project(ava
+  VERSION 1.0.0
+  LANGUAGES CXX
+  DESCRIPTION "OpenAI-first C++23 terminal coding agent with an ncursesw TUI"
+)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

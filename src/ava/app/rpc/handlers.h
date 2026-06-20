@@ -34,6 +34,7 @@ struct ProviderHandle {
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_requested_model(RuntimeSession const& session,
                                                                                 RpcCommand const& command);
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> next_runtime_model(RuntimeSession const& session);
+[[nodiscard]] ava::core::Result<ava::config::ModelInfo> previous_runtime_model(RuntimeSession const& session);
 [[nodiscard]] ava::core::Result<ProviderHandle> provider_for_session_model(
     RuntimeSession const& session, std::string_view injected_provider_id,
     ava::provider::Provider const& injected_provider);

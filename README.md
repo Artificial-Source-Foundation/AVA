@@ -10,6 +10,7 @@ Dependencies:
 
 - CMake 3.25+
 - C++23 compiler
+- Boost development headers and CMake package
 - `ncursesw` development headers/library
 - `curl` executable for provider HTTP transport
 
@@ -92,15 +93,23 @@ The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME
 - `/help`: show commands and hotkeys
 - `/hotkeys`: show effective TUI hotkeys
 - `/mode`: toggle build/plan mode
-- `/details`: toggle TUI tool detail expansion
+- `/details` or Ctrl+O: toggle TUI tool detail expansion
+- `/copy [tool|diff]`: copy the latest AVA message, latest tool-card details, or latest unified diff in the TUI
 - `/thinking`: toggle inline thinking block visibility without changing provider reasoning mode
 - `/connect`: open provider and login method modals; `/login` is an alias
-- `/models [query|provider/model]`: list configured models and capabilities; `/model` is an alias
-- `/sessions [query|id]`: list resumable sessions for the current workspace
+- `/models [query|provider/model]`: list configured models and capabilities; `/model` is an alias, Ctrl+L opens the TUI model selector, and Ctrl+P cycles to the next configured model between turns
+- `/sessions [--archived] [query|id]`, `/sessions rename <id> <name|--clear>`, `/sessions labels <id> <label...|--clear>`, `/sessions archive <id> --confirm`, or `/sessions unarchive <id>`: show the resumable session tree, rename/label sessions, or hide/restore sessions without deleting their JSONL files; `/tree` is an alias for the tree view
+- `/fork [name]`: fork the current session at its latest entry and switch to the branch
+- `/clone [name]`: clone the full current session and switch to the copy
+- `/new [name]`: start a fresh session and switch to it
+- `/resume [id]`: resume/switch to an existing session by exact id or unique prefix; exact `/resume` opens the TUI session selector, where PageUp/PageDown page through rows, Ctrl+S or Ctrl+T cycles recent/name/path sort, Ctrl+N toggles named sessions only, Ctrl+P toggles path display, Ctrl+A shows/hides archived sessions, Ctrl+R restores a rename command, Ctrl+L restores a labels command, and Ctrl+D twice archives or restores the highlighted session
+- `/name <name|--clear>`: set or clear the current session display name; `/rename` is an alias
+- `/labels <label...|--clear>`: set or clear current session labels; `/label` is an alias
 - `/context [query|source]`: list loaded context sources
 - `/compact [instructions]`: generate and record a provider summary
 - `/export`: export this session as markdown
 - `/stats`: show session counts, usage, cost, and resume/export hints; `/status` is an alias
+- `/permissions <list|audit|diagnose|explain|add|remove> ...`: inspect session permission audits and manage persistent permission rules; `/permission-rules` and `/perms` are aliases
 - `/read <path>`: read a file through permissions
 - `/write <path> <text>`: write a file through permissions using atomic replacement where practical
 - `/glob <pattern>`: list readable matching files
@@ -117,17 +126,18 @@ The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME
 - Tool calling is implemented through the provider contract and the built-in dispatcher.
 - `apply_patch` currently supports up to 32 exact text replacements through an `edits` array.
 - `question` opens an interactive TUI modal with single-select, multi-select, custom-answer, secret-entry, and cancel handling. Headless RPC clients can answer question requests through the protocol.
-- Interactive TUI permission prompts exist for backend `ask` decisions; file mutation asks show backend-provided unified diffs when available. Permission decisions are persisted in session audit entries, while non-TTY mode still fails closed unless an explicit headless allow policy is supplied or RPC replies are provided.
-- Deferred: multiple fully selectable providers, plugins, MCP, full session tree UI, LSP, persistent permission rules, and full diff navigation.
+- Interactive TUI permission prompts exist for backend `ask` decisions; file mutation asks show backend-provided unified diffs when available. TUI prompts support one-shot allow/deny plus remembered exact allow/deny rule choices backed by the protected persistent-rule store. Permission decisions are persisted in session audit entries and can be inspected with `/permissions audit`, while non-TTY mode still fails closed unless an explicit headless allow policy is supplied or RPC replies are provided.
+- Historical 0.2 deferrals have mostly moved into the backend: multiple providers, plugins, MCP, LSP, persistent permission rules, interactive rule-management commands, and session tree/fork/clone RPC contracts now exist. Remaining follow-up work is product polish such as deeper audit navigation, provider-generated branch summaries, automatic LSP recipes, and full diff navigation.
 
 ## 0.32 TUI Notes
 
 - The interactive TUI now enters a wide-character ncurses (`ncursesw`) session for terminal mode, input, resize, mouse, and screen drawing.
 - The visible layout remains composer-first: compact identity strip, role-aware transcript lines, compact tool cards, and a bottom-pinned AVA-style composer with the elevated surface, blue rail, and `❯` prompt.
 - The composer is intentionally quiet: no persistent keybinding help or transcript status line is rendered in the input area.
+- Shift+Enter, Ctrl+Enter, or Alt+Enter inserts a newline. Arrow Up/Down move inside multiline drafts and recall prompt history at the draft boundary before falling back to transcript scroll. Home/Ctrl+A and End/Ctrl+E move to the current line boundary. Ctrl+Left/Right, Alt+Left/Right, or Alt+B/F move by word. Ctrl+] jumps forward to the next typed character, Ctrl+Alt+] jumps backward, Delete or Ctrl+D deletes the character after the cursor while the draft has text, Ctrl+W or Alt+Backspace deletes the previous word, Alt+D or Alt+Delete deletes the next word, Ctrl+K deletes to line end and joins the next line when already at line end, Ctrl+Z or Ctrl+- undoes the last edit, Ctrl+L opens the model selector between turns, Ctrl+P cycles to the next configured model between turns, and Ctrl+D exits when the composer is empty.
 - The slash palette opens above the composer with command metadata, keyboard focus cues, and narrow-terminal fallback.
-- During an active assistant or `/compact` run, Enter on a draft queues a backend-owned follow-up turn. `/steer ...` queues steering for the next safe provider boundary. Pending queued items render above the composer, and `/restore` restores the latest pending queued item to the draft before it starts. Queue lifecycle events render as transcript audit entries.
-- Permission requests replace the composer with an approval dock. `Deny` stays the default focus; `A` allows once and `D` denies. Mutation prompts render backend-provided diffs before approval when AVA can safely compute them.
+- During an active assistant or `/compact` run, Enter on a draft queues a backend-owned follow-up turn. `/steer ...` queues steering for the next safe provider boundary. Pending queued items render above the composer, and `/restore` or Alt+Up restores the latest pending queued item to the draft before it starts. Stopped turns say to submit a new prompt to continue; pending queued items skipped by stop/finish render as transcript audit entries with delivery guidance.
+- Permission requests replace the composer with an approval dock. `Deny` stays the default focus; `A` allows once, `D` denies, and `R` toggles a remembered allow/deny rule choice when persistent rules are available. Mutation prompts render backend-provided diffs before approval when AVA can safely compute them.
 - Non-TTY stdin/stdout still use the line shell fallback for scripts and tests.
 - Later frontend work added live assistant/tool lifecycle updates, inline thinking visibility, and backend-provided tool detail/diff rendering in the TUI. 0.32 did not add providers, persistent permission rules, session-wide allows, MCP, plugins, or a session tree UI.
 
@@ -166,6 +176,7 @@ The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME
 - `docs/CONTRIBUTING.md`
 - `docs/roadmap/backend.md`
 - `docs/product/backend-capabilities-1.0.md`
+- `docs/product/mvp-baseline.md`
 - `docs/product/product-plan.md`
 - `docs/product/tooling-plan.md`
 - `docs/product/architecture-plan.md`

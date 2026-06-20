@@ -402,10 +402,18 @@ ava::core::Result<FileMutationResult> write_file(ToolContext const& context, std
     return std::unexpected(std::move(canceled.error()));
   }
 
+  auto attach_preview = [&preview](ava::core::Result<FileMutationResult> written) -> ava::core::Result<FileMutationResult> {
+    if (written && preview) {
+      written->diff = std::move(preview->text);
+      written->diff_truncated = preview->truncated;
+    }
+    return written;
+  };
+
   if (options.mutation_already_locked)
-    return write_file_unlocked(context, path, content);
+    return attach_preview(write_file_unlocked(context, path, content));
   [[maybe_unused]] auto mutation_lock = effective_mutation_queue(context)->lock_path(path);
-  return write_file_unlocked(context, path, content);
+  return attach_preview(write_file_unlocked(context, path, content));
 }
 
 ava::core::Result<FileMutationResult> edit_file(ToolContext const& context, std::filesystem::path const& path, std::string_view old_text,

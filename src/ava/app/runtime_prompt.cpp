@@ -5,15 +5,24 @@
 #include "ava/app/runtime_reasoning.h"
 #include "ava/app/runtime_retry.h"
 
+#include "ava/agent/agent_loop_session.h"
+
 #include "ava/context/skill_loader.h"
 
 #include "ava/lsp/configured_provider.h"
 
 #include "ava/permissions/permission_rules.h"
 
+#include "ava/tools/file_tools.h"
+
+#include <algorithm>
+#include <cctype>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace ava::app::runtime {
 
@@ -80,6 +89,145 @@ bool is_agent_loop_canceled_error(ava::core::Error const& error)
          error.message() == "transport request canceled";
 }
 
+constexpr std::size_t kMaxPromptFileReferences = 5;
+constexpr std::size_t kPromptReferenceMaxBytes = 32 * 1024;
+constexpr std::size_t kPromptReferenceMaxLines = 300;
+
+struct PromptFileReference
+{
+  std::string path;
+};
+
+bool is_reference_start(std::string_view text, std::size_t index)
+{
+  return text[index] == '@' && (index == 0 || std::isspace(static_cast<unsigned char>(text[index - 1])) != 0);
+}
+
+bool is_trailing_reference_punctuation(char ch)
+{
+  switch (ch)
+  {
+    case '.':
+    case ',':
+    case ';':
+    case ':':
+    case '!':
+    case '?':
+    case ')':
+    case ']':
+    case '}':
+      return true;
+    default:
+      return false;
+  }
+}
+
+std::vector<PromptFileReference> prompt_file_references(std::string_view text)
+{
+  std::vector<PromptFileReference> references;
+  auto add_reference = [&references](std::string path) {
+    if (path.empty())
+      return;
+    if (std::ranges::any_of(references, [&](PromptFileReference const& existing) { return existing.path == path; }))
+      return;
+    references.push_back(PromptFileReference{.path = std::move(path)});
+  };
+  for (std::size_t index = 0; index < text.size(); ++index)
+  {
+    if (!is_reference_start(text, index))
+      continue;
+    if (index + 1 < text.size() && text[index + 1] == '"')
+    {
+      auto end = index + 2;
+      while (end < text.size() && text[end] != '"') ++end;
+      add_reference(std::string(text.substr(index + 2, end - index - 2)));
+      index = end;
+      continue;
+    }
+    auto end = index + 1;
+    while (end < text.size() && std::isspace(static_cast<unsigned char>(text[end])) == 0) ++end;
+    auto token_end = end;
+    while (token_end > index + 1 && is_trailing_reference_punctuation(text[token_end - 1])) --token_end;
+    if (token_end <= index + 1)
+      continue;
+    add_reference(std::string(text.substr(index + 1, token_end - index - 1)));
+  }
+  return references;
+}
+
+ava::tools::ToolContext prompt_file_reference_context(RuntimeSession& session, RuntimeRunOptions const& options)
+{
+  return ava::tools::ToolContext{
+      .workspace_dir = session.workspace_dir,
+      .spill_dir = session.store.session_path().parent_path() / "spill",
+      .mode = session.mode,
+      .permission_resolver = options.permission_resolver,
+      .permission_audit_sink = [&store = session.store, session_mutex = options.session_mutex](
+                                   ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+        if (session_mutex)
+        {
+          std::lock_guard lock(*session_mutex);
+          return ava::agent::append_permission_decision(store, event);
+        }
+        return ava::agent::append_permission_decision(store, event);
+      },
+      .cancel_requested = options.cancel_requested,
+      .permission_tool_name = "file_reference",
+      .permission_actor = "user",
+      .session_id = session.store.session_id(),
+      .provider_id = session.model.provider_id,
+      .model_id = session.model.model_id,
+      .current_dir = session.current_dir};
+}
+
+ava::core::Result<std::string> expand_prompt_file_references(RuntimeSession& session, std::string const& user_message,
+                                                             RuntimeRunOptions const& options)
+{
+  auto references = prompt_file_references(user_message);
+  if (references.empty())
+    return user_message;
+  if (references.size() > kMaxPromptFileReferences)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "too many @ file references");
+    error.with_context("max_references", std::to_string(kMaxPromptFileReferences));
+    error.with_context("reference_count", std::to_string(references.size()));
+    return std::unexpected(std::move(error));
+  }
+
+  auto context = prompt_file_reference_context(session, options);
+  std::string expanded = user_message;
+  expanded += "\n\nReferenced files:";
+  for (auto const& reference : references)
+  {
+    auto read = ava::tools::read_file(context, session.current_dir / reference.path,
+                                      ava::tools::ReadOptions{.max_bytes = kPromptReferenceMaxBytes,
+                                                              .offset_line = 1,
+                                                              .max_lines = kPromptReferenceMaxLines});
+    if (!read)
+    {
+      auto error = read.error();
+      error.with_context("file_reference", reference.path);
+      return std::unexpected(std::move(error));
+    }
+    expanded += "\n\n--- ";
+    expanded += reference.path;
+    expanded += " ---\n";
+    expanded += read->content;
+    if (read->truncated)
+    {
+      expanded += "\n[reference truncated";
+      if (read->next_offset_line > 0)
+        expanded += "; next offset " + std::to_string(read->next_offset_line);
+      if (read->byte_limited)
+        expanded += "; byte cap reached";
+      if (read->line_limited)
+        expanded += "; line cap reached";
+      expanded += "]";
+    }
+  }
+  return expanded;
+}
+
 }  // namespace
 
 ava::core::Result<RuntimePromptState> select_runtime_prompt_state(RuntimeSession const& session, ava::agent::Mode mode)
@@ -113,21 +261,25 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
     runtime_transport = &*retry_transport;
     runtime_options.enable_transport_retries = false;
   }
+  ava::permissions::register_enforceable_permission_rule_files(
+      ava::permissions::PermissionRuleStore{.global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
+                                            .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
+                                            .workspace_dir = session.workspace_dir});
+
+  auto expanded_user_message = expand_prompt_file_references(session, user_message, runtime_options);
+  if (!expanded_user_message)
+    return std::unexpected(std::move(expanded_user_message.error()));
+
   auto session_event = base_event_locked(session, RuntimeEventType::SessionStart, options.session_mutex);
   if (auto emitted = emit_event(event_sink, session_event); !emitted) {
     return std::unexpected(std::move(emitted.error()));
   }
 
   auto user_event = base_event_locked(session, RuntimeEventType::UserMessage, options.session_mutex);
-  user_event.text = user_message;
+  user_event.text = *expanded_user_message;
   if (auto emitted = emit_event(event_sink, user_event); !emitted) {
     return std::unexpected(std::move(emitted.error()));
   }
-
-  ava::permissions::register_enforceable_permission_rule_files(
-      ava::permissions::PermissionRuleStore{.global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
-                                            .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
-                                            .workspace_dir = session.workspace_dir});
 
   auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
       .global_config_file = session.paths.ava_config_dir / "lsp.json",
@@ -263,7 +415,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
       .session_mutex = runtime_options.session_mutex,
       .model_pricing = session.model.pricing});
 
-  auto result = loop.run_turn(user_message, session.store, provider, *runtime_transport);
+  auto result = loop.run_turn(*expanded_user_message, session.store, provider, *runtime_transport);
   if (sink_error) return std::unexpected(std::move(*sink_error));
   if (!result) {
     auto event = base_event_locked(

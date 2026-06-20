@@ -11,6 +11,8 @@
 
 namespace ava::tui {
 
+struct TuiKeyBindings;
+
 enum class ToolTimelineStatus
 {
   Running,
@@ -29,6 +31,20 @@ enum class ToolLifecycleState
   Error,
 };
 
+struct ToolPermissionAuditItem
+{
+  std::string permission_request_id = {};
+  std::string resolver_request_id = {};
+  std::string decision = {};
+  std::string operation = {};
+  std::string tool_name = {};
+  std::string risk = {};
+  std::string reason = {};
+  std::string target = {};
+  std::string command = {};
+  std::string resolution_reason = {};
+};
+
 struct ToolTimelineItem
 {
   ToolTimelineStatus status = ToolTimelineStatus::Running;
@@ -42,6 +58,8 @@ struct ToolTimelineItem
   std::string correlation_id = {};
   ToolLifecycleState lifecycle = ToolLifecycleState::ExecutionStarted;
   std::optional<bool> details_visible = std::nullopt;
+  std::vector<std::string> permission_request_ids = {};
+  std::vector<ToolPermissionAuditItem> permissions = {};
   std::string diff = {};
   bool diff_truncated = false;
   std::vector<std::string> changed_paths = {};
@@ -141,10 +159,22 @@ struct SlashCommandItem
   std::string completion_insert_text = "";
 };
 
+struct FileReferenceItem
+{
+  std::string value;
+  std::string description;
+  std::string category = "Files";
+  bool directory = false;
+  bool enabled = true;
+  std::string disabled_reason = "";
+};
+
 enum class PermissionPromptChoice
 {
   Deny,
   Allow,
+  DenyRemember,
+  AllowRemember,
 };
 
 enum class PermissionPromptInputAction
@@ -153,6 +183,8 @@ enum class PermissionPromptInputAction
   Redraw,
   ResolveAllow,
   ResolveDeny,
+  ResolveAllowRemember,
+  ResolveDenyRemember,
 };
 
 struct PermissionPromptInputResult
@@ -168,8 +200,10 @@ struct PermissionPromptView
   std::string target;
   std::string command;
   std::string reason;
+  std::string risk;
   std::string diff_preview = {};
   bool diff_truncated = false;
+  bool remember_available = false;
   PermissionPromptChoice selected_choice = PermissionPromptChoice::Deny;
 };
 
@@ -231,6 +265,13 @@ enum class SelectListInputAction
   Redraw,
   Resolve,
   Cancel,
+  CycleSort,
+  ToggleNamedFilter,
+  TogglePathDisplay,
+  ToggleArchivedFilter,
+  Rename,
+  Label,
+  Archive,
 };
 
 struct SelectListInputResult
@@ -266,11 +307,13 @@ struct ComposerSnapshot
   std::optional<std::string> reasoning_status = std::nullopt;
   std::vector<TranscriptItem> transcript;
   std::vector<SlashCommandItem> slash_commands = {};
+  std::vector<FileReferenceItem> file_references = {};
   std::optional<PermissionPromptView> permission_prompt = std::nullopt;
   std::optional<QuestionPromptView> question_prompt = std::nullopt;
   std::optional<SelectListView> select_list = std::nullopt;
   std::size_t selected_slash_command_index = 0;
   bool slash_palette_suppressed = false;
+  bool path_completion_force_active = false;
   std::size_t transcript_scroll_offset = 0;
   std::size_t transcript_new_output_count = 0;
   std::size_t width = 80;
@@ -292,18 +335,60 @@ struct ComposerSnapshot
 [[nodiscard]] std::optional<std::string> slash_command_selection_disabled_reason(std::string_view input, std::vector<SlashCommandItem> const& commands,
                                                                                  std::size_t selected_index);
 [[nodiscard]] std::optional<std::size_t> slash_palette_selection_for_screen_row(ComposerSnapshot const& snapshot, std::size_t row);
+[[nodiscard]] std::vector<FileReferenceItem> filter_file_references(std::string_view input, std::size_t cursor,
+                                                                    std::vector<FileReferenceItem> const& references);
+[[nodiscard]] bool file_reference_palette_visible(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references);
+[[nodiscard]] std::size_t clamp_file_reference_selection(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references,
+                                                        std::size_t selected_index);
+[[nodiscard]] std::size_t previous_file_reference_selection(std::string_view input, std::size_t cursor,
+                                                           std::vector<FileReferenceItem> const& references, std::size_t selected_index);
+[[nodiscard]] std::size_t next_file_reference_selection(std::string_view input, std::size_t cursor, std::vector<FileReferenceItem> const& references,
+                                                       std::size_t selected_index);
+struct FileReferenceSelectionText
+{
+  std::string text;
+  std::size_t cursor = 0;
+};
+[[nodiscard]] FileReferenceSelectionText file_reference_selection_text(std::string_view input, std::size_t cursor,
+                                                                       std::vector<FileReferenceItem> const& references,
+                                                                       std::size_t selected_index);
+[[nodiscard]] std::vector<FileReferenceItem> filter_path_completions(std::string_view input, std::size_t cursor,
+                                                                     std::vector<FileReferenceItem> const& references,
+                                                                     bool force = false);
+[[nodiscard]] bool path_completion_palette_visible(std::string_view input, std::size_t cursor,
+                                                   std::vector<FileReferenceItem> const& references, bool force = false);
+[[nodiscard]] std::size_t clamp_path_completion_selection(std::string_view input, std::size_t cursor,
+                                                         std::vector<FileReferenceItem> const& references,
+                                                         std::size_t selected_index, bool force = false);
+[[nodiscard]] std::size_t previous_path_completion_selection(std::string_view input, std::size_t cursor,
+                                                            std::vector<FileReferenceItem> const& references,
+                                                            std::size_t selected_index, bool force = false);
+[[nodiscard]] std::size_t next_path_completion_selection(std::string_view input, std::size_t cursor,
+                                                        std::vector<FileReferenceItem> const& references,
+                                                        std::size_t selected_index, bool force = false);
+struct PathCompletionSelectionText
+{
+  std::string text;
+  std::size_t cursor = 0;
+};
+[[nodiscard]] PathCompletionSelectionText path_completion_selection_text(std::string_view input, std::size_t cursor,
+                                                                        std::vector<FileReferenceItem> const& references,
+                                                                        std::size_t selected_index,
+                                                                        bool force = false);
 [[nodiscard]] std::vector<std::string> render_composer(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::size_t composer_main_width(ComposerSnapshot const& snapshot);
 [[nodiscard]] bool draw_screen(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::string sanitize_terminal_text(std::string_view text);
 [[nodiscard]] std::vector<std::string> split_lines(std::string_view text);
-[[nodiscard]] PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event);
+[[nodiscard]] PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event,
+                                                                         bool remember_available = false);
 [[nodiscard]] QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const& prompt, InputEvent event);
 [[nodiscard]] std::vector<std::size_t> filter_select_list_items(SelectListView const& view);
 [[nodiscard]] std::size_t clamp_select_list_selection(SelectListView const& view, std::size_t selected_index);
 [[nodiscard]] std::size_t previous_select_list_selection(SelectListView const& view, std::size_t selected_index);
 [[nodiscard]] std::size_t next_select_list_selection(SelectListView const& view, std::size_t selected_index);
 [[nodiscard]] SelectListInputResult handle_select_list_input(SelectListView const& view, InputEvent event);
+[[nodiscard]] SelectListInputResult handle_select_list_input(SelectListView const& view, InputEvent event, TuiKeyBindings const& bindings);
 [[nodiscard]] std::string to_string(ToolTimelineStatus status);
 [[nodiscard]] std::string to_string(ToolLifecycleState state);
 

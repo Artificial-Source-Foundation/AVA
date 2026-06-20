@@ -132,6 +132,33 @@ ava::core::Result<ava::config::ModelInfo> next_runtime_model(RuntimeSession cons
   return models[next_index];
 }
 
+ava::core::Result<ava::config::ModelInfo> previous_runtime_model(RuntimeSession const& session)
+{
+  auto registry = ava::config::load_model_registry(session.paths);
+  if (!registry)
+    return std::unexpected(std::move(registry.error()));
+  auto const providers = ava::provider::builtin_provider_registry();
+  std::vector<ava::config::ModelInfo> models;
+  for (auto const& model : effective_models(*registry))
+  {
+    if (providers.contains(model.provider_id))
+      models.push_back(model);
+  }
+  if (models.empty())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "no registered provider models are configured"));
+
+  std::size_t previous_index = models.size() - 1;
+  for (std::size_t index = 0; index < models.size(); ++index)
+  {
+    if (models[index].provider_id == session.model.provider_id && models[index].model_id == session.model.model_id)
+    {
+      previous_index = index == 0 ? models.size() - 1 : index - 1;
+      break;
+    }
+  }
+  return models[previous_index];
+}
+
 ava::core::Result<ProviderHandle> provider_for_session_model(RuntimeSession const& session, std::string_view injected_provider_id,
                                                              ava::provider::Provider const& injected_provider)
 {

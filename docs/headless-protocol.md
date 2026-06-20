@@ -30,7 +30,7 @@ Headless modes are fail-closed by default for backend permission decisions whose
 Supported policy flags:
 
 - `--allow read-only`: allows read/search-style permission prompts (`read_file`, `list_directory`, `glob`, and `grep` shapes) when the backend asks. Network, write, edit, patch, bash, and question prompts remain denied.
-- `--allow-tool glob,grep,list_directory,read_file,webfetch,mcp`: allows only the listed exact tool families when they produce compatible ask prompts. Supported values are `glob`, `grep`, `list_directory`, `read_file`, `webfetch`, and `mcp`; unsupported values such as `bash`, `write_file`, `edit_file`, `apply_patch`, `question`, or arbitrary strings are rejected as usage errors. `webfetch` only auto-allows exact `network.fetch` prompts produced by the `webfetch` tool; `mcp` auto-allows MCP server launch/connect plus `mcp.tool.call` and `mcp.resource.read` prompts for MCP-prefixed tools; `--allow read-only` never allows network or MCP prompts.
+- `--allow-tool glob,grep,list_directory,read_file,skill,webfetch,websearch,mcp`: allows only the listed exact tool families when they produce compatible ask prompts. Supported values are `glob`, `grep`, `list_directory`, `read_file`, `skill`, `webfetch`, `websearch`, and `mcp`; unsupported values such as `bash`, `write_file`, `edit_file`, `apply_patch`, `question`, or arbitrary strings are rejected as usage errors. `skill` only auto-allows exact `skill` prompts from the `skill` tool, `webfetch` only auto-allows exact `network.fetch` prompts produced by the `webfetch` tool, `websearch` only auto-allows exact `network.search` prompts produced by the `websearch` tool, and `mcp` auto-allows MCP server launch/connect plus `mcp.tool.call` and `mcp.resource.read` prompts for MCP-prefixed tools; `--allow read-only` never allows skill, network, or MCP prompts.
 
 Examples:
 
@@ -38,12 +38,14 @@ Examples:
 ava --print "summarize the repo" --allow read-only
 ava --print "inspect this file" --allow-tool read_file
 ava --print "find symbols" --allow-tool glob,grep,list_directory
+ava --print "load the relevant skill" --allow-tool skill
 ava --print "fetch release notes" --allow-tool webfetch
+ava --print "search current release notes" --allow-tool websearch
 ava --print "use configured MCP context" --allow-tool mcp
 ava --rpc --allow read-only
 ```
 
-Invalid permission flag values exit with code `2` and write a usage error to stderr before provider/auth startup. In RPC mode, matching read/search, exact `webfetch` network prompts, or MCP prompts covered by `--allow-tool mcp` are auto-allowed before `permission_requested`; non-matching ask prompts still require an explicit `permission_reply` unless a persistent permission rule matches. RPC clients may reply with `allow_session` to create an in-memory exact-match grant for the current RPC process. Those grants are inspectable, revocable, and clearable through RPC commands; they are not persisted across AVA restarts. Persistent rules are managed only by `permission_rule_add`/`permission_rule_remove` and are stored outside the model-writable workspace path.
+Invalid permission flag values exit with code `2` and write a usage error to stderr before provider/auth startup. In RPC mode, matching read/search, exact `skill`, exact `webfetch`/`websearch` network prompts, or MCP prompts covered by `--allow-tool mcp` are auto-allowed before `permission_requested`; non-matching ask prompts still require an explicit `permission_reply` unless a persistent permission rule matches. RPC clients may reply with `allow_session` to create an in-memory exact-match grant for the current RPC process. Those grants are inspectable, revocable, and clearable through RPC commands; they are not persisted across AVA restarts. Persistent rules are managed only by `permission_rule_add`/`permission_rule_remove` and are stored outside the model-writable workspace path.
 
 ## Stdout / Stderr Contract
 
@@ -293,9 +295,9 @@ Session metadata, tree, fork, clone, and branch summaries:
 {"id":"5j","type":"summarize_branch","session_id":"session_source","branch_root_entry_id":"entry_root","branch_tip_entry_id":"entry_tip","summary":"Branch explored X and was abandoned because Y.","provider":"openai","model":"gpt-test","reason":"manual review"}
 ```
 
-`session_metadata` returns the current session's append-only metadata view: `session_id`, `name`, `labels`, `parent_session_id`, `source_session_id`, `branch_from_entry_id`, `branch_origin`, and `actor`. `set_session_name` and `set_session_labels` append `session_metadata` entries and return the same metadata shape. Names are capped at 256 bytes; labels are unique non-empty strings, capped at 32 labels and 64 bytes per label. Metadata writes are rejected while a prompt is active.
+`session_metadata` returns the current session's append-only metadata view: `session_id`, `name`, `labels`, `archived`, `parent_session_id`, `source_session_id`, `branch_from_entry_id`, `branch_origin`, and `actor`. `set_session_name` and `set_session_labels` append `session_metadata` entries and return the same metadata shape. Names are capped at 256 bytes; labels are unique non-empty strings, capped at 32 labels and 64 bytes per label. Metadata writes are rejected while a prompt is active.
 
-`session_tree` returns `{current_session_id,roots,leaves,path,sessions}` for the current workspace. Each session node includes summary fields, metadata fields, `actor`, `children`, `leaf`, and `current`. Parent metadata cycles are cut for tree output: affected nodes remain visible as usable roots/leaves instead of making `roots`, `leaves`, or `path` unusable.
+`session_tree` returns `{current_session_id,roots,leaves,path,sessions}` for the current workspace. Each session node includes summary fields, metadata fields including `archived`, `actor`, `children`, `leaf`, and `current`. Parent metadata cycles are cut for tree output: affected nodes remain visible as usable roots/leaves instead of making `roots`, `leaves`, or `path` unusable.
 
 `fork_session` creates a new session by copying the source through `branch_from_entry_id`, appends provenance metadata (`parent_session_id`, `source_session_id`, `branch_from_entry_id`, `branch_origin:"fork"`, `actor:"rpc"`), switches to the new session, and returns the state shape with `created:true`. If `session_id` is omitted, the current session is the source; if `branch_from_entry_id` is omitted, the source tip is used. When provided, `session_id` and `branch_from_entry_id` must be non-empty strings. `clone_session` copies the full source session, appends provenance metadata with `branch_origin:"clone"`, switches to it, and returns the state shape with `created:true`. `clone_session` rejects `branch_from_entry_id` because clones always copy the full source. Both commands leave the source session file untouched and are rejected while a prompt is active.
 
@@ -446,7 +448,7 @@ RPC notifications may reuse the event envelopes above. Request ids are client-ow
 
 Headless operation is fail-closed by default:
 
-- Permission decisions that require user approval fail unless headless policy supplies `--allow read-only`/`--allow-tool` for a supported read/search tool, `--allow-tool webfetch` for exact `network.fetch` webfetch prompts, `--allow-tool mcp` for MCP launch/connect/tool/resource prompts, or RPC mode receives an explicit `permission_reply` for the active resolver request.
+- Permission decisions that require user approval fail unless headless policy supplies `--allow read-only`/`--allow-tool` for a supported read/search tool, `--allow-tool skill` for exact skill loads, `--allow-tool webfetch` for exact `network.fetch` webfetch prompts, `--allow-tool websearch` for exact `network.search` websearch prompts, `--allow-tool mcp` for MCP launch/connect/tool/resource prompts, or RPC mode receives an explicit `permission_reply` for the active resolver request.
 - The `question` tool fails with an unavailable interaction error unless RPC mode receives an explicit `question_reply` for the active resolver request.
 - Destructive operations remain behind existing backend permission policy checks.
 

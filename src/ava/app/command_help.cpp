@@ -84,7 +84,9 @@ std::string command_hotkeys_text(std::vector<CommandHotkey> const& hotkeys)
     keys_width = std::max(keys_width, item.keys.size());
   }
 
-  std::string output = "Hotkeys:\n";
+  std::string output = "Keybindings:\n";
+  output += "  Config: $XDG_CONFIG_HOME/ava/keybinds.json\n";
+  output += "  Reload: /reload keybindings inside the interactive TUI\n";
   for (auto const& item : items)
   {
     output += "  " + item.action;

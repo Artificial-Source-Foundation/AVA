@@ -5,17 +5,31 @@
 #include "ava/config/model_config.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/session/session_store.h"
+#include "ava/session/session_tree.h"
+#include "ava/permissions/permission_rules.h"
 #include "ava/provider/registry.h"
 
 #include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace ava::app {
 namespace {
+
+constexpr std::size_t kMaxPathCompletionVisited = 20000;
+constexpr std::size_t kMaxPathCompletions = 2000;
+constexpr std::size_t kMaxPathCompletionDepth = 8;
+
+struct PathCompletionCandidate
+{
+  std::string value;
+  std::string description;
+  bool directory = false;
+};
 
 std::string hotkeys_for_action(std::vector<CommandHotkey> const& hotkeys, std::string_view action)
 {
@@ -58,6 +72,151 @@ std::optional<std::size_t> find_item_index(std::vector<tui::SlashCommandItem> co
       return index;
   }
   return std::nullopt;
+}
+
+bool has_ascii_space(std::string_view text)
+{
+  return text.find_first_of(" \t\r\n") != std::string_view::npos;
+}
+
+bool has_unquotable_file_reference_char(std::string_view text)
+{
+  return text.find_first_of("\"\t\r\n") != std::string_view::npos;
+}
+
+bool path_is_under(std::filesystem::path const& path, std::filesystem::path const& root)
+{
+  auto const relative = path.lexically_normal().lexically_relative(root.lexically_normal());
+  return !relative.empty() && relative.native().find("..") != 0 && !relative.is_absolute();
+}
+
+bool is_reference_code_path(RuntimeSession const& session, std::filesystem::path const& path)
+{
+  return path_is_under(path, session.workspace_dir / "docs" / "reference-code") ||
+         path.lexically_normal() == (session.workspace_dir / "docs" / "reference-code").lexically_normal();
+}
+
+bool should_skip_path_completion_entry(RuntimeSession const& session, std::filesystem::directory_entry const& entry)
+{
+  auto const name = entry.path().filename().generic_string();
+  if (name == ".git" || name == "node_modules" || name == ".cache" || name == ".ccache")
+    return true;
+  if (name == "build" || name.starts_with("build-"))
+    return true;
+  return is_reference_code_path(session, entry.path());
+}
+
+std::optional<std::string> completion_relative_path(std::filesystem::path const& base, std::filesystem::path const& path, bool directory,
+                                                   bool allow_spaces)
+{
+  std::error_code error;
+  auto relative = std::filesystem::relative(path, base, error);
+  if (error || relative.empty() || relative == ".")
+    return std::nullopt;
+  auto value = relative.generic_string();
+  if (value.empty() || value.starts_with("../") || value == ".." || value.starts_with('/'))
+    return std::nullopt;
+  if (directory && !value.ends_with('/'))
+    value.push_back('/');
+  if (has_unquotable_file_reference_char(value))
+    return std::nullopt;
+  if (!allow_spaces && has_ascii_space(value))
+    return std::nullopt;
+  return value;
+}
+
+std::string path_completion_description(std::filesystem::directory_entry const& entry, bool directory)
+{
+  if (directory)
+    return "directory";
+
+  std::error_code error;
+  auto const size = entry.file_size(error);
+  if (error)
+    return "file";
+  return "file " + std::to_string(size) + " bytes";
+}
+
+std::vector<PathCompletionCandidate> workspace_path_completions(RuntimeSession const& session, bool allow_spaces = false)
+{
+  std::vector<PathCompletionCandidate> candidates;
+  std::error_code error;
+  if (!std::filesystem::is_directory(session.current_dir, error) || error)
+    return candidates;
+
+  std::size_t visited = 0;
+  for (std::filesystem::recursive_directory_iterator it(session.current_dir, error), end; it != end && visited < kMaxPathCompletionVisited;
+       it.increment(error))
+  {
+    if (error)
+    {
+      error.clear();
+      continue;
+    }
+
+    auto const entry = *it;
+    ++visited;
+    if (should_skip_path_completion_entry(session, entry))
+    {
+      if (entry.is_directory(error))
+        it.disable_recursion_pending();
+      error.clear();
+      continue;
+    }
+
+    auto const directory = entry.is_directory(error);
+    if (error)
+    {
+      error.clear();
+      continue;
+    }
+    if (static_cast<std::size_t>(it.depth()) >= kMaxPathCompletionDepth)
+      it.disable_recursion_pending();
+
+    auto value = completion_relative_path(session.current_dir, entry.path(), directory, allow_spaces);
+    if (!value)
+      continue;
+    candidates.push_back(PathCompletionCandidate{
+        .value = std::move(*value), .description = path_completion_description(entry, directory), .directory = directory});
+  }
+
+  std::ranges::sort(candidates, [](PathCompletionCandidate const& left, PathCompletionCandidate const& right) {
+    if (left.directory != right.directory)
+      return left.directory > right.directory;
+    return left.value < right.value;
+  });
+  if (candidates.size() > kMaxPathCompletions)
+    candidates.resize(kMaxPathCompletions);
+  return candidates;
+}
+
+std::string glob_completion_value(PathCompletionCandidate const& candidate)
+{
+  if (!candidate.directory)
+    return candidate.value;
+  auto value = candidate.value;
+  if (!value.empty() && value.ends_with('/'))
+    value.pop_back();
+  value += "/**";
+  return value;
+}
+
+void add_path_completions(tui::SlashCommandItem& item, std::vector<PathCompletionCandidate> const& candidates, std::size_t argument_index,
+                          bool file_append_space)
+{
+  for (auto const& candidate : candidates)
+  {
+    add_completion(item, argument_index, candidate.value, candidate.description, "Files", {}, candidate.directory ? false : file_append_space);
+  }
+}
+
+void add_glob_completions(tui::SlashCommandItem& item, std::vector<PathCompletionCandidate> const& candidates, std::size_t argument_index)
+{
+  for (auto const& candidate : candidates)
+  {
+    auto description = candidate.directory ? std::string("directory glob") : candidate.description;
+    add_completion(item, argument_index, glob_completion_value(candidate), std::move(description), "Files", {}, false);
+  }
 }
 
 std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry)
@@ -142,16 +301,7 @@ tui::SelectListItemView model_selector_item(ava::config::ModelInfo const& model,
 
 std::string session_sort_label(SessionSelectorSort sort)
 {
-  switch (sort)
-  {
-    case SessionSelectorSort::Recent:
-      return "recent";
-    case SessionSelectorSort::Name:
-      return "name";
-    case SessionSelectorSort::Path:
-      return "path";
-  }
-  return "recent";
+  return session_selector_sort_label(sort);
 }
 
 std::string session_selector_detail(ava::session::SessionSummary const& summary)
@@ -162,19 +312,113 @@ std::string session_selector_detail(ava::session::SessionSummary const& summary)
   return detail;
 }
 
-tui::SelectListItemView session_selector_item(ava::session::SessionSummary const& summary, std::string_view current_session_id)
+std::string labels_text(std::vector<std::string> const& labels)
+{
+  std::string text;
+  for (std::size_t index = 0; index < labels.size(); ++index)
+  {
+    if (index > 0)
+      text += ", ";
+    text += labels[index];
+  }
+  return text;
+}
+
+std::string session_completion_description(ava::session::SessionTreeNode const& node)
+{
+  std::string description;
+  if (!node.metadata.name.empty())
+    description += node.metadata.name + " · ";
+  description += "entries=" + std::to_string(node.summary.entry_count);
+  if (!node.summary.last_updated.empty())
+    description += " updated=" + node.summary.last_updated;
+  if (!node.metadata.branch_origin.empty())
+    description += " origin=" + node.metadata.branch_origin;
+  if (node.metadata.archived)
+    description += " archived";
+  if (!node.metadata.labels.empty())
+    description += " labels=" + labels_text(node.metadata.labels);
+  return description;
+}
+
+std::string session_node_label(ava::session::SessionTreeNode const& node, std::size_t depth)
+{
+  auto label = node.metadata.name.empty() ? node.summary.session_id : node.metadata.name;
+  if (depth == 0)
+    return label;
+  return std::string(depth * 2, ' ') + "+ " + label;
+}
+
+std::string session_node_description(ava::session::SessionTreeNode const& node, bool show_paths)
+{
+  auto path = node.summary.path.empty() ? std::string("path unavailable") : node.summary.path.generic_string();
+  if (!show_paths)
+    return node.metadata.name.empty() ? std::string{} : node.summary.session_id;
+  if (node.metadata.name.empty())
+    return path;
+  return node.summary.session_id + " · " + path;
+}
+
+std::string session_node_detail(ava::session::SessionTreeNode const& node, bool current_path)
+{
+  auto detail = session_selector_detail(node.summary);
+  if (!node.metadata.branch_origin.empty())
+    detail += " · origin " + node.metadata.branch_origin;
+  if (!node.metadata.parent_session_id.empty())
+    detail += " · parent " + node.metadata.parent_session_id;
+  if (!node.metadata.branch_from_entry_id.empty())
+    detail += " · from " + node.metadata.branch_from_entry_id;
+  if (!node.metadata.labels.empty())
+    detail += " · labels " + labels_text(node.metadata.labels);
+  if (node.metadata.archived)
+    detail += " · archived";
+  if (!node.metadata.actor.empty())
+    detail += " · actor " + node.metadata.actor;
+  if (current_path)
+    detail += " · current path";
+  return detail;
+}
+
+tui::SelectListItemView session_selector_item(ava::session::SessionSummary const& summary, std::string_view current_session_id,
+                                              bool show_paths)
 {
   auto const current = !current_session_id.empty() && summary.session_id == current_session_id;
   auto path = summary.path.empty() ? std::string("path unavailable") : summary.path.generic_string();
   return tui::SelectListItemView{.value = summary.session_id,
                                  .label = summary.session_id,
-                                 .description = std::move(path),
+                                 .description = show_paths ? std::move(path) : std::string{},
                                  .group = "Sessions",
                                  .detail = session_selector_detail(summary),
                                  .badge = current ? std::string("current") : std::string{},
                                  .current = current,
                                  .enabled = true,
                                  .disabled_reason = {}};
+}
+
+bool node_less(ava::session::SessionTreeNode const& left, ava::session::SessionTreeNode const& right, SessionSelectorSort sort)
+{
+  switch (sort)
+  {
+    case SessionSelectorSort::Recent:
+      if (left.summary.last_updated != right.summary.last_updated)
+        return left.summary.last_updated > right.summary.last_updated;
+      return left.summary.session_id > right.summary.session_id;
+    case SessionSelectorSort::Name:
+    {
+      auto const left_name = left.metadata.name.empty() ? left.summary.session_id : left.metadata.name;
+      auto const right_name = right.metadata.name.empty() ? right.summary.session_id : right.metadata.name;
+      if (left_name != right_name)
+        return left_name < right_name;
+      return left.summary.session_id < right.summary.session_id;
+    }
+    case SessionSelectorSort::Path:
+      if (left.summary.path.generic_string() != right.summary.path.generic_string())
+      {
+        return left.summary.path.generic_string() < right.summary.path.generic_string();
+      }
+      return left.summary.session_id < right.summary.session_id;
+  }
+  return left.summary.session_id < right.summary.session_id;
 }
 
 void sort_session_summaries(std::vector<ava::session::SessionSummary>& summaries, SessionSelectorSort sort)
@@ -199,6 +443,62 @@ void sort_session_summaries(std::vector<ava::session::SessionSummary>& summaries
   });
 }
 
+std::unordered_map<std::string, std::size_t> session_tree_index_by_id(std::vector<ava::session::SessionTreeNode> const& nodes)
+{
+  std::unordered_map<std::string, std::size_t> index;
+  for (std::size_t node_index = 0; node_index < nodes.size(); ++node_index)
+  {
+    index.emplace(nodes[node_index].summary.session_id, node_index);
+  }
+  return index;
+}
+
+std::vector<std::string> sorted_tree_ids(std::vector<std::string> ids, std::vector<ava::session::SessionTreeNode> const& nodes,
+                                         std::unordered_map<std::string, std::size_t> const& index_by_id, SessionSelectorSort sort)
+{
+  std::erase_if(ids, [&](std::string const& id) { return index_by_id.find(id) == index_by_id.end(); });
+  std::ranges::sort(ids, [&](std::string const& left, std::string const& right) {
+    return node_less(nodes[index_by_id.at(left)], nodes[index_by_id.at(right)], sort);
+  });
+  return ids;
+}
+
+void append_session_tree_items(tui::SelectListView& view, std::vector<ava::session::SessionTreeNode> const& nodes,
+                               std::unordered_map<std::string, std::size_t> const& index_by_id, std::vector<std::string> ids,
+                               std::vector<std::string> const& current_path, SessionSelectorSort sort, std::size_t depth,
+                               bool named_only, bool show_paths, bool show_archived)
+{
+  ids = sorted_tree_ids(std::move(ids), nodes, index_by_id, sort);
+  for (auto const& id : ids)
+  {
+    auto const found = index_by_id.find(id);
+    if (found == index_by_id.end())
+      continue;
+    auto const& node = nodes[found->second];
+    auto const current_path_node = std::ranges::find(current_path, node.summary.session_id) != current_path.end();
+    auto const visible = show_archived || !node.metadata.archived;
+    if (visible && (!named_only || !node.metadata.name.empty()))
+    {
+      if (node.current)
+        view.selected_item_index = view.items.size();
+      view.items.push_back(tui::SelectListItemView{.value = node.summary.session_id,
+                                                   .label = session_node_label(node, depth),
+                                                   .description = session_node_description(node, show_paths),
+                                                   .group = depth == 0 ? std::string("Root sessions") : std::string("Branches"),
+                                                   .detail = session_node_detail(node, current_path_node),
+                                                   .badge = node.current ? std::string("current")
+                                                                         : node.metadata.archived ? std::string("archived")
+                                                                         : !node.metadata.branch_origin.empty() ? node.metadata.branch_origin
+                                                                                                               : std::string("root"),
+                                                   .current = node.current,
+                                                   .enabled = true,
+                                                   .disabled_reason = {}});
+    }
+    append_session_tree_items(view, nodes, index_by_id, node.children, current_path, sort, depth + (visible ? 1 : 0),
+                              named_only, show_paths, show_archived);
+  }
+}
+
 ava::mcp::McpConfigLoadOptions mcp_config_options(RuntimeSession const& session)
 {
   auto options = ava::mcp::default_mcp_config_options(session.workspace_dir);
@@ -220,6 +520,19 @@ std::filesystem::path plugin_enablement_file(RuntimeSession const& session)
 
 void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, RuntimeSession const& session)
 {
+  auto const path_completions = workspace_path_completions(session);
+  if (!path_completions.empty())
+  {
+    if (auto index = find_item_index(items, "/read"))
+      add_path_completions(items[*index], path_completions, 0, false);
+    if (auto index = find_item_index(items, "/write"))
+      add_path_completions(items[*index], path_completions, 0, true);
+    if (auto index = find_item_index(items, "/glob"))
+      add_glob_completions(items[*index], path_completions, 0);
+    if (auto index = find_item_index(items, "/grep"))
+      add_glob_completions(items[*index], path_completions, 1);
+  }
+
   if (auto index = find_item_index(items, "/models"))
   {
     auto& item = items[*index];
@@ -237,17 +550,84 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     }
   }
 
-  if (auto index = find_item_index(items, "/sessions"))
+  auto add_session_completions_for = [&](std::string_view command) {
+    auto index = find_item_index(items, command);
+    if (!index)
+      return;
+    auto& item = items[*index];
+    if (command == "/sessions")
+    {
+      add_completion(item, 0, "rename", "Rename a session without switching to it", "Sessions");
+      add_completion(item, 0, "labels", "Set or clear labels on a session without switching to it", "Sessions");
+      add_completion(item, 0, "archive", "Archive a session after confirmation", "Sessions");
+      add_completion(item, 0, "unarchive", "Restore an archived session to default views", "Sessions");
+      add_completion(item, 0, "--archived", "Include archived sessions in the list", "Sessions");
+    }
+    if (auto tree = ava::session::build_session_tree(session.workspace_dir, session.paths.sessions_dir, session.store.session_id()))
+    {
+      for (auto const& node : tree->sessions)
+      {
+        add_completion(item, 0, node.summary.session_id, session_completion_description(node), "Sessions", {}, false);
+        if (command == "/sessions")
+        {
+          add_completion(item, 1, node.summary.session_id, session_completion_description(node), "Sessions", {"rename"}, false);
+          add_completion(item, 1, node.summary.session_id, session_completion_description(node), "Sessions", {"labels"}, false);
+          add_completion(item, 1, node.summary.session_id, session_completion_description(node), "Sessions", {"archive"}, false,
+                         true);
+          add_completion(item, 1, node.summary.session_id, session_completion_description(node), "Sessions", {"unarchive"},
+                         false, node.metadata.archived,
+                         node.metadata.archived ? "" : "session is not archived");
+          add_completion(item, 2, "--clear", "Clear labels without switching sessions", "Sessions",
+                         {"labels", node.summary.session_id}, false);
+          add_completion(item, 2, "--confirm", "Confirm archive without deleting session files", "Sessions",
+                         {"archive", node.summary.session_id}, false);
+        }
+      }
+    }
+  };
+
+  add_session_completions_for("/sessions");
+  add_session_completions_for("/resume");
+
+  if (auto index = find_item_index(items, "/permissions"))
   {
     auto& item = items[*index];
-    if (auto sessions = ava::session::SessionStore::list_sessions(session.workspace_dir, session.paths.sessions_dir))
+    for (auto const& subcommand : {"list", "audit", "diagnose", "explain", "add", "remove"})
     {
-      for (auto const& summary : *sessions)
+      add_completion(item, 0, subcommand, "Permission rule command", "Safety");
+    }
+    for (auto const& value : {"action=allow", "action=deny"})
+    {
+      add_completion(item, 1, value, "Persistent rule action", "Safety", {"add"});
+    }
+    for (auto const& value : {"operation=read", "operation=search", "operation=edit", "operation=bash",
+                              "operation=network.fetch", "operation=network.search", "operation=skill",
+                              "operation=mcp.tool.call"})
+    {
+      add_completion(item, 1, value, "Persistent rule operation", "Safety", {"add"});
+    }
+    for (auto const& value : {"scope=workspace", "scope=global", "mode=any", "mode=build", "mode=plan"})
+    {
+      add_completion(item, 1, value, "Persistent rule field", "Safety", {"add"});
+    }
+    for (auto const& value : {"path=", "command=", "tool=", "reason="})
+    {
+      add_completion(item, 1, value, "Persistent rule field", "Safety", {"add"}, false);
+    }
+    auto const store = ava::permissions::PermissionRuleStore{
+        .global_rules_file = session.paths.ava_config_dir / "permission-rules.json",
+        .workspace_rules_file = session.workspace_dir / ".ava" / "permission-rules.json",
+        .workspace_dir = session.workspace_dir,
+    };
+    if (auto rules = ava::permissions::load_persistent_permission_rules(store))
+    {
+      for (auto const& rule : *rules)
       {
-        auto description = "entries=" + std::to_string(summary.entry_count);
-        if (!summary.last_updated.empty())
-          description += " updated=" + summary.last_updated;
-        add_completion(item, 0, summary.session_id, std::move(description), "Sessions", {}, false);
+        auto description = ava::permissions::to_string(rule.action) + " " +
+                           ava::permissions::to_string(rule.operation) + " " +
+                           ava::permissions::to_string(rule.scope);
+        add_completion(item, 1, rule.rule_id, description, "Safety", {"explain"}, false);
+        add_completion(item, 1, rule.rule_id, description, "Safety", {"remove"}, false);
       }
     }
   }
@@ -329,6 +709,34 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
 
 }  // namespace
 
+SessionSelectorSort next_session_selector_sort(SessionSelectorSort sort) noexcept
+{
+  switch (sort)
+  {
+    case SessionSelectorSort::Recent:
+      return SessionSelectorSort::Name;
+    case SessionSelectorSort::Name:
+      return SessionSelectorSort::Path;
+    case SessionSelectorSort::Path:
+      return SessionSelectorSort::Recent;
+  }
+  return SessionSelectorSort::Recent;
+}
+
+std::string session_selector_sort_label(SessionSelectorSort sort)
+{
+  switch (sort)
+  {
+    case SessionSelectorSort::Recent:
+      return "recent";
+    case SessionSelectorSort::Name:
+      return "name";
+    case SessionSelectorSort::Path:
+      return "path";
+  }
+  return "recent";
+}
+
 std::vector<tui::SlashCommandItem> command_catalog_slash_items(std::vector<CommandHotkey> const& hotkeys)
 {
   std::vector<tui::SlashCommandItem> items;
@@ -358,6 +766,23 @@ std::vector<tui::SlashCommandItem> command_catalog_slash_items(RuntimeSession co
 {
   auto items = command_catalog_slash_items(hotkeys);
   add_backend_argument_completions(items, session);
+  return items;
+}
+
+std::vector<tui::FileReferenceItem> file_reference_items(RuntimeSession const& session)
+{
+  std::vector<tui::FileReferenceItem> items;
+  auto const candidates = workspace_path_completions(session, true);
+  items.reserve(candidates.size());
+  for (auto const& candidate : candidates)
+  {
+    items.push_back(tui::FileReferenceItem{.value = candidate.value,
+                                           .description = candidate.description,
+                                           .category = "Files",
+                                           .directory = candidate.directory,
+                                           .enabled = true,
+                                           .disabled_reason = {}});
+  }
   return items;
 }
 
@@ -421,19 +846,20 @@ tui::SelectListView model_selector_view(RuntimeSession const& session, std::stri
 }
 
 tui::SelectListView session_selector_view(std::vector<ava::session::SessionSummary> summaries, std::string current_session_id, SessionSelectorSort sort,
-                                          std::string footer_hint)
+                                          std::string footer_hint, bool show_paths)
 {
   sort_session_summaries(summaries, sort);
 
   tui::SelectListView view{
       .title = "Select session",
-      .subtitle = "Linear sessions from the existing JSONL store · sort " + session_sort_label(sort) + " · tree/fork views need a backend session schema",
+      .subtitle = "Linear sessions from the existing JSONL store · sort " + session_sort_label(sort) +
+                  (show_paths ? std::string(" · paths shown") : std::string(" · paths hidden")),
       .items = {},
       .selected_item_index = 0,
       .query = {},
       .placeholder = "Search sessions",
       .empty_text = "No sessions match",
-      .footer_hint = footer_hint.empty() ? std::string("Enter choose · type to filter · Esc cancel") : std::move(footer_hint)};
+      .footer_hint = footer_hint.empty() ? std::string("Enter choose · PgUp/PgDn page · type to filter · Esc cancel") : std::move(footer_hint)};
   view.items.reserve(summaries.size() + 1);
 
   bool current_found = false;
@@ -444,7 +870,7 @@ tui::SelectListView session_selector_view(std::vector<ava::session::SessionSumma
       view.selected_item_index = view.items.size();
       current_found = true;
     }
-    view.items.push_back(session_selector_item(summary, current_session_id));
+    view.items.push_back(session_selector_item(summary, current_session_id, show_paths));
   }
 
   if (!current_found && !current_session_id.empty())
@@ -477,17 +903,69 @@ tui::SelectListView session_selector_view(std::vector<ava::session::SessionSumma
   return view;
 }
 
-tui::SelectListView session_selector_view(RuntimeSession const& session, SessionSelectorSort sort, std::string footer_hint)
+tui::SelectListView session_selector_view(ava::session::SessionTreeIndex tree, SessionSelectorSort sort, std::string footer_hint, bool named_only,
+                                          bool show_paths, bool show_archived)
 {
-  auto sessions = ava::session::SessionStore::list_sessions(session.workspace_dir, session.paths.sessions_dir);
-  if (sessions)
-    return session_selector_view(std::move(*sessions), session.store.session_id(), sort, std::move(footer_hint));
+  auto const index_by_id = session_tree_index_by_id(tree.sessions);
+  tui::SelectListView view{
+      .title = "Select session",
+      .subtitle = "Session tree from JSONL branch metadata · sort " + session_sort_label(sort) +
+                  (named_only ? std::string(" · named only") : std::string(" · all sessions")) +
+                  (show_paths ? std::string(" · paths shown") : std::string(" · paths hidden")) +
+                  (show_archived ? std::string(" · archived shown") : std::string(" · archived hidden")),
+      .items = {},
+      .selected_item_index = 0,
+      .query = {},
+      .placeholder = "Search sessions, labels, branches",
+      .empty_text = named_only ? std::string("No named sessions match") : std::string("No sessions match"),
+      .footer_hint = footer_hint.empty() ? std::string("Enter choose · PgUp/PgDn page · type to filter · Esc cancel") : std::move(footer_hint)};
+  view.items.reserve(tree.sessions.size() + 1);
+
+  append_session_tree_items(view, tree.sessions, index_by_id, tree.roots, tree.current_path, sort, 0, named_only,
+                            show_paths, show_archived);
+
+  if (!named_only && view.items.empty() && !tree.current_session_id.empty())
+  {
+    view.items.push_back(tui::SelectListItemView{.value = tree.current_session_id,
+                                                 .label = tree.current_session_id,
+                                                 .description = "current session metadata unavailable",
+                                                 .group = "Sessions",
+                                                 .detail = "path/model/message count unavailable from current view",
+                                                 .badge = "current",
+                                                 .current = true,
+                                                 .enabled = true,
+                                                 .disabled_reason = {}});
+  }
+
+  if (view.items.empty())
+  {
+    view.items.push_back(tui::SelectListItemView{.value = {},
+                                                 .label = named_only ? std::string("No named sessions found") : std::string("No sessions found"),
+                                                 .description = named_only ? std::string("Use /name <name> to make a session appear in this filter")
+                                                                           : std::string("Start a conversation to create a session"),
+                                                 .group = "Sessions",
+                                                 .detail = {},
+                                                 .badge = {},
+                                                 .current = false,
+                                                 .enabled = false,
+                                                 .disabled_reason = named_only ? std::string("no sessions have names") : std::string("session tree is empty")});
+  }
+
+  return view;
+}
+
+tui::SelectListView session_selector_view(RuntimeSession const& session, SessionSelectorSort sort, std::string footer_hint, bool named_only,
+                                          bool show_paths, bool show_archived)
+{
+  auto tree = ava::session::build_session_tree(session.workspace_dir, session.paths.sessions_dir, session.store.session_id());
+  if (tree)
+    return session_selector_view(std::move(*tree), sort, std::move(footer_hint), named_only, show_paths, show_archived);
 
   return tui::SelectListView{.title = "Select session",
                              .subtitle = "Unable to load session list",
                              .items = {tui::SelectListItemView{.value = {},
                                                                .label = "Session list unavailable",
-                                                               .description = sessions.error().format(),
+                                                               .description = tree.error().format(),
                                                                .group = "Sessions",
                                                                .detail = {},
                                                                .badge = {},

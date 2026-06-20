@@ -261,6 +261,16 @@ void test_file_tools()
   auto plan_doc = ava::tools::write_file(plan_context, workspace / "docs" / "plan.md", "# Plan\n");
   expect(plan_doc.has_value(), "plan mode markdown plan write is allowed");
 
+  auto const diffed_write_path = workspace / "diffed-write.txt";
+  {
+    std::ofstream file(diffed_write_path, std::ios::binary | std::ios::trunc);
+    file << "old line\n";
+  }
+  auto diffed_write = ava::tools::write_file(build_context, diffed_write_path, "new line\n");
+  expect(diffed_write && diffed_write->diff.find("-old line") != std::string::npos &&
+             diffed_write->diff.find("+new line") != std::string::npos && !diffed_write->diff_truncated,
+         "write_file returns the backend-generated unified diff after successful mutation");
+
   auto const large_path = workspace / "large.txt";
   {
     std::ofstream large(large_path, std::ios::binary | std::ios::trunc);

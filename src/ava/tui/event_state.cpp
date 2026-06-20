@@ -19,6 +19,17 @@ std::string first_non_empty(std::initializer_list<std::string_view> values)
   return {};
 }
 
+void assign_if_present(std::string& target, std::string value)
+{
+  if (!value.empty()) target = std::move(value);
+}
+
+void add_unique_string(std::vector<std::string>& values, std::string value)
+{
+  if (value.empty()) return;
+  if (std::ranges::find(values, value) == values.end()) values.push_back(std::move(value));
+}
+
 auto find_pending_tool(TuiEventState& state, std::string const& call_id, std::string const& request_id = {},
                        std::string const& correlation_id = {})
 {
@@ -26,6 +37,126 @@ auto find_pending_tool(TuiEventState& state, std::string const& call_id, std::st
     return (!call_id.empty() && tool.call_id == call_id) || (!request_id.empty() && tool.request_id == request_id) ||
            (!correlation_id.empty() && tool.correlation_id == correlation_id);
   });
+}
+
+auto find_permission_audit(TuiEventState& state, std::string_view permission_request_id,
+                           std::string_view resolver_request_id = {})
+{
+  return std::ranges::find_if(state.permission_audits, [&](ToolPermissionAuditItem const& audit) {
+    return (!permission_request_id.empty() && audit.permission_request_id == permission_request_id) ||
+           (!resolver_request_id.empty() && audit.resolver_request_id == resolver_request_id);
+  });
+}
+
+ToolPermissionAuditItem permission_audit_from_request_envelope(ava::app::EventEnvelope const& envelope)
+{
+  auto const& payload = envelope.payload_json;
+  return ToolPermissionAuditItem{.permission_request_id = ava::core::json::string_field(payload, "permission_request_id").value_or(""),
+                                 .resolver_request_id = ava::core::json::string_field(payload, "resolver_request_id").value_or(""),
+                                 .decision = {},
+                                 .operation = ava::core::json::string_field(payload, "operation").value_or(""),
+                                 .tool_name = ava::core::json::string_field(payload, "tool_name").value_or(""),
+                                 .risk = ava::core::json::string_field(payload, "risk").value_or(""),
+                                 .reason = ava::core::json::string_field(payload, "reason").value_or(""),
+                                 .target = ava::core::json::string_field(payload, "target_path").value_or(""),
+                                 .command = ava::core::json::string_field(payload, "command").value_or(""),
+                                 .resolution_reason = {}};
+}
+
+void merge_permission_audit(ToolPermissionAuditItem& target, ToolPermissionAuditItem incoming)
+{
+  assign_if_present(target.permission_request_id, std::move(incoming.permission_request_id));
+  assign_if_present(target.resolver_request_id, std::move(incoming.resolver_request_id));
+  assign_if_present(target.decision, std::move(incoming.decision));
+  assign_if_present(target.operation, std::move(incoming.operation));
+  assign_if_present(target.tool_name, std::move(incoming.tool_name));
+  assign_if_present(target.risk, std::move(incoming.risk));
+  assign_if_present(target.reason, std::move(incoming.reason));
+  assign_if_present(target.target, std::move(incoming.target));
+  assign_if_present(target.command, std::move(incoming.command));
+  assign_if_present(target.resolution_reason, std::move(incoming.resolution_reason));
+}
+
+void remember_permission_audit(TuiEventState& state, ToolPermissionAuditItem audit)
+{
+  auto existing = find_permission_audit(state, audit.permission_request_id, audit.resolver_request_id);
+  if (existing == state.permission_audits.end()) {
+    state.permission_audits.push_back(std::move(audit));
+    return;
+  }
+  merge_permission_audit(*existing, std::move(audit));
+}
+
+void remember_permission_request_envelope(TuiEventState& state, ava::app::EventEnvelope const& envelope)
+{
+  auto audit = permission_audit_from_request_envelope(envelope);
+  if (audit.permission_request_id.empty() && audit.resolver_request_id.empty()) return;
+  remember_permission_audit(state, std::move(audit));
+}
+
+void remember_permission_reply_envelope(TuiEventState& state, ava::app::EventEnvelope const& envelope)
+{
+  auto const& payload = envelope.payload_json;
+  auto audit = ToolPermissionAuditItem{
+      .permission_request_id = ava::core::json::string_field(payload, "permission_request_id").value_or(""),
+      .resolver_request_id = ava::core::json::string_field(payload, "resolver_request_id").value_or(""),
+      .decision = ava::core::json::string_field(payload, "decision").value_or(""),
+      .resolution_reason = ava::core::json::string_field(payload, "reason").value_or("")};
+  if (audit.permission_request_id.empty() && audit.resolver_request_id.empty()) return;
+  remember_permission_audit(state, std::move(audit));
+}
+
+void remember_permission_provider_event(TuiEventState& state, ava::app::RuntimeEvent const& event)
+{
+  if (event.status != "tui:permission_request" && event.status != "tui:permission_allow" &&
+      event.status != "tui:permission_deny") {
+    return;
+  }
+  auto audit = ToolPermissionAuditItem{.decision = event.status == "tui:permission_allow" ? std::string("allow")
+                                             : event.status == "tui:permission_deny"  ? std::string("deny")
+                                                                                      : std::string{},
+                                       .reason = event.reason,
+                                       .command = event.status == "tui:permission_request" ? event.text : std::string{},
+                                       .resolution_reason = event.error_details};
+  if (!event.tool_name.empty()) audit.tool_name = event.tool_name;
+  if (!event.permission_request_ids.empty()) audit.permission_request_id = event.permission_request_ids.front();
+  if (audit.permission_request_id.empty() && audit.resolver_request_id.empty()) return;
+  remember_permission_audit(state, std::move(audit));
+}
+
+void add_permission_request_id(ToolTimelineItem& item, std::string id)
+{
+  add_unique_string(item.permission_request_ids, std::move(id));
+}
+
+void add_permission_audit(ToolTimelineItem& item, ToolPermissionAuditItem audit)
+{
+  if (!audit.permission_request_id.empty()) add_permission_request_id(item, audit.permission_request_id);
+  auto existing = std::ranges::find_if(item.permissions, [&](ToolPermissionAuditItem const& current) {
+    return (!audit.permission_request_id.empty() && current.permission_request_id == audit.permission_request_id) ||
+           (!audit.resolver_request_id.empty() && current.resolver_request_id == audit.resolver_request_id);
+  });
+  if (existing == item.permissions.end()) {
+    item.permissions.push_back(std::move(audit));
+    return;
+  }
+  merge_permission_audit(*existing, std::move(audit));
+}
+
+void attach_permission_audits(TuiEventState& state, ToolTimelineItem& item)
+{
+  auto const permission_ids = item.permission_request_ids;
+  for (auto const& permission_id : permission_ids) {
+    auto existing = find_permission_audit(state, permission_id);
+    if (existing == state.permission_audits.end()) {
+      add_permission_audit(item, ToolPermissionAuditItem{.permission_request_id = permission_id});
+      continue;
+    }
+    add_permission_audit(item, *existing);
+  }
+  for (auto const& audit : item.permissions) {
+    if (!audit.permission_request_id.empty()) add_unique_string(item.permission_request_ids, audit.permission_request_id);
+  }
 }
 
 bool bool_field(std::string_view object, std::string_view key)
@@ -178,6 +309,10 @@ std::optional<ava::app::RuntimeEvent> runtime_event_from_envelope(ava::app::Even
   if (event.changed_paths.empty()) {
     event.changed_paths = ava::core::json::strings_in_array_field(envelope.payload_json, "changed_files");
   }
+  event.permission_request_ids = ava::core::json::strings_in_array_field(envelope.payload_json, "permission_request_ids");
+  if (auto permission_id = ava::core::json::string_field(envelope.payload_json, "permission_request_id")) {
+    add_unique_string(event.permission_request_ids, *permission_id);
+  }
   event.spill_path = ava::core::json::string_field(envelope.payload_json, "spill_path").value_or("");
   event.reasoning_redacted = bool_field(envelope.payload_json, "reasoning_redacted");
   event.reasoning_signature_present = bool_field(envelope.payload_json, "reasoning_signature_present");
@@ -272,12 +407,25 @@ ToolTimelineStatus queue_event_status(std::string_view name)
   return ToolTimelineStatus::Running;
 }
 
+std::string queue_event_reason_text(std::string_view name, std::string_view reason)
+{
+  if (reason == "canceled")
+    return "run stopped before delivery; submit it again to continue";
+  if (reason == "restored_to_composer")
+    return "restored to composer";
+  if (reason == "run_completed_before_safe_point") {
+    if (name.starts_with("steer")) return "run finished before the next safe steering point";
+    return "run finished before delivery";
+  }
+  return std::string(reason);
+}
+
 std::string queue_event_detail(ava::app::EventEnvelope const& envelope)
 {
   auto const message = ava::core::json::string_field(envelope.payload_json, "message").value_or("");
   auto const reason = ava::core::json::string_field(envelope.payload_json, "reason").value_or("");
   auto detail = queue_event_label(envelope.name);
-  if (!reason.empty()) detail += ": " + reason;
+  if (!reason.empty()) detail += ": " + queue_event_reason_text(envelope.name, reason);
   if (!message.empty()) detail += " - " + message;
   if (bool_field(envelope.payload_json, "message_truncated")) {
     detail += " [message truncated";
@@ -449,12 +597,15 @@ void apply_canceled_event(TuiEventState& state, ava::app::RuntimeEvent const& ev
   state.error_text = "stopped by user";
   state.error_details.clear();
   auto text = event.text.empty() ? std::string("stopped by user") : event.text;
+  if (text == "stopped by user") text += ". Submit a new prompt to continue.";
   state.transcript.push_back(assistant_transcript_item(std::move(text), {}));
   settle_responding_activity(state, ToolTimelineStatus::Error, "assistant stopped");
+  auto detail = event.reason.empty() ? std::string("active work was stopped") : event.reason;
+  detail += "; submit a new prompt to continue";
   upsert_sidebar_activity(
       state, SidebarActivityItem{.id = "stopped",
                                  .label = "stopped",
-                                 .detail = event.reason.empty() ? std::string("active work was stopped") : event.reason,
+                                 .detail = std::move(detail),
                                  .status = ToolTimelineStatus::Error});
   state.run_status = TuiEventRunStatus::Canceled;
 }
@@ -602,6 +753,7 @@ ToolTimelineItem tool_item_from_event(ava::app::RuntimeEvent const& event, ToolT
   if (event.omitted_lines > 0) item.omitted_lines = event.omitted_lines;
   if (event.visible_matches > 0) item.visible_matches = event.visible_matches;
   if (event.total_matches > 0) item.total_matches = event.total_matches;
+  for (auto const& permission_id : event.permission_request_ids) add_permission_request_id(item, permission_id);
   return item;
 }
 
@@ -613,12 +765,15 @@ void apply_tool_start(TuiEventState& state, ava::app::RuntimeEvent const& event)
     if (!item.name.empty()) existing->item.name = std::move(item.name);
     if (!item.argument_summary.empty()) existing->item.argument_summary = std::move(item.argument_summary);
     if (!item.arguments_json.empty()) existing->item.arguments_json = std::move(item.arguments_json);
+    for (auto const& permission_id : item.permission_request_ids) add_permission_request_id(existing->item, permission_id);
+    attach_permission_audits(state, existing->item);
     existing->item.call_id = event.call_id;
     existing->item.lifecycle = ToolLifecycleState::ExecutionStarted;
     existing->item.status = ToolTimelineStatus::Running;
     upsert_activity(state, event.call_id, existing->item);
     return;
   }
+  attach_permission_audits(state, item);
   state.pending_tools.push_back(
       PendingToolItem{.call_id = event.call_id, .request_id = {}, .correlation_id = {}, .item = std::move(item)});
   upsert_activity(state, event.call_id, state.pending_tools.back().item);
@@ -639,14 +794,20 @@ void apply_tool_progress(TuiEventState& state, ava::app::RuntimeEvent const& eve
                                                                            .result_json = event.tool_result_json,
                                                                            .call_id = event.call_id,
                                                                            .lifecycle = ToolLifecycleState::Progress}});
+    for (auto const& permission_id : event.permission_request_ids) {
+      add_permission_request_id(state.pending_tools.back().item, permission_id);
+    }
+    attach_permission_audits(state, state.pending_tools.back().item);
     return;
   }
   if (!event.tool_name.empty()) existing->item.name = event.tool_name;
   if (!event.tool_arguments_json.empty()) existing->item.arguments_json = event.tool_arguments_json;
   if (!event.tool_result_json.empty()) existing->item.result_json = event.tool_result_json;
+  for (auto const& permission_id : event.permission_request_ids) add_permission_request_id(existing->item, permission_id);
   existing->item.status = ToolTimelineStatus::Running;
   existing->item.lifecycle = ToolLifecycleState::Progress;
   existing->item.result_summary = event.text;
+  attach_permission_audits(state, existing->item);
   upsert_activity(state, event.call_id, existing->item);
 }
 
@@ -681,6 +842,7 @@ void apply_tool_result(TuiEventState& state, ava::app::RuntimeEvent const& event
   if (event.omitted_lines > 0) item.omitted_lines = event.omitted_lines;
   if (event.visible_matches > 0) item.visible_matches = event.visible_matches;
   if (event.total_matches > 0) item.total_matches = event.total_matches;
+  for (auto const& permission_id : event.permission_request_ids) add_permission_request_id(item, permission_id);
   auto existing = find_pending_tool(state, event.call_id);
   if (existing != state.pending_tools.end()) {
     if (item.name.empty()) item.name = existing->item.name;
@@ -689,8 +851,11 @@ void apply_tool_result(TuiEventState& state, ava::app::RuntimeEvent const& event
     if (item.result_json.empty()) item.result_json = existing->item.result_json;
     item.request_id = existing->request_id;
     item.correlation_id = existing->correlation_id;
+    for (auto const& permission_id : existing->item.permission_request_ids) add_permission_request_id(item, permission_id);
+    for (auto const& audit : existing->item.permissions) add_permission_audit(item, audit);
     state.pending_tools.erase(existing);
   }
+  attach_permission_audits(state, item);
   upsert_activity(state, event.call_id, item);
   record_modified_file(state, item);
   state.transcript.push_back(TranscriptItem{.tool = std::move(item)});
@@ -830,6 +995,7 @@ void apply_provider_event(TuiEventState& state, ava::app::RuntimeEvent const& ev
   if (event.status == "tui:permission_request" || event.status == "tui:permission_allow" ||
       event.status == "tui:permission_deny" || event.status == "tui:question_request" ||
       event.status == "tui:question_answer" || event.status == "tui:question_cancel") {
+    remember_permission_provider_event(state, event);
     auto const text = event.text.empty() ? event.status : event.text;
     auto const prompt_status = event.status.substr(std::string_view{"tui:"}.size());
     state.transcript.push_back(transcript_text_item("audit", text));
@@ -886,6 +1052,12 @@ void apply_tool_payload_metadata(ToolTimelineItem& item, std::string_view payloa
       item.changed_paths.push_back(std::move(path));
     }
   }
+  for (auto const& permission_id : ava::core::json::strings_in_array_field(payload_json, "permission_request_ids")) {
+    add_permission_request_id(item, permission_id);
+  }
+  if (auto permission_id = ava::core::json::string_field(payload_json, "permission_request_id")) {
+    add_permission_request_id(item, *permission_id);
+  }
   if (auto call_id = ava::core::json::string_field(payload_json, "call_id")) item.call_id = *call_id;
   if (auto request_id = ava::core::json::string_field(payload_json, "request_id")) item.request_id = *request_id;
   if (auto correlation_id = ava::core::json::string_field(payload_json, "correlation_id")) {
@@ -931,6 +1103,7 @@ void annotate_tool_payload_metadata(TuiEventState& state, ava::app::RuntimeEvent
     if (envelope.request_id) pending->item.request_id = *envelope.request_id;
     if (envelope.correlation_id) pending->item.correlation_id = *envelope.correlation_id;
     apply_tool_payload_metadata(pending->item, envelope.payload_json);
+    attach_permission_audits(state, pending->item);
     return;
   }
 
@@ -943,6 +1116,7 @@ void annotate_tool_payload_metadata(TuiEventState& state, ava::app::RuntimeEvent
     if (envelope.request_id) item->tool->request_id = *envelope.request_id;
     if (envelope.correlation_id) item->tool->correlation_id = *envelope.correlation_id;
     apply_tool_payload_metadata(*item->tool, envelope.payload_json);
+    attach_permission_audits(state, *item->tool);
     return;
   }
 }
@@ -1138,11 +1312,13 @@ void apply_event_envelope(TuiEventState& state, ava::app::EventEnvelope const& e
   remember_envelope_ids(state, envelope);
 
   if (envelope.name == "permission_requested" || envelope.name == "question_requested") {
+    if (envelope.name == "permission_requested") remember_permission_request_envelope(state, envelope);
     apply_prompt_request_envelope(state, envelope);
     return;
   }
 
   if (envelope.name == "permission_replied" || envelope.name == "question_replied") {
+    if (envelope.name == "permission_replied") remember_permission_reply_envelope(state, envelope);
     auto const replied =
         envelope.name == "permission_replied" ? std::string("permission replied") : std::string("question replied");
     state.transcript.push_back(transcript_text_item("audit", replied));

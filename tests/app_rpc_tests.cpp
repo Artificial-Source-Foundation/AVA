@@ -1,5 +1,6 @@
 #include "ava/app/headless_policy.h"
 #include "ava/app/rpc/serialization.h"
+#include "ava/app/rpc/handlers.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 
@@ -775,6 +776,7 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   ava::session::SessionMetadataUpdate child_metadata;
   child_metadata.name = "Child";
   child_metadata.labels = std::vector<std::string>{"branch"};
+  child_metadata.archived = true;
   child_metadata.parent_session_id = parent_id;
   child_metadata.source_session_id = parent_id;
   child_metadata.branch_from_entry_id = parent_entries->front().id;
@@ -796,8 +798,9 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
              jsonl.find("\"path\":[\"" + parent_id + "\",\"" + child_id + "\"]") != std::string::npos &&
              jsonl.find("\"parent_session_id\":\"" + parent_id + "\"") != std::string::npos &&
              jsonl.find("\"children\":[\"" + child_id + "\"]") != std::string::npos && jsonl.find("\"labels\":[\"branch\"]") != std::string::npos &&
+             jsonl.find("\"archived\":true") != std::string::npos &&
              jsonl.find("\"actor\":\"test\"") != std::string::npos,
-         "RPC session_tree returns current path, children, labels, actor, and provenance metadata");
+         "RPC session_tree returns current path, children, labels, archive state, actor, and provenance metadata");
   expect(jsonl.find("\"id\":\"switch\"") != std::string::npos && jsonl.find("\"current_session_id\":\"" + parent_id + "\"") != std::string::npos &&
              child->store.session_id() == parent_id,
          "RPC switch_session navigates the active session used by following tree calls");
@@ -963,6 +966,9 @@ void test_app_rpc_model_commands()
   expect(jsonl.find("\"id\":\"cycle\"") != std::string::npos && jsonl.find("\"provider\":\"kimi\"") != std::string::npos,
          "RPC cycle_model advances to the next configured provider model");
   expect(session->model.provider_id == "kimi", "RPC cycle_model updates active session model");
+  auto previous = ava::app::rpc::previous_runtime_model(*session);
+  expect(previous && previous->provider_id == "anthropic" && previous->model_id == "claude-sonnet-4-5",
+         "runtime previous model helper returns the configured predecessor for TUI reverse cycling");
 }
 
 void test_app_rpc_reasoning_commands()

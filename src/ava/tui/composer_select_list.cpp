@@ -1,4 +1,5 @@
 #include "ava/tui/composer_internal.h"
+#include "ava/tui/keybindings.h"
 
 #include <algorithm>
 #include <cctype>
@@ -160,7 +161,7 @@ std::string select_item_line(SelectListItemView const& item, bool selected, std:
 
 std::string select_footer_line(SelectListView const& view, std::size_t width)
 {
-  auto hint = view.footer_hint.empty() ? std::string("↑/↓ select  Enter confirm  Type to search  Esc cancel") : sanitize_terminal_text(view.footer_hint);
+  auto hint = view.footer_hint.empty() ? std::string("↑/↓ select  PgUp/PgDn page  Enter confirm  Type to search  Esc cancel") : sanitize_terminal_text(view.footer_hint);
   return select_modal_line(std::string(detail::kSgrMuted) + std::move(hint) + std::string(detail::kSgrReset), width);
 }
 
@@ -171,6 +172,24 @@ std::string character_text(InputEvent const& event)
   if (event.character == '\0')
     return {};
   return std::string(1, event.character);
+}
+
+InputEvent select_list_bound_event(InputEvent event, TuiKeyBindings const& bindings)
+{
+  auto bound = [&](TuiAction action) { return key_matches_action(bindings, action, event.key); };
+  if (bound(TuiAction::SelectConfirm))
+    return InputEvent{.key = Key::Enter};
+  if (bound(TuiAction::SelectCancel))
+    return InputEvent{.key = Key::Escape};
+  if (bound(TuiAction::SelectPrev))
+    return InputEvent{.key = Key::ArrowUp};
+  if (bound(TuiAction::SelectNext))
+    return InputEvent{.key = Key::ArrowDown};
+  if (bound(TuiAction::SelectPageUp))
+    return InputEvent{.key = Key::PageUp};
+  if (bound(TuiAction::SelectPageDown))
+    return InputEvent{.key = Key::PageDown};
+  return event;
 }
 
 }  // namespace
@@ -239,6 +258,25 @@ std::size_t next_select_list_selection(SelectListView const& view, std::size_t s
   return matches[visible];
 }
 
+std::size_t page_select_list_selection(SelectListView const& view, std::size_t selected_index, bool previous, std::size_t rows)
+{
+  auto const matches = filter_select_list_items(view);
+  if (matches.empty())
+    return 0;
+  auto const selected = clamp_select_list_selection(view, selected_index);
+  auto const current = std::ranges::find(matches, selected);
+  auto visible = current == matches.end() ? std::size_t{0} : static_cast<std::size_t>(current - matches.begin());
+  if (previous)
+  {
+    visible = rows > visible ? std::size_t{0} : visible - rows;
+  }
+  else
+  {
+    visible = std::min(matches.size() - 1, visible + rows);
+  }
+  return matches[visible];
+}
+
 SelectListInputResult handle_select_list_input(SelectListView const& view, InputEvent event)
 {
   SelectListInputResult result{
@@ -262,6 +300,14 @@ SelectListInputResult handle_select_list_input(SelectListView const& view, Input
       }
       return result;
     }
+    case Key::Space:
+      result.query += ' ';
+      {
+        auto current = view_with_result();
+        result.selected_item_index = clamp_select_list_selection(current, result.selected_item_index);
+        result.action = SelectListInputAction::Redraw;
+      }
+      return result;
     case Key::Backspace:
       if (!result.query.empty())
       {
@@ -305,49 +351,92 @@ SelectListInputResult handle_select_list_input(SelectListView const& view, Input
     }
     case Key::Escape:
     case Key::CtrlC:
-    case Key::CtrlD:
       result.action = SelectListInputAction::Cancel;
+      return result;
+    case Key::CtrlD:
+      result.action = SelectListInputAction::Archive;
+      return result;
+    case Key::CtrlA:
+      result.action = SelectListInputAction::ToggleArchivedFilter;
       return result;
     case Key::PageUp: {
       auto current = view_with_result();
-      for (int index = 0; index < 5; ++index)
-      {
-        result.selected_item_index = previous_select_list_selection(current, result.selected_item_index);
-        current.selected_item_index = result.selected_item_index;
-      }
+      result.selected_item_index = page_select_list_selection(current, result.selected_item_index, true, 5);
       result.action = SelectListInputAction::Redraw;
       return result;
     }
     case Key::PageDown: {
       auto current = view_with_result();
-      for (int index = 0; index < 5; ++index)
-      {
-        result.selected_item_index = next_select_list_selection(current, result.selected_item_index);
-        current.selected_item_index = result.selected_item_index;
-      }
+      result.selected_item_index = page_select_list_selection(current, result.selected_item_index, false, 5);
       result.action = SelectListInputAction::Redraw;
       return result;
     }
+    case Key::Home:
+    case Key::End:
     case Key::ArrowLeft:
     case Key::ArrowRight:
+    case Key::CtrlArrowLeft:
+    case Key::CtrlArrowRight:
     case Key::MouseLeftClick:
     case Key::ShiftEnter:
-    case Key::CtrlA:
     case Key::CtrlB:
     case Key::CtrlE:
     case Key::CtrlF:
+    case Key::CtrlH:
     case Key::CtrlK:
+    case Key::CtrlMinus:
+    case Key::CtrlN:
+      result.action = SelectListInputAction::ToggleNamedFilter;
+      return result;
+    case Key::CtrlP:
+      result.action = SelectListInputAction::TogglePathDisplay;
+      return result;
+    case Key::CtrlShiftP:
+      break;
     case Key::CtrlR:
+      result.action = SelectListInputAction::Rename;
+      return result;
+    case Key::CtrlL:
+      result.action = SelectListInputAction::Label;
+      return result;
+    case Key::CtrlS:
     case Key::CtrlT:
+      result.action = SelectListInputAction::CycleSort;
+      return result;
+    case Key::Delete:
+    case Key::ShiftTab:
+    case Key::CtrlEnter:
+    case Key::AltEnter:
+    case Key::AltArrowUp:
+    case Key::AltArrowLeft:
+    case Key::AltArrowRight:
     case Key::CtrlU:
     case Key::CtrlW:
     case Key::CtrlY:
     case Key::CtrlZ:
+    case Key::CtrlRightBracket:
+    case Key::CtrlO:
+    case Key::AltBackspace:
+    case Key::AltB:
+    case Key::AltD:
+    case Key::AltDelete:
+    case Key::AltF:
+    case Key::AltH:
+    case Key::AltJ:
+    case Key::AltK:
+    case Key::AltL:
+    case Key::AltW:
+    case Key::CtrlAltRightBracket:
     case Key::AltY:
     case Key::Unknown:
       break;
   }
   return result;
+}
+
+SelectListInputResult handle_select_list_input(SelectListView const& view, InputEvent event, TuiKeyBindings const& bindings)
+{
+  return handle_select_list_input(view, select_list_bound_event(event, bindings));
 }
 
 namespace detail {

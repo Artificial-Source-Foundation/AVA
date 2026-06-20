@@ -1,0 +1,12 @@
+- The goal uses docs/product/mvp-baseline.md as the governing MVP checklist, with P0 baseline-truth and P1 product gaps in implementation scope.
+- P2 or research items are not implemented by default; they are compared only when useful and are documented as deferred unless a P0 or P1 item depends on them.
+- For each MVP gap, the agent first compares Pi behavior in docs/reference-code/pi, especially packages/coding-agent and packages/tui, and records the AVA decision before implementation.
+- Pi source code and architecture are not copied into AVA; AVA implements behavior with narrow C++23 modules and existing backend/TUI boundaries.
+- TUI/frontend work is in scope, including editor, palette, tool cards, permission UI, session UI, terminal rendering, resize, paste, cursor, and mouse behavior when those areas are selected from the MVP checklist.
+- Backend/RPC/session/provider/tool contracts are implemented whenever a TUI feature needs safe data, persistence, permissions, or runtime control behind it.
+- Every completed MVP item has focused automated tests for deterministic behavior, using CTest whenever possible.
+- Every TUI change that affects real full-screen terminal behavior has a PTY or tmux-backed smoke path when prerequisites are available.
+- If a real terminal smoke cannot run in the current environment, the handoff documents the missing prerequisite, exact smoke command or script, and residual risk.
+- Optional live provider smokes and external terminal artifact tools are credential/tool-gated: run them when prerequisites exist and skip them with an explicit reason when they do not.
+- Before handoff, normal verification includes a configured build, CTest for the affected suite or full test run, and git --no-pager diff --check.
+- The goal is done only when MVP checklist items are either implemented with tests and smoke evidence, or explicitly documented as deferred or excluded with rationale.

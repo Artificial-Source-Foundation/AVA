@@ -6,6 +6,7 @@
 #include <cctype>
 #include <fstream>
 #include <iterator>
+#include <string_view>
 
 namespace ava::tui {
 namespace {
@@ -15,17 +16,29 @@ constexpr std::array kActions = {TuiAction::Submit,
                                  TuiAction::Cancel,
                                  TuiAction::ClearInput,
                                  TuiAction::DeleteBackward,
+                                 TuiAction::DeleteForward,
                                  TuiAction::HistoryPrev,
                                  TuiAction::HistoryNext,
                                  TuiAction::PalettePrev,
                                  TuiAction::PaletteNext,
+                                 TuiAction::SelectPrev,
+                                 TuiAction::SelectNext,
+                                 TuiAction::SelectPageUp,
+                                 TuiAction::SelectPageDown,
+                                 TuiAction::SelectConfirm,
+                                 TuiAction::SelectCancel,
                                  TuiAction::CursorLeft,
                                  TuiAction::CursorRight,
+                                 TuiAction::CursorUp,
+                                 TuiAction::CursorDown,
                                  TuiAction::CursorLineStart,
                                  TuiAction::CursorLineEnd,
                                  TuiAction::CursorWordLeft,
                                  TuiAction::CursorWordRight,
+                                 TuiAction::JumpForward,
+                                 TuiAction::JumpBackward,
                                  TuiAction::DeleteWordBackward,
+                                 TuiAction::DeleteWordForward,
                                  TuiAction::DeleteToLineStart,
                                  TuiAction::DeleteToLineEnd,
                                  TuiAction::Undo,
@@ -38,13 +51,113 @@ constexpr std::array kActions = {TuiAction::Submit,
                                  TuiAction::DetailsToggle,
                                  TuiAction::PageUp,
                                  TuiAction::PageDown,
-                                  TuiAction::ModeToggle,
-                                  TuiAction::Interrupt,
-                                  TuiAction::Exit,
-                                  TuiAction::VariantCycle,
-                                  TuiAction::MessagePrev,
-                                  TuiAction::MessageNext,
-                                  TuiAction::JumpToBottom};
+                                 TuiAction::ModeToggle,
+                                 TuiAction::Interrupt,
+                                 TuiAction::Exit,
+                                 TuiAction::VariantCycle,
+                                 TuiAction::ModelSelect,
+                                 TuiAction::ModelCycleForward,
+                                 TuiAction::ModelCycleBackward,
+                                 TuiAction::MessageDequeue,
+                                 TuiAction::MessagePrev,
+                                 TuiAction::MessageNext,
+                                 TuiAction::JumpToBottom};
+
+struct ActionAlias
+{
+  std::string_view name;
+  TuiAction action;
+  int precedence;
+};
+
+struct ActionNameResolution
+{
+  TuiAction action;
+  int precedence;
+};
+
+struct ParsedKeyBindingEntry
+{
+  TuiAction action;
+  std::vector<std::string> values;
+  int precedence = 0;
+};
+
+constexpr std::array kActionAliases = {
+    ActionAlias{"tui.editor.cursorUp", TuiAction::CursorUp, 2},
+    ActionAlias{"cursorUp", TuiAction::CursorUp, 1},
+    ActionAlias{"tui.editor.cursorDown", TuiAction::CursorDown, 2},
+    ActionAlias{"cursorDown", TuiAction::CursorDown, 1},
+    ActionAlias{"tui.editor.cursorLeft", TuiAction::CursorLeft, 2},
+    ActionAlias{"cursorLeft", TuiAction::CursorLeft, 1},
+    ActionAlias{"tui.editor.cursorRight", TuiAction::CursorRight, 2},
+    ActionAlias{"cursorRight", TuiAction::CursorRight, 1},
+    ActionAlias{"tui.editor.cursorWordLeft", TuiAction::CursorWordLeft, 2},
+    ActionAlias{"cursorWordLeft", TuiAction::CursorWordLeft, 1},
+    ActionAlias{"tui.editor.cursorWordRight", TuiAction::CursorWordRight, 2},
+    ActionAlias{"cursorWordRight", TuiAction::CursorWordRight, 1},
+    ActionAlias{"tui.editor.cursorLineStart", TuiAction::CursorLineStart, 2},
+    ActionAlias{"cursorLineStart", TuiAction::CursorLineStart, 1},
+    ActionAlias{"tui.editor.cursorLineEnd", TuiAction::CursorLineEnd, 2},
+    ActionAlias{"cursorLineEnd", TuiAction::CursorLineEnd, 1},
+    ActionAlias{"tui.editor.jumpForward", TuiAction::JumpForward, 2},
+    ActionAlias{"jumpForward", TuiAction::JumpForward, 1},
+    ActionAlias{"tui.editor.jumpBackward", TuiAction::JumpBackward, 2},
+    ActionAlias{"jumpBackward", TuiAction::JumpBackward, 1},
+    ActionAlias{"tui.editor.pageUp", TuiAction::PageUp, 2},
+    ActionAlias{"pageUp", TuiAction::PageUp, 1},
+    ActionAlias{"tui.editor.pageDown", TuiAction::PageDown, 2},
+    ActionAlias{"pageDown", TuiAction::PageDown, 1},
+    ActionAlias{"tui.editor.deleteCharBackward", TuiAction::DeleteBackward, 2},
+    ActionAlias{"deleteCharBackward", TuiAction::DeleteBackward, 1},
+    ActionAlias{"tui.editor.deleteCharForward", TuiAction::DeleteForward, 2},
+    ActionAlias{"deleteCharForward", TuiAction::DeleteForward, 1},
+    ActionAlias{"tui.editor.deleteWordBackward", TuiAction::DeleteWordBackward, 2},
+    ActionAlias{"deleteWordBackward", TuiAction::DeleteWordBackward, 1},
+    ActionAlias{"tui.editor.deleteWordForward", TuiAction::DeleteWordForward, 2},
+    ActionAlias{"deleteWordForward", TuiAction::DeleteWordForward, 1},
+    ActionAlias{"tui.editor.deleteToLineStart", TuiAction::DeleteToLineStart, 2},
+    ActionAlias{"deleteToLineStart", TuiAction::DeleteToLineStart, 1},
+    ActionAlias{"tui.editor.deleteToLineEnd", TuiAction::DeleteToLineEnd, 2},
+    ActionAlias{"deleteToLineEnd", TuiAction::DeleteToLineEnd, 1},
+    ActionAlias{"tui.editor.yank", TuiAction::Yank, 2},
+    ActionAlias{"tui.editor.yankPop", TuiAction::YankPop, 2},
+    ActionAlias{"yankPop", TuiAction::YankPop, 1},
+    ActionAlias{"tui.editor.undo", TuiAction::Undo, 2},
+    ActionAlias{"tui.editor.redo", TuiAction::Redo, 2},
+    ActionAlias{"tui.input.newLine", TuiAction::NewLine, 2},
+    ActionAlias{"newLine", TuiAction::NewLine, 1},
+    ActionAlias{"tui.input.submit", TuiAction::Submit, 2},
+    ActionAlias{"tui.input.tab", TuiAction::AutocompleteAccept, 2},
+    ActionAlias{"tui.select.up", TuiAction::SelectPrev, 2},
+    ActionAlias{"selectUp", TuiAction::SelectPrev, 1},
+    ActionAlias{"tui.select.down", TuiAction::SelectNext, 2},
+    ActionAlias{"selectDown", TuiAction::SelectNext, 1},
+    ActionAlias{"tui.select.pageUp", TuiAction::SelectPageUp, 2},
+    ActionAlias{"selectPageUp", TuiAction::SelectPageUp, 1},
+    ActionAlias{"tui.select.pageDown", TuiAction::SelectPageDown, 2},
+    ActionAlias{"selectPageDown", TuiAction::SelectPageDown, 1},
+    ActionAlias{"tui.select.confirm", TuiAction::SelectConfirm, 2},
+    ActionAlias{"selectConfirm", TuiAction::SelectConfirm, 1},
+    ActionAlias{"tui.select.cancel", TuiAction::SelectCancel, 2},
+    ActionAlias{"selectCancel", TuiAction::SelectCancel, 1},
+    ActionAlias{"app.clear", TuiAction::ClearInput, 2},
+    ActionAlias{"clear", TuiAction::ClearInput, 1},
+    ActionAlias{"app.interrupt", TuiAction::Interrupt, 2},
+    ActionAlias{"app.exit", TuiAction::Exit, 2},
+    ActionAlias{"app.tools.expand", TuiAction::DetailsToggle, 2},
+    ActionAlias{"expandTools", TuiAction::DetailsToggle, 1},
+    ActionAlias{"app.model.select", TuiAction::ModelSelect, 2},
+    ActionAlias{"modelSelect", TuiAction::ModelSelect, 1},
+    ActionAlias{"app.model.cycleForward", TuiAction::ModelCycleForward, 2},
+    ActionAlias{"modelCycleForward", TuiAction::ModelCycleForward, 1},
+    ActionAlias{"app.model.cycleBackward", TuiAction::ModelCycleBackward, 2},
+    ActionAlias{"modelCycleBackward", TuiAction::ModelCycleBackward, 1},
+    ActionAlias{"app.thinking.cycle", TuiAction::VariantCycle, 2},
+    ActionAlias{"thinkingCycle", TuiAction::VariantCycle, 1},
+    ActionAlias{"app.message.dequeue", TuiAction::MessageDequeue, 2},
+    ActionAlias{"messageDequeue", TuiAction::MessageDequeue, 1},
+};
 
 std::string normalize_token(std::string_view text)
 {
@@ -53,6 +166,19 @@ std::string normalize_token(std::string_view text)
   for (char const ch : text)
   {
     if (std::isspace(static_cast<unsigned char>(ch)) != 0 || ch == '-' || ch == '_')
+      continue;
+    result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  }
+  return result;
+}
+
+std::string normalize_action_id(std::string_view text)
+{
+  std::string result;
+  result.reserve(text.size());
+  for (char const ch : text)
+  {
+    if (std::isspace(static_cast<unsigned char>(ch)) != 0 || ch == '-' || ch == '_' || ch == '.')
       continue;
     result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
   }
@@ -159,6 +285,24 @@ ava::core::Result<std::vector<Key>> parse_key_list(std::string_view text)
   return keys;
 }
 
+ava::core::Result<std::vector<Key>> parse_key_values(std::vector<std::string> const& values)
+{
+  std::vector<Key> keys;
+  for (auto const& value : values)
+  {
+    auto parsed = parse_key_list(value);
+    if (!parsed)
+      return std::unexpected(std::move(parsed.error()));
+    keys.insert(keys.end(), parsed->begin(), parsed->end());
+  }
+  if (keys.empty())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "empty TUI key binding");
+    return std::unexpected(std::move(error));
+  }
+  return keys;
+}
+
 ava::core::Error keybinds_error(std::string message)
 {
   return ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
@@ -169,11 +313,11 @@ void skip_json_whitespace(std::string_view json, std::size_t& offset)
   while (offset < json.size() && std::isspace(static_cast<unsigned char>(json[offset])) != 0) ++offset;
 }
 
-ava::core::Result<std::string> parse_json_key(std::string_view json, std::size_t& offset)
+ava::core::Result<std::string> parse_json_string(std::string_view json, std::size_t& offset, std::string_view expected_message)
 {
   if (offset >= json.size() || json[offset] != '"')
   {
-    return std::unexpected(keybinds_error("expected JSON object key"));
+    return std::unexpected(keybinds_error(std::string(expected_message)));
   }
   ++offset;
   std::string key;
@@ -236,19 +380,98 @@ ava::core::Result<std::string> parse_json_key(std::string_view json, std::size_t
   return std::unexpected(keybinds_error("unterminated JSON object key"));
 }
 
-std::optional<TuiAction> action_from_name(std::string_view name)
+ava::core::Result<std::string> parse_json_key(std::string_view json, std::size_t& offset)
 {
+  return parse_json_string(json, offset, "expected JSON object key");
+}
+
+std::optional<ActionNameResolution> action_from_name(std::string_view name)
+{
+  auto const normalized = normalize_action_id(name);
   for (auto const action : kActions)
   {
-    if (action_name(action) == name)
-      return action;
+    if (normalize_action_id(action_name(action)) == normalized)
+      return ActionNameResolution{.action = action, .precedence = 2};
+  }
+  for (auto const alias : kActionAliases)
+  {
+    if (normalize_action_id(alias.name) == normalized)
+      return ActionNameResolution{.action = alias.action, .precedence = alias.precedence};
   }
   return std::nullopt;
 }
 
-ava::core::Result<std::vector<std::pair<TuiAction, std::string>>> parse_key_binding_entries(std::string_view json)
+ava::core::Result<std::vector<std::string>> parse_key_binding_value(std::string_view json, std::size_t& offset, std::string_view action)
 {
-  std::vector<std::pair<TuiAction, std::string>> entries;
+  if (offset >= json.size())
+  {
+    auto error = keybinds_error("missing TUI keybinding value");
+    error.with_context("action", std::string(action));
+    return std::unexpected(std::move(error));
+  }
+
+  if (json[offset] == '"')
+  {
+    auto value = parse_json_string(json, offset, "TUI keybinding values must be strings or arrays of strings");
+    if (!value)
+      return std::unexpected(std::move(value.error()));
+    return std::vector<std::string>{std::move(*value)};
+  }
+
+  if (json[offset] != '[')
+  {
+    auto error = keybinds_error("TUI keybinding values must be strings or arrays of strings");
+    error.with_context("action", std::string(action));
+    return std::unexpected(std::move(error));
+  }
+
+  ++offset;
+  std::vector<std::string> values;
+  skip_json_whitespace(json, offset);
+  if (offset < json.size() && json[offset] == ']')
+  {
+    ++offset;
+    auto error = keybinds_error("empty TUI key binding");
+    error.with_context("action", std::string(action));
+    return std::unexpected(std::move(error));
+  }
+
+  while (true)
+  {
+    skip_json_whitespace(json, offset);
+    auto value = parse_json_string(json, offset, "TUI keybinding array entries must be strings");
+    if (!value)
+    {
+      value.error().with_context("action", std::string(action));
+      return std::unexpected(std::move(value.error()));
+    }
+    if (trim(*value).empty())
+    {
+      auto error = keybinds_error("empty TUI key binding");
+      error.with_context("action", std::string(action));
+      return std::unexpected(std::move(error));
+    }
+    values.push_back(std::move(*value));
+    skip_json_whitespace(json, offset);
+    if (offset >= json.size())
+      return std::unexpected(keybinds_error("unterminated keybinding array"));
+    if (json[offset] == ',')
+    {
+      ++offset;
+      continue;
+    }
+    if (json[offset] == ']')
+    {
+      ++offset;
+      return values;
+    }
+    return std::unexpected(keybinds_error("expected ',' or ']' in keybinding array"));
+  }
+}
+
+ava::core::Result<std::vector<ParsedKeyBindingEntry>> parse_key_binding_entries(std::string_view json)
+{
+  std::vector<ParsedKeyBindingEntry> entries;
   std::size_t offset = 0;
   skip_json_whitespace(json, offset);
   if (offset >= json.size() || json[offset] != '{')
@@ -286,16 +509,19 @@ ava::core::Result<std::vector<std::pair<TuiAction, std::string>>> parse_key_bind
     }
     ++offset;
     skip_json_whitespace(json, offset);
-    if (offset >= json.size() || json[offset] != '"')
-    {
-      auto error = keybinds_error("TUI keybinding values must be strings");
-      error.with_context("action", *key);
-      return std::unexpected(std::move(error));
-    }
-    auto value = parse_json_key(json, offset);
+    auto value = parse_key_binding_value(json, offset, *key);
     if (!value)
       return std::unexpected(std::move(value.error()));
-    entries.push_back({*action, std::move(*value)});
+    auto existing = std::ranges::find_if(entries, [&](auto const& entry) { return entry.action == action->action; });
+    if (existing == entries.end())
+    {
+      entries.push_back(ParsedKeyBindingEntry{.action = action->action, .values = std::move(*value), .precedence = action->precedence});
+    }
+    else if (action->precedence >= existing->precedence)
+    {
+      existing->values = std::move(*value);
+      existing->precedence = action->precedence;
+    }
     skip_json_whitespace(json, offset);
     if (offset >= json.size())
       return std::unexpected(keybinds_error("unterminated keybinds object"));
@@ -326,14 +552,109 @@ std::optional<std::vector<Key>*> keys_for_action(TuiKeyBindings& bindings, TuiAc
   return std::nullopt;
 }
 
+bool is_select_action(TuiAction action)
+{
+  switch (action)
+  {
+    case TuiAction::SelectPrev:
+    case TuiAction::SelectNext:
+    case TuiAction::SelectPageUp:
+    case TuiAction::SelectPageDown:
+    case TuiAction::SelectConfirm:
+    case TuiAction::SelectCancel:
+      return true;
+    case TuiAction::Submit:
+    case TuiAction::NewLine:
+    case TuiAction::Cancel:
+    case TuiAction::ClearInput:
+    case TuiAction::DeleteBackward:
+    case TuiAction::DeleteForward:
+    case TuiAction::HistoryPrev:
+    case TuiAction::HistoryNext:
+    case TuiAction::PalettePrev:
+    case TuiAction::PaletteNext:
+    case TuiAction::CursorLeft:
+    case TuiAction::CursorRight:
+    case TuiAction::CursorUp:
+    case TuiAction::CursorDown:
+    case TuiAction::CursorLineStart:
+    case TuiAction::CursorLineEnd:
+    case TuiAction::CursorWordLeft:
+    case TuiAction::CursorWordRight:
+    case TuiAction::JumpForward:
+    case TuiAction::JumpBackward:
+    case TuiAction::DeleteWordBackward:
+    case TuiAction::DeleteWordForward:
+    case TuiAction::DeleteToLineStart:
+    case TuiAction::DeleteToLineEnd:
+    case TuiAction::Undo:
+    case TuiAction::Redo:
+    case TuiAction::Yank:
+    case TuiAction::YankPop:
+    case TuiAction::AutocompleteAccept:
+    case TuiAction::PromptAllow:
+    case TuiAction::PromptDeny:
+    case TuiAction::DetailsToggle:
+    case TuiAction::PageUp:
+    case TuiAction::PageDown:
+    case TuiAction::ModeToggle:
+    case TuiAction::Interrupt:
+    case TuiAction::Exit:
+    case TuiAction::VariantCycle:
+    case TuiAction::ModelSelect:
+    case TuiAction::ModelCycleForward:
+    case TuiAction::ModelCycleBackward:
+    case TuiAction::MessageDequeue:
+    case TuiAction::MessagePrev:
+    case TuiAction::MessageNext:
+    case TuiAction::JumpToBottom:
+      return false;
+  }
+  return false;
+}
+
+bool actions_can_share_key(TuiAction lhs, TuiAction rhs)
+{
+  return lhs == rhs || is_select_action(lhs) != is_select_action(rhs);
+}
+
 void remove_keys_from_other_actions(TuiKeyBindings& bindings, TuiAction action, std::vector<Key> const& keys_to_remove)
 {
   for (auto& [candidate, keys] : bindings.bindings)
   {
-    if (candidate == action)
+    if (actions_can_share_key(action, candidate))
       continue;
     std::erase_if(keys, [&](Key key) { return std::ranges::find(keys_to_remove, key) != keys_to_remove.end(); });
   }
+}
+
+ava::core::VoidResult validate_user_key_conflicts(std::vector<std::pair<TuiAction, std::vector<Key>>> const& overrides)
+{
+  std::vector<std::pair<Key, TuiAction>> claims;
+  for (auto const& [action, keys] : overrides)
+  {
+    for (auto const key : keys)
+    {
+      auto const claimed = std::ranges::find_if(claims, [key](auto const& claim) { return claim.first == key; });
+      if (claimed == claims.end())
+      {
+        claims.push_back({key, action});
+        continue;
+      }
+      if (claimed->second == action)
+        continue;
+      if (actions_can_share_key(claimed->second, action))
+        continue;
+
+      auto error = keybinds_error("conflicting TUI keybinding");
+      error.with_context("key", key_display(key))
+          .with_context("action", action_name(action))
+          .with_context("conflicts_with", action_name(claimed->second))
+          .with_context("fix", "assign each configured key to only one action");
+      return std::unexpected(std::move(error));
+    }
+  }
+  return {};
 }
 
 }  // namespace
@@ -341,40 +662,56 @@ void remove_keys_from_other_actions(TuiKeyBindings& bindings, TuiAction action, 
 TuiKeyBindings default_key_bindings()
 {
   return TuiKeyBindings{.bindings = {{TuiAction::Submit, {Key::Enter}},
-                                     {TuiAction::NewLine, {Key::ShiftEnter}},
+                                     {TuiAction::NewLine, {Key::ShiftEnter, Key::CtrlEnter, Key::AltEnter}},
                                      {TuiAction::Cancel, {Key::Escape}},
                                      {TuiAction::ClearInput, {}},
-                                     {TuiAction::DeleteBackward, {Key::Backspace}},
+                                     {TuiAction::DeleteBackward, {Key::Backspace, Key::CtrlH}},
+                                     {TuiAction::DeleteForward, {Key::Delete, Key::CtrlD}},
                                      {TuiAction::HistoryPrev, {Key::ArrowUp}},
                                      {TuiAction::HistoryNext, {Key::ArrowDown}},
                                      {TuiAction::PalettePrev, {Key::ArrowUp}},
                                      {TuiAction::PaletteNext, {Key::ArrowDown}},
+                                     {TuiAction::SelectPrev, {Key::ArrowUp}},
+                                     {TuiAction::SelectNext, {Key::ArrowDown}},
+                                     {TuiAction::SelectPageUp, {Key::PageUp}},
+                                     {TuiAction::SelectPageDown, {Key::PageDown}},
+                                     {TuiAction::SelectConfirm, {Key::Enter}},
+                                     {TuiAction::SelectCancel, {Key::Escape, Key::CtrlC}},
                                      {TuiAction::CursorLeft, {Key::ArrowLeft, Key::CtrlB}},
                                      {TuiAction::CursorRight, {Key::ArrowRight, Key::CtrlF}},
-                                     {TuiAction::CursorLineStart, {Key::CtrlA}},
-                                     {TuiAction::CursorLineEnd, {Key::CtrlE}},
-                                     {TuiAction::CursorWordLeft, {}},
-                                     {TuiAction::CursorWordRight, {}},
-                                     {TuiAction::DeleteWordBackward, {Key::CtrlW}},
+                                     {TuiAction::CursorUp, {Key::ArrowUp}},
+                                     {TuiAction::CursorDown, {Key::ArrowDown}},
+                                     {TuiAction::CursorLineStart, {Key::Home, Key::CtrlA}},
+                                     {TuiAction::CursorLineEnd, {Key::End, Key::CtrlE}},
+                                     {TuiAction::CursorWordLeft, {Key::CtrlArrowLeft, Key::AltArrowLeft, Key::AltB}},
+                                     {TuiAction::CursorWordRight, {Key::CtrlArrowRight, Key::AltArrowRight, Key::AltF}},
+                                     {TuiAction::JumpForward, {Key::CtrlRightBracket}},
+                                     {TuiAction::JumpBackward, {Key::CtrlAltRightBracket}},
+                                     {TuiAction::DeleteWordBackward, {Key::CtrlW, Key::AltBackspace}},
+                                     {TuiAction::DeleteWordForward, {Key::AltD, Key::AltDelete}},
                                      {TuiAction::DeleteToLineStart, {Key::CtrlU}},
                                      {TuiAction::DeleteToLineEnd, {Key::CtrlK}},
-                                     {TuiAction::Undo, {Key::CtrlZ}},
+                                     {TuiAction::Undo, {Key::CtrlZ, Key::CtrlMinus}},
                                      {TuiAction::Redo, {Key::CtrlR}},
                                      {TuiAction::Yank, {Key::CtrlY}},
                                      {TuiAction::YankPop, {Key::AltY}},
                                      {TuiAction::AutocompleteAccept, {Key::Tab}},
                                      {TuiAction::PromptAllow, {}},
                                      {TuiAction::PromptDeny, {}},
-                                     {TuiAction::DetailsToggle, {}},
+                                     {TuiAction::DetailsToggle, {Key::CtrlO}},
                                      {TuiAction::PageUp, {Key::PageUp}},
                                      {TuiAction::PageDown, {Key::PageDown}},
-                                      {TuiAction::ModeToggle, {Key::Tab}},
-                                      {TuiAction::Interrupt, {Key::CtrlC}},
-                                      {TuiAction::Exit, {Key::CtrlD}},
-                                      {TuiAction::VariantCycle, {Key::CtrlT}},
-                                      {TuiAction::MessagePrev, {}},
-                                      {TuiAction::MessageNext, {}},
-                                      {TuiAction::JumpToBottom, {}}}};
+                                     {TuiAction::ModeToggle, {Key::Tab}},
+                                     {TuiAction::Interrupt, {Key::CtrlC}},
+                                     {TuiAction::Exit, {Key::CtrlD}},
+                                     {TuiAction::VariantCycle, {Key::ShiftTab, Key::CtrlT}},
+                                     {TuiAction::ModelSelect, {Key::CtrlL}},
+                                     {TuiAction::ModelCycleForward, {Key::CtrlP}},
+                                     {TuiAction::ModelCycleBackward, {Key::CtrlShiftP}},
+                                     {TuiAction::MessageDequeue, {Key::AltArrowUp}},
+                                     {TuiAction::MessagePrev, {}},
+                                     {TuiAction::MessageNext, {}},
+                                     {TuiAction::JumpToBottom, {}}}};
 }
 
 std::optional<TuiAction> action_for_key(TuiKeyBindings const& bindings, Key key)
@@ -404,10 +741,20 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::Enter;
   if (normalized == "shift+enter" || normalized == "ctrl+j" || normalized == "ctrlj")
     return Key::ShiftEnter;
+  if (normalized == "ctrl+enter" || normalized == "ctrlenter")
+    return Key::CtrlEnter;
+  if (normalized == "alt+enter" || normalized == "altenter" || normalized == "meta+enter" || normalized == "metaenter")
+    return Key::AltEnter;
   if (normalized == "backspace" || normalized == "bs")
     return Key::Backspace;
+  if (normalized == "delete" || normalized == "del")
+    return Key::Delete;
   if (normalized == "tab")
     return Key::Tab;
+  if (normalized == "space")
+    return Key::Space;
+  if (normalized == "shift+tab" || normalized == "shifttab" || normalized == "backtab")
+    return Key::ShiftTab;
   if (normalized == "esc" || normalized == "escape")
     return Key::Escape;
   if (normalized == "arrowup" || normalized == "up")
@@ -418,10 +765,32 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::ArrowLeft;
   if (normalized == "arrowright" || normalized == "right")
     return Key::ArrowRight;
+  if (normalized == "ctrl+arrowleft" || normalized == "ctrlarrowleft" || normalized == "ctrl+left" ||
+      normalized == "ctrlleft")
+    return Key::CtrlArrowLeft;
+  if (normalized == "ctrl+arrowright" || normalized == "ctrlarrowright" || normalized == "ctrl+right" ||
+      normalized == "ctrlright")
+    return Key::CtrlArrowRight;
+  if (normalized == "alt+arrowleft" || normalized == "altarrowleft" || normalized == "alt+left" ||
+      normalized == "altleft" || normalized == "meta+arrowleft" || normalized == "metaarrowleft" ||
+      normalized == "meta+left" || normalized == "metaleft")
+    return Key::AltArrowLeft;
+  if (normalized == "alt+arrowright" || normalized == "altarrowright" || normalized == "alt+right" ||
+      normalized == "altright" || normalized == "meta+arrowright" || normalized == "metaarrowright" ||
+      normalized == "meta+right" || normalized == "metaright")
+    return Key::AltArrowRight;
+  if (normalized == "alt+arrowup" || normalized == "altarrowup" || normalized == "alt+up" ||
+      normalized == "altup" || normalized == "meta+arrowup" || normalized == "metaarrowup" ||
+      normalized == "meta+up" || normalized == "metaup")
+    return Key::AltArrowUp;
   if (normalized == "pageup" || normalized == "pgup")
     return Key::PageUp;
   if (normalized == "pagedown" || normalized == "pgdown")
     return Key::PageDown;
+  if (normalized == "home")
+    return Key::Home;
+  if (normalized == "end")
+    return Key::End;
   if (normalized == "ctrl+a" || normalized == "ctrla")
     return Key::CtrlA;
   if (normalized == "ctrl+b" || normalized == "ctrlb")
@@ -434,10 +803,30 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::CtrlE;
   if (normalized == "ctrl+f" || normalized == "ctrlf")
     return Key::CtrlF;
+  if (normalized == "ctrl+h" || normalized == "ctrlh")
+    return Key::CtrlH;
   if (normalized == "ctrl+k" || normalized == "ctrlk")
     return Key::CtrlK;
+  if (normalized == "ctrl+l" || normalized == "ctrll")
+    return Key::CtrlL;
+  if (normalized == "ctrl+" || normalized == "ctrl+minus" || normalized == "ctrlminus" || normalized == "ctrlhyphen")
+    return Key::CtrlMinus;
+  if (normalized == "ctrl+n" || normalized == "ctrln")
+    return Key::CtrlN;
+  if (normalized == "ctrl+o" || normalized == "ctrlo")
+    return Key::CtrlO;
+  if (normalized == "ctrl+p" || normalized == "ctrlp")
+    return Key::CtrlP;
+  if (normalized == "shift+ctrl+p" || normalized == "ctrl+shift+p" || normalized == "shiftctrlp" ||
+      normalized == "ctrlshiftp")
+    return Key::CtrlShiftP;
   if (normalized == "ctrl+r" || normalized == "ctrlr")
     return Key::CtrlR;
+  if (normalized == "ctrl+]" || normalized == "ctrl]" || normalized == "ctrl+rightbracket" ||
+      normalized == "ctrlrightbracket")
+    return Key::CtrlRightBracket;
+  if (normalized == "ctrl+s" || normalized == "ctrls")
+    return Key::CtrlS;
   if (normalized == "ctrl+t" || normalized == "ctrlt")
     return Key::CtrlT;
   if (normalized == "ctrl+u" || normalized == "ctrlu")
@@ -448,6 +837,32 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::CtrlY;
   if (normalized == "ctrl+z" || normalized == "ctrlz")
     return Key::CtrlZ;
+  if (normalized == "alt+backspace" || normalized == "altbackspace" || normalized == "meta+backspace" ||
+      normalized == "metabackspace")
+    return Key::AltBackspace;
+  if (normalized == "alt+b" || normalized == "altb" || normalized == "meta+b" || normalized == "metab")
+    return Key::AltB;
+  if (normalized == "alt+d" || normalized == "altd" || normalized == "meta+d" || normalized == "metad")
+    return Key::AltD;
+  if (normalized == "alt+delete" || normalized == "altdelete" || normalized == "alt+del" || normalized == "altdel" ||
+      normalized == "meta+delete" || normalized == "metadelete" || normalized == "meta+del" || normalized == "metadel")
+    return Key::AltDelete;
+  if (normalized == "alt+f" || normalized == "altf" || normalized == "meta+f" || normalized == "metaf")
+    return Key::AltF;
+  if (normalized == "alt+h" || normalized == "alth" || normalized == "meta+h" || normalized == "metah")
+    return Key::AltH;
+  if (normalized == "alt+j" || normalized == "altj" || normalized == "meta+j" || normalized == "metaj")
+    return Key::AltJ;
+  if (normalized == "alt+k" || normalized == "altk" || normalized == "meta+k" || normalized == "metak")
+    return Key::AltK;
+  if (normalized == "alt+l" || normalized == "altl" || normalized == "meta+l" || normalized == "metal")
+    return Key::AltL;
+  if (normalized == "alt+w" || normalized == "altw" || normalized == "meta+w" || normalized == "metaw")
+    return Key::AltW;
+  if (normalized == "ctrl+alt+]" || normalized == "ctrlalt]" || normalized == "alt+ctrl+]" ||
+      normalized == "altctrl]" || normalized == "ctrl+alt+rightbracket" || normalized == "ctrlaltrightbracket" ||
+      normalized == "alt+ctrl+rightbracket" || normalized == "altctrlrightbracket")
+    return Key::CtrlAltRightBracket;
   if (normalized == "alt+y" || normalized == "alty" || normalized == "meta+y" || normalized == "metay")
     return Key::AltY;
   return std::nullopt;
@@ -461,8 +876,14 @@ std::string key_display(Key key)
       return "Enter";
     case Key::Backspace:
       return "Backspace";
+    case Key::Delete:
+      return "Delete";
     case Key::Tab:
       return "Tab";
+    case Key::Space:
+      return "Space";
+    case Key::ShiftTab:
+      return "Shift+Tab";
     case Key::Escape:
       return "Esc";
     case Key::ArrowUp:
@@ -473,12 +894,30 @@ std::string key_display(Key key)
       return "Left";
     case Key::ArrowRight:
       return "Right";
+    case Key::CtrlArrowLeft:
+      return "Ctrl+Left";
+    case Key::CtrlArrowRight:
+      return "Ctrl+Right";
+    case Key::AltArrowUp:
+      return "Alt+Up";
+    case Key::AltArrowLeft:
+      return "Alt+Left";
+    case Key::AltArrowRight:
+      return "Alt+Right";
     case Key::PageUp:
       return "PageUp";
     case Key::PageDown:
       return "PageDown";
+    case Key::Home:
+      return "Home";
+    case Key::End:
+      return "End";
     case Key::ShiftEnter:
       return "Shift+Enter";
+    case Key::CtrlEnter:
+      return "Ctrl+Enter";
+    case Key::AltEnter:
+      return "Alt+Enter";
     case Key::CtrlA:
       return "Ctrl+A";
     case Key::CtrlB:
@@ -491,10 +930,28 @@ std::string key_display(Key key)
       return "Ctrl+E";
     case Key::CtrlF:
       return "Ctrl+F";
+    case Key::CtrlH:
+      return "Ctrl+H";
     case Key::CtrlK:
       return "Ctrl+K";
+    case Key::CtrlL:
+      return "Ctrl+L";
+    case Key::CtrlMinus:
+      return "Ctrl+-";
+    case Key::CtrlN:
+      return "Ctrl+N";
+    case Key::CtrlO:
+      return "Ctrl+O";
+    case Key::CtrlP:
+      return "Ctrl+P";
+    case Key::CtrlShiftP:
+      return "Shift+Ctrl+P";
     case Key::CtrlR:
       return "Ctrl+R";
+    case Key::CtrlRightBracket:
+      return "Ctrl+]";
+    case Key::CtrlS:
+      return "Ctrl+S";
     case Key::CtrlT:
       return "Ctrl+T";
     case Key::CtrlU:
@@ -505,6 +962,28 @@ std::string key_display(Key key)
       return "Ctrl+Y";
     case Key::CtrlZ:
       return "Ctrl+Z";
+    case Key::AltBackspace:
+      return "Alt+Backspace";
+    case Key::AltB:
+      return "Alt+B";
+    case Key::AltD:
+      return "Alt+D";
+    case Key::AltDelete:
+      return "Alt+Delete";
+    case Key::AltF:
+      return "Alt+F";
+    case Key::AltH:
+      return "Alt+H";
+    case Key::AltJ:
+      return "Alt+J";
+    case Key::AltK:
+      return "Alt+K";
+    case Key::AltL:
+      return "Alt+L";
+    case Key::AltW:
+      return "Alt+W";
+    case Key::CtrlAltRightBracket:
+      return "Ctrl+Alt+]";
     case Key::AltY:
       return "Alt+Y";
     case Key::MouseWheelUp:
@@ -534,6 +1013,8 @@ std::string action_name(TuiAction action)
       return "clear_input";
     case TuiAction::DeleteBackward:
       return "delete_backward";
+    case TuiAction::DeleteForward:
+      return "delete_forward";
     case TuiAction::HistoryPrev:
       return "history_prev";
     case TuiAction::HistoryNext:
@@ -542,10 +1023,26 @@ std::string action_name(TuiAction action)
       return "palette_prev";
     case TuiAction::PaletteNext:
       return "palette_next";
+    case TuiAction::SelectPrev:
+      return "select_prev";
+    case TuiAction::SelectNext:
+      return "select_next";
+    case TuiAction::SelectPageUp:
+      return "select_page_up";
+    case TuiAction::SelectPageDown:
+      return "select_page_down";
+    case TuiAction::SelectConfirm:
+      return "select_confirm";
+    case TuiAction::SelectCancel:
+      return "select_cancel";
     case TuiAction::CursorLeft:
       return "cursor_left";
     case TuiAction::CursorRight:
       return "cursor_right";
+    case TuiAction::CursorUp:
+      return "cursor_up";
+    case TuiAction::CursorDown:
+      return "cursor_down";
     case TuiAction::CursorLineStart:
       return "cursor_line_start";
     case TuiAction::CursorLineEnd:
@@ -554,8 +1051,14 @@ std::string action_name(TuiAction action)
       return "cursor_word_left";
     case TuiAction::CursorWordRight:
       return "cursor_word_right";
+    case TuiAction::JumpForward:
+      return "jump_forward";
+    case TuiAction::JumpBackward:
+      return "jump_backward";
     case TuiAction::DeleteWordBackward:
       return "delete_word_backward";
+    case TuiAction::DeleteWordForward:
+      return "delete_word_forward";
     case TuiAction::DeleteToLineStart:
       return "delete_to_line_start";
     case TuiAction::DeleteToLineEnd:
@@ -588,6 +1091,14 @@ std::string action_name(TuiAction action)
       return "exit";
     case TuiAction::VariantCycle:
       return "variant_cycle";
+    case TuiAction::ModelSelect:
+      return "model_select";
+    case TuiAction::ModelCycleForward:
+      return "model_cycle_forward";
+    case TuiAction::ModelCycleBackward:
+      return "model_cycle_backward";
+    case TuiAction::MessageDequeue:
+      return "message_dequeue";
     case TuiAction::MessagePrev:
       return "message_prev";
     case TuiAction::MessageNext:
@@ -612,6 +1123,8 @@ std::string action_description(TuiAction action)
       return "Clear the current composer input";
     case TuiAction::DeleteBackward:
       return "Delete the previous character";
+    case TuiAction::DeleteForward:
+      return "Delete the character after the cursor";
     case TuiAction::HistoryPrev:
       return "Recall the previous input history item, or scroll up when history is empty";
     case TuiAction::HistoryNext:
@@ -620,10 +1133,26 @@ std::string action_description(TuiAction action)
       return "Move to the previous slash palette item";
     case TuiAction::PaletteNext:
       return "Move to the next slash palette item";
+    case TuiAction::SelectPrev:
+      return "Move to the previous select-list item";
+    case TuiAction::SelectNext:
+      return "Move to the next select-list item";
+    case TuiAction::SelectPageUp:
+      return "Page up in a select-list modal";
+    case TuiAction::SelectPageDown:
+      return "Page down in a select-list modal";
+    case TuiAction::SelectConfirm:
+      return "Confirm the highlighted select-list item";
+    case TuiAction::SelectCancel:
+      return "Cancel the active select-list modal";
     case TuiAction::CursorLeft:
       return "Move the input cursor left";
     case TuiAction::CursorRight:
       return "Move the input cursor right";
+    case TuiAction::CursorUp:
+      return "Move the input cursor up within a multiline draft";
+    case TuiAction::CursorDown:
+      return "Move the input cursor down within a multiline draft";
     case TuiAction::CursorLineStart:
       return "Move the input cursor to the start of the current line";
     case TuiAction::CursorLineEnd:
@@ -632,8 +1161,14 @@ std::string action_description(TuiAction action)
       return "Move the input cursor to the previous word";
     case TuiAction::CursorWordRight:
       return "Move the input cursor to the next word";
+    case TuiAction::JumpForward:
+      return "Jump forward to the next typed character";
+    case TuiAction::JumpBackward:
+      return "Jump backward to the next typed character";
     case TuiAction::DeleteWordBackward:
       return "Delete the word before the cursor";
+    case TuiAction::DeleteWordForward:
+      return "Delete the word after the cursor";
     case TuiAction::DeleteToLineStart:
       return "Delete from the cursor to the start of the current line";
     case TuiAction::DeleteToLineEnd:
@@ -663,9 +1198,17 @@ std::string action_description(TuiAction action)
     case TuiAction::Interrupt:
       return "Clear a non-empty composer draft, otherwise exit the current TUI loop";
     case TuiAction::Exit:
-      return "Exit the TUI";
+      return "Exit the TUI when the composer is empty";
     case TuiAction::VariantCycle:
       return "Cycle model/variant choices when that backend support exists";
+    case TuiAction::ModelSelect:
+      return "Open the model selector when available";
+    case TuiAction::ModelCycleForward:
+      return "Cycle to the next configured model";
+    case TuiAction::ModelCycleBackward:
+      return "Cycle to the previous configured model when terminal input reports Shift+Ctrl+P";
+    case TuiAction::MessageDequeue:
+      return "Restore the latest queued active-run message to the composer";
     case TuiAction::MessagePrev:
       return "Jump to the previous transcript message boundary";
     case TuiAction::MessageNext:
@@ -723,20 +1266,30 @@ ava::core::Result<TuiKeyBindings> parse_key_bindings_json(std::string_view json,
   if (!entries)
     return std::unexpected(std::move(entries.error()));
 
-  for (auto const& [action, value] : *entries)
+  std::vector<std::pair<TuiAction, std::vector<Key>>> overrides;
+  overrides.reserve(entries->size());
+  for (auto const& entry : *entries)
   {
-    auto keys = parse_key_list(value);
+    auto keys = parse_key_values(entry.values);
     if (!keys)
       return std::unexpected(std::move(keys.error()));
-    remove_keys_from_other_actions(base, action, *keys);
+    overrides.push_back({entry.action, std::move(*keys)});
+  }
+
+  if (auto conflicts = validate_user_key_conflicts(overrides); !conflicts)
+    return std::unexpected(std::move(conflicts.error()));
+
+  for (auto& [action, keys] : overrides)
+  {
+    remove_keys_from_other_actions(base, action, keys);
     auto target = keys_for_action(base, action);
     if (!target)
     {
-      base.bindings.push_back({action, std::move(*keys)});
+      base.bindings.push_back({action, std::move(keys)});
     }
     else
     {
-      **target = std::move(*keys);
+      **target = std::move(keys);
     }
   }
 

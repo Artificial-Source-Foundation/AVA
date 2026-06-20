@@ -34,8 +34,14 @@ Carlo Wood's `origin/cpp-ncurses-tests` branch contains small manual programs fo
 
 The automated `tui_composer` suite covers `newterm` without a real TTY for xterm/screen terminfo and
 tmux-, kitty-, wezterm-, and ssh-like environment variables. This validates initialization and bounded
-rendering, not full terminal behavior. For real PTY/tmux validation, keep the harness outside the default
-CI path until it is deterministic:
+rendering, not full terminal behavior. For real PTY/tmux validation, use the opt-in smoke test. It is
+registered with CTest and skips unless `AVA_TUI_TMUX_SMOKE=1` is set:
+
+```sh
+AVA_TUI_TMUX_SMOKE=1 ctest --test-dir build -R ava_tui.tmux_smoke --output-on-failure
+```
+
+For quick manual probing, the equivalent shape is:
 
 ```sh
 tmux new-session -d -s ava-tui-test -x 100 -y 30 './build/ava'

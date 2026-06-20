@@ -4,6 +4,7 @@
 #include "ava/tui/composer.h"
 #include "ava/config/model_config.h"
 #include "ava/session/session_store.h"
+#include "ava/session/session_tree.h"
 
 #include <string>
 #include <vector>
@@ -19,14 +20,22 @@ enum class SessionSelectorSort
   Path,
 };
 
+[[nodiscard]] SessionSelectorSort next_session_selector_sort(SessionSelectorSort sort) noexcept;
+[[nodiscard]] std::string session_selector_sort_label(SessionSelectorSort sort);
 [[nodiscard]] std::vector<tui::SlashCommandItem> command_catalog_slash_items(std::vector<CommandHotkey> const& hotkeys = {});
 [[nodiscard]] std::vector<tui::SlashCommandItem> command_catalog_slash_items(RuntimeSession const& session, std::vector<CommandHotkey> const& hotkeys = {});
+[[nodiscard]] std::vector<tui::FileReferenceItem> file_reference_items(RuntimeSession const& session);
 [[nodiscard]] tui::SelectListView model_selector_view(ava::config::ModelRegistry const& registry, ava::config::ModelInfo const& current_model,
                                                       std::string footer_hint = {});
 [[nodiscard]] tui::SelectListView model_selector_view(RuntimeSession const& session, std::string footer_hint = {});
 [[nodiscard]] tui::SelectListView session_selector_view(std::vector<ava::session::SessionSummary> summaries, std::string current_session_id = {},
-                                                        SessionSelectorSort sort = SessionSelectorSort::Recent, std::string footer_hint = {});
+                                                        SessionSelectorSort sort = SessionSelectorSort::Recent, std::string footer_hint = {},
+                                                        bool show_paths = true);
+[[nodiscard]] tui::SelectListView session_selector_view(ava::session::SessionTreeIndex tree, SessionSelectorSort sort = SessionSelectorSort::Recent,
+                                                        std::string footer_hint = {}, bool named_only = false,
+                                                        bool show_paths = true, bool show_archived = false);
 [[nodiscard]] tui::SelectListView session_selector_view(RuntimeSession const& session, SessionSelectorSort sort = SessionSelectorSort::Recent,
-                                                        std::string footer_hint = {});
+                                                        std::string footer_hint = {}, bool named_only = false,
+                                                        bool show_paths = true, bool show_archived = false);
 
 }  // namespace ava::app

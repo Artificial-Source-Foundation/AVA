@@ -34,9 +34,10 @@ Required for the MVP, as implemented and verified for the 1.0 release:
 - MCP stdio host support for tool discovery/calls, diagnostics, permission/audit identity, and fake MCP server tests.
 - Docs, samples, protocol notes, and verification commands that prove the backend is ready.
 
-Explicitly post-MVP but still on the product roadmap:
+Explicitly post-MVP or current-develop follow-up work still on the product roadmap:
 
-- 1.1 candidates: persistent permission rules, session tree/fork/clone/labels/names/branch-summary APIs, full LSP symbols/definitions/references, multimodal/image support, unified settings and reload diagnostics, Anthropic-specific OAuth refresh, plugin core-service proxy, and broader live-provider smoke automation.
+- Landed after the original 1.0 cut-line in current backend/RPC: persistent permission rules, session tree/fork/clone/labels/names/caller-supplied branch-summary APIs, full LSP symbols/definitions/references with bounded on-disk sync, and backend multimodal/image attachment replay/storage/provider serialization.
+- 1.1 candidates that remain active: unified settings and reload diagnostics, Anthropic interactive OAuth/live validation, plugin core-service proxy expansion, broader live-provider smoke automation, frontend/TUI consumption of existing session-tree contracts, provider-generated branch summaries if backend-owned, automatic LSP server recipes, unsaved-buffer/incremental LSP sync, and RPC upload/input plumbing for attachments.
 - 1.2+ candidates: HTTP/server daemon mode, plugin marketplace/package manager/remote install, extension UI bridge, advanced MCP HTTP/OAuth/subscriptions/sampling/elicitation/pagination/resources, parallel tool execution, OS-level plugin/shell sandboxing, and dynamic custom-provider registration.
 - Later research: in-process native plugin ABI only if AVA accepts the crash/memory/C++ ABI support burden, and multi-agent/subagent orchestration only after plugin/process/session boundaries are stable.
 
@@ -75,7 +76,7 @@ AVA's backend is a shipped 1.0 local coding-agent backend, not a toy prototype. 
 - Project/global `AGENTS.md`, prompt command, and skill loading in `src/ava/context/` and the unified command registry.
 - Out-of-process plugin and stdio MCP foundations with bounded protocols, enablement, diagnostics, permission/audit identity, and sample/fake-server coverage.
 
-The remaining gap is post-1.0 breadth and product depth: persistent cross-session permission rules, user-facing session fork/clone/tree workflows, unified settings/reload, full LSP symbols/definitions/references, multimodal attachments, plugin core-service proxy, advanced MCP, plugin marketplace flows, HTTP/server daemon mode, broader live-provider smoke automation, parallel tool execution, and multi-agent orchestration.
+The remaining gap is post-1.0 breadth and product depth: richer permission-rule UX/diagnostics, user-facing session tree workflows over the implemented backend/RPC fork/clone/tree contracts, unified settings/reload, automatic LSP server recipes and unsaved-buffer sync, RPC upload/input flows for multimodal attachments, plugin core-service proxy expansion, advanced MCP, plugin marketplace flows, HTTP/server daemon mode, broader live-provider smoke automation, parallel tool execution, and multi-agent orchestration.
 
 ## Milestone Audit Summary
 

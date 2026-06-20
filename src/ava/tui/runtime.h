@@ -35,6 +35,11 @@ struct TuiRestoredQueuedMessage
   bool steering = false;
 };
 
+struct TuiRememberedPermissionRule
+{
+  std::string rule_id;
+};
+
 struct TuiActiveRunQueues
 {
   std::string active_request_id;
@@ -60,6 +65,13 @@ struct TuiRuntimeStateSnapshot
   std::optional<std::size_t> context_source_count = std::nullopt;
   std::string status;
   std::vector<SlashCommandItem> slash_commands = {};
+  std::vector<FileReferenceItem> file_references = {};
+};
+
+struct TuiKeyBindingReloadResult
+{
+  TuiKeyBindings key_bindings = default_key_bindings();
+  TuiRuntimeStateSnapshot state;
 };
 
 struct TuiSubmitContext
@@ -87,6 +99,7 @@ struct TuiRuntimeOptions
   std::optional<std::size_t> context_source_count = std::nullopt;
   std::string initial_status = "";
   std::vector<SlashCommandItem> slash_commands = {};
+  std::vector<FileReferenceItem> file_references = {};
   TuiKeyBindings key_bindings = default_key_bindings();
   // Called on the TUI main thread at startup and after a submit worker completes; never from render/spinner loops.
   std::function<std::optional<std::string>()> token_status_provider;
@@ -95,8 +108,19 @@ struct TuiRuntimeOptions
   std::function<TuiSubmitResult(std::string const&, TuiSubmitContext)> on_submit;
   std::function<ava::core::Result<std::string>()> on_toggle_mode;
   std::function<ava::core::Result<std::string>()> on_cycle_reasoning;
+  std::function<ava::core::Result<TuiRuntimeStateSnapshot>(bool)> on_cycle_model;
+  std::function<ava::core::Result<TuiKeyBindingReloadResult>()> on_reload_key_bindings;
   std::function<SelectListView()> model_selector_view;
   std::function<SelectListView()> session_selector_view;
+  std::function<SelectListView()> on_session_selector_sort_cycle;
+  std::function<SelectListView()> on_session_selector_named_filter_toggle;
+  std::function<SelectListView()> on_session_selector_path_display_toggle;
+  std::function<SelectListView()> on_session_selector_archived_filter_toggle;
+  std::function<ava::core::Result<SelectListView>(std::string_view)> on_session_selector_archive;
+  std::function<ava::core::Result<SelectListView>(std::string_view)> on_session_selector_unarchive;
+  std::function<ava::core::Result<TuiRememberedPermissionRule>(ava::permissions::PermissionPrompt const&,
+                                                               ava::permissions::PermissionAction)>
+      remember_permission_rule;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_model_selected;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_session_selected;
 };

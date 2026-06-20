@@ -1,5 +1,7 @@
 # AVA Product Plan
 
+Status: historical first-shape product plan. Use `docs/product/mvp-baseline.md` for the current Pi-first/OpenCode-second MVP baseline and `docs/product/capabilities-1.1.md` for current backend candidate work. Keep this file as rationale for the lean product direction unless a product decision explicitly supersedes it.
+
 AVA is a lean C++ agentic coding tool. It should feel fast and direct while carrying the practical built-in tool quality expected from the backend maturity baseline.
 
 This document defines the product before implementation. It is intentionally biased toward a small first version.

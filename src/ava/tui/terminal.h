@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <termios.h>
 
 namespace ava::tui {
 
@@ -14,31 +15,63 @@ enum class Key
   Character,
   Enter,
   Backspace,
+  Delete,
   Tab,
+  Space,
+  ShiftTab,
   Escape,
   ArrowUp,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
+  CtrlArrowLeft,
+  CtrlArrowRight,
+  AltArrowUp,
+  AltArrowLeft,
+  AltArrowRight,
   PageUp,
   PageDown,
+  Home,
+  End,
   MouseWheelUp,
   MouseWheelDown,
   MouseLeftClick,
   ShiftEnter,
+  CtrlEnter,
+  AltEnter,
   CtrlA,
   CtrlB,
   CtrlC,
   CtrlD,
   CtrlE,
   CtrlF,
+  CtrlH,
   CtrlK,
+  CtrlL,
+  CtrlMinus,
+  CtrlN,
+  CtrlO,
+  CtrlP,
+  CtrlShiftP,
   CtrlR,
+  CtrlRightBracket,
+  CtrlS,
   CtrlT,
   CtrlU,
   CtrlW,
   CtrlY,
   CtrlZ,
+  AltBackspace,
+  AltB,
+  AltD,
+  AltDelete,
+  AltF,
+  AltH,
+  AltJ,
+  AltK,
+  AltL,
+  AltW,
+  CtrlAltRightBracket,
   AltY,
   Unknown
 };
@@ -75,6 +108,8 @@ class CursesSession
 
   std::unique_ptr<void, ScreenDeleter> screen_;
   std::string previous_locale_;
+  termios previous_terminal_attrs_{};
+  bool restore_terminal_attrs_ = false;
   bool active_ = false;
 };
 

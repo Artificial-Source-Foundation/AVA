@@ -60,6 +60,10 @@ struct ComposerInputLayout {
 [[nodiscard]] std::string slash_command_prefix(std::string_view input);
 [[nodiscard]] std::vector<std::string> render_slash_palette(ComposerSnapshot const& snapshot, std::size_t width,
                                                             std::size_t max_lines);
+[[nodiscard]] std::vector<std::string> render_file_reference_palette(ComposerSnapshot const& snapshot, std::size_t width,
+                                                                     std::size_t max_lines);
+[[nodiscard]] std::vector<std::string> render_path_completion_palette(ComposerSnapshot const& snapshot, std::size_t width,
+                                                                      std::size_t max_lines);
 
 [[nodiscard]] std::vector<std::string> render_permission_prompt(PermissionPromptView const& prompt, std::size_t width,
                                                                 std::size_t max_lines);

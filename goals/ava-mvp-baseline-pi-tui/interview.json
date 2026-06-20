@@ -1,0 +1,138 @@
+{
+  "stage": "interview",
+  "title": "AVA MVP Baseline With Pi And TUI Verification",
+  "goalSlug": "ava-mvp-baseline-pi-tui",
+  "questions": [
+    {
+      "id": "priority_order",
+      "prompt": "How should this goal prioritize the MVP baseline work?",
+      "description": "The baseline is product-wide. This decides the loop order when the agent chooses what to implement first.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Start with TUI/frontend MVP gaps because that is the current product push, but keep the full Pi-first MVP baseline as the governing checklist. Backend/RPC/session/provider/tool work remains in scope whenever a TUI feature needs a safe contract behind it.",
+      "recommendedOptionIds": [
+        "tui_first_full_baseline"
+      ],
+      "options": [
+        {
+          "id": "tui_first_full_baseline",
+          "label": "TUI first, full baseline"
+        },
+        {
+          "id": "strict_doc_order",
+          "label": "Strict checklist order"
+        },
+        {
+          "id": "single_tui_slice",
+          "label": "Only first TUI slice"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "mvp_breadth",
+      "prompt": "Which baseline areas should count as in scope for this goal?",
+      "description": "The MVP baseline includes P0 truth, P1 product gaps, and P2 research/deferred items.",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "Treat P0 and P1 as implementation scope. P2/research items should be compared against Pi/OpenCode only when useful, then documented as deferred unless a P0/P1 feature depends on them.",
+      "recommendedOptionIds": [
+        "p0_truth",
+        "p1_product",
+        "p2_document_only"
+      ],
+      "options": [
+        {
+          "id": "p0_truth",
+          "label": "P0 baseline truth"
+        },
+        {
+          "id": "p1_product",
+          "label": "P1 product gaps"
+        },
+        {
+          "id": "p2_document_only",
+          "label": "Document P2 deferrals"
+        },
+        {
+          "id": "p2_implementation",
+          "label": "Implement P2 too"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "terminal_verification",
+      "prompt": "How strict should terminal/TUI verification be?",
+      "description": "Terminal apps need more than ordinary unit tests for resize, paste, cursor, alternate screen, mouse, and real ncurses behavior.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Require deterministic CTest coverage for renderer/editor/state logic, plus PTY or tmux-backed smoke tests for real terminal behavior whenever a TUI change affects full-screen interaction. If a real terminal smoke cannot run in the environment, the blocker and exact command must be documented before handoff.",
+      "recommendedOptionIds": [
+        "automated_pty_when_feasible"
+      ],
+      "options": [
+        {
+          "id": "automated_pty_when_feasible",
+          "label": "Automated PTY when feasible"
+        },
+        {
+          "id": "manual_artifacts_ok",
+          "label": "Manual artifacts acceptable"
+        },
+        {
+          "id": "unit_tests_only",
+          "label": "Unit tests only"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "reference_policy",
+      "prompt": "How should the Pi reference repository be used?",
+      "description": "Pi is local under docs/reference-code/pi. The AVA guide says reference code is for behavior comparison, not source copying.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Use Pi as the primary behavior and capability reference, especially docs/reference-code/pi/packages/coding-agent and docs/reference-code/pi/packages/tui. Do not copy Pi source or architecture; implement AVA-native C++23 modules and document any MVP exclusions.",
+      "recommendedOptionIds": [
+        "behavior_only"
+      ],
+      "options": [
+        {
+          "id": "behavior_only",
+          "label": "Behavior only"
+        },
+        {
+          "id": "architecture_guidance",
+          "label": "Architecture guidance too"
+        },
+        {
+          "id": "minimal_pi_review",
+          "label": "Minimal Pi review"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "live_smokes",
+      "prompt": "How should the goal handle checks that need credentials, a real terminal, or optional tools?",
+      "description": "Provider live smokes, tmux/VHS/asciinema captures, and external terminal tools may not be present in every environment.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Make optional-environment checks explicit and credential/tool-gated. The agent must run them when prerequisites are present, skip with a clear reason when they are absent, and always run normal CMake tests plus git diff checks before handoff.",
+      "recommendedOptionIds": [
+        "gated_required_when_available"
+      ],
+      "options": [
+        {
+          "id": "gated_required_when_available",
+          "label": "Gated, required when available"
+        },
+        {
+          "id": "always_required",
+          "label": "Always required"
+        },
+        {
+          "id": "never_required",
+          "label": "Never required"
+        }
+      ],
+      "required": true
+    }
+  ]
+}

@@ -1,3 +1,7 @@
+set(CURSES_NEED_NCURSES TRUE)
+set(CURSES_NEED_WIDE TRUE)
+find_package(Curses REQUIRED)
+
 add_library(ava_test_support
   "support/app_runtime_support.cpp"
   "support/fake_transport.cpp"
@@ -52,6 +56,7 @@ add_executable(ava_tests
   "tui_composer_tests.cpp"
 )
 target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_LIBRARIES} ava_test_support)
+target_include_directories(ava_tests PRIVATE ${CURSES_INCLUDE_DIRS})
 add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_provider_server)
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_FILE:ava_fake_mcp_server>")
@@ -245,3 +250,14 @@ add_test(
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-mcp-config-errors
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_mcp_config_errors.cmake)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(
+    NAME ava_tui.tmux_smoke
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tui_tmux_smoke.py
+            --ava $<TARGET_FILE:ava>
+            --root ${CMAKE_BINARY_DIR}/tui-tmux-smoke)
+  set_tests_properties(ava_tui.tmux_smoke PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45)
+endif()

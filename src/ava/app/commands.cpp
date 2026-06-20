@@ -5,6 +5,7 @@
 #include "ava/app/command_help.h"
 #include "ava/app/command_mcp.h"
 #include "ava/app/command_models.h"
+#include "ava/app/command_permissions.h"
 #include "ava/app/command_plugins.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/command_sessions.h"
@@ -282,8 +283,23 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
   if (request.command == "/details") {
     return handled_text("Tool details are a TUI display toggle. Use /details inside the TUI to switch views.");
   }
+  if (starts_with_command(request.command, "/copy")) {
+    auto const argument = command_argument(request.command, "/copy");
+    if (!argument.empty() && argument != "tool" && argument != "tools" && argument != "diff" && argument != "diffs") {
+      return handled_text("unsupported copy target: " + argument + "\nsupported: tool, diff");
+    }
+    return handled_text(
+        "Clipboard copy is available inside the interactive TUI. Use /copy for the latest AVA message, /copy tool for tool details, or /copy diff for the latest unified diff.");
+  }
   if (request.command == "/thinking") {
     return handled_text("Thinking visibility is a TUI display toggle. It does not change provider reasoning mode.");
+  }
+  if (starts_with_command(request.command, "/reload")) {
+    auto const argument = command_argument(request.command, "/reload");
+    if (!argument.empty() && argument != "keybindings" && argument != "keybinds" && argument != "keys") {
+      return handled_text("unsupported reload target: " + argument + "\nsupported: keybindings");
+    }
+    return handled_text("Keybindings reload live inside the interactive TUI. Restart AVA after editing keybinds in non-TTY mode.");
   }
   if (starts_with_command(request.command, "/models")) {
     return run_models_command(session, command_argument(request.command, "/models"));
@@ -300,8 +316,29 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
   if (starts_with_command(request.command, "/plugin")) {
     return run_plugin_command(session, request);
   }
+  if (starts_with_command(request.command, "/permissions")) {
+    return run_permissions_command(session, request);
+  }
   if (starts_with_command(request.command, "/sessions")) {
     return run_sessions_command(session, command_argument(request.command, "/sessions"));
+  }
+  if (starts_with_command(request.command, "/fork")) {
+    return run_fork_command(session, command_argument(request.command, "/fork"));
+  }
+  if (starts_with_command(request.command, "/clone")) {
+    return run_clone_command(session, command_argument(request.command, "/clone"));
+  }
+  if (starts_with_command(request.command, "/new")) {
+    return run_new_session_command(session, command_argument(request.command, "/new"));
+  }
+  if (starts_with_command(request.command, "/resume")) {
+    return run_resume_command(session, command_argument(request.command, "/resume"));
+  }
+  if (starts_with_command(request.command, "/name")) {
+    return run_name_command(session, command_argument(request.command, "/name"));
+  }
+  if (starts_with_command(request.command, "/labels")) {
+    return run_labels_command(session, command_argument(request.command, "/labels"));
   }
   if (request.command == "/mode") {
     return run_mode_command(session);

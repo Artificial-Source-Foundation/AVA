@@ -116,7 +116,7 @@ bool consume_char(std::string_view text, std::size_t& index, char expected)
   return true;
 }
 
-bool is_shift_enter_csi_u(std::string_view sequence)
+bool is_modified_enter_csi_u(std::string_view sequence, int expected_modifiers)
 {
   if (!sequence.starts_with('['))
     return false;
@@ -127,12 +127,75 @@ bool is_shift_enter_csi_u(std::string_view sequence)
   if (!consume_char(sequence, index, ';'))
     return false;
   auto const modifiers = parse_unsigned_int(sequence, index);
-  if (!modifiers || *modifiers != 2)
+  if (!modifiers || *modifiers != expected_modifiers)
     return false;
   return index + 1 == sequence.size() && (sequence[index] == 'u' || sequence[index] == '~');
 }
 
-bool is_legacy_shift_enter_sequence(std::string_view sequence)
+bool is_shift_enter_csi_u(std::string_view sequence)
+{
+  return is_modified_enter_csi_u(sequence, 2);
+}
+
+bool is_ctrl_enter_csi_u(std::string_view sequence)
+{
+  return is_modified_enter_csi_u(sequence, 5);
+}
+
+bool is_alt_enter_csi_u(std::string_view sequence)
+{
+  return is_modified_enter_csi_u(sequence, 3);
+}
+
+bool is_ctrl_minus_csi_u(std::string_view sequence)
+{
+  if (!sequence.starts_with('['))
+    return false;
+  auto index = std::size_t{1};
+  auto const codepoint = parse_unsigned_int(sequence, index);
+  if (!codepoint || *codepoint != 45)
+    return false;
+  if (!consume_char(sequence, index, ';'))
+    return false;
+  auto const modifiers = parse_unsigned_int(sequence, index);
+  if (!modifiers || *modifiers != 5)
+    return false;
+  return index + 1 == sequence.size() && (sequence[index] == 'u' || sequence[index] == '~');
+}
+
+bool is_ctrl_shift_p_csi_u(std::string_view sequence)
+{
+  if (!sequence.starts_with('['))
+    return false;
+  auto index = std::size_t{1};
+  auto const codepoint = parse_unsigned_int(sequence, index);
+  if (!codepoint || (*codepoint != 'P' && *codepoint != 'p'))
+    return false;
+  if (!consume_char(sequence, index, ';'))
+    return false;
+  auto const modifiers = parse_unsigned_int(sequence, index);
+  if (!modifiers || *modifiers != 6)
+    return false;
+  return index + 1 == sequence.size() && (sequence[index] == 'u' || sequence[index] == '~');
+}
+
+bool is_alt_delete_sequence(std::string_view sequence)
+{
+  if (!sequence.starts_with('['))
+    return false;
+  auto index = std::size_t{1};
+  auto const codepoint = parse_unsigned_int(sequence, index);
+  if (!codepoint || *codepoint != 3)
+    return false;
+  if (!consume_char(sequence, index, ';'))
+    return false;
+  auto const modifiers = parse_unsigned_int(sequence, index);
+  if (!modifiers || *modifiers != 3)
+    return false;
+  return index + 1 == sequence.size() && sequence[index] == '~';
+}
+
+bool is_legacy_modified_enter_sequence(std::string_view sequence, int expected_modifiers)
 {
   if (!sequence.starts_with('['))
     return false;
@@ -143,12 +206,27 @@ bool is_legacy_shift_enter_sequence(std::string_view sequence)
   if (!consume_char(sequence, index, ';'))
     return false;
   auto const modifiers = parse_unsigned_int(sequence, index);
-  if (!modifiers || *modifiers != 2)
+  if (!modifiers || *modifiers != expected_modifiers)
     return false;
   if (!consume_char(sequence, index, ';'))
     return false;
   auto const key_code = parse_unsigned_int(sequence, index);
   return key_code && *key_code == 13 && index + 1 == sequence.size() && sequence[index] == '~';
+}
+
+bool is_legacy_shift_enter_sequence(std::string_view sequence)
+{
+  return is_legacy_modified_enter_sequence(sequence, 2);
+}
+
+bool is_legacy_ctrl_enter_sequence(std::string_view sequence)
+{
+  return is_legacy_modified_enter_sequence(sequence, 5);
+}
+
+bool is_legacy_alt_enter_sequence(std::string_view sequence)
+{
+  return is_legacy_modified_enter_sequence(sequence, 3);
 }
 
 Key page_key_from_csi_tilde(std::string_view sequence)
@@ -171,6 +249,12 @@ Key page_key_from_csi_tilde(std::string_view sequence)
   if (index + 1 != sequence.size())
     return Key::Unknown;
 
+  if (*code == 3)
+    return Key::Delete;
+  if (*code == 1 || *code == 7)
+    return Key::Home;
+  if (*code == 4 || *code == 8)
+    return Key::End;
   if (*code == 5)
     return Key::PageUp;
   if (*code == 6)
@@ -247,7 +331,11 @@ CursesSession::CursesSession(void* screen) : screen_(screen), active_(screen != 
 }
 
 CursesSession::CursesSession(CursesSession&& other) noexcept
-    : screen_(std::move(other.screen_)), previous_locale_(std::move(other.previous_locale_)), active_(std::exchange(other.active_, false))
+    : screen_(std::move(other.screen_)),
+      previous_locale_(std::move(other.previous_locale_)),
+      previous_terminal_attrs_(other.previous_terminal_attrs_),
+      restore_terminal_attrs_(std::exchange(other.restore_terminal_attrs_, false)),
+      active_(std::exchange(other.active_, false))
 {
 }
 
@@ -258,6 +346,8 @@ CursesSession& CursesSession::operator=(CursesSession&& other) noexcept
   restore();
   screen_ = std::move(other.screen_);
   previous_locale_ = std::move(other.previous_locale_);
+  previous_terminal_attrs_ = other.previous_terminal_attrs_;
+  restore_terminal_attrs_ = std::exchange(other.restore_terminal_attrs_, false);
   active_ = std::exchange(other.active_, false);
   return *this;
 }
@@ -300,11 +390,20 @@ ava::core::Result<CursesSession> CursesSession::enter()
   static_cast<void>(set_term(screen));
   install_curses_signal_flags();
 
-  if (cbreak() == ERR || noecho() == ERR || keypad(stdscr, TRUE) == ERR)
+  if (raw() == ERR || noecho() == ERR || keypad(stdscr, TRUE) == ERR)
   {
     session.restore();
     restore_signal_mask();
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to configure ncurses terminal mode"));
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to configure ncurses raw terminal mode"));
+  }
+
+  termios terminal_attrs{};
+  if (tcgetattr(STDIN_FILENO, &terminal_attrs) == 0)
+  {
+    session.previous_terminal_attrs_ = terminal_attrs;
+    terminal_attrs.c_iflag &= static_cast<tcflag_t>(~(IXON | IXOFF | IXANY));
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &terminal_attrs) == 0)
+      session.restore_terminal_attrs_ = true;
   }
 
   noqiflush();
@@ -327,6 +426,11 @@ void CursesSession::restore() noexcept
     return;
   static_cast<void>(set_term(static_cast<SCREEN*>(screen_.get())));
   set_bracketed_paste(false);
+  if (restore_terminal_attrs_)
+  {
+    static_cast<void>(tcsetattr(STDIN_FILENO, TCSANOW, &previous_terminal_attrs_));
+    restore_terminal_attrs_ = false;
+  }
   static_cast<void>(curs_set(1));
   static_cast<void>(endwin());
   uninstall_curses_signal_flags();
@@ -383,10 +487,58 @@ int terminal_escape_delay_ms()
 
 Key terminal_escape_sequence_key(std::string_view sequence)
 {
+  if (sequence == "\x7f" || sequence == "\b")
+    return Key::AltBackspace;
+  if (sequence == "\x1d")
+    return Key::CtrlAltRightBracket;
+  if (sequence == "\x1f" || is_ctrl_minus_csi_u(sequence))
+    return Key::CtrlMinus;
+  if (sequence == "\r" || sequence == "\n")
+    return Key::AltEnter;
+  if (sequence == "[Z")
+    return Key::ShiftTab;
+  if (sequence == "[1;6P" || is_ctrl_shift_p_csi_u(sequence))
+    return Key::CtrlShiftP;
+  if (is_alt_delete_sequence(sequence))
+    return Key::AltDelete;
+  if (sequence == "b" || sequence == "B")
+    return Key::AltB;
+  if (sequence == "d" || sequence == "D")
+    return Key::AltD;
+  if (sequence == "f" || sequence == "F")
+    return Key::AltF;
+  if (sequence == "h" || sequence == "H")
+    return Key::AltH;
+  if (sequence == "j" || sequence == "J")
+    return Key::AltJ;
+  if (sequence == "k" || sequence == "K")
+    return Key::AltK;
+  if (sequence == "l" || sequence == "L")
+    return Key::AltL;
+  if (sequence == "w" || sequence == "W")
+    return Key::AltW;
   if (sequence == "y" || sequence == "Y")
     return Key::AltY;
+  if (sequence == "[1;5D" || sequence == "[5D")
+    return Key::CtrlArrowLeft;
+  if (sequence == "[1;5C" || sequence == "[5C")
+    return Key::CtrlArrowRight;
+  if (sequence == "[1;3D" || sequence == "[3D")
+    return Key::AltArrowLeft;
+  if (sequence == "[1;3C" || sequence == "[3C")
+    return Key::AltArrowRight;
+  if (sequence == "[1;3A" || sequence == "[3A")
+    return Key::AltArrowUp;
+  if (sequence == "[H" || sequence == "OH")
+    return Key::Home;
+  if (sequence == "[F" || sequence == "OF")
+    return Key::End;
   if (is_legacy_shift_enter_sequence(sequence) || is_shift_enter_csi_u(sequence))
     return Key::ShiftEnter;
+  if (is_legacy_ctrl_enter_sequence(sequence) || is_ctrl_enter_csi_u(sequence))
+    return Key::CtrlEnter;
+  if (is_legacy_alt_enter_sequence(sequence) || is_alt_enter_csi_u(sequence))
+    return Key::AltEnter;
   if (auto const key = page_key_from_csi_tilde(sequence); key != Key::Unknown)
     return key;
   if (auto const key = sgr_mouse_key(sequence); key != Key::Unknown)
@@ -431,6 +583,8 @@ bool terminal_escape_sequence_complete(std::string_view sequence)
   if (sequence.size() == 1)
   {
     auto const byte = static_cast<unsigned char>(sequence.front());
+    if (byte == 0x08U || byte == 0x0AU || byte == 0x0DU || byte == 0x1DU || byte == 0x1FU || byte == 0x7FU)
+      return true;
     return byte >= 0x30U && byte <= 0x7EU;
   }
 

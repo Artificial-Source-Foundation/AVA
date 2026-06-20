@@ -4,8 +4,9 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 
 ## Current Scope
 
-- AVA agent work in this repo is backend-only unless the user explicitly says otherwise.
-- Carlo owns frontend/TUI planning and implementation. Do not create or follow frontend/TUI plans; backend work may expose semantic events, RPC, session, provider, and tool contracts that Carlo's frontend can consume.
+- AVA agent work in this repo includes backend, terminal frontend, and TUI runtime work unless the user explicitly narrows the task.
+- TUI work is in scope now. Implement real user-facing terminal behavior when the goal calls for it, while preserving backend safety boundaries for permissions, sessions, providers, tools, and process execution.
+- TUI changes must stay testable. Prefer renderer/editor/event-state seams that can be exercised with normal CTest tests, then add terminal-backed smoke coverage for behavior that only exists in a real TTY.
 
 ## Source Map
 
@@ -69,9 +70,20 @@ git --no-pager diff --check
 - Prefer the smallest correct change over broad rewrites.
 - Keep `main.cpp` from growing further when a change has a clear subsystem home.
 - Keep TUI code as presentation/runtime glue; backend modules own permissions, sessions, provider messages, and tool semantics.
+- TUI/frontend plans are allowed when they are tied to implementation and verification. Do not stop at UI plans when the user asked for working behavior.
 - Keep public headers focused on APIs needed across modules. Move test-only or implementation-only helpers out of production interfaces when practical.
 - Add regression tests for safety-sensitive fixes, permission behavior, session persistence, provider parsing, and tool execution.
+- Add regression tests for TUI/editor/rendering changes. Terminal-visible behavior should have either deterministic renderer tests, scripted terminal smoke tests, or a documented manual smoke with captured evidence when automation is not yet reliable.
 - Format changed C++ with the repo `.clang-format` and keep `.clang-tidy` warnings actionable.
+
+## TUI And Terminal Testing
+
+- Start TUI verification at the smallest deterministic layer: text wrapping, width calculation, editor state, keybinding dispatch, palette/filter state, event reducers, permission/tool-card formatting, and transcript rendering should be covered by CTest unit tests where possible.
+- For full terminal behavior, use a pseudo-terminal harness rather than plain pipes. A PTY smoke can set `TERM`, rows, columns, and environment variables, start `ava`, send keystrokes or escape sequences, resize the terminal, and assert on captured screen state and process exit.
+- For ncurses-backed behavior, keep `newterm`/RAII lifecycle tests and add real terminal smokes only for behavior that requires a controlling terminal: alternate-screen cleanup, bracketed paste, resize redraw, mouse events, Escape latency, cursor visibility, Unicode cell placement, and terminal-state restoration after cancellation or crash.
+- Prefer stable screen assertions over raw escape-sequence snapshots. Capture the terminal through a parser, tmux pane, or equivalent screen model, normalize timing-sensitive output, and assert visible text, cursor position, dimensions, and absence of leaked control sequences.
+- Use visual artifacts when they add evidence: tmux captures, asciinema casts, or VHS-style scripted recordings are useful for reviewing complex flows, but they should supplement focused automated checks rather than replace them.
+- Every TUI/frontend task should state what was tested for real before handoff. If a terminal smoke cannot run in the current environment, document the blocker and provide the exact command or script that should be run next.
 
 ## Reference Code
 

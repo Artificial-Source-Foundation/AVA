@@ -6,6 +6,7 @@
 #include <array>
 #include <cctype>
 #include <climits>
+#include <cstdlib>
 #include <string_view>
 #include <vector>
 
@@ -65,10 +66,39 @@ struct CursorPlacement {
   std::size_t column = 0;
 };
 
+bool plain_terminal_output()
+{
+  auto const* no_color = std::getenv("NO_COLOR");
+  return no_color != nullptr && no_color[0] != '\0';
+}
+
+std::string strip_sgr_sequences(std::string_view text)
+{
+  std::string stripped;
+  stripped.reserve(text.size());
+  for (std::size_t index = 0; index < text.size();) {
+    auto const before = index;
+    if (detail::skip_sgr_sequence(text, index)) {
+      continue;
+    }
+    stripped.push_back(text[before]);
+    ++index;
+  }
+  return stripped;
+}
+
+std::vector<std::string> strip_sgr_frame(std::vector<std::string> lines)
+{
+  for (auto& line : lines) {
+    line = strip_sgr_sequences(line);
+  }
+  return lines;
+}
+
 void initialize_color_pairs()
 {
   static bool initialized = false;
-  if (initialized || !has_colors()) return;
+  if (plain_terminal_output() || initialized || !has_colors()) return;
   initialized = true;
   auto screen_bg = COLOR_BLACK;
   auto composer_bg = COLOR_BLACK;
@@ -132,6 +162,7 @@ short color_pair_for(CursesStyle const& style)
 
 attr_t curses_attributes(CursesStyle const& style)
 {
+  if (plain_terminal_output()) return style.attributes;
   if (!has_colors()) return style.attributes;
   return style.attributes | COLOR_PAIR(color_pair_for(style));
 }
@@ -496,13 +527,42 @@ std::vector<std::string> render_queued_message_lines(ComposerSnapshot const& sna
     auto line = std::string(kSgrDim) + "queued " + sanitize_terminal_text(item.kind) + std::string(kSgrReset) + " " +
                 sanitize_terminal_text(item.text);
     if (index == snapshot.queued_messages.size() - 1) {
-      line += " " + std::string(kSgrDim) + "(/restore latest)" + std::string(kSgrReset);
+      line += " " + std::string(kSgrDim) + "(/restore or Alt+Up latest)" + std::string(kSgrReset);
     }
     lines.push_back(detail::screen_surface_line(std::move(line), width));
   }
   if (start > 0 && !lines.empty()) {
     lines.front() = detail::screen_surface_line(
         std::string(kSgrDim) + "queued +" + std::to_string(start) + " more" + std::string(kSgrReset), width);
+  }
+  return lines;
+}
+
+bool status_is_alert(std::string_view status)
+{
+  constexpr std::array kErrorPrefixes = {"invalid_argument:", "io:",       "not_found:",
+                                         "permission_denied:", "provider:", "session:",
+                                         "tool:",              "unknown:"};
+  return std::ranges::any_of(kErrorPrefixes, [status](std::string_view prefix) { return status.starts_with(prefix); });
+}
+
+std::vector<std::string> render_status_alert_lines(std::string_view status, std::size_t width, std::size_t max_lines)
+{
+  std::vector<std::string> lines;
+  if (max_lines == 0 || status.empty() || !status_is_alert(status)) return lines;
+
+  auto const parts = split_lines(status);
+  auto const visible_count = std::min(parts.size(), max_lines);
+  lines.reserve(visible_count);
+  for (std::size_t index = 0; index < visible_count; ++index) {
+    auto line = std::string(index == 0 ? "! " : "  ") + sanitize_terminal_text(parts[index]);
+    if (index + 1 == visible_count && parts.size() > visible_count) line += " ...";
+    if (index == 0) {
+      line = std::string(kSgrError) + line + std::string(kSgrReset);
+    } else {
+      line = std::string(kSgrDim) + line + std::string(kSgrReset);
+    }
+    lines.push_back(detail::fit_line_preserving_sgr(std::move(line), width));
   }
   return lines;
 }
@@ -529,6 +589,9 @@ std::vector<std::string> render_composer(ComposerSnapshot const& snapshot)
 {
   auto const width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
   auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
+  auto finish = [](std::vector<std::string> lines) {
+    return plain_terminal_output() ? strip_sgr_frame(std::move(lines)) : std::move(lines);
+  };
   if (sidebar_visible(snapshot, width)) {
     auto const sidebar_width = std::min<std::size_t>(kSidebarWidth, width / 3);
     auto const main_width = main_width_for(snapshot, width);
@@ -542,19 +605,19 @@ std::vector<std::string> render_composer(ComposerSnapshot const& snapshot)
       combined.push_back(pad_line_to_width(main_line, main_width) + std::string(kSgrDim) + "│" +
                          std::string(kSgrReset) + pad_line_to_width(sidebar_line, sidebar_width));
     }
-    return combined;
+    return finish(std::move(combined));
   }
   if (snapshot.question_prompt && snapshot.question_prompt->modal) {
     auto base = snapshot;
     auto const prompt = *base.question_prompt;
     base.question_prompt = std::nullopt;
-    return overlay_question_modal(render_composer(base), prompt, width, height);
+    return finish(overlay_question_modal(render_composer(base), prompt, width, height));
   }
   if (snapshot.select_list) {
     auto base = snapshot;
     auto const view = *base.select_list;
     base.select_list = std::nullopt;
-    return overlay_select_list_modal(render_composer(base), view, width, height);
+    return finish(overlay_select_list_modal(render_composer(base), view, width, height));
   }
   std::vector<std::string> lines;
   lines.reserve(height);
@@ -579,14 +642,25 @@ std::vector<std::string> render_composer(ComposerSnapshot const& snapshot)
           ? std::min(detail::kMaxPaletteLines, height - fixed_and_prompt_lines)
           : 0;
   auto palette_lines = detail::render_slash_palette(snapshot, width, palette_line_budget);
+  if (palette_lines.empty()) {
+    palette_lines = detail::render_file_reference_palette(snapshot, width, palette_line_budget);
+  }
+  if (palette_lines.empty()) {
+    palette_lines = detail::render_path_completion_palette(snapshot, width, palette_line_budget);
+  }
   auto const fixed_prompt_palette_lines = fixed_and_prompt_lines + palette_lines.size();
   auto const queued_line_budget = (height > fixed_prompt_palette_lines && !prompt_active)
                                       ? std::min<std::size_t>(3, height - fixed_prompt_palette_lines)
                                       : 0;
   auto queued_lines = render_queued_message_lines(snapshot, width, queued_line_budget);
+  auto const fixed_prompt_palette_queued_lines = fixed_prompt_palette_lines + queued_lines.size();
+  auto const status_alert_line_budget = (height > fixed_prompt_palette_queued_lines && !prompt_active)
+                                            ? std::min<std::size_t>(3, height - fixed_prompt_palette_queued_lines)
+                                            : 0;
+  auto status_alert_lines = render_status_alert_lines(snapshot.status, width, status_alert_line_budget);
 
-  auto const non_transcript_lines =
-      fixed_lines + queued_lines.size() + palette_lines.size() + permission_lines.size() + question_lines.size();
+  auto const non_transcript_lines = fixed_lines + queued_lines.size() + status_alert_lines.size() +
+                                    palette_lines.size() + permission_lines.size() + question_lines.size();
   auto const transcript_height = height > non_transcript_lines ? height - non_transcript_lines : 0;
   auto const rendered_transcript = detail::render_transcript_lines(
       snapshot.transcript, width, snapshot.tool_details_visible, snapshot.thinking_visible);
@@ -607,6 +681,9 @@ std::vector<std::string> render_composer(ComposerSnapshot const& snapshot)
   for (auto const& line : queued_lines) {
     lines.push_back(line);
   }
+  for (auto const& line : status_alert_lines) {
+    lines.push_back(line);
+  }
   for (auto const& line : permission_lines) {
     lines.push_back(line);
   }
@@ -615,7 +692,7 @@ std::vector<std::string> render_composer(ComposerSnapshot const& snapshot)
   }
   auto const composer_lines = detail::render_composer_block(snapshot, width, normal_composer_lines);
   lines.insert(lines.end(), composer_lines.begin(), composer_lines.end());
-  return lines;
+  return finish(std::move(lines));
 }
 
 std::size_t composer_main_width(ComposerSnapshot const& snapshot)
@@ -627,11 +704,13 @@ std::size_t composer_main_width(ComposerSnapshot const& snapshot)
 bool draw_screen(ComposerSnapshot const& snapshot)
 {
   initialize_color_pairs();
-  if (has_colors()) {
+  if (!plain_terminal_output() && has_colors()) {
     static_cast<void>(
         bkgd(curses_attributes(
                  CursesStyle{.attributes = A_NORMAL, .color = ColorRole::Text, .background = BackgroundRole::Screen}) |
              ' '));
+  } else {
+    static_cast<void>(bkgd(A_NORMAL | ' '));
   }
   auto const width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
   auto const main_width = composer_main_width(snapshot);

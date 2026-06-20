@@ -810,6 +810,16 @@ bool valid_optional_string_array(std::string_view object, std::string_view key, 
   return true;
 }
 
+bool valid_optional_bool(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return true;
+  if (object.substr(*start, 4) == "true")
+    return true;
+  return object.substr(*start, 5) == "false";
+}
+
 void validate_session_metadata_entry(SessionReplayValidation& validation, std::size_t index, SessionEntry const& entry)
 {
   if (!ava::core::json::is_valid_object(entry.data_json))
@@ -822,11 +832,13 @@ void validate_session_metadata_entry(SessionReplayValidation& validation, std::s
   bool const has_branch_origin = branch_origin && !branch_origin->empty();
   bool const has_meaningful_field =
       ava::core::json::field_value_start(entry.data_json, "name") || ava::core::json::field_value_start(entry.data_json, "labels") ||
+      ava::core::json::field_value_start(entry.data_json, "archived") ||
       ava::core::json::field_value_start(entry.data_json, "parent_session_id") || ava::core::json::field_value_start(entry.data_json, "source_session_id") ||
       ava::core::json::field_value_start(entry.data_json, "branch_from_entry_id") || has_branch_origin;
   if (!schema_version_is_current(entry.data_json) || !has_meaningful_field ||
       !valid_optional_short_string(entry.data_json, "name", kMaxSessionNameBytes, true) ||
       !valid_optional_string_array(entry.data_json, "labels", kMaxSessionLabels, kMaxSessionLabelBytes) ||
+      !valid_optional_bool(entry.data_json, "archived") ||
       !valid_optional_session_id(entry.data_json, "parent_session_id") || !valid_optional_session_id(entry.data_json, "source_session_id") ||
       !valid_optional_entry_id(entry.data_json, "branch_from_entry_id", entry.id) ||
       !valid_optional_short_string(entry.data_json, "actor", kMaxSessionLabelBytes, false) || !valid_optional_metadata_origin(entry.data_json, "branch_origin"))

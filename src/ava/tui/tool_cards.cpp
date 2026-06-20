@@ -65,6 +65,47 @@ std::optional<long long> first_json_integer(std::string_view object, std::initia
   return std::nullopt;
 }
 
+std::optional<std::size_t> csi_sequence_end(std::string_view text, std::size_t index)
+{
+  for (auto scan = index; scan < text.size(); ++scan) {
+    auto const byte = static_cast<unsigned char>(text[scan]);
+    if (byte >= 0x40 && byte <= 0x7E) return scan + 1;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::size_t> terminal_control_sequence_end(std::string_view text, std::size_t index)
+{
+  auto const byte = static_cast<unsigned char>(text[index]);
+  if (byte != 0x1B || index + 1 >= text.size()) return std::nullopt;
+
+  auto const introducer = text[index + 1];
+  if (introducer == '[') return csi_sequence_end(text, index + 2);
+  if (introducer != ']') return std::nullopt;
+
+  for (auto scan = index + 2; scan < text.size(); ++scan) {
+    auto const current = static_cast<unsigned char>(text[scan]);
+    if (current == '\a') return scan + 1;
+    if (current == 0x1B && scan + 1 < text.size() && text[scan + 1] == '\\') return scan + 2;
+  }
+  return std::nullopt;
+}
+
+std::string sanitize_copy_text(std::string_view text)
+{
+  std::string stripped;
+  stripped.reserve(text.size());
+  for (std::size_t index = 0; index < text.size();) {
+    if (auto end = terminal_control_sequence_end(text, index)) {
+      index = *end;
+      continue;
+    }
+    stripped.push_back(text[index]);
+    ++index;
+  }
+  return sanitize_terminal_text(stripped);
+}
+
 std::string format_duration_ms(long long milliseconds)
 {
   if (milliseconds < 0)
@@ -348,6 +389,94 @@ std::string truncation_summary(ToolTimelineItem const& item)
   return summary;
 }
 
+std::string permission_decision_label(ToolPermissionAuditItem const& audit)
+{
+  auto const decision = lower_ascii(audit.decision);
+  if (decision == "allow" || decision == "allowed")
+    return "allow";
+  if (decision == "allow_session_grant" || decision == "session_grant")
+    return "allow session";
+  if (decision == "deny" || decision == "denied")
+    return "deny";
+  return "checked";
+}
+
+std::string permission_audit_detail(ToolPermissionAuditItem const& audit)
+{
+  std::vector<std::string> parts;
+  parts.push_back(permission_decision_label(audit));
+  if (!audit.risk.empty()) parts.push_back("risk " + audit.risk);
+  if (!audit.permission_request_id.empty()) parts.push_back("id " + audit.permission_request_id);
+  if (!audit.resolver_request_id.empty()) parts.push_back("resolver " + audit.resolver_request_id);
+  if (!audit.reason.empty()) parts.push_back("reason " + audit.reason);
+  if (!audit.resolution_reason.empty()) parts.push_back("resolution " + audit.resolution_reason);
+  if (!audit.operation.empty()) parts.push_back("operation " + audit.operation);
+  if (!audit.tool_name.empty()) parts.push_back("tool " + audit.tool_name);
+  if (!audit.target.empty()) parts.push_back("target " + audit.target);
+  if (!audit.command.empty()) parts.push_back("command " + audit.command);
+
+  std::string detail;
+  for (std::size_t index = 0; index < parts.size(); ++index)
+  {
+    if (index > 0) detail += " · ";
+    detail += parts[index];
+  }
+  return detail;
+}
+
+std::string permission_ids_summary(std::vector<std::string> const& ids)
+{
+  if (ids.empty()) return {};
+  if (ids.size() == 1) return "permission checked " + ids.front();
+  return "permissions checked " + std::to_string(ids.size()) + " requests";
+}
+
+std::string permission_summary(ToolTimelineItem const& item)
+{
+  if (item.permissions.empty()) return permission_ids_summary(item.permission_request_ids);
+  if (item.permissions.size() == 1)
+  {
+    auto const& audit = item.permissions.front();
+    auto summary = "permission " + permission_decision_label(audit);
+    if (!audit.risk.empty()) summary += " · risk " + audit.risk;
+    if (!audit.reason.empty())
+      summary += " · reason " + audit.reason;
+    else if (!audit.permission_request_id.empty())
+      summary += " · id " + audit.permission_request_id;
+    return summary;
+  }
+
+  bool saw_deny = false;
+  bool saw_allow = false;
+  std::string risk;
+  for (auto const& audit : item.permissions)
+  {
+    auto const decision = permission_decision_label(audit);
+    saw_deny = saw_deny || decision == "deny";
+    saw_allow = saw_allow || decision.starts_with("allow");
+    if (risk.empty() && !audit.risk.empty()) risk = audit.risk;
+  }
+
+  auto summary = "permissions " + std::to_string(item.permissions.size()) + " checked";
+  if (saw_deny)
+    summary += " · deny";
+  else if (saw_allow)
+    summary += " · allow";
+  if (!risk.empty()) summary += " · risk " + risk;
+  return summary;
+}
+
+void append_permission_lines(std::vector<std::string>& lines, ToolTimelineItem const& item, std::size_t width)
+{
+  if (item.permissions.empty())
+  {
+    auto ids = permission_ids_summary(item.permission_request_ids);
+    if (!ids.empty()) append_tool_detail_lines(lines, "permission", ids, width);
+    return;
+  }
+  for (auto const& audit : item.permissions) append_tool_detail_lines(lines, "permission", permission_audit_detail(audit), width);
+}
+
 std::string status_marker(ToolTimelineStatus status)
 {
   switch (status)
@@ -402,9 +531,63 @@ std::string to_string(ToolLifecycleState state)
 
 namespace detail {
 
+void append_copy_block(std::string& output, std::string_view label, std::string const& text)
+{
+  if (text.empty()) return;
+  auto const lines = split_lines(text);
+  if (lines.empty()) return;
+  if (lines.size() == 1) {
+    output += std::string(label) + ": " + sanitize_copy_text(lines.front()) + "\n";
+    return;
+  }
+  output += std::string(label) + ":\n";
+  for (auto const& line : lines) output += "  " + sanitize_copy_text(line) + "\n";
+}
+
 bool tool_card_details_visible(ToolTimelineItem const& item, bool global_details_visible)
 {
   return item.details_visible.value_or(global_details_visible);
+}
+
+std::string tool_card_diff_copy_text(ToolTimelineItem const& item)
+{
+  if (item.diff.empty()) return {};
+  std::string output;
+  for (auto const& line : split_lines(item.diff)) {
+    if (!output.empty()) output += '\n';
+    output += sanitize_copy_text(line);
+  }
+  if (item.diff_truncated) {
+    if (!output.empty()) output += '\n';
+    output += "[diff truncated]";
+  }
+  return output;
+}
+
+std::string tool_card_copy_text(ToolTimelineItem const& item)
+{
+  std::string output;
+  append_copy_block(output, "tool", item.name.empty() ? std::string("unknown") : item.name);
+  append_copy_block(output, "status", ava::tui::to_string(item.status));
+  append_copy_block(output, "lifecycle", ava::tui::to_string(item.lifecycle));
+  append_copy_block(output, "args", item.argument_summary);
+
+  auto const is_shell = shell_tool(item);
+  if (is_shell) {
+    if (auto command = command_text(item)) append_copy_block(output, "command", *command);
+    if (auto shell_status = exit_status_text(item)) append_copy_block(output, "shell status", *shell_status);
+    if (auto shell_duration = duration_text(item)) append_copy_block(output, "duration", *shell_duration);
+  }
+
+  for (auto const& audit : item.permissions) append_copy_block(output, "permission", permission_audit_detail(audit));
+  append_copy_block(output, "result", item.result_summary);
+  if (auto output_preview = output_preview_text(item)) append_copy_block(output, "output", *output_preview);
+  auto const truncation = truncation_summary(item);
+  append_copy_block(output, "truncation", truncation);
+  append_copy_block(output, "spill", item.spill_path);
+  append_copy_block(output, "diff", item.diff);
+  if (!output.empty() && output.back() == '\n') output.pop_back();
+  return output;
 }
 
 std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::size_t width, bool global_details_visible)
@@ -421,6 +604,7 @@ std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::siz
   auto const output = output_preview_text(item);
   auto const shell_status = is_shell ? exit_status_text(item) : std::optional<std::string>{};
   auto const shell_duration = is_shell ? duration_text(item) : std::optional<std::string>{};
+  auto const permission = permission_summary(item);
   if (args_raw.empty() && command)
     args_raw = sanitize_terminal_text(*command);
 
@@ -465,6 +649,7 @@ std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::siz
       append_tool_detail_lines(lines, "duration", *shell_duration, width);
     if (is_shell && item.status == ToolTimelineStatus::Running)
       append_tool_detail_lines(lines, "cancel", "Esc or Ctrl+C requests stop", width);
+    append_permission_lines(lines, item, width);
     append_tool_detail_lines(lines, "result", item.result_summary, width);
     if (output)
       append_output_preview_lines(lines, item, "output", *output, width, kExpandedOutputPreviewLines);
@@ -490,6 +675,13 @@ std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::siz
       auto result_raw = sanitize_terminal_text(compact);
       std::string line2 = (wide_blocks(width) ? std::string("  │     ") : std::string("      ")) + std::string(kSgrMuted) + result_raw + std::string(kSgrReset);
       lines.push_back(fit_line_preserving_sgr(line2, width));
+    }
+    if (!permission.empty())
+    {
+      auto permission_raw = sanitize_terminal_text(permission);
+      std::string permission_line = (wide_blocks(width) ? std::string("  │     ") : std::string("      ")) + std::string(kSgrWarning) +
+                                    permission_raw + std::string(kSgrReset);
+      lines.push_back(fit_line_preserving_sgr(permission_line, width));
     }
     if (output)
       append_output_preview_lines(lines, item, "output", *output, width, kCollapsedOutputPreviewLines);

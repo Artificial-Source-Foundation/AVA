@@ -434,6 +434,8 @@ ava::core::Result<std::string> session_tree_result_json(RuntimeSession const& se
     json += string_field_json("name", node.metadata.name);
     json += ",\"labels\":" + string_array_json(node.metadata.labels);
     json += ',';
+    json += bool_field_json("archived", node.metadata.archived);
+    json += ',';
     json += string_field_json("parent_session_id", node.metadata.parent_session_id);
     json += ',';
     json += string_field_json("source_session_id", node.metadata.source_session_id);

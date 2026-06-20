@@ -202,7 +202,9 @@ ToolDispatchResult write_file_result(ava::tools::ToolContext const& context, Pro
                             .success = true,
                             .result_text = "{\"tool\":\"write_file\",\"ok\":true,\"path\":\"" +
                                            ava::core::json::escape(result->path.generic_string()) +
-                                           "\",\"bytes_written\":" + std::to_string(result->bytes_written) + "}"};
+                                           "\",\"bytes_written\":" + std::to_string(result->bytes_written) +
+                                           ",\"diff\":\"" + ava::core::json::escape(result->diff) +
+                                           "\",\"diff_truncated\":" + json_bool(result->diff_truncated) + "}"};
 }
 
 ToolDispatchResult edit_file_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)

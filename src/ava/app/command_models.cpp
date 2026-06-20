@@ -121,7 +121,7 @@ std::string format_models_text(RuntimeSession const& session, ava::config::Model
     output += "  no configured models match the filter\n";
   }
   output +=
-      "\nModel switching is not enabled here. In the TUI, Ctrl+T cycles the current model's declared "
+      "\nModel switching is not enabled here. In the TUI, Shift+Tab or Ctrl+T cycles the current model's declared "
       "reasoning levels using the provider/model-specific reasoning parameters above.";
   return output;
 }

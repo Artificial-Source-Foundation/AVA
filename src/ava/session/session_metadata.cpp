@@ -106,8 +106,8 @@ bool valid_branch_origin(std::string_view origin)
 
 ava::core::VoidResult validate_update(SessionMetadataUpdate const& update)
 {
-  if (!update.name && !update.labels && update.parent_session_id.empty() && update.source_session_id.empty() && update.branch_from_entry_id.empty() &&
-      update.branch_origin.empty())
+  if (!update.name && !update.labels && !update.archived && update.parent_session_id.empty() &&
+      update.source_session_id.empty() && update.branch_from_entry_id.empty() && update.branch_origin.empty())
   {
     return std::unexpected(metadata_error("session metadata update is empty"));
   }
@@ -155,12 +155,32 @@ std::string labels_json(std::vector<std::string> const& labels)
   return json;
 }
 
+std::optional<bool> bool_field(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return std::nullopt;
+  if (object.substr(*start, 4) == "true")
+    return true;
+  if (object.substr(*start, 5) == "false")
+    return false;
+  return std::nullopt;
+}
+
 void append_string_field(std::string& json, bool& first, std::string_view key, std::string_view value)
 {
   if (!first)
     json += ',';
   first = false;
   json += "\"" + std::string(key) + "\":\"" + ava::core::json::escape(value) + "\"";
+}
+
+void append_bool_field(std::string& json, bool& first, std::string_view key, bool value)
+{
+  if (!first)
+    json += ',';
+  first = false;
+  json += "\"" + std::string(key) + "\":" + (value ? "true" : "false");
 }
 
 }  // namespace
@@ -187,6 +207,13 @@ ava::core::Result<SessionMetadataView> session_metadata_from_entries(std::vector
     if (ava::core::json::field_value_start(entry.data_json, "labels"))
     {
       metadata.labels = labels_from_entry(entry);
+    }
+    if (ava::core::json::field_value_start(entry.data_json, "archived"))
+    {
+      auto archived = bool_field(entry.data_json, "archived");
+      if (!archived)
+        return std::unexpected(metadata_error("session metadata archived must be a boolean", "archived"));
+      metadata.archived = *archived;
     }
     if (auto parent = ava::core::json::string_field(entry.data_json, "parent_session_id"); parent && !parent->empty())
     {
@@ -241,6 +268,8 @@ ava::core::Result<SessionEntry> make_session_metadata_entry(SessionMetadataUpdat
     first = false;
     data += "\"labels\":" + labels_json(*update.labels);
   }
+  if (update.archived)
+    append_bool_field(data, first, "archived", *update.archived);
   if (!update.parent_session_id.empty())
     append_string_field(data, first, "parent_session_id", update.parent_session_id);
   if (!update.source_session_id.empty())
@@ -278,6 +307,7 @@ std::string session_metadata_json(std::string_view session_id, SessionMetadataVi
   json += "\"session_id\":\"" + ava::core::json::escape(session_id) + "\"";
   json += ",\"name\":\"" + ava::core::json::escape(metadata.name) + "\"";
   json += ",\"labels\":" + labels_json(metadata.labels);
+  json += ",\"archived\":" + std::string(metadata.archived ? "true" : "false");
   json += ",\"parent_session_id\":\"" + ava::core::json::escape(metadata.parent_session_id) + "\"";
   json += ",\"source_session_id\":\"" + ava::core::json::escape(metadata.source_session_id) + "\"";
   json += ",\"branch_from_entry_id\":\"" + ava::core::json::escape(metadata.branch_from_entry_id) + "\"";

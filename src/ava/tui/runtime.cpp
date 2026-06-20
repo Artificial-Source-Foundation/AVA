@@ -6,6 +6,7 @@
 #include "ava/tui/event_state.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/terminal.h"
+#include "ava/tui/tool_cards.h"
 
 #include <algorithm>
 #include <atomic>
@@ -45,6 +46,7 @@ constexpr auto kSpinnerFrameDelay = std::chrono::milliseconds(80);
 constexpr std::string_view kCopyOptionPrefix = "copy:";
 constexpr std::string_view kBase64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 constexpr std::string_view kBuiltinThemeName = "ava-dark";
+constexpr std::string_view kPlainThemeName = "plain";
 
 class SignalBlockGuard {
  public:
@@ -77,6 +79,12 @@ std::pair<std::size_t, std::size_t> terminal_size()
   getmaxyx(stdscr, height, width);
   if (width > 0 && height > 0) return {static_cast<std::size_t>(width), static_cast<std::size_t>(height)};
   return {80, 24};
+}
+
+bool plain_terminal_output()
+{
+  auto const* no_color = std::getenv("NO_COLOR");
+  return no_color != nullptr && no_color[0] != '\0';
 }
 
 struct CursesInput {
@@ -136,6 +144,13 @@ struct EventEnvelopeQueue {
 
 enum class RuntimeEventDrainResult { NoEvents, UpdatedNoRender, Rendered, RenderFailed };
 enum class ActiveSelectList { None, Hotkeys, Settings, Model, Session };
+enum class ComposerJumpMode { None, Forward, Backward };
+
+struct PendingSessionArchiveAction
+{
+  std::string session_id;
+  bool archive = true;
+};
 
 bool mouse_state_matches(mmask_t state, mmask_t mask)
 {
@@ -165,6 +180,48 @@ CursesInput mouse_key_input(Key key, const MEVENT& mouse)
 CursesInput unknown_input()
 {
   return key_input(Key::Unknown);
+}
+
+std::optional<std::string> printable_jump_target(CursesInput const& input)
+{
+  if (input.bracketed_paste)
+    return std::nullopt;
+  if (input.event.key == Key::Space)
+    return std::string(" ");
+  if (input.event.key != Key::Character)
+    return std::nullopt;
+
+  std::string text = input.text.empty() ? std::string(1, input.event.character) : input.text;
+  if (text.empty())
+    return std::nullopt;
+
+  auto const first = static_cast<unsigned char>(text.front());
+  if (first < 0x20U || first == 0x7FU)
+    return std::nullopt;
+  if ((first & 0x80U) == 0)
+    return text.substr(0, 1);
+
+  auto length = std::size_t{0};
+  if (first >= 0xC2U && first <= 0xDFU)
+    length = 2;
+  else if ((first & 0xF0U) == 0xE0U)
+    length = 3;
+  else if (first >= 0xF0U && first <= 0xF4U)
+    length = 4;
+  if (length == 0 || text.size() < length)
+    return std::nullopt;
+  for (std::size_t index = 1; index < length; ++index)
+  {
+    if ((static_cast<unsigned char>(text[index]) & 0xC0U) != 0x80U)
+      return std::nullopt;
+  }
+  return text.substr(0, length);
+}
+
+bool curses_key_name_equals(int value, std::string_view expected)
+{
+  char const* name = keyname(value);
+  return name != nullptr && std::string_view(name) == expected;
 }
 
 std::string title_case_ascii(std::string_view text)
@@ -257,8 +314,18 @@ std::size_t transcript_height_for_snapshot(ComposerSnapshot const& snapshot, std
           ? std::min(detail::kMaxPaletteLines, height - fixed_and_prompt_lines)
           : 0;
   auto const palette_lines = detail::render_slash_palette(snapshot, width, palette_line_budget);
+  auto const file_reference_palette_lines =
+      palette_lines.empty() ? detail::render_file_reference_palette(snapshot, width, palette_line_budget)
+                            : std::vector<std::string>{};
+  auto const path_completion_palette_lines =
+      palette_lines.empty() && file_reference_palette_lines.empty()
+          ? detail::render_path_completion_palette(snapshot, width, palette_line_budget)
+          : std::vector<std::string>{};
+  auto const active_palette_lines = !palette_lines.empty()                 ? palette_lines.size()
+                                    : !file_reference_palette_lines.empty() ? file_reference_palette_lines.size()
+                                                                            : path_completion_palette_lines.size();
   auto const non_transcript_lines =
-      fixed_lines + palette_lines.size() + permission_lines.size() + question_lines.size();
+      fixed_lines + active_palette_lines + permission_lines.size() + question_lines.size();
   return height > non_transcript_lines ? height - non_transcript_lines : 0;
 }
 
@@ -325,6 +392,36 @@ std::optional<std::string_view> copy_text_from_answer(ava::agent::QuestionAnswer
 {
   for (auto const& option : answer.selected_options) {
     if (option.starts_with(kCopyOptionPrefix)) return std::string_view(option).substr(kCopyOptionPrefix.size());
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> latest_ava_message_copy_text(std::vector<TranscriptItem> const& transcript)
+{
+  for (auto item = transcript.rbegin(); item != transcript.rend(); ++item) {
+    if (item->label != "ava" && item->label != "assistant") continue;
+    if (item->text.empty()) continue;
+    return item->text;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> latest_tool_copy_text(std::vector<TranscriptItem> const& transcript)
+{
+  for (auto item = transcript.rbegin(); item != transcript.rend(); ++item) {
+    if (!item->tool) continue;
+    auto text = detail::tool_card_copy_text(*item->tool);
+    if (!text.empty()) return text;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> latest_tool_diff_copy_text(std::vector<TranscriptItem> const& transcript)
+{
+  for (auto item = transcript.rbegin(); item != transcript.rend(); ++item) {
+    if (!item->tool) continue;
+    auto text = detail::tool_card_diff_copy_text(*item->tool);
+    if (!text.empty()) return text;
   }
   return std::nullopt;
 }
@@ -398,7 +495,48 @@ std::string compact_path_leaf(std::string path)
 
 bool exact_command(std::string_view submitted, std::string_view command)
 {
+  while (!submitted.empty() && std::isspace(static_cast<unsigned char>(submitted.front())) != 0) submitted.remove_prefix(1);
+  while (!submitted.empty() && std::isspace(static_cast<unsigned char>(submitted.back())) != 0) submitted.remove_suffix(1);
   return submitted == command;
+}
+
+std::string trim_view_to_string(std::string_view text)
+{
+  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) text.remove_prefix(1);
+  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) text.remove_suffix(1);
+  return std::string(text);
+}
+
+std::optional<std::string> reload_command_argument(std::string_view submitted)
+{
+  auto const normalized = trim_view_to_string(submitted);
+  submitted = normalized;
+  constexpr std::string_view kReload = "/reload";
+  if (submitted == kReload) return std::string{};
+  if (submitted.starts_with(kReload) && submitted.size() > kReload.size() &&
+      std::isspace(static_cast<unsigned char>(submitted[kReload.size()])) != 0) {
+    return trim_view_to_string(submitted.substr(kReload.size() + 1));
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> copy_command_argument(std::string_view submitted)
+{
+  auto const normalized = trim_view_to_string(submitted);
+  submitted = normalized;
+  constexpr std::string_view kCopy = "/copy";
+  if (submitted == kCopy) return std::string{};
+  if (submitted.starts_with(kCopy) && submitted.size() > kCopy.size() &&
+      std::isspace(static_cast<unsigned char>(submitted[kCopy.size()])) != 0) {
+    return trim_view_to_string(submitted.substr(kCopy.size() + 1));
+  }
+  return std::nullopt;
+}
+
+bool reload_target_is_keybindings(std::string_view target)
+{
+  auto const normalized = trim_view_to_string(target);
+  return normalized.empty() || normalized == "keybindings" || normalized == "keybinds" || normalized == "keys";
 }
 
 void add_settings_row(SelectListView& view, std::string group, std::string label, std::string description,
@@ -426,6 +564,18 @@ CursesInput character_input(std::string text, bool bracketed_paste = false)
                                          .mouse_row = 0},
                      .text = std::move(text),
                      .bracketed_paste = bracketed_paste,
+                     .resize = false};
+}
+
+CursesInput space_input()
+{
+  return CursesInput{.event = InputEvent{.key = Key::Space,
+                                         .character = ' ',
+                                         .text = " ",
+                                         .mouse_column = 0,
+                                         .mouse_row = 0},
+                     .text = " ",
+                     .bracketed_paste = false,
                      .resize = false};
 }
 
@@ -485,9 +635,18 @@ std::optional<CursesInput> read_escape_sequence_input()
   std::string consumed;
   consumed.reserve(32);
   while (consumed.size() < kMaxEscapeSequenceBytes) {
-    auto const character = read_plain_wide_character();
-    if (!character) break;
-    if (auto encoded = encode_wide_character(*character)) consumed += *encoded;
+    wint_t value = 0;
+    auto const result = wget_wch(stdscr, &value);
+    if (result == ERR) break;
+    if (result == KEY_CODE_YES) {
+      if (static_cast<int>(value) == KEY_BACKSPACE) {
+        consumed.push_back('\x7f');
+      } else {
+        break;
+      }
+    } else if (auto encoded = encode_wide_character(static_cast<wchar_t>(value))) {
+      consumed += *encoded;
+    }
     if (terminal_escape_sequence_complete(consumed)) break;
   }
   static_cast<void>(wtimeout(stdscr, -1));
@@ -509,11 +668,37 @@ CursesInput read_curses_input()
   if (result == ERR) return unknown_input();
 
   if (result == KEY_CODE_YES) {
+    if (curses_key_name_equals(static_cast<int>(value), "kDC3")) {
+      return key_input(Key::AltDelete);
+    }
+    if (curses_key_name_equals(static_cast<int>(value), "kLFT3")) {
+      return key_input(Key::AltArrowLeft);
+    }
+    if (curses_key_name_equals(static_cast<int>(value), "kRIT3")) {
+      return key_input(Key::AltArrowRight);
+    }
+    if (curses_key_name_equals(static_cast<int>(value), "kUP3")) {
+      return key_input(Key::AltArrowUp);
+    }
+    if (curses_key_name_equals(static_cast<int>(value), "kLFT5")) {
+      return key_input(Key::CtrlArrowLeft);
+    }
+    if (curses_key_name_equals(static_cast<int>(value), "kRIT5")) {
+      return key_input(Key::CtrlArrowRight);
+    }
     switch (static_cast<int>(value)) {
       case KEY_ENTER:
         return key_input(Key::Enter);
       case KEY_BACKSPACE:
         return key_input(Key::Backspace);
+#ifdef KEY_BTAB
+      case KEY_BTAB:
+        return key_input(Key::ShiftTab);
+#endif
+#ifdef KEY_DC
+      case KEY_DC:
+        return key_input(Key::Delete);
+#endif
       case KEY_UP:
         return key_input(Key::ArrowUp);
       case KEY_DOWN:
@@ -526,6 +711,14 @@ CursesInput read_curses_input()
         return key_input(Key::PageUp);
       case KEY_NPAGE:
         return key_input(Key::PageDown);
+#ifdef KEY_HOME
+      case KEY_HOME:
+        return key_input(Key::Home);
+#endif
+#ifdef KEY_END
+      case KEY_END:
+        return key_input(Key::End);
+#endif
 #ifdef KEY_RESIZE
       case KEY_RESIZE:
         return CursesInput{
@@ -559,6 +752,7 @@ CursesInput read_curses_input()
   if (character == L'\r') return key_input(Key::Enter);
   if (character == L'\n') return key_input(Key::ShiftEnter);
   if (character == L'\t') return key_input(Key::Tab);
+  if (character == L' ') return space_input();
   if (character == 0x1B) {
     if (auto escape_input = read_escape_sequence_input()) return *escape_input;
     return key_input(Key::Escape);
@@ -569,14 +763,22 @@ CursesInput read_curses_input()
   if (character == 0x04) return key_input(Key::CtrlD);
   if (character == 0x05) return key_input(Key::CtrlE);
   if (character == 0x06) return key_input(Key::CtrlF);
+  if (character == 0x08) return key_input(Key::CtrlH);
   if (character == 0x0B) return key_input(Key::CtrlK);
+  if (character == 0x0C) return key_input(Key::CtrlL);
+  if (character == 0x1F) return key_input(Key::CtrlMinus);
+  if (character == 0x0E) return key_input(Key::CtrlN);
+  if (character == 0x0F) return key_input(Key::CtrlO);
+  if (character == 0x10) return key_input(Key::CtrlP);
   if (character == 0x12) return key_input(Key::CtrlR);
+  if (character == 0x13) return key_input(Key::CtrlS);
   if (character == 0x14) return key_input(Key::CtrlT);
   if (character == 0x15) return key_input(Key::CtrlU);
   if (character == 0x17) return key_input(Key::CtrlW);
   if (character == 0x19) return key_input(Key::CtrlY);
   if (character == 0x1A) return key_input(Key::CtrlZ);
-  if (character == 0x7F || character == L'\b') return key_input(Key::Backspace);
+  if (character == 0x1D) return key_input(Key::CtrlRightBracket);
+  if (character == 0x7F) return key_input(Key::Backspace);
   if (character >= 0x20) {
     auto encoded = encode_wide_character(character);
     if (!encoded) return unknown_input();
@@ -612,13 +814,7 @@ void push_transcript(ComposerSnapshot& snapshot, TranscriptItem item)
 
 void push_history(std::vector<std::string>& history, std::string input)
 {
-  constexpr std::size_t kMaxHistoryItems = 100;
-  if (input.empty()) return;
-  if (!history.empty() && history.back() == input) return;
-  history.push_back(std::move(input));
-  if (history.size() > kMaxHistoryItems) {
-    history.erase(history.begin(), history.begin() + static_cast<std::ptrdiff_t>(history.size() - kMaxHistoryItems));
-  }
+  static_cast<void>(push_composer_input_history(history, std::move(input)));
 }
 
 PermissionPromptView permission_prompt_view(ava::permissions::PermissionPrompt const& prompt)
@@ -629,6 +825,7 @@ PermissionPromptView permission_prompt_view(ava::permissions::PermissionPrompt c
   view.target = prompt.target_path.empty() ? std::string{} : prompt.target_path.generic_string();
   view.command = prompt.command;
   view.reason = prompt.reason;
+  view.risk = ava::permissions::to_string(prompt.risk);
   view.diff_preview = prompt.diff_preview;
   view.diff_truncated = prompt.diff_truncated;
   return view;
@@ -681,14 +878,14 @@ SelectListView hotkeys_select_list_view(TuiKeyBindings const& bindings, std::str
 {
   auto const help_items = key_binding_help_items(bindings);
   SelectListView view{
-      .title = "Hotkeys",
-      .subtitle = "Read-only active TUI bindings · shared keys are resolved by input context",
+      .title = "Keybindings",
+      .subtitle = "Active TUI bindings · config $XDG_CONFIG_HOME/ava/keybinds.json · reload with /reload keybindings",
       .items = {},
       .selected_item_index = 0,
       .query = {},
-      .placeholder = "Search hotkeys",
-      .empty_text = "No hotkeys match",
-      .footer_hint = footer_hint.empty() ? std::string("Type to filter · Enter/Esc close") : std::move(footer_hint)};
+      .placeholder = "Search keybindings",
+      .empty_text = "No keybindings match",
+      .footer_hint = footer_hint.empty() ? std::string("Type to filter · PgUp/PgDn page · Enter/Esc close") : std::move(footer_hint)};
   view.items.reserve(help_items.size());
   for (auto const& item : help_items) {
     auto badge = std::string("active");
@@ -732,14 +929,19 @@ SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, std::
       .query = {},
       .placeholder = "Search settings",
       .empty_text = "No settings match",
-      .footer_hint = footer_hint.empty() ? std::string("Type to filter · Enter/Esc close") : std::move(footer_hint)};
+      .footer_hint = footer_hint.empty() ? std::string("Type to filter · PgUp/PgDn page · Enter/Esc close") : std::move(footer_hint)};
   view.items.reserve(14);
 
   auto const sidebar = snapshot.sidebar;
-  add_settings_row(view, "Display", "Theme", std::string(kBuiltinThemeName), "built-in ncurses token palette",
-                   "built-in");
+  if (plain_terminal_output()) {
+    add_settings_row(view, "Display", "Theme", std::string(kPlainThemeName), "NO_COLOR disables ANSI styling",
+                     "NO_COLOR");
+  } else {
+    add_settings_row(view, "Display", "Theme", std::string(kBuiltinThemeName), "built-in ncurses token palette",
+                     "built-in");
+  }
   add_settings_row(view, "Display", "Tool details", snapshot.tool_details_visible ? "expanded" : "compact",
-                   "toggle with /details");
+                   "toggle with Ctrl+O or /details");
   add_settings_row(view, "Display", "Thinking blocks", snapshot.thinking_visible ? "visible" : "hidden",
                    "toggle with /thinking");
 
@@ -790,7 +992,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
                             .input = "",
                             .status = options.initial_status,
                             .transcript = {},
-                            .slash_commands = std::move(options.slash_commands)};
+                            .slash_commands = std::move(options.slash_commands),
+                            .file_references = std::move(options.file_references)};
   SidebarSnapshot sidebar{.session_id = options.session_id,
                           .mode = options.mode,
                           .provider = options.provider,
@@ -815,6 +1018,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     snapshot.session_id = std::move(state.session_id);
     snapshot.status = std::move(state.status);
     snapshot.slash_commands = std::move(state.slash_commands);
+    snapshot.file_references = std::move(state.file_references);
 
     sidebar.mode = snapshot.mode;
     sidebar.provider = snapshot.provider;
@@ -835,14 +1039,17 @@ int run_interactive_composer(TuiRuntimeOptions options)
   std::optional<std::size_t> history_index;
   std::string draft_input;
   ComposerDraftState draft;
+  ComposerJumpMode jump_mode = ComposerJumpMode::None;
   std::size_t selected_slash_command_index = 0;
   bool slash_palette_suppressed = false;
+  bool path_completion_force_active = false;
   std::size_t transcript_scroll_offset = 0;
   std::size_t detached_new_output_count = 0;
   std::optional<SidebarSnapshot> detached_sidebar_snapshot;
   std::size_t draft_scroll_offset = 0;
   bool pending_escape_clear = false;
   ActiveSelectList active_select_list = ActiveSelectList::None;
+  std::optional<PendingSessionArchiveAction> session_archive_confirmation;
   std::recursive_mutex ui_mutex;
   std::mutex prompt_request_mutex;
   std::deque<std::shared_ptr<PendingPermissionRequest>> pending_permission_requests;
@@ -851,7 +1058,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
   std::mutex prompt_audit_mutex;
   ava::app::RuntimeEventSink prompt_audit_sink;
 
-  auto emit_prompt_audit = [&](std::string status, std::string text) {
+  auto emit_prompt_audit = [&](std::string status, std::string text, std::string permission_request_id = {},
+                               std::string tool_name = {}, std::string reason = {}, std::string resolution_reason = {}) {
     ava::app::RuntimeEventSink sink;
     {
       std::lock_guard<std::mutex> lock(prompt_audit_mutex);
@@ -862,6 +1070,10 @@ int run_interactive_composer(TuiRuntimeOptions options)
     event.type = ava::app::RuntimeEventType::ProviderEvent;
     event.status = std::move(status);
     event.text = std::move(text);
+    event.tool_name = std::move(tool_name);
+    event.reason = std::move(reason);
+    event.error_details = std::move(resolution_reason);
+    if (!permission_request_id.empty()) event.permission_request_ids.push_back(std::move(permission_request_id));
     static_cast<void>(sink(event));
   };
 
@@ -885,6 +1097,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       snapshot.input_cursor = draft.cursor;
       snapshot.selected_slash_command_index = selected_slash_command_index;
       snapshot.slash_palette_suppressed = slash_palette_suppressed;
+      snapshot.path_completion_force_active = path_completion_force_active;
       if (transcript_scroll_offset == 0) {
         detached_new_output_count = 0;
         detached_sidebar_snapshot.reset();
@@ -924,6 +1137,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     history_index.reset();
     draft_input.clear();
     selected_slash_command_index = 0;
+    path_completion_force_active = false;
     draft_scroll_offset = 0;
     static_cast<void>(insert_composer_draft_text(draft, "\n"));
   };
@@ -936,12 +1150,16 @@ int run_interactive_composer(TuiRuntimeOptions options)
     if (!prompt.tool_name.empty()) permission_label += ": " + prompt.tool_name;
     if (!prompt.command.empty()) permission_label += " " + prompt.command;
     if (prompt.target_path.has_filename()) permission_label += " " + prompt.target_path.generic_string();
-    emit_prompt_audit("tui:permission_request", std::move(permission_label));
+    emit_prompt_audit("tui:permission_request", std::move(permission_label), prompt.permission_request_id,
+                      prompt.tool_name, prompt.reason);
     {
       std::lock_guard<std::recursive_mutex> lock(ui_mutex);
       snapshot.permission_prompt = permission_prompt_view(prompt);
       snapshot.permission_prompt->selected_choice = PermissionPromptChoice::Deny;
-      snapshot.status = "permission required: A=allow D=deny Tab/Left/Right choose Enter/Space confirm Esc deny";
+      snapshot.permission_prompt->remember_available = static_cast<bool>(options.remember_permission_rule);
+      snapshot.status = options.remember_permission_rule
+                            ? "permission required: A=allow once D=deny R=remember Tab/Left/Right choose Enter confirm Esc deny"
+                            : "permission required: A=allow D=deny Tab/Left/Right choose Enter/Space confirm Esc deny";
     }
     static_cast<void>(beep());
     if (!render()) {
@@ -950,28 +1168,91 @@ int run_interactive_composer(TuiRuntimeOptions options)
 
     auto resolve_choice =
         [&](PermissionPromptChoice selected) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-      if (selected == PermissionPromptChoice::Allow) {
-        emit_prompt_audit("tui:permission_allow", "permission allowed: " + prompt.tool_name);
+      auto const allow = selected == PermissionPromptChoice::Allow || selected == PermissionPromptChoice::AllowRemember;
+      auto const remember = selected == PermissionPromptChoice::AllowRemember || selected == PermissionPromptChoice::DenyRemember;
+      std::string remembered_rule_id;
+      if (remember)
+      {
+        if (!options.remember_permission_rule)
+        {
+          emit_prompt_audit("tui:permission_deny", "permission denied: remember unavailable",
+                            prompt.permission_request_id, prompt.tool_name, prompt.reason, "remember unavailable");
+          {
+            std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+            snapshot.permission_prompt.reset();
+            snapshot.status = "permission rule unavailable; denied";
+          }
+          if (!render()) {
+            return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to clear permission prompt"));
+          }
+          ava::permissions::PermissionResolutionDecision decision{ava::permissions::PermissionResolution::Deny,
+                                                                 "permission rule storage is unavailable"};
+          decision.resolution_source = "tui_remember_unavailable";
+          return decision;
+        }
+        auto remembered = options.remember_permission_rule(
+            prompt, allow ? ava::permissions::PermissionAction::Allow : ava::permissions::PermissionAction::Deny);
+        if (!remembered)
+        {
+          auto reason = "failed to remember permission rule: " + remembered.error().format();
+          emit_prompt_audit("tui:permission_deny", "permission denied: " + prompt.tool_name,
+                            prompt.permission_request_id, prompt.tool_name, prompt.reason, reason);
+          {
+            std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+            snapshot.permission_prompt.reset();
+            snapshot.status = "permission rule failed; denied";
+          }
+          if (!render()) {
+            return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to clear permission prompt"));
+          }
+          ava::permissions::PermissionResolutionDecision decision{ava::permissions::PermissionResolution::Deny,
+                                                                 std::move(reason)};
+          decision.resolution_source = "tui_remember_failed";
+          return decision;
+        }
+        remembered_rule_id = remembered->rule_id;
+      }
+
+      if (allow) {
+        emit_prompt_audit("tui:permission_allow", "permission allowed: " + prompt.tool_name,
+                          prompt.permission_request_id, prompt.tool_name, prompt.reason,
+                          remember ? "selected allow and remember" : "selected allow");
         {
           std::lock_guard<std::recursive_mutex> lock(ui_mutex);
           snapshot.permission_prompt.reset();
-          snapshot.status = "permission allowed once";
+          snapshot.status = remember ? "permission allow rule saved" : "permission allowed once";
         }
         if (!render()) {
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to clear permission prompt"));
         }
-        return ava::permissions::PermissionResolution::Allow;
+        ava::permissions::PermissionResolutionDecision decision{ava::permissions::PermissionResolution::Allow};
+        if (remember)
+        {
+          decision.reason = "remembered allow rule";
+          decision.resolution_source = "persistent_rule_added";
+          decision.rule_id = std::move(remembered_rule_id);
+        }
+        return decision;
       }
-      emit_prompt_audit("tui:permission_deny", "permission denied: " + prompt.tool_name);
+      emit_prompt_audit("tui:permission_deny", "permission denied: " + prompt.tool_name,
+                        prompt.permission_request_id, prompt.tool_name, prompt.reason,
+                        remember ? "selected deny and remember" : "selected deny");
       {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
         snapshot.permission_prompt.reset();
-        snapshot.status = "permission denied";
+        snapshot.status = remember ? "permission deny rule saved" : "permission denied";
       }
       if (!render()) {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to clear permission prompt"));
       }
-      return ava::permissions::PermissionResolution::Deny;
+      ava::permissions::PermissionResolutionDecision decision{ava::permissions::PermissionResolution::Deny};
+      if (remember)
+      {
+        decision.reason = "remembered deny rule";
+        decision.resolution_source = "persistent_rule_added";
+        decision.rule_id = std::move(remembered_rule_id);
+      }
+      return decision;
     };
 
     while (true) {
@@ -980,7 +1261,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
         return resolve_choice(PermissionPromptChoice::Deny);
       }
       if (terminal_signal_received()) {
-        emit_prompt_audit("tui:permission_deny", "permission denied: interrupted");
+        emit_prompt_audit("tui:permission_deny", "permission denied: interrupted", prompt.permission_request_id,
+                          prompt.tool_name, prompt.reason, "interrupted");
         {
           std::lock_guard<std::recursive_mutex> lock(ui_mutex);
           snapshot.permission_prompt.reset();
@@ -1003,13 +1285,20 @@ int run_interactive_composer(TuiRuntimeOptions options)
 
       auto input_result =
           snapshot.permission_prompt
-              ? handle_permission_prompt_input(snapshot.permission_prompt->selected_choice, choice_input.event)
+              ? handle_permission_prompt_input(snapshot.permission_prompt->selected_choice, choice_input.event,
+                                               snapshot.permission_prompt->remember_available)
               : PermissionPromptInputResult{};
       if (input_result.action == PermissionPromptInputAction::ResolveAllow) {
         return resolve_choice(PermissionPromptChoice::Allow);
       }
       if (input_result.action == PermissionPromptInputAction::ResolveDeny) {
         return resolve_choice(PermissionPromptChoice::Deny);
+      }
+      if (input_result.action == PermissionPromptInputAction::ResolveAllowRemember) {
+        return resolve_choice(PermissionPromptChoice::AllowRemember);
+      }
+      if (input_result.action == PermissionPromptInputAction::ResolveDenyRemember) {
+        return resolve_choice(PermissionPromptChoice::DenyRemember);
       }
       if (input_result.action == PermissionPromptInputAction::Redraw && snapshot.permission_prompt) {
         {
@@ -1022,7 +1311,9 @@ int run_interactive_composer(TuiRuntimeOptions options)
 
       {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-        snapshot.status = "permission required: A=allow D=deny Tab/Left/Right choose Enter/Space confirm Esc deny";
+        snapshot.status = options.remember_permission_rule
+                              ? "permission required: A=allow once D=deny R=remember Tab/Left/Right choose Enter confirm Esc deny"
+                              : "permission required: A=allow D=deny Tab/Left/Right choose Enter/Space confirm Esc deny";
       }
       if (!render()) {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render permission prompt"));
@@ -1283,10 +1574,12 @@ int run_interactive_composer(TuiRuntimeOptions options)
 
   auto clear_draft_for_interrupt = [&]() {
     pending_escape_clear = false;
+    jump_mode = ComposerJumpMode::None;
     history_index.reset();
     draft_input.clear();
     selected_slash_command_index = 0;
     slash_palette_suppressed = false;
+    path_completion_force_active = false;
     draft_scroll_offset = 0;
     snapshot.status.clear();
     return apply_composer_draft_action(draft, TuiAction::ClearInput);
@@ -1306,8 +1599,47 @@ int run_interactive_composer(TuiRuntimeOptions options)
     refresh_reasoning_status();
   };
 
+  auto open_model_selector = [&]() -> bool {
+    if (!options.model_selector_view) {
+      snapshot.status = "model selector unavailable";
+      static_cast<void>(beep());
+      return true;
+    }
+    pending_escape_clear = false;
+    session_archive_confirmation.reset();
+    snapshot.select_list = options.model_selector_view();
+    active_select_list = ActiveSelectList::Model;
+    snapshot.status = "model selector opened";
+    transcript_scroll_offset = 0;
+    return render();
+  };
+
+  auto cycle_model = [&](bool forward) {
+    if (!options.on_cycle_model) {
+      snapshot.status = "model cycling unavailable";
+      static_cast<void>(beep());
+      return;
+    }
+    auto result = options.on_cycle_model(forward);
+    if (!result) {
+      snapshot.status = result.error().format();
+      static_cast<void>(beep());
+      return;
+    }
+    apply_runtime_state_snapshot(std::move(*result));
+    transcript_scroll_offset = 0;
+  };
+
   auto slash_palette_active = [&]() {
     return !slash_palette_suppressed && slash_palette_visible(draft.text, snapshot.slash_commands);
+  };
+  auto file_reference_palette_active = [&]() {
+    return !slash_palette_suppressed && !slash_palette_active() &&
+           file_reference_palette_visible(draft.text, draft.cursor, snapshot.file_references);
+  };
+  auto path_completion_palette_active = [&]() {
+    return !slash_palette_suppressed && !slash_palette_active() && !file_reference_palette_active() &&
+           path_completion_palette_visible(draft.text, draft.cursor, snapshot.file_references, path_completion_force_active);
   };
 
   auto scroll_up = [&](std::size_t amount) {
@@ -1429,6 +1761,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         } else {
           static_cast<void>(replace_composer_draft(draft, selection_text));
           selected_slash_command_index = 0;
+          path_completion_force_active = false;
           draft_scroll_offset = 0;
           history_index.reset();
           draft_input.clear();
@@ -1441,32 +1774,72 @@ int run_interactive_composer(TuiRuntimeOptions options)
           return InputLoopAction::ContinueLoop;
         }
         selected_slash_command_index = 0;
+        path_completion_force_active = false;
         snapshot.selected_slash_command_index = selected_slash_command_index;
       }
     }
-    auto const submitted = immediate_slash_submission ? *immediate_slash_submission : draft.text;
+    if (file_reference_palette_active()) {
+      selected_slash_command_index =
+          clamp_file_reference_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
+      auto selection = file_reference_selection_text(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
+      static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
+      selected_slash_command_index = 0;
+      path_completion_force_active = false;
+      draft_scroll_offset = 0;
+      history_index.reset();
+      draft_input.clear();
+      snapshot.status = "file reference selected";
+      snapshot.selected_slash_command_index = selected_slash_command_index;
+      if (!render()) {
+        terminal_write_failed = true;
+        return InputLoopAction::BreakLoop;
+      }
+      return InputLoopAction::ContinueLoop;
+    }
+    if (path_completion_palette_active()) {
+      selected_slash_command_index =
+          clamp_path_completion_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index,
+                                          path_completion_force_active);
+      auto selection =
+          path_completion_selection_text(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index,
+                                         path_completion_force_active);
+      static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
+      selected_slash_command_index = 0;
+      path_completion_force_active = false;
+      draft_scroll_offset = 0;
+      history_index.reset();
+      draft_input.clear();
+      snapshot.status = "path selected";
+      snapshot.selected_slash_command_index = selected_slash_command_index;
+      if (!render()) {
+        terminal_write_failed = true;
+        return InputLoopAction::BreakLoop;
+      }
+      return InputLoopAction::ContinueLoop;
+    }
+    auto const submitted = immediate_slash_submission ? *immediate_slash_submission : expanded_composer_draft_text(draft);
     reset_composer_draft(draft);
+    jump_mode = ComposerJumpMode::None;
     draft_scroll_offset = 0;
     history_index.reset();
     draft_input.clear();
     selected_slash_command_index = 0;
+    path_completion_force_active = false;
     if (!submitted.empty()) {
       if ((exact_command(submitted, "/models") || exact_command(submitted, "/model")) && options.model_selector_view) {
         push_history(input_history, submitted);
-        snapshot.select_list = options.model_selector_view();
-        active_select_list = ActiveSelectList::Model;
-        snapshot.status = "model selector opened";
-        transcript_scroll_offset = 0;
-        if (!render()) {
+        if (!open_model_selector()) {
           terminal_write_failed = true;
           return InputLoopAction::BreakLoop;
         }
         return InputLoopAction::ContinueLoop;
       }
-      if (exact_command(submitted, "/sessions") && options.session_selector_view) {
+      if ((exact_command(submitted, "/sessions") || exact_command(submitted, "/tree") || exact_command(submitted, "/resume")) &&
+          options.session_selector_view) {
         push_history(input_history, submitted);
         snapshot.select_list = options.session_selector_view();
         active_select_list = ActiveSelectList::Session;
+        session_archive_confirmation.reset();
         snapshot.status = "session selector opened";
         transcript_scroll_offset = 0;
         if (!render()) {
@@ -1475,11 +1848,60 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
         return InputLoopAction::ContinueLoop;
       }
-      if (submitted == "/hotkeys") {
+      if (auto reload_target = reload_command_argument(submitted)) {
+        push_history(input_history, submitted);
+        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
+        if (!reload_target_is_keybindings(*reload_target)) {
+          snapshot.status = "invalid_argument: unsupported reload target\n  target: " + *reload_target +
+                            "\n  supported: keybindings";
+          push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
+          transcript_scroll_offset = 0;
+          static_cast<void>(beep());
+          if (!render()) {
+            terminal_write_failed = true;
+            return InputLoopAction::BreakLoop;
+          }
+          return InputLoopAction::ContinueLoop;
+        }
+        if (!options.on_reload_key_bindings) {
+          snapshot.status = "reload unavailable";
+          push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
+          transcript_scroll_offset = 0;
+          static_cast<void>(beep());
+          if (!render()) {
+            terminal_write_failed = true;
+            return InputLoopAction::BreakLoop;
+          }
+          return InputLoopAction::ContinueLoop;
+        }
+        auto reloaded = options.on_reload_key_bindings();
+        if (!reloaded) {
+          snapshot.status = reloaded.error().format();
+          push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
+          transcript_scroll_offset = 0;
+          static_cast<void>(beep());
+          if (!render()) {
+            terminal_write_failed = true;
+            return InputLoopAction::BreakLoop;
+          }
+          return InputLoopAction::ContinueLoop;
+        }
+        options.key_bindings = std::move(reloaded->key_bindings);
+        apply_runtime_state_snapshot(std::move(reloaded->state));
+        push_transcript(snapshot,
+                        TranscriptItem{.label = "ava", .text = "keybindings reloaded", .meta = assistant_meta_for_snapshot(snapshot)});
+        transcript_scroll_offset = 0;
+        if (!render()) {
+          terminal_write_failed = true;
+          return InputLoopAction::BreakLoop;
+        }
+        return InputLoopAction::ContinueLoop;
+      }
+      if (submitted == "/hotkeys" || submitted == "/keybindings") {
         push_history(input_history, submitted);
         snapshot.select_list = hotkeys_select_list_view(options.key_bindings);
         active_select_list = ActiveSelectList::Hotkeys;
-        snapshot.status = "hotkeys opened";
+        snapshot.status = "keybindings opened";
         transcript_scroll_offset = 0;
         if (!render()) {
           terminal_write_failed = true;
@@ -1497,6 +1919,49 @@ int run_interactive_composer(TuiRuntimeOptions options)
         active_select_list = ActiveSelectList::Settings;
         snapshot.status = "settings opened";
         transcript_scroll_offset = 0;
+        if (!render()) {
+          terminal_write_failed = true;
+          return InputLoopAction::BreakLoop;
+        }
+        return InputLoopAction::ContinueLoop;
+      }
+      if (auto copy_target = copy_command_argument(submitted)) {
+        push_history(input_history, submitted);
+        auto const target = trim_view_to_string(*copy_target);
+        std::optional<std::string> copy_text;
+        std::string copied_status;
+        std::string missing_status;
+        bool valid_target = true;
+        bool copied = false;
+        if (target.empty()) {
+          copy_text = latest_ava_message_copy_text(snapshot.transcript);
+          copied_status = "copied last AVA message to clipboard";
+          missing_status = "no AVA messages to copy";
+        } else if (target == "tool" || target == "tools") {
+          copy_text = latest_tool_copy_text(snapshot.transcript);
+          copied_status = "copied latest tool details to clipboard";
+          missing_status = "no tool details to copy";
+        } else if (target == "diff" || target == "diffs") {
+          copy_text = latest_tool_diff_copy_text(snapshot.transcript);
+          copied_status = "copied latest tool diff to clipboard";
+          missing_status = "no tool diff to copy";
+        } else {
+          valid_target = false;
+          snapshot.status = "invalid_argument: unsupported copy target\n  target: " + target + "\n  supported: tool, diff";
+        }
+
+        if (valid_target) {
+          copied = copy_text && copy_text_to_terminal_clipboard(*copy_text);
+          if (copied) {
+            snapshot.status = std::move(copied_status);
+          } else {
+            snapshot.status = copy_text ? "clipboard copy failed" : std::move(missing_status);
+          }
+        }
+        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
+        push_transcript(snapshot, TranscriptItem{.label = copied ? "status" : "error", .text = snapshot.status});
+        transcript_scroll_offset = 0;
+        if (!copied) static_cast<void>(beep());
         if (!render()) {
           terminal_write_failed = true;
           return InputLoopAction::BreakLoop;
@@ -1588,7 +2053,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       auto upsert_stopping_activity = [&]() {
         auto item = SidebarActivityItem{.id = "stopping",
                                         .label = "stopping",
-                                        .detail = "waiting for active work to stop",
+                                        .detail = "waiting for active work to stop; queued drafts skip on stop",
                                         .status = ToolTimelineStatus::Running};
         auto existing = std::ranges::find_if(
             sidebar.activity, [&](SidebarActivityItem const& activity) { return activity.id == item.id; });
@@ -1748,6 +2213,51 @@ int run_interactive_composer(TuiRuntimeOptions options)
           auto active_is_action = [&](TuiAction action) {
             return key_matches_action(options.key_bindings, action, active_event.key);
           };
+          auto restore_latest_queued_message = [&]() {
+            if (!active_queues || !active_queues->restore_latest) {
+              snapshot.status = "active-run restore unavailable";
+              return render();
+            }
+            auto restored = active_queues->restore_latest();
+            if (!restored) {
+              snapshot.status = restored.error().format();
+              static_cast<void>(beep());
+              return render();
+            }
+            auto const restored_text = restored->steering ? "/steer " + restored->message : restored->message;
+            static_cast<void>(replace_composer_draft(draft, restored_text));
+            draft_scroll_offset = 0;
+            history_index.reset();
+            draft_input.clear();
+            selected_slash_command_index = 0;
+            slash_palette_suppressed = false;
+            path_completion_force_active = false;
+            snapshot.status = restored->steering ? "steering restored" : "follow-up restored";
+            return render();
+          };
+          if (jump_mode != ComposerJumpMode::None) {
+            if (active_is_action(TuiAction::JumpForward) || active_is_action(TuiAction::JumpBackward)) {
+              jump_mode = ComposerJumpMode::None;
+              snapshot.status = "jump cancelled";
+              return render();
+            }
+            if (auto const target = printable_jump_target(active_input)) {
+              bool const forward = jump_mode == ComposerJumpMode::Forward;
+              jump_mode = ComposerJumpMode::None;
+              pending_escape_clear = false;
+              history_index.reset();
+              draft_input.clear();
+              selected_slash_command_index = 0;
+              slash_palette_suppressed = false;
+              path_completion_force_active = false;
+              draft_scroll_offset = 0;
+              snapshot.status = jump_composer_draft_to_character(draft, *target, forward)
+                                    ? (forward ? "jumped forward" : "jumped backward")
+                                    : "jump character not found";
+              return render();
+            }
+            jump_mode = ComposerJumpMode::None;
+          }
           if (active_event.key == Key::Escape || active_is_action(TuiAction::Cancel)) {
             return request_stop();
           }
@@ -1760,11 +2270,13 @@ int run_interactive_composer(TuiRuntimeOptions options)
             request_close_after_submit();
             return true;
           }
-          if (active_is_action(TuiAction::Exit)) {
+          bool const active_ctrl_d_delete_forward = active_event.key == Key::CtrlD &&
+                                                    active_is_action(TuiAction::DeleteForward) && !draft.text.empty();
+          if (active_is_action(TuiAction::Exit) && !active_ctrl_d_delete_forward) {
             request_close_after_submit();
             return true;
           }
-          if (active_event.key == Key::Character) {
+          auto insert_active_text = [&]() {
             pending_escape_clear = false;
             history_index.reset();
             draft_input.clear();
@@ -1772,11 +2284,34 @@ int run_interactive_composer(TuiRuntimeOptions options)
             slash_palette_suppressed = false;
             draft_scroll_offset = 0;
             auto const text = active_input.text.empty() ? std::string(1, active_event.character) : active_input.text;
-            static_cast<void>(insert_composer_draft_text(draft, text));
+            if (active_input.bracketed_paste) {
+              static_cast<void>(insert_composer_paste_text(draft, text));
+              snapshot.status = "pasted into draft safely";
+            } else {
+              static_cast<void>(insert_composer_draft_text(draft, text));
+            }
+          };
+          if (active_event.key == Key::Character) {
+            insert_active_text();
             return render();
           }
           if (active_is_action(TuiAction::NewLine)) {
             insert_newline();
+            return render();
+          }
+          if (active_is_action(TuiAction::MessageDequeue)) {
+            return restore_latest_queued_message();
+          }
+          if (active_is_action(TuiAction::JumpForward) || active_is_action(TuiAction::JumpBackward)) {
+            pending_escape_clear = false;
+            history_index.reset();
+            draft_input.clear();
+            selected_slash_command_index = 0;
+            slash_palette_suppressed = false;
+            path_completion_force_active = false;
+            jump_mode = active_is_action(TuiAction::JumpForward) ? ComposerJumpMode::Forward : ComposerJumpMode::Backward;
+            snapshot.status = active_is_action(TuiAction::JumpForward) ? "jump forward: type character"
+                                                                       : "jump backward: type character";
             return render();
           }
           if (active_is_action(TuiAction::Submit)) {
@@ -1785,25 +2320,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
               return render();
             }
             if (draft.text == "/restore") {
-              if (!active_queues || !active_queues->restore_latest) {
-                snapshot.status = "active-run restore unavailable";
-                return render();
-              }
-              auto restored = active_queues->restore_latest();
-              if (!restored) {
-                snapshot.status = restored.error().format();
-                static_cast<void>(beep());
-                return render();
-              }
-              auto const restored_text = restored->steering ? "/steer " + restored->message : restored->message;
-              static_cast<void>(replace_composer_draft(draft, restored_text));
-              draft_scroll_offset = 0;
-              history_index.reset();
-              draft_input.clear();
-              selected_slash_command_index = 0;
-              slash_palette_suppressed = false;
-              snapshot.status = restored->steering ? "steering restored" : "follow-up restored";
-              return render();
+              return restore_latest_queued_message();
             }
             auto const steering_prefix = std::string_view("/steer ");
             bool const steering_draft = draft.text.starts_with(steering_prefix);
@@ -1828,7 +2345,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
               return render();
             }
 
-            auto queued_text = draft.text;
+            auto queued_text = expanded_composer_draft_text(draft);
             auto queued = steering_draft ? active_queues->queue_steering(queued_text.substr(steering_prefix.size()))
                                          : active_queues->queue_follow_up(queued_text);
             if (!queued) {
@@ -1838,6 +2355,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
             }
             push_history(input_history, queued_text);
             reset_composer_draft(draft);
+            jump_mode = ComposerJumpMode::None;
             draft_scroll_offset = 0;
             history_index.reset();
             draft_input.clear();
@@ -1846,8 +2364,12 @@ int run_interactive_composer(TuiRuntimeOptions options)
             snapshot.status = steering_draft ? "steering queued" : "follow-up queued";
             return render();
           }
-          if (active_is_action(TuiAction::DeleteBackward) || active_is_action(TuiAction::DeleteWordBackward) ||
-              active_is_action(TuiAction::DeleteToLineStart) || active_is_action(TuiAction::DeleteToLineEnd) ||
+          bool const active_delete_forward = active_is_action(TuiAction::DeleteForward) &&
+                                             (active_event.key != Key::CtrlD || active_ctrl_d_delete_forward);
+          if (active_is_action(TuiAction::DeleteBackward) || active_delete_forward ||
+              active_is_action(TuiAction::DeleteWordBackward) || active_is_action(TuiAction::DeleteWordForward) ||
+              active_is_action(TuiAction::DeleteToLineStart) ||
+              active_is_action(TuiAction::DeleteToLineEnd) ||
               active_is_action(TuiAction::ClearInput) || active_is_action(TuiAction::CursorLeft) ||
               active_is_action(TuiAction::CursorRight) || active_is_action(TuiAction::CursorLineStart) ||
               active_is_action(TuiAction::CursorLineEnd) || active_is_action(TuiAction::CursorWordLeft) ||
@@ -1862,8 +2384,12 @@ int run_interactive_composer(TuiRuntimeOptions options)
             draft_scroll_offset = 0;
             if (active_is_action(TuiAction::DeleteBackward)) {
               static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteBackward));
+            } else if (active_delete_forward) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteForward));
             } else if (active_is_action(TuiAction::DeleteWordBackward)) {
               static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteWordBackward));
+            } else if (active_is_action(TuiAction::DeleteWordForward)) {
+              static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteWordForward));
             } else if (active_is_action(TuiAction::DeleteToLineStart)) {
               static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteToLineStart));
             } else if (active_is_action(TuiAction::DeleteToLineEnd)) {
@@ -1915,18 +2441,46 @@ int run_interactive_composer(TuiRuntimeOptions options)
             jump_to_bottom("live tail");
             return render();
           }
-          if (active_is_action(TuiAction::HistoryPrev)) {
+          if (active_is_action(TuiAction::CursorUp) && apply_composer_draft_action(draft, TuiAction::CursorUp)) {
             pending_escape_clear = false;
             history_index.reset();
             draft_input.clear();
-            scroll_up(kKeyboardScrollRows);
+            selected_slash_command_index = 0;
+            slash_palette_suppressed = false;
+            return render();
+          }
+          if (active_is_action(TuiAction::HistoryPrev)) {
+            pending_escape_clear = false;
+            selected_slash_command_index = 0;
+            slash_palette_suppressed = false;
+            path_completion_force_active = false;
+            draft_scroll_offset = 0;
+            if (browse_composer_input_history(draft, input_history, history_index, draft_input, true)) {
+              snapshot.status = "history previous";
+            } else {
+              scroll_up(kKeyboardScrollRows);
+            }
+            return render();
+          }
+          if (active_is_action(TuiAction::CursorDown) && apply_composer_draft_action(draft, TuiAction::CursorDown)) {
+            pending_escape_clear = false;
+            history_index.reset();
+            draft_input.clear();
+            selected_slash_command_index = 0;
+            slash_palette_suppressed = false;
             return render();
           }
           if (active_is_action(TuiAction::HistoryNext)) {
             pending_escape_clear = false;
-            history_index.reset();
-            draft_input.clear();
-            scroll_down(kKeyboardScrollRows);
+            selected_slash_command_index = 0;
+            slash_palette_suppressed = false;
+            path_completion_force_active = false;
+            draft_scroll_offset = 0;
+            if (browse_composer_input_history(draft, input_history, history_index, draft_input, false)) {
+              snapshot.status = history_index ? "history next" : "history draft";
+            } else {
+              scroll_down(kKeyboardScrollRows);
+            }
             return render();
           }
           if (active_event.key == Key::MouseWheelUp) {
@@ -1944,6 +2498,22 @@ int run_interactive_composer(TuiRuntimeOptions options)
           }
           if (active_is_action(TuiAction::VariantCycle)) {
             snapshot.status = "reasoning can be changed between turns";
+            return render();
+          }
+          if (active_is_action(TuiAction::ModelSelect)) {
+            snapshot.status = "model selection is available between turns";
+            return render();
+          }
+          if (active_is_action(TuiAction::ModelCycleForward) || active_is_action(TuiAction::ModelCycleBackward)) {
+            snapshot.status = "model cycling is available between turns";
+            return render();
+          }
+          if (active_is_action(TuiAction::MessageDequeue)) {
+            snapshot.status = "queued-message restore is available during active runs";
+            return render();
+          }
+          if (active_event.key == Key::Space) {
+            insert_active_text();
             return render();
           }
           return true;
@@ -2099,10 +2669,125 @@ int run_interactive_composer(TuiRuntimeOptions options)
       continue;
     }
     if (snapshot.select_list) {
-      auto input_result = handle_select_list_input(*snapshot.select_list, input.event);
+      auto input_result = handle_select_list_input(*snapshot.select_list, input.event, options.key_bindings);
+      auto preserve_session_selector_state = [&](SelectListView next_view, std::string status) {
+        session_archive_confirmation.reset();
+        auto const query = input_result.query;
+        std::string selected_value;
+        if (input_result.selected_item_index < snapshot.select_list->items.size()) {
+          selected_value = snapshot.select_list->items[input_result.selected_item_index].value;
+        }
+        next_view.query = query;
+        if (!selected_value.empty()) {
+          for (std::size_t index = 0; index < next_view.items.size(); ++index) {
+            if (next_view.items[index].value == selected_value) {
+              next_view.selected_item_index = index;
+              break;
+            }
+          }
+        }
+        next_view.selected_item_index = clamp_select_list_selection(next_view, next_view.selected_item_index);
+        snapshot.select_list = std::move(next_view);
+        snapshot.status = std::move(status);
+      };
+      auto selected_select_list_item = [&]() -> SelectListItemView const* {
+        if (!snapshot.select_list || input_result.selected_item_index >= snapshot.select_list->items.size())
+          return nullptr;
+        return &snapshot.select_list->items[input_result.selected_item_index];
+      };
       if (input_result.action == SelectListInputAction::Redraw && snapshot.select_list) {
+        session_archive_confirmation.reset();
         snapshot.select_list->selected_item_index = input_result.selected_item_index;
         snapshot.select_list->query = std::move(input_result.query);
+      } else if (input_result.action == SelectListInputAction::CycleSort && active_select_list == ActiveSelectList::Session && snapshot.select_list &&
+                 options.on_session_selector_sort_cycle) {
+        preserve_session_selector_state(options.on_session_selector_sort_cycle(), "session selector sort cycled");
+      } else if (input_result.action == SelectListInputAction::ToggleNamedFilter && active_select_list == ActiveSelectList::Session &&
+                 snapshot.select_list && options.on_session_selector_named_filter_toggle) {
+        preserve_session_selector_state(options.on_session_selector_named_filter_toggle(), "session selector filter toggled");
+      } else if (input_result.action == SelectListInputAction::TogglePathDisplay && active_select_list == ActiveSelectList::Session &&
+                 snapshot.select_list && options.on_session_selector_path_display_toggle) {
+        preserve_session_selector_state(options.on_session_selector_path_display_toggle(), "session selector path display toggled");
+      } else if (input_result.action == SelectListInputAction::ToggleArchivedFilter && active_select_list == ActiveSelectList::Session &&
+                 snapshot.select_list && options.on_session_selector_archived_filter_toggle) {
+        preserve_session_selector_state(options.on_session_selector_archived_filter_toggle(), "session selector archived filter toggled");
+      } else if (input_result.action == SelectListInputAction::Rename && active_select_list == ActiveSelectList::Session &&
+                 snapshot.select_list) {
+        if (input_result.selected_item_index < snapshot.select_list->items.size() &&
+            snapshot.select_list->items[input_result.selected_item_index].enabled &&
+            !snapshot.select_list->items[input_result.selected_item_index].value.empty()) {
+          auto const selected_value = snapshot.select_list->items[input_result.selected_item_index].value;
+          snapshot.select_list.reset();
+          active_select_list = ActiveSelectList::None;
+          auto draft_text = "/sessions rename " + selected_value + " ";
+          static_cast<void>(replace_composer_draft(draft, std::move(draft_text)));
+          draft_input.clear();
+          history_index.reset();
+          draft_scroll_offset = 0;
+          snapshot.status = "session rename draft ready";
+        } else {
+          snapshot.status = "session cannot be renamed from this row";
+          static_cast<void>(beep());
+        }
+      } else if (input_result.action == SelectListInputAction::Label && active_select_list == ActiveSelectList::Session &&
+                 snapshot.select_list) {
+        if (input_result.selected_item_index < snapshot.select_list->items.size() &&
+            snapshot.select_list->items[input_result.selected_item_index].enabled &&
+            !snapshot.select_list->items[input_result.selected_item_index].value.empty()) {
+          auto const selected_value = snapshot.select_list->items[input_result.selected_item_index].value;
+          snapshot.select_list.reset();
+          active_select_list = ActiveSelectList::None;
+          auto draft_text = "/sessions labels " + selected_value + " ";
+          static_cast<void>(replace_composer_draft(draft, std::move(draft_text)));
+          draft_input.clear();
+          history_index.reset();
+          draft_scroll_offset = 0;
+          snapshot.status = "session labels draft ready";
+        } else {
+          snapshot.status = "session cannot be labeled from this row";
+          static_cast<void>(beep());
+        }
+      } else if (input_result.action == SelectListInputAction::Archive) {
+        auto const* selected_item = selected_select_list_item();
+        if (active_select_list != ActiveSelectList::Session || !snapshot.select_list) {
+          snapshot.select_list.reset();
+          active_select_list = ActiveSelectList::None;
+          session_archive_confirmation.reset();
+          snapshot.status = "view canceled";
+        } else if (!selected_item || !selected_item->enabled || selected_item->value.empty()) {
+          session_archive_confirmation.reset();
+          snapshot.status = "session cannot be archived or restored from this row";
+          static_cast<void>(beep());
+        } else {
+          bool const archive = selected_item->badge != "archived";
+          if (archive && selected_item->current) {
+            session_archive_confirmation.reset();
+            snapshot.status = "switch sessions before archiving the active session";
+            static_cast<void>(beep());
+          } else if (archive && !options.on_session_selector_archive) {
+            session_archive_confirmation.reset();
+            snapshot.status = "session archive unavailable";
+            static_cast<void>(beep());
+          } else if (!archive && !options.on_session_selector_unarchive) {
+            session_archive_confirmation.reset();
+            snapshot.status = "session restore unavailable";
+            static_cast<void>(beep());
+          } else if (session_archive_confirmation && session_archive_confirmation->session_id == selected_item->value &&
+                     session_archive_confirmation->archive == archive) {
+            auto updated = archive ? options.on_session_selector_archive(selected_item->value)
+                                   : options.on_session_selector_unarchive(selected_item->value);
+            session_archive_confirmation.reset();
+            if (updated) {
+              preserve_session_selector_state(std::move(*updated), archive ? "session archived" : "session restored");
+            } else {
+              snapshot.status = updated.error().format();
+              static_cast<void>(beep());
+            }
+          } else {
+            session_archive_confirmation = PendingSessionArchiveAction{.session_id = selected_item->value, .archive = archive};
+            snapshot.status = std::string("press Ctrl+D again to ") + (archive ? "archive " : "restore ") + selected_item->value;
+          }
+        }
       } else if (input_result.action == SelectListInputAction::Resolve ||
                  input_result.action == SelectListInputAction::Cancel) {
         std::string selected_value;
@@ -2113,6 +2798,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         auto const resolved_list = active_select_list;
         snapshot.select_list.reset();
         active_select_list = ActiveSelectList::None;
+        session_archive_confirmation.reset();
         if (input_result.action == SelectListInputAction::Cancel) {
           snapshot.status = "view canceled";
         } else if (resolved_list == ActiveSelectList::Model && options.on_model_selected) {
@@ -2128,6 +2814,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           if (selected) {
             snapshot.transcript.clear();
             reset_composer_draft(draft);
+            jump_mode = ComposerJumpMode::None;
             draft_input.clear();
             history_index.reset();
             apply_runtime_state_snapshot(std::move(*selected));
@@ -2161,12 +2848,98 @@ int run_interactive_composer(TuiRuntimeOptions options)
       static_cast<void>(replace_composer_draft(
           draft, slash_command_selection_text(draft.text, snapshot.slash_commands, selected_slash_command_index)));
       selected_slash_command_index = 0;
+      path_completion_force_active = false;
       draft_scroll_offset = 0;
       history_index.reset();
       draft_input.clear();
       snapshot.status = "command selected - press Enter to run";
     };
-    if (event.key == Key::Character) {
+    auto select_file_reference = [&]() {
+      selected_slash_command_index =
+          clamp_file_reference_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
+      auto selection = file_reference_selection_text(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
+      static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
+      selected_slash_command_index = 0;
+      path_completion_force_active = false;
+      draft_scroll_offset = 0;
+      history_index.reset();
+      draft_input.clear();
+      snapshot.status = "file reference selected";
+    };
+    auto select_path_completion = [&]() {
+      selected_slash_command_index =
+          clamp_path_completion_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index,
+                                          path_completion_force_active);
+      auto selection =
+          path_completion_selection_text(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index,
+                                         path_completion_force_active);
+      static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
+      selected_slash_command_index = 0;
+      path_completion_force_active = false;
+      draft_scroll_offset = 0;
+      history_index.reset();
+      draft_input.clear();
+      snapshot.status = "path selected";
+    };
+    auto force_path_completion = [&]() {
+      auto const matches = filter_path_completions(draft.text, draft.cursor, snapshot.file_references, true);
+      if (matches.empty())
+        return false;
+      pending_escape_clear = false;
+      history_index.reset();
+      draft_input.clear();
+      slash_palette_suppressed = false;
+      selected_slash_command_index = 0;
+      if (matches.size() == 1)
+      {
+        auto selection = path_completion_selection_text(draft.text, draft.cursor, snapshot.file_references, 0, true);
+        static_cast<void>(replace_composer_draft(draft, std::move(selection.text), selection.cursor));
+        path_completion_force_active = false;
+        draft_scroll_offset = 0;
+        snapshot.status = "path selected";
+        return true;
+      }
+      path_completion_force_active = true;
+      draft_scroll_offset = 0;
+      snapshot.status = "path suggestions";
+      return true;
+    };
+    if (jump_mode != ComposerJumpMode::None) {
+      if (is_action(TuiAction::JumpForward) || is_action(TuiAction::JumpBackward)) {
+        jump_mode = ComposerJumpMode::None;
+        snapshot.status = "jump cancelled";
+      } else if (auto const target = printable_jump_target(input)) {
+        bool const forward = jump_mode == ComposerJumpMode::Forward;
+        jump_mode = ComposerJumpMode::None;
+        pending_escape_clear = false;
+        history_index.reset();
+        draft_input.clear();
+        selected_slash_command_index = 0;
+        slash_palette_suppressed = false;
+        path_completion_force_active = false;
+        draft_scroll_offset = 0;
+        snapshot.status = jump_composer_draft_to_character(draft, *target, forward)
+                              ? (forward ? "jumped forward" : "jumped backward")
+                              : "jump character not found";
+      } else {
+        jump_mode = ComposerJumpMode::None;
+      }
+      if (event.key == Key::Character || event.key == Key::Space || is_action(TuiAction::JumpForward) ||
+          is_action(TuiAction::JumpBackward)) {
+        snapshot.selected_slash_command_index = selected_slash_command_index;
+        if (!render()) {
+          terminal_write_failed = true;
+          break;
+        }
+        continue;
+      }
+    }
+    bool const ctrl_d_delete_forward =
+        event.key == Key::CtrlD && is_action(TuiAction::DeleteForward) && !draft.text.empty();
+    bool const delete_forward_action =
+        is_action(TuiAction::DeleteForward) && (event.key != Key::CtrlD || ctrl_d_delete_forward);
+
+    auto insert_input_text = [&]() {
       pending_escape_clear = false;
       history_index.reset();
       draft_input.clear();
@@ -2174,10 +2947,24 @@ int run_interactive_composer(TuiRuntimeOptions options)
       slash_palette_suppressed = false;
       draft_scroll_offset = 0;
       auto const text = input.text.empty() ? std::string(1, event.character) : input.text;
-      if (insert_composer_draft_text(draft, text) && input.bracketed_paste)
+      if (input.bracketed_paste && insert_composer_paste_text(draft, text))
         snapshot.status = "pasted into draft safely";
+      else if (!input.bracketed_paste)
+        static_cast<void>(insert_composer_draft_text(draft, text));
+    };
+    if (event.key == Key::Character) {
+      insert_input_text();
     } else if (is_action(TuiAction::NewLine)) {
       insert_newline();
+    } else if (is_action(TuiAction::JumpForward) || is_action(TuiAction::JumpBackward)) {
+      pending_escape_clear = false;
+      history_index.reset();
+      draft_input.clear();
+      selected_slash_command_index = 0;
+      slash_palette_suppressed = false;
+      path_completion_force_active = false;
+      jump_mode = is_action(TuiAction::JumpForward) ? ComposerJumpMode::Forward : ComposerJumpMode::Backward;
+      snapshot.status = is_action(TuiAction::JumpForward) ? "jump forward: type character" : "jump backward: type character";
     } else if (is_action(TuiAction::DeleteBackward)) {
       pending_escape_clear = false;
       history_index.reset();
@@ -2186,6 +2973,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
       slash_palette_suppressed = false;
       draft_scroll_offset = 0;
       static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteBackward));
+    } else if (delete_forward_action) {
+      pending_escape_clear = false;
+      history_index.reset();
+      draft_input.clear();
+      selected_slash_command_index = 0;
+      slash_palette_suppressed = false;
+      draft_scroll_offset = 0;
+      static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteForward));
     } else if (is_action(TuiAction::DeleteWordBackward)) {
       pending_escape_clear = false;
       history_index.reset();
@@ -2194,6 +2989,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
       slash_palette_suppressed = false;
       draft_scroll_offset = 0;
       static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteWordBackward));
+    } else if (is_action(TuiAction::DeleteWordForward)) {
+      pending_escape_clear = false;
+      history_index.reset();
+      draft_input.clear();
+      selected_slash_command_index = 0;
+      slash_palette_suppressed = false;
+      draft_scroll_offset = 0;
+      static_cast<void>(apply_composer_draft_action(draft, TuiAction::DeleteWordForward));
     } else if (is_action(TuiAction::DeleteToLineStart)) {
       pending_escape_clear = false;
       history_index.reset();
@@ -2216,14 +3019,24 @@ int run_interactive_composer(TuiRuntimeOptions options)
       draft_input.clear();
       selected_slash_command_index = 0;
       slash_palette_suppressed = false;
+      path_completion_force_active = false;
       draft_scroll_offset = 0;
       snapshot.status =
           apply_composer_draft_action(draft, TuiAction::ClearInput) ? "input cleared" : "input already empty";
     } else if (is_action(TuiAction::AutocompleteAccept) && slash_palette_active()) {
       pending_escape_clear = false;
       select_slash_command();
+    } else if (is_action(TuiAction::AutocompleteAccept) && file_reference_palette_active()) {
+      pending_escape_clear = false;
+      select_file_reference();
+    } else if (is_action(TuiAction::AutocompleteAccept) && path_completion_palette_active()) {
+      pending_escape_clear = false;
+      select_path_completion();
+    } else if (is_action(TuiAction::AutocompleteAccept) && force_path_completion()) {
+      pending_escape_clear = false;
     } else if (is_action(TuiAction::ModeToggle)) {
       pending_escape_clear = false;
+      path_completion_force_active = false;
       if (!options.on_toggle_mode) {
         snapshot.status = "mode toggle unavailable";
       } else if (auto result = options.on_toggle_mode(); !result) {
@@ -2233,6 +3046,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         snapshot.status = "mode switched to " + snapshot.mode;
       }
     } else if (is_action(TuiAction::Interrupt)) {
+      path_completion_force_active = false;
       if (!draft.text.empty()) {
         static_cast<void>(clear_draft_for_interrupt());
         snapshot.selected_slash_command_index = selected_slash_command_index;
@@ -2248,6 +3062,20 @@ int run_interactive_composer(TuiRuntimeOptions options)
     } else if (is_action(TuiAction::VariantCycle)) {
       pending_escape_clear = false;
       cycle_reasoning();
+    } else if (is_action(TuiAction::ModelSelect)) {
+      if (!open_model_selector()) {
+        terminal_write_failed = true;
+        break;
+      }
+    } else if (is_action(TuiAction::ModelCycleForward)) {
+      pending_escape_clear = false;
+      cycle_model(true);
+    } else if (is_action(TuiAction::ModelCycleBackward)) {
+      pending_escape_clear = false;
+      cycle_model(false);
+    } else if (is_action(TuiAction::MessageDequeue)) {
+      pending_escape_clear = false;
+      snapshot.status = "queued-message restore is available during active runs";
     } else if (is_action(TuiAction::PageUp)) {
       auto const [_, height] = terminal_size();
       scroll_up(std::max<std::size_t>(1, height / 2));
@@ -2299,11 +3127,45 @@ int run_interactive_composer(TuiRuntimeOptions options)
         snapshot.status =
             "command " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
       }
-    } else if (is_action(TuiAction::HistoryPrev)) {
+    } else if (is_action(TuiAction::PalettePrev) && file_reference_palette_active()) {
+      pending_escape_clear = false;
+      auto const matches = filter_file_references(draft.text, draft.cursor, snapshot.file_references);
+      if (matches.empty()) {
+        snapshot.status = "no matching file references";
+      } else {
+        selected_slash_command_index =
+            previous_file_reference_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
+        snapshot.status =
+            "reference " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+      }
+    } else if (is_action(TuiAction::PalettePrev) && path_completion_palette_active()) {
+      pending_escape_clear = false;
+      auto const matches = filter_path_completions(draft.text, draft.cursor, snapshot.file_references);
+      if (matches.empty()) {
+        snapshot.status = "no matching paths";
+      } else {
+        selected_slash_command_index =
+            previous_path_completion_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
+        snapshot.status =
+            "path " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+      }
+    } else if (is_action(TuiAction::CursorUp) && apply_composer_draft_action(draft, TuiAction::CursorUp)) {
       pending_escape_clear = false;
       history_index.reset();
       draft_input.clear();
-      scroll_up(kKeyboardScrollRows);
+      selected_slash_command_index = 0;
+      slash_palette_suppressed = false;
+    } else if (is_action(TuiAction::HistoryPrev)) {
+      pending_escape_clear = false;
+      selected_slash_command_index = 0;
+      slash_palette_suppressed = false;
+      path_completion_force_active = false;
+      draft_scroll_offset = 0;
+      if (browse_composer_input_history(draft, input_history, history_index, draft_input, true)) {
+        snapshot.status = "history previous";
+      } else {
+        scroll_up(kKeyboardScrollRows);
+      }
     } else if (is_action(TuiAction::PaletteNext) && slash_palette_active()) {
       pending_escape_clear = false;
       auto const matches = filter_slash_commands(draft.text, snapshot.slash_commands);
@@ -2315,11 +3177,45 @@ int run_interactive_composer(TuiRuntimeOptions options)
         snapshot.status =
             "command " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
       }
-    } else if (is_action(TuiAction::HistoryNext)) {
+    } else if (is_action(TuiAction::PaletteNext) && file_reference_palette_active()) {
+      pending_escape_clear = false;
+      auto const matches = filter_file_references(draft.text, draft.cursor, snapshot.file_references);
+      if (matches.empty()) {
+        snapshot.status = "no matching file references";
+      } else {
+        selected_slash_command_index =
+            next_file_reference_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
+        snapshot.status =
+            "reference " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+      }
+    } else if (is_action(TuiAction::PaletteNext) && path_completion_palette_active()) {
+      pending_escape_clear = false;
+      auto const matches = filter_path_completions(draft.text, draft.cursor, snapshot.file_references);
+      if (matches.empty()) {
+        snapshot.status = "no matching paths";
+      } else {
+        selected_slash_command_index =
+            next_path_completion_selection(draft.text, draft.cursor, snapshot.file_references, selected_slash_command_index);
+        snapshot.status =
+            "path " + std::to_string(selected_slash_command_index + 1) + "/" + std::to_string(matches.size());
+      }
+    } else if (is_action(TuiAction::CursorDown) && apply_composer_draft_action(draft, TuiAction::CursorDown)) {
       pending_escape_clear = false;
       history_index.reset();
       draft_input.clear();
-      scroll_down(kKeyboardScrollRows);
+      selected_slash_command_index = 0;
+      slash_palette_suppressed = false;
+    } else if (is_action(TuiAction::HistoryNext)) {
+      pending_escape_clear = false;
+      selected_slash_command_index = 0;
+      slash_palette_suppressed = false;
+      path_completion_force_active = false;
+      draft_scroll_offset = 0;
+      if (browse_composer_input_history(draft, input_history, history_index, draft_input, false)) {
+        snapshot.status = history_index ? "history next" : "history draft";
+      } else {
+        scroll_down(kKeyboardScrollRows);
+      }
     } else if (is_action(TuiAction::Undo)) {
       pending_escape_clear = false;
       draft_scroll_offset = 0;
@@ -2344,10 +3240,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
       pending_escape_clear = false;
       snapshot.status = "prompt action is only available while a prompt is active";
     } else if (is_action(TuiAction::Cancel)) {
-      if (slash_palette_active()) {
+      if (slash_palette_active() || file_reference_palette_active() || path_completion_palette_active()) {
         pending_escape_clear = false;
         slash_palette_suppressed = true;
         selected_slash_command_index = 0;
+        path_completion_force_active = false;
         history_index.reset();
         draft_input.clear();
         snapshot.status.clear();
@@ -2355,6 +3252,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         if (pending_escape_clear) {
           static_cast<void>(apply_composer_draft_action(draft, TuiAction::ClearInput));
           selected_slash_command_index = 0;
+          path_completion_force_active = false;
           history_index.reset();
           draft_input.clear();
           draft_scroll_offset = 0;
@@ -2372,6 +3270,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
       auto const action = handle_submit();
       if (action == InputLoopAction::BreakLoop) break;
       if (action == InputLoopAction::ContinueLoop) continue;
+    } else if (event.key == Key::Space) {
+      insert_input_text();
     }
     snapshot.selected_slash_command_index = selected_slash_command_index;
     if (!render()) {

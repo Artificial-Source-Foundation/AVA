@@ -21,6 +21,7 @@
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
 #include "ava/tui/terminal.h"
+#include "ava/tui/tool_cards.h"
 
 #include "ava/config/auth.h"
 #include "ava/config/model_config.h"
@@ -31,6 +32,7 @@
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
 #include "ava/session/session_store.h"
+#include "ava/session/session_tree.h"
 
 #include "ava/permissions/permission.h"
 
@@ -75,26 +77,76 @@ void test_tui_composer_rendering_and_input()
   expect(ava::tui::terminal_escape_sequence_key("[27;2;13~") == ava::tui::Key::ShiftEnter &&
              ava::tui::terminal_escape_sequence_key("[13;2u") == ava::tui::Key::ShiftEnter &&
              ava::tui::terminal_escape_sequence_key("[13;2~") == ava::tui::Key::ShiftEnter &&
+             ava::tui::terminal_escape_sequence_key("[27;5;13~") == ava::tui::Key::CtrlEnter &&
+             ava::tui::terminal_escape_sequence_key("[13;5u") == ava::tui::Key::CtrlEnter &&
+             ava::tui::terminal_escape_sequence_key("[13;5~") == ava::tui::Key::CtrlEnter &&
+             ava::tui::terminal_escape_sequence_key("[27;3;13~") == ava::tui::Key::AltEnter &&
+             ava::tui::terminal_escape_sequence_key("[13;3u") == ava::tui::Key::AltEnter &&
+             ava::tui::terminal_escape_sequence_key("[13;3~") == ava::tui::Key::AltEnter &&
+             ava::tui::terminal_escape_sequence_key("\r") == ava::tui::Key::AltEnter &&
+             ava::tui::terminal_escape_sequence_complete("\r") &&
+             ava::tui::terminal_escape_sequence_key("[Z") == ava::tui::Key::ShiftTab &&
+             ava::tui::terminal_escape_sequence_key("[1;6P") == ava::tui::Key::CtrlShiftP &&
+             ava::tui::terminal_escape_sequence_key("[80;6u") == ava::tui::Key::CtrlShiftP &&
+             ava::tui::terminal_escape_sequence_key("[3~") == ava::tui::Key::Delete &&
              ava::tui::terminal_escape_sequence_key("[5~") == ava::tui::Key::PageUp &&
              ava::tui::terminal_escape_sequence_key("[6~") == ava::tui::Key::PageDown &&
              ava::tui::terminal_escape_sequence_key("[5;2~") == ava::tui::Key::PageUp &&
              ava::tui::terminal_escape_sequence_key("[6;2~") == ava::tui::Key::PageDown &&
+             ava::tui::terminal_escape_sequence_key("[H") == ava::tui::Key::Home &&
+             ava::tui::terminal_escape_sequence_key("OH") == ava::tui::Key::Home &&
+             ava::tui::terminal_escape_sequence_key("[1~") == ava::tui::Key::Home &&
+             ava::tui::terminal_escape_sequence_key("[7~") == ava::tui::Key::Home &&
+             ava::tui::terminal_escape_sequence_key("[F") == ava::tui::Key::End &&
+             ava::tui::terminal_escape_sequence_key("OF") == ava::tui::Key::End &&
+             ava::tui::terminal_escape_sequence_key("[4~") == ava::tui::Key::End &&
+             ava::tui::terminal_escape_sequence_key("[8~") == ava::tui::Key::End &&
+             ava::tui::terminal_escape_sequence_key("[45;5u") == ava::tui::Key::CtrlMinus &&
+             ava::tui::terminal_escape_sequence_key(std::string_view("\x1f", 1)) == ava::tui::Key::CtrlMinus &&
+             ava::tui::terminal_escape_sequence_key(std::string_view("\x1d", 1)) == ava::tui::Key::CtrlAltRightBracket &&
+             ava::tui::terminal_escape_sequence_key("[3;3~") == ava::tui::Key::AltDelete &&
+             ava::tui::terminal_escape_sequence_key("[1;5D") == ava::tui::Key::CtrlArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[1;5C") == ava::tui::Key::CtrlArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[5D") == ava::tui::Key::CtrlArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[5C") == ava::tui::Key::CtrlArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[1;3A") == ava::tui::Key::AltArrowUp &&
+             ava::tui::terminal_escape_sequence_key("[3A") == ava::tui::Key::AltArrowUp &&
+             ava::tui::terminal_escape_sequence_key("[1;3D") == ava::tui::Key::AltArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[1;3C") == ava::tui::Key::AltArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[3D") == ava::tui::Key::AltArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[3C") == ava::tui::Key::AltArrowRight &&
              ava::tui::terminal_escape_sequence_key("[<64;12;9M") == ava::tui::Key::MouseWheelUp &&
              ava::tui::terminal_escape_sequence_key("[<65;12;9M") == ava::tui::Key::MouseWheelDown &&
              ava::tui::terminal_escape_sequence_key("[<68;12;9M") == ava::tui::Key::MouseWheelUp &&
              ava::tui::terminal_escape_sequence_key("[<69;12;9M") == ava::tui::Key::MouseWheelDown &&
              ava::tui::terminal_escape_sequence_key("[<64;12;9m") == ava::tui::Key::Unknown &&
              ava::tui::terminal_escape_sequence_key("[<65;12;9m") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key(std::string_view("\x7f", 1)) == ava::tui::Key::AltBackspace &&
+             ava::tui::terminal_escape_sequence_key(std::string_view("\b", 1)) == ava::tui::Key::AltBackspace &&
+             ava::tui::terminal_escape_sequence_key("b") == ava::tui::Key::AltB &&
+             ava::tui::terminal_escape_sequence_key("d") == ava::tui::Key::AltD &&
+             ava::tui::terminal_escape_sequence_key("f") == ava::tui::Key::AltF &&
+             ava::tui::terminal_escape_sequence_key("h") == ava::tui::Key::AltH &&
+             ava::tui::terminal_escape_sequence_key("j") == ava::tui::Key::AltJ &&
+             ava::tui::terminal_escape_sequence_key("k") == ava::tui::Key::AltK &&
+             ava::tui::terminal_escape_sequence_key("l") == ava::tui::Key::AltL &&
+             ava::tui::terminal_escape_sequence_key("w") == ava::tui::Key::AltW &&
              ava::tui::terminal_escape_sequence_key("y") == ava::tui::Key::AltY &&
              ava::tui::terminal_escape_sequence_key("[13;2") == ava::tui::Key::Unknown &&
-             ava::tui::terminal_escape_sequence_key("[13;5u") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[13;5") == ava::tui::Key::Unknown &&
              ava::tui::terminal_escape_sequence_key("[27;2;13") == ava::tui::Key::Unknown &&
              ava::tui::terminal_escape_sequence_key("[999999999999999999999;2u") == ava::tui::Key::Unknown &&
              ava::tui::terminal_escape_sequence_key("[200~") == ava::tui::Key::Unknown,
-         "terminal escape parser maps complete shift-enter CSI forms without treating partial keys or paste markers as "
+         "terminal escape parser maps complete modified Enter CSI forms without treating partial keys or paste markers as "
          "text");
   expect(ava::tui::terminal_escape_sequence_complete("[13;2u") &&
              ava::tui::terminal_escape_sequence_complete("[?25l") &&
+             ava::tui::terminal_escape_sequence_complete("[45;5u") &&
+             ava::tui::terminal_escape_sequence_complete("[3;3~") &&
+             ava::tui::terminal_escape_sequence_complete(std::string_view("\x1f", 1)) &&
+             ava::tui::terminal_escape_sequence_complete(std::string_view("\x1d", 1)) &&
+             ava::tui::terminal_escape_sequence_complete(std::string_view("\x7f", 1)) &&
+             ava::tui::terminal_escape_sequence_complete(std::string_view("\b", 1)) &&
              ava::tui::terminal_escape_sequence_complete(std::string("]0;AVA") + "\a") &&
              ava::tui::terminal_escape_sequence_complete(std::string("]52;c;AAAA") + "\x1b\\") &&
              ava::tui::terminal_escape_sequence_complete(std::string("P1;2|payload") + "\x1b\\") &&
@@ -143,6 +195,10 @@ void test_tui_composer_rendering_and_input()
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveDeny,
          "permission prompt space confirms selected deny");
   prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Space});
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveAllow,
+         "permission prompt semantic Space confirms the selected choice");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
                                                           ava::tui::InputEvent{.key = ava::tui::Key::Escape});
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveDeny,
          "permission prompt escape resolves deny");
@@ -167,6 +223,24 @@ void test_tui_composer_rendering_and_input()
   expect(prompt_input.action == ava::tui::PermissionPromptInputAction::None &&
              prompt_input.selected_choice == ava::tui::PermissionPromptChoice::Allow,
          "permission prompt ignores unmapped character keys without changing focus");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Tab}, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw &&
+             prompt_input.selected_choice == ava::tui::PermissionPromptChoice::DenyRemember,
+         "permission prompt cycles to remembered deny when rule storage is available");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::DenyRemember,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Enter}, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveDenyRemember,
+         "permission prompt enter confirms remembered deny");
+  prompt_input = ava::tui::handle_permission_prompt_input(
+      ava::tui::PermissionPromptChoice::Allow, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'R'}, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::Redraw &&
+             prompt_input.selected_choice == ava::tui::PermissionPromptChoice::AllowRemember,
+         "permission prompt R toggles the selected allow choice into a remembered allow");
+  prompt_input = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::AllowRemember,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Enter}, true);
+  expect(prompt_input.action == ava::tui::PermissionPromptInputAction::ResolveAllowRemember,
+         "permission prompt enter confirms remembered allow");
 
   auto single_question =
       ava::tui::QuestionPromptView{.header = "Choose",
@@ -194,11 +268,16 @@ void test_tui_composer_rendering_and_input()
   expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && question_input.custom_text == "x ",
          "question prompt custom text can include spaces after typing starts");
   single_question.custom_text = question_input.custom_text;
+  question_input = ava::tui::handle_question_prompt_input(single_question,
+                                                          ava::tui::InputEvent{.key = ava::tui::Key::Space});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && question_input.custom_text == "x  ",
+         "question prompt semantic Space appends to existing custom text");
+  single_question.custom_text = question_input.custom_text;
   question_input = ava::tui::handle_question_prompt_input(
       single_question,
       ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = static_cast<char>(0xC3), .text = "\xC3\xA9"});
   expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw &&
-             question_input.custom_text == std::string("x ") + "\xC3\xA9",
+             question_input.custom_text == std::string("x  ") + "\xC3\xA9",
          "question prompt custom text preserves utf-8 input");
   single_question.custom_text = "x";
   question_input =
@@ -253,15 +332,20 @@ void test_tui_composer_rendering_and_input()
   expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && question_input.options[0].selected,
          "question prompt space toggles selected multi-select option");
   multi_question.options = question_input.options;
+  question_input =
+      ava::tui::handle_question_prompt_input(multi_question, ava::tui::InputEvent{.key = ava::tui::Key::Space});
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && !question_input.options[0].selected,
+         "question prompt semantic Space toggles selected multi-select option");
+  multi_question.options = question_input.options;
   question_input = ava::tui::handle_question_prompt_input(
       multi_question, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = '2'});
-  expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && question_input.options[0].selected &&
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Redraw && !question_input.options[0].selected &&
              question_input.options[1].selected,
          "question prompt numeric shortcut toggles multi-select options without resolving");
   multi_question.options = question_input.options;
   question_input =
       ava::tui::handle_question_prompt_input(multi_question, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
-  expect(question_input.action == ava::tui::QuestionPromptInputAction::Resolve && question_input.options[0].selected &&
+  expect(question_input.action == ava::tui::QuestionPromptInputAction::Resolve && !question_input.options[0].selected &&
              question_input.options[1].selected,
          "question prompt enter resolves current multi-select choices");
   question_input =
@@ -308,6 +392,11 @@ void test_tui_composer_rendering_and_input()
          "tui draft editor can undo again after redo");
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorLeft) && draft.cursor == 1,
          "tui draft editor moves left by full utf-8 codepoint boundaries");
+  ava::tui::reset_composer_draft(draft, std::string("a") + "\xC3\xA9" + "b", 1);
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteForward) &&
+             draft.text == "ab" && draft.cursor == 1,
+         "tui draft editor forward-delete removes a full utf-8 codepoint after the cursor");
+  ava::tui::reset_composer_draft(draft, std::string("a") + "\xC3\xA9", 1);
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteBackward) &&
              draft.text == std::string("\xC3\xA9"),
          "tui draft editor preserves the utf-8 codepoint after deleting preceding ascii text");
@@ -317,6 +406,13 @@ void test_tui_composer_rendering_and_input()
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteWordBackward) &&
              draft.text == "one three" && draft.kill_buffer == "two ",
          "tui draft editor deletes the previous word into the kill buffer");
+  ava::tui::reset_composer_draft(draft, "one two three", 3);
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteWordForward) &&
+             draft.text == "one three" && draft.cursor == 3 && draft.kill_buffer == " two",
+         "tui draft editor deletes the next word into the kill buffer");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::Undo) && draft.text == "one two three" &&
+             draft.cursor == 3,
+         "tui draft editor undo restores forward word deletion");
   ava::tui::reset_composer_draft(draft, "first\nsecond line");
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorLineStart) && draft.cursor == 6,
          "tui draft editor moves to the start of the current line");
@@ -334,6 +430,52 @@ void test_tui_composer_rendering_and_input()
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteToLineEnd) &&
              draft.text == "first\n" && draft.kill_buffer == "second line",
          "tui draft editor deletes from cursor to line end into the kill buffer");
+  ava::tui::reset_composer_draft(draft, "join\nline", 4);
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteToLineEnd) &&
+             draft.text == "joinline" && draft.cursor == 4 && draft.kill_buffer == "\n",
+         "tui draft editor joins the next line when deleting at line end");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteToLineEnd) &&
+             draft.text == "join" && draft.cursor == 4 && draft.kill_buffer == "line",
+         "tui draft editor deletes following text after a line-end join");
+  ava::tui::reset_composer_draft(draft, "last", 4);
+  expect(!ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteToLineEnd) &&
+             draft.text == "last" && draft.cursor == 4,
+         "tui draft editor leaves final line end unchanged when there is nothing to delete");
+  ava::tui::reset_composer_draft(draft, "abc\ndef\nghij", 6);
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorUp) && draft.cursor == 2,
+         "tui draft editor moves vertically to the previous line at the same column");
+  expect(!ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorUp) && draft.cursor == 2,
+         "tui draft editor leaves cursor unchanged when vertical movement is already at the first line");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorDown) && draft.cursor == 6 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorDown) && draft.cursor == 10,
+         "tui draft editor moves vertically to following lines at the same column");
+  ava::tui::reset_composer_draft(draft, "abcdef\nx\nabcdef", 5);
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorDown) && draft.cursor == 8 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorDown) && draft.cursor == 14,
+         "tui draft editor preserves sticky column across shorter lines");
+  ava::tui::reset_composer_draft(draft, "abcdef\nx\nabcdef", 5);
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorDown) && draft.cursor == 8 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorLeft) && draft.cursor == 7 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorDown) && draft.cursor == 9,
+         "tui draft editor resets sticky column after horizontal movement");
+  ava::tui::reset_composer_draft(draft, "hello world", 0);
+  expect(ava::tui::jump_composer_draft_to_character(draft, "o", true) && draft.cursor == 4,
+         "tui draft editor jumps forward to the first matching character after the cursor");
+  expect(ava::tui::jump_composer_draft_to_character(draft, "o", true) && draft.cursor == 7,
+         "tui draft editor jumps forward to the next matching character after the cursor");
+  expect(!ava::tui::jump_composer_draft_to_character(draft, "z", true) && draft.cursor == 7,
+         "tui draft editor leaves the cursor unchanged when a forward jump target is missing");
+  expect(ava::tui::jump_composer_draft_to_character(draft, "h", false) && draft.cursor == 0,
+         "tui draft editor jumps backward across the current draft");
+  ava::tui::reset_composer_draft(draft, "abc\ndef\nghi", 0);
+  expect(ava::tui::jump_composer_draft_to_character(draft, "g", true) && draft.cursor == 8,
+         "tui draft editor jumps forward across lines");
+  expect(ava::tui::jump_composer_draft_to_character(draft, "d", false) && draft.cursor == 4,
+         "tui draft editor jumps backward across lines");
+  ava::tui::reset_composer_draft(draft, "Hello World", 0);
+  expect(!ava::tui::jump_composer_draft_to_character(draft, "h", true) && draft.cursor == 0 &&
+             ava::tui::jump_composer_draft_to_character(draft, "W", true) && draft.cursor == 6,
+         "tui draft editor character jumps are case-sensitive");
   ava::tui::reset_composer_draft(draft, "pending message");
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::ClearInput) && draft.text.empty() &&
              draft.cursor == 0 && draft.kill_buffer == "pending message",
@@ -357,11 +499,159 @@ void test_tui_composer_rendering_and_input()
   expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::YankPop) &&
              ring_draft.text == "alpha beta " && ring_draft.kill_buffer == "beta ",
          "tui draft editor yank-pop cycles through the kill ring");
+
+  std::vector<std::string> input_history;
+  expect(!ava::tui::push_composer_input_history(input_history, "   \t  "),
+         "tui input history ignores empty and whitespace-only submissions");
+  expect(ava::tui::push_composer_input_history(input_history, " first prompt ") && input_history.back() == "first prompt",
+         "tui input history trims submitted prompts before storing them");
+  expect(!ava::tui::push_composer_input_history(input_history, "first prompt"),
+         "tui input history skips consecutive duplicates");
+  expect(ava::tui::push_composer_input_history(input_history, "second prompt") &&
+             ava::tui::push_composer_input_history(input_history, "first prompt"),
+         "tui input history keeps non-consecutive duplicates");
+
+  ava::tui::ComposerDraftState history_draft;
+  ava::tui::reset_composer_draft(history_draft, "draft text", 5);
+  std::optional<std::size_t> history_index;
+  std::string draft_input;
+  expect(ava::tui::browse_composer_input_history(history_draft, input_history, history_index, draft_input, true) &&
+             history_draft.text == "first prompt" && history_draft.cursor == 0 && history_index && *history_index == 2,
+         "tui input history recalls the newest item with the cursor at the start on previous");
+  expect(ava::tui::browse_composer_input_history(history_draft, input_history, history_index, draft_input, true) &&
+             history_draft.text == "second prompt" && history_draft.cursor == 0 && history_index && *history_index == 1,
+         "tui input history walks backward through older items");
+  expect(ava::tui::browse_composer_input_history(history_draft, input_history, history_index, draft_input, false) &&
+             history_draft.text == "first prompt" && history_draft.cursor == std::string("first prompt").size() &&
+             history_index && *history_index == 2,
+         "tui input history walks forward toward newer items with the cursor at the end");
+  expect(ava::tui::browse_composer_input_history(history_draft, input_history, history_index, draft_input, false) &&
+             history_draft.text == "draft text" && history_draft.cursor == std::string("draft text").size() &&
+             !history_index,
+         "tui input history restores the in-progress draft after the newest item");
+  expect(!ava::tui::browse_composer_input_history(history_draft, input_history, history_index, draft_input, false),
+         "tui input history next does nothing when not browsing");
+  static_cast<void>(ava::tui::browse_composer_input_history(history_draft, input_history, history_index, draft_input, true));
+  ava::tui::clear_composer_input_history_browse(history_index, draft_input);
+  expect(!history_index && draft_input.empty(), "tui input history browsing state clears when the draft is edited");
+
+  std::vector<std::string> capped_history;
+  for (int index = 0; index < 105; ++index)
+    static_cast<void>(ava::tui::push_composer_input_history(capped_history, "item " + std::to_string(index)));
+  expect(capped_history.size() == 100 && capped_history.front() == "item 5" && capped_history.back() == "item 104",
+         "tui input history keeps the newest 100 entries");
+
   expect(ava::tui::normalize_composer_paste_text("one\r\ntwo\rthree") == "one\ntwo\nthree",
          "tui paste normalizes crlf and lone carriage returns into newlines");
   expect(ava::tui::normalize_composer_paste_text(std::string("a\x01\tb\n", 5) + "\xC3\xA9") ==
              std::string("a\tb\n", 4) + "\xC3\xA9",
          "tui paste strips controls while preserving tabs, newlines, and utf-8 bytes");
+  ava::tui::ComposerDraftState paste_draft;
+  expect(ava::tui::insert_composer_paste_text(paste_draft, "one\ntwo") && paste_draft.text == "one\ntwo" &&
+             ava::tui::expanded_composer_draft_text(paste_draft) == "one\ntwo",
+         "tui small bracketed paste remains literal in the draft and submitted text");
+  ava::tui::reset_composer_draft(paste_draft);
+  auto const large_paste = std::string("line01\nline02\nline03\nline04\nline05\nline06\nline07\nline08\nline09\nline10\nline11");
+  expect(ava::tui::insert_composer_paste_text(paste_draft, large_paste) && paste_draft.text == "[paste #1 +11 lines]" &&
+             paste_draft.cursor == paste_draft.text.size() && ava::tui::expanded_composer_draft_text(paste_draft) == large_paste,
+         "tui large bracketed paste collapses to a marker while preserving exact submitted text");
+  auto make_marker_draft = [&]() {
+    ava::tui::ComposerDraftState marker_draft;
+    static_cast<void>(ava::tui::insert_composer_draft_text(marker_draft, "A"));
+    static_cast<void>(ava::tui::insert_composer_paste_text(marker_draft, large_paste));
+    static_cast<void>(ava::tui::insert_composer_draft_text(marker_draft, "B"));
+    return marker_draft;
+  };
+  auto marker_draft = make_marker_draft();
+  auto const marker_size = marker_draft.text.size() - 2;
+  marker_draft.cursor = 0;
+  expect(ava::tui::apply_composer_draft_action(marker_draft, ava::tui::TuiAction::CursorRight) && marker_draft.cursor == 1 &&
+             ava::tui::apply_composer_draft_action(marker_draft, ava::tui::TuiAction::CursorRight) && marker_draft.cursor == 1 + marker_size &&
+             ava::tui::apply_composer_draft_action(marker_draft, ava::tui::TuiAction::CursorRight) && marker_draft.cursor == marker_draft.text.size(),
+         "tui draft editor treats recorded paste markers as one unit for right-arrow movement");
+  expect(ava::tui::apply_composer_draft_action(marker_draft, ava::tui::TuiAction::CursorLeft) && marker_draft.cursor == 1 + marker_size &&
+             ava::tui::apply_composer_draft_action(marker_draft, ava::tui::TuiAction::CursorLeft) && marker_draft.cursor == 1,
+         "tui draft editor treats recorded paste markers as one unit for left-arrow movement");
+  auto word_marker_draft = [&]() {
+    ava::tui::ComposerDraftState marker_word_draft;
+    static_cast<void>(ava::tui::insert_composer_draft_text(marker_word_draft, "X "));
+    static_cast<void>(ava::tui::insert_composer_paste_text(marker_word_draft, large_paste));
+    static_cast<void>(ava::tui::insert_composer_draft_text(marker_word_draft, " Y"));
+    return marker_word_draft;
+  }();
+  auto const word_marker_size = word_marker_draft.text.size() - 4;
+  word_marker_draft.cursor = 0;
+  expect(ava::tui::apply_composer_draft_action(word_marker_draft, ava::tui::TuiAction::CursorWordRight) &&
+             word_marker_draft.cursor == 1 &&
+             ava::tui::apply_composer_draft_action(word_marker_draft, ava::tui::TuiAction::CursorWordRight) &&
+             word_marker_draft.cursor == 2 + word_marker_size &&
+             ava::tui::apply_composer_draft_action(word_marker_draft, ava::tui::TuiAction::CursorWordRight) &&
+             word_marker_draft.cursor == word_marker_draft.text.size(),
+         "tui draft editor treats recorded paste markers as one unit for word-right movement");
+  expect(ava::tui::apply_composer_draft_action(word_marker_draft, ava::tui::TuiAction::CursorWordLeft) &&
+             word_marker_draft.cursor == 3 + word_marker_size &&
+             ava::tui::apply_composer_draft_action(word_marker_draft, ava::tui::TuiAction::CursorWordLeft) &&
+             word_marker_draft.cursor == 2,
+         "tui draft editor treats recorded paste markers as one unit for word-left movement");
+  word_marker_draft.cursor = 2 + word_marker_size;
+  expect(ava::tui::apply_composer_draft_action(word_marker_draft, ava::tui::TuiAction::DeleteWordBackward) &&
+             word_marker_draft.text == "X  Y" && word_marker_draft.cursor == 2 &&
+             ava::tui::expanded_composer_draft_text(word_marker_draft) == "X  Y",
+         "tui draft editor deletes a recorded paste marker as one unit with word-backspace");
+  auto forward_word_marker_draft = [&]() {
+    ava::tui::ComposerDraftState marker_word_draft;
+    static_cast<void>(ava::tui::insert_composer_draft_text(marker_word_draft, "X "));
+    static_cast<void>(ava::tui::insert_composer_paste_text(marker_word_draft, large_paste));
+    static_cast<void>(ava::tui::insert_composer_draft_text(marker_word_draft, " Y"));
+    return marker_word_draft;
+  }();
+  forward_word_marker_draft.cursor = 2;
+  expect(ava::tui::apply_composer_draft_action(forward_word_marker_draft, ava::tui::TuiAction::DeleteWordForward) &&
+             forward_word_marker_draft.text == "X  Y" && forward_word_marker_draft.cursor == 2 &&
+             ava::tui::expanded_composer_draft_text(forward_word_marker_draft) == "X  Y",
+         "tui draft editor deletes a recorded paste marker as one unit with forward word deletion");
+  auto delete_marker_draft = make_marker_draft();
+  delete_marker_draft.cursor = delete_marker_draft.text.size() - 1;
+  expect(ava::tui::apply_composer_draft_action(delete_marker_draft, ava::tui::TuiAction::DeleteBackward) &&
+             delete_marker_draft.text == "AB" && delete_marker_draft.cursor == 1 &&
+             ava::tui::expanded_composer_draft_text(delete_marker_draft) == "AB",
+         "tui draft editor deletes a recorded paste marker as one unit with backspace");
+  auto forward_delete_marker_draft = make_marker_draft();
+  forward_delete_marker_draft.cursor = 1;
+  expect(ava::tui::apply_composer_draft_action(forward_delete_marker_draft, ava::tui::TuiAction::DeleteForward) &&
+             forward_delete_marker_draft.text == "AB" && forward_delete_marker_draft.cursor == 1 &&
+             ava::tui::expanded_composer_draft_text(forward_delete_marker_draft) == "AB",
+         "tui draft editor deletes a recorded paste marker as one unit with forward delete");
+  expect(ava::tui::apply_composer_draft_action(paste_draft, ava::tui::TuiAction::Undo) && paste_draft.text.empty() &&
+             ava::tui::apply_composer_draft_action(paste_draft, ava::tui::TuiAction::Redo) &&
+             ava::tui::expanded_composer_draft_text(paste_draft) == large_paste,
+         "tui large paste markers survive undo and redo expansion");
+  ava::tui::reset_composer_draft(paste_draft, "[paste #1 +11 lines]");
+  expect(ava::tui::expanded_composer_draft_text(paste_draft) == "[paste #1 +11 lines]",
+         "tui manually typed paste-marker text is not expanded without a recorded paste entry");
+  expect(ava::tui::apply_composer_draft_action(paste_draft, ava::tui::TuiAction::CursorLineStart) &&
+             ava::tui::apply_composer_draft_action(paste_draft, ava::tui::TuiAction::CursorRight) && paste_draft.cursor == 1,
+         "tui manually typed paste-marker text is not treated as an atomic marker");
+  auto duplicate_marker_draft = make_marker_draft();
+  auto const duplicate_marker_text = duplicate_marker_draft.text.substr(1, marker_size);
+  duplicate_marker_draft.cursor = duplicate_marker_draft.text.size();
+  static_cast<void>(ava::tui::insert_composer_draft_text(duplicate_marker_draft, duplicate_marker_text));
+  auto const duplicate_marker_start = duplicate_marker_draft.text.size() - duplicate_marker_text.size();
+  duplicate_marker_draft.cursor = duplicate_marker_start;
+  expect(ava::tui::apply_composer_draft_action(duplicate_marker_draft, ava::tui::TuiAction::CursorRight) &&
+             duplicate_marker_draft.cursor == duplicate_marker_start + 1 &&
+             ava::tui::expanded_composer_draft_text(duplicate_marker_draft) ==
+                 std::string("A") + large_paste + "B" + duplicate_marker_text,
+         "tui duplicate manually typed paste-marker text remains literal beside a recorded marker");
+  duplicate_marker_draft.cursor = duplicate_marker_start;
+  expect(ava::tui::apply_composer_draft_action(duplicate_marker_draft, ava::tui::TuiAction::CursorWordRight) &&
+             duplicate_marker_draft.cursor == duplicate_marker_start + std::string("[paste").size(),
+         "tui duplicate manually typed paste-marker text is not atomic for word movement");
+  ava::tui::reset_composer_draft(paste_draft);
+  auto const long_single_line = std::string(2001, 'x');
+  expect(ava::tui::insert_composer_paste_text(paste_draft, long_single_line) && paste_draft.text == "[paste #1 2001 chars]" &&
+             ava::tui::expanded_composer_draft_text(paste_draft) == long_single_line,
+         "tui large single-line paste collapses by byte count and expands for submit");
 
   auto const split_empty = ava::tui::split_lines("");
   expect(split_empty.size() == 1 && split_empty.front().empty(), "tui split keeps empty input as one line");
@@ -383,6 +673,53 @@ void test_tui_composer_rendering_and_input()
                                                 ava::tui::TranscriptItem{.label = "ava", .text = "world"}},
                                  .width = 80,
                                  .height = 14});
+  {
+    ScopedEnvVar no_color_guard("NO_COLOR", "1");
+    auto const plain_lines = ava::tui::render_composer(
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_plain",
+                                   .input = "/model",
+                                   .status = "ready",
+                                   .transcript = {ava::tui::TranscriptItem{
+                                       .label = "ava",
+                                       .text = "Plain output keeps **bold**, `code`, and colors out of the terminal"}},
+                                   .select_list = ava::tui::SelectListView{
+                                       .title = "Select model",
+                                       .subtitle = "NO_COLOR smoke",
+                                       .items = {ava::tui::SelectListItemView{.value = "openai/gpt-5.5",
+                                                                              .label = "GPT-5.5",
+                                                                              .description = "openai/gpt-5.5",
+                                                                              .group = "openai",
+                                                                              .detail = "plain terminal",
+                                                                              .badge = "current",
+                                                                              .current = true,
+                                                                              .enabled = true,
+                                                                              .disabled_reason = {}}},
+                                       .selected_item_index = 0,
+                                       .query = {},
+                                       .placeholder = "Search models",
+                                       .empty_text = "No models",
+                                       .footer_hint = "Enter choose · Esc cancel"},
+                                   .width = 88,
+                                   .height = 18,
+                                   .input_cursor = 6});
+    expect(std::ranges::all_of(plain_lines,
+                               [](std::string const& line) {
+                                 return line.find('\x1b') == std::string::npos && visible_columns(line) <= 88;
+                               }) &&
+               std::ranges::any_of(plain_lines,
+                                   [](std::string const& line) {
+                                     return line.find("Select model") != std::string::npos;
+                                   }) &&
+               std::ranges::any_of(plain_lines,
+                                   [](std::string const& line) {
+                                     return line.find("Plain output keeps bold, code, and colors") !=
+                                            std::string::npos;
+                                   }),
+           "tui honors NO_COLOR by rendering the full frame without ANSI styling while preserving visible content and width");
+  }
   expect(lines.size() == 14, "tui fills the viewport with transcript, spacer, and composer lines");
   expect(!lines.empty() && strip_sgr(lines.front()).find("hello") != std::string::npos,
          "tui starts short chats at the top of the transcript area");
@@ -462,7 +799,7 @@ void test_tui_composer_rendering_and_input()
                                  [](std::string const& line) {
                                    auto const visible = strip_sgr(line);
                                    return visible.find("queued steer keep patch small") != std::string::npos &&
-                                          visible.find("/restore latest") != std::string::npos;
+                                          visible.find("/restore or Alt+Up latest") != std::string::npos;
                                  }),
          "tui renders active-run queued steering/follow-up messages in a compact pending region");
 
@@ -808,15 +1145,39 @@ void test_tui_composer_rendering_and_input()
       .model = "gpt-5.5",
       .session_id = "session_test",
       .input = "",
-      .status = "Enter submits. Ctrl-J/Shift+Enter inserts newline. / opens commands. Page/wheel scroll.",
+      .status = "Enter submits. Shift/Ctrl/Alt+Enter inserts newline. / opens commands. Page/wheel scroll.",
       .transcript = {},
       .width = 120,
       .height = 8});
   expect(std::ranges::none_of(compact_status,
                               [](std::string const& line) {
-                                return strip_sgr(line).find("Ctrl-J/Shift+Enter inserts newline") != std::string::npos;
+                                return strip_sgr(line).find("Shift/Ctrl/Alt+Enter inserts newline") != std::string::npos;
                               }),
          "tui keeps the composer status compact instead of rendering verbose help");
+  auto const status_alert = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status =
+          "invalid_argument: conflicting TUI keybinding\n  key: Ctrl+P\n  action: model_cycle_forward\x1b[31m",
+      .transcript = {},
+      .width = 96,
+      .height = 10});
+  expect(std::ranges::any_of(status_alert,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("! invalid_argument: conflicting TUI keybinding") !=
+                                      std::string::npos;
+                             }) &&
+             std::ranges::any_of(status_alert,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("key: Ctrl+P") != std::string::npos;
+                                 }) &&
+             std::ranges::none_of(status_alert,
+                                  [](std::string const& line) { return line.find("\x1b[31m") != std::string::npos; }) &&
+             std::ranges::all_of(status_alert, [](std::string const& line) { return visible_columns(line) <= 96; }),
+         "tui renders error-category status strings as compact sanitized alerts above the composer");
 
   auto const minimum_width = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                   .provider = "openai",
@@ -930,30 +1291,383 @@ void test_tui_composer_rendering_and_input()
                                       visible.find("Models") != std::string::npos;
                              }),
          "tui slash palette renders argument completion value, category, and description");
+  std::vector<ava::tui::SlashCommandItem> const path_slash_commands = {
+      ava::tui::SlashCommandItem{
+          .command = "/read",
+          .description = "Read a file",
+          .hint = "<path>",
+          .category = "Files",
+          .argument_completions = {ava::tui::SlashCommandArgumentCompletion{.value = "src/",
+                                                                            .description = "directory",
+                                                                            .category = "Files",
+                                                                            .argument_index = 0,
+                                                                            .append_space = false},
+                                   ava::tui::SlashCommandArgumentCompletion{.value = "src/main.cpp",
+                                                                            .description = "file 24 bytes",
+                                                                            .category = "Files",
+                                                                            .argument_index = 0,
+                                                                            .append_space = false}}}};
+  expect(ava::tui::slash_command_selection_text("/read sr", path_slash_commands, 0) == "/read src/" &&
+             ava::tui::slash_palette_visible("/read src/", path_slash_commands) &&
+             ava::tui::slash_command_selection_text("/read src/", path_slash_commands, 1) == "/read src/main.cpp",
+         "tui slash path completion keeps directory prefixes open for nested file completions");
+  auto const path_palette =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "/read src/",
+                                                           .status = "ready",
+                                                           .transcript = {},
+                                                           .slash_commands = path_slash_commands,
+                                                           .selected_slash_command_index = 1,
+                                                           .width = 96,
+                                                           .height = 10});
+  expect(std::ranges::any_of(path_palette,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("src/main.cpp") != std::string::npos &&
+                                      visible.find("file 24 bytes") != std::string::npos &&
+                                      visible.find("Files") != std::string::npos;
+                             }),
+         "tui slash palette renders backend-provided path completions");
+  std::vector<ava::tui::FileReferenceItem> const file_references = {
+      ava::tui::FileReferenceItem{.value = "src/", .description = "directory", .category = "Files", .directory = true},
+      ava::tui::FileReferenceItem{.value = "src/main.cpp", .description = "file 24 bytes", .category = "Files"},
+      ava::tui::FileReferenceItem{.value = "src/components/Button.tsx", .description = "file 42 bytes", .category = "Files"},
+      ava::tui::FileReferenceItem{.value = "my folder/", .description = "directory", .category = "Files", .directory = true},
+      ava::tui::FileReferenceItem{.value = "my folder/test file.txt", .description = "file 12 bytes", .category = "Files"}};
+  auto const reference_matches = ava::tui::filter_file_references("review @sr", std::string("review @sr").size(), file_references);
+  expect(reference_matches.size() >= 2 && reference_matches.front().value == "src/" &&
+             std::ranges::any_of(reference_matches, [](auto const& item) { return item.value == "src/main.cpp"; }),
+         "tui file reference palette filters @ prefixes against backend candidates");
+  auto const fuzzy_reference_matches =
+      ava::tui::filter_file_references("review @comp/but", std::string("review @comp/but").size(), file_references);
+  expect(fuzzy_reference_matches.size() == 1 && fuzzy_reference_matches.front().value == "src/components/Button.tsx",
+         "tui file reference palette fuzzy-matches slash-separated path tokens against nested candidates");
+  auto const case_reference_matches = ava::tui::filter_file_references("review @MAIN", std::string("review @MAIN").size(), file_references);
+  expect(case_reference_matches.size() == 1 && case_reference_matches.front().value == "src/main.cpp",
+         "tui file reference palette matches @ queries case-insensitively");
+  auto const spaced_reference_matches = ava::tui::filter_file_references("review @my", std::string("review @my").size(), file_references);
+  expect(spaced_reference_matches.size() == 2 && spaced_reference_matches.front().value == "my folder/",
+         "tui file reference palette includes paths with spaces and ranks matching directories first");
+  auto const reference_selection =
+      ava::tui::file_reference_selection_text("review @main please", std::string("review @main").size(), file_references, 0);
+  expect(reference_selection.text == "review @src/main.cpp please" &&
+             reference_selection.cursor == std::string("review @src/main.cpp").size(),
+         "tui file reference selection replaces only the active @ token and leaves surrounding draft text intact");
+  auto const spaced_directory_selection =
+      ava::tui::file_reference_selection_text("review @my", std::string("review @my").size(), file_references, 0);
+  expect(spaced_directory_selection.text == "review @\"my folder/\"" &&
+             spaced_directory_selection.cursor == std::string("review @\"my folder/").size(),
+         "tui file reference selection quotes directories with spaces and leaves the cursor inside the quote");
+  auto const spaced_file_selection =
+      ava::tui::file_reference_selection_text("review @my", std::string("review @my").size(), file_references, 1);
+  expect(spaced_file_selection.text == "review @\"my folder/test file.txt\" " &&
+             spaced_file_selection.cursor == spaced_file_selection.text.size(),
+         "tui file reference selection quotes files with spaces and appends a safe separator");
+  auto const quoted_file_selection = ava::tui::file_reference_selection_text(
+      "review @\"my folder/te\"", std::string("review @\"my folder/te").size(), file_references, 1);
+  expect(quoted_file_selection.text == "review @\"my folder/test file.txt\" " &&
+             quoted_file_selection.cursor == quoted_file_selection.text.size(),
+         "tui file reference selection completes inside quoted @ paths without duplicating the closing quote");
+  auto const reference_palette =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "review @sr",
+                                                           .status = "ready",
+                                                           .transcript = {},
+                                                           .file_references = file_references,
+                                                           .selected_slash_command_index = 1,
+                                                           .width = 96,
+                                                           .height = 10,
+                                                           .input_cursor = std::string("review @sr").size()});
+  expect(std::ranges::any_of(reference_palette,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("@src/main.cpp") != std::string::npos &&
+                                      visible.find("file 24 bytes") != std::string::npos &&
+                                     visible.find("Files") != std::string::npos;
+                             }),
+         "tui file reference palette renders @ candidates with description and category");
+  auto const spaced_reference_palette =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "review @my",
+                                                           .status = "ready",
+                                                           .transcript = {},
+                                                           .file_references = file_references,
+                                                           .selected_slash_command_index = 0,
+                                                           .width = 96,
+                                                           .height = 10,
+                                                           .input_cursor = std::string("review @my").size()});
+  expect(std::ranges::any_of(spaced_reference_palette,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("@\"my folder/\"") != std::string::npos &&
+                                      visible.find("directory") != std::string::npos;
+                             }),
+         "tui file reference palette renders quoted @ candidates for paths with spaces");
+  auto const normal_path_matches = ava::tui::filter_path_completions("inspect src/", std::string("inspect src/").size(), file_references);
+  expect(normal_path_matches.size() >= 2 && normal_path_matches.front().value == "src/" &&
+             std::ranges::any_of(normal_path_matches, [](auto const& item) { return item.value == "src/main.cpp"; }),
+         "tui normal path completion filters path-like prompt tokens against backend candidates");
+  expect(ava::tui::filter_path_completions("inspect main", std::string("inspect main").size(), file_references).empty(),
+         "tui normal path completion does not open for ordinary prose tokens");
+  auto const forced_path_matches =
+      ava::tui::filter_path_completions("inspect main", std::string("inspect main").size(), file_references, true);
+  expect(forced_path_matches.size() == 1 && forced_path_matches.front().value == "src/main.cpp",
+         "tui forced path completion can match a bare prompt token");
+  auto const forced_empty_matches = ava::tui::filter_path_completions("", 0, file_references, true);
+  expect(forced_empty_matches.size() == file_references.size() && forced_empty_matches.front().directory,
+         "tui forced path completion can open workspace suggestions from an empty draft");
+  expect(ava::tui::filter_path_completions("inspect @src/", std::string("inspect @src/").size(), file_references).empty(),
+         "tui normal path completion does not steal @ file reference tokens");
+  auto const dot_slash_path_selection =
+      ava::tui::path_completion_selection_text("inspect ./sr", std::string("inspect ./sr").size(), file_references, 0);
+  expect(dot_slash_path_selection.text == "inspect ./src/" &&
+             dot_slash_path_selection.cursor == std::string("inspect ./src/").size(),
+         "tui normal path completion preserves a typed dot-slash prefix");
+  auto const quoted_path_selection = ava::tui::path_completion_selection_text(
+      "inspect \"my folder/te\"", std::string("inspect \"my folder/te").size(), file_references, 0);
+  expect(quoted_path_selection.text == "inspect \"my folder/test file.txt\"" &&
+             quoted_path_selection.cursor == quoted_path_selection.text.size(),
+         "tui normal path completion continues inside quoted paths without duplicating the closing quote");
+  auto const forced_bare_path_selection =
+      ava::tui::path_completion_selection_text("inspect main", std::string("inspect main").size(), file_references, 0, true);
+  expect(forced_bare_path_selection.text == "inspect src/main.cpp" &&
+             forced_bare_path_selection.cursor == forced_bare_path_selection.text.size(),
+         "tui forced path completion replaces a bare token with the selected relative path");
+  auto const normal_path_palette =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "inspect src/",
+                                                           .status = "ready",
+                                                           .transcript = {},
+                                                           .file_references = file_references,
+                                                           .selected_slash_command_index = 1,
+                                                           .width = 96,
+                                                           .height = 10,
+                                                           .input_cursor = std::string("inspect src/").size()});
+  expect(std::ranges::any_of(normal_path_palette,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("src/main.cpp") != std::string::npos &&
+                                      visible.find("file 24 bytes") != std::string::npos &&
+                                      visible.find("Files") != std::string::npos;
+                             }),
+         "tui normal path completion palette renders backend-provided path candidates");
+  auto const forced_path_palette =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "inspect src",
+                                                           .status = "ready",
+                                                           .transcript = {},
+                                                           .file_references = file_references,
+                                                           .selected_slash_command_index = 0,
+                                                           .path_completion_force_active = true,
+                                                           .width = 96,
+                                                           .height = 10,
+                                                           .input_cursor = std::string("inspect src").size()});
+  expect(std::ranges::any_of(forced_path_palette,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("src/") != std::string::npos &&
+                                      visible.find("directory") != std::string::npos;
+                             }),
+         "tui forced path completion palette renders for bare prompt tokens after Tab");
 
   auto const key_bindings = ava::tui::parse_key_bindings_json(
-      "{\"submit\":\"Ctrl+T, Enter\",\"new_line\":\"Shift+Enter\",\"delete_to_line_start\":\"Ctrl+U\","
-      "\"autocomplete_accept\":\"Tab\",\"variant_cycle\":\"Ctrl+D\",\"redo\":\"Ctrl+R\","
-      "\"yank_pop\":\"Alt+Y\"}");
+      "{\"submit\":\"Ctrl+T, Enter\",\"new_line\":\"Shift+Enter, Ctrl+Enter, Alt+Enter\",\"delete_to_line_start\":\"Ctrl+U\","
+      "\"autocomplete_accept\":\"Tab\",\"variant_cycle\":\"Ctrl+D, Shift+Tab\",\"undo\":\"Ctrl+Z, Ctrl+-\","
+      "\"redo\":\"Ctrl+R\",\"delete_forward\":\"Delete\","
+      "\"cursor_word_left\":\"Ctrl+Left, Alt+Left, Alt+B\",\"cursor_word_right\":\"Ctrl+Right, Alt+Right, Alt+F\","
+      "\"jump_forward\":\"Ctrl+]\",\"jump_backward\":\"Ctrl+Alt+]\","
+      "\"delete_word_backward\":\"Ctrl+W, Alt+Backspace\",\"delete_word_forward\":\"Alt+D, Alt+Delete\","
+      "\"details_toggle\":\"Ctrl+O\",\"model_select\":\"Ctrl+L\",\"model_cycle_forward\":\"Ctrl+P\","
+      "\"model_cycle_backward\":\"Shift+Ctrl+P\",\"message_dequeue\":\"Alt+Up\",\"yank_pop\":\"Alt+Y\"}");
+  auto const parsed_ctrl_s = ava::tui::parse_key_name("Ctrl+S");
+  auto const parsed_ctrl_l = ava::tui::parse_key_name("Ctrl+L");
+  auto const parsed_ctrl_shift_p = ava::tui::parse_key_name("Shift+Ctrl+P");
+  auto const parsed_alt_up = ava::tui::parse_key_name("Alt+Up");
+  auto const parsed_ctrl_enter = ava::tui::parse_key_name("Ctrl+Enter");
+  auto const parsed_alt_enter = ava::tui::parse_key_name("Alt+Enter");
+  auto const parsed_space = ava::tui::parse_key_name("Space");
+  auto const parsed_shift_tab = ava::tui::parse_key_name("Shift+Tab");
+  auto const parsed_ctrl_minus = ava::tui::parse_key_name("Ctrl+-");
+  auto const parsed_ctrl_o = ava::tui::parse_key_name("Ctrl+O");
+  auto const parsed_ctrl_right_bracket = ava::tui::parse_key_name("Ctrl+]");
+  auto const parsed_ctrl_alt_right_bracket = ava::tui::parse_key_name("Ctrl+Alt+]");
+  auto const parsed_alt_left = ava::tui::parse_key_name("Alt+Left");
+  auto const parsed_alt_right = ava::tui::parse_key_name("Alt+Right");
+  auto const parsed_alt_backspace = ava::tui::parse_key_name("Alt+Backspace");
+  auto const parsed_alt_d = ava::tui::parse_key_name("Alt+D");
+  auto const parsed_alt_delete = ava::tui::parse_key_name("Alt+Delete");
+  auto const parsed_alt_h = ava::tui::parse_key_name("Alt+H");
+  auto const parsed_alt_j = ava::tui::parse_key_name("Alt+J");
+  auto const parsed_alt_k = ava::tui::parse_key_name("Alt+K");
+  auto const parsed_alt_l = ava::tui::parse_key_name("Alt+L");
+  auto const parsed_alt_w = ava::tui::parse_key_name("Alt+W");
+  auto const parsed_home = ava::tui::parse_key_name("Home");
+  auto const parsed_end = ava::tui::parse_key_name("End");
   expect(
       key_bindings && ava::tui::action_for_key(*key_bindings, ava::tui::Key::CtrlT) == ava::tui::TuiAction::Submit &&
           ava::tui::action_for_key(*key_bindings, ava::tui::Key::CtrlD) == ava::tui::TuiAction::VariantCycle &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::VariantCycle,
+                                       ava::tui::Key::ShiftTab) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::CursorWordLeft,
+                                       ava::tui::Key::CtrlArrowLeft) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::CursorWordLeft,
+                                       ava::tui::Key::AltArrowLeft) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::CursorWordLeft,
+                                       ava::tui::Key::AltB) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::CursorWordRight,
+                                       ava::tui::Key::CtrlArrowRight) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::CursorWordRight,
+                                       ava::tui::Key::AltArrowRight) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::CursorWordRight,
+                                       ava::tui::Key::AltF) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::JumpForward,
+                                       ava::tui::Key::CtrlRightBracket) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::JumpBackward,
+                                       ava::tui::Key::CtrlAltRightBracket) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::DeleteForward,
+                                       ava::tui::Key::Delete) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::DeleteWordBackward,
+                                       ava::tui::Key::AltBackspace) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::DeleteWordForward,
+                                       ava::tui::Key::AltD) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::DeleteWordForward,
+                                       ava::tui::Key::AltDelete) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::NewLine,
+                                       ava::tui::Key::CtrlEnter) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::NewLine,
+                                       ava::tui::Key::AltEnter) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::Undo, ava::tui::Key::CtrlMinus) &&
           ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::Redo, ava::tui::Key::CtrlR) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::DetailsToggle,
+                                       ava::tui::Key::CtrlO) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::ModelSelect,
+                                       ava::tui::Key::CtrlL) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::ModelCycleForward,
+                                       ava::tui::Key::CtrlP) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::ModelCycleBackward,
+                                       ava::tui::Key::CtrlShiftP) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::MessageDequeue,
+                                       ava::tui::Key::AltArrowUp) &&
+          parsed_ctrl_s && ava::tui::key_display(*parsed_ctrl_s) == "Ctrl+S" &&
+          parsed_ctrl_l && ava::tui::key_display(*parsed_ctrl_l) == "Ctrl+L" &&
+          parsed_ctrl_shift_p && ava::tui::key_display(*parsed_ctrl_shift_p) == "Shift+Ctrl+P" &&
+          parsed_alt_up && ava::tui::key_display(*parsed_alt_up) == "Alt+Up" &&
+          parsed_ctrl_enter && ava::tui::key_display(*parsed_ctrl_enter) == "Ctrl+Enter" &&
+          parsed_alt_enter && ava::tui::key_display(*parsed_alt_enter) == "Alt+Enter" &&
+          parsed_space && ava::tui::key_display(*parsed_space) == "Space" &&
+          parsed_shift_tab && ava::tui::key_display(*parsed_shift_tab) == "Shift+Tab" &&
+          parsed_ctrl_minus && ava::tui::key_display(*parsed_ctrl_minus) == "Ctrl+-" &&
+          parsed_ctrl_o && ava::tui::key_display(*parsed_ctrl_o) == "Ctrl+O" &&
+          parsed_ctrl_right_bracket && ava::tui::key_display(*parsed_ctrl_right_bracket) == "Ctrl+]" &&
+          parsed_ctrl_alt_right_bracket && ava::tui::key_display(*parsed_ctrl_alt_right_bracket) == "Ctrl+Alt+]" &&
+          parsed_alt_left && ava::tui::key_display(*parsed_alt_left) == "Alt+Left" &&
+          parsed_alt_right && ava::tui::key_display(*parsed_alt_right) == "Alt+Right" &&
+          parsed_alt_backspace && ava::tui::key_display(*parsed_alt_backspace) == "Alt+Backspace" &&
+          parsed_alt_d && ava::tui::key_display(*parsed_alt_d) == "Alt+D" &&
+          parsed_alt_delete && ava::tui::key_display(*parsed_alt_delete) == "Alt+Delete" &&
+          parsed_alt_h && ava::tui::key_display(*parsed_alt_h) == "Alt+H" && parsed_alt_j &&
+          ava::tui::key_display(*parsed_alt_j) == "Alt+J" && parsed_alt_k &&
+          ava::tui::key_display(*parsed_alt_k) == "Alt+K" && parsed_alt_l &&
+          ava::tui::key_display(*parsed_alt_l) == "Alt+L" && parsed_alt_w &&
+          ava::tui::key_display(*parsed_alt_w) == "Alt+W" &&
+          parsed_home && ava::tui::key_display(*parsed_home) == "Home" &&
+          parsed_end && ava::tui::key_display(*parsed_end) == "End" &&
+          ava::tui::parse_key_name("Ctrl+H") == ava::tui::Key::CtrlH &&
+          ava::tui::key_display(ava::tui::Key::CtrlH) == "Ctrl+H" &&
           ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::YankPop, ava::tui::Key::AltY) &&
           ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::DeleteToLineStart, ava::tui::Key::CtrlU) &&
           ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::AutocompleteAccept, ava::tui::Key::Tab) &&
+          ava::tui::keys_display(*key_bindings, ava::tui::TuiAction::CursorWordRight).find("Ctrl+Right") !=
+              std::string::npos &&
           ava::tui::keys_display(*key_bindings, ava::tui::TuiAction::Submit).find("Ctrl+T") != std::string::npos,
       "tui keybind parser maps configured keys to semantic actions and display text");
   auto const default_bindings = ava::tui::default_key_bindings();
   expect(
-      ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::HistoryPrev, ava::tui::Key::ArrowUp) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::HistoryPrev, ava::tui::Key::ArrowUp) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::NewLine,
+                                       ava::tui::Key::ShiftEnter) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::NewLine,
+                                       ava::tui::Key::CtrlEnter) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::NewLine,
+                                       ava::tui::Key::AltEnter) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::PalettePrev, ava::tui::Key::ArrowUp) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SelectPrev, ava::tui::Key::ArrowUp) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SelectNext, ava::tui::Key::ArrowDown) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SelectPageUp, ava::tui::Key::PageUp) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SelectPageDown,
+                                       ava::tui::Key::PageDown) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SelectConfirm, ava::tui::Key::Enter) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SelectCancel, ava::tui::Key::Escape) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SelectCancel, ava::tui::Key::CtrlC) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorUp, ava::tui::Key::ArrowUp) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorDown, ava::tui::Key::ArrowDown) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorWordLeft,
+                                       ava::tui::Key::CtrlArrowLeft) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorWordLeft,
+                                       ava::tui::Key::AltArrowLeft) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorWordLeft,
+                                       ava::tui::Key::AltB) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorWordRight,
+                                       ava::tui::Key::CtrlArrowRight) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorWordRight,
+                                       ava::tui::Key::AltArrowRight) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorWordRight,
+                                       ava::tui::Key::AltF) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::JumpForward,
+                                       ava::tui::Key::CtrlRightBracket) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::JumpBackward,
+                                       ava::tui::Key::CtrlAltRightBracket) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorLineStart,
+                                       ava::tui::Key::Home) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorLineEnd,
+                                       ava::tui::Key::End) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::DeleteForward,
+                                       ava::tui::Key::Delete) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::DeleteForward,
+                                       ava::tui::Key::CtrlD) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::DeleteBackward,
+                                       ava::tui::Key::CtrlH) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Exit, ava::tui::Key::CtrlD) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::DeleteWordBackward,
+                                       ava::tui::Key::AltBackspace) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::DeleteWordForward,
+                                       ava::tui::Key::AltD) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::DeleteWordForward,
+                                       ava::tui::Key::AltDelete) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModeToggle, ava::tui::Key::Tab) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::AutocompleteAccept, ava::tui::Key::Tab) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Undo, ava::tui::Key::CtrlZ) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Undo, ava::tui::Key::CtrlMinus) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Redo, ava::tui::Key::CtrlR) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Yank, ava::tui::Key::CtrlY) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::YankPop, ava::tui::Key::AltY) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::DetailsToggle,
+                                       ava::tui::Key::CtrlO) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::VariantCycle,
+                                       ava::tui::Key::ShiftTab) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelSelect,
+                                       ava::tui::Key::CtrlL) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelCycleForward,
+                                       ava::tui::Key::CtrlP) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelCycleBackward,
+                                       ava::tui::Key::CtrlShiftP) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::MessageDequeue,
+                                       ava::tui::Key::AltArrowUp) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Interrupt, ava::tui::Key::CtrlC),
       "tui default keybinds preserve context-specific semantic actions for shared keys");
   auto const navigation_key_bindings = ava::tui::parse_key_bindings_json(
@@ -965,15 +1679,50 @@ void test_tui_composer_rendering_and_input()
                                           ava::tui::Key::PageDown) &&
              ava::tui::key_matches_action(*navigation_key_bindings, ava::tui::TuiAction::JumpToBottom,
                                           ava::tui::Key::CtrlT) &&
+             ava::tui::action_name(ava::tui::TuiAction::CursorUp) == "cursor_up" &&
+             ava::tui::action_name(ava::tui::TuiAction::CursorDown) == "cursor_down" &&
+             ava::tui::action_name(ava::tui::TuiAction::JumpForward) == "jump_forward" &&
+             ava::tui::action_name(ava::tui::TuiAction::JumpBackward) == "jump_backward" &&
+             ava::tui::action_name(ava::tui::TuiAction::DeleteWordForward) == "delete_word_forward" &&
+             ava::tui::action_name(ava::tui::TuiAction::SelectPrev) == "select_prev" &&
+             ava::tui::action_name(ava::tui::TuiAction::SelectNext) == "select_next" &&
+             ava::tui::action_name(ava::tui::TuiAction::SelectPageUp) == "select_page_up" &&
+             ava::tui::action_name(ava::tui::TuiAction::SelectPageDown) == "select_page_down" &&
+             ava::tui::action_name(ava::tui::TuiAction::SelectConfirm) == "select_confirm" &&
+             ava::tui::action_name(ava::tui::TuiAction::SelectCancel) == "select_cancel" &&
+             ava::tui::action_name(ava::tui::TuiAction::ModelSelect) == "model_select" &&
+             ava::tui::action_name(ava::tui::TuiAction::ModelCycleForward) == "model_cycle_forward" &&
+             ava::tui::action_name(ava::tui::TuiAction::ModelCycleBackward) == "model_cycle_backward" &&
+             ava::tui::action_name(ava::tui::TuiAction::MessageDequeue) == "message_dequeue" &&
              ava::tui::action_name(ava::tui::TuiAction::MessagePrev) == "message_prev" &&
              ava::tui::action_name(ava::tui::TuiAction::MessageNext) == "message_next" &&
              ava::tui::action_name(ava::tui::TuiAction::JumpToBottom) == "jump_to_bottom",
-         "tui keybind parser exposes message-boundary navigation and jump-to-bottom action names");
+         "tui keybind parser exposes semantic action names for editor and navigation actions");
   auto const help_items = ava::tui::key_binding_help_items(default_bindings);
   expect(std::ranges::any_of(help_items,
                              [](ava::tui::TuiKeyBindingHelpItem const& item) {
-                               return item.action == "variant_cycle" && item.keys.find("Ctrl+T") != std::string::npos;
+                               return item.action == "variant_cycle" && item.keys.find("Shift+Tab") != std::string::npos &&
+                                      item.keys.find("Ctrl+T") != std::string::npos;
                              }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "model_select" && item.keys.find("Ctrl+L") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "model_cycle_forward" &&
+                                          item.keys.find("Ctrl+P") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "model_cycle_backward" &&
+                                          item.keys.find("Shift+Ctrl+P") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "message_dequeue" &&
+                                          item.keys.find("Alt+Up") != std::string::npos;
+                                 }) &&
              std::ranges::any_of(help_items,
                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
                                    return item.action == "delete_to_line_start" &&
@@ -981,7 +1730,40 @@ void test_tui_composer_rendering_and_input()
                                  }) &&
              std::ranges::any_of(help_items,
                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "jump_forward" && item.keys.find("Ctrl+]") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "jump_backward" &&
+                                          item.keys.find("Ctrl+Alt+]") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "delete_forward" &&
+                                          item.keys.find("Ctrl+D") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "delete_word_backward" &&
+                                          item.keys.find("Alt+Backspace") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "delete_word_forward" &&
+                                          item.keys.find("Alt+D") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "delete_word_forward" &&
+                                          item.keys.find("Alt+Delete") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
                                    return item.action == "undo" && item.keys.find("Ctrl+Z") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "undo" && item.keys.find("Ctrl+-") != std::string::npos;
                                  }) &&
              std::ranges::any_of(help_items,
                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
@@ -1005,7 +1787,142 @@ void test_tui_composer_rendering_and_input()
   expect(escaped_action_keybinds &&
              ava::tui::key_matches_action(*escaped_action_keybinds, ava::tui::TuiAction::Submit, ava::tui::Key::CtrlT),
          "tui keybind parser accepts JSON unicode escapes in action names");
+  auto const space_action_keybinds = ava::tui::parse_key_bindings_json("{\"tui.input.submit\":\"Space\"}");
+  expect(space_action_keybinds &&
+             ava::tui::key_matches_action(*space_action_keybinds, ava::tui::TuiAction::Submit, ava::tui::Key::Space),
+         "tui keybind parser accepts Pi-style Space key names for semantic bindings");
+  auto const select_action_keybinds = ava::tui::parse_key_bindings_json(
+      "{\"tui.select.confirm\":[\"Enter\",\"Space\"],\"tui.select.cancel\":[\"Escape\",\"Ctrl+W\"],"
+      "\"tui.select.up\":\"Ctrl+P\",\"tui.select.down\":\"Ctrl+N\","
+      "\"tui.select.pageUp\":\"Ctrl+O\",\"tui.select.pageDown\":\"Ctrl+Y\"}");
+  expect(select_action_keybinds &&
+             ava::tui::key_matches_action(*select_action_keybinds, ava::tui::TuiAction::SelectConfirm,
+                                           ava::tui::Key::Enter) &&
+             ava::tui::key_matches_action(*select_action_keybinds, ava::tui::TuiAction::SelectConfirm,
+                                           ava::tui::Key::Space) &&
+             ava::tui::key_matches_action(*select_action_keybinds, ava::tui::TuiAction::Submit,
+                                           ava::tui::Key::Enter) &&
+             !ava::tui::key_matches_action(*select_action_keybinds, ava::tui::TuiAction::Submit,
+                                            ava::tui::Key::Space) &&
+             ava::tui::key_matches_action(*select_action_keybinds, ava::tui::TuiAction::SelectCancel,
+                                           ava::tui::Key::Escape) &&
+             ava::tui::key_matches_action(*select_action_keybinds, ava::tui::TuiAction::SelectCancel,
+                                           ava::tui::Key::CtrlW) &&
+             ava::tui::key_matches_action(*select_action_keybinds, ava::tui::TuiAction::Cancel,
+                                           ava::tui::Key::Escape) &&
+             ava::tui::key_matches_action(*select_action_keybinds, ava::tui::TuiAction::DeleteWordBackward,
+                                           ava::tui::Key::CtrlW) &&
+             ava::tui::key_matches_action(*select_action_keybinds, ava::tui::TuiAction::SelectPrev,
+                                           ava::tui::Key::CtrlP) &&
+             ava::tui::key_matches_action(*select_action_keybinds, ava::tui::TuiAction::SelectNext,
+                                           ava::tui::Key::CtrlN) &&
+             ava::tui::key_matches_action(*select_action_keybinds, ava::tui::TuiAction::SelectPageUp,
+                                           ava::tui::Key::CtrlO) &&
+             ava::tui::key_matches_action(*select_action_keybinds, ava::tui::TuiAction::SelectPageDown,
+                                           ava::tui::Key::CtrlY),
+         "tui keybind parser maps Pi select action ids to context-specific select-list actions");
   expect(!ava::tui::parse_key_bindings_json("{\"submit\":123}"), "tui keybind parser rejects non-string action values");
+  auto const array_action_keybinds =
+      ava::tui::parse_key_bindings_json("{\"cursor_line_start\":[\"Home\",\"Ctrl+A\"],\"message_dequeue\":[\"Alt+Up\"]}");
+  expect(array_action_keybinds &&
+             ava::tui::key_matches_action(*array_action_keybinds, ava::tui::TuiAction::CursorLineStart,
+                                           ava::tui::Key::Home) &&
+             ava::tui::key_matches_action(*array_action_keybinds, ava::tui::TuiAction::CursorLineStart,
+                                           ava::tui::Key::CtrlA) &&
+             ava::tui::key_matches_action(*array_action_keybinds, ava::tui::TuiAction::MessageDequeue,
+                                           ava::tui::Key::AltArrowUp),
+         "tui keybind parser accepts Pi-style arrays of key names");
+  auto const namespaced_action_keybinds = ava::tui::parse_key_bindings_json(
+      "{\"tui.editor.cursorLineStart\":[\"Home\",\"Ctrl+A\"],\"app.message.dequeue\":[\"Alt+Up\"],"
+      "\"app.tools.expand\":\"Ctrl+O\",\"tui.editor.deleteCharBackward\":[\"Backspace\",\"Ctrl+H\"]}");
+  expect(namespaced_action_keybinds &&
+             ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::CursorLineStart,
+                                           ava::tui::Key::Home) &&
+             ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::CursorLineStart,
+                                           ava::tui::Key::CtrlA) &&
+             ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::MessageDequeue,
+                                           ava::tui::Key::AltArrowUp) &&
+             ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::DetailsToggle,
+                                           ava::tui::Key::CtrlO) &&
+             ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::DeleteBackward,
+                                           ava::tui::Key::CtrlH),
+         "tui keybind parser accepts matching Pi namespaced action ids and Ctrl+H");
+  auto const vim_action_keybinds = ava::tui::parse_key_bindings_json(
+      "{\"tui.editor.cursorLeft\":[\"Left\",\"Alt+H\"],\"tui.editor.cursorDown\":[\"Down\",\"Alt+J\"],"
+      "\"tui.editor.cursorUp\":[\"Up\",\"Alt+K\"],\"tui.editor.cursorRight\":[\"Right\",\"Alt+L\"],"
+      "\"tui.editor.cursorWordRight\":[\"Alt+Right\",\"Alt+W\"]}");
+  expect(vim_action_keybinds &&
+             ava::tui::key_matches_action(*vim_action_keybinds, ava::tui::TuiAction::CursorLeft,
+                                           ava::tui::Key::AltH) &&
+             ava::tui::key_matches_action(*vim_action_keybinds, ava::tui::TuiAction::CursorDown,
+                                           ava::tui::Key::AltJ) &&
+             ava::tui::key_matches_action(*vim_action_keybinds, ava::tui::TuiAction::CursorUp,
+                                           ava::tui::Key::AltK) &&
+             ava::tui::key_matches_action(*vim_action_keybinds, ava::tui::TuiAction::CursorRight,
+                                           ava::tui::Key::AltL) &&
+             ava::tui::key_matches_action(*vim_action_keybinds, ava::tui::TuiAction::CursorWordRight,
+                                           ava::tui::Key::AltW),
+         "tui keybind parser accepts Pi Vim-style Alt+H/J/K/L and Alt+W cursor aliases");
+  auto const legacy_action_keybinds =
+      ava::tui::parse_key_bindings_json("{\"cursorLineEnd\":[\"End\",\"Ctrl+E\"],\"expandTools\":\"Ctrl+O\"}");
+  expect(legacy_action_keybinds &&
+             ava::tui::key_matches_action(*legacy_action_keybinds, ava::tui::TuiAction::CursorLineEnd,
+                                           ava::tui::Key::End) &&
+             ava::tui::key_matches_action(*legacy_action_keybinds, ava::tui::TuiAction::CursorLineEnd,
+                                           ava::tui::Key::CtrlE) &&
+             ava::tui::key_matches_action(*legacy_action_keybinds, ava::tui::TuiAction::DetailsToggle,
+                                           ava::tui::Key::CtrlO),
+         "tui keybind parser accepts legacy camelCase action aliases where AVA has matching semantics");
+  auto const namespaced_over_legacy_keybinds = ava::tui::parse_key_bindings_json(
+      "{\"app.tools.expand\":\"Ctrl+O\",\"expandTools\":\"Ctrl+T\",\"variant_cycle\":\"Ctrl+T\"}");
+  expect(namespaced_over_legacy_keybinds &&
+             ava::tui::key_matches_action(*namespaced_over_legacy_keybinds, ava::tui::TuiAction::DetailsToggle,
+                                           ava::tui::Key::CtrlO) &&
+             !ava::tui::key_matches_action(*namespaced_over_legacy_keybinds, ava::tui::TuiAction::DetailsToggle,
+                                            ava::tui::Key::CtrlT) &&
+             ava::tui::key_matches_action(*namespaced_over_legacy_keybinds, ava::tui::TuiAction::VariantCycle,
+                                           ava::tui::Key::CtrlT),
+         "tui keybind parser gives namespaced action ids precedence over legacy aliases before conflict checks");
+  auto const later_current_alias_keybinds =
+      ava::tui::parse_key_bindings_json("{\"tui.input.submit\":\"Ctrl+T\",\"submit\":\"Ctrl+D\"}");
+  expect(later_current_alias_keybinds &&
+             ava::tui::key_matches_action(*later_current_alias_keybinds, ava::tui::TuiAction::Submit,
+                                           ava::tui::Key::CtrlD) &&
+             !ava::tui::key_matches_action(*later_current_alias_keybinds, ava::tui::TuiAction::Submit,
+                                            ava::tui::Key::CtrlT),
+         "tui keybind parser lets the later current-form alias win for the same effective action");
+  expect(!ava::tui::parse_key_bindings_json("{\"tui.input.copy\":\"Ctrl+C\"}"),
+         "tui keybind parser rejects namespaced Pi action ids that AVA does not implement");
+  expect(!ava::tui::parse_key_bindings_json("{\"submit\":[]}"),
+         "tui keybind parser rejects empty keybinding arrays");
+  expect(!ava::tui::parse_key_bindings_json("{\"submit\":[\"Enter\",123]}"),
+         "tui keybind parser rejects non-string keybinding array entries");
+  auto const conflicting_keybinds =
+      ava::tui::parse_key_bindings_json("{\"model_cycle_forward\":\"Ctrl+P\",\"model_cycle_backward\":\"Ctrl+P\"}");
+  auto const conflicting_keybinds_error = conflicting_keybinds ? std::string() : conflicting_keybinds.error().format();
+  expect(!conflicting_keybinds &&
+             conflicting_keybinds_error.find("conflicting TUI keybinding") != std::string::npos &&
+             conflicting_keybinds_error.find("Ctrl+P") != std::string::npos &&
+             conflicting_keybinds_error.find("model_cycle_forward") != std::string::npos &&
+             conflicting_keybinds_error.find("model_cycle_backward") != std::string::npos,
+         "tui keybind parser rejects user-configured conflicts with actionable key and action context");
+  auto const conflicting_select_keybinds =
+      ava::tui::parse_key_bindings_json("{\"tui.select.confirm\":\"Space\",\"tui.select.cancel\":\"Space\"}");
+  auto const conflicting_select_keybinds_error =
+      conflicting_select_keybinds ? std::string() : conflicting_select_keybinds.error().format();
+  expect(!conflicting_select_keybinds &&
+             conflicting_select_keybinds_error.find("conflicting TUI keybinding") != std::string::npos &&
+             conflicting_select_keybinds_error.find("Space") != std::string::npos &&
+             conflicting_select_keybinds_error.find("select_confirm") != std::string::npos &&
+             conflicting_select_keybinds_error.find("select_cancel") != std::string::npos,
+         "tui keybind parser rejects conflicts within the select-list keybinding context");
+  auto const shadowing_keybinds = ava::tui::parse_key_bindings_json("{\"submit\":\"Ctrl+D\"}");
+  expect(shadowing_keybinds &&
+             ava::tui::key_matches_action(*shadowing_keybinds, ava::tui::TuiAction::Submit, ava::tui::Key::CtrlD) &&
+             !ava::tui::key_matches_action(*shadowing_keybinds, ava::tui::TuiAction::DeleteForward,
+                                           ava::tui::Key::CtrlD) &&
+             !ava::tui::key_matches_action(*shadowing_keybinds, ava::tui::TuiAction::Exit, ava::tui::Key::CtrlD),
+         "tui keybind parser lets custom bindings shadow shared default keys without flagging conflicts");
 
   auto const keybind_root = temp_root() / "tui-keybinds";
   std::filesystem::remove_all(keybind_root);
@@ -1017,13 +1934,14 @@ void test_tui_composer_rendering_and_input()
          "tui keybind file loader falls back to defaults when the file is missing");
   {
     std::ofstream output(keybinds_file);
-    output << "{\"submit\":\"Ctrl+T\",\"variant_cycle\":\"Ctrl+D\"}";
+    output << "{\"submit\":\"Ctrl+T\",\"variant_cycle\":[\"Shift+Tab\",\"Ctrl+D\"]}";
   }
   auto const loaded_keybinds = ava::tui::load_key_bindings(keybinds_file);
   expect(loaded_keybinds &&
              ava::tui::key_matches_action(*loaded_keybinds, ava::tui::TuiAction::Submit, ava::tui::Key::CtrlT) &&
+             ava::tui::key_matches_action(*loaded_keybinds, ava::tui::TuiAction::VariantCycle, ava::tui::Key::ShiftTab) &&
              ava::tui::key_matches_action(*loaded_keybinds, ava::tui::TuiAction::VariantCycle, ava::tui::Key::CtrlD),
-         "tui keybind file loader reads valid configured bindings");
+         "tui keybind file loader reads valid configured string and array bindings");
   {
     std::ofstream output(keybinds_file);
     output << "{\"submit\":\"Enter\"";
@@ -1034,6 +1952,18 @@ void test_tui_composer_rendering_and_input()
     output << "{\"submt\":\"Enter\"}";
   }
   expect(!ava::tui::load_key_bindings(keybinds_file), "tui keybind file loader rejects unknown actions");
+  {
+    std::ofstream output(keybinds_file);
+    output << "{\"submit\":\"Ctrl+P\",\"model_cycle_forward\":\"Ctrl+P\"}";
+  }
+  auto const conflicting_loaded_keybinds = ava::tui::load_key_bindings(keybinds_file);
+  auto const conflicting_loaded_keybinds_error =
+      conflicting_loaded_keybinds ? std::string() : conflicting_loaded_keybinds.error().format();
+  expect(!conflicting_loaded_keybinds &&
+             conflicting_loaded_keybinds_error.find("conflicting TUI keybinding") != std::string::npos &&
+             conflicting_loaded_keybinds_error.find("Ctrl+P") != std::string::npos &&
+             conflicting_loaded_keybinds_error.find(keybinds_file.string()) != std::string::npos,
+         "tui keybind file loader reports configured conflicts with file path context");
 
   std::vector<ava::tui::SlashCommandItem> const disabled_slash_commands = {
       ava::tui::SlashCommandItem{.command = "/models",
@@ -1296,7 +2226,8 @@ void test_tui_composer_rendering_and_input()
                                                           .operation = "bash",
                                                           .target = "/tmp/outside",
                                                           .command = "git push origin main",
-                                                          .reason = "command can change external state"},
+                                                          .reason = "command can change external state",
+                                                          .risk = "high"},
       .width = 80,
       .height = 12});
   expect(std::ranges::any_of(
@@ -1325,6 +2256,12 @@ void test_tui_composer_rendering_and_input()
                                           visible.find("Enter confirm") != std::string::npos &&
                                           visible.find("Esc deny") != std::string::npos;
                                  }) &&
+             std::ranges::any_of(permission_modal,
+                                 [](std::string const& line) {
+                                   auto visible = strip_sgr(line);
+                                   return visible.find("risk high") != std::string::npos &&
+                                          visible.find("reason command can change external state") != std::string::npos;
+                                 }) &&
              std::ranges::none_of(permission_modal,
                                   [](std::string const& line) {
                                     return line.find("bash") != std::string::npos &&
@@ -1348,6 +2285,37 @@ void test_tui_composer_rendering_and_input()
                  permission_modal,
                  [](std::string const& line) { return strip_sgr(line).find("Esc deny") != std::string::npos; }),
          "tui permission dock controls stay within 80 visible columns without losing controls");
+
+  auto const remembered_permission_modal = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "permission required",
+      .transcript = {},
+      .permission_prompt = ava::tui::PermissionPromptView{.tool_name = "bash",
+                                                          .operation = "bash",
+                                                          .target = "/workspace",
+                                                          .command = "git push origin main",
+                                                          .reason = "command can change external state",
+                                                          .risk = "high",
+                                                          .remember_available = true},
+      .width = 96,
+      .height = 10});
+  expect(std::ranges::any_of(remembered_permission_modal,
+                             [](std::string const& line) {
+                               auto visible = strip_sgr(line);
+                               return visible.find("[Deny rule]") != std::string::npos &&
+                                      visible.find("[Allow rule]") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(remembered_permission_modal,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("R remember") != std::string::npos;
+                                 }) &&
+             std::ranges::all_of(remembered_permission_modal,
+                                 [](std::string const& line) { return visible_columns(line) <= 96; }),
+         "tui permission dock exposes remembered allow and deny choices when rule storage is available");
 
   auto const allow_focused_modal = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -1462,7 +2430,8 @@ void test_tui_composer_rendering_and_input()
                                                                                      .operation = "write_file",
                                                                                      .target = std::string(120, 't'),
                                                                                      .command = std::string(120, 'c'),
-                                                                                     .reason = std::string(120, 'r')},
+                                                                                     .reason = std::string(120, 'r'),
+                                                                                     .risk = "critical"},
                                  .width = 80,
                                  .height = 10});
   expect(std::ranges::all_of(long_permission_modal,
@@ -1474,8 +2443,14 @@ void test_tui_composer_rendering_and_input()
                                    auto const visible = strip_sgr(line);
                                    return visible.find("cccc") != std::string::npos &&
                                           visible.find("...") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(long_permission_modal,
+                                 [](std::string const& line) {
+                                   auto const visible = strip_sgr(line);
+                                   return visible.find("risk critical") != std::string::npos &&
+                                          visible.find("reason rrrr") != std::string::npos;
                                  }),
-         "tui permission dock truncates long detail text and handles an empty tool name");
+         "tui permission dock keeps risk and reason visible when detail text is truncated");
 
   auto const tight_permission_modal = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -1981,6 +2956,36 @@ void test_tui_composer_rendering_and_input()
   expect(selector_input.action == ava::tui::SelectListInputAction::Redraw && selector_input.query == "sonnetg" &&
              selector_input.selected_item_index == 0,
          "select-list typing updates the search query and clamps to empty-match selection safely");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::Space});
+  expect(selector_input.action == ava::tui::SelectListInputAction::Redraw && selector_input.query == "sonnet ",
+         "select-list semantic Space remains searchable text instead of losing spaces in modal queries");
+  auto const selector_keybinds = ava::tui::parse_key_bindings_json(
+      "{\"tui.select.confirm\":[\"Enter\",\"Space\"],\"tui.select.cancel\":[\"Escape\",\"Ctrl+W\"],"
+      "\"tui.select.up\":\"Ctrl+P\",\"tui.select.down\":\"Ctrl+N\","
+      "\"tui.select.pageUp\":\"Ctrl+O\",\"tui.select.pageDown\":\"Ctrl+Y\"}");
+  expect(static_cast<bool>(selector_keybinds), "select-list custom keybind fixture parses");
+  auto const selector_bindings = selector_keybinds ? *selector_keybinds : ava::tui::default_key_bindings();
+  auto bound_selector = selector;
+  bound_selector.query.clear();
+  bound_selector.selected_item_index = 0;
+  selector_input =
+      ava::tui::handle_select_list_input(bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlN}, selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::Redraw && selector_input.selected_item_index == 1,
+         "select-list uses configured down binding before raw Ctrl+N modal actions");
+  bound_selector.selected_item_index = 1;
+  selector_input =
+      ava::tui::handle_select_list_input(bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlP}, selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::Redraw && selector_input.selected_item_index == 0,
+         "select-list uses configured up binding before raw Ctrl+P modal actions");
+  bound_selector.selected_item_index = 0;
+  selector_input =
+      ava::tui::handle_select_list_input(bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::Space}, selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::Resolve && selector_input.selected_item_index == 0,
+         "select-list configured Space confirms instead of appending query text");
+  selector_input =
+      ava::tui::handle_select_list_input(bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlW}, selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::Cancel,
+         "select-list uses configured cancel binding before raw composer delete-word actions");
   selector.query = "ghost";
   selector.selected_item_index = 2;
   selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
@@ -1994,6 +2999,97 @@ void test_tui_composer_rendering_and_input()
   selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::Escape});
   expect(selector_input.action == ava::tui::SelectListInputAction::Cancel,
          "select-list escape cancels the modal safely");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlT});
+  expect(selector_input.action == ava::tui::SelectListInputAction::CycleSort && selector_input.query == selector.query,
+         "select-list ctrl+t exposes a modal sort-cycle action without clearing search state");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlS});
+  expect(selector_input.action == ava::tui::SelectListInputAction::CycleSort && selector_input.query == selector.query,
+         "select-list ctrl+s exposes the Pi-compatible modal sort-cycle action without clearing search state");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlN});
+  expect(selector_input.action == ava::tui::SelectListInputAction::ToggleNamedFilter &&
+             selector_input.query == selector.query,
+         "select-list ctrl+n exposes a modal named-session filter action without clearing search state");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlP});
+  expect(selector_input.action == ava::tui::SelectListInputAction::TogglePathDisplay &&
+             selector_input.query == selector.query,
+         "select-list ctrl+p exposes a modal path-display toggle without clearing search state");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlA});
+  expect(selector_input.action == ava::tui::SelectListInputAction::ToggleArchivedFilter &&
+             selector_input.query == selector.query,
+         "select-list ctrl+a exposes a modal archived-session filter toggle without clearing search state");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlR});
+  expect(selector_input.action == ava::tui::SelectListInputAction::Rename && selector_input.query == selector.query,
+         "select-list ctrl+r exposes a modal rename action without clearing search state");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlL});
+  expect(selector_input.action == ava::tui::SelectListInputAction::Label && selector_input.query == selector.query,
+         "select-list ctrl+l exposes a modal label action without clearing search state");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlD});
+  expect(selector_input.action == ava::tui::SelectListInputAction::Archive && selector_input.query == selector.query,
+         "select-list ctrl+d exposes a modal archive action without clearing search state");
+  ava::tui::SelectListView paged_selector{
+      .title = "Paged",
+      .subtitle = {},
+      .items = {},
+      .selected_item_index = 0,
+      .query = {},
+      .placeholder = "Search rows",
+      .empty_text = "No rows",
+      .footer_hint = {}};
+  for (int index = 0; index < 8; ++index) {
+    paged_selector.items.push_back(ava::tui::SelectListItemView{.value = "row_" + std::to_string(index),
+                                                                .label = "Row " + std::to_string(index),
+                                                                .description = "Page navigation row",
+                                                                .group = "Rows",
+                                                                .detail = {},
+                                                                .badge = {},
+                                                                .current = false,
+                                                                .enabled = true,
+                                                                .disabled_reason = {}});
+  }
+  selector_input = ava::tui::handle_select_list_input(paged_selector,
+                                                      ava::tui::InputEvent{.key = ava::tui::Key::PageDown});
+  expect(selector_input.action == ava::tui::SelectListInputAction::Redraw && selector_input.selected_item_index == 5,
+         "select-list PageDown jumps five visible rows");
+  auto bound_paged_selector = paged_selector;
+  selector_input =
+      ava::tui::handle_select_list_input(bound_paged_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlY}, selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::Redraw && selector_input.selected_item_index == 5,
+         "select-list uses configured page-down binding before raw Ctrl+Y composer yank actions");
+  bound_paged_selector.selected_item_index = 5;
+  selector_input =
+      ava::tui::handle_select_list_input(bound_paged_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlO}, selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::Redraw && selector_input.selected_item_index == 0,
+         "select-list uses configured page-up binding before raw Ctrl+O details actions");
+  paged_selector.selected_item_index = 5;
+  selector_input = ava::tui::handle_select_list_input(paged_selector,
+                                                      ava::tui::InputEvent{.key = ava::tui::Key::PageDown});
+  expect(selector_input.action == ava::tui::SelectListInputAction::Redraw && selector_input.selected_item_index == 7,
+         "select-list PageDown clamps at the last matching row instead of wrapping");
+  paged_selector.selected_item_index = 7;
+  selector_input = ava::tui::handle_select_list_input(paged_selector,
+                                                      ava::tui::InputEvent{.key = ava::tui::Key::PageUp});
+  expect(selector_input.action == ava::tui::SelectListInputAction::Redraw && selector_input.selected_item_index == 2,
+         "select-list PageUp jumps five visible rows");
+  paged_selector.selected_item_index = 0;
+  selector_input = ava::tui::handle_select_list_input(paged_selector,
+                                                      ava::tui::InputEvent{.key = ava::tui::Key::PageUp});
+  expect(selector_input.action == ava::tui::SelectListInputAction::Redraw && selector_input.selected_item_index == 0,
+         "select-list PageUp clamps at the first matching row instead of wrapping");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlEnter});
+  expect(selector_input.action == ava::tui::SelectListInputAction::None && selector_input.query == selector.query,
+         "select-list ctrl+enter remains a composer-only newline alias and does not trigger modal actions");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::AltEnter});
+  expect(selector_input.action == ava::tui::SelectListInputAction::None && selector_input.query == selector.query,
+         "select-list alt+enter remains a composer-only newline alias and does not trigger modal actions");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::ShiftTab});
+  expect(selector_input.action == ava::tui::SelectListInputAction::None && selector_input.query == selector.query,
+         "select-list shift+tab remains an app-level reasoning shortcut and does not trigger modal actions");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::AltArrowLeft});
+  expect(selector_input.action == ava::tui::SelectListInputAction::None && selector_input.query == selector.query,
+         "select-list alt+left remains a composer-only word movement alias and does not trigger modal actions");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::AltArrowRight});
+  expect(selector_input.action == ava::tui::SelectListInputAction::None && selector_input.query == selector.query,
+         "select-list alt+right remains a composer-only word movement alias and does not trigger modal actions");
 
   auto const selector_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -2084,16 +3180,143 @@ void test_tui_composer_rendering_and_input()
       ava::app::session_selector_view(session_summaries, "session_beta", ava::app::SessionSelectorSort::Path, {});
   by_path_sessions.query = "gamma.jsonl";
   auto const path_matches = ava::tui::filter_select_list_items(by_path_sessions);
-  expect(recent_sessions.title == "Select session" && recent_sessions.items.size() == 3 &&
+  expect(ava::app::session_selector_sort_label(ava::app::SessionSelectorSort::Recent) == "recent" &&
+             ava::app::next_session_selector_sort(ava::app::SessionSelectorSort::Recent) == ava::app::SessionSelectorSort::Name &&
+             ava::app::next_session_selector_sort(ava::app::SessionSelectorSort::Name) == ava::app::SessionSelectorSort::Path &&
+             ava::app::next_session_selector_sort(ava::app::SessionSelectorSort::Path) == ava::app::SessionSelectorSort::Recent &&
+             recent_sessions.title == "Select session" && recent_sessions.subtitle.find("sort recent") != std::string::npos && recent_sessions.items.size() == 3 &&
              recent_sessions.items[0].value == "session_gamma" && recent_sessions.items[1].current &&
              recent_sessions.selected_item_index == 1 &&
              recent_sessions.items[1].description.find("beta.jsonl") != std::string::npos &&
              recent_sessions.items[1].detail.find("entries 12") != std::string::npos &&
              recent_sessions.items[1].detail.find("updated 2026-05-06T10:00:00Z") != std::string::npos &&
              by_name_sessions.items[0].value == "session_alpha" &&
+             by_name_sessions.footer_hint.find("PgUp/PgDn page") != std::string::npos &&
              by_path_sessions.items[0].description.find("/tmp/ava/sessions/alpha.jsonl") != std::string::npos &&
              path_matches.size() == 1 && by_path_sessions.items[path_matches.front()].value == "session_gamma",
          "session selector view sorts by recent/name/path and exposes existing path, time, and entry-count metadata");
+
+  ava::session::SessionTreeIndex session_tree;
+  session_tree.current_session_id = "session_child";
+  session_tree.roots = {"session_parent"};
+  session_tree.leaves = {"session_child"};
+  session_tree.current_path = {"session_parent", "session_child"};
+  session_tree.sessions = {
+      ava::session::SessionTreeNode{
+          .summary = ava::session::SessionSummary{.session_id = "session_parent",
+                                                  .path = "/tmp/ava/sessions/parent.jsonl",
+                                                  .last_updated = "2026-05-06T08:00:00Z",
+                                                  .entry_count = 6},
+          .metadata = ava::session::SessionMetadataView{.name = "Parent session",
+                                                        .labels = {"root"},
+                                                        .parent_session_id = {},
+                                                        .source_session_id = {},
+                                                        .branch_from_entry_id = {},
+                                                        .branch_origin = "root",
+                                                        .actor = "test"},
+          .children = {"session_child"},
+          .current = false},
+      ava::session::SessionTreeNode{
+          .summary = ava::session::SessionSummary{.session_id = "session_child",
+                                                  .path = "/tmp/ava/sessions/child.jsonl",
+                                                  .last_updated = "2026-05-06T10:00:00Z",
+                                                  .entry_count = 11},
+          .metadata = ava::session::SessionMetadataView{.name = "Review branch",
+                                                        .labels = {"review", "ui"},
+                                                        .parent_session_id = "session_parent",
+                                                        .source_session_id = "session_parent",
+                                                        .branch_from_entry_id = "entry_1",
+                                                        .branch_origin = "fork",
+                                                        .actor = "rpc"},
+          .children = {},
+          .current = true}};
+  auto tree_sessions = ava::app::session_selector_view(session_tree, ava::app::SessionSelectorSort::Name, {});
+  tree_sessions.query = "review";
+  auto const tree_matches = ava::tui::filter_select_list_items(tree_sessions);
+  expect(tree_sessions.subtitle.find("Session tree") != std::string::npos && tree_sessions.items.size() == 2 &&
+             tree_sessions.items[0].label == "Parent session" &&
+             tree_sessions.items[0].detail.find("current path") != std::string::npos &&
+             tree_sessions.items[1].label.find("+ Review branch") != std::string::npos &&
+             tree_sessions.items[1].current && tree_sessions.items[1].badge == "current" &&
+             tree_sessions.items[1].description.find("session_child") != std::string::npos &&
+             tree_sessions.items[1].detail.find("origin fork") != std::string::npos &&
+             tree_sessions.items[1].detail.find("parent session_parent") != std::string::npos &&
+             tree_sessions.items[1].detail.find("labels review, ui") != std::string::npos &&
+             tree_matches.size() == 1 && tree_sessions.items[tree_matches.front()].value == "session_child",
+         "session selector view exposes tree depth, current path, branch provenance, labels, and searchable names");
+
+  auto tree_with_unnamed = session_tree;
+  tree_with_unnamed.roots.push_back("session_unnamed");
+  tree_with_unnamed.sessions.push_back(
+      ava::session::SessionTreeNode{.summary = ava::session::SessionSummary{.session_id = "session_unnamed",
+                                                                            .path = "/tmp/ava/sessions/unnamed.jsonl",
+                                                                            .last_updated = "2026-05-06T11:00:00Z",
+                                                                            .entry_count = 2},
+                                    .metadata = ava::session::SessionMetadataView{.name = {},
+                                                                                  .labels = {},
+                                                                                  .parent_session_id = {},
+                                                                                  .source_session_id = {},
+                                                                                  .branch_from_entry_id = {},
+                                                                                  .branch_origin = "root",
+                                                                                  .actor = "test"},
+                                    .children = {},
+                                    .current = false});
+  auto named_only_sessions =
+      ava::app::session_selector_view(tree_with_unnamed, ava::app::SessionSelectorSort::Name, "Ctrl+N show all", true);
+  named_only_sessions.query = "unnamed";
+  auto const named_only_matches = ava::tui::filter_select_list_items(named_only_sessions);
+  expect(named_only_sessions.subtitle.find("named only") != std::string::npos &&
+             named_only_sessions.footer_hint.find("Ctrl+N show all") != std::string::npos &&
+             named_only_sessions.items.size() == 2 &&
+             std::ranges::none_of(named_only_sessions.items,
+                                  [](ava::tui::SelectListItemView const& item) {
+                                    return item.value == "session_unnamed";
+                                  }) &&
+             named_only_matches.empty(),
+         "session selector named-only filter hides unnamed sessions while preserving named branch rows");
+
+  auto path_hidden_sessions =
+      ava::app::session_selector_view(tree_with_unnamed, ava::app::SessionSelectorSort::Name, "Ctrl+P show paths", false, false);
+  expect(path_hidden_sessions.subtitle.find("paths hidden") != std::string::npos &&
+             path_hidden_sessions.footer_hint.find("Ctrl+P show paths") != std::string::npos &&
+             path_hidden_sessions.items.size() == 3 &&
+             path_hidden_sessions.items[0].description.find(".jsonl") == std::string::npos &&
+             path_hidden_sessions.items[1].description == "session_child" &&
+             path_hidden_sessions.items[2].description.empty(),
+         "session selector path-display toggle hides session file paths while keeping session ids for named rows");
+
+  auto tree_with_archived = tree_with_unnamed;
+  tree_with_archived.roots.push_back("session_archived");
+  tree_with_archived.sessions.push_back(
+      ava::session::SessionTreeNode{.summary = ava::session::SessionSummary{.session_id = "session_archived",
+                                                                            .path = "/tmp/ava/sessions/archived.jsonl",
+                                                                            .last_updated = "2026-05-06T12:00:00Z",
+                                                                            .entry_count = 3},
+                                    .metadata = ava::session::SessionMetadataView{.name = "Archived branch",
+                                                                                  .labels = {"old"},
+                                                                                  .archived = true,
+                                                                                  .parent_session_id = {},
+                                                                                  .source_session_id = {},
+                                                                                  .branch_from_entry_id = {},
+                                                                                  .branch_origin = "manual",
+                                                                                  .actor = "test"},
+                                    .children = {},
+                                    .current = false});
+  auto active_session_selector =
+      ava::app::session_selector_view(tree_with_archived, ava::app::SessionSelectorSort::Name, {}, false, true);
+  auto archived_session_selector =
+      ava::app::session_selector_view(tree_with_archived, ava::app::SessionSelectorSort::Name, {}, false, true, true);
+  expect(std::ranges::none_of(active_session_selector.items,
+                              [](ava::tui::SelectListItemView const& item) {
+                                return item.value == "session_archived";
+                              }) &&
+             std::ranges::any_of(archived_session_selector.items,
+                                 [](ava::tui::SelectListItemView const& item) {
+                                   return item.value == "session_archived" && item.badge == "archived" &&
+                                          item.detail.find("archived") != std::string::npos;
+                                 }) &&
+             archived_session_selector.subtitle.find("archived shown") != std::string::npos,
+         "session selector hides archived sessions by default and can render them when explicitly requested");
 
   auto const session_selector_frame =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -2129,7 +3352,9 @@ void test_tui_composer_rendering_and_input()
                                                                                   .select_list = hotkeys_view,
                                                                                   .width = 92,
                                                                                   .height = 18});
-  expect(hotkeys_view.title == "Hotkeys" &&
+  expect(hotkeys_view.title == "Keybindings" &&
+             hotkeys_view.subtitle.find("$XDG_CONFIG_HOME/ava/keybinds.json") != std::string::npos &&
+             hotkeys_view.subtitle.find("/reload keybindings") != std::string::npos &&
              std::ranges::any_of(hotkeys_view.items,
                                  [](ava::tui::SelectListItemView const& item) {
                                    return item.value == "mode_toggle" && item.detail.find("Tab") != std::string::npos &&
@@ -2137,11 +3362,15 @@ void test_tui_composer_rendering_and_input()
                                  }) &&
              std::ranges::any_of(
                  hotkeys_frame,
-                 [](std::string const& line) { return strip_sgr(line).find("Hotkeys") != std::string::npos; }) &&
+                 [](std::string const& line) { return strip_sgr(line).find("Keybindings") != std::string::npos; }) &&
+             std::ranges::any_of(hotkeys_frame,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("/reload keybindings") != std::string::npos;
+                                 }) &&
              std::ranges::any_of(
                  hotkeys_frame,
                  [](std::string const& line) { return strip_sgr(line).find("mode_toggle") != std::string::npos; }),
-         "hotkeys view exposes active keybindings and marks context-shared keys in a read-only modal");
+         "keybindings view exposes active bindings, config/reload guidance, and context-shared keys in a read-only modal");
 
   auto const settings_view = ava::tui::settings_select_list_view(
       ava::tui::ComposerSnapshot{.mode = "build",
@@ -2192,6 +3421,53 @@ void test_tui_composer_rendering_and_input()
                  settings_frame,
                  [](std::string const& line) { return strip_sgr(line).find("ava-dark") != std::string::npos; }),
          "settings view exposes read-only runtime, workspace, and built-in theme status without config mutation");
+
+  {
+    ScopedEnvVar no_color_settings_guard("NO_COLOR", "1");
+    auto const plain_settings_view = ava::tui::settings_select_list_view(
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_test",
+                                   .input = "",
+                                   .status = "ready",
+                                   .token_status = "1.3k (0.7%)",
+                                   .reasoning_status = "low",
+                                   .transcript = {},
+                                   .sidebar = ava::tui::SidebarSnapshot{.session_id = "session_test",
+                                                                        .mode = "build",
+                                                                        .provider = "openai",
+                                                                        .model = "gpt-5.5",
+                                                                        .workspace = "/workspace/project",
+                                                                        .git_branch = "develop",
+                                                                        .version = "0.32",
+                                                                        .token_status = "1.3k (0.7%)",
+                                                                        .reasoning_status = "low",
+                                                                        .context_source_count = 2,
+                                                                        .session_path = "/tmp/ava/session_test.jsonl",
+                                                                        .session_entry_count = 42}});
+    auto const plain_settings_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                           .provider = "openai",
+                                                                                           .model = "gpt-5.5",
+                                                                                           .session_id = "session_test",
+                                                                                           .input = "",
+                                                                                           .status = "settings opened",
+                                                                                           .transcript = {},
+                                                                                           .select_list = plain_settings_view,
+                                                                                           .width = 96,
+                                                                                           .height = 20});
+    expect(std::ranges::any_of(plain_settings_view.items,
+                               [](ava::tui::SelectListItemView const& item) {
+                                 return item.label == "Theme" && item.description == "plain" &&
+                                        item.detail == "NO_COLOR disables ANSI styling" && item.badge == "NO_COLOR";
+                               }) &&
+               std::ranges::any_of(
+                   plain_settings_frame,
+                   [](std::string const& line) { return line.find("plain") != std::string::npos; }) &&
+               std::ranges::all_of(
+                   plain_settings_frame, [](std::string const& line) { return line.find("\x1b[") == std::string::npos; }),
+           "settings view reports active NO_COLOR plain display mode without ANSI styling");
+  }
 
   auto const multiline_input = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                     .provider = "openai",
@@ -2470,6 +3746,75 @@ void test_tui_composer_rendering_and_input()
                               [](std::string const& line) { return line.find("\x1b[31m") != std::string::npos; }),
          "tui tool card rendering removes untrusted raw sgr escape sequences");
 
+  auto permission_tool_item = ava::tui::ToolTimelineItem{
+      .status = ava::tui::ToolTimelineStatus::Error,
+      .name = "bash",
+      .argument_summary = "command=git push origin main",
+      .result_summary = "permission denied",
+      .arguments_json = "{\"command\":\"git push origin main\"}",
+      .result_json = "{\"tool\":\"bash\",\"exit_code\":126}",
+      .call_id = "call_permission",
+      .lifecycle = ava::tui::ToolLifecycleState::Error,
+      .permission_request_ids = {"permreq_push"},
+      .permissions = {ava::tui::ToolPermissionAuditItem{.permission_request_id = "permreq_push",
+                                                        .resolver_request_id = "permission_1",
+                                                        .decision = "deny",
+                                                        .operation = "bash",
+                                                        .tool_name = "bash",
+                                                        .risk = "high",
+                                                        .reason = "command can change external state\x1b[31m",
+                                                        .target = "",
+                                                        .command = "git push origin main",
+                                                        .resolution_reason = "selected deny"}}};
+  auto const compact_permission_card = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "ready",
+                                 .transcript = {ava::tui::TranscriptItem{.tool = permission_tool_item}},
+                                 .width = 72,
+                                 .height = 12});
+  expect(std::ranges::any_of(compact_permission_card,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("permission deny") != std::string::npos &&
+                                      visible.find("risk high") != std::string::npos &&
+                                      visible.find("reason command can change") != std::string::npos;
+                             }) &&
+             std::ranges::none_of(compact_permission_card,
+                                  [](std::string const& line) { return line.find("\x1b[31m") != std::string::npos; }) &&
+             std::ranges::all_of(compact_permission_card,
+                                 [](std::string const& line) { return visible_columns(line) <= 72; }),
+         "tui compact tool cards preserve linked permission decision, risk, and reason without leaking raw escapes");
+
+  permission_tool_item.details_visible = true;
+  auto const expanded_permission_card = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "ready",
+                                 .transcript = {ava::tui::TranscriptItem{.tool = permission_tool_item}},
+                                 .width = 88,
+                                 .height = 16});
+  expect(std::ranges::any_of(expanded_permission_card,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("permission: deny") != std::string::npos &&
+                                      visible.find("id permreq_push") != std::string::npos &&
+                                      visible.find("resolver permission_1") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(expanded_permission_card,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("command: git push origin main") != std::string::npos;
+                                 }) &&
+             std::ranges::all_of(expanded_permission_card,
+                                 [](std::string const& line) { return visible_columns(line) <= 88; }),
+         "tui expanded tool cards expose permission audit ids and command context on demand");
+
   auto const grouped_context_tools = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
       .provider = "openai",
@@ -2598,6 +3943,52 @@ void test_tui_composer_rendering_and_input()
               [](std::string const& line) { return strip_sgr(line).find("result: line one") != std::string::npos; }) &&
           std::ranges::all_of(detailed_tool_card, [](std::string const& line) { return visible_columns(line) <= 48; }),
       "tui expands tool cards into sanitized argument and result detail rows when details are enabled");
+
+  auto const copyable_tool_text = ava::tui::detail::tool_card_copy_text(
+      ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Error,
+                                 .name = "bash",
+                                 .argument_summary = "command=git push origin main",
+                                 .result_summary = "permission denied",
+                                 .arguments_json = "{\"command\":\"git push origin main\"}",
+                                 .result_json = "{\"tool\":\"bash\",\"exit_code\":126,\"stderr\":\"denied\\ntry again\"}",
+                                 .lifecycle = ava::tui::ToolLifecycleState::Error,
+                                 .permissions = {ava::tui::ToolPermissionAuditItem{.permission_request_id = "permreq_push",
+                                                                                   .resolver_request_id = "permission_1",
+                                                                                   .decision = "deny",
+                                                                                   .operation = "bash",
+                                                                                   .tool_name = "bash",
+                                                                                   .risk = "high",
+                                                                                   .reason = "command can change external state",
+                                                                                   .command = "git push origin main"}},
+                                 .diff = "--- a\n+++ b\n-old\n+new",
+                                 .truncated = true,
+                                 .output_lines = 2,
+                                 .total_lines = 10,
+                                 .spill_path = "/tmp/ava-spill/bash.txt"});
+  expect(copyable_tool_text.find("tool: bash") != std::string::npos &&
+             copyable_tool_text.find("command: git push origin main") != std::string::npos &&
+             copyable_tool_text.find("shell status: exit 126") != std::string::npos &&
+             copyable_tool_text.find("permission: deny") != std::string::npos &&
+             copyable_tool_text.find("risk high") != std::string::npos &&
+             copyable_tool_text.find("reason command can change external state") != std::string::npos &&
+             copyable_tool_text.find("output:\n  denied\n  try again") != std::string::npos &&
+             copyable_tool_text.find("truncation: truncated 2/10 lines") != std::string::npos &&
+             copyable_tool_text.find("spill: /tmp/ava-spill/bash.txt") != std::string::npos &&
+             copyable_tool_text.find("diff:\n  --- a\n  +++ b") != std::string::npos &&
+             copyable_tool_text.find("\x1b[") == std::string::npos,
+         "tui exposes plain copy text for detailed tool cards without ANSI styling");
+
+  auto const copyable_diff_text = ava::tui::detail::tool_card_diff_copy_text(
+      ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                 .name = "write",
+                                 .diff = "--- note.txt\n+++ note.txt\n-\x1b[31mold\n+new",
+                                 .diff_truncated = true});
+  expect(copyable_diff_text.find("--- note.txt") != std::string::npos &&
+             copyable_diff_text.find("-old") != std::string::npos &&
+             copyable_diff_text.find("+new") != std::string::npos &&
+             copyable_diff_text.find("[diff truncated]") != std::string::npos &&
+             copyable_diff_text.find("\x1b[") == std::string::npos,
+         "tui exposes focused plain copy text for latest tool diffs without ANSI styling");
 
   auto const collapsed_override_card = ava::tui::render_composer(
       ava::tui::ComposerSnapshot{.mode = "build",
@@ -3736,6 +5127,80 @@ void test_tui_event_state_reduces_runtime_events()
              state.transcript.back().tool->result_summary == "denied",
          "tui event state records errored tool results as error tool cards");
 
+  ava::tui::TuiEventState permission_tool_state;
+  ava::app::EventEnvelope permission_tool_requested{.schema_version = 1,
+                                                    .event_id = "event_permission_tool_request",
+                                                    .timestamp = "2026-04-30T00:00:00Z",
+                                                    .session_id = "session_test",
+                                                    .run_id = "run_permission_tool",
+                                                    .turn_id = "turn_permission_tool",
+                                                    .message_id = std::nullopt,
+                                                    .request_id = "permission_1",
+                                                    .correlation_id = "permission_1",
+                                                    .name = "permission_requested",
+                                                    .payload_json =
+                                                        "{\"resolver_request_id\":\"permission_1\","
+                                                        "\"permission_request_id\":\"permreq_push\","
+                                                        "\"operation\":\"bash\",\"mode\":\"build\","
+                                                        "\"target_path\":\"\",\"command\":\"git push origin main\","
+                                                        "\"tool_name\":\"bash\",\"risk\":\"high\","
+                                                        "\"reason\":\"command can change external state\"}"};
+  ava::tui::apply_event_envelope(permission_tool_state, permission_tool_requested);
+  ava::app::EventEnvelope permission_tool_replied{.schema_version = 1,
+                                                  .event_id = "event_permission_tool_reply",
+                                                  .timestamp = "2026-04-30T00:00:01Z",
+                                                  .session_id = "session_test",
+                                                  .run_id = "run_permission_tool",
+                                                  .turn_id = "turn_permission_tool",
+                                                  .message_id = std::nullopt,
+                                                  .request_id = "permission_1",
+                                                  .correlation_id = "permission_1",
+                                                  .name = "permission_replied",
+                                                  .payload_json =
+                                                      "{\"resolver_request_id\":\"permission_1\","
+                                                      "\"decision\":\"deny\",\"reason\":\"selected deny\"}"};
+  ava::tui::apply_event_envelope(permission_tool_state, permission_tool_replied);
+  ava::app::EventEnvelope permission_tool_result{.schema_version = 1,
+                                                 .event_id = "event_permission_tool_result",
+                                                 .timestamp = "2026-04-30T00:00:02Z",
+                                                 .session_id = "session_test",
+                                                 .run_id = "run_permission_tool",
+                                                 .turn_id = "turn_permission_tool",
+                                                 .message_id = "message_permission_tool",
+                                                 .request_id = "request_tool",
+                                                 .correlation_id = "call_permission_tool",
+                                                 .name = "tool_result",
+                                                 .payload_json =
+                                                     "{\"tool_name\":\"bash\",\"text\":\"permission denied\","
+                                                     "\"status\":\"error\",\"permission_request_ids\":[\"permreq_push\"],"
+                                                     "\"args\":{\"command\":\"git push origin main\"},"
+                                                     "\"result\":{\"tool\":\"bash\",\"exit_code\":126}}"};
+  ava::tui::apply_event_envelope(permission_tool_state, permission_tool_result);
+  auto permission_tool_snapshot = ava::tui::event_state_transcript_snapshot(permission_tool_state);
+  auto const permission_tool_render = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "ready",
+                                 .transcript = permission_tool_snapshot,
+                                 .width = 88,
+                                 .height = 18});
+  expect(permission_tool_snapshot.size() == 3 && permission_tool_snapshot.back().tool &&
+             permission_tool_snapshot.back().tool->permissions.size() == 1 &&
+             permission_tool_snapshot.back().tool->permissions[0].permission_request_id == "permreq_push" &&
+             permission_tool_snapshot.back().tool->permissions[0].decision == "deny" &&
+             permission_tool_snapshot.back().tool->permissions[0].risk == "high" &&
+             std::ranges::any_of(permission_tool_render,
+                                 [](std::string const& line) {
+                                   auto const visible = strip_sgr(line);
+                                   return visible.find("permission deny") != std::string::npos &&
+                                          visible.find("risk high") != std::string::npos &&
+                                          visible.find("reason command can change external state") != std::string::npos;
+                                 }),
+         "tui EventEnvelope reducer attaches permission request/reply metadata to linked tool result cards");
+
   ava::tui::TuiEventState correlated_tool_state;
   ava::app::EventEnvelope correlated_provider_delta{.schema_version = 1,
                                                     .event_id = "event_tool_delta",
@@ -3915,9 +5380,11 @@ void test_tui_event_state_reduces_runtime_events()
   ava::tui::apply_runtime_event(canceled_state, canceled);
   expect(canceled_state.run_status == ava::tui::TuiEventRunStatus::Canceled &&
              canceled_state.error_text == "stopped by user" && canceled_state.transcript.size() == 1 &&
-             canceled_state.transcript[0].label == "ava" && canceled_state.transcript[0].text == "stopped by user" &&
-             !canceled_state.activity.empty() && canceled_state.activity.back().label == "stopped",
-         "tui event state presents cooperative cancellation as a friendly stopped state");
+             canceled_state.transcript[0].label == "ava" &&
+             canceled_state.transcript[0].text == "stopped by user. Submit a new prompt to continue." &&
+             !canceled_state.activity.empty() && canceled_state.activity.back().label == "stopped" &&
+             canceled_state.activity.back().detail.find("submit a new prompt to continue") != std::string::npos,
+         "tui event state presents cooperative cancellation with continuation guidance");
 
   ava::tui::TuiEventState explicit_canceled_state;
   ava::app::RuntimeEvent explicit_canceled;
@@ -3927,8 +5394,10 @@ void test_tui_event_state_reduces_runtime_events()
   ava::tui::apply_runtime_event(explicit_canceled_state, explicit_canceled);
   expect(explicit_canceled_state.run_status == ava::tui::TuiEventRunStatus::Canceled &&
              explicit_canceled_state.transcript.size() == 1 &&
-             explicit_canceled_state.transcript[0].text == "stopped by user" &&
-             explicit_canceled_state.activity.back().detail == "cancel_requested",
+             explicit_canceled_state.transcript[0].text == "stopped by user. Submit a new prompt to continue." &&
+             explicit_canceled_state.activity.back().detail.find("cancel_requested") != std::string::npos &&
+             explicit_canceled_state.activity.back().detail.find("submit a new prompt to continue") !=
+                 std::string::npos,
          "tui event state accepts explicit backend canceled lifecycle events");
 
   ava::tui::TuiEventState lifecycle_state;
@@ -4322,15 +5791,38 @@ void test_tui_event_state_reduces_runtime_events()
                                                 "\"message_bytes\":4096}"};
   ava::tui::apply_event_envelope(resolver_state, follow_up_skipped);
   expect(resolver_state.transcript.size() == 8 &&
-             resolver_state.transcript.back().text.find("follow-up skipped: canceled") != std::string::npos &&
+             resolver_state.transcript.back().text.find(
+                 "follow-up skipped: run stopped before delivery; submit it again to continue") !=
+                 std::string::npos &&
              resolver_state.transcript.back().text.find("message truncated from 4096 bytes") != std::string::npos &&
              std::ranges::any_of(resolver_state.activity,
                                  [](ava::tui::SidebarActivityItem const& item) {
                                    return item.label == "follow-up" &&
                                           item.status == ava::tui::ToolTimelineStatus::Error &&
                                           item.detail.find("Continue after tests") != std::string::npos;
-                                 }),
-         "tui EventEnvelope reducer records backend skipped follow-up events with truncation metadata");
+             }),
+         "tui EventEnvelope reducer records skipped follow-up events with continuation guidance and truncation metadata");
+
+  ava::tui::TuiEventState steering_skip_state;
+  ava::app::EventEnvelope steer_skipped{.schema_version = 1,
+                                        .event_id = "event_steer_skip",
+                                        .timestamp = "2026-04-30T00:00:02Z",
+                                        .session_id = "session_test",
+                                        .run_id = "run_prompt",
+                                        .turn_id = "turn_prompt",
+                                        .message_id = std::nullopt,
+                                        .request_id = "request_steer",
+                                        .correlation_id = "request_steer",
+                                        .name = "steer_skipped",
+                                        .payload_json =
+                                            "{\"message\":\"Use smaller patch groups\","
+                                            "\"reason\":\"run_completed_before_safe_point\"}"};
+  ava::tui::apply_event_envelope(steering_skip_state, steer_skipped);
+  expect(steering_skip_state.transcript.size() == 1 &&
+             steering_skip_state.transcript.back().text.find(
+                 "steer skipped: run finished before the next safe steering point") != std::string::npos &&
+             steering_skip_state.transcript.back().text.find("Use smaller patch groups") != std::string::npos,
+         "tui EventEnvelope reducer explains skipped steering when the turn finishes before a safe point");
 
   ava::app::EventEnvelope cancel_requested{.schema_version = 1,
                                            .event_id = "event_cancel",
@@ -4635,6 +6127,7 @@ void test_tui_very_long_transcript_performance_budget()
 
 void run_tui_composer_tests()
 {
+  ScopedEnvVar no_color_guard("NO_COLOR", "");
   test_tui_composer_rendering_and_input();
   test_tui_text_model_conversions();
   test_tui_event_state_reduces_runtime_events();

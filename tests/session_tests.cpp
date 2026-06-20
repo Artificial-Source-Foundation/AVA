@@ -386,7 +386,7 @@ void test_session_tree_metadata_entries_validate_and_export()
                                  .type = ava::session::EntryType::SessionMetadata,
                                  .timestamp = "2026-04-27T00:00:00Z",
                                  .data_json = "{\"schema_version\":1,\"name\":\"Investigate auth flow\","
-                                              "\"labels\":[\"bug\",\"auth\"],\"branch_origin\":\"root\","
+                                              "\"labels\":[\"bug\",\"auth\"],\"archived\":true,\"branch_origin\":\"root\","
                                               "\"actor\":\"auditor\"}"},
       ava::session::SessionEntry{.id = "entry_branch_summary",
                                  .parent_id = "entry_metadata",
@@ -403,7 +403,8 @@ void test_session_tree_metadata_entries_validate_and_export()
   auto const validation = ava::session::validate_session_replay(entries);
   expect(validation.ok(), "session tree metadata and branch summary entries are replay-valid");
   auto const metadata = ava::session::session_metadata_from_entries(entries);
-  expect(metadata && metadata->actor == "auditor", "session metadata read-back exposes persisted actor");
+  expect(metadata && metadata->actor == "auditor" && metadata->archived,
+         "session metadata read-back exposes persisted actor and archive state");
 
   auto const metadata_type = ava::session::parse_entry_type("session_metadata");
   auto const summary_type = ava::session::parse_entry_type("branch_summary");
@@ -507,6 +508,13 @@ void test_session_tree_metadata_entries_validate_and_export()
   expect(
       !non_string_origin_validation.ok() && has_replay_issue(non_string_origin_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
       "session replay validator rejects non-string branch_origin values");
+
+  auto non_bool_archived = entries;
+  non_bool_archived[0].data_json = "{\"schema_version\":1,\"name\":\"Named\",\"archived\":\"yes\"}";
+  auto const non_bool_archived_validation = ava::session::validate_session_replay(non_bool_archived);
+  expect(
+      !non_bool_archived_validation.ok() && has_replay_issue(non_bool_archived_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
+      "session replay validator rejects non-boolean archived metadata values");
 
   auto only_empty_origin = entries;
   only_empty_origin[0].data_json = "{\"schema_version\":1,\"branch_origin\":\"\"}";

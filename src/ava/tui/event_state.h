@@ -39,6 +39,7 @@ struct TuiEventState
   std::string pending_reasoning_text;
   bool pending_reasoning_redacted = false;
   std::vector<PendingToolItem> pending_tools;
+  std::vector<ToolPermissionAuditItem> permission_audits;
   std::vector<QueuedMessageItem> queued_messages;
   std::vector<SidebarActivityItem> activity;
   std::vector<SidebarModifiedFile> modified_files;

@@ -87,17 +87,36 @@ std::string permission_dock_summary(PermissionPromptView const& prompt, std::siz
     summary += detail_text;
   }
 
-  if (!prompt.reason.empty())
-  {
-    auto reason = sanitize_terminal_text(prompt.reason);
-    auto candidate = summary + "  " + std::string(kSgrDim) + reason + std::string(kSgrReset);
-    if (terminal_text_columns(candidate) <= width)
-    {
-      summary = candidate;
-    }
-  }
-
   return fit_line_preserving_sgr(summary, width);
+}
+
+std::string permission_metadata_text(PermissionPromptView const& prompt)
+{
+  std::vector<std::string> parts;
+  if (!prompt.risk.empty())
+    parts.push_back("risk " + sanitize_terminal_text(prompt.risk));
+  if (!prompt.reason.empty())
+    parts.push_back("reason " + sanitize_terminal_text(prompt.reason));
+  if (parts.empty())
+    return {};
+
+  std::string text;
+  for (std::size_t index = 0; index < parts.size(); ++index)
+  {
+    if (index > 0)
+      text += "  ";
+    text += parts[index];
+  }
+  return text;
+}
+
+std::string permission_dock_metadata(std::string_view metadata_text, std::size_t width)
+{
+  if (metadata_text.empty())
+    return {};
+
+  auto text = "  " + std::string(metadata_text);
+  return fit_line_preserving_sgr(std::string(kSgrWarning) + text + std::string(kSgrReset), width);
 }
 
 std::string key_pill(std::string_view key)
@@ -105,8 +124,97 @@ std::string key_pill(std::string_view key)
   return std::string(kSgrBold) + std::string(key) + std::string(kSgrReset);
 }
 
-std::string permission_dock_actions(PermissionPromptChoice selected, std::size_t width)
+bool permission_choice_is_allow(PermissionPromptChoice choice)
 {
+  return choice == PermissionPromptChoice::Allow || choice == PermissionPromptChoice::AllowRemember;
+}
+
+bool permission_choice_is_remember(PermissionPromptChoice choice)
+{
+  return choice == PermissionPromptChoice::DenyRemember || choice == PermissionPromptChoice::AllowRemember;
+}
+
+std::vector<PermissionPromptChoice> permission_choices(bool remember_available)
+{
+  if (!remember_available)
+    return {PermissionPromptChoice::Deny, PermissionPromptChoice::Allow};
+  return {PermissionPromptChoice::Deny, PermissionPromptChoice::Allow, PermissionPromptChoice::DenyRemember,
+          PermissionPromptChoice::AllowRemember};
+}
+
+PermissionPromptChoice next_permission_choice(PermissionPromptChoice selected, bool remember_available)
+{
+  auto choices = permission_choices(remember_available);
+  auto const found = std::ranges::find(choices, selected);
+  if (found == choices.end())
+    return choices.front();
+  auto const index = static_cast<std::size_t>(std::distance(choices.begin(), found));
+  return choices[(index + 1) % choices.size()];
+}
+
+PermissionPromptChoice previous_permission_choice(PermissionPromptChoice selected, bool remember_available)
+{
+  auto choices = permission_choices(remember_available);
+  auto const found = std::ranges::find(choices, selected);
+  if (found == choices.end())
+    return choices.front();
+  auto const index = static_cast<std::size_t>(std::distance(choices.begin(), found));
+  return choices[index == 0 ? choices.size() - 1 : index - 1];
+}
+
+PermissionPromptChoice remembered_permission_choice(PermissionPromptChoice selected)
+{
+  return permission_choice_is_allow(selected) ? PermissionPromptChoice::AllowRemember : PermissionPromptChoice::DenyRemember;
+}
+
+PermissionPromptChoice one_shot_permission_choice(PermissionPromptChoice selected)
+{
+  return permission_choice_is_allow(selected) ? PermissionPromptChoice::Allow : PermissionPromptChoice::Deny;
+}
+
+PermissionPromptInputAction resolve_permission_choice_action(PermissionPromptChoice selected)
+{
+  switch (selected)
+  {
+    case PermissionPromptChoice::Allow:
+      return PermissionPromptInputAction::ResolveAllow;
+    case PermissionPromptChoice::Deny:
+      return PermissionPromptInputAction::ResolveDeny;
+    case PermissionPromptChoice::AllowRemember:
+      return PermissionPromptInputAction::ResolveAllowRemember;
+    case PermissionPromptChoice::DenyRemember:
+      return PermissionPromptInputAction::ResolveDenyRemember;
+  }
+  return PermissionPromptInputAction::ResolveDeny;
+}
+
+std::string permission_dock_actions(PermissionPromptChoice selected, bool remember_available, std::size_t width)
+{
+  if (remember_available)
+  {
+    std::array const candidates = {
+        std::string("  ") + render_permission_choice("[Deny]", selected == PermissionPromptChoice::Deny) + "  " +
+            render_permission_choice("[Allow once]", selected == PermissionPromptChoice::Allow) + "  " +
+            render_permission_choice("[Deny rule]", selected == PermissionPromptChoice::DenyRemember) + "  " +
+            render_permission_choice("[Allow rule]", selected == PermissionPromptChoice::AllowRemember),
+        std::string("  ") + render_compact_permission_choice("[D]", selected == PermissionPromptChoice::Deny) + " " +
+            render_compact_permission_choice("[A]", selected == PermissionPromptChoice::Allow) + " " +
+            render_compact_permission_choice("[D rule]", selected == PermissionPromptChoice::DenyRemember) + " " +
+            render_compact_permission_choice("[A rule]", selected == PermissionPromptChoice::AllowRemember),
+        std::string("  ") + render_permission_choice("[D]", selected == PermissionPromptChoice::Deny) + " " +
+            render_permission_choice("[A]", selected == PermissionPromptChoice::Allow) + " " +
+            render_permission_choice("[DR]", selected == PermissionPromptChoice::DenyRemember) + " " +
+            render_permission_choice("[AR]", selected == PermissionPromptChoice::AllowRemember),
+    };
+
+    for (auto const& candidate : candidates)
+    {
+      if (terminal_text_columns(candidate) <= width)
+        return candidate;
+    }
+    return fit_line_preserving_sgr(candidates.back(), width);
+  }
+
   std::array const candidates = {
       std::string("  ") + render_permission_choice("[Deny]", selected == PermissionPromptChoice::Deny) + "  " +
           render_permission_choice("[Allow once]", selected == PermissionPromptChoice::Allow),
@@ -126,8 +234,26 @@ std::string permission_dock_actions(PermissionPromptChoice selected, std::size_t
   return fit_line_preserving_sgr(candidates.back(), width);
 }
 
-std::string permission_dock_keys(std::size_t width)
+std::string permission_dock_keys(bool remember_available, std::size_t width)
 {
+  if (remember_available)
+  {
+    std::array const candidates = {
+        std::string("  ") + key_pill("A") + " allow once  " + key_pill("D") + " deny  " + key_pill("R") + " remember selected  " +
+            key_pill("Enter") + " confirm  " + key_pill("Esc") + " deny",
+        std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " deny  " + key_pill("R") + " remember  " + key_pill("Enter") +
+            " ok  " + key_pill("Esc") + " no",
+        std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=deny " + key_pill("R") + "=remember",
+    };
+
+    for (auto const& candidate : candidates)
+    {
+      if (terminal_text_columns(candidate) <= width)
+        return candidate;
+    }
+    return fit_line_preserving_sgr(candidates.back(), width);
+  }
+
   std::array const candidates = {
       std::string("  ") + key_pill("A") + " allow once  " + key_pill("D") + " deny  " + key_pill("Enter") + " confirm  " + key_pill("Esc") + " deny  " +
           key_pill("Tab/arrows") + " move",
@@ -355,7 +481,7 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
 
   if (max_lines == 1)
   {
-    lines.push_back(permission_dock_actions(prompt.selected_choice, width));
+    lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.remember_available, width));
     return lines;
   }
 
@@ -363,19 +489,35 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
 
   if (max_lines == 2)
   {
-    lines.push_back(permission_dock_actions(prompt.selected_choice, width));
+    lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.remember_available, width));
     return lines;
   }
 
   lines.push_back(permission_dock_summary(prompt, width));
+  auto metadata_text = permission_metadata_text(prompt);
 
   if (max_lines == 3)
   {
-    lines.push_back(permission_dock_actions(prompt.selected_choice, width));
+    lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.remember_available, width));
     return lines;
   }
 
   constexpr std::size_t kReservedActionLines = 2;
+  if (!metadata_text.empty() && !prompt.diff_preview.empty())
+  {
+    auto const inline_metadata =
+        std::string(kSgrWarning) + std::string(metadata_text) + std::string(kSgrReset);
+    auto const candidate = lines.back() + "  " + inline_metadata;
+    lines.back() = fit_line_preserving_sgr(candidate, width);
+    metadata_text.clear();
+  }
+
+  if (auto metadata = permission_dock_metadata(metadata_text, width);
+      !metadata.empty() && max_lines > lines.size() + kReservedActionLines)
+  {
+    lines.push_back(std::move(metadata));
+  }
+
   if (!prompt.diff_preview.empty() && max_lines > lines.size() + kReservedActionLines)
   {
     auto const diff_budget = max_lines - lines.size() - kReservedActionLines;
@@ -384,10 +526,10 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
     lines.insert(lines.end(), diff_lines.begin(), diff_lines.end());
   }
 
-  lines.push_back(permission_dock_actions(prompt.selected_choice, width));
+  lines.push_back(permission_dock_actions(prompt.selected_choice, prompt.remember_available, width));
   if (lines.size() < max_lines)
   {
-    lines.push_back(permission_dock_keys(width));
+    lines.push_back(permission_dock_keys(prompt.remember_available, width));
   }
   return lines;
 }
@@ -518,7 +660,8 @@ std::vector<std::string> render_question_modal(QuestionPromptView const& prompt,
 
 }  // namespace detail
 
-PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event)
+PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event,
+                                                           bool remember_available)
 {
   switch (event.key)
   {
@@ -533,47 +676,85 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
       }
       if (event.character == ' ')
       {
-        return {
-            .selected_choice = selected_choice,
-            .action = selected_choice == PermissionPromptChoice::Allow ? PermissionPromptInputAction::ResolveAllow : PermissionPromptInputAction::ResolveDeny};
+        return {.selected_choice = selected_choice, .action = detail::resolve_permission_choice_action(selected_choice)};
+      }
+      if ((event.character == 'r' || event.character == 'R') && remember_available)
+      {
+        auto const remembered = detail::permission_choice_is_remember(selected_choice)
+                                    ? detail::one_shot_permission_choice(selected_choice)
+                                    : detail::remembered_permission_choice(selected_choice);
+        return {.selected_choice = remembered, .action = PermissionPromptInputAction::Redraw};
       }
       break;
+    case Key::Space:
+      return {.selected_choice = selected_choice, .action = detail::resolve_permission_choice_action(selected_choice)};
     case Key::Enter:
-      return {
-          .selected_choice = selected_choice,
-          .action = selected_choice == PermissionPromptChoice::Allow ? PermissionPromptInputAction::ResolveAllow : PermissionPromptInputAction::ResolveDeny};
+      return {.selected_choice = selected_choice, .action = detail::resolve_permission_choice_action(selected_choice)};
     case Key::Tab:
-      return {.selected_choice = selected_choice == PermissionPromptChoice::Deny ? PermissionPromptChoice::Allow : PermissionPromptChoice::Deny,
+      return {.selected_choice = detail::next_permission_choice(selected_choice, remember_available),
               .action = PermissionPromptInputAction::Redraw};
     case Key::ArrowLeft:
-      return {.selected_choice = PermissionPromptChoice::Deny, .action = PermissionPromptInputAction::Redraw};
+      return {.selected_choice = detail::previous_permission_choice(selected_choice, remember_available),
+              .action = PermissionPromptInputAction::Redraw};
     case Key::ArrowRight:
-      return {.selected_choice = PermissionPromptChoice::Allow, .action = PermissionPromptInputAction::Redraw};
+      return {.selected_choice = detail::next_permission_choice(selected_choice, remember_available),
+              .action = PermissionPromptInputAction::Redraw};
     case Key::Escape:
     case Key::CtrlC:
     case Key::CtrlD:
       return {.selected_choice = PermissionPromptChoice::Deny, .action = PermissionPromptInputAction::ResolveDeny};
     case Key::Backspace:
+    case Key::Delete:
+    case Key::CtrlArrowLeft:
+    case Key::CtrlArrowRight:
+    case Key::AltArrowLeft:
+    case Key::AltArrowRight:
     case Key::CtrlA:
     case Key::CtrlB:
     case Key::CtrlE:
     case Key::CtrlF:
+    case Key::CtrlH:
     case Key::CtrlK:
+    case Key::CtrlL:
+    case Key::CtrlMinus:
+    case Key::CtrlN:
+    case Key::CtrlO:
+    case Key::CtrlP:
+    case Key::CtrlShiftP:
     case Key::CtrlR:
+    case Key::CtrlS:
     case Key::CtrlT:
     case Key::CtrlU:
     case Key::CtrlW:
     case Key::CtrlY:
     case Key::CtrlZ:
+    case Key::CtrlRightBracket:
+    case Key::AltBackspace:
+    case Key::AltArrowUp:
+    case Key::AltB:
+    case Key::AltD:
+    case Key::AltDelete:
+    case Key::AltF:
+    case Key::AltH:
+    case Key::AltJ:
+    case Key::AltK:
+    case Key::AltL:
+    case Key::AltW:
+    case Key::CtrlAltRightBracket:
     case Key::AltY:
     case Key::ArrowUp:
     case Key::ArrowDown:
     case Key::PageUp:
     case Key::PageDown:
+    case Key::Home:
+    case Key::End:
     case Key::MouseWheelUp:
     case Key::MouseWheelDown:
     case Key::MouseLeftClick:
+    case Key::ShiftTab:
     case Key::ShiftEnter:
+    case Key::CtrlEnter:
+    case Key::AltEnter:
     case Key::Unknown:
       break;
   }
@@ -742,6 +923,33 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
         return result;
       }
       break;
+    case Key::Space:
+      if (prompt.searchable)
+      {
+        result.custom_text += ' ';
+        clamp_selection();
+        result.action = QuestionPromptInputAction::Redraw;
+        return result;
+      }
+      if (prompt.allow_custom && !result.custom_text.empty())
+      {
+        result.custom_text.push_back(' ');
+        result.action = QuestionPromptInputAction::Redraw;
+        return result;
+      }
+      if (has_options)
+      {
+        static_cast<void>(activate_option());
+        return result;
+      }
+      if (prompt.allow_custom)
+      {
+        result.custom_text.push_back(' ');
+        result.action = QuestionPromptInputAction::Redraw;
+        return result;
+      }
+      result.action = QuestionPromptInputAction::None;
+      return result;
     case Key::Backspace:
       if ((prompt.allow_custom || prompt.searchable) && !result.custom_text.empty())
       {
@@ -808,26 +1016,57 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
     case Key::CtrlD:
       result.action = QuestionPromptInputAction::Cancel;
       return result;
+    case Key::Delete:
     case Key::CtrlA:
     case Key::CtrlB:
     case Key::CtrlE:
     case Key::CtrlF:
+    case Key::CtrlH:
     case Key::CtrlK:
+    case Key::CtrlL:
+    case Key::CtrlMinus:
+    case Key::CtrlN:
+    case Key::CtrlO:
+    case Key::CtrlP:
+    case Key::CtrlShiftP:
     case Key::CtrlR:
+    case Key::CtrlS:
     case Key::CtrlT:
     case Key::CtrlU:
     case Key::CtrlW:
     case Key::CtrlY:
     case Key::CtrlZ:
+    case Key::CtrlRightBracket:
+    case Key::AltBackspace:
+    case Key::AltArrowUp:
+    case Key::AltB:
+    case Key::AltD:
+    case Key::AltDelete:
+    case Key::AltF:
+    case Key::AltH:
+    case Key::AltJ:
+    case Key::AltK:
+    case Key::AltL:
+    case Key::AltW:
+    case Key::CtrlAltRightBracket:
     case Key::AltY:
     case Key::ArrowLeft:
     case Key::ArrowRight:
+    case Key::CtrlArrowLeft:
+    case Key::CtrlArrowRight:
+    case Key::AltArrowLeft:
+    case Key::AltArrowRight:
     case Key::PageUp:
     case Key::PageDown:
+    case Key::Home:
+    case Key::End:
     case Key::MouseWheelUp:
     case Key::MouseWheelDown:
     case Key::MouseLeftClick:
+    case Key::ShiftTab:
     case Key::ShiftEnter:
+    case Key::CtrlEnter:
+    case Key::AltEnter:
     case Key::Unknown:
       break;
   }

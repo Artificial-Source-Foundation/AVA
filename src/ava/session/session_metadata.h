@@ -19,6 +19,7 @@ struct SessionMetadataView
 {
   std::string name;
   std::vector<std::string> labels;
+  bool archived = false;
   std::string parent_session_id;
   std::string source_session_id;
   std::string branch_from_entry_id;
@@ -30,6 +31,7 @@ struct SessionMetadataUpdate
 {
   std::optional<std::string> name;
   std::optional<std::vector<std::string>> labels;
+  std::optional<bool> archived;
   std::string parent_session_id;
   std::string source_session_id;
   std::string branch_from_entry_id;

@@ -5,10 +5,12 @@
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/runtime.h"
 #include "ava/provider/provider.h"
+#include "ava/session/attachments.h"
 
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace ava::app::rpc {
 
@@ -27,6 +29,7 @@ struct RpcPromptWorkerOptions
   ava::config::XdgPaths paths;
   std::string request_id;
   std::string message;
+  std::vector<ava::session::ImageAttachmentRef> image_attachments;
 };
 
 [[nodiscard]] std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options);

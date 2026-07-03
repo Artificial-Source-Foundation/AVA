@@ -75,12 +75,16 @@ PermissionAuditEvent audit_event(ToolContext const& context, std::string permiss
 
 ava::core::Error permission_denied_error(std::string_view error_message, ava::permissions::PermissionDecision const& decision,
                                          std::filesystem::path const& target_path, std::string_view command, std::string_view resolution_context,
-                                         std::string_view resolution_reason = {})
+                                         std::string_view resolution_reason = {}, std::string_view permission_request_id = {})
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, std::string(error_message));
   error.with_context("action", ava::permissions::to_string(decision.action));
   error.with_context("reason", decision.reason);
   error.with_context("risk", ava::permissions::to_string(decision.risk));
+  if (!permission_request_id.empty())
+  {
+    error.with_context("request_id", std::string(permission_request_id));
+  }
   if (!command.empty())
   {
     error.with_context("command", std::string(command));
@@ -94,6 +98,14 @@ ava::core::Error permission_denied_error(std::string_view error_message, ava::pe
     error.with_context("resolution", std::string(resolution_context));
     if (!resolution_reason.empty())
       error.with_context("resolution_reason", std::string(resolution_reason));
+    if (resolution_context == "no_resolver")
+      error.with_context("headless_hint", "permission ask failed closed because no interactive or RPC resolver was available");
+  }
+  if (!permission_request_id.empty())
+  {
+    auto const id = std::string(permission_request_id);
+    error.with_context("inspect", "/permissions audit show " + id);
+    error.with_context("diagnose", "/permissions diagnose " + id);
   }
   return error;
 }
@@ -253,7 +265,7 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   }
   if (decision.action == ava::permissions::PermissionAction::Deny)
   {
-    return std::unexpected(permission_denied_error(error_message, decision, target_path, command, "policy"));
+    return std::unexpected(permission_denied_error(error_message, decision, target_path, command, "policy", "", permission_request_id));
   }
 
   if (!context.permission_resolver)
@@ -265,7 +277,7 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
     {
       return std::unexpected(std::move(audited.error()));
     }
-    return std::unexpected(permission_denied_error(error_message, decision, target_path, command, "no_resolver"));
+    return std::unexpected(permission_denied_error(error_message, decision, target_path, command, "no_resolver", "", permission_request_id));
   }
 
   auto resolution = context.permission_resolver(ava::permissions::PermissionPrompt{
@@ -305,7 +317,8 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
 
   auto const resolution_context = resolution ? ava::permissions::to_string(*resolution) : std::string("resolver_failed");
   auto const resolution_reason = resolution ? std::string_view(resolution->reason) : std::string_view{};
-  return std::unexpected(permission_denied_error(error_message, decision, target_path, command, resolution_context, resolution_reason));
+  return std::unexpected(permission_denied_error(error_message, decision, target_path, command, resolution_context, resolution_reason,
+                                                permission_request_id));
 }
 
 std::string permission_audit_data_json(PermissionAuditEvent const& event)

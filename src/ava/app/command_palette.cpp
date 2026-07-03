@@ -1,4 +1,6 @@
 #include "ava/app/command_palette.h"
+#include "ava/app/command_models.h"
+#include "ava/app/display_settings.h"
 #include "ava/app/runtime.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/mcp/config.h"
@@ -238,11 +240,16 @@ std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry 
 std::string model_completion_description(ava::config::ModelInfo const& model, bool registered)
 {
   auto description = model.display_name.empty() ? model.model_id : model.display_name;
+  auto const diagnostics = model_configuration_diagnostics(model, registered);
   if (!registered)
   {
     if (!description.empty())
       description += " - ";
     description += "provider unavailable";
+  }
+  else if (!diagnostics.empty())
+  {
+    description += " - diagnostics " + std::to_string(diagnostics.size());
   }
   else if (model.supports_reasoning.value_or(false) && !model.reasoning_levels.empty())
   {
@@ -264,7 +271,7 @@ std::string optional_capability_text(std::string_view label, std::optional<bool>
   return std::string(label) + (*value ? " yes" : " no");
 }
 
-std::string model_selector_detail(ava::config::ModelInfo const& model)
+std::string model_selector_detail(ava::config::ModelInfo const& model, std::vector<std::string> const& diagnostics)
 {
   std::string detail = optional_capability_text("tools", model.supports_tools) + " · " + optional_capability_text("stream", model.supports_streaming) + " · " +
                        optional_capability_text("reasoning", model.supports_reasoning);
@@ -280,6 +287,10 @@ std::string model_selector_detail(ava::config::ModelInfo const& model)
       detail += model.reasoning_levels[index];
     }
   }
+  if (!diagnostics.empty())
+  {
+    detail += " · diagnostics " + std::to_string(diagnostics.size()) + ": " + diagnostics.front();
+  }
   return detail;
 }
 
@@ -288,15 +299,82 @@ tui::SelectListItemView model_selector_item(ava::config::ModelInfo const& model,
   auto const current = model.provider_id == current_model.provider_id && model.model_id == current_model.model_id;
   auto label = model.display_name.empty() ? model.model_id : model.display_name;
   auto description = model.provider_id + "/" + model.model_id;
+  auto const diagnostics = model_configuration_diagnostics(model, registered);
+  if (!diagnostics.empty())
+    description += " · diagnostics " + std::to_string(diagnostics.size());
+  auto badge = std::string{};
+  if (registered && !diagnostics.empty())
+    badge = "diagnostics";
+  else if (model.supports_reasoning.value_or(false))
+    badge = "reasoning";
   return tui::SelectListItemView{.value = description,
                                  .label = std::move(label),
                                  .description = std::move(description),
                                  .group = model.provider_id,
-                                 .detail = model_selector_detail(model),
-                                 .badge = model.supports_reasoning.value_or(false) ? std::string("reasoning") : std::string{},
+                                 .detail = model_selector_detail(model, diagnostics),
+                                 .badge = std::move(badge),
                                  .current = current,
                                  .enabled = registered,
                                  .disabled_reason = registered ? std::string{} : std::string("provider unavailable")};
+}
+
+std::string model_selector_value(ava::config::ModelInfo const& model)
+{
+  return model.provider_id + "/" + model.model_id;
+}
+
+bool scoped_model_enabled(std::optional<std::vector<std::string>> const& scoped_model_cycle, std::string_view value)
+{
+  if (!scoped_model_cycle)
+    return true;
+  return std::ranges::find_if(*scoped_model_cycle, [&](auto const& existing) { return existing == value; }) !=
+         scoped_model_cycle->end();
+}
+
+std::vector<ava::config::ModelInfo> scoped_model_selector_models(
+    std::vector<ava::config::ModelInfo> models, std::optional<std::vector<std::string>> const& scoped_model_cycle)
+{
+  if (!scoped_model_cycle)
+    return models;
+
+  std::vector<ava::config::ModelInfo> sorted;
+  sorted.reserve(models.size());
+  for (auto const& id : *scoped_model_cycle)
+  {
+    auto const found = std::ranges::find_if(models, [&](auto const& model) { return model_selector_value(model) == id; });
+    if (found != models.end())
+      sorted.push_back(*found);
+  }
+  for (auto const& model : models)
+  {
+    auto const value = model_selector_value(model);
+    auto const already_added = std::ranges::find_if(sorted, [&](auto const& existing) {
+      return existing.provider_id == model.provider_id && existing.model_id == model.model_id;
+    });
+    if (already_added == sorted.end())
+      sorted.push_back(model);
+  }
+  return sorted;
+}
+
+tui::SelectListItemView scoped_model_selector_item(ava::config::ModelInfo const& model,
+                                                   ava::config::ModelInfo const& current_model,
+                                                   std::optional<std::vector<std::string>> const& scoped_model_cycle,
+                                                   bool registered)
+{
+  auto item = model_selector_item(model, current_model, registered);
+  auto const value = model_selector_value(model);
+  bool const enabled_for_cycle = scoped_model_enabled(scoped_model_cycle, value);
+  item.value = value;
+  item.description = value + (enabled_for_cycle ? " · enabled" : " · disabled");
+  if (!registered)
+    item.description += " · provider unavailable";
+  item.badge = enabled_for_cycle ? (scoped_model_cycle ? std::string("enabled") : std::string("all-enabled"))
+                                 : std::string("disabled");
+  item.detail += enabled_for_cycle ? " · scoped cycle enabled" : " · scoped cycle disabled";
+  item.enabled = registered;
+  item.disabled_reason = registered ? std::string{} : std::string("provider unavailable");
+  return item;
 }
 
 std::string session_sort_label(SessionSelectorSort sort)
@@ -359,7 +437,7 @@ std::string session_node_description(ava::session::SessionTreeNode const& node, 
   return node.summary.session_id + " · " + path;
 }
 
-std::string session_node_detail(ava::session::SessionTreeNode const& node, bool current_path)
+std::string session_node_detail(ava::session::SessionTreeNode const& node, bool current_path, bool show_label_time)
 {
   auto detail = session_selector_detail(node.summary);
   if (!node.metadata.branch_origin.empty())
@@ -369,7 +447,11 @@ std::string session_node_detail(ava::session::SessionTreeNode const& node, bool 
   if (!node.metadata.branch_from_entry_id.empty())
     detail += " · from " + node.metadata.branch_from_entry_id;
   if (!node.metadata.labels.empty())
+  {
     detail += " · labels " + labels_text(node.metadata.labels);
+    if (show_label_time && !node.metadata.labels_updated.empty())
+      detail += " updated " + node.metadata.labels_updated;
+  }
   if (node.metadata.archived)
     detail += " · archived";
   if (!node.metadata.actor.empty())
@@ -466,7 +548,7 @@ std::vector<std::string> sorted_tree_ids(std::vector<std::string> ids, std::vect
 void append_session_tree_items(tui::SelectListView& view, std::vector<ava::session::SessionTreeNode> const& nodes,
                                std::unordered_map<std::string, std::size_t> const& index_by_id, std::vector<std::string> ids,
                                std::vector<std::string> const& current_path, SessionSelectorSort sort, std::size_t depth,
-                               bool named_only, bool show_paths, bool show_archived)
+                               bool named_only, bool show_paths, bool show_archived, bool show_label_time)
 {
   ids = sorted_tree_ids(std::move(ids), nodes, index_by_id, sort);
   for (auto const& id : ids)
@@ -485,7 +567,7 @@ void append_session_tree_items(tui::SelectListView& view, std::vector<ava::sessi
                                                    .label = session_node_label(node, depth),
                                                    .description = session_node_description(node, show_paths),
                                                    .group = depth == 0 ? std::string("Root sessions") : std::string("Branches"),
-                                                   .detail = session_node_detail(node, current_path_node),
+                                                   .detail = session_node_detail(node, current_path_node, show_label_time),
                                                    .badge = node.current ? std::string("current")
                                                                          : node.metadata.archived ? std::string("archived")
                                                                          : !node.metadata.branch_origin.empty() ? node.metadata.branch_origin
@@ -495,7 +577,7 @@ void append_session_tree_items(tui::SelectListView& view, std::vector<ava::sessi
                                                    .disabled_reason = {}});
     }
     append_session_tree_items(view, nodes, index_by_id, node.children, current_path, sort, depth + (visible ? 1 : 0),
-                              named_only, show_paths, show_archived);
+                              named_only, show_paths, show_archived, show_label_time);
   }
 }
 
@@ -503,14 +585,18 @@ ava::mcp::McpConfigLoadOptions mcp_config_options(RuntimeSession const& session)
 {
   auto options = ava::mcp::default_mcp_config_options(session.workspace_dir);
   options.global_config_file = session.paths.ava_config_dir / "mcp.json";
-  options.project_config_file = session.workspace_dir / ".ava" / "mcp.json";
+  options.project_config_file = project_resources_trusted(session.project_trust)
+                                    ? session.workspace_dir / ".ava" / "mcp.json"
+                                    : std::filesystem::path{};
   return options;
 }
 
 ava::plugin::PluginDiscoveryOptions plugin_discovery_options(RuntimeSession const& session)
 {
   return ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = session.paths.ava_config_dir / "plugins",
-                                             .project_plugins_dir = session.workspace_dir / ".ava" / "plugins"};
+                                             .project_plugins_dir = project_resources_trusted(session.project_trust)
+                                                                        ? session.workspace_dir / ".ava" / "plugins"
+                                                                        : std::filesystem::path{}};
 }
 
 std::filesystem::path plugin_enablement_file(RuntimeSession const& session)
@@ -518,17 +604,24 @@ std::filesystem::path plugin_enablement_file(RuntimeSession const& session)
   return session.paths.ava_state_dir / "plugin-enablement.json";
 }
 
-void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, RuntimeSession const& session)
+void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, RuntimeSession const& session,
+                                      std::vector<CommandHotkey> const& hotkeys)
 {
   auto const path_completions = workspace_path_completions(session);
   if (!path_completions.empty())
   {
     if (auto index = find_item_index(items, "/read"))
       add_path_completions(items[*index], path_completions, 0, false);
+    if (auto index = find_item_index(items, "/attach"))
+      add_path_completions(items[*index], path_completions, 0, false);
     if (auto index = find_item_index(items, "/write"))
       add_path_completions(items[*index], path_completions, 0, true);
     if (auto index = find_item_index(items, "/glob"))
       add_glob_completions(items[*index], path_completions, 0);
+    if (auto index = find_item_index(items, "/find"))
+      add_glob_completions(items[*index], path_completions, 0);
+    if (auto index = find_item_index(items, "/ls"))
+      add_path_completions(items[*index], path_completions, 0, false);
     if (auto index = find_item_index(items, "/grep"))
       add_glob_completions(items[*index], path_completions, 1);
   }
@@ -548,6 +641,52 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
                        registered ? "" : "provider is not registered");
       }
     }
+  }
+
+  if (auto index = find_item_index(items, "/hotkeys"))
+  {
+    auto& item = items[*index];
+    add_completion(item, 0, "init", "Create $XDG_CONFIG_HOME/ava/keybinds.json from AVA defaults", "General");
+    add_completion(item, 0, "import", "Import a validated keybindings JSON file", "General", {}, false);
+    add_completion(item, 0, "set", "Set one keybinding action in keybinds.json", "General");
+    add_completion(item, 0, "reset", "Remove one action override from keybinds.json", "General");
+    add_completion(item, 0, "unset", "Alias for reset", "General");
+    add_completion(item, 0, "validate", "Validate $XDG_CONFIG_HOME/ava/keybinds.json without reloading", "General", {}, false);
+    for (auto const& hotkey : hotkeys)
+    {
+      add_completion(item, 1, hotkey.action, hotkey.description + " (" + hotkey.keys + ")", "Keybindings", {"set"}, true);
+      add_completion(item, 1, hotkey.action, "Remove override for " + hotkey.description, "Keybindings", {"reset"}, true);
+      add_completion(item, 1, hotkey.action, "Remove override for " + hotkey.description, "Keybindings", {"unset"}, true);
+    }
+    add_completion(item, 1, "--force", "Replace an existing keybinds.json starter file", "General", {"init"}, false);
+    add_completion(item, 2, "--force", "Replace the existing keybinds.json with the imported file", "General", {"import"}, false);
+  }
+
+  if (auto index = find_item_index(items, "/theme"))
+  {
+    auto& item = items[*index];
+    add_completion(item, 0, "dark", "Persist the built-in dark palette", "General", {}, false);
+    add_completion(item, 0, "light", "Persist the built-in light palette", "General", {}, false);
+    add_completion(item, 0, "plain", "Persist no-ANSI output", "General", {}, false);
+    add_completion(item, 0, "reset", "Use the built-in default unless an environment override is set", "General", {}, false);
+    for (auto const& theme : available_tui_custom_themes(session.paths))
+    {
+      add_completion(item, 0, theme.name, "Persist custom theme from " + theme.path.string(), "Themes", {}, false);
+    }
+  }
+
+  if (auto index = find_item_index(items, "/reload"))
+  {
+    auto& item = items[*index];
+    add_completion(item, 0, "keybindings", "Reload $XDG_CONFIG_HOME/ava/keybinds.json inside the TUI", "General", {}, false);
+    add_completion(item, 0, "theme", "Reload $XDG_CONFIG_HOME/ava/display.json and repaint the TUI", "General", {}, false);
+  }
+
+  if (auto index = find_item_index(items, "/export"))
+  {
+    auto& item = items[*index];
+    add_completion(item, 0, "markdown", "Return or write a Markdown session export", "Sessions", {}, false);
+    add_completion(item, 0, "html", "Return or write a self-contained HTML session export", "Sessions", {}, false);
   }
 
   auto add_session_completions_for = [&](std::string_view command) {
@@ -596,6 +735,10 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     {
       add_completion(item, 0, subcommand, "Permission rule command", "Safety");
     }
+    add_completion(item, 1, "export", "Render matching permission decisions as a Markdown table", "Safety", {"audit"},
+                   false);
+    add_completion(item, 1, "summary", "Summarize matching permission audit decisions", "Safety", {"audit"}, false);
+    add_completion(item, 1, "show", "Inspect one permission audit entry or request", "Safety", {"audit"}, false);
     for (auto const& value : {"action=allow", "action=deny"})
     {
       add_completion(item, 1, value, "Persistent rule action", "Safety", {"add"});
@@ -659,6 +802,15 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
         }
       }
     }
+  }
+
+  if (auto index = find_item_index(items, "/trust"))
+  {
+    auto& item = items[*index];
+    add_completion(item, 0, "status", "Show current project trust decision", "Trust");
+    add_completion(item, 0, "project", "Trust project resources for this workspace", "Trust");
+    add_completion(item, 0, "deny", "Skip project resources for this workspace", "Trust");
+    add_completion(item, 0, "clear", "Remove this workspace trust decision", "Trust");
   }
 
   auto const diagnostics = ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.workspace_dir);
@@ -765,7 +917,7 @@ std::vector<tui::SlashCommandItem> command_catalog_slash_items(std::vector<Comma
 std::vector<tui::SlashCommandItem> command_catalog_slash_items(RuntimeSession const& session, std::vector<CommandHotkey> const& hotkeys)
 {
   auto items = command_catalog_slash_items(hotkeys);
-  add_backend_argument_completions(items, session);
+  add_backend_argument_completions(items, session, hotkeys);
   return items;
 }
 
@@ -845,6 +997,72 @@ tui::SelectListView model_selector_view(RuntimeSession const& session, std::stri
                              .footer_hint = std::move(footer_hint)};
 }
 
+tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const& registry,
+                                               ava::config::ModelInfo const& current_model,
+                                               std::optional<std::vector<std::string>> const& scoped_model_cycle,
+                                               std::string footer_hint)
+{
+  auto const providers = ava::provider::builtin_provider_registry();
+  auto models = scoped_model_selector_models(effective_models(registry), scoped_model_cycle);
+  auto const enabled_count = scoped_model_cycle ? scoped_model_cycle->size() : models.size();
+
+  tui::SelectListView view{
+      .title = "Scoped model cycle",
+      .subtitle = "Current Ctrl+P cycle scope · " +
+                  (scoped_model_cycle ? std::to_string(enabled_count) + "/" + std::to_string(models.size()) + " enabled"
+                                      : std::string("all configured registered models enabled")),
+      .items = {},
+      .selected_item_index = 0,
+      .query = {},
+      .placeholder = "Search models",
+      .empty_text = "No configured models match",
+      .footer_hint = std::move(footer_hint)};
+  view.items.reserve(models.size());
+
+  bool current_in_catalog = false;
+  for (auto const& model : models)
+  {
+    auto const current = model.provider_id == current_model.provider_id && model.model_id == current_model.model_id;
+    current_in_catalog = current_in_catalog || current;
+    if (current)
+      view.selected_item_index = view.items.size();
+    view.items.push_back(scoped_model_selector_item(model, current_model, scoped_model_cycle, providers.contains(model.provider_id)));
+  }
+
+  if (!current_in_catalog && !current_model.provider_id.empty() && !current_model.model_id.empty())
+  {
+    view.selected_item_index = view.items.size();
+    view.items.push_back(scoped_model_selector_item(current_model, current_model, scoped_model_cycle,
+                                                   providers.contains(current_model.provider_id)));
+  }
+
+  return view;
+}
+
+tui::SelectListView scoped_model_selector_view(RuntimeSession const& session, std::string footer_hint)
+{
+  auto registry = ava::config::load_model_registry(session.paths);
+  if (registry)
+    return scoped_model_selector_view(*registry, session.model, session.scoped_model_cycle, std::move(footer_hint));
+
+  return tui::SelectListView{.title = "Scoped model cycle",
+                             .subtitle = "Unable to load configured models",
+                             .items = {tui::SelectListItemView{.value = {},
+                                                               .label = "Model registry unavailable",
+                                                               .description = registry.error().format(),
+                                                               .group = "Models",
+                                                               .detail = {},
+                                                               .badge = {},
+                                                               .current = false,
+                                                               .enabled = false,
+                                                               .disabled_reason = "model registry failed to load"}},
+                             .selected_item_index = 0,
+                             .query = {},
+                             .placeholder = "Search models",
+                             .empty_text = "No configured models match",
+                             .footer_hint = std::move(footer_hint)};
+}
+
 tui::SelectListView session_selector_view(std::vector<ava::session::SessionSummary> summaries, std::string current_session_id, SessionSelectorSort sort,
                                           std::string footer_hint, bool show_paths)
 {
@@ -904,7 +1122,7 @@ tui::SelectListView session_selector_view(std::vector<ava::session::SessionSumma
 }
 
 tui::SelectListView session_selector_view(ava::session::SessionTreeIndex tree, SessionSelectorSort sort, std::string footer_hint, bool named_only,
-                                          bool show_paths, bool show_archived)
+                                          bool show_paths, bool show_archived, bool show_label_time)
 {
   auto const index_by_id = session_tree_index_by_id(tree.sessions);
   tui::SelectListView view{
@@ -912,7 +1130,8 @@ tui::SelectListView session_selector_view(ava::session::SessionTreeIndex tree, S
       .subtitle = "Session tree from JSONL branch metadata · sort " + session_sort_label(sort) +
                   (named_only ? std::string(" · named only") : std::string(" · all sessions")) +
                   (show_paths ? std::string(" · paths shown") : std::string(" · paths hidden")) +
-                  (show_archived ? std::string(" · archived shown") : std::string(" · archived hidden")),
+                  (show_archived ? std::string(" · archived shown") : std::string(" · archived hidden")) +
+                  (show_label_time ? std::string(" · label time shown") : std::string(" · label time hidden")),
       .items = {},
       .selected_item_index = 0,
       .query = {},
@@ -922,7 +1141,7 @@ tui::SelectListView session_selector_view(ava::session::SessionTreeIndex tree, S
   view.items.reserve(tree.sessions.size() + 1);
 
   append_session_tree_items(view, tree.sessions, index_by_id, tree.roots, tree.current_path, sort, 0, named_only,
-                            show_paths, show_archived);
+                            show_paths, show_archived, show_label_time);
 
   if (!named_only && view.items.empty() && !tree.current_session_id.empty())
   {
@@ -955,11 +1174,11 @@ tui::SelectListView session_selector_view(ava::session::SessionTreeIndex tree, S
 }
 
 tui::SelectListView session_selector_view(RuntimeSession const& session, SessionSelectorSort sort, std::string footer_hint, bool named_only,
-                                          bool show_paths, bool show_archived)
+                                          bool show_paths, bool show_archived, bool show_label_time)
 {
   auto tree = ava::session::build_session_tree(session.workspace_dir, session.paths.sessions_dir, session.store.session_id());
   if (tree)
-    return session_selector_view(std::move(*tree), sort, std::move(footer_hint), named_only, show_paths, show_archived);
+    return session_selector_view(std::move(*tree), sort, std::move(footer_hint), named_only, show_paths, show_archived, show_label_time);
 
   return tui::SelectListView{.title = "Select session",
                              .subtitle = "Unable to load session list",
@@ -977,6 +1196,41 @@ tui::SelectListView session_selector_view(RuntimeSession const& session, Session
                              .placeholder = "Search sessions",
                              .empty_text = "No sessions match",
                              .footer_hint = std::move(footer_hint)};
+}
+
+std::optional<std::string> session_selector_parent_target(ava::session::SessionTreeIndex const& tree,
+                                                          std::string_view session_id)
+{
+  auto const index_by_id = session_tree_index_by_id(tree.sessions);
+  auto const found = index_by_id.find(std::string(session_id));
+  if (found == index_by_id.end())
+    return std::nullopt;
+  auto const& parent_id = tree.sessions[found->second].metadata.parent_session_id;
+  if (parent_id.empty() || index_by_id.find(parent_id) == index_by_id.end())
+    return std::nullopt;
+  return parent_id;
+}
+
+std::optional<std::string> session_selector_child_target(ava::session::SessionTreeIndex const& tree,
+                                                         std::string_view session_id,
+                                                         SessionSelectorSort sort,
+                                                         bool include_archived)
+{
+  auto const index_by_id = session_tree_index_by_id(tree.sessions);
+  auto const found = index_by_id.find(std::string(session_id));
+  if (found == index_by_id.end())
+    return std::nullopt;
+
+  auto children = sorted_tree_ids(tree.sessions[found->second].children, tree.sessions, index_by_id, sort);
+  for (auto const& child_id : children)
+  {
+    auto const child = index_by_id.find(child_id);
+    if (child == index_by_id.end())
+      continue;
+    if (include_archived || !tree.sessions[child->second].metadata.archived)
+      return child_id;
+  }
+  return std::nullopt;
 }
 
 }  // namespace ava::app

@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iterator>
 #include <string_view>
+#include <utility>
 
 namespace ava::tui {
 namespace {
@@ -15,6 +16,10 @@ constexpr std::array kActions = {TuiAction::Submit,
                                  TuiAction::NewLine,
                                  TuiAction::Cancel,
                                  TuiAction::ClearInput,
+                                 TuiAction::CopySelection,
+                                 TuiAction::ExternalEditor,
+                                 TuiAction::Suspend,
+                                 TuiAction::ClipboardPasteImage,
                                  TuiAction::DeleteBackward,
                                  TuiAction::DeleteForward,
                                  TuiAction::HistoryPrev,
@@ -55,13 +60,37 @@ constexpr std::array kActions = {TuiAction::Submit,
                                  TuiAction::Interrupt,
                                  TuiAction::Exit,
                                  TuiAction::VariantCycle,
+                                 TuiAction::ThinkingToggle,
                                  TuiAction::ModelSelect,
                                  TuiAction::ModelCycleForward,
                                  TuiAction::ModelCycleBackward,
+                                 TuiAction::ModelsSave,
+                                 TuiAction::ModelsEnableAll,
+                                 TuiAction::ModelsClearAll,
+                                 TuiAction::ModelsToggleProvider,
+                                 TuiAction::ModelsReorderUp,
+                                 TuiAction::ModelsReorderDown,
+                                 TuiAction::MessageFollowUp,
                                  TuiAction::MessageDequeue,
                                  TuiAction::MessagePrev,
                                  TuiAction::MessageNext,
-                                 TuiAction::JumpToBottom};
+                                 TuiAction::JumpToBottom,
+                                 TuiAction::SessionNew,
+                                 TuiAction::SessionTree,
+                                 TuiAction::SessionFork,
+                                 TuiAction::SessionResume,
+                                 TuiAction::SessionTogglePath,
+                                 TuiAction::SessionToggleSort,
+                                 TuiAction::SessionToggleNamedFilter,
+                                 TuiAction::SessionRename,
+                                 TuiAction::SessionArchive,
+                                 TuiAction::SessionArchiveNoninvasive,
+                                 TuiAction::TreeFoldOrUp,
+                                 TuiAction::TreeUnfoldOrDown,
+                                 TuiAction::TreeEditLabel,
+                                 TuiAction::TreeToggleLabelTimestamp,
+                                 TuiAction::TreeFilterLabeledOnly,
+                                 TuiAction::TreeFilterAll};
 
 struct ActionAlias
 {
@@ -128,6 +157,8 @@ constexpr std::array kActionAliases = {
     ActionAlias{"tui.input.newLine", TuiAction::NewLine, 2},
     ActionAlias{"newLine", TuiAction::NewLine, 1},
     ActionAlias{"tui.input.submit", TuiAction::Submit, 2},
+    ActionAlias{"tui.input.copy", TuiAction::CopySelection, 2},
+    ActionAlias{"copySelection", TuiAction::CopySelection, 1},
     ActionAlias{"tui.input.tab", TuiAction::AutocompleteAccept, 2},
     ActionAlias{"tui.select.up", TuiAction::SelectPrev, 2},
     ActionAlias{"selectUp", TuiAction::SelectPrev, 1},
@@ -143,6 +174,12 @@ constexpr std::array kActionAliases = {
     ActionAlias{"selectCancel", TuiAction::SelectCancel, 1},
     ActionAlias{"app.clear", TuiAction::ClearInput, 2},
     ActionAlias{"clear", TuiAction::ClearInput, 1},
+    ActionAlias{"app.editor.external", TuiAction::ExternalEditor, 2},
+    ActionAlias{"externalEditor", TuiAction::ExternalEditor, 1},
+    ActionAlias{"app.suspend", TuiAction::Suspend, 2},
+    ActionAlias{"suspend", TuiAction::Suspend, 1},
+    ActionAlias{"app.clipboard.pasteImage", TuiAction::ClipboardPasteImage, 2},
+    ActionAlias{"pasteImage", TuiAction::ClipboardPasteImage, 1},
     ActionAlias{"app.interrupt", TuiAction::Interrupt, 2},
     ActionAlias{"app.exit", TuiAction::Exit, 2},
     ActionAlias{"app.tools.expand", TuiAction::DetailsToggle, 2},
@@ -153,10 +190,58 @@ constexpr std::array kActionAliases = {
     ActionAlias{"modelCycleForward", TuiAction::ModelCycleForward, 1},
     ActionAlias{"app.model.cycleBackward", TuiAction::ModelCycleBackward, 2},
     ActionAlias{"modelCycleBackward", TuiAction::ModelCycleBackward, 1},
+    ActionAlias{"app.models.save", TuiAction::ModelsSave, 2},
+    ActionAlias{"modelsSave", TuiAction::ModelsSave, 1},
+    ActionAlias{"app.models.enableAll", TuiAction::ModelsEnableAll, 2},
+    ActionAlias{"modelsEnableAll", TuiAction::ModelsEnableAll, 1},
+    ActionAlias{"app.models.clearAll", TuiAction::ModelsClearAll, 2},
+    ActionAlias{"modelsClearAll", TuiAction::ModelsClearAll, 1},
+    ActionAlias{"app.models.toggleProvider", TuiAction::ModelsToggleProvider, 2},
+    ActionAlias{"modelsToggleProvider", TuiAction::ModelsToggleProvider, 1},
+    ActionAlias{"app.models.reorderUp", TuiAction::ModelsReorderUp, 2},
+    ActionAlias{"modelsReorderUp", TuiAction::ModelsReorderUp, 1},
+    ActionAlias{"app.models.reorderDown", TuiAction::ModelsReorderDown, 2},
+    ActionAlias{"modelsReorderDown", TuiAction::ModelsReorderDown, 1},
     ActionAlias{"app.thinking.cycle", TuiAction::VariantCycle, 2},
     ActionAlias{"thinkingCycle", TuiAction::VariantCycle, 1},
+    ActionAlias{"app.thinking.toggle", TuiAction::ThinkingToggle, 2},
+    ActionAlias{"toggleThinking", TuiAction::ThinkingToggle, 1},
+    ActionAlias{"app.message.followUp", TuiAction::MessageFollowUp, 2},
+    ActionAlias{"followUp", TuiAction::MessageFollowUp, 1},
     ActionAlias{"app.message.dequeue", TuiAction::MessageDequeue, 2},
     ActionAlias{"messageDequeue", TuiAction::MessageDequeue, 1},
+    ActionAlias{"app.session.new", TuiAction::SessionNew, 2},
+    ActionAlias{"sessionNew", TuiAction::SessionNew, 1},
+    ActionAlias{"app.session.tree", TuiAction::SessionTree, 2},
+    ActionAlias{"sessionTree", TuiAction::SessionTree, 1},
+    ActionAlias{"app.session.fork", TuiAction::SessionFork, 2},
+    ActionAlias{"sessionFork", TuiAction::SessionFork, 1},
+    ActionAlias{"app.session.resume", TuiAction::SessionResume, 2},
+    ActionAlias{"sessionResume", TuiAction::SessionResume, 1},
+    ActionAlias{"app.session.togglePath", TuiAction::SessionTogglePath, 2},
+    ActionAlias{"sessionTogglePath", TuiAction::SessionTogglePath, 1},
+    ActionAlias{"app.session.toggleSort", TuiAction::SessionToggleSort, 2},
+    ActionAlias{"sessionToggleSort", TuiAction::SessionToggleSort, 1},
+    ActionAlias{"app.session.toggleNamedFilter", TuiAction::SessionToggleNamedFilter, 2},
+    ActionAlias{"sessionToggleNamedFilter", TuiAction::SessionToggleNamedFilter, 1},
+    ActionAlias{"app.session.rename", TuiAction::SessionRename, 2},
+    ActionAlias{"sessionRename", TuiAction::SessionRename, 1},
+    ActionAlias{"app.session.delete", TuiAction::SessionArchive, 2},
+    ActionAlias{"sessionDelete", TuiAction::SessionArchive, 1},
+    ActionAlias{"app.session.deleteNoninvasive", TuiAction::SessionArchiveNoninvasive, 2},
+    ActionAlias{"sessionDeleteNoninvasive", TuiAction::SessionArchiveNoninvasive, 1},
+    ActionAlias{"app.tree.foldOrUp", TuiAction::TreeFoldOrUp, 2},
+    ActionAlias{"treeFoldOrUp", TuiAction::TreeFoldOrUp, 1},
+    ActionAlias{"app.tree.unfoldOrDown", TuiAction::TreeUnfoldOrDown, 2},
+    ActionAlias{"treeUnfoldOrDown", TuiAction::TreeUnfoldOrDown, 1},
+    ActionAlias{"app.tree.editLabel", TuiAction::TreeEditLabel, 2},
+    ActionAlias{"treeEditLabel", TuiAction::TreeEditLabel, 1},
+    ActionAlias{"app.tree.toggleLabelTimestamp", TuiAction::TreeToggleLabelTimestamp, 2},
+    ActionAlias{"treeToggleLabelTimestamp", TuiAction::TreeToggleLabelTimestamp, 1},
+    ActionAlias{"app.tree.filter.labeledOnly", TuiAction::TreeFilterLabeledOnly, 2},
+    ActionAlias{"treeFilterLabeledOnly", TuiAction::TreeFilterLabeledOnly, 1},
+    ActionAlias{"app.tree.filter.all", TuiAction::TreeFilterAll, 2},
+    ActionAlias{"treeFilterAll", TuiAction::TreeFilterAll, 1},
 };
 
 std::string normalize_token(std::string_view text)
@@ -562,11 +647,33 @@ bool is_select_action(TuiAction action)
     case TuiAction::SelectPageDown:
     case TuiAction::SelectConfirm:
     case TuiAction::SelectCancel:
+    case TuiAction::SessionTogglePath:
+    case TuiAction::SessionToggleSort:
+    case TuiAction::SessionToggleNamedFilter:
+    case TuiAction::SessionRename:
+    case TuiAction::SessionArchive:
+    case TuiAction::SessionArchiveNoninvasive:
+    case TuiAction::TreeFoldOrUp:
+    case TuiAction::TreeUnfoldOrDown:
+    case TuiAction::TreeEditLabel:
+    case TuiAction::TreeToggleLabelTimestamp:
+    case TuiAction::TreeFilterLabeledOnly:
+    case TuiAction::TreeFilterAll:
+    case TuiAction::ModelsSave:
+    case TuiAction::ModelsEnableAll:
+    case TuiAction::ModelsClearAll:
+    case TuiAction::ModelsToggleProvider:
+    case TuiAction::ModelsReorderUp:
+    case TuiAction::ModelsReorderDown:
       return true;
     case TuiAction::Submit:
     case TuiAction::NewLine:
     case TuiAction::Cancel:
     case TuiAction::ClearInput:
+    case TuiAction::CopySelection:
+    case TuiAction::ExternalEditor:
+    case TuiAction::Suspend:
+    case TuiAction::ClipboardPasteImage:
     case TuiAction::DeleteBackward:
     case TuiAction::DeleteForward:
     case TuiAction::HistoryPrev:
@@ -601,13 +708,19 @@ bool is_select_action(TuiAction action)
     case TuiAction::Interrupt:
     case TuiAction::Exit:
     case TuiAction::VariantCycle:
+    case TuiAction::ThinkingToggle:
     case TuiAction::ModelSelect:
     case TuiAction::ModelCycleForward:
     case TuiAction::ModelCycleBackward:
+    case TuiAction::MessageFollowUp:
     case TuiAction::MessageDequeue:
     case TuiAction::MessagePrev:
     case TuiAction::MessageNext:
     case TuiAction::JumpToBottom:
+    case TuiAction::SessionNew:
+    case TuiAction::SessionTree:
+    case TuiAction::SessionFork:
+    case TuiAction::SessionResume:
       return false;
   }
   return false;
@@ -615,7 +728,12 @@ bool is_select_action(TuiAction action)
 
 bool actions_can_share_key(TuiAction lhs, TuiAction rhs)
 {
-  return lhs == rhs || is_select_action(lhs) != is_select_action(rhs);
+  if (lhs == rhs || is_select_action(lhs) != is_select_action(rhs))
+    return true;
+  auto const is_ctrl_c_semantic = [](TuiAction action) {
+    return action == TuiAction::ClearInput || action == TuiAction::CopySelection || action == TuiAction::Interrupt;
+  };
+  return is_ctrl_c_semantic(lhs) && is_ctrl_c_semantic(rhs);
 }
 
 void remove_keys_from_other_actions(TuiKeyBindings& bindings, TuiAction action, std::vector<Key> const& keys_to_remove)
@@ -657,16 +775,236 @@ ava::core::VoidResult validate_user_key_conflicts(std::vector<std::pair<TuiActio
   return {};
 }
 
+std::string_view config_action_id(TuiAction action)
+{
+  switch (action)
+  {
+    case TuiAction::Submit:
+      return "tui.input.submit";
+    case TuiAction::NewLine:
+      return "tui.input.newLine";
+    case TuiAction::Cancel:
+      return "cancel";
+    case TuiAction::ClearInput:
+      return "app.clear";
+    case TuiAction::CopySelection:
+      return "tui.input.copy";
+    case TuiAction::ExternalEditor:
+      return "app.editor.external";
+    case TuiAction::Suspend:
+      return "app.suspend";
+    case TuiAction::ClipboardPasteImage:
+      return "app.clipboard.pasteImage";
+    case TuiAction::DeleteBackward:
+      return "tui.editor.deleteCharBackward";
+    case TuiAction::DeleteForward:
+      return "tui.editor.deleteCharForward";
+    case TuiAction::HistoryPrev:
+      return "history_prev";
+    case TuiAction::HistoryNext:
+      return "history_next";
+    case TuiAction::PalettePrev:
+      return "palette_prev";
+    case TuiAction::PaletteNext:
+      return "palette_next";
+    case TuiAction::SelectPrev:
+      return "tui.select.up";
+    case TuiAction::SelectNext:
+      return "tui.select.down";
+    case TuiAction::SelectPageUp:
+      return "tui.select.pageUp";
+    case TuiAction::SelectPageDown:
+      return "tui.select.pageDown";
+    case TuiAction::SelectConfirm:
+      return "tui.select.confirm";
+    case TuiAction::SelectCancel:
+      return "tui.select.cancel";
+    case TuiAction::CursorLeft:
+      return "tui.editor.cursorLeft";
+    case TuiAction::CursorRight:
+      return "tui.editor.cursorRight";
+    case TuiAction::CursorUp:
+      return "tui.editor.cursorUp";
+    case TuiAction::CursorDown:
+      return "tui.editor.cursorDown";
+    case TuiAction::CursorLineStart:
+      return "tui.editor.cursorLineStart";
+    case TuiAction::CursorLineEnd:
+      return "tui.editor.cursorLineEnd";
+    case TuiAction::CursorWordLeft:
+      return "tui.editor.cursorWordLeft";
+    case TuiAction::CursorWordRight:
+      return "tui.editor.cursorWordRight";
+    case TuiAction::JumpForward:
+      return "tui.editor.jumpForward";
+    case TuiAction::JumpBackward:
+      return "tui.editor.jumpBackward";
+    case TuiAction::DeleteWordBackward:
+      return "tui.editor.deleteWordBackward";
+    case TuiAction::DeleteWordForward:
+      return "tui.editor.deleteWordForward";
+    case TuiAction::DeleteToLineStart:
+      return "tui.editor.deleteToLineStart";
+    case TuiAction::DeleteToLineEnd:
+      return "tui.editor.deleteToLineEnd";
+    case TuiAction::Undo:
+      return "tui.editor.undo";
+    case TuiAction::Redo:
+      return "tui.editor.redo";
+    case TuiAction::Yank:
+      return "tui.editor.yank";
+    case TuiAction::YankPop:
+      return "tui.editor.yankPop";
+    case TuiAction::AutocompleteAccept:
+      return "tui.input.tab";
+    case TuiAction::PromptAllow:
+      return "prompt_allow";
+    case TuiAction::PromptDeny:
+      return "prompt_deny";
+    case TuiAction::DetailsToggle:
+      return "app.tools.expand";
+    case TuiAction::PageUp:
+      return "tui.editor.pageUp";
+    case TuiAction::PageDown:
+      return "tui.editor.pageDown";
+    case TuiAction::ModeToggle:
+      return "mode_toggle";
+    case TuiAction::Interrupt:
+      return "app.interrupt";
+    case TuiAction::Exit:
+      return "app.exit";
+    case TuiAction::VariantCycle:
+      return "app.thinking.cycle";
+    case TuiAction::ThinkingToggle:
+      return "app.thinking.toggle";
+    case TuiAction::ModelSelect:
+      return "app.model.select";
+    case TuiAction::ModelCycleForward:
+      return "app.model.cycleForward";
+    case TuiAction::ModelCycleBackward:
+      return "app.model.cycleBackward";
+    case TuiAction::ModelsSave:
+      return "app.models.save";
+    case TuiAction::ModelsEnableAll:
+      return "app.models.enableAll";
+    case TuiAction::ModelsClearAll:
+      return "app.models.clearAll";
+    case TuiAction::ModelsToggleProvider:
+      return "app.models.toggleProvider";
+    case TuiAction::ModelsReorderUp:
+      return "app.models.reorderUp";
+    case TuiAction::ModelsReorderDown:
+      return "app.models.reorderDown";
+    case TuiAction::MessageFollowUp:
+      return "app.message.followUp";
+    case TuiAction::MessageDequeue:
+      return "app.message.dequeue";
+    case TuiAction::MessagePrev:
+      return "message_prev";
+    case TuiAction::MessageNext:
+      return "message_next";
+    case TuiAction::JumpToBottom:
+      return "jump_to_bottom";
+    case TuiAction::SessionNew:
+      return "app.session.new";
+    case TuiAction::SessionTree:
+      return "app.session.tree";
+    case TuiAction::SessionFork:
+      return "app.session.fork";
+    case TuiAction::SessionResume:
+      return "app.session.resume";
+    case TuiAction::SessionTogglePath:
+      return "app.session.togglePath";
+    case TuiAction::SessionToggleSort:
+      return "app.session.toggleSort";
+    case TuiAction::SessionToggleNamedFilter:
+      return "app.session.toggleNamedFilter";
+    case TuiAction::SessionRename:
+      return "app.session.rename";
+    case TuiAction::SessionArchive:
+      return "app.session.delete";
+    case TuiAction::SessionArchiveNoninvasive:
+      return "app.session.deleteNoninvasive";
+    case TuiAction::TreeFoldOrUp:
+      return "app.tree.foldOrUp";
+    case TuiAction::TreeUnfoldOrDown:
+      return "app.tree.unfoldOrDown";
+    case TuiAction::TreeEditLabel:
+      return "app.tree.editLabel";
+    case TuiAction::TreeToggleLabelTimestamp:
+      return "app.tree.toggleLabelTimestamp";
+    case TuiAction::TreeFilterLabeledOnly:
+      return "app.tree.filter.labeledOnly";
+    case TuiAction::TreeFilterAll:
+      return "app.tree.filter.all";
+  }
+  return "unknown";
+}
+
+void append_json_string(std::string& output, std::string_view text)
+{
+  output.push_back('"');
+  for (char const ch : text)
+  {
+    switch (ch)
+    {
+      case '"':
+        output += "\\\"";
+        break;
+      case '\\':
+        output += "\\\\";
+        break;
+      case '\n':
+        output += "\\n";
+        break;
+      case '\r':
+        output += "\\r";
+        break;
+      case '\t':
+        output += "\\t";
+        break;
+      default:
+        output.push_back(ch);
+        break;
+    }
+  }
+  output.push_back('"');
+}
+
+bool has_same_context_default_key_conflict(TuiKeyBindings const& bindings, TuiAction action, std::vector<Key> const& keys)
+{
+  auto const session_precedence_over_models = [](TuiAction current, TuiAction candidate) {
+    return (current == TuiAction::SessionTogglePath && candidate == TuiAction::ModelsToggleProvider) ||
+           (current == TuiAction::SessionToggleSort && candidate == TuiAction::ModelsSave);
+  };
+  for (auto const key : keys)
+  {
+    for (auto const& [candidate, candidate_keys] : bindings.bindings)
+    {
+      if (candidate == action || actions_can_share_key(action, candidate) ||
+          session_precedence_over_models(action, candidate))
+        continue;
+      if (std::ranges::find(candidate_keys, key) != candidate_keys.end())
+        return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 TuiKeyBindings default_key_bindings()
 {
   return TuiKeyBindings{.bindings = {{TuiAction::Submit, {Key::Enter}},
-                                     {TuiAction::NewLine, {Key::ShiftEnter, Key::CtrlEnter, Key::AltEnter}},
+                                     {TuiAction::NewLine, {Key::ShiftEnter, Key::CtrlEnter}},
                                      {TuiAction::Cancel, {Key::Escape}},
-                                     {TuiAction::ClearInput, {}},
-                                     {TuiAction::DeleteBackward, {Key::Backspace, Key::CtrlH}},
-                                     {TuiAction::DeleteForward, {Key::Delete, Key::CtrlD}},
+                                     {TuiAction::ClearInput, {Key::CtrlC}},
+                                     {TuiAction::CopySelection, {Key::CtrlC}},
+                                     {TuiAction::ExternalEditor, {Key::CtrlG}},
+                                     {TuiAction::Suspend, {Key::CtrlZ}},
+                                     {TuiAction::ClipboardPasteImage, {Key::CtrlV}},
+                                     {TuiAction::DeleteBackward, {Key::Backspace, Key::ShiftBackspace, Key::CtrlH}},
+                                     {TuiAction::DeleteForward, {Key::Delete, Key::ShiftDelete, Key::CtrlD}},
                                      {TuiAction::HistoryPrev, {Key::ArrowUp}},
                                      {TuiAction::HistoryNext, {Key::ArrowDown}},
                                      {TuiAction::PalettePrev, {Key::ArrowUp}},
@@ -691,7 +1029,7 @@ TuiKeyBindings default_key_bindings()
                                      {TuiAction::DeleteWordForward, {Key::AltD, Key::AltDelete}},
                                      {TuiAction::DeleteToLineStart, {Key::CtrlU}},
                                      {TuiAction::DeleteToLineEnd, {Key::CtrlK}},
-                                     {TuiAction::Undo, {Key::CtrlZ, Key::CtrlMinus}},
+                                     {TuiAction::Undo, {Key::CtrlMinus}},
                                      {TuiAction::Redo, {Key::CtrlR}},
                                      {TuiAction::Yank, {Key::CtrlY}},
                                      {TuiAction::YankPop, {Key::AltY}},
@@ -704,14 +1042,38 @@ TuiKeyBindings default_key_bindings()
                                      {TuiAction::ModeToggle, {Key::Tab}},
                                      {TuiAction::Interrupt, {Key::CtrlC}},
                                      {TuiAction::Exit, {Key::CtrlD}},
-                                     {TuiAction::VariantCycle, {Key::ShiftTab, Key::CtrlT}},
+                                     {TuiAction::VariantCycle, {Key::ShiftTab}},
+                                     {TuiAction::ThinkingToggle, {Key::CtrlT}},
                                      {TuiAction::ModelSelect, {Key::CtrlL}},
                                      {TuiAction::ModelCycleForward, {Key::CtrlP}},
                                      {TuiAction::ModelCycleBackward, {Key::CtrlShiftP}},
+                                     {TuiAction::MessageFollowUp, {Key::AltEnter}},
                                      {TuiAction::MessageDequeue, {Key::AltArrowUp}},
                                      {TuiAction::MessagePrev, {}},
                                      {TuiAction::MessageNext, {}},
-                                     {TuiAction::JumpToBottom, {}}}};
+                                     {TuiAction::JumpToBottom, {}},
+                                     {TuiAction::SessionNew, {}},
+                                     {TuiAction::SessionTree, {}},
+                                     {TuiAction::SessionFork, {}},
+                                     {TuiAction::SessionResume, {}},
+                                     {TuiAction::SessionTogglePath, {Key::CtrlP}},
+                                     {TuiAction::SessionToggleSort, {Key::CtrlS, Key::CtrlT}},
+                                     {TuiAction::SessionToggleNamedFilter, {Key::CtrlN}},
+                                     {TuiAction::SessionRename, {Key::CtrlR}},
+                                     {TuiAction::SessionArchive, {Key::CtrlD}},
+                                     {TuiAction::SessionArchiveNoninvasive, {Key::CtrlBackspace}},
+                                     {TuiAction::TreeFoldOrUp, {Key::CtrlArrowLeft, Key::AltArrowLeft}},
+                                     {TuiAction::TreeUnfoldOrDown, {Key::CtrlArrowRight, Key::AltArrowRight}},
+                                     {TuiAction::TreeEditLabel, {Key::ShiftL}},
+                                     {TuiAction::TreeToggleLabelTimestamp, {Key::ShiftT}},
+                                     {TuiAction::TreeFilterLabeledOnly, {}},
+                                     {TuiAction::TreeFilterAll, {}},
+                                     {TuiAction::ModelsSave, {Key::CtrlS}},
+                                     {TuiAction::ModelsEnableAll, {Key::CtrlA}},
+                                     {TuiAction::ModelsClearAll, {Key::CtrlX}},
+                                     {TuiAction::ModelsToggleProvider, {Key::CtrlP}},
+                                     {TuiAction::ModelsReorderUp, {Key::AltArrowUp}},
+                                     {TuiAction::ModelsReorderDown, {Key::AltArrowDown}}}};
 }
 
 std::optional<TuiAction> action_for_key(TuiKeyBindings const& bindings, Key key)
@@ -747,14 +1109,54 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::AltEnter;
   if (normalized == "backspace" || normalized == "bs")
     return Key::Backspace;
+  if (normalized == "shift+backspace" || normalized == "shiftbackspace" || normalized == "shift+bs" ||
+      normalized == "shiftbs")
+    return Key::ShiftBackspace;
+  if (normalized == "ctrl+backspace" || normalized == "ctrlbackspace" || normalized == "ctrl+bs" ||
+      normalized == "ctrlbs" || normalized == "control+backspace" || normalized == "controlbackspace")
+    return Key::CtrlBackspace;
   if (normalized == "delete" || normalized == "del")
     return Key::Delete;
+  if (normalized == "shift+delete" || normalized == "shiftdelete" || normalized == "shift+del" ||
+      normalized == "shiftdel")
+    return Key::ShiftDelete;
+  if (normalized == "insert" || normalized == "ins")
+    return Key::Insert;
+  if (normalized == "clear")
+    return Key::Clear;
   if (normalized == "tab")
     return Key::Tab;
   if (normalized == "space")
     return Key::Space;
+  if (normalized == "ctrl+space" || normalized == "ctrlspace" || normalized == "control+space" ||
+      normalized == "controlspace")
+    return Key::CtrlSpace;
+  if (normalized == "ctrl+0" || normalized == "ctrl0" || normalized == "control+0" || normalized == "control0")
+    return Key::Ctrl0;
+  if (normalized == "ctrl+1" || normalized == "ctrl1" || normalized == "control+1" || normalized == "control1")
+    return Key::Ctrl1;
+  if (normalized == "ctrl+2" || normalized == "ctrl2" || normalized == "control+2" || normalized == "control2")
+    return Key::Ctrl2;
+  if (normalized == "ctrl+3" || normalized == "ctrl3" || normalized == "control+3" || normalized == "control3")
+    return Key::Ctrl3;
+  if (normalized == "ctrl+4" || normalized == "ctrl4" || normalized == "control+4" || normalized == "control4")
+    return Key::Ctrl4;
+  if (normalized == "ctrl+5" || normalized == "ctrl5" || normalized == "control+5" || normalized == "control5")
+    return Key::Ctrl5;
+  if (normalized == "ctrl+6" || normalized == "ctrl6" || normalized == "control+6" || normalized == "control6")
+    return Key::Ctrl6;
+  if (normalized == "ctrl+7" || normalized == "ctrl7" || normalized == "control+7" || normalized == "control7")
+    return Key::Ctrl7;
+  if (normalized == "ctrl+8" || normalized == "ctrl8" || normalized == "control+8" || normalized == "control8")
+    return Key::Ctrl8;
+  if (normalized == "ctrl+9" || normalized == "ctrl9" || normalized == "control+9" || normalized == "control9")
+    return Key::Ctrl9;
   if (normalized == "shift+tab" || normalized == "shifttab" || normalized == "backtab")
     return Key::ShiftTab;
+  if (normalized == "shift+l" || normalized == "shiftl")
+    return Key::ShiftL;
+  if (normalized == "shift+t" || normalized == "shiftt")
+    return Key::ShiftT;
   if (normalized == "esc" || normalized == "escape")
     return Key::Escape;
   if (normalized == "arrowup" || normalized == "up")
@@ -765,6 +1167,44 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::ArrowLeft;
   if (normalized == "arrowright" || normalized == "right")
     return Key::ArrowRight;
+  if (normalized == "shift+arrowup" || normalized == "shiftarrowup" || normalized == "shift+up" ||
+      normalized == "shiftup")
+    return Key::ShiftArrowUp;
+  if (normalized == "shift+arrowdown" || normalized == "shiftarrowdown" || normalized == "shift+down" ||
+      normalized == "shiftdown")
+    return Key::ShiftArrowDown;
+  if (normalized == "shift+arrowleft" || normalized == "shiftarrowleft" || normalized == "shift+left" ||
+      normalized == "shiftleft")
+    return Key::ShiftArrowLeft;
+  if (normalized == "shift+arrowright" || normalized == "shiftarrowright" || normalized == "shift+right" ||
+      normalized == "shiftright")
+    return Key::ShiftArrowRight;
+  if (normalized == "shift+ctrl+arrowleft" || normalized == "ctrl+shift+arrowleft" ||
+      normalized == "shiftctrlarrowleft" || normalized == "ctrlshiftarrowleft" ||
+      normalized == "shift+ctrl+left" || normalized == "ctrl+shift+left" || normalized == "shiftctrlleft" ||
+      normalized == "ctrlshiftleft")
+    return Key::ShiftCtrlArrowLeft;
+  if (normalized == "shift+ctrl+arrowright" || normalized == "ctrl+shift+arrowright" ||
+      normalized == "shiftctrlarrowright" || normalized == "ctrlshiftarrowright" ||
+      normalized == "shift+ctrl+right" || normalized == "ctrl+shift+right" || normalized == "shiftctrlright" ||
+      normalized == "ctrlshiftright")
+    return Key::ShiftCtrlArrowRight;
+  if (normalized == "shift+alt+arrowleft" || normalized == "alt+shift+arrowleft" ||
+      normalized == "shiftaltarrowleft" || normalized == "altshiftarrowleft" || normalized == "shift+alt+left" ||
+      normalized == "alt+shift+left" || normalized == "shiftaltleft" || normalized == "altshiftleft" ||
+      normalized == "shift+meta+arrowleft" || normalized == "meta+shift+arrowleft" ||
+      normalized == "shiftmetaarrowleft" || normalized == "metashiftarrowleft" ||
+      normalized == "shift+meta+left" || normalized == "meta+shift+left" || normalized == "shiftmetaleft" ||
+      normalized == "metashiftleft")
+    return Key::ShiftAltArrowLeft;
+  if (normalized == "shift+alt+arrowright" || normalized == "alt+shift+arrowright" ||
+      normalized == "shiftaltarrowright" || normalized == "altshiftarrowright" ||
+      normalized == "shift+alt+right" || normalized == "alt+shift+right" || normalized == "shiftaltright" ||
+      normalized == "altshiftright" || normalized == "shift+meta+arrowright" ||
+      normalized == "meta+shift+arrowright" || normalized == "shiftmetaarrowright" ||
+      normalized == "metashiftarrowright" || normalized == "shift+meta+right" ||
+      normalized == "meta+shift+right" || normalized == "shiftmetaright" || normalized == "metashiftright")
+    return Key::ShiftAltArrowRight;
   if (normalized == "ctrl+arrowleft" || normalized == "ctrlarrowleft" || normalized == "ctrl+left" ||
       normalized == "ctrlleft")
     return Key::CtrlArrowLeft;
@@ -783,6 +1223,10 @@ std::optional<Key> parse_key_name(std::string_view text)
       normalized == "altup" || normalized == "meta+arrowup" || normalized == "metaarrowup" ||
       normalized == "meta+up" || normalized == "metaup")
     return Key::AltArrowUp;
+  if (normalized == "alt+arrowdown" || normalized == "altarrowdown" || normalized == "alt+down" ||
+      normalized == "altdown" || normalized == "meta+arrowdown" || normalized == "metaarrowdown" ||
+      normalized == "meta+down" || normalized == "metadown")
+    return Key::AltArrowDown;
   if (normalized == "pageup" || normalized == "pgup")
     return Key::PageUp;
   if (normalized == "pagedown" || normalized == "pgdown")
@@ -791,6 +1235,24 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::Home;
   if (normalized == "end")
     return Key::End;
+  if (normalized == "ctrl+home" || normalized == "ctrlhome" || normalized == "control+home" ||
+      normalized == "controlhome")
+    return Key::CtrlHome;
+  if (normalized == "ctrl+end" || normalized == "ctrlend" || normalized == "control+end" ||
+      normalized == "controlend")
+    return Key::CtrlEnd;
+  if (normalized == "shift+home" || normalized == "shifthome")
+    return Key::ShiftHome;
+  if (normalized == "shift+end" || normalized == "shiftend")
+    return Key::ShiftEnd;
+  if (normalized == "shift+ctrl+home" || normalized == "ctrl+shift+home" || normalized == "shiftctrlhome" ||
+      normalized == "ctrlshifthome" || normalized == "shift+control+home" || normalized == "control+shift+home" ||
+      normalized == "shiftcontrolhome" || normalized == "controlshifthome")
+    return Key::ShiftCtrlHome;
+  if (normalized == "shift+ctrl+end" || normalized == "ctrl+shift+end" || normalized == "shiftctrlend" ||
+      normalized == "ctrlshiftend" || normalized == "shift+control+end" || normalized == "control+shift+end" ||
+      normalized == "shiftcontrolend" || normalized == "controlshiftend")
+    return Key::ShiftCtrlEnd;
   if (normalized == "ctrl+a" || normalized == "ctrla")
     return Key::CtrlA;
   if (normalized == "ctrl+b" || normalized == "ctrlb")
@@ -803,6 +1265,8 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::CtrlE;
   if (normalized == "ctrl+f" || normalized == "ctrlf")
     return Key::CtrlF;
+  if (normalized == "ctrl+g" || normalized == "ctrlg")
+    return Key::CtrlG;
   if (normalized == "ctrl+h" || normalized == "ctrlh")
     return Key::CtrlH;
   if (normalized == "ctrl+k" || normalized == "ctrlk")
@@ -811,6 +1275,8 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::CtrlL;
   if (normalized == "ctrl+" || normalized == "ctrl+minus" || normalized == "ctrlminus" || normalized == "ctrlhyphen")
     return Key::CtrlMinus;
+  if (normalized == "ctrl+/" || normalized == "ctrl/" || normalized == "ctrl+slash" || normalized == "ctrlslash")
+    return Key::CtrlSlash;
   if (normalized == "ctrl+n" || normalized == "ctrln")
     return Key::CtrlN;
   if (normalized == "ctrl+o" || normalized == "ctrlo")
@@ -831,12 +1297,40 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::CtrlT;
   if (normalized == "ctrl+u" || normalized == "ctrlu")
     return Key::CtrlU;
+  if (normalized == "ctrl+v" || normalized == "ctrlv")
+    return Key::CtrlV;
   if (normalized == "ctrl+w" || normalized == "ctrlw")
     return Key::CtrlW;
+  if (normalized == "ctrl+x" || normalized == "ctrlx")
+    return Key::CtrlX;
   if (normalized == "ctrl+y" || normalized == "ctrly")
     return Key::CtrlY;
   if (normalized == "ctrl+z" || normalized == "ctrlz")
     return Key::CtrlZ;
+  if (normalized == "f1")
+    return Key::F1;
+  if (normalized == "f2")
+    return Key::F2;
+  if (normalized == "f3")
+    return Key::F3;
+  if (normalized == "f4")
+    return Key::F4;
+  if (normalized == "f5")
+    return Key::F5;
+  if (normalized == "f6")
+    return Key::F6;
+  if (normalized == "f7")
+    return Key::F7;
+  if (normalized == "f8")
+    return Key::F8;
+  if (normalized == "f9")
+    return Key::F9;
+  if (normalized == "f10")
+    return Key::F10;
+  if (normalized == "f11")
+    return Key::F11;
+  if (normalized == "f12")
+    return Key::F12;
   if (normalized == "alt+backspace" || normalized == "altbackspace" || normalized == "meta+backspace" ||
       normalized == "metabackspace")
     return Key::AltBackspace;
@@ -876,14 +1370,50 @@ std::string key_display(Key key)
       return "Enter";
     case Key::Backspace:
       return "Backspace";
+    case Key::ShiftBackspace:
+      return "Shift+Backspace";
+    case Key::CtrlBackspace:
+      return "Ctrl+Backspace";
     case Key::Delete:
       return "Delete";
+    case Key::ShiftDelete:
+      return "Shift+Delete";
+    case Key::Insert:
+      return "Insert";
+    case Key::Clear:
+      return "Clear";
     case Key::Tab:
       return "Tab";
     case Key::Space:
       return "Space";
+    case Key::CtrlSpace:
+      return "Ctrl+Space";
+    case Key::Ctrl0:
+      return "Ctrl+0";
+    case Key::Ctrl1:
+      return "Ctrl+1";
+    case Key::Ctrl2:
+      return "Ctrl+2";
+    case Key::Ctrl3:
+      return "Ctrl+3";
+    case Key::Ctrl4:
+      return "Ctrl+4";
+    case Key::Ctrl5:
+      return "Ctrl+5";
+    case Key::Ctrl6:
+      return "Ctrl+6";
+    case Key::Ctrl7:
+      return "Ctrl+7";
+    case Key::Ctrl8:
+      return "Ctrl+8";
+    case Key::Ctrl9:
+      return "Ctrl+9";
     case Key::ShiftTab:
       return "Shift+Tab";
+    case Key::ShiftL:
+      return "Shift+L";
+    case Key::ShiftT:
+      return "Shift+T";
     case Key::Escape:
       return "Esc";
     case Key::ArrowUp:
@@ -894,12 +1424,30 @@ std::string key_display(Key key)
       return "Left";
     case Key::ArrowRight:
       return "Right";
+    case Key::ShiftArrowUp:
+      return "Shift+Up";
+    case Key::ShiftArrowDown:
+      return "Shift+Down";
+    case Key::ShiftArrowLeft:
+      return "Shift+Left";
+    case Key::ShiftArrowRight:
+      return "Shift+Right";
+    case Key::ShiftCtrlArrowLeft:
+      return "Shift+Ctrl+Left";
+    case Key::ShiftCtrlArrowRight:
+      return "Shift+Ctrl+Right";
+    case Key::ShiftAltArrowLeft:
+      return "Shift+Alt+Left";
+    case Key::ShiftAltArrowRight:
+      return "Shift+Alt+Right";
     case Key::CtrlArrowLeft:
       return "Ctrl+Left";
     case Key::CtrlArrowRight:
       return "Ctrl+Right";
     case Key::AltArrowUp:
       return "Alt+Up";
+    case Key::AltArrowDown:
+      return "Alt+Down";
     case Key::AltArrowLeft:
       return "Alt+Left";
     case Key::AltArrowRight:
@@ -912,6 +1460,18 @@ std::string key_display(Key key)
       return "Home";
     case Key::End:
       return "End";
+    case Key::CtrlHome:
+      return "Ctrl+Home";
+    case Key::CtrlEnd:
+      return "Ctrl+End";
+    case Key::ShiftHome:
+      return "Shift+Home";
+    case Key::ShiftEnd:
+      return "Shift+End";
+    case Key::ShiftCtrlHome:
+      return "Shift+Ctrl+Home";
+    case Key::ShiftCtrlEnd:
+      return "Shift+Ctrl+End";
     case Key::ShiftEnter:
       return "Shift+Enter";
     case Key::CtrlEnter:
@@ -930,6 +1490,8 @@ std::string key_display(Key key)
       return "Ctrl+E";
     case Key::CtrlF:
       return "Ctrl+F";
+    case Key::CtrlG:
+      return "Ctrl+G";
     case Key::CtrlH:
       return "Ctrl+H";
     case Key::CtrlK:
@@ -938,6 +1500,8 @@ std::string key_display(Key key)
       return "Ctrl+L";
     case Key::CtrlMinus:
       return "Ctrl+-";
+    case Key::CtrlSlash:
+      return "Ctrl+/";
     case Key::CtrlN:
       return "Ctrl+N";
     case Key::CtrlO:
@@ -956,12 +1520,40 @@ std::string key_display(Key key)
       return "Ctrl+T";
     case Key::CtrlU:
       return "Ctrl+U";
+    case Key::CtrlV:
+      return "Ctrl+V";
     case Key::CtrlW:
       return "Ctrl+W";
+    case Key::CtrlX:
+      return "Ctrl+X";
     case Key::CtrlY:
       return "Ctrl+Y";
     case Key::CtrlZ:
       return "Ctrl+Z";
+    case Key::F1:
+      return "F1";
+    case Key::F2:
+      return "F2";
+    case Key::F3:
+      return "F3";
+    case Key::F4:
+      return "F4";
+    case Key::F5:
+      return "F5";
+    case Key::F6:
+      return "F6";
+    case Key::F7:
+      return "F7";
+    case Key::F8:
+      return "F8";
+    case Key::F9:
+      return "F9";
+    case Key::F10:
+      return "F10";
+    case Key::F11:
+      return "F11";
+    case Key::F12:
+      return "F12";
     case Key::AltBackspace:
       return "Alt+Backspace";
     case Key::AltB:
@@ -992,6 +1584,10 @@ std::string key_display(Key key)
       return "MouseWheelDown";
     case Key::MouseLeftClick:
       return "MouseLeftClick";
+    case Key::MouseLeftDrag:
+      return "MouseLeftDrag";
+    case Key::MouseLeftRelease:
+      return "MouseLeftRelease";
     case Key::Character:
     case Key::Unknown:
       return "";
@@ -1011,6 +1607,14 @@ std::string action_name(TuiAction action)
       return "cancel";
     case TuiAction::ClearInput:
       return "clear_input";
+    case TuiAction::CopySelection:
+      return "copy_selection";
+    case TuiAction::ExternalEditor:
+      return "external_editor";
+    case TuiAction::Suspend:
+      return "suspend";
+    case TuiAction::ClipboardPasteImage:
+      return "clipboard_paste_image";
     case TuiAction::DeleteBackward:
       return "delete_backward";
     case TuiAction::DeleteForward:
@@ -1091,12 +1695,28 @@ std::string action_name(TuiAction action)
       return "exit";
     case TuiAction::VariantCycle:
       return "variant_cycle";
+    case TuiAction::ThinkingToggle:
+      return "thinking_toggle";
     case TuiAction::ModelSelect:
       return "model_select";
     case TuiAction::ModelCycleForward:
       return "model_cycle_forward";
     case TuiAction::ModelCycleBackward:
       return "model_cycle_backward";
+    case TuiAction::ModelsSave:
+      return "models_save";
+    case TuiAction::ModelsEnableAll:
+      return "models_enable_all";
+    case TuiAction::ModelsClearAll:
+      return "models_clear_all";
+    case TuiAction::ModelsToggleProvider:
+      return "models_toggle_provider";
+    case TuiAction::ModelsReorderUp:
+      return "models_reorder_up";
+    case TuiAction::ModelsReorderDown:
+      return "models_reorder_down";
+    case TuiAction::MessageFollowUp:
+      return "message_follow_up";
     case TuiAction::MessageDequeue:
       return "message_dequeue";
     case TuiAction::MessagePrev:
@@ -1105,8 +1725,53 @@ std::string action_name(TuiAction action)
       return "message_next";
     case TuiAction::JumpToBottom:
       return "jump_to_bottom";
+    case TuiAction::SessionNew:
+      return "session_new";
+    case TuiAction::SessionTree:
+      return "session_tree";
+    case TuiAction::SessionFork:
+      return "session_fork";
+    case TuiAction::SessionResume:
+      return "session_resume";
+    case TuiAction::SessionTogglePath:
+      return "session_toggle_path";
+    case TuiAction::SessionToggleSort:
+      return "session_toggle_sort";
+    case TuiAction::SessionToggleNamedFilter:
+      return "session_toggle_named_filter";
+    case TuiAction::SessionRename:
+      return "session_rename";
+    case TuiAction::SessionArchive:
+      return "session_archive";
+    case TuiAction::SessionArchiveNoninvasive:
+      return "session_archive_noninvasive";
+    case TuiAction::TreeFoldOrUp:
+      return "tree_fold_or_up";
+    case TuiAction::TreeUnfoldOrDown:
+      return "tree_unfold_or_down";
+    case TuiAction::TreeEditLabel:
+      return "tree_edit_label";
+    case TuiAction::TreeToggleLabelTimestamp:
+      return "tree_toggle_label_timestamp";
+    case TuiAction::TreeFilterLabeledOnly:
+      return "tree_filter_labeled_only";
+    case TuiAction::TreeFilterAll:
+      return "tree_filter_all";
   }
   return "unknown";
+}
+
+std::optional<TuiAction> key_binding_action_from_name(std::string_view name)
+{
+  auto const resolved = action_from_name(name);
+  if (!resolved)
+    return std::nullopt;
+  return resolved->action;
+}
+
+std::string key_binding_config_action_id(TuiAction action)
+{
+  return std::string(config_action_id(action));
 }
 
 std::string action_description(TuiAction action)
@@ -1121,6 +1786,14 @@ std::string action_description(TuiAction action)
       return "Dismiss slash suggestions or clear composer input";
     case TuiAction::ClearInput:
       return "Clear the current composer input";
+    case TuiAction::CopySelection:
+      return "Copy the selected composer text";
+    case TuiAction::ExternalEditor:
+      return "Open the current draft in $VISUAL or $EDITOR";
+    case TuiAction::Suspend:
+      return "Suspend AVA to the background until resumed by the shell";
+    case TuiAction::ClipboardPasteImage:
+      return "Paste an image from the system clipboard as a pending attachment";
     case TuiAction::DeleteBackward:
       return "Delete the previous character";
     case TuiAction::DeleteForward:
@@ -1200,13 +1873,29 @@ std::string action_description(TuiAction action)
     case TuiAction::Exit:
       return "Exit the TUI when the composer is empty";
     case TuiAction::VariantCycle:
-      return "Cycle model/variant choices when that backend support exists";
+      return "Cycle model reasoning choices when backend support exists";
+    case TuiAction::ThinkingToggle:
+      return "Toggle thinking block visibility without changing provider reasoning mode";
     case TuiAction::ModelSelect:
       return "Open the model selector when available";
     case TuiAction::ModelCycleForward:
       return "Cycle to the next configured model";
     case TuiAction::ModelCycleBackward:
       return "Cycle to the previous configured model when terminal input reports Shift+Ctrl+P";
+    case TuiAction::ModelsSave:
+      return "Save the scoped model-cycle selection when persistent model settings support exists";
+    case TuiAction::ModelsEnableAll:
+      return "Enable all visible models in the scoped model-cycle selector";
+    case TuiAction::ModelsClearAll:
+      return "Clear all visible models in the scoped model-cycle selector";
+    case TuiAction::ModelsToggleProvider:
+      return "Toggle the highlighted provider in the scoped model-cycle selector";
+    case TuiAction::ModelsReorderUp:
+      return "Move the highlighted enabled model earlier in the scoped cycle order";
+    case TuiAction::ModelsReorderDown:
+      return "Move the highlighted enabled model later in the scoped cycle order";
+    case TuiAction::MessageFollowUp:
+      return "Queue a follow-up message during an active run, or submit normally when idle";
     case TuiAction::MessageDequeue:
       return "Restore the latest queued active-run message to the composer";
     case TuiAction::MessagePrev:
@@ -1215,6 +1904,38 @@ std::string action_description(TuiAction action)
       return "Jump to the next transcript message boundary";
     case TuiAction::JumpToBottom:
       return "Return the transcript to the live tail";
+    case TuiAction::SessionNew:
+      return "Start a new session through the existing /new workflow";
+    case TuiAction::SessionTree:
+      return "Open the session tree selector";
+    case TuiAction::SessionFork:
+      return "Fork the current session through the existing /fork workflow";
+    case TuiAction::SessionResume:
+      return "Open the session resume selector";
+    case TuiAction::SessionTogglePath:
+      return "Toggle path display in the session selector";
+    case TuiAction::SessionToggleSort:
+      return "Cycle sort mode in the session selector";
+    case TuiAction::SessionToggleNamedFilter:
+      return "Toggle named-session filtering in the session selector";
+    case TuiAction::SessionRename:
+      return "Draft a rename command for the highlighted session";
+    case TuiAction::SessionArchive:
+      return "Archive or restore the highlighted session after confirmation";
+    case TuiAction::SessionArchiveNoninvasive:
+      return "Archive or restore the highlighted session when the selector search is empty";
+    case TuiAction::TreeFoldOrUp:
+      return "Navigate to the highlighted session's parent branch in the selector";
+    case TuiAction::TreeUnfoldOrDown:
+      return "Navigate to the highlighted session's first child branch in the selector";
+    case TuiAction::TreeEditLabel:
+      return "Draft a labels command for the highlighted session";
+    case TuiAction::TreeToggleLabelTimestamp:
+      return "Toggle label timestamps in the session tree selector";
+    case TuiAction::TreeFilterLabeledOnly:
+      return "Toggle named/labeled session filtering in the session selector";
+    case TuiAction::TreeFilterAll:
+      return "Toggle archived-session visibility in the session selector";
   }
   return "Unknown action";
 }
@@ -1253,6 +1974,45 @@ std::vector<TuiKeyBindingHelpItem> key_binding_help_items(TuiKeyBindings const& 
     items.push_back(TuiKeyBindingHelpItem{.action = action_name(action), .description = action_description(action), .keys = std::move(keys_text)});
   }
   return items;
+}
+
+std::string default_key_bindings_config_json()
+{
+  auto const defaults = default_key_bindings();
+  std::string output = "{\n";
+  bool first_action = true;
+  for (auto const& [action, keys] : defaults.bindings)
+  {
+    if (has_same_context_default_key_conflict(defaults, action, keys))
+      continue;
+
+    std::vector<std::string> displays;
+    displays.reserve(keys.size());
+    for (auto const key : keys)
+    {
+      auto display = key_display(key);
+      if (!display.empty())
+        displays.push_back(std::move(display));
+    }
+    if (displays.empty())
+      continue;
+
+    if (!first_action)
+      output += ",\n";
+    first_action = false;
+    output += "  ";
+    append_json_string(output, config_action_id(action));
+    output += ": [";
+    for (std::size_t index = 0; index < displays.size(); ++index)
+    {
+      if (index > 0)
+        output += ", ";
+      append_json_string(output, displays[index]);
+    }
+    output += "]";
+  }
+  output += "\n}\n";
+  return output;
 }
 
 ava::core::Result<TuiKeyBindings> parse_key_bindings_json(std::string_view json)

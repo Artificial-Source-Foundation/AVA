@@ -32,7 +32,9 @@ std::string plugin_display_path(std::filesystem::path const& path, RuntimeSessio
 ava::plugin::PluginDiscoveryOptions plugin_discovery_options(RuntimeSession const& session)
 {
   return ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = session.paths.ava_config_dir / "plugins",
-                                             .project_plugins_dir = session.workspace_dir / ".ava" / "plugins"};
+                                             .project_plugins_dir = project_resources_trusted(session.project_trust)
+                                                                        ? session.workspace_dir / ".ava" / "plugins"
+                                                                        : std::filesystem::path{}};
 }
 
 std::filesystem::path plugin_enablement_file(RuntimeSession const& session)

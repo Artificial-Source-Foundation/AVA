@@ -57,6 +57,7 @@ class ToolRegistry
 {
  public:
   [[nodiscard]] ava::core::VoidResult register_tool(RegisteredTool tool);
+  void apply_visibility_filter(ava::tools::ToolContext const& context);
   [[nodiscard]] RegisteredTool const* find(std::string_view name) const noexcept;
   [[nodiscard]] std::span<RegisteredTool const> entries() const noexcept;
   [[nodiscard]] std::vector<ToolMetadata> metadata() const;

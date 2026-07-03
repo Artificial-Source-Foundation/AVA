@@ -286,6 +286,50 @@ void skip_json_ws(std::string_view text, std::size_t& index)
   while (index < text.size() && std::isspace(static_cast<unsigned char>(text[index])) != 0) ++index;
 }
 
+std::optional<std::size_t> balanced_json_value_end(std::string_view text, std::size_t start, char open, char close)
+{
+  if (start >= text.size() || text[start] != open)
+    return std::nullopt;
+  bool in_string = false;
+  bool escaped = false;
+  int depth = 0;
+  for (std::size_t index = start; index < text.size(); ++index)
+  {
+    char const ch = text[index];
+    if (escaped)
+    {
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\' && in_string)
+    {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"')
+    {
+      in_string = !in_string;
+      continue;
+    }
+    if (in_string)
+      continue;
+    if (ch == open)
+    {
+      ++depth;
+      continue;
+    }
+    if (ch == close)
+    {
+      --depth;
+      if (depth == 0)
+        return index + 1;
+      if (depth < 0)
+        return std::nullopt;
+    }
+  }
+  return std::nullopt;
+}
+
 ava::core::Result<std::optional<std::vector<std::string>>> optional_string_array_field(std::string_view object, std::string_view key)
 {
   auto const start = ava::core::json::field_value_start(object, key);
@@ -368,6 +412,113 @@ ava::core::Result<std::optional<std::vector<std::string>>> optional_string_array
     return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of strings"));
   }
   return std::optional<std::vector<std::string>>{std::move(values)};
+}
+
+ava::core::Result<RpcImageUpload> parse_rpc_image_upload(std::string_view image_object)
+{
+  auto type = exact_optional_string_field(image_object, "type");
+  if (!type)
+    return std::unexpected(std::move(type.error()));
+  if (!*type || (*type)->empty())
+    return std::unexpected(invalid_rpc("RPC images entries require type"));
+  if (**type != "image")
+    return std::unexpected(invalid_rpc("RPC images entries must have type image"));
+  if (auto valid = validate_optional_rpc_text(*type, "images.type", 16); !valid)
+    return std::unexpected(std::move(valid.error()));
+
+  auto data = exact_optional_string_field(image_object, "data");
+  if (!data)
+    return std::unexpected(std::move(data.error()));
+  if (!*data || (*data)->empty())
+    return std::unexpected(invalid_rpc("RPC images entries require data"));
+  if (auto valid = validate_optional_rpc_text(*data, "images.data", kMaxRpcPromptImageDataBase64Bytes); !valid)
+    return std::unexpected(std::move(valid.error()));
+
+  auto camel_mime_type = exact_optional_string_field(image_object, "mimeType");
+  if (!camel_mime_type)
+    return std::unexpected(std::move(camel_mime_type.error()));
+  auto snake_mime_type = exact_optional_string_field(image_object, "mime_type");
+  if (!snake_mime_type)
+    return std::unexpected(std::move(snake_mime_type.error()));
+  if (!*camel_mime_type && !*snake_mime_type)
+    return std::unexpected(invalid_rpc("RPC images entries require mimeType"));
+  if (*camel_mime_type && *snake_mime_type && **camel_mime_type != **snake_mime_type)
+    return std::unexpected(invalid_rpc("RPC images mimeType aliases must match"));
+  auto mime_type = *camel_mime_type ? std::move(**camel_mime_type) : std::move(**snake_mime_type);
+  if (mime_type.empty())
+    return std::unexpected(invalid_rpc("RPC images entries require mimeType"));
+  auto optional_mime_type = std::optional<std::string>{mime_type};
+  if (auto valid = validate_optional_rpc_text(optional_mime_type, "images.mimeType", kMaxRpcPromptImageMimeTypeBytes); !valid)
+    return std::unexpected(std::move(valid.error()));
+
+  return RpcImageUpload{.type = std::move(**type),
+                        .data_base64 = std::move(**data),
+                        .mime_type = std::move(mime_type)};
+}
+
+ava::core::Result<std::optional<std::vector<RpcImageUpload>>> optional_image_upload_array_field(std::string_view object,
+                                                                                                std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return std::optional<std::vector<RpcImageUpload>>{};
+  auto const field_name = std::string(key);
+  if (*start >= object.size() || object[*start] != '[')
+  {
+    return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of image objects"));
+  }
+  auto const end = balanced_json_value_end(object, *start, '[', ']');
+  if (!end)
+  {
+    return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of image objects"));
+  }
+
+  std::size_t index = *start + 1;
+  std::vector<RpcImageUpload> values;
+  skip_json_ws(object, index);
+  if (index < object.size() && index + 1 != *end)
+  {
+    while (index < object.size())
+    {
+      if (index + 1 >= *end || object[index] != '{')
+      {
+        return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of image objects"));
+      }
+      auto const item_end = balanced_json_value_end(object, index, '{', '}');
+      if (!item_end || *item_end > *end - 1)
+      {
+        return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of image objects"));
+      }
+      auto item = parse_rpc_image_upload(object.substr(index, *item_end - index));
+      if (!item)
+        return std::unexpected(std::move(item.error()));
+      values.push_back(std::move(*item));
+
+      index = *item_end;
+      skip_json_ws(object, index);
+      if (index >= object.size())
+      {
+        return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of image objects"));
+      }
+      if (object[index] == ',')
+      {
+        ++index;
+        skip_json_ws(object, index);
+        continue;
+      }
+      if (object[index] == ']')
+        break;
+      return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of image objects"));
+    }
+  }
+
+  index = *end;
+  skip_json_ws(object, index);
+  if (index < object.size() && object[index] != ',' && object[index] != '}')
+  {
+    return std::unexpected(invalid_rpc("RPC " + field_name + " must be an array of image objects"));
+  }
+  return std::optional<std::vector<RpcImageUpload>>{std::move(values)};
 }
 
 ava::core::VoidResult validate_optional_rpc_text_array(std::optional<std::vector<std::string>> const& values, std::string_view field_name,
@@ -540,6 +691,27 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
   if (auto valid = rpc::validate_optional_rpc_text(command_arguments, "command_arguments", rpc::kMaxRpcLineBytes / 2); !valid)
   {
     return std::unexpected(std::move(valid.error()));
+  }
+
+  auto output_path = std::optional<std::string>{};
+  if (*type == "export_html")
+  {
+    auto parsed_camel_output_path = rpc::exact_optional_string_field(line, "outputPath");
+    if (!parsed_camel_output_path)
+      return std::unexpected(std::move(parsed_camel_output_path.error()));
+    auto parsed_snake_output_path = rpc::exact_optional_string_field(line, "output_path");
+    if (!parsed_snake_output_path)
+      return std::unexpected(std::move(parsed_snake_output_path.error()));
+    if (*parsed_camel_output_path && *parsed_snake_output_path && **parsed_camel_output_path != **parsed_snake_output_path)
+      return std::unexpected(rpc::invalid_rpc("RPC export_html outputPath aliases must match"));
+    if (*parsed_camel_output_path)
+      output_path = std::move(**parsed_camel_output_path);
+    else if (*parsed_snake_output_path)
+      output_path = std::move(**parsed_snake_output_path);
+    if (output_path && output_path->empty())
+      return std::unexpected(rpc::invalid_rpc("RPC export_html outputPath must be non-empty when provided"));
+    if (auto valid = rpc::validate_optional_rpc_text(output_path, "outputPath", rpc::kMaxRpcExportPathBytes); !valid)
+      return std::unexpected(std::move(valid.error()));
   }
 
   auto rule_id = std::optional<std::string>{};
@@ -740,6 +912,42 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
     }
   }
 
+  auto attachments = std::optional<std::vector<std::string>>{};
+  auto images = std::optional<std::vector<RpcImageUpload>>{};
+  if (*type == "prompt")
+  {
+    auto parsed_attachments = rpc::optional_string_array_field(line, "attachments");
+    if (!parsed_attachments)
+      return std::unexpected(std::move(parsed_attachments.error()));
+    if (auto valid = rpc::validate_optional_rpc_text_array(*parsed_attachments, "attachments",
+                                                           rpc::kMaxRpcPromptAttachments,
+                                                           rpc::kMaxRpcPromptAttachmentPathBytes);
+        !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
+    if (*parsed_attachments &&
+        std::ranges::any_of(**parsed_attachments, [](std::string const& path) { return path.empty(); }))
+    {
+      return std::unexpected(rpc::invalid_rpc("RPC attachments entries must be non-empty"));
+    }
+    attachments = std::move(*parsed_attachments);
+
+    auto parsed_images = rpc::optional_image_upload_array_field(line, "images");
+    if (!parsed_images)
+      return std::unexpected(std::move(parsed_images.error()));
+    images = std::move(*parsed_images);
+
+    auto const attachment_count = attachments ? attachments->size() : 0U;
+    auto const upload_count = images ? images->size() : 0U;
+    if (attachment_count + upload_count > rpc::kMaxRpcPromptAttachments)
+    {
+      auto error = rpc::invalid_rpc("RPC prompt image inputs have too many entries");
+      error.with_context("max_entries", std::to_string(rpc::kMaxRpcPromptAttachments));
+      return std::unexpected(std::move(error));
+    }
+  }
+
   return RpcCommand{.id = std::move(*id),
                     .type = std::move(*type),
                     .protocol_version = std::move(*protocol_version),
@@ -763,18 +971,21 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
                     .reason = std::move(reason),
                     .session_name = std::move(session_name),
                     .labels = std::move(labels),
-                     .branch_from_entry_id = std::move(branch_from_entry_id),
-                     .branch_root_entry_id = std::move(branch_root_entry_id),
-                     .branch_tip_entry_id = std::move(branch_tip_entry_id),
-                     .summary = std::move(summary),
-                     .answer = std::move(answer),
+                    .branch_from_entry_id = std::move(branch_from_entry_id),
+                    .branch_root_entry_id = std::move(branch_root_entry_id),
+                    .branch_tip_entry_id = std::move(branch_tip_entry_id),
+                    .summary = std::move(summary),
+                    .answer = std::move(answer),
                     .selected = std::move(selected),
                     .selected_options = std::move(selected_options),
+                    .attachments = std::move(attachments),
+                    .images = std::move(images),
                     .plugin_id = std::move(plugin_id),
                     .name = std::move(name),
                     .arguments = std::move(*arguments),
                     .command_arguments = std::move(command_arguments),
                     .server_id = std::move(server_id),
+                    .output_path = std::move(output_path),
                     .path = ava::core::json::string_field(line, "path"),
                     .target_path = std::move(target_path),
                     .command = std::move(rule_command),

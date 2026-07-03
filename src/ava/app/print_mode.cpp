@@ -32,7 +32,9 @@ ava::permissions::PermissionResolver deny_permission_resolver()
 {
   return [](ava::permissions::PermissionPrompt const&)
              -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-    return ava::permissions::PermissionResolution::Deny;
+    return ava::permissions::PermissionResolutionDecision{
+        ava::permissions::PermissionResolution::Deny,
+        "print mode denied permission by default; use --allow read-only or --allow-tool <tool> for supported prompts"};
   };
 }
 
@@ -51,6 +53,10 @@ void write_text_event_diagnostic(RuntimeEvent const& event, std::ostream& err)
     if (!event.status.empty()) err << " " << event.status;
     if (!event.text.empty()) err << ": " << event.text;
     err << '\n';
+    if ((event.error_code == "permission_denied" || event.error_category == "permission_denied") &&
+        !event.error_details.empty()) {
+      err << event.error_details << '\n';
+    }
     return;
   }
   if (event.type == RuntimeEventType::Error) {

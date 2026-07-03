@@ -1,6 +1,7 @@
 #include "ava/app/command_sessions.h"
 
 #include "ava/app/command_format.h"
+#include "ava/app/command_tools.h"
 
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
@@ -11,11 +12,18 @@
 
 #include "ava/context/context_loader.h"
 
+#include "ava/core/fingerprint.h"
 #include "ava/core/ids.h"
+#include "ava/core/json.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -65,6 +73,111 @@ bool contains_ascii_case_insensitive(std::string_view text, std::string_view que
   return lower_ascii(text).find(lower_ascii(query)) != std::string::npos;
 }
 
+enum class ExportFormat
+{
+  Markdown,
+  Html,
+};
+
+struct ExportCommandArguments
+{
+  ExportFormat format = ExportFormat::Markdown;
+  std::string path;
+};
+
+std::string export_format_text(ExportFormat format)
+{
+  switch (format)
+  {
+    case ExportFormat::Markdown:
+      return "markdown";
+    case ExportFormat::Html:
+      return "html";
+  }
+  return "markdown";
+}
+
+std::string_view trim_ascii_view(std::string_view text)
+{
+  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) text.remove_prefix(1);
+  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) text.remove_suffix(1);
+  return text;
+}
+
+std::string_view first_token(std::string_view text)
+{
+  text = trim_ascii_view(text);
+  auto const end = text.find_first_of(" \t\r\n");
+  return text.substr(0, end == std::string_view::npos ? text.size() : end);
+}
+
+std::string_view after_first_token(std::string_view text)
+{
+  text = trim_ascii_view(text);
+  auto const end = text.find_first_of(" \t\r\n");
+  if (end == std::string_view::npos) return {};
+  return trim_ascii_view(text.substr(end + 1));
+}
+
+bool path_looks_html(std::string_view path)
+{
+  auto const lowered = lower_ascii(path);
+  return lowered.ends_with(".html") || lowered.ends_with(".htm");
+}
+
+ava::core::Result<ExportCommandArguments> parse_export_command_arguments(std::string_view argument)
+{
+  argument = trim_ascii_view(argument);
+  ExportCommandArguments parsed;
+  if (argument.empty()) return parsed;
+
+  auto const token = lower_ascii(first_token(argument));
+  if (token == "markdown" || token == "md")
+  {
+    parsed.format = ExportFormat::Markdown;
+    parsed.path = std::string(after_first_token(argument));
+    return parsed;
+  }
+  if (token == "html")
+  {
+    parsed.format = ExportFormat::Html;
+    parsed.path = std::string(after_first_token(argument));
+    return parsed;
+  }
+  if (token == "--format")
+  {
+    auto const format_token = lower_ascii(first_token(after_first_token(argument)));
+    if (format_token == "markdown" || format_token == "md")
+    {
+      parsed.format = ExportFormat::Markdown;
+    }
+    else if (format_token == "html")
+    {
+      parsed.format = ExportFormat::Html;
+    }
+    else
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "unsupported export format");
+      error.with_context("format", std::string(format_token));
+      error.with_context("supported", "markdown, html");
+      return std::unexpected(std::move(error));
+    }
+    parsed.path = std::string(after_first_token(after_first_token(argument)));
+    return parsed;
+  }
+
+  parsed.path = std::string(argument);
+  parsed.format = path_looks_html(argument) ? ExportFormat::Html : ExportFormat::Markdown;
+  return parsed;
+}
+
+std::filesystem::path resolve_export_path(RuntimeSession const& session, std::string_view path)
+{
+  auto resolved = std::filesystem::path(std::string(path));
+  if (resolved.is_relative()) resolved = session.current_dir / resolved;
+  return resolved.lexically_normal();
+}
+
 std::string labels_text(std::vector<std::string> const& labels)
 {
   std::string text;
@@ -102,6 +215,104 @@ bool context_source_matches_query(ContextSourceMetadata const& source, std::stri
 {
   return contains_ascii_case_insensitive(source.path.generic_string(), query) ||
          contains_ascii_case_insensitive(ava::context::to_string(source.source_type), query);
+}
+
+std::string context_file_status(std::filesystem::path const& path, std::size_t loaded_bytes,
+                                std::uint64_t loaded_fingerprint)
+{
+  std::error_code status_error;
+  auto const status = std::filesystem::symlink_status(path, status_error);
+  if (status_error)
+    return "status=unreadable cause=" + sanitize_inline_text(status_error.message());
+  if (!std::filesystem::exists(status))
+    return "status=missing";
+  if (std::filesystem::is_symlink(status))
+    return "status=changed cause=symlink";
+  if (!std::filesystem::is_regular_file(status))
+    return "status=changed cause=not_regular";
+
+  std::error_code size_error;
+  auto const current_bytes = std::filesystem::file_size(path, size_error);
+  if (size_error)
+    return "status=unreadable cause=" + sanitize_inline_text(size_error.message());
+  if (current_bytes != loaded_bytes)
+    return "status=changed current_bytes=" + std::to_string(current_bytes);
+
+  std::ifstream file(path, std::ios::binary);
+  if (!file)
+    return "status=unreadable cause=open_failed";
+
+  std::string content;
+  content.reserve(loaded_bytes);
+  std::array<char, 4096> buffer{};
+  while (file) {
+    file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    if (file.gcount() > 0)
+      content.append(buffer.data(), static_cast<std::size_t>(file.gcount()));
+  }
+  if (!file.eof() && file.fail())
+    return "status=unreadable cause=read_failed";
+  if (ava::core::content_fingerprint(content) == loaded_fingerprint)
+    return "status=current current_bytes=" + std::to_string(current_bytes);
+  return "status=changed current_bytes=" + std::to_string(current_bytes);
+}
+
+bool prompt_matches_query(RuntimeSession const& session, std::string_view query)
+{
+  if (query.empty())
+    return true;
+  if (contains_ascii_case_insensitive("prompt", query) || contains_ascii_case_insensitive("builtin", query) ||
+      contains_ascii_case_insensitive("override", query))
+    return true;
+  return session.prompt.source_path && contains_ascii_case_insensitive(session.prompt.source_path->generic_string(), query);
+}
+
+std::string_view freshness_source_kind_text(RuntimeFreshnessSourceKind kind)
+{
+  switch (kind) {
+    case RuntimeFreshnessSourceKind::SystemPrompt:
+      return "system_prompt";
+    case RuntimeFreshnessSourceKind::AppendSystemPrompt:
+      return "append_system_prompt";
+    case RuntimeFreshnessSourceKind::PromptCommand:
+      return "prompt_command";
+    case RuntimeFreshnessSourceKind::Skill:
+      return "skill";
+    case RuntimeFreshnessSourceKind::PluginManifest:
+      return "plugin_manifest";
+    case RuntimeFreshnessSourceKind::PluginPrompt:
+      return "plugin_prompt";
+    case RuntimeFreshnessSourceKind::PluginSkill:
+      return "plugin_skill";
+  }
+  return "unknown";
+}
+
+bool freshness_source_matches_query(RuntimeFreshnessSourceMetadata const& source, std::string_view query)
+{
+  if (query.empty())
+    return true;
+  return contains_ascii_case_insensitive(freshness_source_kind_text(source.kind), query) ||
+         contains_ascii_case_insensitive(source.scope, query) ||
+         contains_ascii_case_insensitive(source.source_id, query) ||
+         contains_ascii_case_insensitive(source.name, query) ||
+         contains_ascii_case_insensitive(source.path.generic_string(), query);
+}
+
+std::size_t freshness_source_count(std::vector<RuntimeFreshnessSourceMetadata> const& sources,
+                                   RuntimeFreshnessSourceKind kind)
+{
+  return static_cast<std::size_t>(std::ranges::count_if(sources, [&](auto const& source) {
+    return source.kind == kind;
+  }));
+}
+
+std::string freshness_source_status_text(RuntimeFreshnessSourceMetadata const& source)
+{
+  if (source.path.empty())
+    return "<inline>  loaded_bytes=" + std::to_string(source.byte_count) + "  status=inline";
+  return source.path.string() + "  loaded_bytes=" + std::to_string(source.byte_count) + "  " +
+         context_file_status(source.path, source.byte_count, source.content_fingerprint);
 }
 
 RuntimeEvent base_command_event(RuntimeSession const& session, RuntimeEventType type)
@@ -212,7 +423,9 @@ ava::core::Result<RuntimeSession> reopen_session(RuntimeSession const& current, 
   options.current_dir = current.current_dir;
   options.requested_session_id = std::string(session_id);
   options.continue_last_session = false;
+  options.sessionless = current.sessionless;
   options.mode = current.mode;
+  options.tool_visibility = current.tool_visibility;
   options.paths = current.paths;
   return open_runtime_session(options);
 }
@@ -223,7 +436,9 @@ ava::core::Result<RuntimeSession> create_fresh_session(RuntimeSession const& cur
   options.workspace_dir = current.workspace_dir;
   options.current_dir = current.current_dir;
   options.continue_last_session = false;
+  options.sessionless = current.sessionless;
   options.mode = current.mode;
+  options.tool_visibility = current.tool_visibility;
   options.paths = current.paths;
   return open_runtime_session(options);
 }
@@ -235,6 +450,11 @@ ava::core::Result<CommandResult> run_branch_command(RuntimeSession& session, std
   result.handled = true;
 
   auto const source_session_id = session.store.session_id();
+  if (session.sessionless)
+  {
+    add_output(result, "Cannot branch a sessionless session.");
+    return result;
+  }
   auto const trimmed_name = trim_ascii(name);
   auto branched = ava::session::create_session_branch(ava::session::SessionBranchOptions{
       .workspace_dir = session.workspace_dir,
@@ -728,17 +948,63 @@ ava::core::Result<CommandResult> run_context_command(RuntimeSession& session, st
   CommandResult result;
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);
-  if (session.context_sources.empty()) {
-    add_output(result, "No context sources loaded.");
-    return result;
+  std::string output = "Context freshness:\n";
+  output += "  mode=" + ava::agent::to_string(session.mode) + "\n";
+  output += "  model=" + session.model.provider_id + "/" + session.model.model_id + "\n";
+  output += "  project_trust=" + std::string(to_string(session.project_trust.decision)) +
+            " project_resources=" + (project_resources_trusted(session.project_trust) ? std::string("enabled") : std::string("skipped")) + "\n";
+  if (prompt_matches_query(session, trimmed_query)) {
+    output += "  prompt=";
+    if (session.prompt.from_override) {
+      output += "override";
+      if (session.prompt.source_path)
+        output += " path=" + session.prompt.source_path->string() + " " +
+                  context_file_status(*session.prompt.source_path, session.prompt.text.size(),
+                                      ava::core::content_fingerprint(session.prompt.text));
+    } else {
+      output += "builtin";
+    }
+    output += " bytes=" + std::to_string(session.prompt.text.size()) + "\n";
   }
-  std::string output;
+  output += "  context_sources=" + std::to_string(session.context_sources.size()) + "\n";
+  auto const system_prompt_sources =
+      freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::SystemPrompt) +
+      freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::AppendSystemPrompt);
+  output += "  system_prompt_sources=" + std::to_string(system_prompt_sources) + "\n";
+  auto const prompt_command_sources = freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PromptCommand);
+  output += "  prompt_commands=" + std::to_string(prompt_command_sources) + "\n";
+  auto const skill_sources = freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::Skill);
+  output += "  skills=" + std::to_string(skill_sources) + "\n";
+  auto const plugin_sources =
+      freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PluginManifest) +
+      freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PluginPrompt) +
+      freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PluginSkill);
+  output += "  plugin_sources=" + std::to_string(plugin_sources) + "\n";
+
+  bool matched_source = false;
   for (auto const& source : session.context_sources) {
     if (!context_source_matches_query(source, trimmed_query)) continue;
-    output += ava::context::to_string(source.source_type) + "  " + source.path.string() +
-              "  bytes=" + std::to_string(source.byte_count) + '\n';
+    matched_source = true;
+    output += "  " + ava::context::to_string(source.source_type) + "  " + source.path.string() +
+              "  loaded_bytes=" + std::to_string(source.byte_count) + "  " +
+              context_file_status(source.path, source.byte_count, source.content_fingerprint) + '\n';
   }
-  if (output.empty() && !trimmed_query.empty()) {
+  bool matched_freshness_source = false;
+  for (auto const& source : session.freshness_sources) {
+    if (!freshness_source_matches_query(source, trimmed_query)) continue;
+    matched_freshness_source = true;
+    output += "  " + std::string(freshness_source_kind_text(source.kind)) + "  " + source.scope + "  ";
+    if (!source.source_id.empty()) {
+      output += sanitize_inline_text(source.source_id);
+      if (!source.name.empty() && source.name != source.source_id)
+        output += "/" + sanitize_inline_text(source.name);
+    } else {
+      output += sanitize_inline_text(source.name);
+    }
+    output += "  " + freshness_source_status_text(source) + '\n';
+  }
+  if (!matched_source && !matched_freshness_source && !prompt_matches_query(session, trimmed_query) &&
+      !trimmed_query.empty()) {
     add_output(result, "No context sources matching: " + sanitize_inline_text(trimmed_query));
     return result;
   }
@@ -882,16 +1148,66 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, Co
   return fail_compaction(stale_compaction_snapshot_error("manual", last_snapshot_entries, last_current_entries));
 }
 
-ava::core::Result<CommandResult> run_export_command(RuntimeSession& session)
+ava::core::Result<CommandResult> run_export_command(RuntimeSession& session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;
+  auto parsed = parse_export_command_arguments(command_argument(request.command, "/export"));
+  if (!parsed)
+  {
+    add_output(result, parsed.error().format());
+    return result;
+  }
   auto entries = session.store.load();
   if (!entries) {
     add_output(result, entries.error().format());
     return result;
   }
-  add_output(result, ava::session::format_session_markdown(*entries));
+
+  auto const format = parsed->format;
+  auto content = format == ExportFormat::Html ? ava::session::format_session_html(*entries)
+                                              : ava::session::format_session_markdown(*entries);
+  if (parsed->path.empty())
+  {
+    add_output(result, std::move(content));
+    return result;
+  }
+
+  auto const target_path = resolve_export_path(session, parsed->path);
+  auto context = make_tool_context(session, request.permission_resolver);
+  context.permission_request_ids = std::make_shared<std::vector<std::string>>();
+  auto linked_permission_ids = [&]() -> std::vector<std::string> {
+    return context.permission_request_ids ? *context.permission_request_ids : std::vector<std::string>{};
+  };
+
+  auto const call_id = ava::core::make_id("cmd");
+  auto const path_text = display_path(target_path, session.current_dir);
+  if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "export", path_text); !recorded)
+    return std::unexpected(std::move(recorded.error()));
+
+  auto written = ava::tools::write_file(context, target_path, content);
+  if (!written)
+  {
+    auto const text = written.error().format();
+    if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "export",
+                                           ava::agent::ToolTimelineStatus::Error, text, {}, linked_permission_ids());
+        !recorded)
+      return std::unexpected(std::move(recorded.error()));
+    add_output(result, text);
+    return result;
+  }
+
+  auto result_json = std::string("{\"tool\":\"export\",\"ok\":true,\"format\":\"") + export_format_text(format) +
+                     "\",\"path\":\"" + ava::core::json::escape(target_path.string()) +
+                     "\",\"bytes_written\":" + std::to_string(written->bytes_written) + "}";
+  if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "export",
+                                         ava::agent::ToolTimelineStatus::Success,
+                                         "wrote " + std::to_string(written->bytes_written) + " bytes", result_json,
+                                         linked_permission_ids());
+      !recorded)
+    return std::unexpected(std::move(recorded.error()));
+  add_output(result, "exported session:\n  format: " + export_format_text(format) + "\n  path: " + target_path.string() +
+                         "\n  bytes: " + std::to_string(written->bytes_written));
   return result;
 }
 

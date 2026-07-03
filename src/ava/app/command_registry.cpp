@@ -2,10 +2,12 @@
 #include "ava/app/command_format.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/command_tools.h"
+#include "ava/app/project_trust.h"
 #include "ava/tools/file_tools.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/mcp/config.h"
 #include "ava/context/skill_loader.h"
+#include "ava/core/fingerprint.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
@@ -363,7 +365,7 @@ void load_prompt_command_dir(RegistryBuilder& builder, std::filesystem::path con
                                             .kind = UnifiedCommandKind::PromptTemplate,
                                             .source_id = std::move(*name),
                                             .source_path = file,
-                                            .source_scope = std::move(source_scope),
+                                            .source_scope = source_scope,
                                             .template_text = std::move(body)});
   }
 }
@@ -401,15 +403,50 @@ void load_builtin_commands(RegistryBuilder& builder)
 
 void load_prompt_commands(RegistryBuilder& builder, RuntimeSession const& session)
 {
-  load_prompt_command_dir(builder, session.workspace_dir / ".ava" / "commands", UnifiedCommandSource::PromptProject, "project");
-  load_prompt_command_dir(builder, session.workspace_dir / ".ava" / "command", UnifiedCommandSource::PromptProject, "project");
+  if (project_resources_trusted(session.project_trust))
+  {
+    load_prompt_command_dir(builder, session.workspace_dir / ".ava" / "commands", UnifiedCommandSource::PromptProject, "project");
+    load_prompt_command_dir(builder, session.workspace_dir / ".ava" / "command", UnifiedCommandSource::PromptProject, "project");
+  }
   load_prompt_command_dir(builder, session.paths.ava_config_dir / "commands", UnifiedCommandSource::PromptGlobal, "global");
   load_prompt_command_dir(builder, session.paths.ava_config_dir / "command", UnifiedCommandSource::PromptGlobal, "global");
 }
 
+void add_prompt_command_source_files(std::vector<PromptCommandSourceFile>& sources,
+                                     std::filesystem::path const& root,
+                                     UnifiedCommandSource source,
+                                     std::string_view scope)
+{
+  std::vector<CommandRegistryDiagnostic> diagnostics;
+  auto files = markdown_files(root, diagnostics, source);
+  for (auto const& file : files)
+  {
+    auto name = command_name_for_file(root, file);
+    if (!name)
+      continue;
+    auto content = read_bounded_file(file, kMaxCommandFileBytes);
+    if (!content)
+      continue;
+    auto parsed = parse_markdown(*content);
+    auto body = markdown_field(parsed, "template");
+    if (body.empty())
+      body = std::move(parsed.body);
+    if (trim_view(body).empty())
+      continue;
+    sources.push_back(PromptCommandSourceFile{.command_name = std::move(*name),
+                                              .scope = std::string(scope),
+                                              .path = file,
+                                              .byte_count = content->size(),
+                                              .content_fingerprint = ava::core::content_fingerprint(*content)});
+  }
+}
+
 void load_skill_commands(RegistryBuilder& builder, RuntimeSession const& session)
 {
-  auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{.workspace_root = session.workspace_dir});
+  auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
+      .workspace_root = session.workspace_dir,
+      .include_project_skills = project_resources_trusted(session.project_trust),
+  });
   for (auto const& diagnostic : loaded.diagnostics)
   {
     add_diagnostic(builder,
@@ -436,7 +473,9 @@ void load_skill_commands(RegistryBuilder& builder, RuntimeSession const& session
 ava::plugin::PluginDiscoveryOptions plugin_discovery_options(RuntimeSession const& session)
 {
   return ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = session.paths.ava_config_dir / "plugins",
-                                             .project_plugins_dir = session.workspace_dir / ".ava" / "plugins"};
+                                             .project_plugins_dir = project_resources_trusted(session.project_trust)
+                                                                        ? session.workspace_dir / ".ava" / "plugins"
+                                                                        : std::filesystem::path{}};
 }
 
 std::filesystem::path plugin_enablement_file(RuntimeSession const& session)
@@ -514,7 +553,9 @@ void load_mcp_prompt_commands(RegistryBuilder& builder, RuntimeSession& session,
 {
   auto config_options = ava::mcp::default_mcp_config_options(session.workspace_dir);
   config_options.global_config_file = session.paths.ava_config_dir / "mcp.json";
-  config_options.project_config_file = session.workspace_dir / ".ava" / "mcp.json";
+  config_options.project_config_file = project_resources_trusted(session.project_trust)
+                                           ? session.workspace_dir / ".ava" / "mcp.json"
+                                           : std::filesystem::path{};
   auto config = ava::mcp::load_mcp_config(config_options);
   if (!config)
   {
@@ -730,6 +771,27 @@ std::optional<std::pair<std::size_t, std::optional<std::size_t>>> parse_argument
   return std::pair<std::size_t, std::optional<std::size_t>>{*start - 1, *count};
 }
 
+std::optional<std::pair<std::size_t, std::string_view>> parse_argument_default(std::string_view value)
+{
+  if (!value.starts_with("${") || !value.ends_with('}'))
+    return std::nullopt;
+  value.remove_prefix(2);
+  value.remove_suffix(1);
+  if (value.empty() || value.front() < '1' || value.front() > '9')
+    return std::nullopt;
+
+  std::size_t index = 0;
+  std::size_t number = 0;
+  while (index < value.size() && std::isdigit(static_cast<unsigned char>(value[index])) != 0)
+  {
+    number = number * 10 + static_cast<std::size_t>(value[index] - '0');
+    ++index;
+  }
+  if (number == 0 || value.substr(index, 2) != ":-")
+    return std::nullopt;
+  return std::pair<std::size_t, std::string_view>{number - 1, value.substr(index + 2)};
+}
+
 }  // namespace
 
 std::string to_string(UnifiedCommandSource source)
@@ -768,6 +830,26 @@ std::string to_string(UnifiedCommandKind kind)
       return "plugin_command";
   }
   return "unknown";
+}
+
+std::vector<PromptCommandSourceFile> prompt_command_source_files(std::filesystem::path const& workspace_dir,
+                                                                 ava::config::XdgPaths const& paths,
+                                                                 bool include_project_commands)
+{
+  std::vector<PromptCommandSourceFile> sources;
+  if (include_project_commands)
+  {
+    add_prompt_command_source_files(sources, workspace_dir / ".ava" / "commands", UnifiedCommandSource::PromptProject, "project");
+    add_prompt_command_source_files(sources, workspace_dir / ".ava" / "command", UnifiedCommandSource::PromptProject, "project");
+  }
+  add_prompt_command_source_files(sources, paths.ava_config_dir / "commands", UnifiedCommandSource::PromptGlobal, "global");
+  add_prompt_command_source_files(sources, paths.ava_config_dir / "command", UnifiedCommandSource::PromptGlobal, "global");
+  std::ranges::sort(sources, [](PromptCommandSourceFile const& left, PromptCommandSourceFile const& right) {
+    if (left.scope != right.scope)
+      return left.scope < right.scope;
+    return left.command_name < right.command_name;
+  });
+  return sources;
 }
 
 CommandRegistry load_command_registry(RuntimeSession& session, CommandRegistryOptions options)
@@ -871,6 +953,23 @@ ava::core::Result<std::string> expand_prompt_command_template(std::string_view t
         if (auto slice = parse_argument_slice(expression))
         {
           output += join_tokens(*tokens, slice->first, slice->second);
+          index = close + 1;
+          continue;
+        }
+      }
+    }
+    if (template_text.substr(index, 2) == "${")
+    {
+      auto const close = template_text.find('}', index);
+      if (close != std::string_view::npos)
+      {
+        auto const expression = template_text.substr(index, close - index + 1);
+        if (auto default_value = parse_argument_default(expression))
+        {
+          if (default_value->first < tokens->size() && !(*tokens)[default_value->first].empty())
+            output += (*tokens)[default_value->first];
+          else
+            output += default_value->second;
           index = close + 1;
           continue;
         }

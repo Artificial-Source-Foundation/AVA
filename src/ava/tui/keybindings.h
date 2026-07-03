@@ -18,6 +18,10 @@ enum class TuiAction
   NewLine,
   Cancel,
   ClearInput,
+  CopySelection,
+  ExternalEditor,
+  Suspend,
+  ClipboardPasteImage,
   DeleteBackward,
   DeleteForward,
   HistoryPrev,
@@ -58,13 +62,37 @@ enum class TuiAction
   Interrupt,
   Exit,
   VariantCycle,
+  ThinkingToggle,
   ModelSelect,
   ModelCycleForward,
   ModelCycleBackward,
+  ModelsSave,
+  ModelsEnableAll,
+  ModelsClearAll,
+  ModelsToggleProvider,
+  ModelsReorderUp,
+  ModelsReorderDown,
+  MessageFollowUp,
   MessageDequeue,
   MessagePrev,
   MessageNext,
   JumpToBottom,
+  SessionNew,
+  SessionTree,
+  SessionFork,
+  SessionResume,
+  SessionTogglePath,
+  SessionToggleSort,
+  SessionToggleNamedFilter,
+  SessionRename,
+  SessionArchive,
+  SessionArchiveNoninvasive,
+  TreeFoldOrUp,
+  TreeUnfoldOrDown,
+  TreeEditLabel,
+  TreeToggleLabelTimestamp,
+  TreeFilterLabeledOnly,
+  TreeFilterAll,
 };
 
 struct TuiKeyBindings
@@ -87,9 +115,12 @@ struct TuiKeyBindingHelpItem
 [[nodiscard]] std::optional<Key> parse_key_name(std::string_view text);
 [[nodiscard]] std::string key_display(Key key);
 [[nodiscard]] std::string action_name(TuiAction action);
+[[nodiscard]] std::optional<TuiAction> key_binding_action_from_name(std::string_view name);
+[[nodiscard]] std::string key_binding_config_action_id(TuiAction action);
 [[nodiscard]] std::string action_description(TuiAction action);
 [[nodiscard]] std::string keys_display(TuiKeyBindings const& bindings, TuiAction action);
 [[nodiscard]] std::vector<TuiKeyBindingHelpItem> key_binding_help_items(TuiKeyBindings const& bindings);
+[[nodiscard]] std::string default_key_bindings_config_json();
 [[nodiscard]] ava::core::Result<TuiKeyBindings> parse_key_bindings_json(std::string_view json);
 [[nodiscard]] ava::core::Result<TuiKeyBindings> parse_key_bindings_json(std::string_view json, TuiKeyBindings base);
 [[nodiscard]] ava::core::Result<TuiKeyBindings> load_key_bindings(std::filesystem::path const& keybinds_file);

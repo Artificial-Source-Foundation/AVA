@@ -1523,12 +1523,46 @@ void test_model_and_prompt_config()
            "builtin model overrides preserve missing capability metadata");
   }
 
+  auto saved_scope = ava::config::store_scoped_model_cycle(
+      paths, std::vector<std::string>{"openai/gpt-5.5", "anthropic/claude-sonnet-4-5"});
+  expect(saved_scope.has_value(), "model config stores scoped model cycle");
+  registry = ava::config::load_model_registry(paths);
+  expect(registry && registry->scoped_model_cycle && registry->scoped_model_cycle->size() == 2 &&
+             (*registry->scoped_model_cycle)[0] == "openai/gpt-5.5" &&
+             (*registry->scoped_model_cycle)[1] == "anthropic/claude-sonnet-4-5",
+         "model registry loads persisted scoped model cycle order");
+  if (registry) {
+    selected = ava::config::select_default_model(*registry);
+    expect(selected.display_name == "Custom GPT",
+           "scoped model cycle save preserves existing custom model entries");
+  }
+
+  auto saved_empty_scope = ava::config::store_scoped_model_cycle(paths, std::vector<std::string>{});
+  expect(saved_empty_scope.has_value(), "model config stores explicit empty scoped model cycle");
+  registry = ava::config::load_model_registry(paths);
+  expect(registry && registry->scoped_model_cycle && registry->scoped_model_cycle->empty(),
+         "model registry preserves explicit empty scoped model cycle");
+
+  auto saved_default_scope = ava::config::store_scoped_model_cycle(paths, std::nullopt);
+  expect(saved_default_scope.has_value(), "model config removes scoped model cycle for default all-model cycling");
+  registry = ava::config::load_model_registry(paths);
+  expect(registry && !registry->scoped_model_cycle,
+         "model registry treats a missing scoped model cycle as all registered models enabled");
+
+  std::filesystem::remove(paths.models_file, remove_error);
+  auto saved_new_scope = ava::config::store_scoped_model_cycle(paths, std::vector<std::string>{"openai/gpt-5.5"});
+  expect(saved_new_scope.has_value(), "model config creates models.json for scoped model cycle persistence");
+  registry = ava::config::load_model_registry(paths);
+  expect(registry && registry->scoped_model_cycle && registry->scoped_model_cycle->size() == 1 &&
+             registry->scoped_model_cycle->front() == "openai/gpt-5.5",
+         "model registry loads scoped model cycle from generated models.json");
+
   auto inferred_family = ava::config::select_default_model(
       ava::config::ModelRegistry{.default_provider_id = "openai", .default_model_id = "gpt-5.5", .models = {}});
   expect(inferred_family.family == "gpt-5", "GPT-5.5 model id infers GPT-5 prompt family");
 
   auto prompt = ava::config::select_prompt(paths, selected, ava::agent::Mode::Build);
-  expect(prompt && !prompt->from_override && prompt->text.find("Provider=openai") != std::string::npos,
+  expect(prompt && !prompt->from_override && !prompt->source_path && prompt->text.find("Provider=openai") != std::string::npos,
          "builtin prompt selects by provider and family");
   std::filesystem::create_directories(paths.prompts_dir / "openai" / "gpt-5");
   {
@@ -1536,8 +1570,10 @@ void test_model_and_prompt_config()
     file << "custom plan prompt";
   }
   auto override = ava::config::select_prompt(paths, selected, ava::agent::Mode::Plan);
-  expect(override && override->from_override && override->text == "custom plan prompt",
-         "prompt override loads from XDG config");
+  auto const override_path = paths.prompts_dir / "openai" / "gpt-5" / "plan.txt";
+  expect(override && override->from_override && override->text == "custom plan prompt" &&
+             override->source_path && *override->source_path == override_path,
+         "prompt override loads from XDG config and records its source path");
 
   {
     std::ofstream file(paths.models_file, std::ios::binary | std::ios::trunc);

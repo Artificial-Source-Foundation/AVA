@@ -207,6 +207,7 @@ ava::core::Result<SessionMetadataView> session_metadata_from_entries(std::vector
     if (ava::core::json::field_value_start(entry.data_json, "labels"))
     {
       metadata.labels = labels_from_entry(entry);
+      metadata.labels_updated = entry.timestamp;
     }
     if (ava::core::json::field_value_start(entry.data_json, "archived"))
     {
@@ -307,6 +308,7 @@ std::string session_metadata_json(std::string_view session_id, SessionMetadataVi
   json += "\"session_id\":\"" + ava::core::json::escape(session_id) + "\"";
   json += ",\"name\":\"" + ava::core::json::escape(metadata.name) + "\"";
   json += ",\"labels\":" + labels_json(metadata.labels);
+  json += ",\"labels_updated\":\"" + ava::core::json::escape(metadata.labels_updated) + "\"";
   json += ",\"archived\":" + std::string(metadata.archived ? "true" : "false");
   json += ",\"parent_session_id\":\"" + ava::core::json::escape(metadata.parent_session_id) + "\"";
   json += ",\"source_session_id\":\"" + ava::core::json::escape(metadata.source_session_id) + "\"";

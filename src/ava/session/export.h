@@ -15,5 +15,6 @@ struct ExportOptions
 };
 
 [[nodiscard]] std::string format_session_markdown(std::vector<SessionEntry> const& entries, ExportOptions const& options = {});
+[[nodiscard]] std::string format_session_html(std::vector<SessionEntry> const& entries, ExportOptions const& options = {});
 
 }  // namespace ava::session

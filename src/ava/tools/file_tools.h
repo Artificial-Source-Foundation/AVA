@@ -2,6 +2,7 @@
 
 #include "ava/agent/mode.h"
 #include "ava/agent/question.h"
+#include "ava/agent/tool_visibility.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
 
@@ -70,14 +71,18 @@ struct ToolContext
   std::filesystem::path plugin_global_plugins_dir = {};
   std::filesystem::path plugin_project_plugins_dir = {};
   std::filesystem::path plugin_enablement_file = {};
+  bool include_project_plugins = true;
   std::filesystem::path mcp_global_config_file = {};
   std::filesystem::path mcp_project_config_file = {};
+  bool include_project_mcp_config = true;
   std::vector<std::filesystem::path> skill_global_dirs = {};
   std::vector<std::filesystem::path> skill_project_dirs = {};
+  bool include_project_skills = true;
   std::string session_id = {};
   std::string provider_id = {};
   std::string model_id = {};
   std::filesystem::path current_dir = {};
+  ava::agent::ToolVisibilityOptions tool_visibility;
 };
 
 struct TextOutput

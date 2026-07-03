@@ -86,6 +86,11 @@ std::string command_hotkeys_text(std::vector<CommandHotkey> const& hotkeys)
 
   std::string output = "Keybindings:\n";
   output += "  Config: $XDG_CONFIG_HOME/ava/keybinds.json\n";
+  output += "  Init: /keybindings init creates a validated starter file\n";
+  output += "  Import: /keybindings import <path> [--force] validates and installs a JSON file\n";
+  output += "  Set: /keybindings set <action> <key>[,<key>...] edits one action\n";
+  output += "  Reset: /keybindings reset <action> removes one override\n";
+  output += "  Validate: /keybindings validate checks keybinds.json without reloading\n";
   output += "  Reload: /reload keybindings inside the interactive TUI\n";
   for (auto const& item : items)
   {
@@ -104,6 +109,9 @@ std::string command_help_text(std::vector<CommandHotkey> const& hotkeys)
 {
   std::string output = "Commands:\n";
   output += command_rows(true);
+  output += "\nShell helpers:\n";
+  output += "  !<command>   Run a permissioned shell command through /bash\n";
+  output += "  !!<command>  Run the same permissioned shell command as a hidden-output helper; AVA keeps shell output out of provider context unless you paste it into a later prompt\n";
   output += "\nUnavailable commands:\n";
   output += command_rows(false);
   output += '\n';

@@ -188,6 +188,15 @@ std::string read_tool_body(std::string_view path)
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
 }
 
+std::string grep_tool_body(std::string_view include)
+{
+  auto const arguments = std::string("{\"pattern\":\"needle\",\"include\":\"") + json_escape(include) +
+                         "\",\"max_matches\":5,\"literal\":true}";
+  return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_grep\",\"type\":\"function\","
+         "\"function\":{\"name\":\"grep\",\"arguments\":\"" +
+         json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+}
+
 std::string write_tool_body(std::string_view path)
 {
   auto const arguments = std::string("{\"path\":\"") + json_escape(path) + "\",\"content\":\"rpc new\\n\"}";
@@ -299,6 +308,10 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
   {
     return ProviderResponse{.body = request_index == 0 ? read_tool_body(target_path) : text_body("after tool failure")};
   }
+  if (scenario == "grep-tool")
+  {
+    return ProviderResponse{.body = request_index == 0 ? grep_tool_body(target_path) : text_body("after grep tool")};
+  }
   if (scenario == "write-tool")
   {
     return ProviderResponse{.body = request_index == 0 ? write_tool_body(target_path) : text_body("after permission deny")};
@@ -335,6 +348,10 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
   {
     return ProviderResponse{.body = request_index == 0 ? text_body("before compact") : text_body("# Goal\nHeadless compact summary\n# Next Steps\nContinue.")};
   }
+  if (scenario == "markdown-links")
+  {
+    return ProviderResponse{.body = text_body("[Docs](https://e.test/d) https://e.test/b u@e.test")};
+  }
   return ProviderResponse{.body = text_body("headless active prompt complete")};
 }
 
@@ -357,8 +374,9 @@ int main(int argc, char** argv)
                             : scenario == "text-three"       ? 3
                             : scenario == "read-tool-twice"  ? 4
                             : scenario == "read-tool-thrice" ? 6
-                            : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "write-tool" || scenario == "bash-timeout-tree" ||
-                               scenario == "question-tool" || scenario == "question-tool-multi" || scenario == "skill-tool" || scenario == "websearch-tool" ||
+                            : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "grep-tool" ||
+                               scenario == "write-tool" || scenario == "bash-timeout-tree" || scenario == "question-tool" ||
+                               scenario == "question-tool-multi" || scenario == "skill-tool" || scenario == "websearch-tool" ||
                                scenario == "webfetch-tool" || scenario == "mcp-tool" || scenario == "compact")
                                 ? 2
                                 : 1;

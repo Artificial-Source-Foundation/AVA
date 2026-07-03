@@ -174,9 +174,20 @@ std::string character_text(InputEvent const& event)
   return std::string(1, event.character);
 }
 
+bool event_matches_action(InputEvent const& event, TuiKeyBindings const& bindings, TuiAction action)
+{
+  if (key_matches_action(bindings, action, event.key))
+    return true;
+  if (event.key == Key::Character && character_text(event) == "L")
+    return key_matches_action(bindings, action, Key::ShiftL);
+  if (event.key == Key::Character && character_text(event) == "T")
+    return key_matches_action(bindings, action, Key::ShiftT);
+  return false;
+}
+
 InputEvent select_list_bound_event(InputEvent event, TuiKeyBindings const& bindings)
 {
-  auto bound = [&](TuiAction action) { return key_matches_action(bindings, action, event.key); };
+  auto bound = [&](TuiAction action) { return event_matches_action(event, bindings, action); };
   if (bound(TuiAction::SelectConfirm))
     return InputEvent{.key = Key::Enter};
   if (bound(TuiAction::SelectCancel))
@@ -189,6 +200,30 @@ InputEvent select_list_bound_event(InputEvent event, TuiKeyBindings const& bindi
     return InputEvent{.key = Key::PageUp};
   if (bound(TuiAction::SelectPageDown))
     return InputEvent{.key = Key::PageDown};
+  if (bound(TuiAction::SessionTogglePath))
+    return InputEvent{.key = Key::CtrlP};
+  if (bound(TuiAction::SessionToggleSort))
+    return InputEvent{.key = Key::CtrlS};
+  if (bound(TuiAction::SessionToggleNamedFilter))
+    return InputEvent{.key = Key::CtrlN};
+  if (bound(TuiAction::SessionRename))
+    return InputEvent{.key = Key::CtrlR};
+  if (bound(TuiAction::SessionArchive))
+    return InputEvent{.key = Key::CtrlD};
+  if (bound(TuiAction::SessionArchiveNoninvasive))
+    return InputEvent{.key = Key::CtrlBackspace};
+  if (bound(TuiAction::TreeFoldOrUp))
+    return InputEvent{.key = Key::CtrlArrowLeft};
+  if (bound(TuiAction::TreeUnfoldOrDown))
+    return InputEvent{.key = Key::CtrlArrowRight};
+  if (bound(TuiAction::TreeEditLabel))
+    return InputEvent{.key = Key::CtrlL};
+  if (bound(TuiAction::TreeToggleLabelTimestamp))
+    return InputEvent{.key = Key::ShiftT};
+  if (bound(TuiAction::TreeFilterLabeledOnly))
+    return InputEvent{.key = Key::CtrlN};
+  if (bound(TuiAction::TreeFilterAll))
+    return InputEvent{.key = Key::CtrlA};
   return event;
 }
 
@@ -309,6 +344,7 @@ SelectListInputResult handle_select_list_input(SelectListView const& view, Input
       }
       return result;
     case Key::Backspace:
+    case Key::ShiftBackspace:
       if (!result.query.empty())
       {
         erase_last_utf8_codepoint(result.query);
@@ -356,8 +392,15 @@ SelectListInputResult handle_select_list_input(SelectListView const& view, Input
     case Key::CtrlD:
       result.action = SelectListInputAction::Archive;
       return result;
+    case Key::CtrlBackspace:
+      if (result.query.empty())
+        result.action = SelectListInputAction::ArchiveNoninvasive;
+      return result;
     case Key::CtrlA:
       result.action = SelectListInputAction::ToggleArchivedFilter;
+      return result;
+    case Key::ShiftT:
+      result.action = SelectListInputAction::ToggleLabelTimestamp;
       return result;
     case Key::PageUp: {
       auto current = view_with_result();
@@ -371,17 +414,37 @@ SelectListInputResult handle_select_list_input(SelectListView const& view, Input
       result.action = SelectListInputAction::Redraw;
       return result;
     }
+    case Key::CtrlArrowLeft:
+    case Key::AltArrowLeft:
+      result.action = SelectListInputAction::BranchParent;
+      return result;
+    case Key::CtrlArrowRight:
+    case Key::AltArrowRight:
+      result.action = SelectListInputAction::BranchChild;
+      return result;
     case Key::Home:
     case Key::End:
+    case Key::CtrlHome:
+    case Key::CtrlEnd:
     case Key::ArrowLeft:
     case Key::ArrowRight:
-    case Key::CtrlArrowLeft:
-    case Key::CtrlArrowRight:
-    case Key::MouseLeftClick:
+    case Key::ShiftArrowUp:
+    case Key::ShiftArrowDown:
+    case Key::ShiftArrowLeft:
+    case Key::ShiftArrowRight:
+    case Key::ShiftCtrlArrowLeft:
+    case Key::ShiftCtrlArrowRight:
+    case Key::ShiftAltArrowLeft:
+    case Key::ShiftAltArrowRight:
+    case Key::ShiftHome:
+    case Key::ShiftEnd:
+    case Key::ShiftCtrlHome:
+    case Key::ShiftCtrlEnd:
     case Key::ShiftEnter:
     case Key::CtrlB:
     case Key::CtrlE:
     case Key::CtrlF:
+    case Key::CtrlG:
     case Key::CtrlH:
     case Key::CtrlK:
     case Key::CtrlMinus:
@@ -393,6 +456,9 @@ SelectListInputResult handle_select_list_input(SelectListView const& view, Input
       return result;
     case Key::CtrlShiftP:
       break;
+    case Key::CtrlX:
+      result.action = SelectListInputAction::ModelsClearAll;
+      return result;
     case Key::CtrlR:
       result.action = SelectListInputAction::Rename;
       return result;
@@ -404,16 +470,37 @@ SelectListInputResult handle_select_list_input(SelectListView const& view, Input
       result.action = SelectListInputAction::CycleSort;
       return result;
     case Key::Delete:
+    case Key::ShiftDelete:
+    case Key::Insert:
+    case Key::Clear:
     case Key::ShiftTab:
+    case Key::ShiftL:
     case Key::CtrlEnter:
     case Key::AltEnter:
+      break;
     case Key::AltArrowUp:
-    case Key::AltArrowLeft:
-    case Key::AltArrowRight:
+      result.action = SelectListInputAction::ModelsReorderUp;
+      return result;
+    case Key::AltArrowDown:
+      result.action = SelectListInputAction::ModelsReorderDown;
+      return result;
     case Key::CtrlU:
+    case Key::CtrlV:
     case Key::CtrlW:
     case Key::CtrlY:
     case Key::CtrlZ:
+    case Key::CtrlSpace:
+    case Key::CtrlSlash:
+    case Key::Ctrl0:
+    case Key::Ctrl1:
+    case Key::Ctrl2:
+    case Key::Ctrl3:
+    case Key::Ctrl4:
+    case Key::Ctrl5:
+    case Key::Ctrl6:
+    case Key::Ctrl7:
+    case Key::Ctrl8:
+    case Key::Ctrl9:
     case Key::CtrlRightBracket:
     case Key::CtrlO:
     case Key::AltBackspace:
@@ -428,6 +515,21 @@ SelectListInputResult handle_select_list_input(SelectListView const& view, Input
     case Key::AltW:
     case Key::CtrlAltRightBracket:
     case Key::AltY:
+    case Key::MouseLeftClick:
+    case Key::MouseLeftDrag:
+    case Key::MouseLeftRelease:
+    case Key::F1:
+    case Key::F2:
+    case Key::F3:
+    case Key::F4:
+    case Key::F5:
+    case Key::F6:
+    case Key::F7:
+    case Key::F8:
+    case Key::F9:
+    case Key::F10:
+    case Key::F11:
+    case Key::F12:
     case Key::Unknown:
       break;
   }
@@ -440,6 +542,84 @@ SelectListInputResult handle_select_list_input(SelectListView const& view, Input
 }
 
 namespace detail {
+
+std::optional<std::size_t> select_list_item_for_modal_row(SelectListView const& view, std::size_t modal_row,
+                                                          std::size_t width, std::size_t max_lines)
+{
+  std::vector<std::optional<std::size_t>> rows;
+  if (max_lines == 0)
+    return std::nullopt;
+  auto push_row = [&](std::optional<std::size_t> item_index) -> bool {
+    if (rows.size() >= max_lines)
+      return false;
+    rows.push_back(item_index);
+    return rows.size() < max_lines;
+  };
+
+  if (!push_row(std::nullopt))
+    return modal_row < rows.size() ? rows[modal_row] : std::nullopt;
+  if (!push_row(std::nullopt))
+    return modal_row < rows.size() ? rows[modal_row] : std::nullopt;
+
+  if (!view.subtitle.empty())
+  {
+    auto const wrapped = select_wrapped_lines(view.subtitle, width);
+    for (std::size_t index = 0; index < wrapped.size(); ++index)
+    {
+      if (rows.size() + 4 >= max_lines)
+        break;
+      if (!push_row(std::nullopt))
+        return modal_row < rows.size() ? rows[modal_row] : std::nullopt;
+    }
+  }
+  if (!push_row(std::nullopt))
+    return modal_row < rows.size() ? rows[modal_row] : std::nullopt;
+  if (!push_row(std::nullopt))
+    return modal_row < rows.size() ? rows[modal_row] : std::nullopt;
+  if (!push_row(std::nullopt))
+    return modal_row < rows.size() ? rows[modal_row] : std::nullopt;
+
+  auto const matches = filter_select_list_items(view);
+  auto const selected = clamp_select_list_selection(view, view.selected_item_index);
+  auto selected_visible = std::size_t{0};
+  if (auto const found = std::ranges::find(matches, selected); found != matches.end())
+  {
+    selected_visible = static_cast<std::size_t>(found - matches.begin());
+  }
+  auto const reserved_footer = std::size_t{2};
+  auto const budget = max_lines > rows.size() + reserved_footer ? max_lines - rows.size() - reserved_footer : 0;
+  auto start = budget > 0 && selected_visible >= budget ? selected_visible - budget + 1 : std::size_t{0};
+  if (budget > 0 && start + budget > matches.size() && matches.size() > budget)
+    start = matches.size() - budget;
+
+  if (!matches.empty())
+  {
+    std::string last_group;
+    for (std::size_t visible = start; visible < matches.size() && rows.size() + reserved_footer < max_lines; ++visible)
+    {
+      auto const item_index = matches[visible];
+      auto const& item = view.items[item_index];
+      if (!item.group.empty() && item.group != last_group && rows.size() + reserved_footer + 1 < max_lines)
+      {
+        if (!push_row(std::nullopt))
+          return modal_row < rows.size() ? rows[modal_row] : std::nullopt;
+        last_group = item.group;
+      }
+      if (rows.size() + reserved_footer >= max_lines)
+        break;
+      if (!push_row(item_index))
+        return modal_row < rows.size() ? rows[modal_row] : std::nullopt;
+    }
+  }
+
+  if (rows.size() < max_lines)
+    push_row(std::nullopt);
+  if (rows.size() < max_lines)
+    push_row(std::nullopt);
+  while (rows.size() < max_lines) rows.push_back(std::nullopt);
+
+  return modal_row < rows.size() ? rows[modal_row] : std::nullopt;
+}
 
 std::vector<std::string> render_select_list_modal(SelectListView const& view, std::size_t width, std::size_t max_lines)
 {

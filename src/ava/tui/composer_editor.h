@@ -45,9 +45,14 @@ struct ComposerDraftState
 };
 
 [[nodiscard]] std::size_t clamp_composer_draft_cursor(std::string_view text, std::size_t cursor);
+[[nodiscard]] std::size_t clamp_composer_draft_cursor_to_atomic_boundary(ComposerDraftState const& draft,
+                                                                         std::size_t cursor);
 void reset_composer_draft(ComposerDraftState& draft, std::string text = {}, std::size_t cursor = std::string::npos);
 bool replace_composer_draft(ComposerDraftState& draft, std::string text, std::size_t cursor = std::string::npos);
+bool replace_composer_draft_range(ComposerDraftState& draft, std::size_t start, std::size_t end,
+                                  std::string_view replacement);
 bool insert_composer_draft_text(ComposerDraftState& draft, std::string_view text);
+bool replace_composer_backslash_before_cursor_with_newline(ComposerDraftState& draft);
 bool insert_composer_paste_text(ComposerDraftState& draft, std::string_view text);
 bool jump_composer_draft_to_character(ComposerDraftState& draft, std::string_view character, bool forward);
 bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action);

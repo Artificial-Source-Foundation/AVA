@@ -355,6 +355,8 @@ std::string state_result_json(RuntimeSession const& session, bool cancel_request
   json += ',';
   json += bool_field_json("created", session.created);
   json += ',';
+  json += bool_field_json("sessionless", session.sessionless);
+  json += ',';
   json += bool_field_json("cancel_requested", cancel_requested);
   json += ',';
   json += bool_field_json("reasoning_enabled", session.reasoning.has_value());
@@ -433,6 +435,8 @@ ava::core::Result<std::string> session_tree_result_json(RuntimeSession const& se
     json += ',';
     json += string_field_json("name", node.metadata.name);
     json += ",\"labels\":" + string_array_json(node.metadata.labels);
+    json += ',';
+    json += string_field_json("labels_updated", node.metadata.labels_updated);
     json += ',';
     json += bool_field_json("archived", node.metadata.archived);
     json += ',';

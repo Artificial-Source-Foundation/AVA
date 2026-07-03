@@ -73,6 +73,14 @@ class EmptyDiagnosticsProvider final : public ava::lsp::DiagnosticsProvider {
   }
 };
 
+bool schemas_contain_tool(std::vector<std::string> const& schemas, std::string_view name)
+{
+  auto const needle = "\"name\":\"" + std::string(name) + "\"";
+  return std::ranges::any_of(schemas, [&](std::string const& schema) {
+    return schema.find(needle) != std::string::npos;
+  });
+}
+
 void test_tool_dispatcher()
 {
   auto const root = temp_root() / "dispatcher";
@@ -99,6 +107,64 @@ void test_tool_dispatcher()
 
   ava::agent::ToolDispatcher const dispatcher(
       ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Build});
+  {
+    ava::tools::ToolContext allowlisted_context{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .tool_visibility = ava::agent::ToolVisibilityOptions{.included_tools = {"read_file", "grep"}}};
+    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(allowlisted_context);
+    expect(schemas_contain_tool(schemas, "read_file") && schemas_contain_tool(schemas, "grep") &&
+               !schemas_contain_tool(schemas, "bash") && !schemas_contain_tool(schemas, "write_file"),
+           "tool visibility allowlist limits exported provider schemas");
+
+    ava::agent::ToolDispatcher const allowlisted_dispatcher(allowlisted_context);
+    auto hidden = allowlisted_dispatcher.dispatch(
+        ava::agent::ProviderToolCall{.id = "call_hidden_bash", .name = "bash", .arguments_json = "{\"command\":\"pwd\"}"});
+    expect(hidden && !hidden->success && hidden->result_text.find("unknown tool") != std::string::npos,
+           "tool visibility allowlist removes hidden tools from dispatch");
+  }
+  {
+    ava::tools::ToolContext excluded_context{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .tool_visibility = ava::agent::ToolVisibilityOptions{.included_tools = {"read_file", "grep"}, .excluded_tools = {"grep"}}};
+    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(excluded_context);
+    expect(schemas_contain_tool(schemas, "read_file") && !schemas_contain_tool(schemas, "grep"),
+           "tool visibility exclusion overrides an explicit allowlist");
+  }
+  {
+    ava::tools::ToolContext pi_alias_context{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .tool_visibility = ava::agent::ToolVisibilityOptions{.included_tools = {"read", "grep", "find", "ls"}, .excluded_tools = {"find"}}};
+    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(pi_alias_context);
+    expect(schemas_contain_tool(schemas, "read_file") && schemas_contain_tool(schemas, "grep") &&
+               schemas_contain_tool(schemas, "list_directory") && !schemas_contain_tool(schemas, "glob") &&
+               !schemas_contain_tool(schemas, "write_file"),
+           "tool visibility accepts Pi read/find/ls aliases while exporting native AVA schema names");
+  }
+  {
+    ava::tools::ToolContext no_tools_context{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .tool_visibility = ava::agent::ToolVisibilityOptions{.mode = ava::agent::ToolVisibilityMode::NoTools}};
+    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(no_tools_context);
+    expect(schemas.empty(), "tool visibility no-tools hides built-in provider schemas");
+
+    ava::agent::ToolDispatcher const no_tools_dispatcher(no_tools_context);
+    auto hidden = no_tools_dispatcher.dispatch(
+        ava::agent::ProviderToolCall{.id = "call_hidden_read", .name = "read_file", .arguments_json = "{\"path\":\"note.txt\"}"});
+    expect(hidden && !hidden->success && hidden->result_text.find("unknown tool") != std::string::npos,
+           "tool visibility no-tools removes built-in tools from dispatch");
+  }
+  {
+    ava::tools::ToolContext no_builtin_context{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .tool_visibility = ava::agent::ToolVisibilityOptions{.mode = ava::agent::ToolVisibilityMode::NoBuiltinTools}};
+    auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(no_builtin_context);
+    expect(schemas.empty(), "tool visibility no-builtin-tools hides built-in provider schemas when no external tools exist");
+  }
   auto read = dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "call_read", .name = "read_file", .arguments_json = "{\"path\":\"note.txt\",\"max_bytes\":5}"});
   expect(read && read->success && read->result_text.find("hello") != std::string::npos,
@@ -1098,8 +1164,14 @@ void test_tool_dispatcher_plan_mode_denies_mutation()
       ava::tools::ToolContext{.workspace_dir = workspace, .mode = ava::agent::Mode::Plan});
   auto denied = dispatcher.dispatch(ava::agent::ProviderToolCall{
       .id = "call_write", .name = "write_file", .arguments_json = "{\"path\":\"main.cpp\",\"content\":\"bad\"}"});
-  expect(denied && !denied->success && denied->result_text.find("permission_denied") != std::string::npos,
+  expect(denied && !denied->success && denied->result_text.find("permission_denied") != std::string::npos &&
+             denied->result_text.find("request_id") != std::string::npos &&
+             denied->result_text.find("/permissions audit show permreq_") != std::string::npos,
          "tool dispatcher keeps plan mode source mutation denied inside tools");
+  auto const denied_structured = denied ? ava::agent::serialize_tool_result_payload_json(*denied) : std::string{};
+  expect(denied_structured.find("\"permission_request_ids\":[\"permreq_") != std::string::npos &&
+             denied_structured.find("/permissions diagnose permreq_") != std::string::npos,
+         "tool dispatcher exposes actionable permission denial details in structured results");
   expect(!std::filesystem::exists(workspace / "main.cpp"), "denied plan mode write does not create source file");
 }
 

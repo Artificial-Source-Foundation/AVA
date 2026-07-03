@@ -21,6 +21,8 @@
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
 #include "ava/tui/terminal.h"
+#include "ava/tui/terminal_image.h"
+#include "ava/tui/theme.h"
 #include "ava/tui/tool_cards.h"
 
 #include "ava/config/auth.h"
@@ -57,6 +59,8 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <memory>
+#include <numeric>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -70,10 +74,169 @@
 
 namespace {
 
+struct ScopedTerminalCapabilityProfile
+{
+  explicit ScopedTerminalCapabilityProfile(std::string term_program_value)
+      : term("TERM", "xterm-256color"),
+        term_program("TERM_PROGRAM", std::move(term_program_value)),
+        terminal_emulator("TERMINAL_EMULATOR", ""),
+        tmux("TMUX", ""),
+        kitty_window_id("KITTY_WINDOW_ID", ""),
+        ghostty_resources_dir("GHOSTTY_RESOURCES_DIR", ""),
+        wezterm_pane("WEZTERM_PANE", ""),
+        warp_session_id("WARP_SESSION_ID", ""),
+        warp_terminal_session_uuid("WARP_TERMINAL_SESSION_UUID", ""),
+        iterm_session_id("ITERM_SESSION_ID", ""),
+        wt_session("WT_SESSION", "")
+  {
+  }
+
+  ScopedEnvVar term;
+  ScopedEnvVar term_program;
+  ScopedEnvVar terminal_emulator;
+  ScopedEnvVar tmux;
+  ScopedEnvVar kitty_window_id;
+  ScopedEnvVar ghostty_resources_dir;
+  ScopedEnvVar wezterm_pane;
+  ScopedEnvVar warp_session_id;
+  ScopedEnvVar warp_terminal_session_uuid;
+  ScopedEnvVar iterm_session_id;
+  ScopedEnvVar wt_session;
+};
+
+void test_tui_terminal_image_support()
+{
+  auto const unknown = ava::tui::detect_terminal_image_capabilities(ava::tui::TerminalEnvironment{});
+  expect(unknown.images == ava::tui::TerminalImageProtocol::None && !unknown.true_color && !unknown.hyperlinks &&
+             unknown.detail.find("unknown terminal") != std::string::npos,
+         "terminal image detection keeps unknown terminals on the textual fallback path");
+
+  auto const tmux_ghostty = ava::tui::detect_terminal_image_capabilities(
+      ava::tui::TerminalEnvironment{.term_program = "ghostty",
+                                    .term = "tmux-256color",
+                                    .color_term = "truecolor",
+                                    .tmux = true},
+      true);
+  expect(tmux_ghostty.images == ava::tui::TerminalImageProtocol::None && tmux_ghostty.true_color &&
+             tmux_ghostty.hyperlinks && tmux_ghostty.badge == "tmux" &&
+             tmux_ghostty.detail.find("tmux") != std::string::npos,
+         "terminal image detection disables image protocols under tmux while preserving explicit truecolor and forwarded hyperlinks");
+
+  auto const kitty = ava::tui::detect_terminal_image_capabilities(
+      ava::tui::TerminalEnvironment{.term_program = "kitty", .term = "xterm-kitty"});
+  auto const ghostty = ava::tui::detect_terminal_image_capabilities(
+      ava::tui::TerminalEnvironment{.term_program = "ghostty"});
+  auto const wezterm = ava::tui::detect_terminal_image_capabilities(
+      ava::tui::TerminalEnvironment{.term_program = "wezterm"});
+  auto const warp = ava::tui::detect_terminal_image_capabilities(
+      ava::tui::TerminalEnvironment{.term_program = "warpterminal"});
+  expect(kitty.images == ava::tui::TerminalImageProtocol::Kitty &&
+             ghostty.images == ava::tui::TerminalImageProtocol::Kitty &&
+             wezterm.images == ava::tui::TerminalImageProtocol::Kitty &&
+             warp.images == ava::tui::TerminalImageProtocol::Kitty &&
+             kitty.true_color && kitty.hyperlinks,
+         "terminal image detection enables Kitty-compatible graphics for Kitty, Ghostty, WezTerm, and Warp outside multiplexers");
+
+  auto const iterm = ava::tui::detect_terminal_image_capabilities(
+      ava::tui::TerminalEnvironment{.term_program = "iterm.app"});
+  auto const windows_terminal = ava::tui::detect_terminal_image_capabilities(
+      ava::tui::TerminalEnvironment{.term = "xterm-256color", .wt_session = true});
+  expect(iterm.images == ava::tui::TerminalImageProtocol::Iterm2 && iterm.true_color && iterm.hyperlinks &&
+             windows_terminal.images == ava::tui::TerminalImageProtocol::None && windows_terminal.true_color &&
+             windows_terminal.hyperlinks,
+         "terminal image detection distinguishes iTerm2 inline images from hyperlink-only terminals");
+
+  auto const kitty_sequence =
+      ava::tui::encode_kitty_image("AAAA", ava::tui::KittyImageOptions{.columns = 2, .rows = 2, .image_id = 42, .move_cursor = false});
+  auto const long_kitty_sequence = ava::tui::encode_kitty_image(std::string(5000, 'A'));
+  expect(kitty_sequence.starts_with("\x1b_Ga=T,f=100,q=2,C=1,c=2,r=2,i=42;AAAA") &&
+             kitty_sequence.ends_with("\x1b\\") &&
+             long_kitty_sequence.find(",m=1;") != std::string::npos &&
+             long_kitty_sequence.find("\x1b_Gm=0;") != std::string::npos &&
+             ava::tui::delete_kitty_image(42) == "\x1b_Ga=d,d=I,i=42,q=2\x1b\\" &&
+             ava::tui::delete_all_kitty_images() == "\x1b_Ga=d,d=A,q=2\x1b\\",
+         "terminal image helpers build Kitty graphics and cleanup sequences without terminal-side cursor movement when requested");
+
+  auto const iterm_sequence = ava::tui::encode_iterm2_image(
+      "BBBB", ava::tui::Iterm2ImageOptions{.width = "12", .height = "auto", .name = "screen.png", .preserve_aspect_ratio = false});
+  expect(iterm_sequence.starts_with("\x1b]1337;File=inline=1;width=12;height=auto;name=c2NyZWVuLnBuZw==;preserveAspectRatio=0:BBBB") &&
+             iterm_sequence.ends_with("\a"),
+         "terminal image helpers build iTerm2 inline image sequences with encoded names");
+
+  expect(ava::tui::terminal_line_contains_image_sequence("plain text") == false &&
+             ava::tui::terminal_line_contains_image_sequence(std::string("x") + "\x1b_Gpayload\x1b\\") &&
+             ava::tui::terminal_line_contains_image_sequence(std::string("x") + "\x1b]1337;File=inline=1:AAAA\a"),
+         "terminal image line detection recognizes Kitty and iTerm2 escape sequences without false positives on plain paths");
+
+  auto const cells = ava::tui::calculate_image_cell_size(ava::tui::ImageDimensions{.width_px = 20, .height_px = 100}, 10, 5,
+                                                         ava::tui::TerminalCellDimensions{.width_px = 10, .height_px = 10});
+  expect(cells.columns == 1 && cells.rows == 5, "terminal image sizing preserves aspect ratio within cell bounds");
+
+  std::string png(24, '\0');
+  png[0] = static_cast<char>(0x89);
+  png[1] = 'P';
+  png[2] = 'N';
+  png[3] = 'G';
+  png[4] = '\r';
+  png[5] = '\n';
+  png[6] = static_cast<char>(0x1A);
+  png[7] = '\n';
+  png[11] = 13;
+  png[12] = 'I';
+  png[13] = 'H';
+  png[14] = 'D';
+  png[15] = 'R';
+  png[16] = 0;
+  png[17] = 0;
+  png[18] = 1;
+  png[19] = 44;
+  png[20] = 0;
+  png[21] = 0;
+  png[22] = 0;
+  png[23] = 200;
+  auto const dimensions = ava::tui::image_dimensions_from_bytes(png, "image/png");
+  expect(dimensions && dimensions->width_px == 300 && dimensions->height_px == 200,
+         "terminal image dimension parser reads PNG dimensions for future preview row sizing");
+}
+
 void test_tui_composer_rendering_and_input()
 {
   expect(ava::tui::terminal_escape_delay_ms() == 100,
          "terminal escape delay is deliberately tuned low enough for responsive Esc while buffering split CSI input");
+  auto const osc8_width_sample = std::string("a\x1b]8;;https://example.test\x1b\\b\x1b]8;;\x1b\\");
+  expect(ava::tui::detail::terminal_text_columns(osc8_width_sample) == 2 &&
+             ava::tui::detail::fit_line_preserving_sgr(
+                 std::string("\x1b]8;;https://example.test\x1b\\abcdef\x1b]8;;\x1b\\"), 4)
+                     .find("\x1b]8;;\x1b\\...") != std::string::npos,
+         "tui width helpers treat OSC 8 hyperlinks as zero-width and close truncated links before ellipses");
+  expect(ava::tui::terminal_kitty_keyboard_push_sequence() == std::string_view("\x1b[>5u") &&
+             ava::tui::terminal_kitty_keyboard_query_sequence() == std::string_view("\x1b[>5u\x1b[?u\x1b[c") &&
+             ava::tui::terminal_kitty_keyboard_pop_sequence() == std::string_view("\x1b[<u"),
+         "terminal session requests Kitty keyboard disambiguation plus alternate-key reporting, queries support, and restores the stack on exit");
+  expect(ava::tui::terminal_modify_other_keys_enable_sequence() == std::string_view("\x1b[>4;2m") &&
+             ava::tui::terminal_modify_other_keys_disable_sequence() == std::string_view("\x1b[>4;0m"),
+         "terminal session has xterm modifyOtherKeys fallback enable and disable sequences");
+  auto const kitty_flags = ava::tui::terminal_kitty_keyboard_flags_response("[?5u");
+  auto const kitty_zero_flags = ava::tui::terminal_kitty_keyboard_flags_response("[?0u");
+  using KeyboardAction = ava::tui::KeyboardProtocolResponseAction;
+  expect(kitty_flags && *kitty_flags == 5 && kitty_zero_flags && *kitty_zero_flags == 0 &&
+             !ava::tui::terminal_kitty_keyboard_flags_response("[?u") &&
+             !ava::tui::terminal_kitty_keyboard_flags_response("[?5c") &&
+             ava::tui::terminal_device_attributes_response("[?1c") &&
+             ava::tui::terminal_device_attributes_response("[?62;4;52c") &&
+             !ava::tui::terminal_device_attributes_response("[?c") &&
+             !ava::tui::terminal_device_attributes_response("[?62;4;52u") &&
+             ava::tui::terminal_keyboard_protocol_response_action("[?0u", false, false) ==
+                 KeyboardAction::EnableModifyOtherKeys &&
+             ava::tui::terminal_keyboard_protocol_response_action("[?62;4;52c", false, false) ==
+                 KeyboardAction::EnableModifyOtherKeys &&
+             ava::tui::terminal_keyboard_protocol_response_action("[?62;4;52c", true, false) ==
+                 KeyboardAction::None &&
+             ava::tui::terminal_keyboard_protocol_response_action("[?5u", false, true) ==
+                 KeyboardAction::DisableModifyOtherKeys &&
+             ava::tui::terminal_keyboard_protocol_response_action("[?5u", false, false) ==
+                 KeyboardAction::None,
+         "terminal keyboard negotiation parser recognizes Kitty flag and device-attribute replies and derives fallback actions");
   expect(ava::tui::terminal_escape_sequence_key("[27;2;13~") == ava::tui::Key::ShiftEnter &&
              ava::tui::terminal_escape_sequence_key("[13;2u") == ava::tui::Key::ShiftEnter &&
              ava::tui::terminal_escape_sequence_key("[13;2~") == ava::tui::Key::ShiftEnter &&
@@ -88,19 +251,46 @@ void test_tui_composer_rendering_and_input()
              ava::tui::terminal_escape_sequence_key("[Z") == ava::tui::Key::ShiftTab &&
              ava::tui::terminal_escape_sequence_key("[1;6P") == ava::tui::Key::CtrlShiftP &&
              ava::tui::terminal_escape_sequence_key("[80;6u") == ava::tui::Key::CtrlShiftP &&
+             ava::tui::terminal_escape_sequence_key("[1079::112;6u") == ava::tui::Key::CtrlShiftP &&
+             ava::tui::terminal_escape_sequence_key("[103;5u") == ava::tui::Key::CtrlG &&
              ava::tui::terminal_escape_sequence_key("[3~") == ava::tui::Key::Delete &&
+             ava::tui::terminal_escape_sequence_key("[3$") == ava::tui::Key::ShiftDelete &&
+             ava::tui::terminal_escape_sequence_complete("[3$") &&
+             ava::tui::terminal_escape_sequence_key("[3;2~") == ava::tui::Key::ShiftDelete &&
+             ava::tui::terminal_escape_sequence_key("[2~") == ava::tui::Key::Insert &&
              ava::tui::terminal_escape_sequence_key("[5~") == ava::tui::Key::PageUp &&
              ava::tui::terminal_escape_sequence_key("[6~") == ava::tui::Key::PageDown &&
              ava::tui::terminal_escape_sequence_key("[5;2~") == ava::tui::Key::PageUp &&
              ava::tui::terminal_escape_sequence_key("[6;2~") == ava::tui::Key::PageDown &&
+             ava::tui::terminal_escape_sequence_key("OP") == ava::tui::Key::F1 &&
+             ava::tui::terminal_escape_sequence_key("OQ") == ava::tui::Key::F2 &&
+             ava::tui::terminal_escape_sequence_key("[11~") == ava::tui::Key::F1 &&
+             ava::tui::terminal_escape_sequence_key("[12~") == ava::tui::Key::F2 &&
+             ava::tui::terminal_escape_sequence_key("[24~") == ava::tui::Key::F12 &&
              ava::tui::terminal_escape_sequence_key("[H") == ava::tui::Key::Home &&
              ava::tui::terminal_escape_sequence_key("OH") == ava::tui::Key::Home &&
              ava::tui::terminal_escape_sequence_key("[1~") == ava::tui::Key::Home &&
              ava::tui::terminal_escape_sequence_key("[7~") == ava::tui::Key::Home &&
+             ava::tui::terminal_escape_sequence_key("[1;5H") == ava::tui::Key::CtrlHome &&
+             ava::tui::terminal_escape_sequence_key("[7;5~") == ava::tui::Key::CtrlHome &&
+             ava::tui::terminal_escape_sequence_key("[1;6H") == ava::tui::Key::ShiftCtrlHome &&
+             ava::tui::terminal_escape_sequence_key("[7;6~") == ava::tui::Key::ShiftCtrlHome &&
+             ava::tui::terminal_escape_sequence_key("[1;2H") == ava::tui::Key::ShiftHome &&
+             ava::tui::terminal_escape_sequence_key("[2H") == ava::tui::Key::ShiftHome &&
+             ava::tui::terminal_escape_sequence_key("[7$") == ava::tui::Key::ShiftHome &&
+             ava::tui::terminal_escape_sequence_key("[7;2~") == ava::tui::Key::ShiftHome &&
              ava::tui::terminal_escape_sequence_key("[F") == ava::tui::Key::End &&
              ava::tui::terminal_escape_sequence_key("OF") == ava::tui::Key::End &&
              ava::tui::terminal_escape_sequence_key("[4~") == ava::tui::Key::End &&
              ava::tui::terminal_escape_sequence_key("[8~") == ava::tui::Key::End &&
+             ava::tui::terminal_escape_sequence_key("[1;5F") == ava::tui::Key::CtrlEnd &&
+             ava::tui::terminal_escape_sequence_key("[8;5~") == ava::tui::Key::CtrlEnd &&
+             ava::tui::terminal_escape_sequence_key("[1;6F") == ava::tui::Key::ShiftCtrlEnd &&
+             ava::tui::terminal_escape_sequence_key("[8;6~") == ava::tui::Key::ShiftCtrlEnd &&
+             ava::tui::terminal_escape_sequence_key("[1;2F") == ava::tui::Key::ShiftEnd &&
+             ava::tui::terminal_escape_sequence_key("[2F") == ava::tui::Key::ShiftEnd &&
+             ava::tui::terminal_escape_sequence_key("[8$") == ava::tui::Key::ShiftEnd &&
+             ava::tui::terminal_escape_sequence_key("[8;2~") == ava::tui::Key::ShiftEnd &&
              ava::tui::terminal_escape_sequence_key("[45;5u") == ava::tui::Key::CtrlMinus &&
              ava::tui::terminal_escape_sequence_key(std::string_view("\x1f", 1)) == ava::tui::Key::CtrlMinus &&
              ava::tui::terminal_escape_sequence_key(std::string_view("\x1d", 1)) == ava::tui::Key::CtrlAltRightBracket &&
@@ -109,18 +299,103 @@ void test_tui_composer_rendering_and_input()
              ava::tui::terminal_escape_sequence_key("[1;5C") == ava::tui::Key::CtrlArrowRight &&
              ava::tui::terminal_escape_sequence_key("[5D") == ava::tui::Key::CtrlArrowLeft &&
              ava::tui::terminal_escape_sequence_key("[5C") == ava::tui::Key::CtrlArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[1;2D") == ava::tui::Key::ShiftArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[1;2C") == ava::tui::Key::ShiftArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[2D") == ava::tui::Key::ShiftArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[2C") == ava::tui::Key::ShiftArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[d") == ava::tui::Key::ShiftArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[c") == ava::tui::Key::ShiftArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[1;2A") == ava::tui::Key::ShiftArrowUp &&
+             ava::tui::terminal_escape_sequence_key("[1;2B") == ava::tui::Key::ShiftArrowDown &&
+             ava::tui::terminal_escape_sequence_key("[2A") == ava::tui::Key::ShiftArrowUp &&
+             ava::tui::terminal_escape_sequence_key("[2B") == ava::tui::Key::ShiftArrowDown &&
+             ava::tui::terminal_escape_sequence_key("[a") == ava::tui::Key::ShiftArrowUp &&
+             ava::tui::terminal_escape_sequence_key("[b") == ava::tui::Key::ShiftArrowDown &&
+             ava::tui::terminal_escape_sequence_key("[1;6D") == ava::tui::Key::ShiftCtrlArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[1;6C") == ava::tui::Key::ShiftCtrlArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[6D") == ava::tui::Key::ShiftCtrlArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[6C") == ava::tui::Key::ShiftCtrlArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[1;4D") == ava::tui::Key::ShiftAltArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[1;4C") == ava::tui::Key::ShiftAltArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[4D") == ava::tui::Key::ShiftAltArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[4C") == ava::tui::Key::ShiftAltArrowRight &&
              ava::tui::terminal_escape_sequence_key("[1;3A") == ava::tui::Key::AltArrowUp &&
              ava::tui::terminal_escape_sequence_key("[3A") == ava::tui::Key::AltArrowUp &&
+             ava::tui::terminal_escape_sequence_key("[1;3B") == ava::tui::Key::AltArrowDown &&
+             ava::tui::terminal_escape_sequence_key("[3B") == ava::tui::Key::AltArrowDown &&
              ava::tui::terminal_escape_sequence_key("[1;3D") == ava::tui::Key::AltArrowLeft &&
              ava::tui::terminal_escape_sequence_key("[1;3C") == ava::tui::Key::AltArrowRight &&
              ava::tui::terminal_escape_sequence_key("[3D") == ava::tui::Key::AltArrowLeft &&
              ava::tui::terminal_escape_sequence_key("[3C") == ava::tui::Key::AltArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[57417u") == ava::tui::Key::ArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[57418u") == ava::tui::Key::ArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[57419u") == ava::tui::Key::ArrowUp &&
+             ava::tui::terminal_escape_sequence_key("[57420u") == ava::tui::Key::ArrowDown &&
+             ava::tui::terminal_escape_sequence_key("[57419;2u") == ava::tui::Key::ShiftArrowUp &&
+             ava::tui::terminal_escape_sequence_key("[57420;2u") == ava::tui::Key::ShiftArrowDown &&
+             ava::tui::terminal_escape_sequence_key("[57417;2u") == ava::tui::Key::ShiftArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[57418;2u") == ava::tui::Key::ShiftArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[57417;5u") == ava::tui::Key::CtrlArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[57418;5u") == ava::tui::Key::CtrlArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[57417;3u") == ava::tui::Key::AltArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[57418;3u") == ava::tui::Key::AltArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[57417;6u") == ava::tui::Key::ShiftCtrlArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[57418;6u") == ava::tui::Key::ShiftCtrlArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[57417;4u") == ava::tui::Key::ShiftAltArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[57418;4u") == ava::tui::Key::ShiftAltArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[57419;3u") == ava::tui::Key::AltArrowUp &&
+             ava::tui::terminal_escape_sequence_key("[57420;3u") == ava::tui::Key::AltArrowDown &&
+             ava::tui::terminal_escape_sequence_key("[57421u") == ava::tui::Key::PageUp &&
+             ava::tui::terminal_escape_sequence_key("[57422u") == ava::tui::Key::PageDown &&
+             ava::tui::terminal_escape_sequence_key("[57423u") == ava::tui::Key::Home &&
+             ava::tui::terminal_escape_sequence_key("[57424u") == ava::tui::Key::End &&
+             ava::tui::terminal_escape_sequence_key("[57423;5u") == ava::tui::Key::CtrlHome &&
+             ava::tui::terminal_escape_sequence_key("[57424;5u") == ava::tui::Key::CtrlEnd &&
+             ava::tui::terminal_escape_sequence_key("[57423;6u") == ava::tui::Key::ShiftCtrlHome &&
+             ava::tui::terminal_escape_sequence_key("[57424;6u") == ava::tui::Key::ShiftCtrlEnd &&
+             ava::tui::terminal_escape_sequence_key("[57423;2u") == ava::tui::Key::ShiftHome &&
+             ava::tui::terminal_escape_sequence_key("[57424;2u") == ava::tui::Key::ShiftEnd &&
+             ava::tui::terminal_escape_sequence_key("[57426u") == ava::tui::Key::Delete &&
+             ava::tui::terminal_escape_sequence_key("[57426;2u") == ava::tui::Key::ShiftDelete &&
+             ava::tui::terminal_escape_sequence_key("[57426;3u") == ava::tui::Key::AltDelete &&
+             ava::tui::terminal_escape_sequence_key("[127;2u") == ava::tui::Key::ShiftBackspace &&
+             ava::tui::terminal_escape_sequence_key("[127;5u") == ava::tui::Key::CtrlBackspace &&
+             ava::tui::terminal_escape_sequence_key("[99;5u") == ava::tui::Key::CtrlC &&
+             ava::tui::terminal_escape_sequence_key("[120;5u") == ava::tui::Key::CtrlX &&
+             ava::tui::terminal_escape_sequence_key("[1089::99;5u") == ava::tui::Key::CtrlC &&
+             ava::tui::terminal_escape_sequence_key("[99;5:2u") == ava::tui::Key::CtrlC &&
+             ava::tui::terminal_escape_sequence_key("[99;5:3u") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[100;3u") == ava::tui::Key::AltD &&
+             ava::tui::terminal_escape_sequence_key("[27;5;99~") == ava::tui::Key::CtrlC &&
+             ava::tui::terminal_escape_sequence_key("[27;5;100~") == ava::tui::Key::CtrlD &&
+             ava::tui::terminal_escape_sequence_key("[27;5;45~") == ava::tui::Key::CtrlMinus &&
+             ava::tui::terminal_escape_sequence_key("[27;6;80~") == ava::tui::Key::CtrlShiftP &&
+             ava::tui::terminal_escape_sequence_key("[27;3;100~") == ava::tui::Key::AltD &&
+             ava::tui::terminal_escape_sequence_key("[27;2;127~") == ava::tui::Key::ShiftBackspace &&
+             ava::tui::terminal_escape_sequence_key("[27;5;127~") == ava::tui::Key::CtrlBackspace &&
+             ava::tui::terminal_escape_sequence_key("[27;3;127~") == ava::tui::Key::AltBackspace &&
+             ava::tui::terminal_escape_sequence_key("[27;1;127~") == ava::tui::Key::Backspace &&
+             ava::tui::terminal_escape_sequence_key("[27;1;27~") == ava::tui::Key::Escape &&
+             ava::tui::terminal_escape_sequence_key(std::string_view("\x00", 1)) == ava::tui::Key::CtrlSpace &&
+             ava::tui::terminal_escape_sequence_key("[32;5u") == ava::tui::Key::CtrlSpace &&
+             ava::tui::terminal_escape_sequence_key("[27;5;32~") == ava::tui::Key::CtrlSpace &&
+             ava::tui::terminal_escape_sequence_key("[48;5u") == ava::tui::Key::Ctrl0 &&
+             ava::tui::terminal_escape_sequence_key("[49;5u") == ava::tui::Key::Ctrl1 &&
+             ava::tui::terminal_escape_sequence_key("[57;5u") == ava::tui::Key::Ctrl9 &&
+             ava::tui::terminal_escape_sequence_key("[27;5;49~") == ava::tui::Key::Ctrl1 &&
+             ava::tui::terminal_escape_sequence_key("[47;5u") == ava::tui::Key::CtrlSlash &&
+             ava::tui::terminal_escape_sequence_key("[47::91;5u") == ava::tui::Key::CtrlSlash &&
+             ava::tui::terminal_escape_sequence_key("[27;5;47~") == ava::tui::Key::CtrlSlash &&
+             ava::tui::terminal_escape_sequence_key("[27;2;9~") == ava::tui::Key::ShiftTab &&
              ava::tui::terminal_escape_sequence_key("[<64;12;9M") == ava::tui::Key::MouseWheelUp &&
              ava::tui::terminal_escape_sequence_key("[<65;12;9M") == ava::tui::Key::MouseWheelDown &&
              ava::tui::terminal_escape_sequence_key("[<68;12;9M") == ava::tui::Key::MouseWheelUp &&
              ava::tui::terminal_escape_sequence_key("[<69;12;9M") == ava::tui::Key::MouseWheelDown &&
+             ava::tui::terminal_escape_sequence_key("[<0;12;9M") == ava::tui::Key::MouseLeftClick &&
+             ava::tui::terminal_escape_sequence_key("[<32;12;9M") == ava::tui::Key::MouseLeftDrag &&
              ava::tui::terminal_escape_sequence_key("[<64;12;9m") == ava::tui::Key::Unknown &&
              ava::tui::terminal_escape_sequence_key("[<65;12;9m") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[<0;12;9m") == ava::tui::Key::MouseLeftRelease &&
              ava::tui::terminal_escape_sequence_key(std::string_view("\x7f", 1)) == ava::tui::Key::AltBackspace &&
              ava::tui::terminal_escape_sequence_key(std::string_view("\b", 1)) == ava::tui::Key::AltBackspace &&
              ava::tui::terminal_escape_sequence_key("b") == ava::tui::Key::AltB &&
@@ -139,10 +414,56 @@ void test_tui_composer_rendering_and_input()
              ava::tui::terminal_escape_sequence_key("[200~") == ava::tui::Key::Unknown,
          "terminal escape parser maps complete modified Enter CSI forms without treating partial keys or paste markers as "
          "text");
+  auto const kitty_keypad_one = ava::tui::terminal_escape_sequence_event("[57400u");
+  auto const kitty_keypad_plus = ava::tui::terminal_escape_sequence_event("[57413u");
+  auto const kitty_shifted_letter = ava::tui::terminal_escape_sequence_event("[97:65:97;2u");
+  auto const kitty_repeat_letter = ava::tui::terminal_escape_sequence_event("[97;1:2u");
+  auto const kitty_release_letter = ava::tui::terminal_escape_sequence_event("[97;1:3u");
+  auto const modify_plain_letter = ava::tui::terminal_escape_sequence_event("[27;1;120~");
+  auto const modify_shifted_letter = ava::tui::terminal_escape_sequence_event("[27;2;69~");
+  expect(kitty_keypad_one.key == ava::tui::Key::Character && kitty_keypad_one.text == "1" &&
+             kitty_keypad_plus.key == ava::tui::Key::Character && kitty_keypad_plus.text == "+" &&
+             kitty_shifted_letter.key == ava::tui::Key::Character && kitty_shifted_letter.text == "A" &&
+             kitty_repeat_letter.key == ava::tui::Key::Character && kitty_repeat_letter.text == "a" &&
+             kitty_release_letter.key == ava::tui::Key::Unknown &&
+             modify_plain_letter.key == ava::tui::Key::Character && modify_plain_letter.text == "x" &&
+             modify_shifted_letter.key == ava::tui::Key::Character && modify_shifted_letter.text == "E",
+         "terminal escape parser decodes Kitty CSI-u and xterm modifyOtherKeys printable reports while ignoring releases");
+  auto const legacy_mouse_sequence = [](unsigned int button, unsigned int column, unsigned int row) {
+    std::string sequence = "[M";
+    sequence.push_back(static_cast<char>(button + 32U));
+    sequence.push_back(static_cast<char>(column + 32U));
+    sequence.push_back(static_cast<char>(row + 32U));
+    return sequence;
+  };
+  auto const sgr_click = ava::tui::terminal_escape_sequence_event("[<0;12;9M");
+  auto const sgr_release = ava::tui::terminal_escape_sequence_event("[<0;12;9m");
+  auto const sgr_drag = ava::tui::terminal_escape_sequence_event("[<32;12;9M");
+  auto const sgr_wheel = ava::tui::terminal_escape_sequence_event("[<65;21;7M");
+  auto const legacy_click = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(0, 12, 9));
+  auto const legacy_release = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(3, 12, 9));
+  auto const legacy_drag = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(32, 12, 9));
+  auto const legacy_wheel = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(64, 21, 7));
+  expect(sgr_click.key == ava::tui::Key::MouseLeftClick && sgr_click.mouse_column == 12 &&
+             sgr_click.mouse_row == 9 && sgr_release.key == ava::tui::Key::MouseLeftRelease &&
+             sgr_release.mouse_column == 12 && sgr_release.mouse_row == 9 &&
+             sgr_drag.key == ava::tui::Key::MouseLeftDrag && sgr_drag.mouse_column == 12 && sgr_drag.mouse_row == 9 &&
+             sgr_wheel.key == ava::tui::Key::MouseWheelDown && sgr_wheel.mouse_column == 21 &&
+             sgr_wheel.mouse_row == 7 && legacy_click.key == ava::tui::Key::MouseLeftClick &&
+             legacy_click.mouse_column == 12 && legacy_click.mouse_row == 9 &&
+             legacy_release.key == ava::tui::Key::MouseLeftRelease && legacy_release.mouse_column == 12 &&
+             legacy_release.mouse_row == 9 && legacy_drag.key == ava::tui::Key::MouseLeftDrag &&
+             legacy_drag.mouse_column == 12 && legacy_drag.mouse_row == 9 &&
+             legacy_wheel.key == ava::tui::Key::MouseWheelUp &&
+             legacy_wheel.mouse_column == 21 && legacy_wheel.mouse_row == 7,
+         "terminal escape parser preserves SGR and legacy mouse click, drag, release, and wheel coordinates");
   expect(ava::tui::terminal_escape_sequence_complete("[13;2u") &&
              ava::tui::terminal_escape_sequence_complete("[?25l") &&
              ava::tui::terminal_escape_sequence_complete("[45;5u") &&
              ava::tui::terminal_escape_sequence_complete("[3;3~") &&
+             ava::tui::terminal_escape_sequence_complete("[<0;12;9M") &&
+             ava::tui::terminal_escape_sequence_complete(legacy_mouse_sequence(0, 12, 9)) &&
+             ava::tui::terminal_escape_sequence_complete(std::string_view("\x00", 1)) &&
              ava::tui::terminal_escape_sequence_complete(std::string_view("\x1f", 1)) &&
              ava::tui::terminal_escape_sequence_complete(std::string_view("\x1d", 1)) &&
              ava::tui::terminal_escape_sequence_complete(std::string_view("\x7f", 1)) &&
@@ -152,15 +473,19 @@ void test_tui_composer_rendering_and_input()
              ava::tui::terminal_escape_sequence_complete(std::string("P1;2|payload") + "\x1b\\") &&
              !ava::tui::terminal_escape_sequence_complete("[13;2") &&
              !ava::tui::terminal_escape_sequence_complete("[200") &&
+             !ava::tui::terminal_escape_sequence_complete("[M ") &&
              !ava::tui::terminal_escape_sequence_complete("]0;AVA") &&
              !ava::tui::terminal_escape_sequence_complete(std::string("P1;2|payload")),
          "terminal escape parser buffers CSI, OSC, and DCS sequences until a real terminator is present");
   expect(
-      ava::tui::terminal_escape_sequence_should_discard("[?25l") &&
+          ava::tui::terminal_escape_sequence_should_discard("[?25l") &&
+          ava::tui::terminal_escape_sequence_should_discard("[?5u") &&
+          ava::tui::terminal_escape_sequence_should_discard("[?62;4;52c") &&
           ava::tui::terminal_escape_sequence_should_discard(std::string("]0;AVA") + "\a") &&
           ava::tui::terminal_escape_sequence_should_discard(std::string("]52;c;AAAA") + "\x1b\\") &&
           ava::tui::terminal_escape_sequence_should_discard(std::string("P1;2|payload") + "\x1b\\") &&
           ava::tui::terminal_escape_sequence_should_discard("[<64;12;9m") &&
+          ava::tui::terminal_escape_sequence_should_discard("[97;1:3u") &&
           !ava::tui::terminal_escape_sequence_should_discard("[13;2u") &&
           !ava::tui::terminal_escape_sequence_should_discard("[200~") &&
           !ava::tui::terminal_escape_sequence_should_discard("[13;2"),
@@ -390,6 +715,14 @@ void test_tui_composer_rendering_and_input()
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::Undo) &&
              draft.text == std::string("a") + "\xC3\xA9",
          "tui draft editor can undo again after redo");
+  ava::tui::reset_composer_draft(draft, "alpha beta", std::string("alpha ").size());
+  expect(ava::tui::replace_composer_draft_range(draft, std::string("alpha ").size(), draft.text.size(), "TWO") &&
+             draft.text == "alpha TWO" && draft.cursor == std::string("alpha TWO").size(),
+         "tui draft editor replaces selected byte ranges and moves the cursor after the replacement");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::Undo) && draft.text == "alpha beta" &&
+             draft.cursor == std::string("alpha ").size(),
+         "tui draft editor range replacement participates in undo history");
+  ava::tui::reset_composer_draft(draft, std::string("a") + "\xC3\xA9");
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorLeft) && draft.cursor == 1,
          "tui draft editor moves left by full utf-8 codepoint boundaries");
   ava::tui::reset_composer_draft(draft, std::string("a") + "\xC3\xA9" + "b", 1);
@@ -413,6 +746,98 @@ void test_tui_composer_rendering_and_input()
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::Undo) && draft.text == "one two three" &&
              draft.cursor == 3,
          "tui draft editor undo restores forward word deletion");
+  ava::tui::reset_composer_draft(draft, "path/to/file", 0);
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) && draft.cursor == 4 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) && draft.cursor == 5 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) && draft.cursor == 7 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) && draft.cursor == 8 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) &&
+             draft.cursor == draft.text.size(),
+         "tui draft editor word-right stops at path punctuation boundaries");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) && draft.cursor == 8 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) && draft.cursor == 7 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) && draft.cursor == 5 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) && draft.cursor == 4 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) && draft.cursor == 0,
+         "tui draft editor word-left stops at path punctuation boundaries");
+  ava::tui::reset_composer_draft(draft, "foo...bar", 0);
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) && draft.cursor == 3 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) && draft.cursor == 6 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) &&
+             draft.cursor == draft.text.size(),
+         "tui draft editor word-right treats punctuation runs as one segment");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) && draft.cursor == 6 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) && draft.cursor == 3 &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) && draft.cursor == 0,
+         "tui draft editor word-left treats punctuation runs as one segment");
+  ava::tui::reset_composer_draft(draft, "path/to/file", 7);
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteWordBackward) &&
+             draft.text == "path//file" && draft.cursor == 5 && draft.kill_buffer == "to",
+         "tui draft editor word-backspace deletes only the preceding path segment");
+  ava::tui::reset_composer_draft(draft, "path/to/file", 4);
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteWordForward) &&
+             draft.text == "pathto/file" && draft.cursor == 4 && draft.kill_buffer == "/",
+         "tui draft editor forward word deletion can delete a punctuation segment independently");
+  auto const cjk_hello = std::string("\xE4\xBD\xA0\xE5\xA5\xBD");
+  auto const fullwidth_comma = std::string("\xEF\xBC\x8C");
+  auto const cjk_world = std::string("\xE4\xB8\x96\xE7\x95\x8C");
+  auto const cjk_sentence = cjk_hello + fullwidth_comma + cjk_world;
+  auto const cjk_after_hello = cjk_hello.size();
+  auto const cjk_after_comma = cjk_after_hello + fullwidth_comma.size();
+  ava::tui::reset_composer_draft(draft, cjk_sentence);
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) &&
+             draft.cursor == cjk_after_comma,
+         "tui draft editor word-left stops after fullwidth punctuation before a CJK word");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) &&
+             draft.cursor == cjk_after_hello,
+         "tui draft editor word-left treats fullwidth punctuation as its own segment");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) && draft.cursor == 0,
+         "tui draft editor word-left moves over the preceding CJK word");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) &&
+             draft.cursor == cjk_after_hello,
+         "tui draft editor word-right moves over the first CJK word");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) &&
+             draft.cursor == cjk_after_comma,
+         "tui draft editor word-right stops after fullwidth punctuation");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) &&
+             draft.cursor == cjk_sentence.size(),
+         "tui draft editor word-right moves over the final CJK word");
+  auto const mixed_cjk = std::string("hello") + cjk_hello + fullwidth_comma + "world" + cjk_world;
+  auto const mixed_after_ascii_hello = std::string("hello").size();
+  auto const mixed_after_cjk_hello = mixed_after_ascii_hello + cjk_hello.size();
+  auto const mixed_after_comma = mixed_after_cjk_hello + fullwidth_comma.size();
+  auto const mixed_after_ascii_world = mixed_after_comma + std::string("world").size();
+  ava::tui::reset_composer_draft(draft, mixed_cjk);
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) &&
+             draft.cursor == mixed_after_ascii_world,
+         "tui draft editor word-left separates adjacent ASCII and CJK words");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) &&
+             draft.cursor == mixed_after_comma,
+         "tui draft editor word-left moves over ASCII after fullwidth punctuation");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) &&
+             draft.cursor == mixed_after_cjk_hello,
+         "tui draft editor word-left stops on fullwidth punctuation in mixed text");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) &&
+             draft.cursor == mixed_after_ascii_hello,
+         "tui draft editor word-left moves over CJK before ASCII");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordLeft) && draft.cursor == 0,
+         "tui draft editor word-left moves over leading ASCII before CJK");
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) &&
+             draft.cursor == mixed_after_ascii_hello &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) &&
+             draft.cursor == mixed_after_cjk_hello &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) &&
+             draft.cursor == mixed_after_comma &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) &&
+             draft.cursor == mixed_after_ascii_world &&
+             ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorWordRight) &&
+             draft.cursor == mixed_cjk.size(),
+         "tui draft editor word-right steps through mixed ASCII, CJK, and fullwidth punctuation segments");
+  ava::tui::reset_composer_draft(draft, cjk_sentence, cjk_after_comma);
+  expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteWordBackward) &&
+             draft.text == cjk_hello + cjk_world && draft.cursor == cjk_after_hello &&
+             draft.kill_buffer == fullwidth_comma,
+         "tui draft editor word-backspace deletes fullwidth punctuation as its own segment");
   ava::tui::reset_composer_draft(draft, "first\nsecond line");
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::CursorLineStart) && draft.cursor == 6,
          "tui draft editor moves to the start of the current line");
@@ -482,6 +907,28 @@ void test_tui_composer_rendering_and_input()
          "tui draft editor clears a non-empty composer draft into the kill buffer");
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::Undo) && draft.text == "pending message",
          "tui draft editor undo restores a cleared composer draft");
+  ava::tui::ComposerDraftState backslash_newline_draft;
+  expect(ava::tui::insert_composer_draft_text(backslash_newline_draft, "\\") &&
+             backslash_newline_draft.text == "\\",
+         "tui draft editor inserts backslash visibly before Enter workaround");
+  expect(ava::tui::replace_composer_backslash_before_cursor_with_newline(backslash_newline_draft) &&
+             backslash_newline_draft.text == "\n" && backslash_newline_draft.cursor == 1,
+         "tui draft editor converts a standalone backslash before cursor into a newline");
+  expect(ava::tui::apply_composer_draft_action(backslash_newline_draft, ava::tui::TuiAction::Undo) &&
+             backslash_newline_draft.text == "\\",
+         "tui draft editor can undo the backslash-enter newline workaround");
+  ava::tui::reset_composer_draft(backslash_newline_draft, "\\\\\\");
+  expect(ava::tui::replace_composer_backslash_before_cursor_with_newline(backslash_newline_draft) &&
+             backslash_newline_draft.text == "\\\\\n",
+         "tui draft editor removes only the backslash immediately before cursor for Enter newline workaround");
+  ava::tui::reset_composer_draft(backslash_newline_draft, "\\x");
+  expect(!ava::tui::replace_composer_backslash_before_cursor_with_newline(backslash_newline_draft) &&
+             backslash_newline_draft.text == "\\x",
+         "tui draft editor leaves ordinary backslash text alone when backslash is not before cursor");
+  ava::tui::reset_composer_draft(backslash_newline_draft, "\\x", 1);
+  expect(ava::tui::replace_composer_backslash_before_cursor_with_newline(backslash_newline_draft) &&
+             backslash_newline_draft.text == "\nx",
+         "tui draft editor applies the backslash-enter newline workaround at the current cursor");
   ava::tui::ComposerDraftState ring_draft;
   ava::tui::reset_composer_draft(ring_draft, "alpha beta gamma");
   expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::DeleteWordBackward) &&
@@ -572,6 +1019,13 @@ void test_tui_composer_rendering_and_input()
   expect(ava::tui::apply_composer_draft_action(marker_draft, ava::tui::TuiAction::CursorLeft) && marker_draft.cursor == 1 + marker_size &&
              ava::tui::apply_composer_draft_action(marker_draft, ava::tui::TuiAction::CursorLeft) && marker_draft.cursor == 1,
          "tui draft editor treats recorded paste markers as one unit for left-arrow movement");
+  auto const marker_start = std::size_t{1};
+  auto const marker_end = marker_start + marker_size;
+  expect(ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(marker_draft, marker_start + 1) == marker_start &&
+             ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(marker_draft, marker_end - 1) == marker_end &&
+             ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(marker_draft, marker_start) == marker_start &&
+             ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(marker_draft, marker_end) == marker_end,
+         "tui draft editor snaps cursor positions inside recorded paste markers to atomic boundaries");
   auto word_marker_draft = [&]() {
     ava::tui::ComposerDraftState marker_word_draft;
     static_cast<void>(ava::tui::insert_composer_draft_text(marker_word_draft, "X "));
@@ -632,6 +1086,8 @@ void test_tui_composer_rendering_and_input()
   expect(ava::tui::apply_composer_draft_action(paste_draft, ava::tui::TuiAction::CursorLineStart) &&
              ava::tui::apply_composer_draft_action(paste_draft, ava::tui::TuiAction::CursorRight) && paste_draft.cursor == 1,
          "tui manually typed paste-marker text is not treated as an atomic marker");
+  expect(ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(paste_draft, 3) == 3,
+         "tui manually typed paste-marker text does not receive recorded-marker cursor snapping");
   auto duplicate_marker_draft = make_marker_draft();
   auto const duplicate_marker_text = duplicate_marker_draft.text.substr(1, marker_size);
   duplicate_marker_draft.cursor = duplicate_marker_draft.text.size();
@@ -645,8 +1101,8 @@ void test_tui_composer_rendering_and_input()
          "tui duplicate manually typed paste-marker text remains literal beside a recorded marker");
   duplicate_marker_draft.cursor = duplicate_marker_start;
   expect(ava::tui::apply_composer_draft_action(duplicate_marker_draft, ava::tui::TuiAction::CursorWordRight) &&
-             duplicate_marker_draft.cursor == duplicate_marker_start + std::string("[paste").size(),
-         "tui duplicate manually typed paste-marker text is not atomic for word movement");
+             duplicate_marker_draft.cursor == duplicate_marker_start + 1,
+         "tui duplicate manually typed paste-marker text is punctuation-aware but not atomic for word movement");
   ava::tui::reset_composer_draft(paste_draft);
   auto const long_single_line = std::string(2001, 'x');
   expect(ava::tui::insert_composer_paste_text(paste_draft, long_single_line) && paste_draft.text == "[paste #1 2001 chars]" &&
@@ -803,6 +1259,65 @@ void test_tui_composer_rendering_and_input()
                                  }),
          "tui renders active-run queued steering/follow-up messages in a compact pending region");
 
+  auto const attachment_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "attached image for next prompt",
+      .transcript = {ava::tui::TranscriptItem{.label = "status", .text = "attached image"}},
+      .width = 80,
+      .height = 12,
+      .pending_attachments = {ava::tui::PendingAttachmentItem{.label = "screen.png", .detail = "(image/png, 68 bytes)"}}});
+  expect(std::ranges::any_of(attachment_lines,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("attached image screen.png") != std::string::npos &&
+                                      visible.find("(image/png, 68 bytes)") != std::string::npos &&
+                                      visible.find("(next prompt)") != std::string::npos;
+                             }),
+         "tui renders pending image attachments before the next prompt is submitted");
+  auto const attachment_preview_snapshot = ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "attached image for next prompt",
+      .transcript = {ava::tui::TranscriptItem{.label = "status", .text = "attached image"}},
+      .width = 80,
+      .height = 14,
+      .pending_attachments = {ava::tui::PendingAttachmentItem{
+          .label = "screen.png",
+          .detail = "(image/png, 68 bytes) preview kitty",
+          .preview = ava::tui::PendingAttachmentItem::Preview{.protocol = ava::tui::TerminalImageProtocol::Kitty,
+                                                              .base64_data = std::make_shared<std::string const>("AAAA"),
+                                                              .dimensions = ava::tui::ImageDimensions{.width_px = 20,
+                                                                                                      .height_px = 20},
+                                                              .image_id = 42}}}};
+  auto const attachment_preview_frame = ava::tui::render_composer_frame(attachment_preview_snapshot);
+  auto const attachment_preview_lines = ava::tui::render_composer(attachment_preview_snapshot);
+  expect(attachment_preview_frame.graphics.size() == 1 &&
+             attachment_preview_frame.graphics[0].protocol == ava::tui::TerminalImageProtocol::Kitty &&
+             attachment_preview_frame.graphics[0].image_id == std::optional<std::size_t>{42} &&
+             attachment_preview_frame.graphics[0].rows > 1 &&
+             attachment_preview_frame.graphics[0].sequence.starts_with("\x1b_G") &&
+             attachment_preview_frame.graphics[0].sequence.find("C=1") != std::string::npos &&
+             std::ranges::none_of(attachment_preview_lines, [](std::string const& line) {
+               return ava::tui::terminal_line_contains_image_sequence(line);
+             }),
+         "tui render frame reserves rows and carries trusted Kitty image graphics outside the text-only line API");
+  {
+    ScopedEnvVar no_color_preview_guard("NO_COLOR", "1");
+    auto const plain_attachment_preview_frame = ava::tui::render_composer_frame(attachment_preview_snapshot);
+    expect(plain_attachment_preview_frame.graphics.empty() &&
+               std::ranges::none_of(plain_attachment_preview_frame.lines, [](std::string const& line) {
+                 return line.find("\x1b[") != std::string::npos || ava::tui::terminal_line_contains_image_sequence(line);
+               }),
+           "plain TUI output keeps image previews on the textual fallback path without ANSI or graphics escapes");
+  }
+
   auto const reasoning_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                     .provider = "openai",
                                                                                     .model = "gpt-5.5",
@@ -949,7 +1464,7 @@ void test_tui_composer_rendering_and_input()
                                  }) &&
              std::ranges::any_of(
                  markdown_transcript,
-                 [](std::string const& line) { return strip_sgr(line).find("> quoted text") != std::string::npos; }) &&
+                 [](std::string const& line) { return strip_sgr(line).find("│ quoted text") != std::string::npos; }) &&
              std::ranges::any_of(
                  markdown_transcript,
                  [](std::string const& line) { return strip_sgr(line).find("``` cpp") != std::string::npos; }) &&
@@ -970,8 +1485,15 @@ void test_tui_composer_rendering_and_input()
          "tui assistant renderer handles paragraphs, lists, quotes, fenced code, inline code, and bold");
 
   constexpr auto kBoldSgr = std::string_view{"\x1b[1m"};
+  constexpr auto kItalicSgr = std::string_view{"\x1b[3m"};
+  constexpr auto kUnderlineSgr = std::string_view{"\x1b[4m"};
+  constexpr auto kStrikethroughSgr = std::string_view{"\x1b[9m"};
+  constexpr auto kResetSgr = std::string_view{"\x1b[0m"};
   constexpr auto kMutedSgr = std::string_view{"\x1b[38;2;139;149;165m"};
   constexpr auto kWarningSgr = std::string_view{"\x1b[38;2;251;191;36m"};
+  constexpr auto kSuccessSgr = std::string_view{"\x1b[38;2;52;211;153m"};
+  constexpr auto kErrorSgr = std::string_view{"\x1b[38;2;248;113;113m"};
+  constexpr auto kAccentSgr = std::string_view{"\x1b[38;2;77;158;246m"};
 
   auto const role_markup_transcript = ava::tui::render_composer(
       ava::tui::ComposerSnapshot{.mode = "build",
@@ -997,6 +1519,183 @@ void test_tui_composer_rendering_and_input()
              has_active_sgr_at_text(*assistant_markup_line, "y", kBoldSgr),
          "tui keeps user inline markdown literal inside a compact bubble while formatting assistant inline markdown");
 
+  {
+    ScopedTerminalCapabilityProfile no_hyperlink_terminal("");
+    auto const inline_style_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_test",
+        .input = "",
+        .status = "ready",
+        .transcript = {ava::tui::TranscriptItem{
+            .label = "ava", .text = "Use *italic* and [docs](https://example.test)."}},
+        .width = 72,
+        .height = 12});
+    auto const inline_style_line = std::ranges::find_if(inline_style_transcript, [](std::string const& line) {
+      return strip_sgr(line).find("Use italic and docs (https://example.test).") != std::string::npos;
+    });
+    expect(inline_style_line != inline_style_transcript.end() &&
+               has_active_sgr_at_text(*inline_style_line, "italic", kItalicSgr) &&
+               has_active_sgr_at_text(*inline_style_line, "docs", kUnderlineSgr),
+           "tui assistant renderer emits visible italic and link underline SGR for parsed Markdown inline styling");
+
+    auto const heading_inline_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_test",
+        .input = "",
+        .status = "ready",
+        .transcript = {ava::tui::TranscriptItem{
+            .label = "ava", .text = "### Why `sourceInfo` should stay **visible**."}},
+        .width = 72,
+        .height = 12});
+    auto const heading_inline_line = std::ranges::find_if(heading_inline_transcript, [](std::string const& line) {
+      return strip_sgr(line).find("Why sourceInfo should stay visible.") != std::string::npos;
+    });
+    expect(heading_inline_line != heading_inline_transcript.end() &&
+               strip_sgr(*heading_inline_line).find("###") == std::string::npos &&
+               has_active_sgr_at_text(*heading_inline_line, "sourceInfo", kWarningSgr) &&
+               has_active_sgr_at_text(*heading_inline_line, "should stay", kBoldSgr) &&
+               has_active_sgr_at_text(*heading_inline_line, "visible", kBoldSgr) &&
+               strip_sgr(*heading_inline_line).find("`sourceInfo`") == std::string::npos &&
+               strip_sgr(*heading_inline_line).find("**visible**") == std::string::npos,
+           "tui assistant renderer preserves heading styling around inline code and bold Markdown spans");
+
+    auto const strikethrough_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_test",
+        .input = "",
+        .status = "ready",
+        .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "Use ~~strike~~ and ~literal~."}},
+        .width = 56,
+        .height = 12});
+    auto const strikethrough_line = std::ranges::find_if(strikethrough_transcript, [](std::string const& line) {
+      return strip_sgr(line).find("Use strike and ~literal~.") != std::string::npos;
+    });
+    expect(strikethrough_line != strikethrough_transcript.end() &&
+               has_active_sgr_at_text(*strikethrough_line, "strike", kStrikethroughSgr) &&
+               !has_active_sgr_at_text(*strikethrough_line, "literal", kStrikethroughSgr) &&
+               strip_sgr(*strikethrough_line).find("~~strike~~") == std::string::npos,
+           "tui assistant renderer emits Pi-style strikethrough SGR for double-tilde Markdown while preserving single-tilde text");
+
+    auto const link_fallback_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_test",
+        .input = "",
+        .status = "ready",
+        .transcript = {ava::tui::TranscriptItem{
+            .label = "ava",
+            .text = "[https://example.test](https://example.test) [user@example.test](mailto:user@example.test) "
+                    "[docs](https://example.test/docs)"}},
+        .width = 120,
+        .height = 12});
+    auto link_fallback_plain = std::string{};
+    for (auto const& line : link_fallback_transcript) {
+      link_fallback_plain += strip_sgr(line);
+      link_fallback_plain.push_back(' ');
+    }
+    expect(link_fallback_plain.find("https://example.test") != std::string::npos &&
+               link_fallback_plain.find("https://example.test (https://example.test)") == std::string::npos &&
+               link_fallback_plain.find("mailto:user@example.test") == std::string::npos &&
+               link_fallback_plain.find("user@example.test") != std::string::npos &&
+               link_fallback_plain.find("docs (https://example.test/docs)") != std::string::npos,
+           "tui assistant renderer avoids duplicate URL/mailto fallback when Markdown link labels already equal targets");
+  }
+
+  {
+    ScopedEnvVar no_color_hyperlink_guard("NO_COLOR", "");
+    ScopedTerminalCapabilityProfile hyperlink_terminal("vscode");
+    auto const osc8_link_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_test",
+        .input = "",
+        .status = "ready",
+        .transcript = {ava::tui::TranscriptItem{
+            .label = "ava",
+            .text = "[docs](https://example.test/docs) and https://example.test/bare"}},
+        .width = 120,
+        .height = 12});
+    auto osc8_joined = std::string{};
+    for (auto const& line : osc8_link_transcript) osc8_joined += line;
+    expect(osc8_joined.find("\x1b]8;;https://example.test/docs\x1b\\") != std::string::npos &&
+               osc8_joined.find("\x1b]8;;https://example.test/bare\x1b\\") != std::string::npos &&
+               osc8_joined.find("\x1b]8;;\x1b\\") != std::string::npos &&
+               osc8_joined.find("(https://example.test/docs)") == std::string::npos,
+           "tui assistant renderer emits Pi-style OSC 8 hyperlinks when terminal capabilities advertise them");
+  }
+
+  {
+    ScopedEnvVar no_color_hyperlink_guard("NO_COLOR", "1");
+    ScopedTerminalCapabilityProfile hyperlink_terminal("vscode");
+    auto const plain_link_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_test",
+        .input = "",
+        .status = "ready",
+        .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "[docs](https://example.test/docs)"}},
+        .width = 120,
+        .height = 12});
+    auto plain_link_joined = std::string{};
+    for (auto const& line : plain_link_transcript) plain_link_joined += line;
+    expect(plain_link_joined.find("\x1b]8;;") == std::string::npos &&
+               plain_link_joined.find("docs (https://example.test/docs)") != std::string::npos,
+           "plain TUI output suppresses OSC 8 hyperlinks and keeps visible link fallback text");
+  }
+
+  {
+    ScopedTerminalCapabilityProfile no_hyperlink_terminal("");
+    auto const bare_url_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_test",
+        .input = "",
+        .status = "ready",
+        .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "Visit https://example.test/docs."}},
+        .width = 72,
+        .height = 12});
+    auto const bare_url_line = std::ranges::find_if(bare_url_transcript, [](std::string const& line) {
+      return strip_sgr(line).find("Visit https://example.test/docs.") != std::string::npos;
+    });
+    expect(bare_url_line != bare_url_transcript.end() &&
+               has_active_sgr_at_text(*bare_url_line, "https://example.test/docs", kUnderlineSgr) &&
+               bare_url_line->find(std::string("https://example.test/docs") + std::string(kResetSgr) + ".") !=
+                   std::string::npos &&
+               strip_sgr(*bare_url_line).find("(https://example.test/docs)") == std::string::npos,
+           "tui assistant renderer styles bare web URLs once and keeps trailing punctuation outside the link span");
+
+    auto const bare_email_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_test",
+        .input = "",
+        .status = "ready",
+        .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "Contact user@example.test."}},
+        .width = 72,
+        .height = 12});
+    auto const bare_email_line = std::ranges::find_if(bare_email_transcript, [](std::string const& line) {
+      return strip_sgr(line).find("Contact user@example.test.") != std::string::npos;
+    });
+    expect(bare_email_line != bare_email_transcript.end() &&
+               has_active_sgr_at_text(*bare_email_line, "user@example.test", kUnderlineSgr) &&
+               bare_email_line->find(std::string("user@example.test") + std::string(kResetSgr) + ".") !=
+                   std::string::npos &&
+               strip_sgr(*bare_email_line).find("mailto:") == std::string::npos &&
+               strip_sgr(*bare_email_line).find("(user@example.test)") == std::string::npos,
+           "tui assistant renderer styles bare email autolinks once without exposing a mailto fallback");
+  }
+
   auto const wrapped_markdown_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
       .provider = "openai",
@@ -1014,7 +1713,7 @@ void test_tui_composer_rendering_and_input()
     return strip_sgr(line).find("  theta iota") != std::string::npos;
   });
   auto const quote_continuation = std::ranges::find_if(wrapped_markdown_transcript, [](std::string const& line) {
-    return strip_sgr(line).find("  eta theta") != std::string::npos;
+    return strip_sgr(line).find("│ eta theta") != std::string::npos;
   });
   auto const bullet_continuation_is_plain = bullet_continuation != wrapped_markdown_transcript.end() &&
                                             !has_active_sgr_at_text(*bullet_continuation, "theta iota", kMutedSgr);
@@ -1022,6 +1721,823 @@ void test_tui_composer_rendering_and_input()
                                            !has_active_sgr_at_text(*quote_continuation, "eta theta", kMutedSgr);
   expect(bullet_continuation_is_plain && quote_continuation_is_plain,
          "tui assistant renderer keeps wrapped list and quote continuations out of code styling");
+
+  auto const list_quote_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .label = "ava", .text = "- > alpha beta gamma delta epsilon zeta eta theta iota kappa\n>no-space quote"}},
+      .width = 42,
+      .height = 16});
+  auto const list_quote_first = std::ranges::find_if(list_quote_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("- │ alpha beta") != std::string::npos;
+  });
+  auto const list_quote_wrap = std::ranges::find_if(list_quote_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("  │ zeta eta") != std::string::npos;
+  });
+  auto const no_space_quote = std::ranges::find_if(list_quote_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("│ no-space quote") != std::string::npos;
+  });
+  expect(list_quote_first != list_quote_transcript.end() && list_quote_wrap != list_quote_transcript.end() &&
+             no_space_quote != list_quote_transcript.end() &&
+             std::ranges::all_of(list_quote_transcript,
+                                 [](std::string const& line) { return visible_columns(line) <= 42; }),
+         "tui assistant renderer uses Pi-style quote borders for plain and list-contained blockquotes");
+
+  auto const lazy_blockquote_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .label = "ava", .text = ">Foo\nbar with **bold** and `code`\n\nagain"}},
+      .width = 58,
+      .height = 14});
+  auto const lazy_quote_foo = std::ranges::find_if(lazy_blockquote_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("│ Foo") != std::string::npos;
+  });
+  auto const lazy_quote_bar = std::ranges::find_if(lazy_blockquote_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("│ bar with bold and code") != std::string::npos;
+  });
+  auto const lazy_quote_after_blank = std::ranges::find_if(lazy_blockquote_transcript, [](std::string const& line) {
+    auto const visible = strip_sgr(line);
+    return visible.find("again") != std::string::npos && visible.find("│ again") == std::string::npos;
+  });
+  expect(lazy_quote_foo != lazy_blockquote_transcript.end() &&
+             lazy_quote_bar != lazy_blockquote_transcript.end() &&
+             lazy_quote_after_blank != lazy_blockquote_transcript.end() &&
+             has_active_sgr_at_text(*lazy_quote_bar, "bold", kBoldSgr) &&
+             has_active_sgr_at_text(*lazy_quote_bar, "code", kWarningSgr) &&
+             std::ranges::all_of(lazy_blockquote_transcript,
+                                 [](std::string const& line) { return visible_columns(line) <= 58; }),
+         "tui assistant renderer applies Pi-style lazy blockquote continuation until a blank line");
+
+  auto const divider_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{.label = "ava",
+                                              .text = "Before\n---\nMiddle\n* * *\nAfter\n___\nnot --- a rule"}},
+      .width = 44,
+      .height = 18});
+  auto const divider_lines = std::ranges::count_if(divider_transcript, [](std::string const& line) {
+    auto const visible = strip_sgr(line);
+    return visible.find("─") != std::string::npos;
+  });
+  expect(divider_lines == 3 &&
+             std::ranges::any_of(divider_transcript,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("not --- a rule") != std::string::npos;
+                                 }) &&
+             std::ranges::all_of(divider_transcript,
+                                 [](std::string const& line) { return visible_columns(line) <= 44; }),
+         "tui assistant renderer renders Markdown horizontal rules without treating ordinary dashed text as a divider");
+
+  auto const task_list_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .label = "ava",
+          .text = "- [ ] alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\n- [x] finished item"}},
+      .width = 48,
+      .height = 16});
+  auto const task_unchecked = std::ranges::find_if(task_list_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("- [ ] alpha beta") != std::string::npos;
+  });
+  auto const task_checked = std::ranges::find_if(task_list_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("- [x] finished item") != std::string::npos;
+  });
+  auto const task_continuation = std::ranges::find_if(task_list_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("      eta theta") != std::string::npos;
+  });
+  expect(task_unchecked != task_list_transcript.end() && task_checked != task_list_transcript.end() &&
+             task_continuation != task_list_transcript.end() &&
+             !has_active_sgr_at_text(*task_continuation, "eta theta", kMutedSgr) &&
+             std::ranges::all_of(task_list_transcript,
+                                 [](std::string const& line) { return visible_columns(line) <= 48; }),
+         "tui assistant renderer preserves task-list markers and aligns wrapped task continuations");
+
+  auto const ordered_list_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "1. alpha\n1. beta\n1. gamma"}},
+      .width = 48,
+      .height = 14});
+  auto ordered_list_text = std::string{};
+  for (auto const& line : ordered_list_transcript) {
+    ordered_list_text += strip_sgr(line);
+    ordered_list_text.push_back('\n');
+  }
+  expect(ordered_list_text.find("1. alpha") != std::string::npos &&
+             ordered_list_text.find("2. beta") != std::string::npos &&
+             ordered_list_text.find("3. gamma") != std::string::npos &&
+             ordered_list_text.find("1. beta") == std::string::npos &&
+             std::ranges::all_of(ordered_list_transcript,
+                                 [](std::string const& line) { return visible_columns(line) <= 48; }),
+         "tui assistant renderer normalizes repeated ordered-list markers Pi-style");
+
+  auto const ordered_code_list_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .label = "ava",
+          .text = "1. First item\n\n```typescript\n// code block\n```\n\n1. Second item\n\n```typescript\n// another code "
+                  "block\n```\n\n1. Third item"}},
+      .width = 72,
+      .height = 24});
+  auto ordered_code_list_text = std::string{};
+  for (auto const& line : ordered_code_list_transcript) {
+    ordered_code_list_text += strip_sgr(line);
+    ordered_code_list_text.push_back('\n');
+  }
+  expect(ordered_code_list_text.find("1. First item") != std::string::npos &&
+             ordered_code_list_text.find("2. Second item") != std::string::npos &&
+             ordered_code_list_text.find("3. Third item") != std::string::npos &&
+             ordered_code_list_text.find("1. Second item") == std::string::npos &&
+             ordered_code_list_text.find("``` typescript") != std::string::npos &&
+             ordered_code_list_text.find("// another code block") != std::string::npos &&
+             std::ranges::all_of(ordered_code_list_transcript,
+                                 [](std::string const& line) { return visible_columns(line) <= 72; }),
+         "tui assistant renderer keeps ordered-list numbering across unindented fenced code blocks");
+
+  auto assert_code_block_spacing = [](std::string const& markdown) {
+    auto const transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_test",
+        .input = "",
+        .status = "ready",
+        .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = markdown}},
+        .width = 72,
+        .height = 18});
+    std::vector<std::string> visible;
+    visible.reserve(transcript.size());
+    for (auto const& line : transcript) {
+      auto stripped = strip_sgr(line);
+      while (!stripped.empty() && stripped.back() == ' ') stripped.pop_back();
+      visible.push_back(std::move(stripped));
+    }
+    auto const paragraph = std::ranges::find(visible, "  hello this is text");
+    auto const index = paragraph == visible.end() ? visible.size() : static_cast<std::size_t>(paragraph - visible.begin());
+    expect(index + 6 < visible.size() && visible[index + 1].empty() && visible[index + 2] == "  ```" &&
+               visible[index + 3] == "    code block" && visible[index + 4] == "  ```" &&
+               visible[index + 5].empty() && visible[index + 6] == "  more text",
+           "tui assistant renderer normalizes paragraph/fenced-code spacing to one blank line");
+  };
+  assert_code_block_spacing("hello this is text\n```\ncode block\n```\nmore text");
+  assert_code_block_spacing("hello this is text\n\n```\ncode block\n```\n\nmore text");
+
+  auto const heading_spacing_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "# Hello\nThis is a paragraph"}},
+      .width = 72,
+      .height = 14});
+  std::vector<std::string> heading_visible;
+  heading_visible.reserve(heading_spacing_transcript.size());
+  for (auto const& line : heading_spacing_transcript) {
+    auto visible = strip_sgr(line);
+    while (!visible.empty() && visible.back() == ' ') visible.pop_back();
+    heading_visible.push_back(std::move(visible));
+  }
+  auto const heading_line = std::ranges::find(heading_visible, "  Hello");
+  auto const heading_index =
+      heading_line == heading_visible.end() ? heading_visible.size() : static_cast<std::size_t>(heading_line - heading_visible.begin());
+  expect(heading_index + 2 < heading_visible.size() && heading_visible[heading_index + 1].empty() &&
+             heading_visible[heading_index + 2] == "  This is a paragraph",
+         "tui assistant renderer normalizes heading/paragraph spacing to one blank line");
+
+  auto const divider_spacing_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "hello world\n---\nagain, hello world"}},
+      .width = 72,
+      .height = 14});
+  std::vector<std::string> divider_visible;
+  divider_visible.reserve(divider_spacing_transcript.size());
+  for (auto const& line : divider_spacing_transcript) {
+    auto visible = strip_sgr(line);
+    while (!visible.empty() && visible.back() == ' ') visible.pop_back();
+    divider_visible.push_back(std::move(visible));
+  }
+  auto const first_divider_line = std::ranges::find(divider_visible, "  hello world");
+  auto const divider_index = first_divider_line == divider_visible.end()
+                                 ? divider_visible.size()
+                                 : static_cast<std::size_t>(first_divider_line - divider_visible.begin());
+  expect(divider_index + 3 < divider_visible.size() &&
+             divider_visible[divider_index + 1].find("─") != std::string::npos &&
+             divider_visible[divider_index + 2].empty() && divider_visible[divider_index + 3] == "  again, hello world",
+         "tui assistant renderer normalizes divider/paragraph spacing to one blank line");
+
+  auto const html_literal_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .label = "ava",
+          .text = "This is text with <thinking>hidden content</thinking> that should stay visible.\n```html\n<div>Some "
+                  "HTML</div>\n```"}},
+      .width = 88,
+      .height = 18});
+  auto html_literal_text = std::string{};
+  for (auto const& line : html_literal_transcript) {
+    html_literal_text += strip_sgr(line);
+    html_literal_text.push_back('\n');
+  }
+  expect(html_literal_text.find("<thinking>hidden content</thinking>") != std::string::npos &&
+             html_literal_text.find("<div>Some HTML</div>") != std::string::npos,
+         "tui assistant renderer keeps HTML-like tags visible in prose and fenced code");
+
+  auto const loose_list_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .label = "ava",
+          .text = "1. Lorem ipsum dolor sit amet.\n\n   Ut enim ad minim veniam.\n\n1. Duis aute irure dolor.\n\n   "
+                  "Excepteur sint occaecat cupidatat.\n\n1. Beep boop"}},
+      .width = 88,
+      .height = 24});
+  std::vector<std::string> loose_list_visible;
+  loose_list_visible.reserve(loose_list_transcript.size());
+  for (auto const& line : loose_list_transcript) {
+    auto visible = strip_sgr(line);
+    while (!visible.empty() && visible.back() == ' ') visible.pop_back();
+    loose_list_visible.push_back(std::move(visible));
+  }
+  auto const first_loose_item = std::ranges::find(loose_list_visible, "  1. Lorem ipsum dolor sit amet.");
+  auto const loose_index = first_loose_item == loose_list_visible.end()
+                               ? loose_list_visible.size()
+                               : static_cast<std::size_t>(first_loose_item - loose_list_visible.begin());
+  expect(loose_index + 8 < loose_list_visible.size() && loose_list_visible[loose_index + 1].empty() &&
+             loose_list_visible[loose_index + 2] == "     Ut enim ad minim veniam." &&
+             loose_list_visible[loose_index + 3].empty() &&
+             loose_list_visible[loose_index + 4] == "  2. Duis aute irure dolor." &&
+             loose_list_visible[loose_index + 5].empty() &&
+             loose_list_visible[loose_index + 6] == "     Excepteur sint occaecat cupidatat." &&
+             loose_list_visible[loose_index + 7].empty() &&
+             loose_list_visible[loose_index + 8] == "  3. Beep boop",
+         "tui assistant renderer preserves Pi-style loose ordered-list continuations and numbering");
+
+  auto const nested_list_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .label = "ava",
+          .text = "- parent\n  - alpha beta gamma delta epsilon zeta eta theta iota\n    + grand child\n1. ordered\n   "
+                  "1) nested ordered"}},
+      .width = 48,
+      .height = 18});
+  auto const nested_unordered = std::ranges::find_if(nested_list_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("    - alpha beta") != std::string::npos;
+  });
+  auto const nested_continuation = std::ranges::find_if(nested_list_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("      eta theta") != std::string::npos;
+  });
+  auto const nested_plus = std::ranges::find_if(nested_list_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("        + grand child") != std::string::npos;
+  });
+  auto const nested_ordered = std::ranges::find_if(nested_list_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("    1) nested ordered") != std::string::npos;
+  });
+  expect(nested_unordered != nested_list_transcript.end() && nested_continuation != nested_list_transcript.end() &&
+             nested_plus != nested_list_transcript.end() && nested_ordered != nested_list_transcript.end() &&
+             !has_active_sgr_at_text(*nested_continuation, "eta theta", kMutedSgr) &&
+             std::ranges::all_of(nested_list_transcript,
+                                 [](std::string const& line) { return visible_columns(line) <= 48; }),
+         "tui assistant renderer preserves Pi-style nested list indentation and wrapped continuations");
+
+  auto const table_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{.label = "ava",
+                                              .text = "| Name | Age |\n| --- | ---: |\n| Alice | 30 |\n| Bob | 25 |"}},
+      .width = 64,
+      .height = 16});
+  auto const table_header = std::ranges::find_if(table_transcript, [](std::string const& line) {
+    auto const visible = strip_sgr(line);
+    return visible.find("│ Name") != std::string::npos && visible.find("Age │") != std::string::npos;
+  });
+  auto const table_alice = std::ranges::find_if(table_transcript, [](std::string const& line) {
+    auto const visible = strip_sgr(line);
+    return visible.find("│ Alice") != std::string::npos && visible.find(" 30 │") != std::string::npos;
+  });
+  auto const table_top_border = std::ranges::find_if(table_transcript, [](std::string const& line) {
+    auto const visible = strip_sgr(line);
+    return visible.find("┌") != std::string::npos && visible.find("┬") != std::string::npos &&
+           visible.find("┐") != std::string::npos;
+  });
+  auto const table_bottom_border = std::ranges::find_if(table_transcript, [](std::string const& line) {
+    auto const visible = strip_sgr(line);
+    return visible.find("└") != std::string::npos && visible.find("┴") != std::string::npos &&
+           visible.find("┘") != std::string::npos;
+  });
+  auto const table_dividers = std::ranges::count_if(table_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("┼") != std::string::npos;
+  });
+  expect(table_header != table_transcript.end() && table_alice != table_transcript.end() &&
+             table_top_border != table_transcript.end() && table_bottom_border != table_transcript.end() &&
+             table_dividers == 2 &&
+             std::ranges::any_of(table_transcript,
+                                 [](std::string const& line) { return strip_sgr(line).find("─") != std::string::npos; }) &&
+             std::ranges::all_of(table_transcript,
+                                 [](std::string const& line) { return visible_columns(line) <= 64; }),
+         "tui assistant renderer renders simple Markdown tables with Pi-style outer borders, dividers, and right alignment");
+
+  auto const too_narrow_table_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .label = "ava",
+          .text = "| A | B | C | D | E |\n| --- | --- | --- | --- | --- |\n| 1 | 2 | 3 | 4 | 5 |"}},
+      .width = 20,
+      .height = 16});
+  auto const too_narrow_text = std::accumulate(
+      too_narrow_table_transcript.begin(), too_narrow_table_transcript.end(), std::string{},
+      [](std::string acc, std::string const& line) {
+        acc += " ";
+        acc += strip_sgr(line);
+        return acc;
+      });
+  expect(too_narrow_text.find("| A | B | C") != std::string::npos &&
+             too_narrow_text.find("| 1 | 2 | 3") != std::string::npos &&
+             std::ranges::none_of(too_narrow_table_transcript,
+                                  [](std::string const& line) {
+                                    auto const visible = strip_sgr(line);
+                                    return visible.find("┌") != std::string::npos ||
+                                           visible.find("│") != std::string::npos ||
+                                           visible.find("└") != std::string::npos;
+                                  }) &&
+             std::ranges::all_of(too_narrow_table_transcript,
+                                 [](std::string const& line) { return visible_columns(line) <= 20; }),
+         "tui assistant renderer falls back to wrapped raw Markdown when a table is too narrow for stable borders");
+
+  auto const narrow_table_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .label = "ava",
+          .text = "| Command | Description |\n| --- | --- |\n| npm install | Install all dependencies for the workspace |"}},
+      .width = 40,
+      .height = 18});
+  auto const narrow_table_text = std::accumulate(
+      narrow_table_transcript.begin(), narrow_table_transcript.end(), std::string{}, [](std::string acc, std::string const& line) {
+        acc += " ";
+        acc += strip_sgr(line);
+        return acc;
+      });
+  expect(narrow_table_text.find("Command") != std::string::npos &&
+             narrow_table_text.find("npm install") != std::string::npos &&
+             narrow_table_text.find("dependencies") != std::string::npos &&
+             narrow_table_text.find("workspace") != std::string::npos &&
+             std::ranges::any_of(narrow_table_transcript,
+                                 [](std::string const& line) { return strip_sgr(line).find("│") != std::string::npos; }) &&
+             std::ranges::all_of(narrow_table_transcript,
+                                 [](std::string const& line) { return visible_columns(line) <= 40; }),
+         "tui assistant renderer wraps Markdown table cells while preserving borders and content");
+
+  auto const one_column_table_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .label = "ava",
+          .text = "| Header |\n| --- |\n| This is a very long cell content that should wrap |\n| "
+                  "prefix https://example.com/this/is/a/very/long/url/that/should/wrap |"}},
+      .width = 36,
+      .height = 24});
+  auto count_table_borders = [](std::string const& line) {
+    auto const visible = strip_sgr(line);
+    auto count = std::size_t{0};
+    for (auto found = visible.find("│"); found != std::string::npos; found = visible.find("│", found + 1)) {
+      ++count;
+    }
+    return count;
+  };
+  auto one_column_table_text = std::string{};
+  for (auto const& line : one_column_table_transcript) {
+    auto const visible = strip_sgr(line);
+    for (std::size_t index = 0; index < visible.size();) {
+      if (visible.compare(index, std::string_view("│").size(), "│") == 0 ||
+          visible.compare(index, std::string_view("├").size(), "├") == 0 ||
+          visible.compare(index, std::string_view("┤").size(), "┤") == 0 ||
+          visible.compare(index, std::string_view("┼").size(), "┼") == 0 ||
+          visible.compare(index, std::string_view("─").size(), "─") == 0) {
+        index += std::string_view("│").size();
+        continue;
+      }
+      if (visible[index] != ' ') one_column_table_text.push_back(visible[index]);
+      ++index;
+    }
+  }
+  expect(std::ranges::any_of(one_column_table_transcript,
+                             [](std::string const& line) { return strip_sgr(line).find("│ Header") != std::string::npos; }) &&
+             one_column_table_text.find("verylongcellcontent") != std::string::npos &&
+             one_column_table_text.find("prefixhttps://example.com/this/is/a/very/long/url/that/should/wrap") !=
+                 std::string::npos &&
+             std::ranges::all_of(one_column_table_transcript,
+                                 [](std::string const& line) { return visible_columns(line) <= 36; }) &&
+             std::ranges::all_of(one_column_table_transcript,
+                                 [&](std::string const& line) {
+                                   auto const visible = strip_sgr(line);
+                                   return visible.find("│") == std::string::npos || count_table_borders(line) == 2;
+                                 }),
+         "tui assistant renderer supports one-column tables and wraps long unbroken table tokens without losing borders");
+
+  auto const styled_table_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .label = "ava",
+          .text = "| Code |\n| --- |\n| `averyveryveryverylongidentifier` |"}},
+      .width = 36,
+      .height = 18});
+  auto styled_table_text = std::string{};
+  for (auto const& line : styled_table_transcript) {
+    auto const visible = strip_sgr(line);
+    for (std::size_t index = 0; index < visible.size();) {
+      if (visible.compare(index, std::string_view("│").size(), "│") == 0 ||
+          visible.compare(index, std::string_view("├").size(), "├") == 0 ||
+          visible.compare(index, std::string_view("┤").size(), "┤") == 0 ||
+          visible.compare(index, std::string_view("┼").size(), "┼") == 0 ||
+          visible.compare(index, std::string_view("─").size(), "─") == 0) {
+        index += std::string_view("│").size();
+        continue;
+      }
+      if (visible[index] != ' ') styled_table_text.push_back(visible[index]);
+      ++index;
+    }
+  }
+  expect(std::ranges::any_of(styled_table_transcript,
+                             [](std::string const& line) { return has_active_sgr_at_text(line, "avery", kWarningSgr); }) &&
+             styled_table_text.find("averyveryveryverylongidentifier") != std::string::npos &&
+             styled_table_text.find("`") == std::string::npos &&
+             std::ranges::all_of(styled_table_transcript,
+                                 [](std::string const& line) { return visible_columns(line) <= 36; }) &&
+             std::ranges::all_of(styled_table_transcript,
+                                 [&](std::string const& line) {
+                                   auto const visible = strip_sgr(line);
+                                   return visible.find("│") == std::string::npos || count_table_borders(line) == 2;
+                                 }),
+         "tui assistant renderer wraps styled inline code inside table cells without breaking borders");
+
+  auto const narrow_three_column_table = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .label = "ava",
+          .text = "| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |"}},
+      .width = 22,
+      .height = 14});
+  auto narrow_three_column_text = std::string{};
+  for (auto const& line : narrow_three_column_table) {
+    narrow_three_column_text += strip_sgr(line);
+    narrow_three_column_text.push_back('\n');
+  }
+  expect(!narrow_three_column_table.empty() &&
+             narrow_three_column_text.find("A") != std::string::npos &&
+             narrow_three_column_text.find("B") != std::string::npos &&
+             narrow_three_column_text.find("C") != std::string::npos &&
+             narrow_three_column_text.find("1") != std::string::npos &&
+             narrow_three_column_text.find("2") != std::string::npos &&
+             narrow_three_column_text.find("3") != std::string::npos &&
+             std::ranges::any_of(narrow_three_column_table,
+                                 [](std::string const& line) { return strip_sgr(line).find("│") != std::string::npos; }) &&
+             std::ranges::all_of(narrow_three_column_table,
+                                 [](std::string const& line) { return visible_columns(line) <= 22; }),
+         "tui assistant renderer keeps narrow multi-column Markdown tables bounded and readable");
+
+  auto const highlighted_code_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .label = "ava",
+          .text =
+              "```cpp\n"
+              "int main() {\n"
+              "  std::string value = \"ok\";\n"
+              "  return 42;\n"
+              "}\n"
+              "```\n"
+              "```diff\n"
+              "@@ -1 +1 @@\n"
+              "-old\n"
+              "+new\n"
+              " context\n"
+              "```\n"
+              "```json\n"
+              "{\"ok\": true, \"n\": 12}\n"
+              "```\n"
+              "```sh\n"
+              "echo \"ok\" # comment\n"
+              "```\n"
+              "```typescript\n"
+              "interface User { name: string; }\n"
+              "const greet = (user: User): string => \"hi\";\n"
+              "```\n"
+              "```javascript\n"
+              "async function load() {\n"
+              "  return await fetch(\"/ok\");\n"
+              "}\n"
+              "```\n"
+              "```html\n"
+              "<div class=\"ok\">Hi</div>\n"
+              "<!-- note -->\n"
+              "```\n"
+              "```css\n"
+              ".card { color: #fff; margin: 12px; }\n"
+              "```\n"
+              "```yaml\n"
+              "enabled: true\n"
+              "name: \"ava\"\n"
+              "count: 42\n"
+              "# comment\n"
+              "```\n"
+              "```cmake\n"
+              "add_executable(ava main.cpp)\n"
+              "set(AVA_ENABLED ON)\n"
+              "# build comment\n"
+              "```\n"
+              "```toml\n"
+              "[tool.ava]\n"
+              "name = \"ava\"\n"
+              "enabled = true\n"
+              "count = 42\n"
+              "# note\n"
+              "```\n"
+              "```ini\n"
+              "[server]\n"
+              "port = 8080\n"
+              "enabled = yes\n"
+              "; note\n"
+              "```\n"
+              "```text\n"
+              "return \"plain\";\n"
+              "```"}},
+      .width = 72,
+      .height = 120});
+  auto const cpp_signature = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("int main() {") != std::string::npos;
+  });
+  auto const cpp_string = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("std::string value = \"ok\";") != std::string::npos;
+  });
+  auto const cpp_return = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("return 42;") != std::string::npos;
+  });
+  auto const diff_hunk = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("@@ -1 +1 @@") != std::string::npos;
+  });
+  auto const diff_removed = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("-old") != std::string::npos;
+  });
+  auto const diff_added = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("+new") != std::string::npos;
+  });
+  auto const json_code = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("{\"ok\": true, \"n\": 12}") != std::string::npos;
+  });
+  auto const shell_code = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("echo \"ok\" # comment") != std::string::npos;
+  });
+  auto const typescript_interface = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("interface User { name: string; }") != std::string::npos;
+  });
+  auto const typescript_const = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("const greet = (user: User): string => \"hi\";") != std::string::npos;
+  });
+  auto const javascript_async = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("async function load() {") != std::string::npos;
+  });
+  auto const javascript_return = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("return await fetch(\"/ok\");") != std::string::npos;
+  });
+  auto const html_tag = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("<div class=\"ok\">Hi</div>") != std::string::npos;
+  });
+  auto const html_comment = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("<!-- note -->") != std::string::npos;
+  });
+  auto const css_code = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find(".card { color: #fff; margin: 12px; }") != std::string::npos;
+  });
+  auto const yaml_enabled = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("enabled: true") != std::string::npos;
+  });
+  auto const yaml_name = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("name: \"ava\"") != std::string::npos;
+  });
+  auto const yaml_count = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("count: 42") != std::string::npos;
+  });
+  auto const yaml_comment = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("# comment") != std::string::npos;
+  });
+  auto const cmake_command = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("add_executable(ava main.cpp)") != std::string::npos;
+  });
+  auto const cmake_option = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("set(AVA_ENABLED ON)") != std::string::npos;
+  });
+  auto const cmake_comment = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("# build comment") != std::string::npos;
+  });
+  auto const toml_header = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("[tool.ava]") != std::string::npos;
+  });
+  auto const toml_name = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("name = \"ava\"") != std::string::npos;
+  });
+  auto const toml_enabled = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("enabled = true") != std::string::npos;
+  });
+  auto const toml_count = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("count = 42") != std::string::npos;
+  });
+  auto const toml_comment = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("# note") != std::string::npos;
+  });
+  auto const ini_header = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("[server]") != std::string::npos;
+  });
+  auto const ini_port = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("port = 8080") != std::string::npos;
+  });
+  auto const ini_enabled = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("enabled = yes") != std::string::npos;
+  });
+  auto const ini_comment = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("; note") != std::string::npos;
+  });
+  auto const fallback_code = std::ranges::find_if(highlighted_code_transcript, [](std::string const& line) {
+    return strip_sgr(line).find("return \"plain\";") != std::string::npos;
+  });
+  auto const found_highlight_examples =
+      cpp_signature != highlighted_code_transcript.end() && cpp_string != highlighted_code_transcript.end() &&
+      cpp_return != highlighted_code_transcript.end() && diff_hunk != highlighted_code_transcript.end() &&
+      diff_removed != highlighted_code_transcript.end() && diff_added != highlighted_code_transcript.end() &&
+      json_code != highlighted_code_transcript.end() && shell_code != highlighted_code_transcript.end() &&
+      typescript_interface != highlighted_code_transcript.end() && typescript_const != highlighted_code_transcript.end() &&
+      javascript_async != highlighted_code_transcript.end() && javascript_return != highlighted_code_transcript.end() &&
+      html_tag != highlighted_code_transcript.end() && html_comment != highlighted_code_transcript.end() &&
+      css_code != highlighted_code_transcript.end() && yaml_enabled != highlighted_code_transcript.end() &&
+      yaml_name != highlighted_code_transcript.end() && yaml_count != highlighted_code_transcript.end() &&
+      yaml_comment != highlighted_code_transcript.end() && cmake_command != highlighted_code_transcript.end() &&
+      cmake_option != highlighted_code_transcript.end() && cmake_comment != highlighted_code_transcript.end() &&
+      toml_header != highlighted_code_transcript.end() && toml_name != highlighted_code_transcript.end() &&
+      toml_enabled != highlighted_code_transcript.end() && toml_count != highlighted_code_transcript.end() &&
+      toml_comment != highlighted_code_transcript.end() && ini_header != highlighted_code_transcript.end() &&
+      ini_port != highlighted_code_transcript.end() && ini_enabled != highlighted_code_transcript.end() &&
+      ini_comment != highlighted_code_transcript.end() && fallback_code != highlighted_code_transcript.end();
+  expect(found_highlight_examples, "tui assistant renderer keeps all fenced-code highlight examples visible");
+  if (found_highlight_examples) {
+    expect(has_active_sgr_at_text(*cpp_signature, "int", kWarningSgr) &&
+               has_active_sgr_at_text(*cpp_signature, "main", kAccentSgr) &&
+               has_active_sgr_at_text(*cpp_string, "\"ok\"", kSuccessSgr) &&
+               has_active_sgr_at_text(*cpp_return, "return", kWarningSgr) &&
+               has_active_sgr_at_text(*cpp_return, "42", kAccentSgr),
+           "tui assistant renderer applies lightweight C++ syntax coloring");
+    expect(has_active_sgr_at_text(*diff_hunk, "@@ -1 +1 @@", kAccentSgr) &&
+               has_active_sgr_at_text(*diff_removed, "-old", kErrorSgr) &&
+               has_active_sgr_at_text(*diff_added, "+new", kSuccessSgr),
+           "tui assistant renderer applies diff syntax coloring");
+    expect(has_active_sgr_at_text(*json_code, "\"ok\"", kSuccessSgr) &&
+               has_active_sgr_at_text(*json_code, "true", kWarningSgr) &&
+               has_active_sgr_at_text(*json_code, "12", kAccentSgr),
+           "tui assistant renderer applies JSON syntax coloring");
+    expect(has_active_sgr_at_text(*shell_code, "\"ok\"", kSuccessSgr) &&
+               has_active_sgr_at_text(*shell_code, "# comment", kMutedSgr),
+           "tui assistant renderer applies shell syntax coloring");
+    expect(has_active_sgr_at_text(*typescript_interface, "interface", kWarningSgr) &&
+               has_active_sgr_at_text(*typescript_interface, "string", kWarningSgr) &&
+               has_active_sgr_at_text(*typescript_const, "const", kWarningSgr) &&
+               has_active_sgr_at_text(*typescript_const, "\"hi\"", kSuccessSgr),
+           "tui assistant renderer applies TypeScript syntax coloring for Pi-style language names");
+    expect(has_active_sgr_at_text(*javascript_async, "async", kWarningSgr) &&
+               has_active_sgr_at_text(*javascript_async, "function", kWarningSgr) &&
+               has_active_sgr_at_text(*javascript_async, "load", kAccentSgr) &&
+               has_active_sgr_at_text(*javascript_return, "return", kWarningSgr) &&
+               has_active_sgr_at_text(*javascript_return, "await", kWarningSgr) &&
+               has_active_sgr_at_text(*javascript_return, "fetch", kAccentSgr) &&
+               has_active_sgr_at_text(*javascript_return, "\"/ok\"", kSuccessSgr),
+           "tui assistant renderer applies JavaScript syntax coloring for Pi-style language names");
+    expect(has_active_sgr_at_text(*html_tag, "div", kAccentSgr) &&
+               has_active_sgr_at_text(*html_tag, "class", kWarningSgr) &&
+               has_active_sgr_at_text(*html_tag, "\"ok\"", kSuccessSgr) &&
+               has_active_sgr_at_text(*html_comment, "<!-- note -->", kMutedSgr),
+           "tui assistant renderer applies HTML syntax coloring");
+    expect(has_active_sgr_at_text(*css_code, "color", kWarningSgr) &&
+               has_active_sgr_at_text(*css_code, "#fff", kAccentSgr) &&
+               has_active_sgr_at_text(*css_code, "margin", kWarningSgr) &&
+               has_active_sgr_at_text(*css_code, "12px", kAccentSgr),
+           "tui assistant renderer applies CSS syntax coloring");
+    expect(has_active_sgr_at_text(*yaml_enabled, "enabled", kWarningSgr),
+           "tui assistant renderer highlights YAML keys");
+    expect(has_active_sgr_at_text(*yaml_enabled, "true", kWarningSgr),
+           "tui assistant renderer highlights YAML booleans");
+    expect(has_active_sgr_at_text(*yaml_name, "name", kWarningSgr) &&
+               has_active_sgr_at_text(*yaml_name, "\"ava\"", kSuccessSgr),
+           "tui assistant renderer highlights YAML string values");
+    expect(has_active_sgr_at_text(*yaml_count, "count", kWarningSgr),
+           "tui assistant renderer highlights YAML numeric keys");
+    expect(has_active_sgr_at_text(*yaml_count, "42", kAccentSgr),
+           "tui assistant renderer highlights YAML numeric scalar values");
+    expect(has_active_sgr_at_text(*yaml_comment, "# comment", kMutedSgr),
+           "tui assistant renderer highlights YAML comments");
+    expect(has_active_sgr_at_text(*cmake_command, "add_executable", kAccentSgr) &&
+               has_active_sgr_at_text(*cmake_option, "set", kAccentSgr) &&
+               has_active_sgr_at_text(*cmake_option, "ON", kWarningSgr) &&
+               has_active_sgr_at_text(*cmake_comment, "# build comment", kMutedSgr),
+           "tui assistant renderer highlights CMake commands, scalars, and comments");
+    expect(has_active_sgr_at_text(*toml_header, "tool.ava", kAccentSgr) &&
+               has_active_sgr_at_text(*toml_name, "name", kWarningSgr) &&
+               has_active_sgr_at_text(*toml_name, "\"ava\"", kSuccessSgr) &&
+               has_active_sgr_at_text(*toml_enabled, "enabled", kWarningSgr) &&
+               has_active_sgr_at_text(*toml_enabled, "true", kWarningSgr) &&
+               has_active_sgr_at_text(*toml_count, "42", kAccentSgr) &&
+               has_active_sgr_at_text(*toml_comment, "# note", kMutedSgr),
+           "tui assistant renderer highlights TOML table headers, keys, scalars, and comments");
+    expect(has_active_sgr_at_text(*ini_header, "server", kAccentSgr) &&
+               has_active_sgr_at_text(*ini_port, "port", kWarningSgr) &&
+               has_active_sgr_at_text(*ini_port, "8080", kAccentSgr) &&
+               has_active_sgr_at_text(*ini_enabled, "enabled", kWarningSgr) &&
+               has_active_sgr_at_text(*ini_enabled, "yes", kWarningSgr) &&
+               has_active_sgr_at_text(*ini_comment, "; note", kMutedSgr),
+           "tui assistant renderer highlights INI sections, keys, scalars, and comments");
+    expect(has_active_sgr_at_text(*fallback_code, "return", kMutedSgr) &&
+               !has_active_sgr_at_text(*fallback_code, "return", kWarningSgr),
+           "tui assistant renderer preserves dim plain fallback for unsupported code fences");
+  }
+  expect(std::ranges::all_of(highlighted_code_transcript,
+                             [](std::string const& line) { return visible_columns(line) <= 72; }),
+         "tui assistant renderer keeps highlighted code lines width-safe");
 
   auto const wrapped_code_fence_transcript = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -1139,19 +2655,45 @@ void test_tui_composer_rendering_and_input()
                  rows_transcript,
                  [](std::string const& line) { return strip_sgr(line).find("· /help") != std::string::npos; }),
          "tui keeps errors and generic command rows distinct from message blocks");
+  auto const onboarding_transcript = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "ready",
+                                 .transcript = {ava::tui::TranscriptItem{
+                                     .label = "setup",
+                                     .text =
+                                         "Provider auth is not configured for `openai`.\n"
+                                         "Connect with /connect or /login in this TUI.\n"
+                                         "Auth file: /tmp/ava/auth.json"}},
+                                 .width = 72,
+                                 .height = 12});
+  expect(std::ranges::any_of(onboarding_transcript,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("Provider auth is not configured") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(onboarding_transcript,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("Connect with /connect or /login") != std::string::npos;
+                                 }) &&
+             std::ranges::all_of(onboarding_transcript,
+                                 [](std::string const& line) { return visible_columns(line) <= 72; }),
+         "tui renders first-run setup transcript guidance without width overflow");
   auto const compact_status = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
       .provider = "openai",
       .model = "gpt-5.5",
       .session_id = "session_test",
       .input = "",
-      .status = "Enter submits. Shift/Ctrl/Alt+Enter inserts newline. / opens commands. Page/wheel scroll.",
+      .status = "Enter submits. Shift/Ctrl+Enter inserts newline. Alt+Enter queues follow-up. / opens commands.",
       .transcript = {},
       .width = 120,
       .height = 8});
   expect(std::ranges::none_of(compact_status,
                               [](std::string const& line) {
-                                return strip_sgr(line).find("Shift/Ctrl/Alt+Enter inserts newline") != std::string::npos;
+                                return strip_sgr(line).find("Alt+Enter queues follow-up") != std::string::npos;
                               }),
          "tui keeps the composer status compact instead of rendering verbose help");
   auto const status_alert = ava::tui::render_composer(ava::tui::ComposerSnapshot{
@@ -1207,6 +2749,11 @@ void test_tui_composer_rendering_and_input()
   auto const grep_commands = ava::tui::filter_slash_commands("/gr", slash_commands);
   expect(grep_commands.size() == 1 && grep_commands.front().command == "/grep",
          "tui slash palette filters commands by typed prefix");
+  auto const fuzzy_grep_commands = ava::tui::filter_slash_commands("/gp", slash_commands);
+  expect(fuzzy_grep_commands.size() == 1 && fuzzy_grep_commands.front().command == "/grep" &&
+             ava::tui::slash_palette_visible("/gp", slash_commands) &&
+             ava::tui::slash_command_selection_text("/gp", slash_commands, 0) == "/grep ",
+         "tui slash palette fuzzy-matches command names like Pi");
   expect(ava::tui::filter_slash_commands("hello", slash_commands).empty(),
          "tui slash palette stays hidden for normal chat input");
   expect(ava::tui::slash_palette_visible("/g", slash_commands),
@@ -1255,15 +2802,41 @@ void test_tui_composer_rendering_and_input()
                                                        .argument_index = 1,
                                                        .append_space = false}}}};
   auto const model_argument_matches = ava::tui::filter_slash_commands("/model open", argument_slash_commands);
-  expect(model_argument_matches.size() == 1 && model_argument_matches.front().argument_completion &&
+  expect(!model_argument_matches.empty() && model_argument_matches.front().argument_completion &&
              model_argument_matches.front().command == "openai/gpt-5.5",
-         "tui slash palette filters backend-provided argument completions after a command alias");
+         "tui slash palette ranks the strongest backend-provided argument completion after a command alias first");
+  auto const fuzzy_model_argument_matches =
+      ava::tui::filter_slash_commands("/models sonnet", argument_slash_commands);
+  expect(fuzzy_model_argument_matches.size() == 1 && fuzzy_model_argument_matches.front().argument_completion &&
+             fuzzy_model_argument_matches.front().command == "anthropic/claude-sonnet-4-5" &&
+             ava::tui::slash_palette_visible("/models sonnet", argument_slash_commands) &&
+             ava::tui::slash_command_selection_text("/models sonnet", argument_slash_commands, 0) ==
+                 "/models anthropic/claude-sonnet-4-5",
+         "tui slash palette fuzzy-matches non-file argument completions like Pi model search");
+  auto const swapped_model_argument_matches =
+      ava::tui::filter_slash_commands("/models 4sonnet", argument_slash_commands);
+  expect(swapped_model_argument_matches.size() == 1 && swapped_model_argument_matches.front().argument_completion &&
+             swapped_model_argument_matches.front().command == "anthropic/claude-sonnet-4-5",
+         "tui slash palette supports Pi-style swapped numeric/name fuzzy argument queries");
   expect(ava::tui::slash_palette_visible("/models open", argument_slash_commands) &&
              ava::tui::slash_command_selection_text("/models open", argument_slash_commands, 0) ==
                  "/models openai/gpt-5.5",
          "tui slash selection inserts explicit backend-provided argument completion text");
   expect(ava::tui::slash_command_selection_text("/mcp inspect f", argument_slash_commands, 0) == "/mcp inspect fs",
          "tui argument completion preserves required previous arguments for nested command forms");
+  auto const command_cursor_input = std::string("/models open");
+  auto const command_cursor = std::string("/models").size();
+  auto const command_cursor_matches =
+      ava::tui::filter_slash_commands(command_cursor_input, command_cursor, argument_slash_commands);
+  expect(command_cursor_matches.size() == 1 && command_cursor_matches.front().command == "/models" &&
+             !command_cursor_matches.front().argument_completion &&
+             ava::tui::slash_palette_visible(command_cursor_input, command_cursor, argument_slash_commands),
+         "tui slash palette re-queries command-name completions when the cursor moves before slash arguments like Pi");
+  auto const command_cursor_selection =
+      ava::tui::slash_command_selection_text("/mod open", std::string("/mod").size(), argument_slash_commands, 0);
+  expect(command_cursor_selection.text == "/models open" &&
+             command_cursor_selection.cursor == std::string("/models ").size(),
+         "tui cursor-scoped slash selection preserves suffix text after the command-name cursor");
   std::vector<ava::tui::SlashCommandItem> const connect_slash_commands = {
       ava::tui::SlashCommandItem{.command = "/connect", .description = "Connect a provider", .category = "General"}};
   expect(!ava::tui::slash_palette_visible("/connect", connect_slash_commands) &&
@@ -1291,6 +2864,28 @@ void test_tui_composer_rendering_and_input()
                                       visible.find("Models") != std::string::npos;
                              }),
          "tui slash palette renders argument completion value, category, and description");
+  auto const cursor_scoped_argument_palette =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = command_cursor_input,
+                                                           .status = "ready",
+                                                           .transcript = {},
+                                                           .slash_commands = argument_slash_commands,
+                                                           .selected_slash_command_index = 0,
+                                                           .width = 96,
+                                                           .height = 10,
+                                                           .input_cursor = command_cursor});
+  expect(std::ranges::any_of(cursor_scoped_argument_palette,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("/models") != std::string::npos;
+                             }) &&
+             std::ranges::none_of(cursor_scoped_argument_palette,
+                                  [](std::string const& line) {
+                                    return strip_sgr(line).find("openai/gpt-5.5") != std::string::npos;
+                                  }),
+         "tui rendered slash palette drops stale argument suggestions after cursor movement into the command name");
   std::vector<ava::tui::SlashCommandItem> const path_slash_commands = {
       ava::tui::SlashCommandItem{
           .command = "/read",
@@ -1311,6 +2906,9 @@ void test_tui_composer_rendering_and_input()
              ava::tui::slash_palette_visible("/read src/", path_slash_commands) &&
              ava::tui::slash_command_selection_text("/read src/", path_slash_commands, 1) == "/read src/main.cpp",
          "tui slash path completion keeps directory prefixes open for nested file completions");
+  expect(!ava::tui::slash_palette_visible("/read /", path_slash_commands) &&
+             ava::tui::filter_slash_commands("/read /", path_slash_commands).empty(),
+         "tui slash argument palette yields when the current prefix has no backend completion match");
   auto const path_palette =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                            .provider = "openai",
@@ -1351,6 +2949,21 @@ void test_tui_composer_rendering_and_input()
   auto const spaced_reference_matches = ava::tui::filter_file_references("review @my", std::string("review @my").size(), file_references);
   expect(spaced_reference_matches.size() == 2 && spaced_reference_matches.front().value == "my folder/",
          "tui file reference palette includes paths with spaces and ranks matching directories first");
+  auto const equals_reference_matches = ava::tui::filter_file_references("include=@sr", std::string("include=@sr").size(), file_references);
+  expect(equals_reference_matches.size() >= 2 && equals_reference_matches.front().value == "src/",
+         "tui file reference palette treats equals as a token delimiter like Pi");
+  auto const single_quote_reference_matches =
+      ava::tui::filter_file_references("include='@sr", std::string("include='@sr").size(), file_references);
+  expect(single_quote_reference_matches.size() >= 2 && single_quote_reference_matches.front().value == "src/",
+         "tui file reference palette treats single quotes as token delimiters like Pi");
+  auto const parenthesized_reference_matches =
+      ava::tui::filter_file_references("compare (@sr", std::string("compare (@sr").size(), file_references);
+  expect(parenthesized_reference_matches.size() >= 2 && parenthesized_reference_matches.front().value == "src/",
+         "tui file reference palette opens after parenthesized prose boundaries");
+  auto const bracketed_reference_matches =
+      ava::tui::filter_file_references("compare [@sr", std::string("compare [@sr").size(), file_references);
+  expect(bracketed_reference_matches.size() >= 2 && bracketed_reference_matches.front().value == "src/",
+         "tui file reference palette opens after bracketed prose boundaries");
   auto const reference_selection =
       ava::tui::file_reference_selection_text("review @main please", std::string("review @main").size(), file_references, 0);
   expect(reference_selection.text == "review @src/main.cpp please" &&
@@ -1371,6 +2984,21 @@ void test_tui_composer_rendering_and_input()
   expect(quoted_file_selection.text == "review @\"my folder/test file.txt\" " &&
              quoted_file_selection.cursor == quoted_file_selection.text.size(),
          "tui file reference selection completes inside quoted @ paths without duplicating the closing quote");
+  auto const equals_reference_selection =
+      ava::tui::file_reference_selection_text("include=@main", std::string("include=@main").size(), file_references, 0);
+  expect(equals_reference_selection.text == "include=@src/main.cpp " &&
+             equals_reference_selection.cursor == equals_reference_selection.text.size(),
+         "tui file reference selection replaces only the @ token after an equals delimiter");
+  auto const single_quote_reference_selection =
+      ava::tui::file_reference_selection_text("include='@main", std::string("include='@main").size(), file_references, 0);
+  expect(single_quote_reference_selection.text == "include='@src/main.cpp " &&
+             single_quote_reference_selection.cursor == single_quote_reference_selection.text.size(),
+         "tui file reference selection replaces only the @ token after a single-quote delimiter");
+  auto const parenthesized_reference_selection =
+      ava::tui::file_reference_selection_text("compare (@main)", std::string("compare (@main").size(), file_references, 0);
+  expect(parenthesized_reference_selection.text == "compare (@src/main.cpp)" &&
+             parenthesized_reference_selection.cursor == std::string("compare (@src/main.cpp").size(),
+         "tui file reference selection preserves closing punctuation without inserting an extra space");
   auto const reference_palette =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                            .provider = "openai",
@@ -1384,14 +3012,38 @@ void test_tui_composer_rendering_and_input()
                                                            .width = 96,
                                                            .height = 10,
                                                            .input_cursor = std::string("review @sr").size()});
+  auto const reference_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
+                                                            .provider = "openai",
+                                                            .model = "gpt-5.5",
+                                                            .session_id = "session_test",
+                                                            .input = "review @sr",
+                                                            .status = "ready",
+                                                            .transcript = {},
+                                                            .file_references = file_references,
+                                                            .selected_slash_command_index = 1,
+                                                            .width = 96,
+                                                            .height = 10,
+                                                            .input_cursor = std::string("review @sr").size()};
+  auto const reference_hit_row =
+      static_cast<std::size_t>(std::ranges::find_if(reference_palette, [](std::string const& line) {
+                                  return strip_sgr(line).find("@src/main.cpp") != std::string::npos;
+                                }) -
+                               reference_palette.begin()) +
+      1;
+  auto const expected_reference_index =
+      static_cast<std::size_t>(std::ranges::find_if(reference_matches, [](auto const& item) { return item.value == "src/main.cpp"; }) -
+                               reference_matches.begin());
+  auto const clicked_reference = ava::tui::file_reference_palette_selection_for_screen_row(reference_snapshot, reference_hit_row);
   expect(std::ranges::any_of(reference_palette,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
                                return visible.find("@src/main.cpp") != std::string::npos &&
                                       visible.find("file 24 bytes") != std::string::npos &&
-                                     visible.find("Files") != std::string::npos;
-                             }),
-         "tui file reference palette renders @ candidates with description and category");
+                                      visible.find("Files") != std::string::npos;
+                             }) &&
+             clicked_reference && *clicked_reference == expected_reference_index &&
+             !ava::tui::file_reference_palette_selection_for_screen_row(reference_snapshot, 1),
+         "tui file reference palette renders @ candidates and hit-tests visible rows to candidate indices");
   auto const spaced_reference_palette =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                            .provider = "openai",
@@ -1416,15 +3068,37 @@ void test_tui_composer_rendering_and_input()
   expect(normal_path_matches.size() >= 2 && normal_path_matches.front().value == "src/" &&
              std::ranges::any_of(normal_path_matches, [](auto const& item) { return item.value == "src/main.cpp"; }),
          "tui normal path completion filters path-like prompt tokens against backend candidates");
+  auto const equals_path_matches = ava::tui::filter_path_completions("inspect file=src/", std::string("inspect file=src/").size(), file_references);
+  expect(equals_path_matches.size() >= 2 && equals_path_matches.front().value == "src/",
+         "tui normal path completion treats equals as a path token delimiter");
+  auto const single_quote_path_matches =
+      ava::tui::filter_path_completions("inspect path='src/", std::string("inspect path='src/").size(), file_references);
+  expect(single_quote_path_matches.size() >= 2 && single_quote_path_matches.front().value == "src/",
+         "tui normal path completion treats single quotes as path token delimiters like Pi");
+  auto const whitespace_path_matches = ava::tui::filter_path_completions("inspect ", std::string("inspect ").size(), file_references);
+  expect(whitespace_path_matches.size() == file_references.size() && whitespace_path_matches.front().directory,
+         "tui normal path completion opens workspace suggestions at a new token after whitespace like Pi");
+  expect(ava::tui::filter_path_completions("inspect file=", std::string("inspect file=").size(), file_references).empty(),
+         "tui normal path completion does not open an empty token after equals without explicit Tab");
   expect(ava::tui::filter_path_completions("inspect main", std::string("inspect main").size(), file_references).empty(),
          "tui normal path completion does not open for ordinary prose tokens");
   auto const forced_path_matches =
       ava::tui::filter_path_completions("inspect main", std::string("inspect main").size(), file_references, true);
   expect(forced_path_matches.size() == 1 && forced_path_matches.front().value == "src/main.cpp",
          "tui forced path completion can match a bare prompt token");
+  auto const forced_equals_path_matches =
+      ava::tui::filter_path_completions("inspect file=main", std::string("inspect file=main").size(), file_references, true);
+  expect(forced_equals_path_matches.size() == 1 && forced_equals_path_matches.front().value == "src/main.cpp",
+         "tui forced path completion matches the token after an equals delimiter");
   auto const forced_empty_matches = ava::tui::filter_path_completions("", 0, file_references, true);
   expect(forced_empty_matches.size() == file_references.size() && forced_empty_matches.front().directory,
          "tui forced path completion can open workspace suggestions from an empty draft");
+  expect(ava::tui::filter_path_completions("/read", std::string("/read").size(), file_references, true).empty(),
+         "tui forced path completion leaves top-level slash command names to the slash palette");
+  auto const forced_slash_argument_matches =
+      ava::tui::filter_path_completions("/read main", std::string("/read main").size(), file_references, true);
+  expect(forced_slash_argument_matches.size() == 1 && forced_slash_argument_matches.front().value == "src/main.cpp",
+         "tui forced path completion can match the current slash-command argument token like Pi");
   expect(ava::tui::filter_path_completions("inspect @src/", std::string("inspect @src/").size(), file_references).empty(),
          "tui normal path completion does not steal @ file reference tokens");
   auto const dot_slash_path_selection =
@@ -1437,11 +3111,36 @@ void test_tui_composer_rendering_and_input()
   expect(quoted_path_selection.text == "inspect \"my folder/test file.txt\"" &&
              quoted_path_selection.cursor == quoted_path_selection.text.size(),
          "tui normal path completion continues inside quoted paths without duplicating the closing quote");
+  auto const equals_path_selection =
+      ava::tui::path_completion_selection_text("inspect file=src/ma", std::string("inspect file=src/ma").size(), file_references, 0);
+  expect(equals_path_selection.text == "inspect file=src/main.cpp" &&
+             equals_path_selection.cursor == equals_path_selection.text.size(),
+         "tui normal path completion preserves text before an equals delimiter");
+  auto const single_quote_path_selection =
+      ava::tui::path_completion_selection_text("inspect path='src/ma", std::string("inspect path='src/ma").size(), file_references, 0);
+  expect(single_quote_path_selection.text == "inspect path='src/main.cpp" &&
+             single_quote_path_selection.cursor == single_quote_path_selection.text.size(),
+         "tui normal path completion preserves text before a single-quote delimiter");
+  auto const equals_quoted_path_selection = ava::tui::path_completion_selection_text(
+      "inspect path=\"my folder/te\"", std::string("inspect path=\"my folder/te").size(), file_references, 0);
+  expect(equals_quoted_path_selection.text == "inspect path=\"my folder/test file.txt\"" &&
+             equals_quoted_path_selection.cursor == equals_quoted_path_selection.text.size(),
+         "tui normal path completion continues inside quoted paths after equals delimiters");
+  auto const whitespace_path_selection =
+      ava::tui::path_completion_selection_text("inspect ", std::string("inspect ").size(), file_references, 1);
+  expect(whitespace_path_selection.text == "inspect src/" &&
+             whitespace_path_selection.cursor == std::string("inspect src/").size(),
+         "tui normal path completion inserts a selected workspace path at an empty token after whitespace");
   auto const forced_bare_path_selection =
       ava::tui::path_completion_selection_text("inspect main", std::string("inspect main").size(), file_references, 0, true);
   expect(forced_bare_path_selection.text == "inspect src/main.cpp" &&
              forced_bare_path_selection.cursor == forced_bare_path_selection.text.size(),
          "tui forced path completion replaces a bare token with the selected relative path");
+  auto const forced_slash_argument_selection =
+      ava::tui::path_completion_selection_text("/read main", std::string("/read main").size(), file_references, 0, true);
+  expect(forced_slash_argument_selection.text == "/read src/main.cpp" &&
+             forced_slash_argument_selection.cursor == forced_slash_argument_selection.text.size(),
+         "tui forced path completion replaces only the active slash-command argument token");
   auto const normal_path_palette =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                            .provider = "openai",
@@ -1455,14 +3154,40 @@ void test_tui_composer_rendering_and_input()
                                                            .width = 96,
                                                            .height = 10,
                                                            .input_cursor = std::string("inspect src/").size()});
+  auto const normal_path_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
+                                                              .provider = "openai",
+                                                              .model = "gpt-5.5",
+                                                              .session_id = "session_test",
+                                                              .input = "inspect src/",
+                                                              .status = "ready",
+                                                              .transcript = {},
+                                                              .file_references = file_references,
+                                                              .selected_slash_command_index = 1,
+                                                              .width = 96,
+                                                              .height = 10,
+                                                              .input_cursor = std::string("inspect src/").size()};
+  auto const path_hit_row =
+      static_cast<std::size_t>(std::ranges::find_if(normal_path_palette, [](std::string const& line) {
+                                  auto const visible = strip_sgr(line);
+                                  return visible.find("src/main.cpp") != std::string::npos &&
+                                         visible.find("file 24 bytes") != std::string::npos;
+                                }) -
+                               normal_path_palette.begin()) +
+      1;
+  auto const expected_path_index =
+      static_cast<std::size_t>(std::ranges::find_if(normal_path_matches, [](auto const& item) { return item.value == "src/main.cpp"; }) -
+                               normal_path_matches.begin());
+  auto const clicked_path = ava::tui::path_completion_palette_selection_for_screen_row(normal_path_snapshot, path_hit_row);
   expect(std::ranges::any_of(normal_path_palette,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
                                return visible.find("src/main.cpp") != std::string::npos &&
                                       visible.find("file 24 bytes") != std::string::npos &&
                                       visible.find("Files") != std::string::npos;
-                             }),
-         "tui normal path completion palette renders backend-provided path candidates");
+                             }) &&
+             clicked_path && *clicked_path == expected_path_index &&
+             !ava::tui::path_completion_palette_selection_for_screen_row(normal_path_snapshot, 1),
+         "tui normal path completion palette renders backend-provided path candidates and hit-tests visible rows");
   auto const forced_path_palette =
       ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                            .provider = "openai",
@@ -1486,28 +3211,55 @@ void test_tui_composer_rendering_and_input()
          "tui forced path completion palette renders for bare prompt tokens after Tab");
 
   auto const key_bindings = ava::tui::parse_key_bindings_json(
-      "{\"submit\":\"Ctrl+T, Enter\",\"new_line\":\"Shift+Enter, Ctrl+Enter, Alt+Enter\",\"delete_to_line_start\":\"Ctrl+U\","
-      "\"autocomplete_accept\":\"Tab\",\"variant_cycle\":\"Ctrl+D, Shift+Tab\",\"undo\":\"Ctrl+Z, Ctrl+-\","
-      "\"redo\":\"Ctrl+R\",\"delete_forward\":\"Delete\","
+      "{\"submit\":\"Ctrl+T, Enter\",\"new_line\":\"Shift+Enter, Ctrl+Enter\",\"message_follow_up\":\"Alt+Enter\","
+      "\"delete_to_line_start\":\"Ctrl+U\","
+      "\"autocomplete_accept\":\"Tab\",\"variant_cycle\":\"Ctrl+D, Shift+Tab\",\"undo\":\"Ctrl+-\","
+      "\"suspend\":\"Ctrl+Z\",\"clipboard_paste_image\":\"Ctrl+V\",\"redo\":\"Ctrl+R\",\"delete_forward\":\"Delete\","
       "\"cursor_word_left\":\"Ctrl+Left, Alt+Left, Alt+B\",\"cursor_word_right\":\"Ctrl+Right, Alt+Right, Alt+F\","
       "\"jump_forward\":\"Ctrl+]\",\"jump_backward\":\"Ctrl+Alt+]\","
       "\"delete_word_backward\":\"Ctrl+W, Alt+Backspace\",\"delete_word_forward\":\"Alt+D, Alt+Delete\","
       "\"details_toggle\":\"Ctrl+O\",\"model_select\":\"Ctrl+L\",\"model_cycle_forward\":\"Ctrl+P\","
-      "\"model_cycle_backward\":\"Shift+Ctrl+P\",\"message_dequeue\":\"Alt+Up\",\"yank_pop\":\"Alt+Y\"}");
+      "\"model_cycle_backward\":\"Shift+Ctrl+P\",\"app.models.save\":\"Ctrl+S\","
+      "\"app.models.enableAll\":\"Ctrl+A\",\"app.models.clearAll\":\"Ctrl+X\","
+      "\"app.models.toggleProvider\":\"Ctrl+P\",\"app.models.reorderUp\":\"Alt+Up\","
+      "\"app.models.reorderDown\":\"Alt+Down\",\"message_dequeue\":\"Alt+Up\",\"yank_pop\":\"Alt+Y\"}");
   auto const parsed_ctrl_s = ava::tui::parse_key_name("Ctrl+S");
   auto const parsed_ctrl_l = ava::tui::parse_key_name("Ctrl+L");
   auto const parsed_ctrl_shift_p = ava::tui::parse_key_name("Shift+Ctrl+P");
+  auto const parsed_ctrl_g = ava::tui::parse_key_name("Ctrl+G");
   auto const parsed_alt_up = ava::tui::parse_key_name("Alt+Up");
+  auto const parsed_alt_down = ava::tui::parse_key_name("Alt+Down");
+  auto const parsed_ctrl_x = ava::tui::parse_key_name("Ctrl+X");
   auto const parsed_ctrl_enter = ava::tui::parse_key_name("Ctrl+Enter");
   auto const parsed_alt_enter = ava::tui::parse_key_name("Alt+Enter");
   auto const parsed_space = ava::tui::parse_key_name("Space");
+  auto const parsed_ctrl_space = ava::tui::parse_key_name("Ctrl+Space");
+  auto const parsed_ctrl_1 = ava::tui::parse_key_name("Ctrl+1");
+  auto const parsed_ctrl_9 = ava::tui::parse_key_name("Ctrl+9");
   auto const parsed_shift_tab = ava::tui::parse_key_name("Shift+Tab");
+  auto const parsed_shift_l = ava::tui::parse_key_name("Shift+L");
+  auto const parsed_shift_t = ava::tui::parse_key_name("Shift+T");
   auto const parsed_ctrl_minus = ava::tui::parse_key_name("Ctrl+-");
+  auto const parsed_ctrl_slash = ava::tui::parse_key_name("Ctrl+/");
   auto const parsed_ctrl_o = ava::tui::parse_key_name("Ctrl+O");
+  auto const parsed_ctrl_v = ava::tui::parse_key_name("Ctrl+V");
   auto const parsed_ctrl_right_bracket = ava::tui::parse_key_name("Ctrl+]");
   auto const parsed_ctrl_alt_right_bracket = ava::tui::parse_key_name("Ctrl+Alt+]");
+  auto const parsed_shift_up = ava::tui::parse_key_name("Shift+Up");
+  auto const parsed_shift_down = ava::tui::parse_key_name("Shift+Down");
+  auto const parsed_shift_left = ava::tui::parse_key_name("Shift+Left");
+  auto const parsed_shift_right = ava::tui::parse_key_name("Shift+Right");
+  auto const parsed_shift_ctrl_left = ava::tui::parse_key_name("Shift+Ctrl+Left");
+  auto const parsed_ctrl_shift_right = ava::tui::parse_key_name("Ctrl+Shift+Right");
+  auto const parsed_shift_alt_left = ava::tui::parse_key_name("Shift+Alt+Left");
+  auto const parsed_alt_shift_right = ava::tui::parse_key_name("Alt+Shift+Right");
   auto const parsed_alt_left = ava::tui::parse_key_name("Alt+Left");
   auto const parsed_alt_right = ava::tui::parse_key_name("Alt+Right");
+  auto const parsed_shift_backspace = ava::tui::parse_key_name("Shift+Backspace");
+  auto const parsed_ctrl_backspace = ava::tui::parse_key_name("Ctrl+Backspace");
+  auto const parsed_shift_delete = ava::tui::parse_key_name("Shift+Delete");
+  auto const parsed_insert = ava::tui::parse_key_name("Insert");
+  auto const parsed_clear = ava::tui::parse_key_name("Clear");
   auto const parsed_alt_backspace = ava::tui::parse_key_name("Alt+Backspace");
   auto const parsed_alt_d = ava::tui::parse_key_name("Alt+D");
   auto const parsed_alt_delete = ava::tui::parse_key_name("Alt+Delete");
@@ -1518,6 +3270,14 @@ void test_tui_composer_rendering_and_input()
   auto const parsed_alt_w = ava::tui::parse_key_name("Alt+W");
   auto const parsed_home = ava::tui::parse_key_name("Home");
   auto const parsed_end = ava::tui::parse_key_name("End");
+  auto const parsed_ctrl_home = ava::tui::parse_key_name("Ctrl+Home");
+  auto const parsed_ctrl_end = ava::tui::parse_key_name("Ctrl+End");
+  auto const parsed_shift_home = ava::tui::parse_key_name("Shift+Home");
+  auto const parsed_shift_end = ava::tui::parse_key_name("Shift+End");
+  auto const parsed_shift_ctrl_home = ava::tui::parse_key_name("Shift+Ctrl+Home");
+  auto const parsed_ctrl_shift_end = ava::tui::parse_key_name("Ctrl+Shift+End");
+  auto const parsed_f2 = ava::tui::parse_key_name("F2");
+  auto const parsed_f12 = ava::tui::parse_key_name("F12");
   expect(
       key_bindings && ava::tui::action_for_key(*key_bindings, ava::tui::Key::CtrlT) == ava::tui::TuiAction::Submit &&
           ava::tui::action_for_key(*key_bindings, ava::tui::Key::CtrlD) == ava::tui::TuiAction::VariantCycle &&
@@ -1549,9 +3309,14 @@ void test_tui_composer_rendering_and_input()
                                        ava::tui::Key::AltDelete) &&
           ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::NewLine,
                                        ava::tui::Key::CtrlEnter) &&
-          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::NewLine,
+          !ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::NewLine,
+                                        ava::tui::Key::AltEnter) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::MessageFollowUp,
                                        ava::tui::Key::AltEnter) &&
           ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::Undo, ava::tui::Key::CtrlMinus) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::Suspend, ava::tui::Key::CtrlZ) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::ClipboardPasteImage,
+                                       ava::tui::Key::CtrlV) &&
           ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::Redo, ava::tui::Key::CtrlR) &&
           ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::DetailsToggle,
                                        ava::tui::Key::CtrlO) &&
@@ -1561,22 +3326,57 @@ void test_tui_composer_rendering_and_input()
                                        ava::tui::Key::CtrlP) &&
           ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::ModelCycleBackward,
                                        ava::tui::Key::CtrlShiftP) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::ModelsSave,
+                                       ava::tui::Key::CtrlS) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::ModelsEnableAll,
+                                       ava::tui::Key::CtrlA) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::ModelsClearAll,
+                                       ava::tui::Key::CtrlX) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::ModelsToggleProvider,
+                                       ava::tui::Key::CtrlP) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::ModelsReorderUp,
+                                       ava::tui::Key::AltArrowUp) &&
+          ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::ModelsReorderDown,
+                                       ava::tui::Key::AltArrowDown) &&
           ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::MessageDequeue,
                                        ava::tui::Key::AltArrowUp) &&
           parsed_ctrl_s && ava::tui::key_display(*parsed_ctrl_s) == "Ctrl+S" &&
           parsed_ctrl_l && ava::tui::key_display(*parsed_ctrl_l) == "Ctrl+L" &&
           parsed_ctrl_shift_p && ava::tui::key_display(*parsed_ctrl_shift_p) == "Shift+Ctrl+P" &&
+          parsed_ctrl_g && ava::tui::key_display(*parsed_ctrl_g) == "Ctrl+G" &&
           parsed_alt_up && ava::tui::key_display(*parsed_alt_up) == "Alt+Up" &&
+          parsed_alt_down && ava::tui::key_display(*parsed_alt_down) == "Alt+Down" &&
+          parsed_ctrl_x && ava::tui::key_display(*parsed_ctrl_x) == "Ctrl+X" &&
           parsed_ctrl_enter && ava::tui::key_display(*parsed_ctrl_enter) == "Ctrl+Enter" &&
           parsed_alt_enter && ava::tui::key_display(*parsed_alt_enter) == "Alt+Enter" &&
           parsed_space && ava::tui::key_display(*parsed_space) == "Space" &&
+          parsed_ctrl_space && ava::tui::key_display(*parsed_ctrl_space) == "Ctrl+Space" &&
+          parsed_ctrl_1 && ava::tui::key_display(*parsed_ctrl_1) == "Ctrl+1" && parsed_ctrl_9 &&
+          ava::tui::key_display(*parsed_ctrl_9) == "Ctrl+9" &&
           parsed_shift_tab && ava::tui::key_display(*parsed_shift_tab) == "Shift+Tab" &&
+          parsed_shift_l && ava::tui::key_display(*parsed_shift_l) == "Shift+L" &&
+          parsed_shift_t && ava::tui::key_display(*parsed_shift_t) == "Shift+T" &&
           parsed_ctrl_minus && ava::tui::key_display(*parsed_ctrl_minus) == "Ctrl+-" &&
+          parsed_ctrl_slash && ava::tui::key_display(*parsed_ctrl_slash) == "Ctrl+/" &&
           parsed_ctrl_o && ava::tui::key_display(*parsed_ctrl_o) == "Ctrl+O" &&
+          parsed_ctrl_v && ava::tui::key_display(*parsed_ctrl_v) == "Ctrl+V" &&
           parsed_ctrl_right_bracket && ava::tui::key_display(*parsed_ctrl_right_bracket) == "Ctrl+]" &&
           parsed_ctrl_alt_right_bracket && ava::tui::key_display(*parsed_ctrl_alt_right_bracket) == "Ctrl+Alt+]" &&
+          parsed_shift_up && ava::tui::key_display(*parsed_shift_up) == "Shift+Up" &&
+          parsed_shift_down && ava::tui::key_display(*parsed_shift_down) == "Shift+Down" &&
+          parsed_shift_left && ava::tui::key_display(*parsed_shift_left) == "Shift+Left" &&
+          parsed_shift_right && ava::tui::key_display(*parsed_shift_right) == "Shift+Right" &&
+          parsed_shift_ctrl_left && ava::tui::key_display(*parsed_shift_ctrl_left) == "Shift+Ctrl+Left" &&
+          parsed_ctrl_shift_right && ava::tui::key_display(*parsed_ctrl_shift_right) == "Shift+Ctrl+Right" &&
+          parsed_shift_alt_left && ava::tui::key_display(*parsed_shift_alt_left) == "Shift+Alt+Left" &&
+          parsed_alt_shift_right && ava::tui::key_display(*parsed_alt_shift_right) == "Shift+Alt+Right" &&
           parsed_alt_left && ava::tui::key_display(*parsed_alt_left) == "Alt+Left" &&
           parsed_alt_right && ava::tui::key_display(*parsed_alt_right) == "Alt+Right" &&
+          parsed_shift_backspace && ava::tui::key_display(*parsed_shift_backspace) == "Shift+Backspace" &&
+          parsed_ctrl_backspace && ava::tui::key_display(*parsed_ctrl_backspace) == "Ctrl+Backspace" &&
+          parsed_shift_delete && ava::tui::key_display(*parsed_shift_delete) == "Shift+Delete" &&
+          parsed_insert && ava::tui::key_display(*parsed_insert) == "Insert" && parsed_clear &&
+          ava::tui::key_display(*parsed_clear) == "Clear" &&
           parsed_alt_backspace && ava::tui::key_display(*parsed_alt_backspace) == "Alt+Backspace" &&
           parsed_alt_d && ava::tui::key_display(*parsed_alt_d) == "Alt+D" &&
           parsed_alt_delete && ava::tui::key_display(*parsed_alt_delete) == "Alt+Delete" &&
@@ -1587,6 +3387,14 @@ void test_tui_composer_rendering_and_input()
           ava::tui::key_display(*parsed_alt_w) == "Alt+W" &&
           parsed_home && ava::tui::key_display(*parsed_home) == "Home" &&
           parsed_end && ava::tui::key_display(*parsed_end) == "End" &&
+          parsed_ctrl_home && ava::tui::key_display(*parsed_ctrl_home) == "Ctrl+Home" &&
+          parsed_ctrl_end && ava::tui::key_display(*parsed_ctrl_end) == "Ctrl+End" &&
+          parsed_shift_home && ava::tui::key_display(*parsed_shift_home) == "Shift+Home" &&
+          parsed_shift_end && ava::tui::key_display(*parsed_shift_end) == "Shift+End" &&
+          parsed_shift_ctrl_home && ava::tui::key_display(*parsed_shift_ctrl_home) == "Shift+Ctrl+Home" &&
+          parsed_ctrl_shift_end && ava::tui::key_display(*parsed_ctrl_shift_end) == "Shift+Ctrl+End" &&
+          parsed_f2 && ava::tui::key_display(*parsed_f2) == "F2" && parsed_f12 &&
+          ava::tui::key_display(*parsed_f12) == "F12" &&
           ava::tui::parse_key_name("Ctrl+H") == ava::tui::Key::CtrlH &&
           ava::tui::key_display(ava::tui::Key::CtrlH) == "Ctrl+H" &&
           ava::tui::key_matches_action(*key_bindings, ava::tui::TuiAction::YankPop, ava::tui::Key::AltY) &&
@@ -1596,6 +3404,24 @@ void test_tui_composer_rendering_and_input()
               std::string::npos &&
           ava::tui::keys_display(*key_bindings, ava::tui::TuiAction::Submit).find("Ctrl+T") != std::string::npos,
       "tui keybind parser maps configured keys to semantic actions and display text");
+  auto const function_key_bindings = ava::tui::parse_key_bindings_json("{\"tui.editor.cursorLineEnd\":\"F2\"}");
+  expect(function_key_bindings &&
+             ava::tui::key_matches_action(*function_key_bindings, ava::tui::TuiAction::CursorLineEnd,
+                                          ava::tui::Key::F2),
+         "tui keybind parser accepts Pi-style function keys for configurable actions");
+  auto const special_key_bindings =
+      ava::tui::parse_key_bindings_json("{\"tui.editor.cursorLineStart\":\"Insert\",\"tui.editor.cursorLineEnd\":\"Clear\"}");
+  expect(special_key_bindings &&
+             ava::tui::key_matches_action(*special_key_bindings, ava::tui::TuiAction::CursorLineStart,
+                                          ava::tui::Key::Insert) &&
+             ava::tui::key_matches_action(*special_key_bindings, ava::tui::TuiAction::CursorLineEnd,
+                                          ava::tui::Key::Clear),
+         "tui keybind parser accepts Pi-style Insert and Clear special keys");
+  auto const ctrl_digit_bindings = ava::tui::parse_key_bindings_json("{\"tui.editor.cursorLineEnd\":\"Ctrl+1\"}");
+  expect(ctrl_digit_bindings &&
+             ava::tui::key_matches_action(*ctrl_digit_bindings, ava::tui::TuiAction::CursorLineEnd,
+                                          ava::tui::Key::Ctrl1),
+         "tui keybind parser accepts Pi-style Ctrl+digit special keys");
   auto const default_bindings = ava::tui::default_key_bindings();
   expect(
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::HistoryPrev, ava::tui::Key::ArrowUp) &&
@@ -1603,7 +3429,9 @@ void test_tui_composer_rendering_and_input()
                                        ava::tui::Key::ShiftEnter) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::NewLine,
                                        ava::tui::Key::CtrlEnter) &&
-          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::NewLine,
+          !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::NewLine,
+                                        ava::tui::Key::AltEnter) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::MessageFollowUp,
                                        ava::tui::Key::AltEnter) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::PalettePrev, ava::tui::Key::ArrowUp) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SelectPrev, ava::tui::Key::ArrowUp) &&
@@ -1614,6 +3442,32 @@ void test_tui_composer_rendering_and_input()
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SelectConfirm, ava::tui::Key::Enter) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SelectCancel, ava::tui::Key::Escape) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SelectCancel, ava::tui::Key::CtrlC) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SessionTogglePath,
+                                       ava::tui::Key::CtrlP) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SessionToggleSort,
+                                       ava::tui::Key::CtrlS) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SessionToggleSort,
+                                       ava::tui::Key::CtrlT) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SessionToggleNamedFilter,
+                                       ava::tui::Key::CtrlN) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SessionRename,
+                                       ava::tui::Key::CtrlR) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SessionArchive,
+                                       ava::tui::Key::CtrlD) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::SessionArchiveNoninvasive,
+                                       ava::tui::Key::CtrlBackspace) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::TreeFoldOrUp,
+                                       ava::tui::Key::CtrlArrowLeft) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::TreeFoldOrUp,
+                                       ava::tui::Key::AltArrowLeft) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::TreeUnfoldOrDown,
+                                       ava::tui::Key::CtrlArrowRight) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::TreeUnfoldOrDown,
+                                       ava::tui::Key::AltArrowRight) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::TreeEditLabel,
+                                       ava::tui::Key::ShiftL) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::TreeToggleLabelTimestamp,
+                                       ava::tui::Key::ShiftT) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorUp, ava::tui::Key::ArrowUp) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorDown, ava::tui::Key::ArrowDown) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CursorWordLeft,
@@ -1639,7 +3493,11 @@ void test_tui_composer_rendering_and_input()
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::DeleteForward,
                                        ava::tui::Key::Delete) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::DeleteForward,
+                                       ava::tui::Key::ShiftDelete) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::DeleteForward,
                                        ava::tui::Key::CtrlD) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::DeleteBackward,
+                                       ava::tui::Key::ShiftBackspace) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::DeleteBackward,
                                        ava::tui::Key::CtrlH) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Exit, ava::tui::Key::CtrlD) &&
@@ -1651,21 +3509,46 @@ void test_tui_composer_rendering_and_input()
                                        ava::tui::Key::AltDelete) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModeToggle, ava::tui::Key::Tab) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::AutocompleteAccept, ava::tui::Key::Tab) &&
-          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Undo, ava::tui::Key::CtrlZ) &&
+          !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Undo, ava::tui::Key::CtrlZ) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Undo, ava::tui::Key::CtrlMinus) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Suspend, ava::tui::Key::CtrlZ) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ClipboardPasteImage,
+                                       ava::tui::Key::CtrlV) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Redo, ava::tui::Key::CtrlR) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Yank, ava::tui::Key::CtrlY) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::YankPop, ava::tui::Key::AltY) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::DetailsToggle,
                                        ava::tui::Key::CtrlO) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CopySelection,
+                                       ava::tui::Key::CtrlC) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ClearInput,
+                                       ava::tui::Key::CtrlC) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ExternalEditor,
+                                       ava::tui::Key::CtrlG) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::VariantCycle,
                                        ava::tui::Key::ShiftTab) &&
+          !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::VariantCycle,
+                                        ava::tui::Key::CtrlT) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ThinkingToggle,
+                                       ava::tui::Key::CtrlT) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelSelect,
                                        ava::tui::Key::CtrlL) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelCycleForward,
                                        ava::tui::Key::CtrlP) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelCycleBackward,
                                        ava::tui::Key::CtrlShiftP) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelsSave,
+                                       ava::tui::Key::CtrlS) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelsEnableAll,
+                                       ava::tui::Key::CtrlA) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelsClearAll,
+                                       ava::tui::Key::CtrlX) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelsToggleProvider,
+                                       ava::tui::Key::CtrlP) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelsReorderUp,
+                                       ava::tui::Key::AltArrowUp) &&
+          ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelsReorderDown,
+                                       ava::tui::Key::AltArrowDown) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::MessageDequeue,
                                        ava::tui::Key::AltArrowUp) &&
           ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::Interrupt, ava::tui::Key::CtrlC),
@@ -1690,23 +3573,83 @@ void test_tui_composer_rendering_and_input()
              ava::tui::action_name(ava::tui::TuiAction::SelectPageDown) == "select_page_down" &&
              ava::tui::action_name(ava::tui::TuiAction::SelectConfirm) == "select_confirm" &&
              ava::tui::action_name(ava::tui::TuiAction::SelectCancel) == "select_cancel" &&
+             ava::tui::action_name(ava::tui::TuiAction::CopySelection) == "copy_selection" &&
+             ava::tui::action_name(ava::tui::TuiAction::ExternalEditor) == "external_editor" &&
+             ava::tui::action_name(ava::tui::TuiAction::Suspend) == "suspend" &&
+             ava::tui::action_name(ava::tui::TuiAction::ClipboardPasteImage) == "clipboard_paste_image" &&
              ava::tui::action_name(ava::tui::TuiAction::ModelSelect) == "model_select" &&
              ava::tui::action_name(ava::tui::TuiAction::ModelCycleForward) == "model_cycle_forward" &&
              ava::tui::action_name(ava::tui::TuiAction::ModelCycleBackward) == "model_cycle_backward" &&
+             ava::tui::action_name(ava::tui::TuiAction::ModelsSave) == "models_save" &&
+             ava::tui::action_name(ava::tui::TuiAction::ModelsEnableAll) == "models_enable_all" &&
+             ava::tui::action_name(ava::tui::TuiAction::ModelsClearAll) == "models_clear_all" &&
+             ava::tui::action_name(ava::tui::TuiAction::ModelsToggleProvider) == "models_toggle_provider" &&
+             ava::tui::action_name(ava::tui::TuiAction::ModelsReorderUp) == "models_reorder_up" &&
+             ava::tui::action_name(ava::tui::TuiAction::ModelsReorderDown) == "models_reorder_down" &&
+             ava::tui::action_name(ava::tui::TuiAction::ThinkingToggle) == "thinking_toggle" &&
+             ava::tui::action_name(ava::tui::TuiAction::MessageFollowUp) == "message_follow_up" &&
              ava::tui::action_name(ava::tui::TuiAction::MessageDequeue) == "message_dequeue" &&
              ava::tui::action_name(ava::tui::TuiAction::MessagePrev) == "message_prev" &&
              ava::tui::action_name(ava::tui::TuiAction::MessageNext) == "message_next" &&
-             ava::tui::action_name(ava::tui::TuiAction::JumpToBottom) == "jump_to_bottom",
+             ava::tui::action_name(ava::tui::TuiAction::JumpToBottom) == "jump_to_bottom" &&
+             ava::tui::action_name(ava::tui::TuiAction::SessionNew) == "session_new" &&
+             ava::tui::action_name(ava::tui::TuiAction::SessionTree) == "session_tree" &&
+             ava::tui::action_name(ava::tui::TuiAction::SessionFork) == "session_fork" &&
+             ava::tui::action_name(ava::tui::TuiAction::SessionResume) == "session_resume" &&
+             ava::tui::action_name(ava::tui::TuiAction::SessionTogglePath) == "session_toggle_path" &&
+             ava::tui::action_name(ava::tui::TuiAction::SessionToggleSort) == "session_toggle_sort" &&
+             ava::tui::action_name(ava::tui::TuiAction::SessionToggleNamedFilter) ==
+                 "session_toggle_named_filter" &&
+             ava::tui::action_name(ava::tui::TuiAction::SessionRename) == "session_rename" &&
+             ava::tui::action_name(ava::tui::TuiAction::SessionArchive) == "session_archive" &&
+             ava::tui::action_name(ava::tui::TuiAction::SessionArchiveNoninvasive) ==
+                 "session_archive_noninvasive" &&
+             ava::tui::action_name(ava::tui::TuiAction::TreeFoldOrUp) == "tree_fold_or_up" &&
+             ava::tui::action_name(ava::tui::TuiAction::TreeUnfoldOrDown) == "tree_unfold_or_down" &&
+             ava::tui::action_name(ava::tui::TuiAction::TreeEditLabel) == "tree_edit_label" &&
+             ava::tui::action_name(ava::tui::TuiAction::TreeToggleLabelTimestamp) ==
+                 "tree_toggle_label_timestamp",
          "tui keybind parser exposes semantic action names for editor and navigation actions");
   auto const help_items = ava::tui::key_binding_help_items(default_bindings);
   expect(std::ranges::any_of(help_items,
                              [](ava::tui::TuiKeyBindingHelpItem const& item) {
-                               return item.action == "variant_cycle" && item.keys.find("Shift+Tab") != std::string::npos &&
-                                      item.keys.find("Ctrl+T") != std::string::npos;
+                               return item.action == "variant_cycle" &&
+                                      item.keys.find("Shift+Tab") != std::string::npos &&
+                                      item.keys.find("Ctrl+T") == std::string::npos;
                              }) &&
              std::ranges::any_of(help_items,
+                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                    return item.action == "thinking_toggle" &&
+                                           item.keys.find("Ctrl+T") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(help_items,
+                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                    return item.action == "model_select" && item.keys.find("Ctrl+L") != std::string::npos;
+                                  }) &&
+             std::ranges::any_of(help_items,
                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
-                                   return item.action == "model_select" && item.keys.find("Ctrl+L") != std::string::npos;
+                                   return item.action == "copy_selection" &&
+                                          item.keys.find("Ctrl+C") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "clear_input" &&
+                                          item.keys.find("Ctrl+C") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "external_editor" &&
+                                          item.keys.find("Ctrl+G") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "suspend" &&
+                                          item.keys.find("Ctrl+Z") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "clipboard_paste_image" &&
+                                          item.keys.find("Ctrl+V") != std::string::npos;
                                  }) &&
              std::ranges::any_of(help_items,
                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
@@ -1720,8 +3663,46 @@ void test_tui_composer_rendering_and_input()
                                  }) &&
              std::ranges::any_of(help_items,
                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "models_clear_all" &&
+                                          item.keys.find("Ctrl+X") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "message_follow_up" &&
+                                          item.keys.find("Alt+Enter") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
                                    return item.action == "message_dequeue" &&
                                           item.keys.find("Alt+Up") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "session_toggle_path" &&
+                                          item.keys.find("Ctrl+P") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "session_toggle_sort" &&
+                                          item.keys.find("Ctrl+S") != std::string::npos &&
+                                          item.keys.find("Ctrl+T") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "session_archive" &&
+                                          item.keys.find("Ctrl+D") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "tree_fold_or_up" &&
+                                          item.keys.find("Ctrl+Left") != std::string::npos &&
+                                          item.keys.find("Alt+Left") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "tree_unfold_or_down" &&
+                                          item.keys.find("Ctrl+Right") != std::string::npos &&
+                                          item.keys.find("Alt+Right") != std::string::npos;
                                  }) &&
              std::ranges::any_of(help_items,
                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
@@ -1740,7 +3721,13 @@ void test_tui_composer_rendering_and_input()
              std::ranges::any_of(help_items,
                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
                                    return item.action == "delete_forward" &&
+                                          item.keys.find("Shift+Delete") != std::string::npos &&
                                           item.keys.find("Ctrl+D") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "delete_backward" &&
+                                          item.keys.find("Shift+Backspace") != std::string::npos;
                                  }) &&
              std::ranges::any_of(help_items,
                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
@@ -1759,7 +3746,7 @@ void test_tui_composer_rendering_and_input()
                                  }) &&
              std::ranges::any_of(help_items,
                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
-                                   return item.action == "undo" && item.keys.find("Ctrl+Z") != std::string::npos;
+                                   return item.action == "undo" && item.keys.find("Ctrl+Z") == std::string::npos;
                                  }) &&
              std::ranges::any_of(help_items,
                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
@@ -1776,6 +3763,11 @@ void test_tui_composer_rendering_and_input()
              std::ranges::any_of(help_items,
                                  [](ava::tui::TuiKeyBindingHelpItem const& item) {
                                    return item.action == "yank_pop" && item.keys.find("Alt+Y") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(help_items,
+                                 [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                   return item.action == "session_archive_noninvasive" &&
+                                          item.keys.find("Ctrl+Backspace") != std::string::npos;
                                  }),
          "tui keybind help lists concrete semantic action names and effective keys");
   expect(!ava::tui::parse_key_bindings_json("{\"submit\":\"Hyper+Enter\"}"),
@@ -1791,6 +3783,17 @@ void test_tui_composer_rendering_and_input()
   expect(space_action_keybinds &&
              ava::tui::key_matches_action(*space_action_keybinds, ava::tui::TuiAction::Submit, ava::tui::Key::Space),
          "tui keybind parser accepts Pi-style Space key names for semantic bindings");
+  auto const ctrl_space_action_keybinds =
+      ava::tui::parse_key_bindings_json("{\"tui.input.submit\":\"Ctrl+Space\"}");
+  expect(ctrl_space_action_keybinds &&
+             ava::tui::key_matches_action(*ctrl_space_action_keybinds, ava::tui::TuiAction::Submit,
+                                           ava::tui::Key::CtrlSpace),
+         "tui keybind parser accepts Pi-style Ctrl+Space key names for semantic bindings");
+  auto const ctrl_slash_action_keybinds = ava::tui::parse_key_bindings_json("{\"tui.input.submit\":\"Ctrl+/\"}");
+  expect(ctrl_slash_action_keybinds &&
+             ava::tui::key_matches_action(*ctrl_slash_action_keybinds, ava::tui::TuiAction::Submit,
+                                           ava::tui::Key::CtrlSlash),
+         "tui keybind parser accepts Pi-style Ctrl+/ key names for semantic bindings");
   auto const select_action_keybinds = ava::tui::parse_key_bindings_json(
       "{\"tui.select.confirm\":[\"Enter\",\"Space\"],\"tui.select.cancel\":[\"Escape\",\"Ctrl+W\"],"
       "\"tui.select.up\":\"Ctrl+P\",\"tui.select.down\":\"Ctrl+N\","
@@ -1834,6 +3837,12 @@ void test_tui_composer_rendering_and_input()
          "tui keybind parser accepts Pi-style arrays of key names");
   auto const namespaced_action_keybinds = ava::tui::parse_key_bindings_json(
       "{\"tui.editor.cursorLineStart\":[\"Home\",\"Ctrl+A\"],\"app.message.dequeue\":[\"Alt+Up\"],"
+      "\"app.message.followUp\":\"Alt+Enter\","
+      "\"app.clear\":\"Ctrl+C\","
+      "\"app.editor.external\":\"Ctrl+G\","
+      "\"app.suspend\":\"Ctrl+Z\","
+      "\"app.clipboard.pasteImage\":\"Ctrl+V\","
+      "\"app.tree.editLabel\":\"Shift+L\","
       "\"app.tools.expand\":\"Ctrl+O\",\"tui.editor.deleteCharBackward\":[\"Backspace\",\"Ctrl+H\"]}");
   expect(namespaced_action_keybinds &&
              ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::CursorLineStart,
@@ -1842,8 +3851,20 @@ void test_tui_composer_rendering_and_input()
                                            ava::tui::Key::CtrlA) &&
              ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::MessageDequeue,
                                            ava::tui::Key::AltArrowUp) &&
+             ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::MessageFollowUp,
+                                           ava::tui::Key::AltEnter) &&
+             ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::ClearInput,
+                                           ava::tui::Key::CtrlC) &&
+             ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::ExternalEditor,
+                                           ava::tui::Key::CtrlG) &&
+             ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::Suspend,
+                                           ava::tui::Key::CtrlZ) &&
+             ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::ClipboardPasteImage,
+                                           ava::tui::Key::CtrlV) &&
              ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::DetailsToggle,
                                            ava::tui::Key::CtrlO) &&
+             ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::TreeEditLabel,
+                                           ava::tui::Key::ShiftL) &&
              ava::tui::key_matches_action(*namespaced_action_keybinds, ava::tui::TuiAction::DeleteBackward,
                                            ava::tui::Key::CtrlH),
          "tui keybind parser accepts matching Pi namespaced action ids and Ctrl+H");
@@ -1863,16 +3884,28 @@ void test_tui_composer_rendering_and_input()
              ava::tui::key_matches_action(*vim_action_keybinds, ava::tui::TuiAction::CursorWordRight,
                                            ava::tui::Key::AltW),
          "tui keybind parser accepts Pi Vim-style Alt+H/J/K/L and Alt+W cursor aliases");
-  auto const legacy_action_keybinds =
-      ava::tui::parse_key_bindings_json("{\"cursorLineEnd\":[\"End\",\"Ctrl+E\"],\"expandTools\":\"Ctrl+O\"}");
+  auto const legacy_action_keybinds = ava::tui::parse_key_bindings_json(
+      "{\"cursorLineEnd\":[\"End\",\"Ctrl+E\"],\"expandTools\":\"Ctrl+O\","
+      "\"toggleThinking\":\"Ctrl+T\",\"followUp\":\"Alt+Enter\"}");
   expect(legacy_action_keybinds &&
              ava::tui::key_matches_action(*legacy_action_keybinds, ava::tui::TuiAction::CursorLineEnd,
                                            ava::tui::Key::End) &&
              ava::tui::key_matches_action(*legacy_action_keybinds, ava::tui::TuiAction::CursorLineEnd,
                                            ava::tui::Key::CtrlE) &&
              ava::tui::key_matches_action(*legacy_action_keybinds, ava::tui::TuiAction::DetailsToggle,
-                                           ava::tui::Key::CtrlO),
+                                           ava::tui::Key::CtrlO) &&
+             ava::tui::key_matches_action(*legacy_action_keybinds, ava::tui::TuiAction::ThinkingToggle,
+                                           ava::tui::Key::CtrlT) &&
+             ava::tui::key_matches_action(*legacy_action_keybinds, ava::tui::TuiAction::MessageFollowUp,
+                                           ava::tui::Key::AltEnter),
          "tui keybind parser accepts legacy camelCase action aliases where AVA has matching semantics");
+  auto const thinking_toggle_keybinds = ava::tui::parse_key_bindings_json("{\"app.thinking.toggle\":\"Ctrl+T\"}");
+  expect(thinking_toggle_keybinds &&
+             ava::tui::key_matches_action(*thinking_toggle_keybinds, ava::tui::TuiAction::ThinkingToggle,
+                                           ava::tui::Key::CtrlT) &&
+             !ava::tui::key_matches_action(*thinking_toggle_keybinds, ava::tui::TuiAction::VariantCycle,
+                                            ava::tui::Key::CtrlT),
+         "tui keybind parser accepts Pi thinking visibility toggle action id");
   auto const namespaced_over_legacy_keybinds = ava::tui::parse_key_bindings_json(
       "{\"app.tools.expand\":\"Ctrl+O\",\"expandTools\":\"Ctrl+T\",\"variant_cycle\":\"Ctrl+T\"}");
   expect(namespaced_over_legacy_keybinds &&
@@ -1891,8 +3924,76 @@ void test_tui_composer_rendering_and_input()
              !ava::tui::key_matches_action(*later_current_alias_keybinds, ava::tui::TuiAction::Submit,
                                             ava::tui::Key::CtrlT),
          "tui keybind parser lets the later current-form alias win for the same effective action");
-  expect(!ava::tui::parse_key_bindings_json("{\"tui.input.copy\":\"Ctrl+C\"}"),
-         "tui keybind parser rejects namespaced Pi action ids that AVA does not implement");
+  auto const copy_action_keybinds = ava::tui::parse_key_bindings_json("{\"tui.input.copy\":\"Ctrl+C\"}");
+  expect(copy_action_keybinds &&
+             ava::tui::key_matches_action(*copy_action_keybinds, ava::tui::TuiAction::CopySelection,
+                                           ava::tui::Key::CtrlC) &&
+             ava::tui::key_matches_action(*copy_action_keybinds, ava::tui::TuiAction::ClearInput,
+                                           ava::tui::Key::CtrlC) &&
+             ava::tui::key_matches_action(*copy_action_keybinds, ava::tui::TuiAction::Interrupt,
+                                           ava::tui::Key::CtrlC),
+         "tui keybind parser accepts Pi copy action ids while preserving Ctrl+C clear and interrupt fallbacks");
+  auto const session_delete_noninvasive_keybinds =
+      ava::tui::parse_key_bindings_json("{\"app.session.deleteNoninvasive\":\"Ctrl+Backspace\"}");
+  expect(session_delete_noninvasive_keybinds &&
+             ava::tui::key_matches_action(*session_delete_noninvasive_keybinds,
+                                          ava::tui::TuiAction::SessionArchiveNoninvasive,
+                                          ava::tui::Key::CtrlBackspace),
+         "tui keybind parser accepts Pi session non-invasive delete action id");
+  auto const session_action_keybinds =
+      ava::tui::parse_key_bindings_json("{\"app.session.new\":\"Alt+H\",\"app.session.tree\":\"Alt+J\","
+                                        "\"app.session.fork\":\"Alt+K\",\"app.session.resume\":\"Alt+L\","
+                                        "\"app.session.togglePath\":\"Ctrl+O\","
+                                        "\"app.session.toggleSort\":\"Ctrl+Y\","
+                                        "\"app.session.toggleNamedFilter\":\"Ctrl+U\","
+                                        "\"app.session.rename\":\"Ctrl+K\","
+                                        "\"app.session.delete\":\"Alt+D\"}");
+  expect(session_action_keybinds &&
+             ava::tui::key_matches_action(*session_action_keybinds, ava::tui::TuiAction::SessionNew,
+                                          ava::tui::Key::AltH) &&
+             ava::tui::key_matches_action(*session_action_keybinds, ava::tui::TuiAction::SessionTree,
+                                          ava::tui::Key::AltJ) &&
+             ava::tui::key_matches_action(*session_action_keybinds, ava::tui::TuiAction::SessionFork,
+                                          ava::tui::Key::AltK) &&
+             ava::tui::key_matches_action(*session_action_keybinds, ava::tui::TuiAction::SessionResume,
+                                          ava::tui::Key::AltL) &&
+             ava::tui::key_matches_action(*session_action_keybinds, ava::tui::TuiAction::SessionTogglePath,
+                                          ava::tui::Key::CtrlO) &&
+             ava::tui::key_matches_action(*session_action_keybinds, ava::tui::TuiAction::SessionToggleSort,
+                                          ava::tui::Key::CtrlY) &&
+             ava::tui::key_matches_action(*session_action_keybinds,
+                                          ava::tui::TuiAction::SessionToggleNamedFilter,
+                                          ava::tui::Key::CtrlU) &&
+             ava::tui::key_matches_action(*session_action_keybinds, ava::tui::TuiAction::SessionRename,
+                                          ava::tui::Key::CtrlK) &&
+             ava::tui::key_matches_action(*session_action_keybinds, ava::tui::TuiAction::SessionArchive,
+                                          ava::tui::Key::AltD),
+         "tui keybind parser accepts Pi session action ids");
+  auto const tree_action_keybinds =
+      ava::tui::parse_key_bindings_json("{\"app.tree.foldOrUp\":\"Ctrl+O\","
+                                        "\"app.tree.unfoldOrDown\":\"Ctrl+Y\","
+                                        "\"app.tree.editLabel\":\"Shift+L\","
+                                        "\"app.tree.toggleLabelTimestamp\":\"Shift+T\","
+                                        "\"app.tree.filter.labeledOnly\":\"Ctrl+Space\","
+                                        "\"app.tree.filter.all\":\"Ctrl+/\"}");
+  expect(tree_action_keybinds &&
+             ava::tui::key_matches_action(*tree_action_keybinds, ava::tui::TuiAction::TreeFoldOrUp,
+                                          ava::tui::Key::CtrlO) &&
+             ava::tui::key_matches_action(*tree_action_keybinds, ava::tui::TuiAction::TreeUnfoldOrDown,
+                                          ava::tui::Key::CtrlY) &&
+             ava::tui::key_matches_action(*tree_action_keybinds, ava::tui::TuiAction::TreeEditLabel,
+                                          ava::tui::Key::ShiftL) &&
+             ava::tui::key_matches_action(*tree_action_keybinds,
+                                          ava::tui::TuiAction::TreeToggleLabelTimestamp,
+                                          ava::tui::Key::ShiftT) &&
+             ava::tui::key_matches_action(*tree_action_keybinds,
+                                          ava::tui::TuiAction::TreeFilterLabeledOnly,
+                                          ava::tui::Key::CtrlSpace) &&
+             ava::tui::key_matches_action(*tree_action_keybinds, ava::tui::TuiAction::TreeFilterAll,
+                                          ava::tui::Key::CtrlSlash),
+         "tui keybind parser accepts Pi tree branch navigation, label, and equivalent filter action ids");
+  expect(!ava::tui::parse_key_bindings_json("{\"app.tree.filter.noTools\":\"Ctrl+T\"}"),
+         "tui keybind parser rejects Pi tree filter ids without an AVA session-selector equivalent");
   expect(!ava::tui::parse_key_bindings_json("{\"submit\":[]}"),
          "tui keybind parser rejects empty keybinding arrays");
   expect(!ava::tui::parse_key_bindings_json("{\"submit\":[\"Enter\",123]}"),
@@ -1923,6 +4024,85 @@ void test_tui_composer_rendering_and_input()
                                            ava::tui::Key::CtrlD) &&
              !ava::tui::key_matches_action(*shadowing_keybinds, ava::tui::TuiAction::Exit, ava::tui::Key::CtrlD),
          "tui keybind parser lets custom bindings shadow shared default keys without flagging conflicts");
+
+  auto const default_config_json = ava::tui::default_key_bindings_config_json();
+  auto const default_config_keybinds = ava::tui::parse_key_bindings_json(default_config_json);
+  expect(default_config_json.find("\"tui.editor.cursorLeft\"") != std::string::npos &&
+             default_config_json.find("\"app.clear\"") != std::string::npos &&
+             default_config_json.find("\"tui.input.copy\"") != std::string::npos &&
+             default_config_json.find("\"app.editor.external\"") != std::string::npos &&
+             default_config_json.find("\"app.suspend\"") != std::string::npos &&
+             default_config_json.find("\"app.clipboard.pasteImage\"") != std::string::npos &&
+             default_config_json.find("\"app.session.togglePath\"") != std::string::npos &&
+             default_config_json.find("\"app.session.toggleSort\"") != std::string::npos &&
+             default_config_json.find("\"app.session.toggleNamedFilter\"") != std::string::npos &&
+             default_config_json.find("\"app.session.rename\"") != std::string::npos &&
+             default_config_json.find("\"app.session.delete\"") != std::string::npos &&
+             default_config_json.find("\"app.session.deleteNoninvasive\"") != std::string::npos &&
+             default_config_json.find("\"app.tree.foldOrUp\"") != std::string::npos &&
+             default_config_json.find("\"app.tree.unfoldOrDown\"") != std::string::npos &&
+             default_config_json.find("\"app.tree.editLabel\"") != std::string::npos &&
+             default_config_json.find("\"app.tree.toggleLabelTimestamp\"") != std::string::npos &&
+             default_config_json.find("\"app.tree.filter.labeledOnly\"") == std::string::npos &&
+             default_config_json.find("\"app.tree.filter.all\"") == std::string::npos &&
+             default_config_json.find("\"app.models.clearAll\"") != std::string::npos &&
+             default_config_json.find("\"app.thinking.toggle\"") != std::string::npos &&
+             default_config_json.find("\"app.message.followUp\"") != std::string::npos &&
+             default_config_json.find("\"app.model.cycleForward\"") != std::string::npos &&
+             default_config_json.find("\"history_prev\"") == std::string::npos &&
+             default_config_json.find("\"mode_toggle\"") == std::string::npos &&
+             default_config_keybinds &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::CursorLeft,
+                                          ava::tui::Key::CtrlB) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::CopySelection,
+                                          ava::tui::Key::CtrlC) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::ClearInput,
+                                          ava::tui::Key::CtrlC) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::ExternalEditor,
+                                          ava::tui::Key::CtrlG) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::Suspend,
+                                          ava::tui::Key::CtrlZ) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::ClipboardPasteImage,
+                                          ava::tui::Key::CtrlV) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::Interrupt,
+                                          ava::tui::Key::CtrlC) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::SessionTogglePath,
+                                          ava::tui::Key::CtrlP) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::SessionToggleSort,
+                                          ava::tui::Key::CtrlS) &&
+             ava::tui::key_matches_action(*default_config_keybinds,
+                                          ava::tui::TuiAction::SessionToggleNamedFilter,
+                                          ava::tui::Key::CtrlN) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::SessionRename,
+                                          ava::tui::Key::CtrlR) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::SessionArchive,
+                                          ava::tui::Key::CtrlD) &&
+             ava::tui::key_matches_action(*default_config_keybinds,
+                                          ava::tui::TuiAction::SessionArchiveNoninvasive,
+                                          ava::tui::Key::CtrlBackspace) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::TreeFoldOrUp,
+                                          ava::tui::Key::CtrlArrowLeft) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::TreeUnfoldOrDown,
+                                          ava::tui::Key::CtrlArrowRight) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::TreeEditLabel,
+                                          ava::tui::Key::ShiftL) &&
+             ava::tui::key_matches_action(*default_config_keybinds,
+                                          ava::tui::TuiAction::TreeToggleLabelTimestamp,
+                                          ava::tui::Key::ShiftT) &&
+             !ava::tui::key_matches_action(*default_config_keybinds,
+                                           ava::tui::TuiAction::TreeFilterLabeledOnly,
+                                           ava::tui::Key::CtrlN) &&
+             !ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::TreeFilterAll,
+                                           ava::tui::Key::CtrlA) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::ModelsClearAll,
+                                          ava::tui::Key::CtrlX) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::ThinkingToggle,
+                                          ava::tui::Key::CtrlT) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::MessageFollowUp,
+                                          ava::tui::Key::AltEnter) &&
+             ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::Submit,
+                                          ava::tui::Key::Enter),
+         "tui keybind default config template uses Pi-style ids and remains valid with intentional shared defaults");
 
   auto const keybind_root = temp_root() / "tui-keybinds";
   std::filesystem::remove_all(keybind_root);
@@ -2601,6 +4781,38 @@ void test_tui_composer_rendering_and_input()
              ava::tui::detail::terminal_text_columns(std::string("\xE2\x98\xBA") + "\xEF\xB8\x8F") >= 1,
          "tui width accounting handles CJK width and treats combining marks, zero-width joiners, and variation "
          "selectors as non-advancing");
+  auto const regional_c = std::string("\xF0\x9F\x87\xA8");
+  auto const regional_n = std::string("\xF0\x9F\x87\xB3");
+  auto const thumbs_up = std::string("\xF0\x9F\x91\x8D");
+  auto const light_skin_tone = std::string("\xF0\x9F\x8F\xBB");
+  auto const man = std::string("\xF0\x9F\x91\xA8");
+  auto const laptop = std::string("\xF0\x9F\x92\xBB");
+  auto const zwj = std::string("\xE2\x80\x8D");
+  auto const check_mark = std::string("\xE2\x9C\x85");
+  auto const lightning = std::string("\xE2\x9A\xA1");
+  auto const variation_16 = std::string("\xEF\xB8\x8F");
+  auto const white_flag = std::string("\xF0\x9F\x8F\xB3");
+  auto const rainbow = std::string("\xF0\x9F\x8C\x88");
+  expect(ava::tui::detail::terminal_text_columns(regional_c) == 2 &&
+             ava::tui::detail::terminal_text_columns(regional_c + regional_n) == 2 &&
+             ava::tui::detail::terminal_text_columns("      - " + regional_c) == 10 &&
+             ava::tui::detail::terminal_text_columns(thumbs_up + light_skin_tone) == 2 &&
+             ava::tui::detail::terminal_text_columns(man + zwj + laptop) == 2 &&
+             ava::tui::detail::terminal_text_columns(check_mark) == 2 &&
+             ava::tui::detail::terminal_text_columns(lightning) == 2 &&
+             ava::tui::detail::terminal_text_columns(lightning + variation_16) == 2 &&
+             ava::tui::detail::terminal_text_columns(white_flag + variation_16 + zwj + rainbow) == 2,
+         "tui width accounting treats Pi-style regional indicators and emoji modifier/ZWJ clusters as stable wide cells");
+  auto const partial_flag_wrap = ava::tui::detail::wrap_transcript_text("      - " + regional_c, 13);
+  expect(partial_flag_wrap.size() == 2 && ava::tui::detail::terminal_text_columns(partial_flag_wrap[0]) <= 9 &&
+             ava::tui::detail::terminal_text_columns(partial_flag_wrap[1]) == 2,
+         "tui transcript wrapping breaks Pi-style partial-flag list lines before terminal overflow");
+  auto const clipped_regional_indicator = ava::tui::detail::fit_line("x" + regional_c + "y", 2);
+  expect(ava::tui::detail::terminal_text_columns(clipped_regional_indicator) <= 2,
+         "tui narrow fitting does not undercount singleton regional indicators");
+  auto const clipped_zwj_cluster = ava::tui::detail::fit_line(man + zwj + laptop + "x", 2);
+  expect(clipped_zwj_cluster == man + zwj + laptop,
+         "tui narrow fitting keeps emoji ZWJ clusters intact when they fit exactly");
   auto const cursor_prefix_columns = ava::tui::detail::terminal_text_columns(
       std::string(ava::tui::detail::kComposerBar) + "  " + std::string(ava::tui::detail::kComposerPrompt) + " ");
   auto const cursor_base = cursor_prefix_columns + 1;
@@ -2621,6 +4833,112 @@ void test_tui_composer_rendering_and_input()
              cursor_for(cursor_text, cursor_text.size()) == cursor_base + 4 &&
              cursor_for(std::string("x") + std::string("\xC0\x80", 2), 3) == cursor_base + 3,
          "tui composer cursor placement uses sanitized display columns for CJK, combining marks, and invalid utf-8");
+  auto const wrapped_input = ava::tui::detail::input_render_line_spans("alpha beta gamma", 20);
+  expect(wrapped_input.size() == 2 && wrapped_input[0].text == "alpha beta " && wrapped_input[0].start == 0 &&
+             wrapped_input[0].end == std::string("alpha beta ").size() && wrapped_input[0].first_line &&
+             wrapped_input[1].text == "gamma" && wrapped_input[1].start == std::string("alpha beta ").size() &&
+             !wrapped_input[1].first_line,
+         "tui composer wraps long input at word boundaries while preserving source offsets");
+  auto const wrapped_long_word = ava::tui::detail::input_render_line_spans("abcdefghijklmnop", 20);
+  expect(wrapped_long_word.size() == 2 && wrapped_long_word[0].text == "abcdefghijklmno" &&
+             wrapped_long_word[1].text == "p",
+         "tui composer falls back to cell-level wrapping for long unbroken input tokens");
+  auto const cjk_wrap_text = std::string("\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C\xE7\x95\x8C");
+  auto const wrapped_cjk_input = ava::tui::detail::input_render_line_spans(cjk_wrap_text, 20);
+  expect(wrapped_cjk_input.size() == 2 &&
+             ava::tui::detail::terminal_text_columns(wrapped_cjk_input[0].text) == 14 &&
+             ava::tui::detail::terminal_text_columns(wrapped_cjk_input[1].text) == 2,
+         "tui composer wraps CJK input on full UTF-8 cell boundaries");
+  auto const wrapped_cursor_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
+                                                                  .provider = "openai",
+                                                                  .model = "gpt-5.5",
+                                                                  .session_id = "session_test",
+                                                                  .input = "alpha beta gamma",
+                                                                  .status = "ready",
+                                                                  .transcript = {},
+                                                                  .width = 20,
+                                                                  .height = 8,
+                                                                  .input_cursor = std::string::npos};
+  expect(ava::tui::detail::input_cursor_line(wrapped_cursor_snapshot, 20) == 1 &&
+             ava::tui::detail::input_cursor_column(wrapped_cursor_snapshot, 20) ==
+                 ava::tui::detail::composer_input_prefix_columns(false) + std::string("gamma").size() + 1,
+         "tui composer places the cursor on the wrapped continuation row");
+  auto const wrapped_render = ava::tui::render_composer(wrapped_cursor_snapshot);
+  expect(std::ranges::any_of(wrapped_render,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("▎  ❯ alpha beta ") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(wrapped_render,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("▎    gamma") != std::string::npos;
+                                 }),
+         "tui composer renders wrapped input as visible continuation rows");
+  auto const wrapped_click = ava::tui::composer_input_cursor_for_screen_position(
+      wrapped_cursor_snapshot, 6, ava::tui::detail::composer_input_prefix_columns(false) + 3);
+  expect(wrapped_click && *wrapped_click == std::string("alpha beta ga").size(),
+         "tui composer hit-tests wrapped input continuation rows to source cursor offsets");
+  auto const click_cursor_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
+                                                                .provider = "openai",
+                                                                .model = "gpt-5.5",
+                                                                .session_id = "session_test",
+                                                                .input = "alpha beta",
+                                                                .status = "ready",
+                                                                .transcript = {},
+                                                                .width = 80,
+                                                                .height = 8};
+  auto const clicked_after_alpha = ava::tui::composer_input_cursor_for_screen_position(
+      click_cursor_snapshot, 6, cursor_base + std::string("alpha ").size());
+  expect(clicked_after_alpha && *clicked_after_alpha == std::string("alpha ").size() &&
+             !ava::tui::composer_input_cursor_for_screen_position(click_cursor_snapshot, 1, cursor_base) &&
+             !ava::tui::composer_input_cursor_for_screen_position(click_cursor_snapshot, 7, cursor_base),
+         "tui composer hit-tests visible input rows to draft cursor byte offsets and ignores non-input rows");
+  auto const multiline_click_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
+                                                                  .provider = "openai",
+                                                                  .model = "gpt-5.5",
+                                                                  .session_id = "session_test",
+                                                                  .input = "one\ntwo\nthree",
+                                                                  .status = "ready",
+                                                                  .transcript = {},
+                                                                  .width = 80,
+                                                                  .height = 8};
+  auto const clicked_second_line =
+      ava::tui::composer_input_cursor_for_screen_position(multiline_click_snapshot, 5, cursor_base + 1);
+  expect(clicked_second_line && *clicked_second_line == std::string("one\nt").size(),
+         "tui composer hit-tests multiline visible input rows to the matching logical line cursor");
+  auto const wide_click_text = std::string("a") + "\xE7\x95\x8C" + "b";
+  auto const wide_click_cursor = ava::tui::composer_input_cursor_for_screen_position(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = wide_click_text,
+                                 .status = "ready",
+                                 .transcript = {},
+                                 .width = 80,
+                                 .height = 8},
+      6,
+      cursor_base + 3);
+  expect(wide_click_cursor && *wide_click_cursor == std::string("a").size() + std::string("\xE7\x95\x8C").size(),
+         "tui composer click-to-cursor clamps through wide utf-8 cells without landing inside a codepoint");
+  auto const selected_input_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                        .provider = "openai",
+                                                                                        .model = "gpt-5.5",
+                                                                                        .session_id = "session_test",
+                                                                                        .input = "alpha beta",
+                                                                                        .status = "ready",
+                                                                                        .transcript = {},
+                                                                                        .width = 80,
+                                                                                        .height = 8,
+                                                                                        .input_cursor = 10,
+                                                                                        .input_selection_start = 6,
+                                                                                        .input_selection_end = 10});
+  expect(std::ranges::any_of(selected_input_frame,
+                             [](std::string const& line) {
+                               return line.find(std::string(ava::tui::detail::kReverseVideo) + "beta") !=
+                                          std::string::npos &&
+                                      strip_sgr(line).find("▎  ❯ alpha beta") != std::string::npos;
+                             }),
+         "tui composer renders selected input text with reverse video without changing visible draft text");
 
   auto const composer_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "plan",
                                                                                    .provider = "openai",
@@ -2986,6 +5304,97 @@ void test_tui_composer_rendering_and_input()
       ava::tui::handle_select_list_input(bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlW}, selector_bindings);
   expect(selector_input.action == ava::tui::SelectListInputAction::Cancel,
          "select-list uses configured cancel binding before raw composer delete-word actions");
+  auto const session_selector_keybinds = ava::tui::parse_key_bindings_json(
+      "{\"app.session.togglePath\":\"Ctrl+O\",\"app.session.toggleSort\":\"Ctrl+Y\","
+      "\"app.session.toggleNamedFilter\":\"Ctrl+U\",\"app.session.rename\":\"Ctrl+K\","
+      "\"app.session.delete\":\"Alt+D\"}");
+  expect(static_cast<bool>(session_selector_keybinds), "session selector custom keybind fixture parses");
+  auto const session_selector_bindings =
+      session_selector_keybinds ? *session_selector_keybinds : ava::tui::default_key_bindings();
+  auto session_bound_selector = selector;
+  session_bound_selector.query = "custom";
+  selector_input = ava::tui::handle_select_list_input(
+      session_bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlO}, session_selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::TogglePathDisplay &&
+             selector_input.query == session_bound_selector.query,
+         "select-list routes custom app.session.togglePath binding before raw composer details actions");
+  selector_input = ava::tui::handle_select_list_input(
+      session_bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlY}, session_selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::CycleSort &&
+             selector_input.query == session_bound_selector.query,
+         "select-list routes custom app.session.toggleSort binding before raw composer yank actions");
+  selector_input = ava::tui::handle_select_list_input(
+      session_bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlU}, session_selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::ToggleNamedFilter &&
+             selector_input.query == session_bound_selector.query,
+         "select-list routes custom app.session.toggleNamedFilter binding before raw composer line deletion");
+  selector_input = ava::tui::handle_select_list_input(
+      session_bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlK}, session_selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::Rename &&
+             selector_input.query == session_bound_selector.query,
+         "select-list routes custom app.session.rename binding before raw composer line-end deletion");
+  selector_input = ava::tui::handle_select_list_input(
+      session_bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::AltD}, session_selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::Archive &&
+             selector_input.query == session_bound_selector.query,
+         "select-list routes custom app.session.delete binding before raw composer word deletion");
+  auto const tree_selector_keybinds =
+      ava::tui::parse_key_bindings_json("{\"app.tree.foldOrUp\":\"Ctrl+O\","
+                                        "\"app.tree.unfoldOrDown\":\"Ctrl+Y\","
+                                        "\"app.tree.editLabel\":\"Shift+L\","
+                                        "\"app.tree.toggleLabelTimestamp\":\"Shift+T\","
+                                        "\"app.tree.filter.labeledOnly\":\"Ctrl+Space\","
+                                        "\"app.tree.filter.all\":\"Ctrl+/\"}");
+  expect(static_cast<bool>(tree_selector_keybinds), "tree selector custom keybind fixture parses");
+  auto const tree_selector_bindings = tree_selector_keybinds ? *tree_selector_keybinds : ava::tui::default_key_bindings();
+  selector_input = ava::tui::handle_select_list_input(
+      session_bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlO}, tree_selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::BranchParent &&
+             selector_input.query == session_bound_selector.query,
+         "select-list routes custom app.tree.foldOrUp binding before raw composer details actions");
+  selector_input = ava::tui::handle_select_list_input(
+      session_bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlY}, tree_selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::BranchChild &&
+             selector_input.query == session_bound_selector.query,
+         "select-list routes custom app.tree.unfoldOrDown binding before raw composer yank actions");
+  selector_input = ava::tui::handle_select_list_input(
+      session_bound_selector,
+      ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'L', .text = "L"},
+      tree_selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::Label &&
+             selector_input.query == session_bound_selector.query,
+         "select-list routes Pi app.tree.editLabel Shift+L binding to the existing label draft action");
+  selector_input = ava::tui::handle_select_list_input(
+      session_bound_selector,
+      ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'l', .text = "l"},
+      tree_selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::Redraw &&
+             selector_input.query == session_bound_selector.query + "l",
+         "select-list keeps ordinary lowercase l as searchable text when Shift+L is bound");
+  selector_input = ava::tui::handle_select_list_input(
+      session_bound_selector,
+      ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'T', .text = "T"},
+      tree_selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::ToggleLabelTimestamp &&
+             selector_input.query == session_bound_selector.query,
+         "select-list routes Pi app.tree.toggleLabelTimestamp Shift+T binding to the label-time toggle");
+  selector_input = ava::tui::handle_select_list_input(
+      session_bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlSpace}, tree_selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::ToggleNamedFilter &&
+             selector_input.query == session_bound_selector.query,
+         "select-list routes Pi app.tree.filter.labeledOnly to the existing named/labeled filter");
+  selector_input = ava::tui::handle_select_list_input(
+      session_bound_selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlSlash}, tree_selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::ToggleArchivedFilter &&
+             selector_input.query == session_bound_selector.query,
+         "select-list routes Pi app.tree.filter.all to the existing archived visibility filter");
+  selector_input = ava::tui::handle_select_list_input(
+      session_bound_selector,
+      ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 't', .text = "t"},
+      tree_selector_bindings);
+  expect(selector_input.action == ava::tui::SelectListInputAction::Redraw &&
+             selector_input.query == session_bound_selector.query + "t",
+         "select-list keeps ordinary lowercase t as searchable text when Shift+T is bound");
   selector.query = "ghost";
   selector.selected_item_index = 2;
   selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
@@ -2999,6 +5408,9 @@ void test_tui_composer_rendering_and_input()
   selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::Escape});
   expect(selector_input.action == ava::tui::SelectListInputAction::Cancel,
          "select-list escape cancels the modal safely");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::MouseLeftClick});
+  expect(selector_input.action == ava::tui::SelectListInputAction::None && selector_input.query == selector.query,
+         "select-list raw mouse clicks are resolved by rendered modal hit-testing instead of triggering keyboard-only actions");
   selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlT});
   expect(selector_input.action == ava::tui::SelectListInputAction::CycleSort && selector_input.query == selector.query,
          "select-list ctrl+t exposes a modal sort-cycle action without clearing search state");
@@ -3017,6 +5429,10 @@ void test_tui_composer_rendering_and_input()
   expect(selector_input.action == ava::tui::SelectListInputAction::ToggleArchivedFilter &&
              selector_input.query == selector.query,
          "select-list ctrl+a exposes a modal archived-session filter toggle without clearing search state");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlX});
+  expect(selector_input.action == ava::tui::SelectListInputAction::ModelsClearAll &&
+             selector_input.query == selector.query,
+         "select-list ctrl+x exposes a scoped-model clear action without clearing search state");
   selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlR});
   expect(selector_input.action == ava::tui::SelectListInputAction::Rename && selector_input.query == selector.query,
          "select-list ctrl+r exposes a modal rename action without clearing search state");
@@ -3026,6 +5442,36 @@ void test_tui_composer_rendering_and_input()
   selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlD});
   expect(selector_input.action == ava::tui::SelectListInputAction::Archive && selector_input.query == selector.query,
          "select-list ctrl+d exposes a modal archive action without clearing search state");
+  selector_input =
+      ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlBackspace});
+  expect(selector_input.action == ava::tui::SelectListInputAction::None && selector_input.query == selector.query,
+         "select-list ctrl+backspace is non-destructive while the search query is non-empty");
+  auto empty_query_selector = selector;
+  empty_query_selector.query.clear();
+  selector_input = ava::tui::handle_select_list_input(empty_query_selector,
+                                                      ava::tui::InputEvent{.key = ava::tui::Key::CtrlBackspace});
+  expect(selector_input.action == ava::tui::SelectListInputAction::ArchiveNoninvasive && selector_input.query.empty(),
+         "select-list ctrl+backspace archives only when the selector search query is empty");
+  selector_input =
+      ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::AltArrowLeft});
+  expect(selector_input.action == ava::tui::SelectListInputAction::BranchParent &&
+             selector_input.query == selector.query,
+         "select-list alt-left exposes a modal parent-branch action without clearing search state");
+  selector_input =
+      ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlArrowLeft});
+  expect(selector_input.action == ava::tui::SelectListInputAction::BranchParent &&
+             selector_input.query == selector.query,
+         "select-list ctrl-left exposes a modal parent-branch action without clearing search state");
+  selector_input =
+      ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::AltArrowRight});
+  expect(selector_input.action == ava::tui::SelectListInputAction::BranchChild &&
+             selector_input.query == selector.query,
+         "select-list alt-right exposes a modal child-branch action without clearing search state");
+  selector_input =
+      ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::CtrlArrowRight});
+  expect(selector_input.action == ava::tui::SelectListInputAction::BranchChild &&
+             selector_input.query == selector.query,
+         "select-list ctrl-right exposes a modal child-branch action without clearing search state");
   ava::tui::SelectListView paged_selector{
       .title = "Paged",
       .subtitle = {},
@@ -3080,16 +5526,26 @@ void test_tui_composer_rendering_and_input()
          "select-list ctrl+enter remains a composer-only newline alias and does not trigger modal actions");
   selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::AltEnter});
   expect(selector_input.action == ava::tui::SelectListInputAction::None && selector_input.query == selector.query,
-         "select-list alt+enter remains a composer-only newline alias and does not trigger modal actions");
+         "select-list alt+enter remains a composer-only follow-up/submit action and does not trigger modal actions");
   selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::ShiftTab});
   expect(selector_input.action == ava::tui::SelectListInputAction::None && selector_input.query == selector.query,
          "select-list shift+tab remains an app-level reasoning shortcut and does not trigger modal actions");
   selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::AltArrowLeft});
-  expect(selector_input.action == ava::tui::SelectListInputAction::None && selector_input.query == selector.query,
-         "select-list alt+left remains a composer-only word movement alias and does not trigger modal actions");
+  expect(selector_input.action == ava::tui::SelectListInputAction::BranchParent &&
+             selector_input.query == selector.query,
+         "select-list alt+left triggers parent-branch navigation in modal context");
   selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::AltArrowRight});
-  expect(selector_input.action == ava::tui::SelectListInputAction::None && selector_input.query == selector.query,
-         "select-list alt+right remains a composer-only word movement alias and does not trigger modal actions");
+  expect(selector_input.action == ava::tui::SelectListInputAction::BranchChild &&
+             selector_input.query == selector.query,
+         "select-list alt+right triggers child-branch navigation in modal context");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::AltArrowUp});
+  expect(selector_input.action == ava::tui::SelectListInputAction::ModelsReorderUp &&
+             selector_input.query == selector.query,
+         "select-list alt+up exposes a scoped-model reorder-up action without clearing search state");
+  selector_input = ava::tui::handle_select_list_input(selector, ava::tui::InputEvent{.key = ava::tui::Key::AltArrowDown});
+  expect(selector_input.action == ava::tui::SelectListInputAction::ModelsReorderDown &&
+             selector_input.query == selector.query,
+         "select-list alt+down exposes a scoped-model reorder-down action without clearing search state");
 
   auto const selector_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -3102,6 +5558,38 @@ void test_tui_composer_rendering_and_input()
       .select_list = selector,
       .width = 88,
       .height = 18});
+  auto click_selector = selector;
+  click_selector.query.clear();
+  click_selector.selected_item_index = 0;
+  auto const clicked_selector = ava::tui::select_list_selection_for_screen_position(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "composer behind selector",
+                                 .status = "selector opened",
+                                 .transcript = {},
+                                 .select_list = click_selector,
+                                 .width = 92,
+                                 .height = 18},
+      12,
+      12);
+  expect(clicked_selector && *clicked_selector == 1,
+         "select-list hit-test maps a visible modal item row back to its original item index");
+  auto const outside_selector = ava::tui::select_list_selection_for_screen_position(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "composer behind selector",
+                                 .status = "selector opened",
+                                 .transcript = {},
+                                 .select_list = click_selector,
+                                 .width = 92,
+                                 .height = 18},
+      12,
+      1);
+  expect(!outside_selector, "select-list hit-test ignores clicks outside the modal horizontal bounds");
   expect(selector_frame.size() == 18 &&
              std::ranges::any_of(
                  selector_frame,
@@ -3149,15 +5637,43 @@ void test_tui_composer_rendering_and_input()
       .default_model_id = "gpt-5.5",
       .models = {make_model("openai", "gpt-5.5", "GPT-5.5", "gpt-5", true, {"low", "medium", "high"}),
                  make_model("anthropic", "claude-sonnet-4-5", "Claude Sonnet 4.5", "claude-sonnet", false),
+                 ava::config::ModelInfo{.provider_id = "openai",
+                                        .model_id = "diagnostic-local",
+                                        .display_name = "Diagnostic Local",
+                                        .family = "custom",
+                                        .supports_reasoning = true},
                  make_model("unregistered", "remote-model", "Remote Model", "remote", std::nullopt)}};
   auto const model_picker =
       ava::app::model_selector_view(model_registry, model_registry.models.front(), "Enter choose · Esc cancel");
   expect(model_picker.title == "Select model" && model_picker.selected_item_index == 0 &&
-             model_picker.items.size() == 3 && model_picker.items[0].current && model_picker.items[0].enabled &&
+             model_picker.items.size() == 4 && model_picker.items[0].current && model_picker.items[0].enabled &&
              model_picker.items[0].detail.find("levels low/medium/high") != std::string::npos &&
-             !model_picker.items[2].enabled &&
-             model_picker.items[2].disabled_reason.find("provider unavailable") != std::string::npos,
-         "model picker view exposes provider grouping, current marker, capability hints, and disabled providers");
+             model_picker.items[2].enabled && model_picker.items[2].badge == "diagnostics" &&
+             model_picker.items[2].detail.find("diagnostics") != std::string::npos &&
+             model_picker.items[2].detail.find("custom model missing context_window_tokens") != std::string::npos &&
+             !model_picker.items[3].enabled &&
+             model_picker.items[3].disabled_reason.find("provider unavailable") != std::string::npos,
+         "model picker view exposes provider grouping, current marker, capability hints, diagnostics, and disabled providers");
+  auto const scoped_all_models = ava::app::scoped_model_selector_view(
+      model_registry, model_registry.models.front(), std::nullopt, "Enter toggle · Ctrl+X clear");
+  auto const scoped_ordered_models = ava::app::scoped_model_selector_view(
+      model_registry,
+      model_registry.models.front(),
+      std::optional<std::vector<std::string>>{std::vector<std::string>{"anthropic/claude-sonnet-4-5", "openai/gpt-5.5"}},
+      "Enter toggle · Ctrl+X clear");
+  expect(scoped_all_models.title == "Scoped model cycle" &&
+             scoped_all_models.subtitle.find("all configured registered models enabled") != std::string::npos &&
+             scoped_all_models.items.size() == 4 && scoped_all_models.items[0].badge == "all-enabled" &&
+             scoped_all_models.items[0].description.find("enabled") != std::string::npos &&
+             !scoped_all_models.items[3].enabled &&
+             scoped_all_models.items[3].disabled_reason.find("provider unavailable") != std::string::npos &&
+             scoped_ordered_models.items[0].value == "anthropic/claude-sonnet-4-5" &&
+             scoped_ordered_models.items[0].badge == "enabled" &&
+             scoped_ordered_models.items[1].value == "openai/gpt-5.5" &&
+             scoped_ordered_models.items[2].value == "openai/diagnostic-local" &&
+             scoped_ordered_models.items[2].badge == "disabled" &&
+             scoped_ordered_models.footer_hint.find("Ctrl+X") != std::string::npos,
+         "scoped model selector view marks session cycle scope and preserves explicit enabled order before disabled rows");
 
   std::vector<ava::session::SessionSummary> session_summaries{
       ava::session::SessionSummary{.session_id = "session_beta",
@@ -3209,6 +5725,7 @@ void test_tui_composer_rendering_and_input()
                                                   .entry_count = 6},
           .metadata = ava::session::SessionMetadataView{.name = "Parent session",
                                                         .labels = {"root"},
+                                                        .labels_updated = "2026-05-06T08:05:00Z",
                                                         .parent_session_id = {},
                                                         .source_session_id = {},
                                                         .branch_from_entry_id = {},
@@ -3223,6 +5740,7 @@ void test_tui_composer_rendering_and_input()
                                                   .entry_count = 11},
           .metadata = ava::session::SessionMetadataView{.name = "Review branch",
                                                         .labels = {"review", "ui"},
+                                                        .labels_updated = "2026-05-06T10:05:00Z",
                                                         .parent_session_id = "session_parent",
                                                         .source_session_id = "session_parent",
                                                         .branch_from_entry_id = "entry_1",
@@ -3231,9 +5749,12 @@ void test_tui_composer_rendering_and_input()
           .children = {},
           .current = true}};
   auto tree_sessions = ava::app::session_selector_view(session_tree, ava::app::SessionSelectorSort::Name, {});
+  auto tree_sessions_with_label_time =
+      ava::app::session_selector_view(session_tree, ava::app::SessionSelectorSort::Name, {}, false, true, false, true);
   tree_sessions.query = "review";
   auto const tree_matches = ava::tui::filter_select_list_items(tree_sessions);
   expect(tree_sessions.subtitle.find("Session tree") != std::string::npos && tree_sessions.items.size() == 2 &&
+             tree_sessions.subtitle.find("label time hidden") != std::string::npos &&
              tree_sessions.items[0].label == "Parent session" &&
              tree_sessions.items[0].detail.find("current path") != std::string::npos &&
              tree_sessions.items[1].label.find("+ Review branch") != std::string::npos &&
@@ -3242,8 +5763,19 @@ void test_tui_composer_rendering_and_input()
              tree_sessions.items[1].detail.find("origin fork") != std::string::npos &&
              tree_sessions.items[1].detail.find("parent session_parent") != std::string::npos &&
              tree_sessions.items[1].detail.find("labels review, ui") != std::string::npos &&
+             tree_sessions.items[1].detail.find("2026-05-06T10:05:00Z") == std::string::npos &&
+             tree_sessions_with_label_time.subtitle.find("label time shown") != std::string::npos &&
+             tree_sessions_with_label_time.items[1].detail.find("labels review, ui updated 2026-05-06T10:05:00Z") !=
+                 std::string::npos &&
              tree_matches.size() == 1 && tree_sessions.items[tree_matches.front()].value == "session_child",
-         "session selector view exposes tree depth, current path, branch provenance, labels, and searchable names");
+         "session selector view exposes tree depth, current path, branch provenance, labels, optional label time, and searchable names");
+  auto const parent_target = ava::app::session_selector_parent_target(session_tree, "session_child");
+  auto const child_target =
+      ava::app::session_selector_child_target(session_tree, "session_parent", ava::app::SessionSelectorSort::Name);
+  expect(parent_target && *parent_target == "session_parent" && child_target && *child_target == "session_child" &&
+             !ava::app::session_selector_parent_target(session_tree, "session_parent") &&
+             !ava::app::session_selector_child_target(session_tree, "session_child", ava::app::SessionSelectorSort::Name),
+         "session selector branch targets resolve parent and first visible child links from tree metadata");
 
   auto tree_with_unnamed = session_tree;
   tree_with_unnamed.roots.push_back("session_unnamed");
@@ -3354,7 +5886,9 @@ void test_tui_composer_rendering_and_input()
                                                                                   .height = 18});
   expect(hotkeys_view.title == "Keybindings" &&
              hotkeys_view.subtitle.find("$XDG_CONFIG_HOME/ava/keybinds.json") != std::string::npos &&
+             hotkeys_view.subtitle.find("Enter drafts /keybindings set") != std::string::npos &&
              hotkeys_view.subtitle.find("/reload keybindings") != std::string::npos &&
+             hotkeys_view.footer_hint.find("Enter draft edit") != std::string::npos &&
              std::ranges::any_of(hotkeys_view.items,
                                  [](ava::tui::SelectListItemView const& item) {
                                    return item.value == "mode_toggle" && item.detail.find("Tab") != std::string::npos &&
@@ -3370,8 +5904,14 @@ void test_tui_composer_rendering_and_input()
              std::ranges::any_of(
                  hotkeys_frame,
                  [](std::string const& line) { return strip_sgr(line).find("mode_toggle") != std::string::npos; }),
-         "keybindings view exposes active bindings, config/reload guidance, and context-shared keys in a read-only modal");
+         "keybindings view exposes active bindings, edit drafting, config/reload guidance, and context-shared keys");
 
+  ava::tui::set_tui_config_theme(std::nullopt);
+  auto settings_key_bindings = ava::tui::default_key_bindings();
+  auto const parsed_settings_key_bindings =
+      ava::tui::parse_key_bindings_json("{\"tui.editor.cursorLeft\":\"Alt+H\",\"app.tools.expand\":\"Ctrl+O\"}");
+  expect(parsed_settings_key_bindings.has_value(), "settings view test keybindings parse through the production loader");
+  if (parsed_settings_key_bindings) settings_key_bindings = *parsed_settings_key_bindings;
   auto const settings_view = ava::tui::settings_select_list_view(
       ava::tui::ComposerSnapshot{.mode = "build",
                                  .provider = "openai",
@@ -3393,7 +5933,8 @@ void test_tui_composer_rendering_and_input()
                                                                       .reasoning_status = "low",
                                                                       .context_source_count = 2,
                                                                       .session_path = "/tmp/ava/session_test.jsonl",
-                                                                      .session_entry_count = 42}});
+                                                                      .session_entry_count = 42}},
+      settings_key_bindings);
   auto const settings_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                    .provider = "openai",
                                                                                    .model = "gpt-5.5",
@@ -3411,8 +5952,73 @@ void test_tui_composer_rendering_and_input()
                              }) &&
              std::ranges::any_of(settings_view.items,
                                  [](ava::tui::SelectListItemView const& item) {
+                                   return item.value == "theme:dark" && item.label == "Theme dark" &&
+                                          item.detail == "persist to display.json" && item.badge == "current" &&
+                                          item.current;
+                                 }) &&
+             std::ranges::any_of(settings_view.items,
+                                 [](ava::tui::SelectListItemView const& item) {
+                                   return item.value == "theme:light" && item.label == "Theme light" &&
+                                          item.detail == "persist to display.json" && item.badge == "select" &&
+                                          !item.current;
+                                 }) &&
+             std::ranges::any_of(settings_view.items,
+                                 [](ava::tui::SelectListItemView const& item) {
                                    return item.label == "Current directory" &&
                                           item.description == "/workspace/project" && item.detail == "project";
+                                 }) &&
+             std::ranges::any_of(settings_view.items,
+                                 [](ava::tui::SelectListItemView const& item) {
+                                   return item.label == "Image preview" && !item.description.empty() &&
+                                          !item.detail.empty() && !item.badge.empty();
+                                 }) &&
+             std::ranges::any_of(settings_view.items,
+                                 [](ava::tui::SelectListItemView const& item) {
+                                   return item.label == "Keybindings" &&
+                                          item.value == "settings:keybindings.open" &&
+                                          item.description.find("active actions") != std::string::npos &&
+                                          item.detail == "Enter opens active bindings" && item.badge == "open";
+                                 }) &&
+             std::ranges::any_of(settings_view.items,
+                                 [](ava::tui::SelectListItemView const& item) {
+                                   return item.label == "Keybindings file" &&
+                                          item.value == "settings:keybindings.validate" &&
+                                          item.description == "$XDG_CONFIG_HOME/ava/keybinds.json" &&
+                                          item.detail == "Enter validates with /keybindings validate" &&
+                                          item.badge == "validate";
+                                 }) &&
+             std::ranges::any_of(settings_view.items,
+                                 [](ava::tui::SelectListItemView const& item) {
+                                   return item.label == "Keybindings edit" &&
+                                          item.value == "settings:keybindings.edit" &&
+                                          item.description == "/keybindings set <action> <key>" &&
+                                          item.detail == "Enter drafts the edit command; reset removes one override" &&
+                                          item.badge == "draft";
+                                 }) &&
+             std::ranges::any_of(settings_view.items,
+                                 [](ava::tui::SelectListItemView const& item) {
+                                   return item.label == "Keybindings reload" &&
+                                          item.value == "settings:keybindings.reload" &&
+                                          item.description == "/reload keybindings" &&
+                                          item.detail == "Enter applies valid keybinds.json edits" &&
+                                          item.badge == "live";
+                                 }) &&
+             std::ranges::any_of(settings_view.items,
+                                 [](ava::tui::SelectListItemView const& item) {
+                                   return item.label == "Model selector" &&
+                                          item.value == "settings:models.open" &&
+                                          item.description == "openai/gpt-5.5" &&
+                                          item.detail == "Enter opens /models selector" &&
+                                          item.badge == "open";
+                                 }) &&
+             std::ranges::any_of(settings_view.items,
+                                 [](ava::tui::SelectListItemView const& item) {
+                                   return item.label == "Model cycle scope" &&
+                                          item.value == "settings:models.scoped" &&
+                                          item.description == "Ctrl+P scoped cycle" &&
+                                          item.detail.find("/scoped-models") != std::string::npos &&
+                                          item.detail.find("Ctrl+S") != std::string::npos &&
+                                          item.badge == "open";
                                  }) &&
              std::ranges::any_of(
                  settings_frame,
@@ -3420,10 +6026,279 @@ void test_tui_composer_rendering_and_input()
              std::ranges::any_of(
                  settings_frame,
                  [](std::string const& line) { return strip_sgr(line).find("ava-dark") != std::string::npos; }),
-         "settings view exposes read-only runtime, workspace, and built-in theme status without config mutation");
+         "settings view exposes runtime, workspace, built-in theme status, and selectable theme rows");
 
   {
+    ScopedEnvVar no_color_settings_guard("NO_COLOR", "");
+    ScopedEnvVar light_theme_guard("AVA_TUI_THEME", "light");
+    ScopedEnvVar colorfgbg_guard("COLORFGBG", "");
+    ava::tui::set_tui_config_theme(std::nullopt);
+    auto const light_settings_view = ava::tui::settings_select_list_view(
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_test",
+                                   .input = "",
+                                   .status = "ready",
+                                   .token_status = "1.3k (0.7%)",
+                                   .reasoning_status = "low",
+                                   .transcript = {},
+                                   .sidebar = ava::tui::SidebarSnapshot{.session_id = "session_test",
+                                                                        .mode = "build",
+                                                                        .provider = "openai",
+                                                                        .model = "gpt-5.5",
+                                                                        .workspace = "/workspace/project",
+                                                                        .git_branch = "develop",
+                                                                        .version = "0.32",
+                                                                        .token_status = "1.3k (0.7%)",
+                                                                        .reasoning_status = "low",
+                                                                        .context_source_count = 2,
+                                                                        .session_path = "/tmp/ava/session_test.jsonl",
+                                                                        .session_entry_count = 42}});
+    expect(std::ranges::any_of(light_settings_view.items,
+                               [](ava::tui::SelectListItemView const& item) {
+                                 return item.label == "Theme" && item.description == "ava-light" &&
+                                        item.detail == "built-in light ncurses token palette" &&
+                                        item.badge == "AVA_TUI_THEME";
+                               }),
+           "settings view reports process-selected built-in light theme from AVA_TUI_THEME");
+  }
+
+  {
+    ScopedEnvVar no_color_settings_guard("NO_COLOR", "");
+    ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+    ScopedEnvVar colorfgbg_guard("COLORFGBG", "");
+    ava::tui::set_tui_config_theme("light");
+    auto const configured_light_settings_view = ava::tui::settings_select_list_view(
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_test",
+                                   .input = "",
+                                   .status = "ready",
+                                   .token_status = "1.3k (0.7%)",
+                                   .reasoning_status = "low",
+                                   .transcript = {},
+                                   .sidebar = ava::tui::SidebarSnapshot{.session_id = "session_test",
+                                                                        .mode = "build",
+                                                                        .provider = "openai",
+                                                                        .model = "gpt-5.5",
+                                                                        .workspace = "/workspace/project",
+                                                                        .git_branch = "develop",
+                                                                        .version = "0.32",
+                                                                        .token_status = "1.3k (0.7%)",
+                                                                        .reasoning_status = "low",
+                                                                        .context_source_count = 2,
+                                                                        .session_path = "/tmp/ava/session_test.jsonl",
+                                                                        .session_entry_count = 42}});
+    expect(std::ranges::any_of(configured_light_settings_view.items,
+                               [](ava::tui::SelectListItemView const& item) {
+                                 return item.label == "Theme" && item.description == "ava-light" &&
+                                        item.detail == "built-in light ncurses token palette" &&
+                                        item.badge == "display.json";
+                               }) &&
+               std::ranges::any_of(configured_light_settings_view.items,
+                                   [](ava::tui::SelectListItemView const& item) {
+                                     return item.value == "theme:light" && item.badge == "current" &&
+                                            item.current;
+                                   }),
+           "settings view reports persisted built-in light theme from display.json");
+    ava::tui::set_tui_config_theme(std::nullopt);
+  }
+
+  {
+    ScopedEnvVar no_color_settings_guard("NO_COLOR", "");
+    ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+    ScopedEnvVar colorfgbg_guard("COLORFGBG", "");
+    auto custom_theme = ava::tui::TuiCustomTheme{.name = "sunrise",
+                                                 .path = "/tmp/ava/sunrise.json",
+                                                 .palette = ava::tui::TuiThemePalette{.text = -1,
+                                                                                      .muted = 242,
+                                                                                      .success = 34,
+                                                                                      .warning = 220,
+                                                                                      .error = 196,
+                                                                                      .accent = 39,
+                                                                                      .screen_bg = 255,
+                                                                                      .composer_bg = 236},
+                                                 .revision = "test-custom-theme"};
+    ava::tui::set_tui_config_theme("sunrise", custom_theme);
+    auto const custom_settings_view = ava::tui::settings_select_list_view(
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_test",
+                                   .input = "",
+                                   .status = "ready",
+                                   .token_status = "1.3k (0.7%)",
+                                   .reasoning_status = "low",
+                                   .transcript = {},
+                                   .custom_themes = {ava::tui::ThemeOptionItem{.name = "sunrise",
+                                                                                .detail = "/tmp/ava/sunrise.json"}},
+                                   .sidebar = ava::tui::SidebarSnapshot{.session_id = "session_test",
+                                                                        .mode = "build",
+                                                                        .provider = "openai",
+                                                                        .model = "gpt-5.5",
+                                                                        .workspace = "/workspace/project",
+                                                                        .git_branch = "develop",
+                                                                        .version = "0.32",
+                                                                        .token_status = "1.3k (0.7%)",
+                                                                        .reasoning_status = "low",
+                                                                        .context_source_count = 2,
+                                                                        .session_path = "/tmp/ava/session_test.jsonl",
+                                                                        .session_entry_count = 42}});
+    expect(std::ranges::any_of(custom_settings_view.items,
+                               [](ava::tui::SelectListItemView const& item) {
+                                 return item.label == "Theme" && item.description == "sunrise" &&
+                                        item.detail.find("sunrise.json") != std::string::npos &&
+                                        item.badge == "display.json";
+                               }) &&
+               std::ranges::any_of(custom_settings_view.items,
+                                   [](ava::tui::SelectListItemView const& item) {
+                                     return item.value == "theme:sunrise" && item.label == "Theme sunrise" &&
+                                            item.description == "custom theme" &&
+                                            item.detail.find("sunrise.json") != std::string::npos &&
+                                            item.badge == "current" && item.current;
+                                   }),
+           "settings view reports and exposes a selected custom TUI theme from display.json");
+    ava::tui::set_tui_config_theme(std::nullopt);
+  }
+
+  {
+    ScopedEnvVar no_color_settings_guard("NO_COLOR", "");
+    ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+    ScopedEnvVar colorfgbg_guard("COLORFGBG", "0;15");
+    ava::tui::set_tui_config_theme(std::nullopt);
+    auto const terminal_light_settings_view = ava::tui::settings_select_list_view(
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_test",
+                                   .input = "",
+                                   .status = "ready",
+                                   .token_status = "1.3k (0.7%)",
+                                   .reasoning_status = "low",
+                                   .transcript = {},
+                                   .sidebar = ava::tui::SidebarSnapshot{.session_id = "session_test",
+                                                                        .mode = "build",
+                                                                        .provider = "openai",
+                                                                        .model = "gpt-5.5",
+                                                                        .workspace = "/workspace/project",
+                                                                        .git_branch = "develop",
+                                                                        .version = "0.32",
+                                                                        .token_status = "1.3k (0.7%)",
+                                                                        .reasoning_status = "low",
+                                                                        .context_source_count = 2,
+                                                                        .session_path = "/tmp/ava/session_test.jsonl",
+                                                                        .session_entry_count = 42}});
+    expect(std::ranges::any_of(terminal_light_settings_view.items,
+                               [](ava::tui::SelectListItemView const& item) {
+                                 return item.label == "Theme" && item.description == "ava-light" &&
+                                        item.detail == "terminal background appears light from COLORFGBG" &&
+                                        item.badge == "COLORFGBG";
+                               }) &&
+               std::ranges::any_of(terminal_light_settings_view.items,
+                                   [](ava::tui::SelectListItemView const& item) {
+                                     return item.value == "theme:light" && item.badge == "current" &&
+                                            item.current;
+                                   }),
+           "settings view reports terminal-background light theme inferred from COLORFGBG");
+  }
+
+  {
+    ScopedEnvVar no_color_settings_guard("NO_COLOR", "");
+    ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+    ScopedEnvVar colorfgbg_guard("COLORFGBG", "15;0");
+    ava::tui::set_tui_config_theme(std::nullopt);
+    auto const terminal_dark_settings_view = ava::tui::settings_select_list_view(
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_test",
+                                   .input = "",
+                                   .status = "ready",
+                                   .token_status = "1.3k (0.7%)",
+                                   .reasoning_status = "low",
+                                   .transcript = {},
+                                   .sidebar = ava::tui::SidebarSnapshot{.session_id = "session_test",
+                                                                        .mode = "build",
+                                                                        .provider = "openai",
+                                                                        .model = "gpt-5.5",
+                                                                        .workspace = "/workspace/project",
+                                                                        .git_branch = "develop",
+                                                                        .version = "0.32",
+                                                                        .token_status = "1.3k (0.7%)",
+                                                                        .reasoning_status = "low",
+                                                                        .context_source_count = 2,
+                                                                        .session_path = "/tmp/ava/session_test.jsonl",
+                                                                        .session_entry_count = 42}});
+    expect(std::ranges::any_of(terminal_dark_settings_view.items,
+                               [](ava::tui::SelectListItemView const& item) {
+                                 return item.label == "Theme" && item.description == "ava-dark" &&
+                                        item.detail == "terminal background appears dark from COLORFGBG" &&
+                                        item.badge == "COLORFGBG";
+                               }) &&
+               std::ranges::any_of(terminal_dark_settings_view.items,
+                                   [](ava::tui::SelectListItemView const& item) {
+                                     return item.value == "theme:dark" && item.badge == "current" &&
+                                            item.current;
+                                   }),
+           "settings view reports terminal-background dark theme inferred from COLORFGBG");
+  }
+
+  {
+    ScopedEnvVar no_color_settings_guard("NO_COLOR", "");
+    ScopedEnvVar plain_theme_guard("AVA_TUI_THEME", "plain");
+    ScopedEnvVar colorfgbg_guard("COLORFGBG", "");
+    ava::tui::set_tui_config_theme(std::nullopt);
+    auto const env_plain_settings_view = ava::tui::settings_select_list_view(
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_test",
+                                   .input = "",
+                                   .status = "ready",
+                                   .token_status = "1.3k (0.7%)",
+                                   .reasoning_status = "low",
+                                   .transcript = {},
+                                   .sidebar = ava::tui::SidebarSnapshot{.session_id = "session_test",
+                                                                        .mode = "build",
+                                                                        .provider = "openai",
+                                                                        .model = "gpt-5.5",
+                                                                        .workspace = "/workspace/project",
+                                                                        .git_branch = "develop",
+                                                                        .version = "0.32",
+                                                                        .token_status = "1.3k (0.7%)",
+                                                                        .reasoning_status = "low",
+                                                                        .context_source_count = 2,
+                                                                        .session_path = "/tmp/ava/session_test.jsonl",
+                                                                        .session_entry_count = 42}});
+    auto const env_plain_settings_frame =
+        ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                             .provider = "openai",
+                                                             .model = "gpt-5.5",
+                                                             .session_id = "session_test",
+                                                             .input = "",
+                                                             .status = "settings opened",
+                                                             .transcript = {},
+                                                             .select_list = env_plain_settings_view,
+                                                             .width = 96,
+                                                             .height = 20});
+    expect(std::ranges::any_of(env_plain_settings_view.items,
+                               [](ava::tui::SelectListItemView const& item) {
+                                 return item.label == "Theme" && item.description == "plain" &&
+                                        item.detail == "AVA_TUI_THEME=plain disables ANSI styling" &&
+                                        item.badge == "AVA_TUI_THEME";
+                               }) &&
+               std::ranges::all_of(env_plain_settings_frame,
+                                   [](std::string const& line) { return line.find("\x1b[") == std::string::npos; }),
+           "AVA_TUI_THEME=plain selects the same no-ANSI rendering path as NO_COLOR without requiring NO_COLOR");
+  }
+
+  {
+    ScopedEnvVar requested_theme_guard("AVA_TUI_THEME", "light");
     ScopedEnvVar no_color_settings_guard("NO_COLOR", "1");
+    ScopedEnvVar colorfgbg_guard("COLORFGBG", "0;15");
+    ava::tui::set_tui_config_theme(std::nullopt);
     auto const plain_settings_view = ava::tui::settings_select_list_view(
         ava::tui::ComposerSnapshot{.mode = "build",
                                    .provider = "openai",
@@ -3811,9 +6686,55 @@ void test_tui_composer_rendering_and_input()
                                  [](std::string const& line) {
                                    return strip_sgr(line).find("command: git push origin main") != std::string::npos;
                                  }) &&
+             std::ranges::any_of(expanded_permission_card,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("inspect: /permissions audit show permreq_push") !=
+                                          std::string::npos;
+                                 }) &&
+             std::ranges::any_of(expanded_permission_card,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("diagnose: /permissions diagnose permreq_push") !=
+                                          std::string::npos;
+                                 }) &&
              std::ranges::all_of(expanded_permission_card,
                                  [](std::string const& line) { return visible_columns(line) <= 88; }),
-         "tui expanded tool cards expose permission audit ids and command context on demand");
+         "tui expanded tool cards expose permission audit ids, command context, and follow-up commands on demand");
+
+  {
+    ScopedEnvVar no_color_permission_guard("NO_COLOR", "1");
+    auto const plain_narrow_permission_card = ava::tui::render_composer(
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_test",
+                                   .input = "",
+                                   .status = "ready",
+                                   .transcript = {ava::tui::TranscriptItem{.tool = permission_tool_item}},
+                                   .width = 56,
+                                   .height = 24,
+                                   .tool_details_visible = true});
+    auto plain_permission_text = std::string{};
+    for (auto const& line : plain_narrow_permission_card)
+    {
+      plain_permission_text += line;
+      plain_permission_text += '\n';
+    }
+    auto const plain_permission_accessible =
+        std::ranges::all_of(plain_narrow_permission_card,
+                            [](std::string const& line) {
+                              return line.find('\x1b') == std::string::npos && visible_columns(line) <= 56;
+                            }) &&
+        plain_permission_text.find("[x] bash") != std::string::npos &&
+        plain_permission_text.find("permission: deny") != std::string::npos &&
+        plain_permission_text.find("risk: high") != std::string::npos &&
+        plain_permission_text.find("id: permreq_push") != std::string::npos &&
+        plain_permission_text.find("reason: command can change external state") != std::string::npos &&
+        plain_permission_text.find("command: git push origin main") != std::string::npos &&
+        plain_permission_text.find("inspect: /permissions audit show permreq_push") != std::string::npos &&
+        plain_permission_text.find("diagnose: /permissions diagnose permreq_push") != std::string::npos;
+    expect(plain_permission_accessible,
+           "tui plain narrow permission cards keep critical state readable without color");
+  }
 
   auto const grouped_context_tools = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -3919,6 +6840,53 @@ void test_tui_composer_rendering_and_input()
                  [](std::string const& line) { return line.find("\x1b[38;2;248;113;113m[x]") != std::string::npos; }),
          "tui emits trusted sgr status colors for running and error tool cards");
 
+  auto const canceled_tool_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Canceled,
+                                             .name = "bash",
+                                             .argument_summary = "command=sleep 30",
+                                             .result_summary = "stopped by user",
+                                             .arguments_json = "{\"command\":\"sleep 30\"}",
+                                             .result_json = "{\"tool\":\"bash\",\"canceled\":true}",
+                                             .lifecycle = ava::tui::ToolLifecycleState::Canceled}}},
+      .width = 64,
+      .height = 16,
+      .tool_details_visible = true});
+  expect(std::ranges::any_of(canceled_tool_card,
+                             [](std::string const& line) {
+                               auto visible = strip_sgr(line);
+                               return visible.find("[-]") != std::string::npos &&
+                                      visible.find("bash") != std::string::npos &&
+                                      visible.find("canceled") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(canceled_tool_card,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("cancel: stopped") != std::string::npos;
+                                 }) &&
+             std::ranges::none_of(canceled_tool_card,
+                                  [](std::string const& line) { return strip_sgr(line).find("[x]") != std::string::npos; }) &&
+             std::ranges::all_of(canceled_tool_card,
+                                 [](std::string const& line) { return visible_columns(line) <= 64; }),
+         "tui renders canceled tool cards as a distinct non-error status");
+  auto const canceled_copy_text = ava::tui::detail::tool_card_copy_text(
+      ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Canceled,
+                                 .name = "bash",
+                                 .argument_summary = "command=sleep 30",
+                                 .result_summary = "stopped by user",
+                                 .arguments_json = "{\"command\":\"sleep 30\"}",
+                                 .result_json = "{\"tool\":\"bash\",\"canceled\":true}",
+                                 .lifecycle = ava::tui::ToolLifecycleState::Canceled});
+  expect(canceled_copy_text.find("status: canceled") != std::string::npos &&
+             canceled_copy_text.find("lifecycle: canceled") != std::string::npos &&
+             canceled_copy_text.find("\x1b[") == std::string::npos,
+         "tui copy text preserves canceled tool state without ANSI styling");
+
   auto const detailed_tool_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
       .provider = "openai",
@@ -3961,6 +6929,7 @@ void test_tui_composer_rendering_and_input()
                                                                                    .reason = "command can change external state",
                                                                                    .command = "git push origin main"}},
                                  .diff = "--- a\n+++ b\n-old\n+new",
+                                 .changed_paths = {"src/main.cpp", "\x1b[31msecret.txt"},
                                  .truncated = true,
                                  .output_lines = 2,
                                  .total_lines = 10,
@@ -3971,12 +6940,53 @@ void test_tui_composer_rendering_and_input()
              copyable_tool_text.find("permission: deny") != std::string::npos &&
              copyable_tool_text.find("risk high") != std::string::npos &&
              copyable_tool_text.find("reason command can change external state") != std::string::npos &&
+             copyable_tool_text.find("inspect: /permissions audit show permreq_push") != std::string::npos &&
+             copyable_tool_text.find("diagnose: /permissions diagnose permreq_push") != std::string::npos &&
              copyable_tool_text.find("output:\n  denied\n  try again") != std::string::npos &&
              copyable_tool_text.find("truncation: truncated 2/10 lines") != std::string::npos &&
+             copyable_tool_text.find("changed: src/main.cpp, ?[31msecret.txt") != std::string::npos &&
              copyable_tool_text.find("spill: /tmp/ava-spill/bash.txt") != std::string::npos &&
              copyable_tool_text.find("diff:\n  --- a\n  +++ b") != std::string::npos &&
              copyable_tool_text.find("\x1b[") == std::string::npos,
          "tui exposes plain copy text for detailed tool cards without ANSI styling");
+
+  auto const permission_copy_text = ava::tui::detail::tool_card_permission_copy_text(
+      ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Error,
+                                 .name = "bash",
+                                 .permissions = {ava::tui::ToolPermissionAuditItem{.permission_request_id = "permreq_push",
+                                                                                   .resolver_request_id = "permission_1",
+                                                                                   .decision = "deny",
+                                                                                   .operation = "bash",
+                                                                                   .tool_name = "bash",
+                                                                                   .risk = "high",
+                                                                                   .reason = "command can change external state",
+                                                                                   .command = "git push origin main"},
+                                                 ava::tui::ToolPermissionAuditItem{.permission_request_id = "permreq_read",
+                                                                                   .decision = "allow",
+                                                                                   .operation = "read",
+                                                                                   .tool_name = "read_file",
+                                                                                   .risk = "low",
+                                                                                   .target = "docs/USAGE.md"}}},
+      "git push");
+  auto const missing_permission_copy_text = ava::tui::detail::tool_card_permission_copy_text(
+      ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                 .name = "read",
+                                 .permissions = {ava::tui::ToolPermissionAuditItem{.permission_request_id = "permreq_read",
+                                                                                   .decision = "allow",
+                                                                                   .operation = "read",
+                                                                                   .tool_name = "read_file",
+                                                                                   .target = "docs/USAGE.md"}}},
+      "git push");
+  expect(permission_copy_text.find("permission: deny") != std::string::npos &&
+             permission_copy_text.find("id permreq_push") != std::string::npos &&
+             permission_copy_text.find("risk high") != std::string::npos &&
+             permission_copy_text.find("reason command can change external state") != std::string::npos &&
+             permission_copy_text.find("command git push origin main") != std::string::npos &&
+             permission_copy_text.find("inspect: /permissions audit show permreq_push") != std::string::npos &&
+             permission_copy_text.find("diagnose: /permissions diagnose permreq_push") != std::string::npos &&
+             permission_copy_text.find("permreq_read") == std::string::npos && permission_copy_text.find("\x1b[") == std::string::npos &&
+             missing_permission_copy_text.empty(),
+         "tui exposes focused permission copy text with follow-up commands, query filtering, and no ANSI styling");
 
   auto const copyable_diff_text = ava::tui::detail::tool_card_diff_copy_text(
       ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
@@ -3989,6 +6999,23 @@ void test_tui_composer_rendering_and_input()
              copyable_diff_text.find("[diff truncated]") != std::string::npos &&
              copyable_diff_text.find("\x1b[") == std::string::npos,
          "tui exposes focused plain copy text for latest tool diffs without ANSI styling");
+
+  auto const queryable_tool_card =
+      ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                 .name = "write",
+                                 .argument_summary = "src/main.cpp",
+                                 .result_summary = "wrote 27 bytes",
+                                 .permissions = {ava::tui::ToolPermissionAuditItem{.permission_request_id = "permreq_write",
+                                                                                   .decision = "allow",
+                                                                                   .tool_name = "write_file",
+                                                                                   .reason = "workspace edit"}},
+                                 .diff = "--- src/main.cpp\n+++ src/main.cpp\n-old\n+new",
+                                 .changed_paths = {"src/main.cpp"}};
+  expect(ava::tui::detail::tool_card_matches_copy_query(queryable_tool_card, "MAIN.CPP") &&
+             ava::tui::detail::tool_card_matches_copy_query(queryable_tool_card, "workspace edit") &&
+             ava::tui::detail::tool_card_matches_copy_query(queryable_tool_card, "+new") &&
+             !ava::tui::detail::tool_card_matches_copy_query(queryable_tool_card, "package-lock"),
+         "tui copy query matching finds visible tool, permission, changed-path, and diff context case-insensitively");
 
   auto const collapsed_override_card = ava::tui::render_composer(
       ava::tui::ComposerSnapshot{.mode = "build",
@@ -4040,6 +7067,66 @@ void test_tui_composer_rendering_and_input()
                                    return strip_sgr(line).find("spill: /tmp/ava-spill/grep.txt") != std::string::npos;
                                  }),
          "tui renders backend-provided truncation counts and spill paths only when present");
+
+  auto const changed_paths_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                             .name = "apply_patch",
+                                             .argument_summary = "2 edits",
+                                             .result_summary = "updated files",
+                                             .details_visible = true,
+                                             .changed_paths = {"src/main.cpp", "tests/tui.cpp", "docs/mvp.md", "goals/ledger.md", "\x1b[31mhidden.txt"}}}},
+      .width = 120,
+      .height = 16});
+  expect(std::ranges::any_of(changed_paths_card,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("changed:") != std::string::npos &&
+                                      visible.find("src/main.cpp") != std::string::npos &&
+                                      visible.find("+1 more") != std::string::npos &&
+                                      visible.find("\x1b[") == std::string::npos;
+                             }) &&
+             std::ranges::all_of(changed_paths_card,
+                                 [](std::string const& line) { return visible_columns(line) <= 120; }),
+         "tui expanded tool cards render bounded changed-file summaries even without a diff");
+
+  auto const inferred_changed_tool =
+      ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                 .name = "write_file",
+                                 .argument_summary = "path=notes/output.txt",
+                                 .result_summary = "wrote 12 bytes",
+                                 .result_json = "{\"tool\":\"write_file\",\"ok\":true,\"path\":\"notes/output.txt\"}",
+                                 .lifecycle = ava::tui::ToolLifecycleState::Complete,
+                                 .details_visible = true,
+                                 .diff = "--- notes/output.txt\n+++ notes/output.txt\n-old\n+new"};
+  auto const inferred_changed_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{.tool = inferred_changed_tool}},
+      .width = 88,
+      .height = 14});
+  auto const inferred_changed_copy = ava::tui::detail::tool_card_copy_text(inferred_changed_tool);
+  expect(std::ranges::any_of(inferred_changed_card,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("changed: notes/output.txt") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(inferred_changed_card,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("diff notes/output.txt:") != std::string::npos;
+                                 }) &&
+             inferred_changed_copy.find("changed: notes/output.txt") != std::string::npos &&
+             ava::tui::detail::tool_card_matches_copy_query(inferred_changed_tool, "output.txt"),
+         "tui infers changed-file summaries from mutating tool result JSON when timeline metadata is sparse");
 
   auto const wide_diff_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -4655,26 +7742,29 @@ void test_tui_text_model_conversions()
 
   auto const markdown = ava::tui::text_from_markdown(
       "# Title\nSee [docs](https://example.test) and *note*.\nUse `ava` and **bold**.\n```cpp\nint main() "
-      "{}\n```\n**open");
+      "{}\n```\nDrop ~~old~~ but keep ~literal~.\n**open");
   bool saw_code = false;
   bool saw_bold = false;
   bool saw_italic = false;
   bool saw_link = false;
+  bool saw_strikethrough = false;
   for (auto const& run : markdown.runs) {
     if (auto const* span = std::get_if<ava::tui::TextSpan>(&run)) {
       saw_code = saw_code || span->rendition.code;
       saw_bold = saw_bold || span->rendition.bold;
       saw_italic = saw_italic || span->rendition.italic;
       saw_link = saw_link || (span->rendition.underline && span->rendition.color == ava::tui::TextColorRole::Accent);
+      saw_strikethrough = saw_strikethrough || span->rendition.strikethrough;
     }
   }
+  auto const markdown_plain = ava::tui::to_plain_text(markdown);
   expect(ava::tui::validate_text(markdown).has_value() && saw_code && saw_bold && saw_italic && saw_link &&
-             ava::tui::to_plain_text(markdown).find("Title") != std::string::npos &&
-             ava::tui::to_plain_text(markdown).find("docs (https://example.test)") != std::string::npos &&
-             ava::tui::to_plain_text(markdown).find("Use ava and bold.") != std::string::npos &&
-             ava::tui::to_plain_text(markdown).find("**open") != std::string::npos,
-         "tui Markdown conversion supports basic heading/link/emphasis/code/fences and leaves unsupported Markdown "
-         "readable");
+             saw_strikethrough && markdown_plain.find("Title") != std::string::npos &&
+             markdown_plain.find("docs (https://example.test)") != std::string::npos &&
+             markdown_plain.find("Use ava and bold.") != std::string::npos &&
+             markdown_plain.find("Drop old but keep ~literal~.") != std::string::npos &&
+             markdown_plain.find("~~old~~") == std::string::npos && markdown_plain.find("**open") != std::string::npos,
+         "tui Markdown conversion supports basic heading/link/emphasis/code/fences and leaves unsupported Markdown readable");
 
   auto const rendered_from_model = ava::tui::render_composer(ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -5127,6 +8217,29 @@ void test_tui_event_state_reduces_runtime_events()
              state.transcript.back().tool->result_summary == "denied",
          "tui event state records errored tool results as error tool cards");
 
+  ava::app::RuntimeEvent tool_canceled_start;
+  tool_canceled_start.type = ava::app::RuntimeEventType::ToolStart;
+  tool_canceled_start.call_id = "call_canceled";
+  tool_canceled_start.tool_name = "bash";
+  tool_canceled_start.text = "sleep 30";
+  tool_canceled_start.tool_arguments_json = "{\"command\":\"sleep 30\"}";
+  ava::tui::apply_runtime_event(state, tool_canceled_start);
+  ava::app::RuntimeEvent tool_canceled;
+  tool_canceled.type = ava::app::RuntimeEventType::ToolResult;
+  tool_canceled.call_id = "call_canceled";
+  tool_canceled.tool_name = "bash";
+  tool_canceled.status = "canceled";
+  tool_canceled.text = "stopped by user";
+  tool_canceled.tool_result_json = "{\"tool\":\"bash\",\"canceled\":true}";
+  ava::tui::apply_runtime_event(state, tool_canceled);
+  expect(state.transcript.back().tool &&
+             state.transcript.back().tool->status == ava::tui::ToolTimelineStatus::Canceled &&
+             state.transcript.back().tool->lifecycle == ava::tui::ToolLifecycleState::Canceled &&
+             state.transcript.back().tool->argument_summary == "sleep 30" &&
+             state.transcript.back().tool->result_summary == "stopped by user" &&
+             state.activity.back().status == ava::tui::ToolTimelineStatus::Canceled,
+         "tui event state records canceled tool results as canceled tool cards");
+
   ava::tui::TuiEventState permission_tool_state;
   ava::app::EventEnvelope permission_tool_requested{.schema_version = 1,
                                                     .event_id = "event_permission_tool_request",
@@ -5383,6 +8496,7 @@ void test_tui_event_state_reduces_runtime_events()
              canceled_state.transcript[0].label == "ava" &&
              canceled_state.transcript[0].text == "stopped by user. Submit a new prompt to continue." &&
              !canceled_state.activity.empty() && canceled_state.activity.back().label == "stopped" &&
+             canceled_state.activity.back().status == ava::tui::ToolTimelineStatus::Canceled &&
              canceled_state.activity.back().detail.find("submit a new prompt to continue") != std::string::npos,
          "tui event state presents cooperative cancellation with continuation guidance");
 
@@ -5395,6 +8509,7 @@ void test_tui_event_state_reduces_runtime_events()
   expect(explicit_canceled_state.run_status == ava::tui::TuiEventRunStatus::Canceled &&
              explicit_canceled_state.transcript.size() == 1 &&
              explicit_canceled_state.transcript[0].text == "stopped by user. Submit a new prompt to continue." &&
+             explicit_canceled_state.activity.back().status == ava::tui::ToolTimelineStatus::Canceled &&
              explicit_canceled_state.activity.back().detail.find("cancel_requested") != std::string::npos &&
              explicit_canceled_state.activity.back().detail.find("submit a new prompt to continue") !=
                  std::string::npos,
@@ -5432,6 +8547,9 @@ void test_tui_event_state_reduces_runtime_events()
   retry_tick.delay_ms = 250;
   retry_tick.remaining_ms = 125;
   ava::tui::apply_runtime_event(lifecycle_state, retry_tick);
+  ava::app::RuntimeEvent retry_tick_update = retry_tick;
+  retry_tick_update.remaining_ms = 25;
+  ava::tui::apply_runtime_event(lifecycle_state, retry_tick_update);
   ava::app::RuntimeEvent compaction_end;
   compaction_end.type = ava::app::RuntimeEventType::CompactionEnd;
   compaction_end.trigger = "context_overflow";
@@ -5439,20 +8557,24 @@ void test_tui_event_state_reduces_runtime_events()
   compaction_end.max_attempts = 2;
   compaction_end.summary_bytes = 1234;
   ava::tui::apply_runtime_event(lifecycle_state, compaction_end);
-  expect(lifecycle_state.transcript.size() == 2 && lifecycle_state.transcript[0].label == "audit" &&
+  expect(lifecycle_state.transcript.size() == 3 && lifecycle_state.transcript[0].label == "audit" &&
              lifecycle_state.transcript[0].text.find("retrying after context_overflow") != std::string::npos &&
              lifecycle_state.transcript[0].text.find("attempt 1/1") != std::string::npos &&
              lifecycle_state.transcript[0].text.find("delay=250ms") != std::string::npos &&
              lifecycle_state.transcript[0].text.find("tokens~9000/8000") != std::string::npos &&
              lifecycle_state.transcript[0].text.find("entries=3/4") != std::string::npos &&
-             lifecycle_state.transcript[1].label == "compaction" &&
-             lifecycle_state.transcript[1].text.find("compaction completed") != std::string::npos &&
-             lifecycle_state.transcript[1].text.find("attempt 1/2") != std::string::npos &&
-             lifecycle_state.transcript[1].text.find("summary=1234 bytes") != std::string::npos &&
+             lifecycle_state.transcript[1].label == "audit" &&
+             lifecycle_state.transcript[1].text.find("retry countdown after context_overflow") != std::string::npos &&
+             lifecycle_state.transcript[1].text.find("remaining=25ms") != std::string::npos &&
+             lifecycle_state.transcript[1].text.find("remaining=125ms") == std::string::npos &&
+             lifecycle_state.transcript[2].label == "compaction" &&
+             lifecycle_state.transcript[2].text.find("compaction completed") != std::string::npos &&
+             lifecycle_state.transcript[2].text.find("attempt 1/2") != std::string::npos &&
+             lifecycle_state.transcript[2].text.find("summary=1234 bytes") != std::string::npos &&
              std::ranges::any_of(lifecycle_state.activity,
                                  [](ava::tui::SidebarActivityItem const& activity) {
                                    return activity.label == "retry" &&
-                                          activity.detail.find("remaining=125ms") != std::string::npos;
+                                          activity.detail.find("remaining=25ms") != std::string::npos;
                                  }),
          "tui event state renders backend retry, retry countdown, and compaction markers with backend-provided detail");
   auto const compaction_render = ava::tui::render_composer(
@@ -6053,6 +9175,120 @@ void test_tui_large_render_performance_budget()
          "tui large render performance budget catches pathological redraw slowdowns without a real terminal");
 }
 
+void test_tui_large_tool_output_preview_is_bounded()
+{
+  auto const small_output_card = ava::tui::detail::render_tool_card(
+      ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                 .name = "grep",
+                                 .result_summary = "4 matches",
+                                 .result_json = "{\"output\":\"one\\ntwo\\nthree\\nfour\"}",
+                                 .lifecycle = ava::tui::ToolLifecycleState::Complete},
+      96,
+      false);
+  expect(std::ranges::any_of(small_output_card,
+                             [](std::string const& line) {
+                               return strip_sgr(line).find("output: 2 shown/4 lines · 2 hidden") !=
+                                      std::string::npos;
+                             }),
+         "tui output preview keeps exact hidden-line counts for small unmetadata tool output");
+
+  constexpr auto total_lines = std::size_t{20000};
+  std::string output_json = "{\"output\":\"";
+  output_json.reserve(total_lines * 28);
+  for (std::size_t index = 0; index < total_lines; ++index) {
+    if (index > 0) output_json += "\\n";
+    output_json += "large output line ";
+    output_json += std::to_string(index);
+  }
+  output_json += "\"}";
+
+  auto item = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                         .name = "grep",
+                                         .argument_summary = "pattern=large",
+                                         .result_summary = "20000 matches",
+                                         .result_json = std::move(output_json),
+                                         .lifecycle = ava::tui::ToolLifecycleState::Complete,
+                                         .total_lines = total_lines};
+
+  auto const start = std::chrono::steady_clock::now();
+  auto const compact = ava::tui::detail::render_tool_card(item, 96, false);
+  item.details_visible = true;
+  auto const expanded = ava::tui::detail::render_tool_card(item, 96, true);
+  auto const elapsed = std::chrono::steady_clock::now() - start;
+
+  std::string compact_text;
+  for (auto const& line : compact) {
+    compact_text += strip_sgr(line);
+    compact_text += '\n';
+  }
+  std::string expanded_text;
+  for (auto const& line : expanded) {
+    expanded_text += strip_sgr(line);
+    expanded_text += '\n';
+  }
+
+  expect(compact_text.find("output: 2 shown/20000 lines · 19998 hidden") != std::string::npos &&
+             compact_text.find("large output line 0") != std::string::npos &&
+             compact_text.find("large output line 1") != std::string::npos &&
+             compact_text.find("large output line 19999") == std::string::npos,
+         "tui collapsed output preview uses backend totals without rendering deep large-output lines");
+  expect(expanded_text.find("output: 8 shown/20000 lines · 19992 hidden") != std::string::npos &&
+             expanded_text.find("large output line 7") != std::string::npos &&
+             expanded_text.find("large output line 8") == std::string::npos &&
+             expanded_text.find("large output line 19999") == std::string::npos &&
+             std::ranges::all_of(expanded, [](std::string const& line) { return visible_columns(line) <= 96; }),
+         "tui expanded output preview remains bounded for large tool output");
+  expect(elapsed < std::chrono::seconds(2),
+         "tui large tool-output preview avoids pathological redraw cost");
+}
+
+void test_tui_transcript_tail_renderer_matches_full_visible_window()
+{
+  std::vector<ava::tui::TranscriptItem> transcript;
+  for (int index = 0; index < 48; ++index) {
+    transcript.push_back(ava::tui::TranscriptItem{
+        .label = "you",
+        .text = "tail renderer input " + std::to_string(index) +
+                " with enough text to wrap over multiple terminal columns"});
+    transcript.push_back(ava::tui::TranscriptItem{.label = "ava",
+                                                  .text = "tail renderer answer " + std::to_string(index) +
+                                                          " keeps viewport rows equivalent to the full renderer",
+                                                  .meta = "Build · GPT-5.5",
+                                                  .thinking = index % 3 == 0 ? "thinking " + std::to_string(index) : std::string{}});
+    if (index % 4 == 0) {
+      transcript.push_back(ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                             .name = "read_file",
+                                             .argument_summary = "path=src/main.cpp",
+                                             .result_summary = "read 12 lines",
+                                             .call_id = "tail_read_" + std::to_string(index),
+                                             .lifecycle = ava::tui::ToolLifecycleState::Complete}});
+      transcript.push_back(ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                             .name = "grep",
+                                             .argument_summary = "pattern=tail",
+                                             .result_summary = "2 matches",
+                                             .call_id = "tail_grep_" + std::to_string(index),
+                                             .lifecycle = ava::tui::ToolLifecycleState::Complete}});
+    }
+  }
+
+  constexpr auto width = std::size_t{92};
+  constexpr auto height = std::size_t{13};
+  auto const full =
+      ava::tui::detail::render_transcript_lines(transcript, width, true, true);
+  for (auto const offset : {std::size_t{0}, std::size_t{1}, std::size_t{7}, std::size_t{32}, std::size_t{96}}) {
+    auto const expected = ava::tui::detail::visible_transcript_lines(full, width, height, offset);
+    auto const tail_budget = height + offset;
+    auto const tail =
+        ava::tui::detail::render_transcript_tail_lines(transcript, width, tail_budget, true, true);
+    auto const actual = ava::tui::detail::visible_transcript_lines(tail, width, height, offset);
+    expect(actual == expected,
+           "tui bounded transcript tail renderer matches full-render visible rows at scroll offset " +
+               std::to_string(offset));
+  }
+}
+
 void test_tui_very_long_transcript_performance_budget()
 {
   std::vector<ava::tui::TranscriptItem> transcript;
@@ -6128,10 +9364,15 @@ void test_tui_very_long_transcript_performance_budget()
 void run_tui_composer_tests()
 {
   ScopedEnvVar no_color_guard("NO_COLOR", "");
+  ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+  ScopedEnvVar colorfgbg_guard("COLORFGBG", "");
+  test_tui_terminal_image_support();
   test_tui_composer_rendering_and_input();
   test_tui_text_model_conversions();
   test_tui_event_state_reduces_runtime_events();
   test_ncurses_newterm_smoke_without_real_tty();
   test_tui_large_render_performance_budget();
+  test_tui_large_tool_output_preview_is_bounded();
+  test_tui_transcript_tail_renderer_matches_full_visible_window();
   test_tui_very_long_transcript_performance_budget();
 }

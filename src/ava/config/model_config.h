@@ -45,11 +45,14 @@ struct ModelRegistry
   std::string default_provider_id = "openai";
   std::string default_model_id = "gpt-5.5";
   std::vector<ModelInfo> models;
+  std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
 };
 
 [[nodiscard]] ModelRegistry builtin_model_registry();
 [[nodiscard]] ModelRegistry parse_model_registry(std::string_view content);
 [[nodiscard]] ava::core::Result<ModelRegistry> load_model_registry(XdgPaths const& paths);
+[[nodiscard]] ava::core::VoidResult store_scoped_model_cycle(XdgPaths const& paths,
+                                                             std::optional<std::vector<std::string>> scoped_model_cycle);
 [[nodiscard]] std::optional<ModelInfo> find_model(ModelRegistry const& registry, std::string_view provider_id, std::string_view model_id);
 [[nodiscard]] ModelInfo select_default_model(ModelRegistry const& registry);
 [[nodiscard]] std::optional<long double> usage_cost_usd(ModelPricing const& pricing, ava::provider::TokenUsage const& usage);

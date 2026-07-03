@@ -5,9 +5,15 @@ This document defines the current backend contract for AVA headless modes. AVA s
 ## Modes
 
 - `interactive`: current TUI or non-TTY line shell behavior. Human prompts are allowed. Piped stdin without `--print` remains the line shell for slash-command scripts.
-- `print`: one prompt in, text or JSONL events out, process exits after the turn. Enable with `ava --print "prompt"`, `ava -p "prompt"`, or `printf 'prompt' | ava --print`.
-- `rpc`: JSONL request/response envelopes over stdio for long-lived automation. Enable with `ava --rpc` or `ava --output rpc`.
+- `print`: one prompt in, text or JSONL events out, process exits after the turn. Enable with `ava --print "prompt"`, `ava -p "prompt"`, `ava --mode text "prompt"`, `ava --mode json "prompt"`, or `printf 'prompt' | ava --print`.
+- `rpc`: JSONL request/response envelopes over stdio for long-lived automation. Enable with `ava --rpc`, `ava --output rpc`, or `ava --mode rpc`.
 - `server` (deferred): no contract yet. Server mode is explicitly out of scope until the stdio RPC contract is proven.
+
+## Session Selection
+
+AVA creates a resumable append-only session by default for interactive, print, and RPC modes. `--continue` resumes the newest persisted session for the current workspace, and `--session <id-or-prefix>` resumes an exact session id or unique prefix. `--fork <id-or-prefix>` creates a new persisted branch from an exact session id or unique prefix, copies the selected source history, records fork metadata, and can be combined with `--name <name>` to set the new branch display name. `--name <name>` on a non-fork startup records session metadata for the opened session. `--session-dir <dir>` selects the session storage directory for this process before resume, fork, continue, or new-session creation.
+
+`--session`, `--continue`, and `--fork` are mutually exclusive. `--no-session` starts an ephemeral session for the current process. Runtime entries remain available to in-process commands such as `get_messages`, `/stats`, or `/export`, but AVA does not write a resumable JSONL history file under the configured sessions directory and the session is not returned by session listing. Temporary attachment and spill files may exist only while the process/session store is alive. `--no-session` cannot be combined with `--session`, `--continue`, or `--fork`. RPC `get_state` includes `sessionless:true` when this mode is active.
 
 ## Print Input And Output
 
@@ -19,9 +25,20 @@ Print mode accepts an optional prompt argument after `--print`/`-p`. If no promp
 <stdin content>
 ```
 
-Text output is the default. In text output, stdout contains the final assistant text only; diagnostics, tool progress, and errors go to stderr. JSONL output is selected with `--json` or `--output json`; stdout contains serialized event envelopes and ends with `done`, `canceled`, or `error` for turns that reach the runtime. Credentials and startup failures are reported on stderr.
+Text output is the default. In text output, stdout contains the final assistant text only; diagnostics, tool progress, and errors go to stderr. JSONL output is selected with `--json`, `--output json`, or Pi-compatible `--mode json`; stdout contains serialized event envelopes and ends with `done`, `canceled`, or `error` for turns that reach the runtime. Credentials and startup failures are reported on stderr.
 
-`--no-session` is not implemented because the shared runtime currently opens a session for every turn. Sessionless print mode is deferred in the product plan until the runtime supports it directly.
+## Tool Visibility Flags
+
+Tool visibility flags filter which native model-visible tool names are exported to the provider and accepted by the dispatcher for the current process. They apply to interactive, print, and RPC sessions:
+
+- `--tools name[,name...]` or `-t name[,name...]`: allowlist tool names.
+- `--exclude-tools name[,name...]` or `-xt name[,name...]`: remove tool names. Exclusion overrides allowlisting.
+- `--no-builtin-tools` or `-nbt`: hide AVA built-ins while leaving enabled plugin and MCP tools available unless other filters remove them.
+- `--no-tools` or `-nt`: hide all tools unless `--tools` explicitly re-enables exact names.
+
+These flags are not permission grants. Headless permission flags such as `--allow-tool read_file` only answer compatible backend permission prompts for tools that remain visible and callable.
+
+AVA accepts Pi built-in names as input aliases for visibility filters: `read` maps to `read_file`, `write` to `write_file`, `edit` to `edit_file`, `find` to `glob`, and `ls` to `list_directory`. Provider schemas remain AVA-native, so `--tools read,grep,find,ls` advertises `read_file`, `grep`, `glob`, and `list_directory`.
 
 ## Headless Permission Flags
 
@@ -161,7 +178,21 @@ Prompt turn:
 {"id":"1","type":"prompt","message":"hello"}
 ```
 
-AVA starts the prompt turn asynchronously inside the RPC session, keeps reading stdin while it runs, streams normal runtime event envelopes (`session_start`, `user_message`, streaming `message_update`/`message_end`/`provider_event`, final `assistant_message`, tool events, compaction/retry events, retry countdown ticks, and `done`/`canceled`/`error`) to stdout, then writes exactly one RPC response with `final_text`, `stop_reason`, `provider_iterations`, `tool_calls`, optional `tool_timeline`, and `session_id` on success or `success:false` on failure. `tool_timeline[]` entries include `status`, `call_id`, `tool`, optional presentation text/summaries, optional `args`/`result`, optional `structured_result`, content/error fields, changed paths, permission request ids, and truncation/spill/diff counters using the same names as tool event payloads. Failures before runtime startup, such as missing auth, may return only the `success:false` RPC response. Prompt event envelopes include the prompt command id as `request_id`. Only one prompt may be active per RPC session; a second `prompt` while one is active returns an in-band error. Prompt requests require credentials for the active session provider unless the embedding test harness supplies runtime credentials.
+Prompt requests may also include image inputs. `attachments` is an array of non-empty local image paths:
+
+```json
+{"id":"1-img","type":"prompt","message":"describe this","attachments":["screens/screen.png"]}
+```
+
+`images` accepts Pi-style inline upload objects:
+
+```json
+{"id":"1-upload","type":"prompt","message":"describe this","images":[{"type":"image","data":"iVBORw0KGgo=","mimeType":"image/png"}]}
+```
+
+Attachment paths are resolved relative to the runtime current directory unless absolute. Inline image `data` must be standard base64, and `mimeType` must match the detected image bytes. AVA imports each supported PNG, JPEG, WebP, or GIF file or upload into the active session's attachment storage before the turn starts, rejects symlink sources, unsupported byte signatures, non-regular files, MIME mismatches, and images outside the bounded byte size, persists metadata only, and sends verified bytes to image-capable providers. Local `attachments` and inline `images` share the 16-image prompt cap.
+
+AVA starts the prompt turn asynchronously inside the RPC session, keeps reading stdin while it runs, streams normal runtime event envelopes (`session_start`, `user_message`, streaming `message_update`/`message_end`/`provider_event`, final `assistant_message`, tool events, compaction/retry events, retry countdown ticks, and `done`/`canceled`/`error`) to stdout, then writes exactly one RPC response with `final_text`, `stop_reason`, `provider_iterations`, `tool_calls`, optional `tool_timeline`, and `session_id` on success or `success:false` on failure. `tool_timeline[]` entries include `status`, `call_id`, `tool`, optional presentation text/summaries, optional `args`/`result`, optional `structured_result`, content/error fields, changed paths, permission request ids, and truncation/spill/diff counters using the same names as tool event payloads. Failures before runtime startup, such as missing auth, invalid attachment import, or unsupported image input for the selected model, may return only the `success:false` RPC response. Prompt event envelopes include the prompt command id as `request_id`. Only one prompt may be active per RPC session; a second `prompt` while one is active returns an in-band error. Prompt requests require credentials for the active session provider unless the embedding test harness supplies runtime credentials.
 
 Steer an active prompt:
 
@@ -203,7 +234,7 @@ Example state response shape:
 {"id":"3","type":"response","success":true,"result":{"protocol_version":1,"session_id":"session_...","provider":"anthropic","model":"claude-sonnet-4-5","reasoning_enabled":true,"reasoning_level":"enabled","reasoning_budget_tokens":4096,"reasoning_display":"summarized"}}
 ```
 
-`get_state`, `list_models`, `list_sessions`, `session_tree`, `session_metadata`, `permission_grants`, `permission_grant_revoke`, and `permission_grants_clear` remain available while a prompt is active. `get_messages`, `get_session_stats`, `validate_session`, `permission_rules`, `permission_rule_add`, `permission_rule_remove`, `set_session_name`, `set_session_labels`, `fork_session`, `clone_session`, `summarize_branch`, `set_model`, `cycle_model`, `set_reasoning`, `clear_reasoning`, `compact`, `export`, and `context` materialize or mutate session history or durable policy and are rejected while a prompt is active. RPC `/compact` also marks the session busy while it generates and records the provider summary, so a prompt cannot start midway through compaction.
+`get_state`, `list_models`, `list_sessions`, `session_tree`, `session_metadata`, `permission_grants`, `permission_grant_revoke`, and `permission_grants_clear` remain available while a prompt is active. `get_messages`, `get_session_stats`, `validate_session`, `permission_rules`, `permission_rule_add`, `permission_rule_remove`, `set_session_name`, `set_session_labels`, `fork_session`, `clone_session`, `summarize_branch`, `set_model`, `cycle_model`, `set_reasoning`, `clear_reasoning`, `compact`, `export`, `export_html`, and `context` materialize or mutate session history or durable policy and are rejected while a prompt is active. RPC `/compact` also marks the session busy while it generates and records the provider summary, so a prompt cannot start midway through compaction.
 
 Messages:
 
@@ -213,7 +244,7 @@ Messages:
 
 Returns durable message-like session entries for the active session in append order. The current response is `{session_id,messages,truncated,message_count}` where each message includes `version`, `id`, `parent_id`, `type`, `timestamp`, and object-shaped `data` unless the individual entry is too large, in which case the entry is marked `truncated`. Responses are capped to protect headless clients and the AVA process. Reasoning entries are sanitized: visible non-redacted text may be returned, but raw provider signatures and opaque redacted-thinking payloads are replaced by safe status fields such as `signature_present` and `redacted`. User image attachment metadata is also sanitized: `data.attachments[]` is user-message-only and contains only `id`, `type:"image"`, `mime_type`, `byte_size`, `sha256`, `storage_path`, and optional `redacted`; raw image bytes and unknown attachment fields are never returned. This intentionally excludes non-message bookkeeping entries such as `session_start`, `model_change`, `compaction`, and permission audit rows. Internal replay user messages inserted after context compaction are also hidden because they are provider-context repair entries, not user-visible transcript turns.
 
-Image attachment metadata is the backend-safe replay contract for image input. Valid metadata requires canonical unescaped object keys, `mime_type` to be one of `image/png`, `image/jpeg`, `image/webp`, or `image/gif`, `sha256` to be a 64-character hex digest, `byte_size` to be an unquoted base-10 JSON integer literal from `1` through `20971520` with no fraction or exponent notation, and `storage_path` to be a relative `attachments/...` path without absolute roots, `..`, backslashes, drive prefixes, or empty path segments. Inline image data fields such as base64 payloads are invalid. AVA reconstructs provider-neutral image content parts for replay, loads bytes only from the active session's `<session_id>.attachments` storage after path, symlink, byte-size, and SHA-256 checks, and serializes verified image payloads for OpenAI Responses, OpenAI-compatible chat-completions, and Anthropic Messages. Provider requests are capped at 16 images and 40 MiB total image bytes before base64 expansion; Anthropic image parts are additionally capped at 5 MiB each. RPC upload/input plumbing is still separate follow-up work, so headless clients should treat `attachments[]` as persisted metadata rather than an inline upload field.
+Image attachment metadata is the backend-safe replay contract for image input. Valid metadata requires canonical unescaped object keys, `mime_type` to be one of `image/png`, `image/jpeg`, `image/webp`, or `image/gif`, `sha256` to be a 64-character hex digest, `byte_size` to be an unquoted base-10 JSON integer literal from `1` through `20971520` with no fraction or exponent notation, and `storage_path` to be a relative `attachments/...` path without absolute roots, `..`, backslashes, drive prefixes, or empty path segments. Inline image data fields such as base64 payloads are invalid in persisted session metadata. AVA reconstructs provider-neutral image content parts for replay, loads bytes only from the active session's `<session_id>.attachments` storage after path, symlink, byte-size, and SHA-256 checks, and serializes verified image payloads for OpenAI Responses, OpenAI-compatible chat-completions, and Anthropic Messages. Provider requests are capped at 16 images and 40 MiB total image bytes before base64 expansion; Anthropic image parts are additionally capped at 5 MiB each. RPC prompt `attachments` is a local file import field, RPC prompt `images` is an inline upload import field, and `get_messages` `data.attachments[]` is persisted metadata, not an inline upload field.
 
 Session stats:
 
@@ -295,9 +326,9 @@ Session metadata, tree, fork, clone, and branch summaries:
 {"id":"5j","type":"summarize_branch","session_id":"session_source","branch_root_entry_id":"entry_root","branch_tip_entry_id":"entry_tip","summary":"Branch explored X and was abandoned because Y.","provider":"openai","model":"gpt-test","reason":"manual review"}
 ```
 
-`session_metadata` returns the current session's append-only metadata view: `session_id`, `name`, `labels`, `archived`, `parent_session_id`, `source_session_id`, `branch_from_entry_id`, `branch_origin`, and `actor`. `set_session_name` and `set_session_labels` append `session_metadata` entries and return the same metadata shape. Names are capped at 256 bytes; labels are unique non-empty strings, capped at 32 labels and 64 bytes per label. Metadata writes are rejected while a prompt is active.
+`session_metadata` returns the current session's append-only metadata view: `session_id`, `name`, `labels`, `labels_updated`, `archived`, `parent_session_id`, `source_session_id`, `branch_from_entry_id`, `branch_origin`, and `actor`. `labels_updated` is the timestamp of the most recent metadata entry that changed labels, or an empty string when labels have not been set. `set_session_name` and `set_session_labels` append `session_metadata` entries and return the same metadata shape. Names are capped at 256 bytes; labels are unique non-empty strings, capped at 32 labels and 64 bytes per label. Metadata writes are rejected while a prompt is active.
 
-`session_tree` returns `{current_session_id,roots,leaves,path,sessions}` for the current workspace. Each session node includes summary fields, metadata fields including `archived`, `actor`, `children`, `leaf`, and `current`. Parent metadata cycles are cut for tree output: affected nodes remain visible as usable roots/leaves instead of making `roots`, `leaves`, or `path` unusable.
+`session_tree` returns `{current_session_id,roots,leaves,path,sessions}` for the current workspace. Each session node includes summary fields, metadata fields including `labels_updated`, `archived`, `actor`, `children`, `leaf`, and `current`. Parent metadata cycles are cut for tree output: affected nodes remain visible as usable roots/leaves instead of making `roots`, `leaves`, or `path` unusable.
 
 `fork_session` creates a new session by copying the source through `branch_from_entry_id`, appends provenance metadata (`parent_session_id`, `source_session_id`, `branch_from_entry_id`, `branch_origin:"fork"`, `actor:"rpc"`), switches to the new session, and returns the state shape with `created:true`. If `session_id` is omitted, the current session is the source; if `branch_from_entry_id` is omitted, the source tip is used. When provided, `session_id` and `branch_from_entry_id` must be non-empty strings. `clone_session` copies the full source session, appends provenance metadata with `branch_origin:"clone"`, switches to it, and returns the state shape with `created:true`. `clone_session` rejects `branch_from_entry_id` because clones always copy the full source. Both commands leave the source session file untouched and are rejected while a prompt is active.
 
@@ -310,25 +341,28 @@ Backend slash-command equivalents:
 ```json
 {"id":"6","type":"compact","instructions":"optional notes"}
 {"id":"7","type":"export"}
-{"id":"8","type":"context"}
-{"id":"9","type":"list_plugins"}
-{"id":"10","type":"plugin_failures"}
-{"id":"11","type":"inspect_plugin","plugin_id":"com.example.tool"}
-{"id":"12","type":"enable_plugin","plugin_id":"com.example.tool"}
-{"id":"13","type":"disable_plugin","plugin_id":"com.example.tool"}
-{"id":"14","type":"validate_plugin","path":".ava/plugins/com.example.tool/plugin.json"}
-{"id":"15","type":"list_plugin_prompts","plugin_id":"com.example.tool"}
-{"id":"16","type":"get_plugin_prompt","plugin_id":"com.example.tool","name":"review"}
-{"id":"17","type":"list_plugin_skills","plugin_id":"com.example.tool"}
-{"id":"18","type":"get_plugin_skill","plugin_id":"com.example.tool","name":"triage"}
-{"id":"19","type":"run_plugin_command","plugin_id":"com.example.tool","name":"status","arguments":{}}
-{"id":"20","type":"list_mcp_servers"}
-{"id":"21","type":"inspect_mcp_server","server_id":"demo"}
-{"id":"22","type":"list_mcp_tools","server_id":"demo"}
-{"id":"23","type":"restart_mcp_server","server_id":"demo"}
+{"id":"8","type":"export_html"}
+{"id":"8b","type":"export_html","outputPath":"session.html"}
+{"id":"8c","type":"export_html","output_path":"session.html"}
+{"id":"9","type":"context"}
+{"id":"10","type":"list_plugins"}
+{"id":"11","type":"plugin_failures"}
+{"id":"12","type":"inspect_plugin","plugin_id":"com.example.tool"}
+{"id":"13","type":"enable_plugin","plugin_id":"com.example.tool"}
+{"id":"14","type":"disable_plugin","plugin_id":"com.example.tool"}
+{"id":"15","type":"validate_plugin","path":".ava/plugins/com.example.tool/plugin.json"}
+{"id":"16","type":"list_plugin_prompts","plugin_id":"com.example.tool"}
+{"id":"17","type":"get_plugin_prompt","plugin_id":"com.example.tool","name":"review"}
+{"id":"18","type":"list_plugin_skills","plugin_id":"com.example.tool"}
+{"id":"19","type":"get_plugin_skill","plugin_id":"com.example.tool","name":"triage"}
+{"id":"20","type":"run_plugin_command","plugin_id":"com.example.tool","name":"status","arguments":{}}
+{"id":"21","type":"list_mcp_servers"}
+{"id":"22","type":"inspect_mcp_server","server_id":"demo"}
+{"id":"23","type":"list_mcp_tools","server_id":"demo"}
+{"id":"24","type":"restart_mcp_server","server_id":"demo"}
 ```
 
-These dispatch `/compact`, `/export`, `/context`, `/plugins`, `/plugin run`, and `/mcp` through the shared backend command dispatcher. Plugin commands require `plugin_id` for plugin-specific operations, `path` for validate, and `name` for prompt/skill retrieval or command execution. MCP server commands require `server_id` except `list_mcp_servers`. Responses include `handled`, `quit`, `output` (array of strings), and `text` (joined output). Responses may also include `tool_timeline[]` using the same entry shape and status semantics as prompt `tool_timeline[]`, including `structured_result.status:"canceled"` for canceled command-side tools. Command-side permission asks use the supplied headless policy and fail closed when no policy allows the operation.
+These dispatch `/compact`, `/export`, `/export html`, `/context`, `/plugins`, `/plugin run`, and `/mcp` through the shared backend command dispatcher. `export` returns Markdown in command output. `export_html` returns HTML in command output when no path is supplied; with `outputPath` or the equivalent `output_path`, it writes HTML through AVA's permissioned file-mutation path and returns the written path/byte summary plus command-side tool events. Plugin commands require `plugin_id` for plugin-specific operations, `path` for validate, and `name` for prompt/skill retrieval or command execution. MCP server commands require `server_id` except `list_mcp_servers`. Responses include `handled`, `quit`, `output` (array of strings), and `text` (joined output). Responses may also include `tool_timeline[]` using the same entry shape and status semantics as prompt `tool_timeline[]`, including `structured_result.status:"canceled"` for canceled command-side tools. Command-side permission asks use the supplied headless policy and fail closed when no policy allows the operation.
 
 `compact` requires credentials for the active session provider and asks that provider to generate the compaction summary before appending a compaction boundary. RPC compact emits `compaction_start` and `compaction_end` events around successful provider-backed compaction; stale-session retries emit `retry` with `reason:"stale_compaction_snapshot"` and bounded `attempt`/`max_attempts` metadata. It returns `success:false` for missing auth, provider summary failure, empty or oversized summaries, stale-session append failures, or active-run conflicts. On success, the recorded compaction entry contains summary metadata such as trigger, estimated tokens, threshold, retained recent context, and keep-recent settings.
 
@@ -449,6 +483,7 @@ RPC notifications may reuse the event envelopes above. Request ids are client-ow
 Headless operation is fail-closed by default:
 
 - Permission decisions that require user approval fail unless headless policy supplies `--allow read-only`/`--allow-tool` for a supported read/search tool, `--allow-tool skill` for exact skill loads, `--allow-tool webfetch` for exact `network.fetch` webfetch prompts, `--allow-tool websearch` for exact `network.search` websearch prompts, `--allow-tool mcp` for MCP launch/connect/tool/resource prompts, or RPC mode receives an explicit `permission_reply` for the active resolver request.
+- Permission-denied tool results include the backend reason, risk label, resolution reason when available, generated `permission_request_id`, and follow-up `/permissions audit show <permission_request_id>` plus `/permissions diagnose <permission_request_id>` commands in `structured_result.error.details`. Text print mode writes those details to stderr for human operators.
 - The `question` tool fails with an unavailable interaction error unless RPC mode receives an explicit `question_reply` for the active resolver request.
 - Destructive operations remain behind existing backend permission policy checks.
 

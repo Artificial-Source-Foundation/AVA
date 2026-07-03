@@ -1,16 +1,19 @@
 #pragma once
 
 #include "ava/app/events.h"
+#include "ava/app/project_trust.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/config/model_config.h"
 #include "ava/config/prompt_config.h"
 #include "ava/config/xdg_paths.h"
+#include "ava/session/attachments.h"
 #include "ava/session/compaction.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
 #include "ava/provider/provider.h"
 #include "ava/context/context_loader.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <mutex>
@@ -21,11 +24,40 @@
 
 namespace ava::app {
 
+enum class RuntimeFreshnessSourceKind
+{
+  SystemPrompt,
+  AppendSystemPrompt,
+  PromptCommand,
+  Skill,
+  PluginManifest,
+  PluginPrompt,
+  PluginSkill,
+};
+
 struct ContextSourceMetadata
 {
   std::filesystem::path path;
   ava::context::ContextSourceType source_type = ava::context::ContextSourceType::Workspace;
   std::size_t byte_count = 0;
+  std::uint64_t content_fingerprint = 0;
+};
+
+struct RuntimeFreshnessSourceMetadata
+{
+  RuntimeFreshnessSourceKind kind = RuntimeFreshnessSourceKind::Skill;
+  std::string scope;
+  std::string source_id;
+  std::string name;
+  std::filesystem::path path;
+  std::size_t byte_count = 0;
+  std::uint64_t content_fingerprint = 0;
+};
+
+struct RuntimePromptOverrides
+{
+  std::optional<std::string> system_prompt = std::nullopt;
+  std::vector<std::string> append_system_prompts;
 };
 
 struct RuntimeOpenOptions
@@ -33,9 +65,14 @@ struct RuntimeOpenOptions
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
   std::optional<std::string> requested_session_id;
+  std::optional<std::string> fork_session_id;
+  std::optional<std::string> initial_session_name;
   bool continue_last_session = false;
+  bool sessionless = false;
   ava::agent::Mode mode = ava::agent::Mode::Build;
+  ava::agent::ToolVisibilityOptions tool_visibility;
   ava::config::XdgPaths paths = ava::config::xdg_paths();
+  RuntimePromptOverrides prompt_overrides;
 };
 
 struct RuntimeReasoningSelection
@@ -54,10 +91,16 @@ struct RuntimeSession
   ava::config::XdgPaths paths;
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
+  ProjectTrustState project_trust;
+  RuntimePromptOverrides prompt_overrides;
+  ava::agent::ToolVisibilityOptions tool_visibility;
   std::vector<ContextSourceMetadata> context_sources;
+  std::vector<RuntimeFreshnessSourceMetadata> freshness_sources;
   std::string system_prompt;
   std::optional<RuntimeReasoningSelection> reasoning = std::nullopt;
+  std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
   bool created = false;
+  bool sessionless = false;
 };
 
 struct RuntimePromptState
@@ -65,6 +108,7 @@ struct RuntimePromptState
   ava::agent::Mode mode = ava::agent::Mode::Build;
   ava::config::PromptSelection prompt;
   std::vector<ContextSourceMetadata> context_sources;
+  std::vector<RuntimeFreshnessSourceMetadata> freshness_sources;
   std::string system_prompt;
 };
 
@@ -82,6 +126,7 @@ struct RuntimeRunOptions
   std::function<bool()> cancel_requested = nullptr;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
   std::mutex* session_mutex = nullptr;
+  std::vector<ava::session::ImageAttachmentRef> image_attachments;
 };
 
 using CompactionSummaryGenerator =

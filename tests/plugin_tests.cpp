@@ -1143,6 +1143,19 @@ void test_plugin_tool_dispatcher()
   {
     ava::test::expect_json_matches_golden(*plugin_schema, "plugin-tool-schema.json", "plugin tool provider schema matches AVA 0.80 golden fixture");
   }
+  {
+    auto no_builtin_context = context;
+    no_builtin_context.tool_visibility.mode = ava::agent::ToolVisibilityMode::NoBuiltinTools;
+    auto const no_builtin_schemas = ava::agent::ToolDispatcher::tool_schemas_json(no_builtin_context);
+    auto const visible_plugin_schema = std::find_if(no_builtin_schemas.begin(), no_builtin_schemas.end(), [&](std::string const& schema) {
+      return schema.find("\"name\":\"" + model_tool_name + "\"") != std::string::npos;
+    });
+    auto const visible_builtin_schema = std::find_if(no_builtin_schemas.begin(), no_builtin_schemas.end(), [](std::string const& schema) {
+      return schema.find("\"name\":\"read_file\"") != std::string::npos;
+    });
+    expect(visible_plugin_schema != no_builtin_schemas.end() && visible_builtin_schema == no_builtin_schemas.end(),
+           "no-builtin tool visibility keeps enabled plugin tools while hiding built-ins");
+  }
 
   ava::agent::ToolDispatcher dispatcher(context);
   auto dispatched =

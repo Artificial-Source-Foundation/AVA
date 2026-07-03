@@ -6,7 +6,9 @@
 #include "ava/session/session_store.h"
 #include "ava/session/session_tree.h"
 
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ava::app {
@@ -28,14 +30,27 @@ enum class SessionSelectorSort
 [[nodiscard]] tui::SelectListView model_selector_view(ava::config::ModelRegistry const& registry, ava::config::ModelInfo const& current_model,
                                                       std::string footer_hint = {});
 [[nodiscard]] tui::SelectListView model_selector_view(RuntimeSession const& session, std::string footer_hint = {});
+[[nodiscard]] tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const& registry,
+                                                             ava::config::ModelInfo const& current_model,
+                                                             std::optional<std::vector<std::string>> const& scoped_model_cycle,
+                                                             std::string footer_hint = {});
+[[nodiscard]] tui::SelectListView scoped_model_selector_view(RuntimeSession const& session, std::string footer_hint = {});
 [[nodiscard]] tui::SelectListView session_selector_view(std::vector<ava::session::SessionSummary> summaries, std::string current_session_id = {},
                                                         SessionSelectorSort sort = SessionSelectorSort::Recent, std::string footer_hint = {},
                                                         bool show_paths = true);
 [[nodiscard]] tui::SelectListView session_selector_view(ava::session::SessionTreeIndex tree, SessionSelectorSort sort = SessionSelectorSort::Recent,
                                                         std::string footer_hint = {}, bool named_only = false,
-                                                        bool show_paths = true, bool show_archived = false);
+                                                        bool show_paths = true, bool show_archived = false,
+                                                        bool show_label_time = false);
 [[nodiscard]] tui::SelectListView session_selector_view(RuntimeSession const& session, SessionSelectorSort sort = SessionSelectorSort::Recent,
                                                         std::string footer_hint = {}, bool named_only = false,
-                                                        bool show_paths = true, bool show_archived = false);
+                                                        bool show_paths = true, bool show_archived = false,
+                                                        bool show_label_time = false);
+[[nodiscard]] std::optional<std::string> session_selector_parent_target(ava::session::SessionTreeIndex const& tree,
+                                                                        std::string_view session_id);
+[[nodiscard]] std::optional<std::string> session_selector_child_target(ava::session::SessionTreeIndex const& tree,
+                                                                       std::string_view session_id,
+                                                                       SessionSelectorSort sort = SessionSelectorSort::Recent,
+                                                                       bool include_archived = false);
 
 }  // namespace ava::app

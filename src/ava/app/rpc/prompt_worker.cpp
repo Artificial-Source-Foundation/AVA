@@ -45,8 +45,10 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
     }
     auto policy_permission_resolver = prompt_options->permission_resolver;
 
-    auto run_one_prompt = [&](std::string const& request_id, std::string const& message) -> ava::core::VoidResult {
+    auto run_one_prompt = [&](std::string const& request_id, std::string const& message,
+                              std::vector<ava::session::ImageAttachmentRef> image_attachments) -> ava::core::VoidResult {
       set_active_request_id(options.run_state, request_id);
+      prompt_options->image_attachments = std::move(image_attachments);
       prompt_options->cancel_requested = [&run_state = options.run_state, stop_token] { return stop_token.stop_requested() || cancel_requested(run_state); };
       prompt_options->session_mutex = &options.session_mutex;
       prompt_options->permission_resolver = make_rpc_permission_resolver(options.pending_state, options.output, options.run_state, options.session,
@@ -106,7 +108,7 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
       return {};
     };
 
-    auto prompt_run = run_one_prompt(options.request_id, options.message);
+    auto prompt_run = run_one_prompt(options.request_id, options.message, std::move(options.image_attachments));
     if (!prompt_run)
     {
       record_async_error(options.run_state, std::move(prompt_run.error()));
@@ -128,7 +130,7 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
         finish_with_queue_cleanup("prompt_start_failed");
         return;
       }
-      auto follow_up_run = run_one_prompt(follow_up->request_id, follow_up->message);
+      auto follow_up_run = run_one_prompt(follow_up->request_id, follow_up->message, {});
       if (!follow_up_run)
       {
         record_async_error(options.run_state, std::move(follow_up_run.error()));

@@ -662,7 +662,11 @@ PluginDiscoveryOptions discovery_options_for_context(ava::tools::ToolContext con
 {
   auto options = default_plugin_discovery_options(context.workspace_dir);
   if (!context.plugin_global_plugins_dir.empty()) options.global_plugins_dir = context.plugin_global_plugins_dir;
-  if (!context.plugin_project_plugins_dir.empty()) options.project_plugins_dir = context.plugin_project_plugins_dir;
+  if (!context.include_project_plugins) {
+    options.project_plugins_dir.clear();
+  } else if (!context.plugin_project_plugins_dir.empty()) {
+    options.project_plugins_dir = context.plugin_project_plugins_dir;
+  }
   return options;
 }
 

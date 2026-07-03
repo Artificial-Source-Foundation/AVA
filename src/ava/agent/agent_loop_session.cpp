@@ -44,13 +44,45 @@ std::string reasoning_block_data_json(ParsedReasoningBlock const& block, std::st
   return json;
 }
 
+std::string image_attachments_json(std::vector<ava::session::ImageAttachmentRef> const& attachments)
+{
+  std::string json;
+  json += '[';
+  for (std::size_t index = 0; index < attachments.size(); ++index) {
+    auto const& attachment = attachments[index];
+    if (index > 0) json += ',';
+    json += "{\"id\":\"" + ava::core::json::escape(attachment.id) + "\",\"type\":\"image\",\"mime_type\":\"" +
+            ava::core::json::escape(attachment.mime_type) + "\",\"byte_size\":" +
+            std::to_string(attachment.byte_size) + ",\"sha256\":\"" +
+            ava::core::json::escape(attachment.sha256) + "\",\"storage_path\":\"" +
+            ava::core::json::escape(attachment.storage_path) + "\"}";
+  }
+  json += ']';
+  return json;
+}
+
+std::string user_message_data_json(std::string const& text,
+                                   std::vector<ava::session::ImageAttachmentRef> const& attachments)
+{
+  std::string json = "{\"text\":\"" + ava::core::json::escape(text) + "\"";
+  if (!attachments.empty()) json += ",\"attachments\":" + image_attachments_json(attachments);
+  json += '}';
+  return json;
+}
+
 }  // namespace
 
 ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text)
 {
+  return append_user_message(store, text, {});
+}
+
+ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text,
+                                                   std::vector<ava::session::ImageAttachmentRef> const& attachments)
+{
   auto id = ava::core::make_id("entry");
   auto appended = append_entry_with_id(store, ava::session::EntryType::UserMessage, id,
-                                       "{\"text\":\"" + ava::core::json::escape(text) + "\"}");
+                                       user_message_data_json(text, attachments));
   if (!appended) return std::unexpected(std::move(appended.error()));
   return id;
 }
@@ -58,10 +90,18 @@ ava::core::Result<std::string> append_user_message(ava::session::SessionStore& s
 ava::core::VoidResult append_replay_user_message(ava::session::SessionStore& store, std::string const& text,
                                                  std::string const& replay_of)
 {
-  return append_entry(store, ava::session::EntryType::UserMessage,
-                      "{\"text\":\"" + ava::core::json::escape(text) + "\",\"internal_replay\":true,\"replay_of\":\"" +
-                          ava::core::json::escape(replay_of) +
-                          "\",\"reason\":\"context_compaction_active_prompt_replay\"}");
+  return append_replay_user_message(store, text, {}, replay_of);
+}
+
+ava::core::VoidResult append_replay_user_message(ava::session::SessionStore& store, std::string const& text,
+                                                 std::vector<ava::session::ImageAttachmentRef> const& attachments,
+                                                 std::string const& replay_of)
+{
+  auto data = user_message_data_json(text, attachments);
+  data.pop_back();
+  data += ",\"internal_replay\":true,\"replay_of\":\"" + ava::core::json::escape(replay_of) +
+          "\",\"reason\":\"context_compaction_active_prompt_replay\"}";
+  return append_entry(store, ava::session::EntryType::UserMessage, std::move(data));
 }
 
 ava::core::VoidResult append_assistant_message(ava::session::SessionStore& store, std::string const& text,

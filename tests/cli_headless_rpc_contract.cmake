@@ -36,7 +36,7 @@ execute_process(
           "XDG_STATE_HOME=${TEST_ROOT}/state"
           "XDG_DATA_HOME=${TEST_ROOT}/data"
           "NO_COLOR=1"
-          "${AVA_EXE}" --rpc
+          "${AVA_EXE}" --mode rpc
   WORKING_DIRECTORY "${WORKSPACE}"
   INPUT_FILE "${INPUT_FILE}"
   OUTPUT_VARIABLE AVA_OUTPUT
@@ -46,7 +46,7 @@ execute_process(
 )
 
 if(NOT AVA_RESULT EQUAL 0)
-  message(FATAL_ERROR "ava --rpc exited with ${AVA_RESULT}\nstdout:\n${AVA_OUTPUT}\nstderr:\n${AVA_ERROR}")
+  message(FATAL_ERROR "ava --mode rpc exited with ${AVA_RESULT}\nstdout:\n${AVA_OUTPUT}\nstderr:\n${AVA_ERROR}")
 endif()
 
 foreach(NEEDLE

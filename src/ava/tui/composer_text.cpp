@@ -136,6 +136,27 @@ bool is_wide_codepoint(char32_t codepoint)
          (codepoint >= 0x1F300 && codepoint <= 0x1FAFF) || (codepoint >= 0x20000 && codepoint <= 0x3FFFD);
 }
 
+bool is_regional_indicator(char32_t codepoint)
+{
+  return codepoint >= 0x1F1E6 && codepoint <= 0x1F1FF;
+}
+
+bool is_emoji_modifier(char32_t codepoint)
+{
+  return codepoint >= 0x1F3FB && codepoint <= 0x1F3FF;
+}
+
+bool is_variation_selector(char32_t codepoint)
+{
+  return (codepoint >= 0xFE00 && codepoint <= 0xFE0F) || (codepoint >= 0xE0100 && codepoint <= 0xE01EF);
+}
+
+bool is_emoji_cluster_start(char32_t codepoint)
+{
+  return (codepoint >= 0x1F000 && codepoint <= 0x1FAFF) || (codepoint >= 0x2600 && codepoint <= 0x26FF) ||
+         codepoint == 0x2705;
+}
+
 bool is_zero_width_codepoint(char32_t codepoint)
 {
   return (codepoint >= 0x0300 && codepoint <= 0x036F) || (codepoint >= 0x0483 && codepoint <= 0x0489) || (codepoint >= 0x0591 && codepoint <= 0x05BD) ||
@@ -164,6 +185,70 @@ std::size_t codepoint_columns(char32_t codepoint)
   return is_wide_codepoint(codepoint) ? std::size_t{2} : std::size_t{1};
 }
 
+struct DecodedCodepoint
+{
+  char32_t codepoint = 0;
+  std::size_t length = 0;
+};
+
+std::optional<DecodedCodepoint> decode_next_codepoint(std::string_view text, std::size_t index)
+{
+  if (index >= text.size())
+    return std::nullopt;
+  auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
+  char32_t codepoint = 0;
+  if (!decode_utf8_codepoint(text, index, length, codepoint))
+    return std::nullopt;
+  return DecodedCodepoint{.codepoint = codepoint, .length = length};
+}
+
+std::optional<std::size_t> emoji_cluster_length(std::string_view text, std::size_t index, char32_t first, std::size_t first_length)
+{
+  if (is_regional_indicator(first))
+  {
+    auto length = first_length;
+    if (auto const next = decode_next_codepoint(text, index + length); next && is_regional_indicator(next->codepoint))
+      length += next->length;
+    return length;
+  }
+
+  if (!is_emoji_cluster_start(first))
+    return std::nullopt;
+
+  auto length = first_length;
+  while (auto const next = decode_next_codepoint(text, index + length))
+  {
+    if (is_variation_selector(next->codepoint) || is_emoji_modifier(next->codepoint))
+    {
+      length += next->length;
+      continue;
+    }
+    if (next->codepoint == 0x200D)
+    {
+      auto const joined = decode_next_codepoint(text, index + length + next->length);
+      if (!joined)
+        break;
+      length += next->length + joined->length;
+      continue;
+    }
+    break;
+  }
+  return length;
+}
+
+TerminalTextCell terminal_text_cell(std::string_view text, std::size_t index)
+{
+  if (index >= text.size())
+    return {};
+  auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
+  char32_t codepoint = 0;
+  if (!decode_utf8_codepoint(text, index, length, codepoint))
+    return TerminalTextCell{.bytes = 1, .columns = 1, .valid = false};
+  if (auto const cluster_length = emoji_cluster_length(text, index, codepoint, length))
+    return TerminalTextCell{.bytes = *cluster_length, .columns = 2, .valid = true};
+  return TerminalTextCell{.bytes = length, .columns = codepoint_columns(codepoint), .valid = true};
+}
+
 bool skip_sgr_sequence(std::string_view text, std::size_t& index)
 {
   if (index + 1 >= text.size() || text[index] != '\x1b' || text[index + 1] != '[')
@@ -183,27 +268,42 @@ bool skip_sgr_sequence(std::string_view text, std::size_t& index)
   return true;
 }
 
+bool skip_osc_sequence(std::string_view text, std::size_t& index)
+{
+  if (index + 1 >= text.size() || text[index] != '\x1b' || text[index + 1] != ']')
+  {
+    return false;
+  }
+  auto end = index + 2;
+  while (end < text.size())
+  {
+    if (text[end] == '\a')
+    {
+      index = end + 1;
+      return true;
+    }
+    if (text[end] == '\x1b' && end + 1 < text.size() && text[end + 1] == '\\')
+    {
+      index = end + 2;
+      return true;
+    }
+    ++end;
+  }
+  return false;
+}
+
 std::size_t terminal_text_columns(std::string_view text)
 {
   std::size_t columns = 0;
   for (std::size_t index = 0; index < text.size();)
   {
-    if (skip_sgr_sequence(text, index))
+    if (skip_sgr_sequence(text, index) || skip_osc_sequence(text, index))
     {
       continue;
     }
-    auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
-    char32_t codepoint = 0;
-    if (decode_utf8_codepoint(text, index, length, codepoint))
-    {
-      index += length;
-      columns += codepoint_columns(codepoint);
-    }
-    else
-    {
-      ++index;
-      ++columns;
-    }
+    auto const cell = terminal_text_cell(text, index);
+    index += cell.bytes;
+    columns += cell.columns;
   }
   return columns;
 }
@@ -221,16 +321,14 @@ std::string fit_line(std::string text, std::size_t width)
     std::size_t visible = 0;
     for (std::size_t index = 0; index < text.size() && visible < width;)
     {
-      auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
-      char32_t cp = 0;
-      if (decode_utf8_codepoint(text, index, length, cp))
+      auto const cell = terminal_text_cell(text, index);
+      if (cell.valid)
       {
-        auto const cp_width = codepoint_columns(cp);
-        if (visible + cp_width > width)
+        if (visible + cell.columns > width)
           break;
-        output.append(text.substr(index, length));
-        index += length;
-        visible += cp_width;
+        output.append(text.substr(index, cell.bytes));
+        index += cell.bytes;
+        visible += cell.columns;
       }
       else
       {
@@ -247,16 +345,14 @@ std::string fit_line(std::string text, std::size_t width)
   std::size_t visible = 0;
   for (std::size_t index = 0; index < text.size() && visible < visible_budget;)
   {
-    auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
-    char32_t cp = 0;
-    if (decode_utf8_codepoint(text, index, length, cp))
+    auto const cell = terminal_text_cell(text, index);
+    if (cell.valid)
     {
-      auto const cp_width = codepoint_columns(cp);
-      if (visible + cp_width > visible_budget)
+      if (visible + cell.columns > visible_budget)
         break;
-      output.append(text.substr(index, length));
-      index += length;
-      visible += cp_width;
+      output.append(text.substr(index, cell.bytes));
+      index += cell.bytes;
+      visible += cell.columns;
     }
     else
     {
@@ -284,6 +380,7 @@ std::string fit_line_preserving_sgr(std::string text, std::size_t width)
   auto const visible_budget = width - 3;
   std::size_t visible = 0;
   bool emitted_sgr = false;
+  bool emitted_osc = false;
   std::string output;
   for (std::size_t index = 0; index < text.size() && visible < visible_budget;)
   {
@@ -294,17 +391,22 @@ std::string fit_line_preserving_sgr(std::string text, std::size_t width)
       emitted_sgr = true;
       continue;
     }
-
-    auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
-    char32_t cp = 0;
-    if (decode_utf8_codepoint(text, index, length, cp))
+    auto const before_osc = index;
+    if (skip_osc_sequence(text, index))
     {
-      auto const cp_width = codepoint_columns(cp);
-      if (visible + cp_width > visible_budget)
+      output.append(text.substr(before_osc, index - before_osc));
+      emitted_osc = true;
+      continue;
+    }
+
+    auto const cell = terminal_text_cell(text, index);
+    if (cell.valid)
+    {
+      if (visible + cell.columns > visible_budget)
         break;
-      output.append(text.substr(index, length));
-      index += length;
-      visible += cp_width;
+      output.append(text.substr(index, cell.bytes));
+      index += cell.bytes;
+      visible += cell.columns;
     }
     else
     {
@@ -313,6 +415,8 @@ std::string fit_line_preserving_sgr(std::string text, std::size_t width)
       ++visible;
     }
   }
+  if (emitted_osc)
+    output += "\x1b]8;;\x1b\\";
   output += "...";
   if (emitted_sgr)
     output += kSgrReset;
@@ -367,12 +471,9 @@ std::vector<std::string> wrap_transcript_text(std::string_view text, std::size_t
   std::size_t columns = 0;
   for (std::size_t index = 0; index < sanitized.size();)
   {
-    auto const byte = static_cast<unsigned char>(sanitized[index]);
-    auto const length = utf8_sequence_length(byte);
-    char32_t codepoint = 0;
-    auto const valid = decode_utf8_codepoint(sanitized, index, length, codepoint);
-    auto const chunk_length = valid ? length : std::size_t{1};
-    auto const chunk_columns = valid ? codepoint_columns(codepoint) : std::size_t{1};
+    auto const cell = terminal_text_cell(sanitized, index);
+    auto const chunk_length = cell.valid ? cell.bytes : std::size_t{1};
+    auto const chunk_columns = cell.columns;
     if (columns + chunk_columns > content_width && !current.empty())
     {
       wrapped.push_back(std::move(current));

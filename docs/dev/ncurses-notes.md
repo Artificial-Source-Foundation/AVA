@@ -49,21 +49,21 @@ tmux capture-pane -t ava-tui-test -p
 tmux kill-session -t ava-tui-test
 ```
 
-Use that smoke to verify bracketed paste enable/disable, Escape dismissal latency, resize redraw, mouse wheel/click delivery, Unicode cursor placement, and visible flicker before claiming broader terminal-driver stability.
+Use that smoke to verify bracketed paste enable/disable, Escape dismissal latency, resize redraw, mouse wheel/click/drag delivery, Unicode cursor placement, and visible flicker before claiming broader terminal-driver stability.
 
 Manual PTY/tmux checklist:
 
 - Start AVA in a clean pane, resize through narrow/wide/tall/short shapes, and confirm the transcript and composer stay bounded.
 - Toggle a modal or palette, press Escape, and confirm the hardware cursor is hidden while the overlay is active and returns to the composer afterward.
 - Paste a small multiline block and a large bracketed paste; confirm paste markers are not rendered as text and terminal paste mode is disabled after exit.
-- Scroll with the mouse wheel and click palette rows; confirm terminal selection still works outside AVA-specific mouse actions.
+- Scroll with the mouse wheel, click palette rows, drag-select composer text, and use Shift+Arrow plus Ctrl+C to select/copy composer text; confirm terminal selection still works outside AVA-specific mouse actions.
 - Repeat once inside tmux and once over an ssh-like terminal when available, recording `$TERM`, `$TERM_PROGRAM`, `$COLORTERM`, and `$TMUX`.
 
 ## Current Terminal Feature Boundaries
 
 - AVA intentionally keeps a full ncurses redraw per frame. Batch 4 stress coverage remains within budget, so differential redraw/damage tracking is deferred until a real PTY/tmux baseline shows flicker or latency that full redraw cannot meet.
 - Cursor flicker is reduced by hiding the hardware cursor during repaint and restoring it only after the composer cursor is moved. Overlay surfaces keep the hardware cursor hidden.
-- CSI-u/Kitty keyboard handling is limited to the AVA-supported modified Enter forms; full Kitty keyboard protocol, key release/repeat, and non-Latin base-key reporting remain unsupported.
-- Mouse support is limited to wheel and left-click actions consumed by AVA. Drag, right-click menus, and terminal text-selection integration are not implemented.
+- CSI-u/Kitty keyboard handling covers AVA-supported modified Enter forms, Kitty keypad printable/navigation reports, Shift+Left/Right and Shift+Up/Down character-selection reports, Shift+Ctrl/Alt+Left/Right word-selection reports, Shift+Home/End line-selection reports, Shift+Backspace/Delete delete reports, Ctrl+Backspace session-selector reports, and AVA's known Ctrl/Alt editor chords with base-layout fallback for supported keys. TUI entry pushes Kitty keyboard flags `5` for disambiguated escape codes plus alternate/base-layout key reporting, queries Kitty support, and falls back to xterm modifyOtherKeys (`CSI >4;2m`) when Kitty reports zero flags or only device attributes reply. Restore disables AVA-owned modifyOtherKeys fallback and pops the Kitty keyboard stack. xterm modifyOtherKeys reports (`CSI 27;<modifier>;<codepoint>~`) are parsed for AVA-supported shortcuts and printable text. ncurses shifted vertical arrows are accepted through `kUP2`/`kDN2`, `kri`/`kind`, and guarded `KEY_SUP`/`KEY_SDOWN`/`KEY_SR`/`KEY_SF` paths because tmux-compatible terminfos often expose `CSI 1;2 A/B` as scroll-key capabilities; shifted Delete is accepted through `kDC2` and guarded `KEY_SDC` reports. Key-release semantics, arbitrary custom key ids, and unmapped non-Latin chords remain unsupported; repeat CSI-u events are treated as ordinary input.
+- Mouse support consumes wheel, left-click, and composer left-drag selection actions in AVA. Raw SGR/legacy drag and release reports are parsed distinctly so release does not masquerade as click, and raw SGR composer drag selection can replace the selected text on the next edit. Right-click menus and terminal text-selection integration are not implemented.
 - IME behavior is validated only through Unicode width/cursor placement and manual smoke testing; AVA does not expose a dedicated IME composition protocol.
-- Terminal images, artifact panes, OSC clipboard/image protocols, and synchronized-output capability negotiation remain out of scope for the ncurses frontend hardening slice.
+- Terminal images, artifact panes, arbitrary OSC clipboard/image negotiation, and synchronized-output capability negotiation remain out of scope for the ncurses frontend hardening slice; explicit copy commands use the existing OSC52 clipboard write path.

@@ -10,9 +10,15 @@
 #include "ava/app/command_registry.h"
 #include "ava/app/command_sessions.h"
 #include "ava/app/command_tools.h"
+#include "ava/app/display_settings.h"
 #include "ava/app/plugin_event_hooks.h"
+#include "ava/app/project_trust.h"
+#include "ava/app/runtime_prompt.h"
 
 #include "ava/tools/file_tools.h"
+
+#include "ava/tui/keybindings.h"
+#include "ava/tui/theme.h"
 
 #include "ava/mcp/config.h"
 #include "ava/mcp/stdio_client.h"
@@ -24,21 +30,317 @@
 #include "ava/core/json.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
+#include <vector>
 
 namespace ava::app {
 namespace {
+
+constexpr auto kMaxKeybindingsImportBytes = std::uintmax_t{256 * 1024};
+
+struct JsonObjectEntry
+{
+  std::string key;
+  std::string raw_key;
+  std::string raw_value;
+};
 
 bool starts_with_command(std::string_view line, std::string_view command) noexcept
 {
   return line == command || (line.starts_with(command) && line.size() > command.size() && line[command.size()] == ' ');
 }
 
+bool is_json_whitespace(char ch) noexcept
+{
+  return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
+}
+
+void skip_json_whitespace(std::string_view text, std::size_t& offset) noexcept
+{
+  while (offset < text.size() && is_json_whitespace(text[offset])) ++offset;
+}
+
+std::string trim_copy(std::string_view text)
+{
+  std::size_t begin = 0;
+  while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin])) != 0) ++begin;
+  std::size_t end = text.size();
+  while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1])) != 0) --end;
+  return std::string(text.substr(begin, end - begin));
+}
+
+std::optional<std::size_t> json_string_literal_end(std::string_view text, std::size_t start) noexcept
+{
+  if (start >= text.size() || text[start] != '"') return std::nullopt;
+  bool escaped = false;
+  for (std::size_t index = start + 1; index < text.size(); ++index) {
+    auto const ch = text[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"') return index;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::size_t> json_balanced_value_end(std::string_view text, std::size_t start)
+{
+  if (start >= text.size() || (text[start] != '{' && text[start] != '[')) return std::nullopt;
+  std::vector<char> expected_closers;
+  bool in_string = false;
+  bool escaped = false;
+  for (std::size_t index = start; index < text.size(); ++index) {
+    auto const ch = text[index];
+    if (in_string) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch == '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch == '"') in_string = false;
+      continue;
+    }
+    if (ch == '"') {
+      in_string = true;
+      continue;
+    }
+    if (ch == '{') {
+      expected_closers.push_back('}');
+      continue;
+    }
+    if (ch == '[') {
+      expected_closers.push_back(']');
+      continue;
+    }
+    if (ch == '}' || ch == ']') {
+      if (expected_closers.empty() || expected_closers.back() != ch) return std::nullopt;
+      expected_closers.pop_back();
+      if (expected_closers.empty()) return index + 1;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<std::size_t> json_value_end(std::string_view text, std::size_t start)
+{
+  if (start >= text.size()) return std::nullopt;
+  if (text[start] == '"') {
+    auto const end = json_string_literal_end(text, start);
+    if (!end) return std::nullopt;
+    return *end + 1;
+  }
+  if (text[start] == '{' || text[start] == '[') return json_balanced_value_end(text, start);
+
+  auto end = start;
+  while (end < text.size() && text[end] != ',' && text[end] != '}') ++end;
+  while (end > start && is_json_whitespace(text[end - 1])) --end;
+  return end > start ? std::optional<std::size_t>(end) : std::nullopt;
+}
+
+std::optional<std::vector<JsonObjectEntry>> top_level_json_object_entries(std::string_view object)
+{
+  if (!ava::core::json::is_valid_object(object)) return std::nullopt;
+
+  std::vector<JsonObjectEntry> entries;
+  std::size_t offset = 0;
+  skip_json_whitespace(object, offset);
+  if (offset >= object.size() || object[offset] != '{') return std::nullopt;
+  ++offset;
+  skip_json_whitespace(object, offset);
+  if (offset < object.size() && object[offset] == '}') return entries;
+
+  while (offset < object.size()) {
+    skip_json_whitespace(object, offset);
+    auto const key_start = offset;
+    auto const key_end = json_string_literal_end(object, key_start);
+    if (!key_end) return std::nullopt;
+    auto raw_key = std::string(object.substr(key_start, *key_end - key_start + 1));
+    auto const decoded_key = ava::core::json::string_field("{\"value\":" + raw_key + "}", "value");
+    if (!decoded_key) return std::nullopt;
+    offset = *key_end + 1;
+    skip_json_whitespace(object, offset);
+    if (offset >= object.size() || object[offset] != ':') return std::nullopt;
+    ++offset;
+    skip_json_whitespace(object, offset);
+    auto const value_start = offset;
+    auto const value_end = json_value_end(object, value_start);
+    if (!value_end) return std::nullopt;
+    auto raw_value = std::string(object.substr(value_start, *value_end - value_start));
+    entries.push_back(JsonObjectEntry{.key = *decoded_key, .raw_key = std::move(raw_key), .raw_value = std::move(raw_value)});
+    offset = *value_end;
+    skip_json_whitespace(object, offset);
+    if (offset < object.size() && object[offset] == ',') {
+      ++offset;
+      continue;
+    }
+    if (offset < object.size() && object[offset] == '}') return entries;
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+std::vector<std::string> split_keybinding_tokens(std::vector<std::string> const& args, std::size_t first)
+{
+  std::vector<std::string> tokens;
+  for (std::size_t index = first; index < args.size(); ++index) {
+    std::string_view text = args[index];
+    std::size_t start = 0;
+    while (start <= text.size()) {
+      auto const comma = text.find(',', start);
+      auto const end = comma == std::string_view::npos ? text.size() : comma;
+      auto token = trim_copy(text.substr(start, end - start));
+      if (!token.empty()) tokens.push_back(std::move(token));
+      if (comma == std::string_view::npos) break;
+      start = comma + 1;
+    }
+  }
+  return tokens;
+}
+
+std::optional<std::vector<std::string>> keybinding_key_displays(std::vector<std::string> const& args, std::size_t first,
+                                                               std::string& error)
+{
+  auto tokens = split_keybinding_tokens(args, first);
+  if (tokens.empty()) {
+    error = "missing keybinding key";
+    return std::nullopt;
+  }
+
+  std::vector<std::string> displays;
+  for (auto const& token : tokens) {
+    auto const key = ava::tui::parse_key_name(token);
+    if (!key) {
+      error = "unknown TUI key binding:\n  key: " + token;
+      return std::nullopt;
+    }
+    auto display = ava::tui::key_display(*key);
+    if (display.empty()) {
+      error = "unsupported TUI key binding:\n  key: " + token;
+      return std::nullopt;
+    }
+    if (std::ranges::find(displays, display) == displays.end()) displays.push_back(std::move(display));
+  }
+  if (displays.empty()) {
+    error = "missing keybinding key";
+    return std::nullopt;
+  }
+  return displays;
+}
+
+std::string keybinding_json_value(std::vector<std::string> const& key_displays)
+{
+  if (key_displays.size() == 1) return "\"" + ava::core::json::escape(key_displays.front()) + "\"";
+
+  std::string output = "[";
+  for (std::size_t index = 0; index < key_displays.size(); ++index) {
+    if (index > 0) output += ", ";
+    output += "\"" + ava::core::json::escape(key_displays[index]) + "\"";
+  }
+  output += "]";
+  return output;
+}
+
+bool keybinding_entry_matches_action(JsonObjectEntry const& entry, ava::tui::TuiAction action)
+{
+  auto const entry_action = ava::tui::key_binding_action_from_name(entry.key);
+  return entry_action && *entry_action == action;
+}
+
+std::string render_keybinding_object_setting_action(std::vector<JsonObjectEntry> const& entries, ava::tui::TuiAction action,
+                                                    std::string_view raw_key, std::string_view raw_value)
+{
+  std::string output = "{\n";
+  bool first = true;
+  bool replaced = false;
+  auto append_entry = [&](std::string_view key, std::string_view value) {
+    if (!first) output += ",\n";
+    first = false;
+    output += "  ";
+    output += key;
+    output += ": ";
+    output += value;
+  };
+
+  for (auto const& entry : entries) {
+    if (keybinding_entry_matches_action(entry, action)) {
+      if (!replaced) {
+        append_entry(raw_key, raw_value);
+        replaced = true;
+      }
+      continue;
+    }
+    append_entry(entry.raw_key, entry.raw_value);
+  }
+  if (!replaced) append_entry(raw_key, raw_value);
+  output += "\n}\n";
+  return output;
+}
+
+std::string render_keybinding_object_without_action(std::vector<JsonObjectEntry> const& entries, ava::tui::TuiAction action)
+{
+  std::string output = "{\n";
+  bool first = true;
+  for (auto const& entry : entries) {
+    if (keybinding_entry_matches_action(entry, action)) continue;
+    if (!first) output += ",\n";
+    first = false;
+    output += "  ";
+    output += entry.raw_key;
+    output += ": ";
+    output += entry.raw_value;
+  }
+  output += "\n}\n";
+  return output;
+}
+
+bool keybinding_object_has_action(std::vector<JsonObjectEntry> const& entries, ava::tui::TuiAction action)
+{
+  return std::ranges::any_of(entries, [action](auto const& entry) { return keybinding_entry_matches_action(entry, action); });
+}
+
+std::string join_display_list(std::vector<std::string> const& values)
+{
+  std::string output;
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    if (index > 0) output += ", ";
+    output += values[index];
+  }
+  return output;
+}
+
 std::string_view command_token(std::string_view line) noexcept
 {
   auto const end = line.find_first_of(" \t\r\n");
   return line.substr(0, end == std::string_view::npos ? line.size() : end);
+}
+
+bool is_shell_helper_command(std::string_view line) noexcept
+{
+  return line.starts_with('!');
+}
+
+std::string shell_helper_argument(std::string_view line)
+{
+  if (!is_shell_helper_command(line)) return {};
+  line.remove_prefix(line.starts_with("!!") ? 2 : 1);
+  while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) line.remove_prefix(1);
+  return std::string(line);
 }
 
 CommandResult handled_text(std::string text)
@@ -59,6 +361,506 @@ CommandResult handled_prompt(std::string command, std::string source, std::strin
   return result;
 }
 
+CommandResult run_keybindings_command(RuntimeSession& session, std::string_view argument,
+                                      std::vector<CommandHotkey> const& hotkeys)
+{
+  auto const args = split_command_arguments(argument);
+  if (args.empty())
+    return handled_text(command_hotkeys_text(hotkeys));
+
+  auto const keybinds_file = session.paths.ava_config_dir / "keybinds.json";
+  if (args.front() == "set") {
+    if (args.size() < 3) return handled_text(missing_argument("/keybindings set <action> <key>[,<key>...]"));
+
+    auto const action = args[1];
+    auto const resolved_action = ava::tui::key_binding_action_from_name(action);
+    if (!resolved_action) {
+      return handled_text("keybindings assignment is invalid:\ninvalid_argument: unknown TUI keybinding action\n  action: " +
+                          action + "\nTarget was not changed.");
+    }
+    std::string key_error;
+    auto const key_displays = keybinding_key_displays(args, 2, key_error);
+    if (!key_displays) return handled_text(key_error + "\nusage: /keybindings set <action> <key>[,<key>...]");
+
+    auto const canonical_action = ava::tui::key_binding_config_action_id(*resolved_action);
+    auto const raw_key = "\"" + ava::core::json::escape(canonical_action) + "\"";
+    auto const raw_value = keybinding_json_value(*key_displays);
+    if (auto parsed = ava::tui::parse_key_bindings_json("{" + raw_key + ":" + raw_value + "}"); !parsed) {
+      return handled_text("keybindings assignment is invalid:\n" + parsed.error().format() +
+                          "\nTarget was not changed.");
+    }
+
+    std::string content = "{}\n";
+    std::error_code exists_error;
+    auto const exists = std::filesystem::exists(keybinds_file, exists_error);
+    if (exists_error) {
+      return handled_text("failed to inspect keybindings file: " + keybinds_file.string() +
+                          "\n  cause: " + exists_error.message());
+    }
+    if (exists) {
+      std::error_code regular_error;
+      auto const regular = std::filesystem::is_regular_file(keybinds_file, regular_error);
+      if (regular_error) {
+        return handled_text("failed to inspect keybindings file: " + keybinds_file.string() +
+                            "\n  cause: " + regular_error.message());
+      }
+      if (!regular) return handled_text("keybindings file is not a regular file:\n  " + keybinds_file.string());
+
+      std::error_code size_error;
+      auto const config_bytes = std::filesystem::file_size(keybinds_file, size_error);
+      if (size_error) {
+        return handled_text("failed to size keybindings file: " + keybinds_file.string() +
+                            "\n  cause: " + size_error.message());
+      }
+      if (config_bytes > kMaxKeybindingsImportBytes) {
+        return handled_text("keybindings file is too large to edit safely:\n  " + keybinds_file.string() +
+                            "\n  limit: " + std::to_string(kMaxKeybindingsImportBytes) + " bytes");
+      }
+
+      content.assign(static_cast<std::size_t>(config_bytes), '\0');
+      std::ifstream input(keybinds_file, std::ios::binary);
+      if (!input) return handled_text("failed to read keybindings file:\n  " + keybinds_file.string());
+      if (!content.empty()) input.read(content.data(), static_cast<std::streamsize>(content.size()));
+      if (!input && static_cast<std::uintmax_t>(input.gcount()) != config_bytes) {
+        return handled_text("failed to finish reading keybindings file:\n  " + keybinds_file.string());
+      }
+      if (trim_copy(content).empty()) content = "{}\n";
+    }
+
+    auto const entries = top_level_json_object_entries(content);
+    if (!entries) {
+      return handled_text("keybindings file is not a valid JSON object:\n  " + keybinds_file.string() +
+                          "\nTarget was not changed.");
+    }
+
+    auto const candidate = render_keybinding_object_setting_action(*entries, *resolved_action, raw_key, raw_value);
+    if (auto parsed = ava::tui::parse_key_bindings_json(candidate); !parsed) {
+      return handled_text("keybindings assignment is invalid:\n" + parsed.error().format() +
+                          "\nTarget was not changed.");
+    }
+
+    std::error_code directory_error;
+    std::filesystem::create_directories(session.paths.ava_config_dir, directory_error);
+    if (directory_error) {
+      return handled_text("failed to create keybindings directory: " + session.paths.ava_config_dir.string() +
+                          "\n  cause: " + directory_error.message());
+    }
+
+    {
+      std::ofstream output(keybinds_file, std::ios::binary | std::ios::trunc);
+      if (!output) return handled_text("failed to write keybindings file:\n  " + keybinds_file.string());
+      output << candidate;
+      if (!output) return handled_text("failed to finish writing keybindings file:\n  " + keybinds_file.string());
+    }
+
+    if (auto loaded = ava::tui::load_key_bindings(keybinds_file); !loaded) {
+      return handled_text("wrote keybindings file, but validation failed:\n" + loaded.error().format());
+    }
+
+    return handled_text("Set keybinding:\n  action: " + action + "\n  keys: " + join_display_list(*key_displays) +
+                        "\n  target: " + keybinds_file.string() +
+                        "\nRun /reload keybindings inside the interactive TUI to apply it.");
+  }
+
+  if (args.front() == "reset" || args.front() == "unset") {
+    if (args.size() != 2) return handled_text(missing_argument("/keybindings reset <action>"));
+
+    auto const action = args[1];
+    auto const resolved_action = ava::tui::key_binding_action_from_name(action);
+    if (!resolved_action) {
+      return handled_text("keybindings reset target is invalid:\ninvalid_argument: unknown TUI keybinding action\n  action: " +
+                          action + "\nTarget was not changed.");
+    }
+
+    std::error_code exists_error;
+    auto const exists = std::filesystem::exists(keybinds_file, exists_error);
+    if (exists_error) {
+      return handled_text("failed to inspect keybindings file: " + keybinds_file.string() +
+                          "\n  cause: " + exists_error.message());
+    }
+    if (!exists) {
+      return handled_text("No keybindings file found:\n  " + keybinds_file.string() +
+                          "\nNo override was reset for action: " + action);
+    }
+
+    std::error_code regular_error;
+    auto const regular = std::filesystem::is_regular_file(keybinds_file, regular_error);
+    if (regular_error) {
+      return handled_text("failed to inspect keybindings file: " + keybinds_file.string() +
+                          "\n  cause: " + regular_error.message());
+    }
+    if (!regular) return handled_text("keybindings file is not a regular file:\n  " + keybinds_file.string());
+
+    std::error_code size_error;
+    auto const config_bytes = std::filesystem::file_size(keybinds_file, size_error);
+    if (size_error) {
+      return handled_text("failed to size keybindings file: " + keybinds_file.string() +
+                          "\n  cause: " + size_error.message());
+    }
+    if (config_bytes > kMaxKeybindingsImportBytes) {
+      return handled_text("keybindings file is too large to edit safely:\n  " + keybinds_file.string() +
+                          "\n  limit: " + std::to_string(kMaxKeybindingsImportBytes) + " bytes");
+    }
+
+    std::string content(static_cast<std::size_t>(config_bytes), '\0');
+    {
+      std::ifstream input(keybinds_file, std::ios::binary);
+      if (!input) return handled_text("failed to read keybindings file:\n  " + keybinds_file.string());
+      if (!content.empty()) input.read(content.data(), static_cast<std::streamsize>(content.size()));
+      if (!input && static_cast<std::uintmax_t>(input.gcount()) != config_bytes) {
+        return handled_text("failed to finish reading keybindings file:\n  " + keybinds_file.string());
+      }
+    }
+    if (trim_copy(content).empty()) content = "{}\n";
+
+    auto const entries = top_level_json_object_entries(content);
+    if (!entries) {
+      return handled_text("keybindings file is not a valid JSON object:\n  " + keybinds_file.string() +
+                          "\nTarget was not changed.");
+    }
+    if (!keybinding_object_has_action(*entries, *resolved_action)) {
+      return handled_text("No keybinding override found:\n  action: " + action +
+                          "\n  target: " + keybinds_file.string() + "\nTarget was not changed.");
+    }
+
+    auto const candidate = render_keybinding_object_without_action(*entries, *resolved_action);
+    if (auto parsed = ava::tui::parse_key_bindings_json(candidate); !parsed) {
+      return handled_text("keybindings reset is invalid:\n" + parsed.error().format() +
+                          "\nTarget was not changed.");
+    }
+
+    {
+      std::ofstream output(keybinds_file, std::ios::binary | std::ios::trunc);
+      if (!output) return handled_text("failed to write keybindings file:\n  " + keybinds_file.string());
+      output << candidate;
+      if (!output) return handled_text("failed to finish writing keybindings file:\n  " + keybinds_file.string());
+    }
+
+    if (auto loaded = ava::tui::load_key_bindings(keybinds_file); !loaded) {
+      return handled_text("wrote keybindings file, but validation failed:\n" + loaded.error().format());
+    }
+
+    return handled_text("Reset keybinding override:\n  action: " + action +
+                        "\n  target: " + keybinds_file.string() +
+                        "\nRun /reload keybindings inside the interactive TUI to apply it.");
+  }
+
+  if (args.front() == "import") {
+    if (args.size() < 2) return handled_text(missing_argument("/keybindings import <path> [--force]"));
+    bool force = false;
+    for (std::size_t index = 2; index < args.size(); ++index) {
+      if (args[index] == "--force") {
+        force = true;
+        continue;
+      }
+      return handled_text("unsupported keybindings import option: " + args[index] + "\nsupported: --force");
+    }
+
+    auto import_path = std::filesystem::path(args[1]);
+    if (import_path.is_relative()) import_path = session.current_dir / import_path;
+    import_path = import_path.lexically_normal();
+
+    std::error_code source_error;
+    auto const source_exists = std::filesystem::exists(import_path, source_error);
+    if (source_error) {
+      return handled_text("failed to inspect keybindings import source: " + import_path.string() +
+                          "\n  cause: " + source_error.message());
+    }
+    if (!source_exists) {
+      return handled_text("keybindings import source does not exist:\n  " + import_path.string());
+    }
+    auto const regular = std::filesystem::is_regular_file(import_path, source_error);
+    if (source_error) {
+      return handled_text("failed to inspect keybindings import source: " + import_path.string() +
+                          "\n  cause: " + source_error.message());
+    }
+    if (!regular) {
+      return handled_text("keybindings import source is not a regular file:\n  " + import_path.string());
+    }
+    auto const import_bytes = std::filesystem::file_size(import_path, source_error);
+    if (source_error) {
+      return handled_text("failed to size keybindings import source: " + import_path.string() +
+                          "\n  cause: " + source_error.message());
+    }
+    if (import_bytes > kMaxKeybindingsImportBytes) {
+      return handled_text("keybindings import source is too large:\n  " + import_path.string() +
+                          "\n  limit: " + std::to_string(kMaxKeybindingsImportBytes) + " bytes");
+    }
+
+    if (auto loaded = ava::tui::load_key_bindings(import_path); !loaded) {
+      return handled_text("keybindings import source is invalid:\n" + loaded.error().format() +
+                          "\nTarget was not changed.");
+    }
+
+    std::error_code exists_error;
+    auto const target_exists = std::filesystem::exists(keybinds_file, exists_error);
+    if (exists_error) {
+      return handled_text("failed to inspect keybindings file: " + keybinds_file.string() +
+                          "\n  cause: " + exists_error.message());
+    }
+    if (target_exists && !force) {
+      return handled_text("keybindings file already exists:\n  " + keybinds_file.string() +
+                          "\nUse /keybindings import <path> --force to replace it explicitly.");
+    }
+
+    std::string content(static_cast<std::size_t>(import_bytes), '\0');
+    {
+      std::ifstream input(import_path, std::ios::binary);
+      if (!input) return handled_text("failed to read keybindings import source:\n  " + import_path.string());
+      if (!content.empty()) input.read(content.data(), static_cast<std::streamsize>(content.size()));
+      if (!input && static_cast<std::uintmax_t>(input.gcount()) != import_bytes) {
+        return handled_text("failed to finish reading keybindings import source:\n  " + import_path.string());
+      }
+    }
+
+    std::error_code directory_error;
+    std::filesystem::create_directories(session.paths.ava_config_dir, directory_error);
+    if (directory_error) {
+      return handled_text("failed to create keybindings directory: " + session.paths.ava_config_dir.string() +
+                          "\n  cause: " + directory_error.message());
+    }
+
+    {
+      std::ofstream output(keybinds_file, std::ios::binary | std::ios::trunc);
+      if (!output) return handled_text("failed to write keybindings file:\n  " + keybinds_file.string());
+      output << content;
+      if (!output) return handled_text("failed to finish writing keybindings file:\n  " + keybinds_file.string());
+    }
+
+    if (auto loaded = ava::tui::load_key_bindings(keybinds_file); !loaded) {
+      return handled_text("imported keybindings file, but validation failed:\n" + loaded.error().format());
+    }
+
+    return handled_text("Imported keybindings file:\n  source: " + import_path.string() +
+                        "\n  target: " + keybinds_file.string() +
+                        "\nRun /reload keybindings inside the interactive TUI to apply it.");
+  }
+
+  if (args.front() == "validate") {
+    if (args.size() > 1) {
+      return handled_text("unsupported keybindings validate option: " + args[1] + "\nsupported: no options");
+    }
+    std::error_code exists_error;
+    auto const exists = std::filesystem::exists(keybinds_file, exists_error);
+    if (exists_error) {
+      return handled_text("failed to inspect keybindings file: " + keybinds_file.string() + "\n  cause: " + exists_error.message());
+    }
+    if (!exists) {
+      return handled_text("No keybindings file found:\n  " + keybinds_file.string() +
+                          "\nAVA is using built-in defaults. Run /keybindings init to create a starter file.");
+    }
+    auto loaded = ava::tui::load_key_bindings(keybinds_file);
+    if (!loaded) {
+      return handled_text("keybindings file is invalid:\n" + loaded.error().format() +
+                          "\nPrevious active bindings remain in use until a valid /reload keybindings.");
+    }
+    return handled_text("keybindings file is valid:\n  " + keybinds_file.string() +
+                        "\nRun /reload keybindings inside the interactive TUI to apply edits.");
+  }
+
+  if (args.front() != "init") {
+    return handled_text("unsupported keybindings command: " + args.front() +
+                        "\nsupported: init [--force], import <path> [--force], set <action> <key>[,<key>...], reset <action>, validate");
+  }
+
+  bool force = false;
+  for (std::size_t index = 1; index < args.size(); ++index) {
+    if (args[index] == "--force") {
+      force = true;
+      continue;
+    }
+    return handled_text("unsupported keybindings init option: " + args[index] + "\nsupported: --force");
+  }
+
+  std::error_code exists_error;
+  auto const exists = std::filesystem::exists(keybinds_file, exists_error);
+  if (exists_error) {
+    return handled_text("failed to inspect keybindings file: " + keybinds_file.string() + "\n  cause: " + exists_error.message());
+  }
+  if (exists && !force) {
+    return handled_text("keybindings file already exists:\n  " + keybinds_file.string() +
+                        "\nUse /keybindings init --force to replace it, or edit it and run /reload keybindings in the TUI.");
+  }
+
+  auto const content = ava::tui::default_key_bindings_config_json();
+  if (auto parsed = ava::tui::parse_key_bindings_json(content); !parsed) {
+    return handled_text("failed to build default keybindings template:\n" + parsed.error().format());
+  }
+
+  std::error_code directory_error;
+  std::filesystem::create_directories(session.paths.ava_config_dir, directory_error);
+  if (directory_error) {
+    return handled_text("failed to create keybindings directory: " + session.paths.ava_config_dir.string() +
+                        "\n  cause: " + directory_error.message());
+  }
+
+  {
+    std::ofstream output(keybinds_file, std::ios::binary | std::ios::trunc);
+    if (!output)
+      return handled_text("failed to write keybindings file:\n  " + keybinds_file.string());
+    output << content;
+    if (!output)
+      return handled_text("failed to finish writing keybindings file:\n  " + keybinds_file.string());
+  }
+
+  if (auto loaded = ava::tui::load_key_bindings(keybinds_file); !loaded) {
+    return handled_text("wrote keybindings file, but validation failed:\n" + loaded.error().format());
+  }
+
+  return handled_text(std::string(force ? "Replaced" : "Created") + " keybindings starter file:\n  " +
+                      keybinds_file.string() +
+                      "\nEdit it, then run /reload keybindings inside the interactive TUI.");
+}
+
+std::string active_theme_summary()
+{
+  auto const active = ava::tui::active_tui_theme();
+  return active.name + " (" + active.badge + ")";
+}
+
+ava::core::Result<CommandResult> run_theme_command(RuntimeSession& session, std::string_view argument)
+{
+  auto const args = split_command_arguments(argument);
+  if (args.size() > 1)
+    return handled_text("unsupported theme options: " + std::string(argument) + "\n" + tui_theme_setting_usage());
+
+  auto settings = load_tui_display_settings(session.paths);
+  if (!settings)
+    return std::unexpected(std::move(settings.error()));
+
+  if (args.empty())
+  {
+    ava::tui::set_tui_config_theme(settings->theme, settings->custom_theme);
+    return handled_text("TUI theme:\n  config: " + settings->path.string() + "\n  configured: " +
+                        (settings->theme ? *settings->theme : std::string("built-in default")) +
+                        "\n  active: " + active_theme_summary() + "\n" + tui_theme_setting_usage());
+  }
+
+  if (is_tui_theme_reset_value(args.front()))
+  {
+    auto stored = store_tui_theme_setting(session.paths, std::nullopt);
+    if (!stored)
+      return std::unexpected(std::move(stored.error()));
+    ava::tui::set_tui_config_theme(std::nullopt);
+    return handled_text("Reset TUI theme to the built-in default.\n  config: " +
+                        tui_display_settings_file(session.paths).string() + "\n  active: " + active_theme_summary());
+  }
+
+  if (!normalize_tui_theme_setting(args.front()))
+  {
+    auto custom_theme = load_tui_custom_theme(session.paths, args.front());
+    if (!custom_theme && custom_theme.error().category() == ava::core::ErrorCategory::NotFound)
+      return handled_text("unsupported theme: " + args.front() + "\n" + tui_theme_setting_usage());
+    if (!custom_theme)
+      return std::unexpected(std::move(custom_theme.error()));
+  }
+
+  auto stored = store_tui_theme_setting(session.paths, args.front());
+  if (!stored)
+    return std::unexpected(std::move(stored.error()));
+  auto settings_after_store = load_tui_display_settings(session.paths);
+  if (!settings_after_store)
+    return std::unexpected(std::move(settings_after_store.error()));
+  ava::tui::set_tui_config_theme(settings_after_store->theme, settings_after_store->custom_theme);
+  return handled_text("Stored TUI theme " + *settings_after_store->theme + ".\n  config: " +
+                      tui_display_settings_file(session.paths).string() + "\n  active: " + active_theme_summary());
+}
+
+ava::core::Result<CommandResult> run_reload_command(RuntimeSession& session, std::string_view argument)
+{
+  auto const args = split_command_arguments(argument);
+  if (args.size() > 1)
+    return handled_text("unsupported reload target: " + std::string(argument) + "\nsupported: keybindings, theme");
+
+  auto const target = args.empty() ? std::string{} : args.front();
+  if (target.empty() || target == "keybindings" || target == "keybinds" || target == "keys")
+  {
+    return handled_text(
+        "Keybindings reload live inside the interactive TUI. Restart AVA after editing keybinds in non-TTY mode, or use /reload theme for display.json.");
+  }
+
+  if (target == "theme" || target == "themes" || target == "display")
+  {
+    auto settings = apply_tui_display_settings(session.paths);
+    if (!settings)
+      return std::unexpected(std::move(settings.error()));
+    return handled_text("TUI display settings reloaded.\n  config: " + settings->path.string() +
+                        "\n  configured: " + (settings->theme ? *settings->theme : std::string("built-in default")) +
+                        "\n  active: " + active_theme_summary());
+  }
+
+  return handled_text("unsupported reload target: " + target + "\nsupported: keybindings, theme");
+}
+
+std::string project_trust_summary(ProjectTrustState const& state)
+{
+  std::string output = "Project trust:\n";
+  output += "  workspace=" + state.workspace_dir.string() + "\n";
+  output += "  decision=" + std::string(to_string(state.decision)) + "\n";
+  if (!state.matched_path.empty())
+    output += "  matched=" + state.matched_path.string() + "\n";
+  output += "  trust_file=" + state.trust_file.string() + "\n";
+  output += "  project_resources=" + std::string(project_resources_trusted(state) ? "enabled" : "skipped") + "\n";
+  if (!state.diagnostic.empty())
+    output += "  diagnostic=" + sanitize_inline_text(state.diagnostic) + "\n";
+  if (state.protected_resources.empty())
+  {
+    output += "  protected_resources=none";
+    return output;
+  }
+  output += "  protected_resources=" + std::to_string(state.protected_resources.size()) + "\n";
+  for (auto const& resource : state.protected_resources)
+  {
+    output += "    " + sanitize_inline_text(resource.kind) + "  " + resource.path.string() + "\n";
+  }
+  if (!output.empty() && output.back() == '\n')
+    output.pop_back();
+  return output;
+}
+
+ava::core::Result<CommandResult> reload_project_trust_state(RuntimeSession& session, std::string prefix)
+{
+  session.project_trust = load_project_trust_state(session.paths, session.workspace_dir);
+  auto prompt_state = runtime::load_runtime_prompt_state(session.paths, session.model, session.mode, session.workspace_dir,
+                                                         session.current_dir,
+                                                         project_resources_trusted(session.project_trust),
+                                                         session.prompt_overrides);
+  if (!prompt_state)
+    return std::unexpected(std::move(prompt_state.error()));
+  apply_runtime_prompt_state(session, std::move(*prompt_state));
+  return handled_text(std::move(prefix) + "\n" + project_trust_summary(session.project_trust));
+}
+
+ava::core::Result<CommandResult> run_trust_command(RuntimeSession& session, std::string_view argument)
+{
+  auto const args = split_command_arguments(argument);
+  auto const action = args.empty() ? std::string("status") : args.front();
+  if (action == "status")
+    return handled_text(project_trust_summary(session.project_trust));
+  if (action == "project" || action == "trust" || action == "approve")
+  {
+    auto saved = set_project_trust_decision(session.paths, session.workspace_dir, true);
+    if (!saved)
+      return std::unexpected(std::move(saved.error()));
+    return reload_project_trust_state(session, "trusted project resources");
+  }
+  if (action == "deny" || action == "untrust")
+  {
+    auto saved = set_project_trust_decision(session.paths, session.workspace_dir, false);
+    if (!saved)
+      return std::unexpected(std::move(saved.error()));
+    return reload_project_trust_state(session, "denied project resources");
+  }
+  if (action == "clear")
+  {
+    auto cleared = clear_project_trust_decision(session.paths, session.workspace_dir);
+    if (!cleared)
+      return std::unexpected(std::move(cleared.error()));
+    return reload_project_trust_state(session, "cleared project trust decision");
+  }
+  return handled_text("unsupported trust action: " + action + "\nsupported: status, project, deny, clear");
+}
+
 std::string dynamic_command_argument(std::string_view line)
 {
   auto const token = command_token(line);
@@ -71,7 +873,10 @@ std::string dynamic_command_argument(std::string_view line)
 ava::core::Result<std::string> skill_prompt_message(RuntimeSession& session, CommandRequest const& request,
                                                     CommandRegistryEntry const& entry)
 {
-  auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{.workspace_root = session.workspace_dir});
+  auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
+      .workspace_root = session.workspace_dir,
+      .include_project_skills = project_resources_trusted(session.project_trust),
+  });
   auto const match = std::ranges::find_if(
       loaded.skills, [&](ava::context::LoadedSkill const& skill) { return skill.name == entry.skill_name; });
   if (match == loaded.skills.end()) {
@@ -130,7 +935,9 @@ ava::core::Result<std::string> mcp_prompt_message(RuntimeSession& session, Comma
 {
   auto config_options = ava::mcp::default_mcp_config_options(session.workspace_dir);
   config_options.global_config_file = session.paths.ava_config_dir / "mcp.json";
-  config_options.project_config_file = session.workspace_dir / ".ava" / "mcp.json";
+  config_options.project_config_file = project_resources_trusted(session.project_trust)
+                                           ? session.workspace_dir / ".ava" / "mcp.json"
+                                           : std::filesystem::path{};
   auto config = ava::mcp::load_mcp_config(config_options);
   if (!config) return std::unexpected(std::move(config.error()));
   auto const server = std::ranges::find_if(
@@ -205,6 +1012,7 @@ ava::core::Result<CommandResult> run_registry_command(RuntimeSession& session, C
 
 bool is_backend_command(std::string_view line) noexcept
 {
+  if (is_shell_helper_command(line)) return true;
   return find_command_catalog_entry(line) != nullptr;
 }
 
@@ -218,6 +1026,12 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
 {
   CommandResult result;
   if (request.command.empty()) return result;
+
+  if (is_shell_helper_command(request.command)) {
+    auto const shell_command = shell_helper_argument(request.command);
+    if (shell_command.empty()) return handled_text(missing_argument("!<command> or !!<command>"));
+    request.command = "/bash " + shell_command;
+  }
 
   auto const* entry = find_command_catalog_entry(request.command);
   if (!entry) {
@@ -272,37 +1086,53 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
   if (request.command == "/help") {
     return handled_text(command_help_text(request.hotkeys));
   }
-  if (request.command == "/hotkeys") {
-    return handled_text(command_hotkeys_text(request.hotkeys));
+  if (starts_with_command(request.command, "/hotkeys")) {
+    return run_keybindings_command(session, command_argument(request.command, "/hotkeys"), request.hotkeys);
+  }
+  if (starts_with_command(request.command, "/theme")) {
+    return run_theme_command(session, command_argument(request.command, "/theme"));
   }
   if (request.command == "/settings") {
-    return handled_text(
-        "Settings are shown as a read-only TUI view. Runtime-owned slash commands keep config changes in "
-        "the backend.");
+    return handled_text("Settings are shown as a TUI view. Use /theme dark|light|plain|custom-name|reset to persist the display theme.");
   }
   if (request.command == "/details") {
     return handled_text("Tool details are a TUI display toggle. Use /details inside the TUI to switch views.");
   }
+  if (starts_with_command(request.command, "/tool")) {
+    return handled_text(
+        "Tool detail inspection is available inside the interactive TUI. Use /tool [query] to show the latest or matching expanded tool card, /details to toggle all tool cards, or /copy tool [query] to copy details.");
+  }
+  if (starts_with_command(request.command, "/diff")) {
+    return handled_text(
+        "Tool diff inspection is available inside the interactive TUI. Use /diff [query] to show the latest or matching unified diff, or /copy diff [query] to copy it.");
+  }
   if (starts_with_command(request.command, "/copy")) {
     auto const argument = command_argument(request.command, "/copy");
-    if (!argument.empty() && argument != "tool" && argument != "tools" && argument != "diff" && argument != "diffs") {
-      return handled_text("unsupported copy target: " + argument + "\nsupported: tool, diff");
+    auto const copy_args = split_command_arguments(argument);
+    auto const target = copy_args.empty() ? std::string{} : copy_args.front();
+    if (!target.empty() && target != "tool" && target != "tools" && target != "diff" && target != "diffs" && target != "permission" &&
+        target != "permissions") {
+      return handled_text("unsupported copy target: " + target + "\nsupported: tool [query], diff [query], permission [query]");
     }
     return handled_text(
-        "Clipboard copy is available inside the interactive TUI. Use /copy for the latest AVA message, /copy tool for tool details, or /copy diff for the latest unified diff.");
+        "Clipboard copy is available inside the interactive TUI. Use /copy for the latest AVA message, /copy tool [query] for tool details, /copy diff [query] for unified diffs, or /copy permission [query] for permission audit details.");
   }
   if (request.command == "/thinking") {
     return handled_text("Thinking visibility is a TUI display toggle. It does not change provider reasoning mode.");
   }
+  if (starts_with_command(request.command, "/attach")) {
+    return handled_text(
+        "Image attachment import is available inside the interactive TUI with /attach <path>. In headless RPC, send prompt attachments with the attachments array.");
+  }
   if (starts_with_command(request.command, "/reload")) {
-    auto const argument = command_argument(request.command, "/reload");
-    if (!argument.empty() && argument != "keybindings" && argument != "keybinds" && argument != "keys") {
-      return handled_text("unsupported reload target: " + argument + "\nsupported: keybindings");
-    }
-    return handled_text("Keybindings reload live inside the interactive TUI. Restart AVA after editing keybinds in non-TTY mode.");
+    return run_reload_command(session, command_argument(request.command, "/reload"));
   }
   if (starts_with_command(request.command, "/models")) {
     return run_models_command(session, command_argument(request.command, "/models"));
+  }
+  if (request.command == "/scoped-models") {
+    return handled_text(
+        "Scoped model cycling is a TUI selector. In the TUI, /scoped-models opens the model cycle list and Ctrl+S persists it to models.json.");
   }
   if (starts_with_command(request.command, "/connect")) {
     return run_connect_command(session, request);
@@ -315,6 +1145,9 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
   }
   if (starts_with_command(request.command, "/plugin")) {
     return run_plugin_command(session, request);
+  }
+  if (starts_with_command(request.command, "/trust")) {
+    return run_trust_command(session, command_argument(request.command, "/trust"));
   }
   if (starts_with_command(request.command, "/permissions")) {
     return run_permissions_command(session, request);
@@ -352,8 +1185,8 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
   if (starts_with_command(request.command, "/compact")) {
     return run_compact_command(session, request);
   }
-  if (request.command == "/export") {
-    return run_export_command(session);
+  if (starts_with_command(request.command, "/export")) {
+    return run_export_command(session, request);
   }
 
   if (entry->hint.empty() && starts_with_command(request.command, entry->command)) {
@@ -362,6 +1195,9 @@ ava::core::Result<CommandResult> run_command(RuntimeSession& session, CommandReq
 
   if (request.command == "/glob") {
     return handled_text(missing_argument("/glob <pattern>"));
+  }
+  if (request.command == "/find") {
+    return handled_text(missing_argument("/find <pattern>"));
   }
   if (request.command == "/grep") {
     return handled_text(missing_argument("/grep <text> [glob]"));

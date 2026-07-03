@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import os
 import pathlib
 import re
@@ -42,6 +43,11 @@ def capture_styled(tmux_exe: str, session: str) -> str:
     return result.stdout
 
 
+def pane_current_command(tmux_exe: str, session: str) -> str:
+    result = tmux(tmux_exe, "display-message", "-p", "-t", f"{session}:0.0", "#{pane_current_command}")
+    return result.stdout.strip()
+
+
 def wait_for(tmux_exe: str, session: str, pattern: str, label: str, timeout: float = 8.0) -> str:
     compiled = re.compile(pattern)
     deadline = time.monotonic() + timeout
@@ -57,6 +63,25 @@ def wait_for(tmux_exe: str, session: str, pattern: str, label: str, timeout: flo
     raise RuntimeError(f"timed out waiting for {label}; expected /{pattern}/\nlast screen:\n{last}")
 
 
+def wait_for_count(
+    tmux_exe: str, session: str, pattern: str, expected_count: int, label: str, timeout: float = 8.0
+) -> str:
+    compiled = re.compile(pattern)
+    deadline = time.monotonic() + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        status = tmux(tmux_exe, "has-session", "-t", session, check=False)
+        if status.returncode != 0:
+            raise RuntimeError(f"tmux session exited before {label}\nlast screen:\n{last}")
+        last = capture(tmux_exe, session)
+        if len(compiled.findall(last)) >= expected_count:
+            return last
+        time.sleep(0.1)
+    raise RuntimeError(
+        f"timed out waiting for {label}; expected at least {expected_count} matches of /{pattern}/\nlast screen:\n{last}"
+    )
+
+
 def wait_for_absent(tmux_exe: str, session: str, pattern: str, label: str, timeout: float = 8.0) -> str:
     compiled = re.compile(pattern)
     deadline = time.monotonic() + timeout
@@ -70,6 +95,22 @@ def wait_for_absent(tmux_exe: str, session: str, pattern: str, label: str, timeo
             return last
         time.sleep(0.1)
     raise RuntimeError(f"timed out waiting for {label}; still matched /{pattern}/\nlast screen:\n{last}")
+
+
+def wait_for_pane_command(tmux_exe: str, session: str, pattern: str, label: str, timeout: float = 8.0) -> str:
+    compiled = re.compile(pattern)
+    deadline = time.monotonic() + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        status = tmux(tmux_exe, "has-session", "-t", session, check=False)
+        if status.returncode != 0:
+            raise RuntimeError(f"tmux session exited before {label}\nlast pane command:\n{last}")
+        last = pane_current_command(tmux_exe, session)
+        if compiled.search(last):
+            return last
+        time.sleep(0.1)
+    screen = capture(tmux_exe, session)
+    raise RuntimeError(f"timed out waiting for {label}; expected pane command /{pattern}/, last {last}\nscreen:\n{screen}")
 
 
 def send_keys(tmux_exe: str, session: str, *keys: str) -> None:
@@ -91,6 +132,35 @@ def wait_for_session_exit(tmux_exe: str, session: str, timeout: float = 8.0) -> 
     raise RuntimeError(f"tmux session did not exit\nscreen:\n{screen}")
 
 
+def wait_for_request_count(path: pathlib.Path, expected_count: int, label: str, timeout: float = 8.0) -> str:
+    deadline = time.monotonic() + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        if path.exists():
+            last = path.read_text(encoding="utf-8", errors="replace")
+            if last.count("--- request ") >= expected_count:
+                return last
+        time.sleep(0.1)
+    raise RuntimeError(
+        f"timed out waiting for {label}; expected at least {expected_count} provider requests\nlast log:\n{last}"
+    )
+
+
+def assert_request_count_stays(path: pathlib.Path, expected_count: int, label: str, duration: float = 1.2) -> str:
+    deadline = time.monotonic() + duration
+    last = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+    while time.monotonic() < deadline:
+        if path.exists():
+            last = path.read_text(encoding="utf-8", errors="replace")
+        count = last.count("--- request ")
+        if count != expected_count:
+            raise RuntimeError(
+                f"{label}; expected exactly {expected_count} provider requests, saw {count}\nrequest log:\n{last}"
+            )
+        time.sleep(0.1)
+    return last
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ava", required=True)
@@ -109,6 +179,11 @@ def main() -> int:
     ava_exe = pathlib.Path(args.ava).resolve()
     if not ava_exe.exists():
         raise RuntimeError(f"AVA executable does not exist: {ava_exe}")
+    fake_provider_exe = ava_exe.parent / "tests" / "ava_fake_provider_server"
+    if not fake_provider_exe.exists():
+        fake_provider_exe = ava_exe.parent.parent / "tests" / "ava_fake_provider_server"
+    if not fake_provider_exe.exists():
+        raise RuntimeError(f"fake provider executable does not exist next to AVA build: {fake_provider_exe}")
 
     root = pathlib.Path(args.root).resolve()
     if root.exists():
@@ -120,30 +195,223 @@ def main() -> int:
     config = root / "config"
     state = root / "state"
     data = root / "data"
-    for path in (workspace, home, config, state, data):
+    active_workspace = root / "active-workspace"
+    active_home = root / "active-home"
+    active_config = root / "active-config"
+    active_state = root / "active-state"
+    active_data = root / "active-data"
+    restore_workspace = root / "restore-workspace"
+    restore_home = root / "restore-home"
+    restore_config = root / "restore-config"
+    restore_state = root / "restore-state"
+    restore_data = root / "restore-data"
+    for path in (
+        workspace,
+        home,
+        config,
+        state,
+        data,
+        active_workspace,
+        active_home,
+        active_config,
+        active_state,
+        active_data,
+        restore_workspace,
+        restore_home,
+        restore_config,
+        restore_state,
+        restore_data,
+    ):
         path.mkdir(parents=True, exist_ok=True)
     ava_config = config / "ava"
     ava_config.mkdir(parents=True, exist_ok=True)
+    active_ava_config = active_config / "ava"
+    active_ava_config.mkdir(parents=True, exist_ok=True)
+    restore_ava_config = restore_config / "ava"
+    restore_ava_config.mkdir(parents=True, exist_ok=True)
+    (ava_config / "models.json").write_text(
+        '{"models":[{"provider":"openai","id":"diagnostic-local","name":"Diagnostic Local","supports_reasoning":true}]}\n',
+        encoding="utf-8",
+    )
+    (active_ava_config / "models.json").write_text(
+        '{"default_provider":"moonshot","default_model":"ava-tui-fake",'
+        '"models":[{"provider":"moonshot","id":"ava-tui-fake","name":"AVA TUI Fake","family":"fake",'
+        '"context_window_tokens":8192,"max_output_tokens":1024,"supports_tools":false,'
+        '"supports_streaming":false,"supports_reasoning":false,"reports_usage":true}]}\n',
+        encoding="utf-8",
+    )
+    (restore_ava_config / "models.json").write_text(
+        '{"default_provider":"moonshot","default_model":"ava-tui-fake",'
+        '"models":[{"provider":"moonshot","id":"ava-tui-fake","name":"AVA TUI Fake","family":"fake",'
+        '"context_window_tokens":8192,"max_output_tokens":1024,"supports_tools":false,'
+        '"supports_streaming":false,"supports_reasoning":false,"reports_usage":true}]}\n',
+        encoding="utf-8",
+    )
     (workspace / "src").mkdir(parents=True, exist_ok=True)
+    (workspace / "AGENTS.md").write_text("tmux smoke context\n", encoding="utf-8")
     (workspace / "src" / "main.cpp").write_text("int main() { return 0; }\n", encoding="utf-8")
+    (active_workspace / "AGENTS.md").write_text("active tmux smoke context\n", encoding="utf-8")
+    (restore_workspace / "AGENTS.md").write_text("restore tmux smoke context\n", encoding="utf-8")
+    (workspace / "screen.png").write_bytes(b"\x89PNG\r\n\x1a\nava-tui-image")
+    import_keybinds_content = '{"tui.editor.cursorLeft":["Left","Alt+H"],"app.tools.expand":"Ctrl+O"}\n'
+    (workspace / "import-keybinds.json").write_text(import_keybinds_content, encoding="utf-8")
+    fake_editor = root / "fake-editor.sh"
+    fake_editor.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' 'external editor draft' > \"$1\"\n",
+        encoding="utf-8",
+    )
+    fake_editor.chmod(0o755)
     (workspace / "my folder").mkdir(parents=True, exist_ok=True)
     (workspace / "my folder" / "space file.txt").write_text("space path\n", encoding="utf-8")
+    (workspace / ".ava" / "commands").mkdir(parents=True, exist_ok=True)
+    (workspace / ".ava" / "commands" / "trust-smoke.md").write_text(
+        "---\ndescription: Trust smoke command\n---\nTrust smoke $1\n", encoding="utf-8"
+    )
+    (workspace / ".ava" / "APPEND_SYSTEM.md").write_text("tmux project append prompt\n", encoding="utf-8")
+    (ava_config / "themes").mkdir(parents=True, exist_ok=True)
+    (ava_config / "themes" / "ocean.json").write_text(
+        "{\n"
+        '  "name": "ocean",\n'
+        '  "vars": {"primary": "#0066cc", "paper": 255},\n'
+        '  "colors": {\n'
+        '    "text": "",\n'
+        '    "muted": 242,\n'
+        '    "success": 34,\n'
+        '    "warning": "#ffaa00",\n'
+        '    "error": "#ff0000",\n'
+        '    "accent": "primary",\n'
+        '    "screenBg": "paper",\n'
+        '    "composerBg": 236\n'
+        "  }\n"
+        "}\n",
+        encoding="utf-8",
+    )
 
     conflict_session = f"ava-tui-conflict-{uuid.uuid4().hex[:10]}"
+    suspend_session = f"ava-tui-suspend-{uuid.uuid4().hex[:10]}"
+    theme_session = f"ava-tui-theme-{uuid.uuid4().hex[:10]}"
+    background_theme_session = f"ava-tui-theme-bg-{uuid.uuid4().hex[:10]}"
+    persisted_theme_session = f"ava-tui-theme-persist-{uuid.uuid4().hex[:10]}"
+    active_session = f"ava-tui-active-{uuid.uuid4().hex[:10]}"
+    restore_active_session = f"ava-tui-restore-{uuid.uuid4().hex[:10]}"
+    scoped_persist_session = f"ava-tui-scoped-persist-{uuid.uuid4().hex[:10]}"
     session = f"ava-tui-smoke-{uuid.uuid4().hex[:10]}"
     tmux(tmux_exe, "kill-session", "-t", conflict_session, check=False)
+    tmux(tmux_exe, "kill-session", "-t", suspend_session, check=False)
+    tmux(tmux_exe, "kill-session", "-t", theme_session, check=False)
+    tmux(tmux_exe, "kill-session", "-t", background_theme_session, check=False)
+    tmux(tmux_exe, "kill-session", "-t", persisted_theme_session, check=False)
+    tmux(tmux_exe, "kill-session", "-t", active_session, check=False)
+    tmux(tmux_exe, "kill-session", "-t", restore_active_session, check=False)
+    tmux(tmux_exe, "kill-session", "-t", scoped_persist_session, check=False)
     tmux(tmux_exe, "kill-session", "-t", session, check=False)
 
+    light_env_prefix = (
+        f"HOME={shlex.quote(str(home))} "
+        f"XDG_CONFIG_HOME={shlex.quote(str(config))} "
+        f"XDG_STATE_HOME={shlex.quote(str(state))} "
+        f"XDG_DATA_HOME={shlex.quote(str(data))} "
+        "NO_COLOR= "
+        "AVA_TUI_THEME=light "
+        "COLORFGBG= "
+        f"exec {shlex.quote(str(ava_exe))}"
+    )
+    background_theme_env_prefix = (
+        f"HOME={shlex.quote(str(home))} "
+        f"XDG_CONFIG_HOME={shlex.quote(str(config))} "
+        f"XDG_STATE_HOME={shlex.quote(str(state))} "
+        f"XDG_DATA_HOME={shlex.quote(str(data))} "
+        "NO_COLOR= "
+        "AVA_TUI_THEME= "
+        f"COLORFGBG={shlex.quote('0;15')} "
+        f"exec {shlex.quote(str(ava_exe))}"
+    )
+    persisted_theme_env_prefix = (
+        f"HOME={shlex.quote(str(home))} "
+        f"XDG_CONFIG_HOME={shlex.quote(str(config))} "
+        f"XDG_STATE_HOME={shlex.quote(str(state))} "
+        f"XDG_DATA_HOME={shlex.quote(str(data))} "
+        "NO_COLOR= "
+        "AVA_TUI_THEME= "
+        "COLORFGBG= "
+        f"exec {shlex.quote(str(ava_exe))}"
+    )
     env_prefix = (
         f"HOME={shlex.quote(str(home))} "
         f"XDG_CONFIG_HOME={shlex.quote(str(config))} "
         f"XDG_STATE_HOME={shlex.quote(str(state))} "
         f"XDG_DATA_HOME={shlex.quote(str(data))} "
         "NO_COLOR=1 "
+        "COLORFGBG= "
+        "VISUAL= "
+        f"EDITOR={shlex.quote(str(fake_editor))} "
+        f"AVA_CLIPBOARD_IMAGE_FILE={shlex.quote(str(workspace / 'screen.png'))} "
         f"exec {shlex.quote(str(ava_exe))}"
     )
+    suspend_env_prefix = (
+        f"HOME={shlex.quote(str(home))} "
+        f"XDG_CONFIG_HOME={shlex.quote(str(config))} "
+        f"XDG_STATE_HOME={shlex.quote(str(state))} "
+        f"XDG_DATA_HOME={shlex.quote(str(data))} "
+        "NO_COLOR=1 "
+        "COLORFGBG= "
+        "VISUAL= "
+        f"EDITOR={shlex.quote(str(fake_editor))} "
+        f"{shlex.quote(str(ava_exe))}"
+    )
+    active_provider_port = root / "active-provider.port"
+    active_request_log = root / "active-provider-requests.log"
+    active_provider_out = root / "active-provider.out"
+    active_provider_err = root / "active-provider.err"
+    active_provider = None
+    active_provider_stdout = None
+    active_provider_stderr = None
+    restore_provider_port = root / "restore-provider.port"
+    restore_request_log = root / "restore-provider-requests.log"
+    restore_provider_out = root / "restore-provider.out"
+    restore_provider_err = root / "restore-provider.err"
+    restore_provider = None
+    restore_provider_stdout = None
+    restore_provider_stderr = None
 
     try:
+        (ava_config / "keybinds.json").unlink(missing_ok=True)
+        tmux(
+            tmux_exe,
+            "new-session",
+            "-d",
+            "-s",
+            suspend_session,
+            "-x",
+            "100",
+            "-y",
+            "24",
+            "-c",
+            str(workspace),
+        )
+        wait_for_pane_command(tmux_exe, suspend_session, r"(?:zsh|bash|sh|fish)$", "interactive shell before suspend smoke")
+        send_literal(tmux_exe, suspend_session, suspend_env_prefix)
+        send_keys(tmux_exe, suspend_session, "Enter")
+        wait_for(tmux_exe, suspend_session, r"Type a message|live session", "suspend initial TUI frame")
+        send_literal(tmux_exe, suspend_session, "suspend draft")
+        wait_for(tmux_exe, suspend_session, r"suspend draft", "suspend draft before Ctrl+Z")
+        send_keys(tmux_exe, suspend_session, "C-z")
+        wait_for_pane_command(tmux_exe, suspend_session, r"(?:zsh|bash|sh|fish)$", "shell after Ctrl+Z suspend")
+        send_literal(tmux_exe, suspend_session, "fg")
+        send_keys(tmux_exe, suspend_session, "Enter")
+        wait_for_pane_command(tmux_exe, suspend_session, r"ava$", "AVA foreground command after fg resume")
+        resumed_suspend = wait_for(tmux_exe, suspend_session, r"suspend draft", "TUI redraw after fg resume")
+        if "suspend draft" not in resumed_suspend:
+            raise RuntimeError(f"suspend/resume did not preserve the draft\nscreen:\n{resumed_suspend}")
+        send_keys(tmux_exe, suspend_session, "C-u")
+        wait_for_absent(tmux_exe, suspend_session, r"suspend draft", "suspend draft cleared before exit")
+        send_keys(tmux_exe, suspend_session, "C-d")
+        wait_for_pane_command(tmux_exe, suspend_session, r"(?:zsh|bash|sh|fish)$", "interactive shell after resumed AVA exits")
+        send_literal(tmux_exe, suspend_session, "exit")
+        send_keys(tmux_exe, suspend_session, "Enter")
+        wait_for_session_exit(tmux_exe, suspend_session)
+
         (ava_config / "keybinds.json").write_text(
             '{"submit":"Ctrl+P","model_cycle_forward":"Ctrl+P"}\n', encoding="utf-8"
         )
@@ -179,6 +447,392 @@ def main() -> int:
             "new-session",
             "-d",
             "-s",
+            theme_session,
+            "-x",
+            "100",
+            "-y",
+            "24",
+            "-c",
+            str(workspace),
+            light_env_prefix,
+        )
+        wait_for(tmux_exe, theme_session, r"Type a message|live session", "light-theme initial TUI frame")
+        send_literal(tmux_exe, theme_session, "/settings")
+        wait_for(tmux_exe, theme_session, r"/settings", "light-theme settings command draft")
+        send_keys(tmux_exe, theme_session, "Enter")
+        light_settings_modal = wait_for(
+            tmux_exe, theme_session, r"ava-light|AVA_TUI_THEME", "light-theme settings modal"
+        )
+        if "ava-light" not in light_settings_modal or "AVA_TUI_THEME" not in light_settings_modal:
+            raise RuntimeError(f"settings modal did not report AVA_TUI_THEME=light\nscreen:\n{light_settings_modal}")
+        tmux(tmux_exe, "kill-session", "-t", theme_session, check=False)
+
+        display_config = ava_config / "display.json"
+        if display_config.exists():
+            display_config.unlink()
+        tmux(
+            tmux_exe,
+            "new-session",
+            "-d",
+            "-s",
+            background_theme_session,
+            "-x",
+            "100",
+            "-y",
+            "24",
+            "-c",
+            str(workspace),
+            background_theme_env_prefix,
+        )
+        wait_for(
+            tmux_exe,
+            background_theme_session,
+            r"Type a message|live session",
+            "terminal-background theme initial TUI frame",
+        )
+        send_literal(tmux_exe, background_theme_session, "/settings")
+        wait_for(tmux_exe, background_theme_session, r"/settings", "terminal-background settings command draft")
+        send_keys(tmux_exe, background_theme_session, "Enter")
+        background_theme_modal = wait_for(
+            tmux_exe,
+            background_theme_session,
+            r"ava-light|COLORFGBG",
+            "terminal-background settings modal",
+        )
+        if "ava-light" not in background_theme_modal or "COLORFGBG" not in background_theme_modal:
+            raise RuntimeError(
+                f"settings modal did not report COLORFGBG-derived light theme\nscreen:\n{background_theme_modal}"
+            )
+        tmux(tmux_exe, "kill-session", "-t", background_theme_session, check=False)
+
+        (ava_config / "keybinds.json").write_text(
+            '{"tui.editor.cursorLineStart":["Home","Ctrl+A"]}\n', encoding="utf-8"
+        )
+        tmux(
+            tmux_exe,
+            "new-session",
+            "-d",
+            "-s",
+            persisted_theme_session,
+            "-x",
+            "100",
+            "-y",
+            "24",
+            "-c",
+            str(workspace),
+            persisted_theme_env_prefix,
+        )
+        wait_for(tmux_exe, persisted_theme_session, r"Type a message|live session", "persisted-theme initial TUI frame")
+        send_literal(tmux_exe, persisted_theme_session, "/settings")
+        wait_for(tmux_exe, persisted_theme_session, r"/settings", "persisted-theme settings command draft")
+        send_keys(tmux_exe, persisted_theme_session, "Enter")
+        wait_for(tmux_exe, persisted_theme_session, r"Settings|Search settings", "persisted-theme settings modal")
+        send_literal(tmux_exe, persisted_theme_session, "Theme light")
+        wait_for(tmux_exe, persisted_theme_session, r"Theme light", "persisted-theme filtered theme row")
+        send_keys(tmux_exe, persisted_theme_session, "Enter")
+        applied_theme = wait_for(
+            tmux_exe, persisted_theme_session, r"Stored TUI theme light", "settings theme selection applied"
+        )
+        if "Stored TUI theme light" not in applied_theme:
+            raise RuntimeError(f"settings modal did not apply the light theme row\nscreen:\n{applied_theme}")
+        if not display_config.exists() or '"theme": "light"' not in display_config.read_text(encoding="utf-8"):
+            raise RuntimeError(f"settings theme selection did not write display.json\npath:\n{display_config}")
+        tmux(tmux_exe, "kill-session", "-t", persisted_theme_session, check=False)
+
+        tmux(
+            tmux_exe,
+            "new-session",
+            "-d",
+            "-s",
+            persisted_theme_session,
+            "-x",
+            "100",
+            "-y",
+            "24",
+            "-c",
+            str(workspace),
+            persisted_theme_env_prefix,
+        )
+        wait_for(tmux_exe, persisted_theme_session, r"Type a message|live session", "persisted-theme restart TUI frame")
+        send_literal(tmux_exe, persisted_theme_session, "/settings")
+        wait_for(tmux_exe, persisted_theme_session, r"/settings", "persisted-theme restart settings draft")
+        send_keys(tmux_exe, persisted_theme_session, "Enter")
+        persisted_theme_modal = wait_for(
+            tmux_exe, persisted_theme_session, r"ava-light|display\.json", "persisted-theme settings modal after restart"
+        )
+        if "ava-light" not in persisted_theme_modal or "display.json" not in persisted_theme_modal:
+            raise RuntimeError(f"settings modal did not report persisted display.json light theme\nscreen:\n{persisted_theme_modal}")
+        send_keys(tmux_exe, persisted_theme_session, "Escape")
+        wait_for_absent(tmux_exe, persisted_theme_session, r"Search settings", "persisted-theme settings modal canceled")
+        send_keys(tmux_exe, persisted_theme_session, "C-u")
+        send_literal(tmux_exe, persisted_theme_session, "/settings")
+        wait_for(tmux_exe, persisted_theme_session, r"/settings", "custom-theme settings draft")
+        send_keys(tmux_exe, persisted_theme_session, "Enter")
+        wait_for(tmux_exe, persisted_theme_session, r"Settings|Search settings", "custom-theme settings modal")
+        send_literal(tmux_exe, persisted_theme_session, "Theme ocean")
+        wait_for(tmux_exe, persisted_theme_session, r"Theme ocean", "custom-theme filtered theme row")
+        send_keys(tmux_exe, persisted_theme_session, "Enter")
+        applied_custom_theme = wait_for(
+            tmux_exe, persisted_theme_session, r"Stored TUI theme ocean", "settings custom theme selection applied"
+        )
+        if "Stored TUI theme ocean" not in applied_custom_theme:
+            raise RuntimeError(f"settings modal did not apply the custom theme row\nscreen:\n{applied_custom_theme}")
+        if '"theme": "ocean"' not in display_config.read_text(encoding="utf-8"):
+            raise RuntimeError(f"settings custom theme selection did not write display.json\npath:\n{display_config}")
+        display_config.write_text('{\n  "theme": "plain"\n}\n', encoding="utf-8")
+        send_keys(tmux_exe, persisted_theme_session, "C-u")
+        send_literal(tmux_exe, persisted_theme_session, "/reload theme")
+        wait_for(tmux_exe, persisted_theme_session, r"/reload theme", "display theme reload draft")
+        send_keys(tmux_exe, persisted_theme_session, "Enter")
+        reloaded_theme = wait_for(
+            tmux_exe, persisted_theme_session, r"display theme reloaded: plain", "display theme reload command"
+        )
+        if "display theme reloaded: plain" not in reloaded_theme:
+            raise RuntimeError(f"/reload theme did not report the externally edited plain theme\nscreen:\n{reloaded_theme}")
+        send_keys(tmux_exe, persisted_theme_session, "C-u")
+        send_literal(tmux_exe, persisted_theme_session, "/settings")
+        wait_for(tmux_exe, persisted_theme_session, r"/settings", "reloaded-theme settings draft")
+        send_keys(tmux_exe, persisted_theme_session, "Enter")
+        reloaded_theme_modal = wait_for(
+            tmux_exe, persisted_theme_session, r"plain|display\.json", "settings modal after display theme reload"
+        )
+        if "plain" not in reloaded_theme_modal or "display.json" not in reloaded_theme_modal:
+            raise RuntimeError(f"settings modal did not report reloaded display.json plain theme\nscreen:\n{reloaded_theme_modal}")
+        send_keys(tmux_exe, persisted_theme_session, "Escape")
+        wait_for_absent(tmux_exe, persisted_theme_session, r"Search settings", "reloaded-theme settings modal canceled")
+        display_config.write_text('{\n  "theme": "light"\n}\n', encoding="utf-8")
+        auto_reloaded_theme = wait_for(
+            tmux_exe,
+            persisted_theme_session,
+            r"display theme auto-reloaded: ava-light",
+            "automatic display theme reload",
+        )
+        if "display theme auto-reloaded: ava-light" not in auto_reloaded_theme:
+            raise RuntimeError(f"display.json edit did not auto-reload the light theme\nscreen:\n{auto_reloaded_theme}")
+        send_keys(tmux_exe, persisted_theme_session, "C-u")
+        send_literal(tmux_exe, persisted_theme_session, "/settings")
+        wait_for(tmux_exe, persisted_theme_session, r"/settings", "auto-reloaded-theme settings draft")
+        send_keys(tmux_exe, persisted_theme_session, "Enter")
+        auto_reloaded_theme_modal = wait_for(
+            tmux_exe,
+            persisted_theme_session,
+            r"ava-light|display\.json",
+            "settings modal after automatic display theme reload",
+        )
+        if "ava-light" not in auto_reloaded_theme_modal or "display.json" not in auto_reloaded_theme_modal:
+            raise RuntimeError(
+                f"settings modal did not report auto-reloaded display.json light theme\nscreen:\n{auto_reloaded_theme_modal}"
+            )
+        tmux(tmux_exe, "kill-session", "-t", persisted_theme_session, check=False)
+
+        active_provider_port.unlink(missing_ok=True)
+        active_request_log.unlink(missing_ok=True)
+        active_provider_stdout = active_provider_out.open("w", encoding="utf-8")
+        active_provider_stderr = active_provider_err.open("w", encoding="utf-8")
+        active_provider = subprocess.Popen(
+            [
+                str(fake_provider_exe),
+                str(active_provider_port),
+                str(active_request_log),
+                "3500",
+                "text-three",
+                "",
+            ],
+            stdout=active_provider_stdout,
+            stderr=active_provider_stderr,
+        )
+        deadline = time.monotonic() + 8.0
+        while not active_provider_port.exists():
+            if active_provider.poll() is not None:
+                raise RuntimeError(
+                    "fake provider exited before writing its port\n"
+                    f"stdout:\n{active_provider_out.read_text(encoding='utf-8', errors='replace')}\n"
+                    f"stderr:\n{active_provider_err.read_text(encoding='utf-8', errors='replace')}"
+                )
+            if time.monotonic() >= deadline:
+                raise RuntimeError("timed out waiting for fake provider port")
+            time.sleep(0.05)
+        active_port = active_provider_port.read_text(encoding="utf-8").strip()
+        active_env_prefix = (
+            f"HOME={shlex.quote(str(active_home))} "
+            f"XDG_CONFIG_HOME={shlex.quote(str(active_config))} "
+            f"XDG_STATE_HOME={shlex.quote(str(active_state))} "
+            f"XDG_DATA_HOME={shlex.quote(str(active_data))} "
+            "NO_COLOR=1 "
+            "COLORFGBG= "
+            "MOONSHOT_API_KEY=test-key "
+            f"MOONSHOT_BASE_URL={shlex.quote('http://127.0.0.1:' + active_port)} "
+            f"exec {shlex.quote(str(ava_exe))}"
+        )
+        tmux(
+            tmux_exe,
+            "new-session",
+            "-d",
+            "-s",
+            active_session,
+            "-x",
+            "110",
+            "-y",
+            "28",
+            "-c",
+            str(active_workspace),
+            active_env_prefix,
+        )
+        wait_for(tmux_exe, active_session, r"Type a message|live session", "active-run fake-provider initial frame")
+        send_literal(tmux_exe, active_session, "tmux active first prompt")
+        wait_for(tmux_exe, active_session, r"tmux active first prompt", "active-run first prompt draft")
+        send_keys(tmux_exe, active_session, "Enter")
+        wait_for_request_count(active_request_log, 1, "active-run first provider request")
+        send_literal(tmux_exe, active_session, "tmux active follow-up")
+        wait_for(tmux_exe, active_session, r"tmux active follow-up", "active-run follow-up draft")
+        send_literal(tmux_exe, active_session, "\x1b\r")
+        queued_follow_up = wait_for(tmux_exe, active_session, r"follow-up queued", "active-run Alt+Enter follow-up queued")
+        if "tmux active follow-up" not in queued_follow_up:
+            raise RuntimeError(f"active-run Alt+Enter did not render the queued follow-up text\nscreen:\n{queued_follow_up}")
+        active_log = wait_for_request_count(active_request_log, 2, "active-run queued follow-up provider request", timeout=12.0)
+        if "tmux active first prompt" not in active_log or "tmux active follow-up" not in active_log:
+            raise RuntimeError(f"active-run follow-up did not reach the fake provider\nrequest log:\n{active_log}")
+        wait_for(tmux_exe, active_session, r"follow-up started|headless active prompt complete", "active-run follow-up delivery")
+        send_keys(tmux_exe, active_session, "C-d")
+        wait_for_session_exit(tmux_exe, active_session)
+        tmux(tmux_exe, "kill-session", "-t", active_session, check=False)
+        if active_provider.poll() is None:
+            active_provider.terminate()
+            try:
+                active_provider.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                active_provider.kill()
+                active_provider.wait(timeout=2.0)
+        active_provider = None
+
+        restore_provider_port.unlink(missing_ok=True)
+        restore_request_log.unlink(missing_ok=True)
+        restore_provider_stdout = restore_provider_out.open("w", encoding="utf-8")
+        restore_provider_stderr = restore_provider_err.open("w", encoding="utf-8")
+        restore_provider = subprocess.Popen(
+            [
+                str(fake_provider_exe),
+                str(restore_provider_port),
+                str(restore_request_log),
+                "3500",
+                "text-three",
+                "",
+            ],
+            stdout=restore_provider_stdout,
+            stderr=restore_provider_stderr,
+        )
+        deadline = time.monotonic() + 8.0
+        while not restore_provider_port.exists():
+            if restore_provider.poll() is not None:
+                raise RuntimeError(
+                    "fake provider exited before writing its restore port\n"
+                    f"stdout:\n{restore_provider_out.read_text(encoding='utf-8', errors='replace')}\n"
+                    f"stderr:\n{restore_provider_err.read_text(encoding='utf-8', errors='replace')}"
+                )
+            if time.monotonic() >= deadline:
+                raise RuntimeError("timed out waiting for fake provider restore port")
+            time.sleep(0.05)
+        restore_port = restore_provider_port.read_text(encoding="utf-8").strip()
+        restore_env_prefix = (
+            f"HOME={shlex.quote(str(restore_home))} "
+            f"XDG_CONFIG_HOME={shlex.quote(str(restore_config))} "
+            f"XDG_STATE_HOME={shlex.quote(str(restore_state))} "
+            f"XDG_DATA_HOME={shlex.quote(str(restore_data))} "
+            "NO_COLOR=1 "
+            "COLORFGBG= "
+            "MOONSHOT_API_KEY=test-key "
+            f"MOONSHOT_BASE_URL={shlex.quote('http://127.0.0.1:' + restore_port)} "
+            f"exec {shlex.quote(str(ava_exe))}"
+        )
+        tmux(
+            tmux_exe,
+            "new-session",
+            "-d",
+            "-s",
+            restore_active_session,
+            "-x",
+            "110",
+            "-y",
+            "28",
+            "-c",
+            str(restore_workspace),
+            restore_env_prefix,
+        )
+        wait_for(tmux_exe, restore_active_session, r"Type a message|live session", "active-run restore initial frame")
+        send_literal(tmux_exe, restore_active_session, "tmux restore first prompt")
+        wait_for(tmux_exe, restore_active_session, r"tmux restore first prompt", "active-run restore first prompt draft")
+        send_keys(tmux_exe, restore_active_session, "Enter")
+        wait_for_request_count(restore_request_log, 1, "active-run restore first provider request")
+        send_literal(tmux_exe, restore_active_session, "tmux restore follow-up")
+        wait_for(tmux_exe, restore_active_session, r"tmux restore follow-up", "active-run restore follow-up draft")
+        send_literal(tmux_exe, restore_active_session, "\x1b\r")
+        queued_restore_follow_up = wait_for(
+            tmux_exe,
+            restore_active_session,
+            r"follow-up queued",
+            "active-run restore Alt+Enter follow-up queued",
+        )
+        if "tmux restore follow-up" not in queued_restore_follow_up:
+            raise RuntimeError(
+                f"active-run restore setup did not render the queued follow-up text\nscreen:\n{queued_restore_follow_up}"
+            )
+        send_keys(tmux_exe, restore_active_session, "M-Up")
+        restored_follow_up = wait_for(
+            tmux_exe,
+            restore_active_session,
+            r"restored to composer|follow-up restored",
+            "active-run Alt+Up follow-up restored",
+        )
+        if "tmux restore follow-up" not in restored_follow_up:
+            raise RuntimeError(
+                f"active-run Alt+Up did not restore the follow-up text visibly\nscreen:\n{restored_follow_up}"
+            )
+        send_literal(tmux_exe, restore_active_session, " still-draft")
+        restored_draft_edit = wait_for(
+            tmux_exe,
+            restore_active_session,
+            r"tmux restore follow-up still-draft",
+            "active-run restored follow-up remains editable",
+        )
+        if "tmux restore follow-up still-draft" not in restored_draft_edit:
+            raise RuntimeError(
+                f"active-run restored follow-up was not editable in the composer\nscreen:\n{restored_draft_edit}"
+            )
+        wait_for(
+            tmux_exe,
+            restore_active_session,
+            r"headless active prompt complete",
+            "active-run restore original prompt completion",
+            timeout=12.0,
+        )
+        restore_log = assert_request_count_stays(
+            restore_request_log,
+            1,
+            "active-run restored follow-up should not be delivered",
+        )
+        if "tmux restore follow-up" in restore_log:
+            raise RuntimeError(f"restored follow-up leaked to the fake provider\nrequest log:\n{restore_log}")
+        send_keys(tmux_exe, restore_active_session, "C-u")
+        send_keys(tmux_exe, restore_active_session, "C-d")
+        wait_for_session_exit(tmux_exe, restore_active_session)
+        tmux(tmux_exe, "kill-session", "-t", restore_active_session, check=False)
+        if restore_provider.poll() is None:
+            restore_provider.terminate()
+            try:
+                restore_provider.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                restore_provider.kill()
+                restore_provider.wait(timeout=2.0)
+        restore_provider = None
+
+        (ava_config / "keybinds.json").write_text(
+            '{"tui.editor.cursorLineStart":["Home","Ctrl+A"]}\n', encoding="utf-8"
+        )
+        tmux(
+            tmux_exe,
+            "new-session",
+            "-d",
+            "-s",
             session,
             "-x",
             "120",
@@ -192,21 +846,11 @@ def main() -> int:
         initial = wait_for(tmux_exe, session, r"Type a message|live session", "initial TUI frame")
         if "AVA" not in initial:
             raise RuntimeError(f"initial frame did not show AVA branding\nscreen:\n{initial}")
+        if "Provider auth is not configured for `openai`" not in initial or "Connect with /connect" not in initial:
+            raise RuntimeError(f"first-run onboarding guidance did not render in fresh TUI\nscreen:\n{initial}")
         styled_initial = capture_styled(tmux_exe, session)
         if "\x1b[" in styled_initial:
             raise RuntimeError(f"NO_COLOR=1 TUI frame still captured ANSI style escapes\nscreen:\n{styled_initial}")
-
-        send_literal(tmux_exe, session, "/settings")
-        wait_for(tmux_exe, session, r"/settings", "settings command draft")
-        send_keys(tmux_exe, session, "Enter")
-        settings_modal = wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal")
-        if "plain" not in settings_modal or "NO_COLOR" not in settings_modal:
-            raise RuntimeError(f"settings modal did not report the active NO_COLOR plain mode\nscreen:\n{settings_modal}")
-        styled_settings = capture_styled(tmux_exe, session)
-        if "\x1b[" in styled_settings:
-            raise RuntimeError(f"NO_COLOR=1 settings modal still captured ANSI style escapes\nscreen:\n{styled_settings}")
-        send_keys(tmux_exe, session, "Escape")
-        wait_for_absent(tmux_exe, session, r"Search settings", "settings modal canceled")
 
         send_literal(tmux_exe, session, "/copy")
         wait_for(tmux_exe, session, r"/copy", "empty copy command draft")
@@ -214,11 +858,364 @@ def main() -> int:
         empty_copy = wait_for(tmux_exe, session, r"no AVA messages to copy", "empty /copy status")
         if "no AVA messages to copy" not in empty_copy:
             raise RuntimeError(f"/copy without prior AVA messages did not report the empty copy state\nscreen:\n{empty_copy}")
+        send_keys(tmux_exe, session, "C-u")
+
+        send_literal(tmux_exe, session, "/settings")
+        wait_for(tmux_exe, session, r"/settings", "settings command draft")
+        send_keys(tmux_exe, session, "Enter")
+        settings_modal = wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal")
+        if "plain" not in settings_modal or "NO_COLOR" not in settings_modal:
+            raise RuntimeError(f"settings modal did not report the active NO_COLOR plain mode\nscreen:\n{settings_modal}")
+        if "Keybindings" not in settings_modal or "Keybindings file" not in settings_modal:
+            raise RuntimeError(f"settings modal did not report keybinding config and reload guidance\nscreen:\n{settings_modal}")
+        styled_settings = capture_styled(tmux_exe, session)
+        if "\x1b[" in styled_settings:
+            raise RuntimeError(f"NO_COLOR=1 settings modal still captured ANSI style escapes\nscreen:\n{styled_settings}")
+        send_literal(tmux_exe, session, "Keybindings")
+        settings_keybinding_rows = wait_for(tmux_exe, session, r"Keybindings file", "settings keybinding filtered rows")
+        keybindings_row = next(
+            (
+                (index + 1, line)
+                for index, line in enumerate(settings_keybinding_rows.splitlines())
+                if "Keybindings" in line
+                and "open" in line
+                and "file" not in line
+                and "edit" not in line
+                and "reload" not in line
+            ),
+            None,
+        )
+        if keybindings_row is None:
+            raise RuntimeError(
+                f"settings keybinding rows did not expose a clickable open row\nscreen:\n{settings_keybinding_rows}"
+            )
+        keybindings_row_number, keybindings_row_text = keybindings_row
+        keybindings_column = max(1, len(keybindings_row_text) - len(keybindings_row_text.lstrip()) + 4)
+        send_literal(tmux_exe, session, f"\x1b[<0;{keybindings_column};{keybindings_row_number}M")
+        settings_opened_hotkeys = wait_for(
+            tmux_exe, session, r"Search keybindings|mode_toggle", "settings mouse click opens keybindings view"
+        )
+        if "Search keybindings" not in settings_opened_hotkeys:
+            raise RuntimeError(
+                f"settings keybindings row mouse click did not open the active keybindings view\nscreen:\n{settings_opened_hotkeys}"
+            )
+        send_literal(tmux_exe, session, "cursor_left")
+        wait_for(tmux_exe, session, r"cursor_left", "settings-opened keybindings filtered action")
+        send_keys(tmux_exe, session, "Enter")
+        hotkeys_edit_draft = wait_for(
+            tmux_exe, session, r"/keybindings set cursor_left", "settings-opened keybindings drafts selected action"
+        )
+        if "/keybindings set cursor_left" not in hotkeys_edit_draft:
+            raise RuntimeError(
+                f"settings-opened keybindings view did not draft the selected action edit command\nscreen:\n{hotkeys_edit_draft}"
+            )
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/settings")
+        wait_for(tmux_exe, session, r"/settings", "settings command draft before keybinding validate")
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before keybinding validate")
+        send_literal(tmux_exe, session, "validate")
+        wait_for(tmux_exe, session, r"Keybindings file", "settings keybinding validate row")
+        send_keys(tmux_exe, session, "Enter")
+        settings_validate = wait_for(tmux_exe, session, r"keybindings file is valid", "settings keybinding validate action")
+        if "keybindings file is valid" not in settings_validate:
+            raise RuntimeError(f"settings keybinding validate row did not run validation\nscreen:\n{settings_validate}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/settings")
+        wait_for(tmux_exe, session, r"/settings", "settings command draft before keybinding edit")
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before keybinding edit")
+        send_literal(tmux_exe, session, "edit")
+        wait_for(tmux_exe, session, r"Keybindings edit", "settings keybinding edit row")
+        send_keys(tmux_exe, session, "Enter")
+        settings_edit_draft = wait_for(tmux_exe, session, r"/keybindings set", "settings keybinding edit drafts command")
+        if "/keybindings set" not in settings_edit_draft:
+            raise RuntimeError(f"settings keybinding edit row did not draft /keybindings set\nscreen:\n{settings_edit_draft}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/settings")
+        wait_for(tmux_exe, session, r"/settings", "settings command draft before keybinding reload")
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before keybinding reload")
+        send_literal(tmux_exe, session, "reload")
+        settings_reload_row = wait_for(
+            tmux_exe, session, r"Keybindings reload|/reload keybindings", "settings keybinding reload row"
+        )
+        if "Keybindings reload" not in settings_reload_row or "/reload keybindings" not in settings_reload_row:
+            raise RuntimeError(
+                f"settings modal did not expose keybinding reload guidance when filtered\nscreen:\n{settings_reload_row}"
+            )
+        send_keys(tmux_exe, session, "Enter")
+        settings_reload = wait_for(tmux_exe, session, r"keybindings reloaded", "settings keybinding reload action")
+        if "keybindings reloaded" not in settings_reload:
+            raise RuntimeError(f"settings keybinding reload row did not reload live bindings\nscreen:\n{settings_reload}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/settings")
+        wait_for(tmux_exe, session, r"/settings", "settings command draft before model selector")
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before model selector")
+        send_literal(tmux_exe, session, "Model selector")
+        settings_model_selector_row = wait_for(
+            tmux_exe, session, r"Model selector|/models selector", "settings model selector row"
+        )
+        if "Model selector" not in settings_model_selector_row or "openai/GPT" not in settings_model_selector_row:
+            raise RuntimeError(
+                f"settings modal did not expose the model selector action\nscreen:\n{settings_model_selector_row}"
+            )
+        send_keys(tmux_exe, session, "Enter")
+        settings_opened_model_selector = wait_for(
+            tmux_exe, session, r"Select model|Search models", "settings opens model selector"
+        )
+        if "Select model" not in settings_opened_model_selector and "Search models" not in settings_opened_model_selector:
+            raise RuntimeError(
+                f"settings model selector row did not open the model selector\nscreen:\n{settings_opened_model_selector}"
+            )
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Select model|Search models", "settings-opened model selector canceled")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/settings")
+        wait_for(tmux_exe, session, r"/settings", "settings command draft before scoped models")
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before scoped models")
+        send_literal(tmux_exe, session, "cycle scope")
+        settings_scoped_model_row = wait_for(
+            tmux_exe, session, r"Model cycle scope|/scoped-models|Ctrl\+S", "settings scoped model row"
+        )
+        if (
+            "Model cycle scope" not in settings_scoped_model_row
+            or "Ctrl+P scoped cycle" not in settings_scoped_model_row
+        ):
+            raise RuntimeError(
+                f"settings modal did not expose scoped model-cycle persistence guidance\nscreen:\n{settings_scoped_model_row}"
+            )
+        send_keys(tmux_exe, session, "Enter")
+        settings_opened_scoped_model_selector = wait_for(
+            tmux_exe, session, r"Scoped model cycle|Search models", "settings opens scoped model selector"
+        )
+        if "Scoped model cycle" not in settings_opened_scoped_model_selector:
+            raise RuntimeError(
+                f"settings scoped model row did not open the scoped cycle selector\nscreen:\n{settings_opened_scoped_model_selector}"
+            )
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(
+            tmux_exe, session, r"Scoped model cycle|Search models", "settings-opened scoped model selector canceled"
+        )
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/context")
+        wait_for(tmux_exe, session, r"/context\s+Sessions", "context command palette")
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"/context\s+Sessions", "context palette dismissed")
+        send_keys(tmux_exe, session, "Enter")
+        context_freshness = wait_for(
+            tmux_exe, session, r"(?s)Context freshness:.*context_sources=1", "context freshness command"
+        )
+        if (
+            "prompt=builtin" not in context_freshness
+            or "AGENTS.md" not in context_freshness
+            or "status=current" not in context_freshness
+            or "project_resources=skipped" not in context_freshness
+            or "system_prompt_sources=0" not in context_freshness
+        ):
+            raise RuntimeError(f"/context did not report prompt and context freshness visibly\nscreen:\n{context_freshness}")
+        if "trust-smoke" in context_freshness:
+            raise RuntimeError(f"/context listed an untrusted project prompt command\nscreen:\n{context_freshness}")
+        if "APPEND_SYSTEM" in context_freshness:
+            raise RuntimeError(f"/context listed an untrusted project append-system prompt\nscreen:\n{context_freshness}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/trust status")
+        wait_for(tmux_exe, session, r"/trust status", "trust status draft")
+        send_keys(tmux_exe, session, "Enter")
+        trust_status = wait_for(
+            tmux_exe, session, r"(?s)Project trust:.*decision=unknown.*project_resources=skipped", "trust status command"
+        )
+        if ".ava/commands" not in trust_status:
+            raise RuntimeError(f"/trust status did not list protected project resources\nscreen:\n{trust_status}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/trust project")
+        wait_for(tmux_exe, session, r"/trust project", "trust project draft")
+        send_keys(tmux_exe, session, "Enter")
+        trust_project = wait_for(
+            tmux_exe, session, r"(?s)trusted project resources.*project_resources=enabled", "trust project command"
+        )
+        if "decision=trusted" not in trust_project:
+            raise RuntimeError(f"/trust project did not persist a trusted decision\nscreen:\n{trust_project}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/context trust-smoke")
+        wait_for(tmux_exe, session, r"/context trust-smoke", "trusted context query draft")
+        send_keys(tmux_exe, session, "Enter")
+        trusted_context = wait_for(
+            tmux_exe,
+            session,
+            r"(?s)project_trust=trusted project_resources=enabled.*prompt_command\s+project\s+trust-smoke",
+            "trusted project prompt command freshness",
+        )
+        if "status=current" not in trusted_context:
+            raise RuntimeError(f"/context did not report trusted project prompt command freshness\nscreen:\n{trusted_context}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/context APPEND_SYSTEM")
+        wait_for(tmux_exe, session, r"/context APPEND_SYSTEM", "trusted append-system context query draft")
+        send_keys(tmux_exe, session, "Enter")
+        trusted_prompt_context = wait_for(
+            tmux_exe,
+            session,
+            r"(?s)project_trust=trusted project_resources=enabled.*append_system_prompt\s+project\s+APPEND_SYSTEM\.md",
+            "trusted project append-system freshness",
+        )
+        if "status=current" not in trusted_prompt_context:
+            raise RuntimeError(f"/context did not report trusted append-system prompt freshness\nscreen:\n{trusted_prompt_context}")
+
+        (ava_config / "keybinds.json").unlink(missing_ok=True)
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/keybindings init")
+        wait_for(tmux_exe, session, r"❯ /keybindings init(?:\s|$)", "keybindings init command draft")
+        wait_for(tmux_exe, session, r"Create \$XDG_CONFIG_HOME/ava/keybinds\.json", "keybindings init completion row")
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Create \$XDG_CONFIG_HOME/ava/keybinds\.json", "keybindings init palette dismissed")
+        send_keys(tmux_exe, session, "Enter")
+        keybindings_init = wait_for(
+            tmux_exe, session, r"Created keybindings starter file", "keybindings starter init command"
+        )
+        if "Created keybindings starter file" not in keybindings_init:
+            raise RuntimeError(f"/keybindings init did not report starter-file creation\nscreen:\n{keybindings_init}")
+        keybinds_content = (ava_config / "keybinds.json").read_text(encoding="utf-8")
+        if '"tui.input.submit"' not in keybinds_content or '"tui.editor.cursorLeft"' not in keybinds_content:
+            raise RuntimeError(f"/keybindings init wrote an unexpected starter file\ncontent:\n{keybinds_content}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/keybindings init")
+        wait_for(tmux_exe, session, r"❯ /keybindings init(?:\s|$)", "keybindings existing init command draft")
+        wait_for(tmux_exe, session, r"Create \$XDG_CONFIG_HOME/ava/keybinds\.json", "keybindings existing init completion row")
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Create \$XDG_CONFIG_HOME/ava/keybinds\.json", "keybindings existing init palette dismissed")
+        send_keys(tmux_exe, session, "Enter")
+        keybindings_init_existing = wait_for(
+            tmux_exe, session, r"keybindings file already exists", "keybindings starter overwrite refusal"
+        )
+        if "--force" not in keybindings_init_existing:
+            raise RuntimeError(
+                f"/keybindings init did not explain the explicit overwrite path\nscreen:\n{keybindings_init_existing}"
+            )
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/keybindings init --force")
+        wait_for(tmux_exe, session, r"/keybindings init --force", "keybindings force init draft")
+        send_keys(tmux_exe, session, "Enter")
+        keybindings_init_force = wait_for(
+            tmux_exe, session, r"Replaced keybindings starter file", "keybindings starter force command"
+        )
+        if "Replaced keybindings starter file" not in keybindings_init_force:
+            raise RuntimeError(f"/keybindings init --force did not replace the starter file\nscreen:\n{keybindings_init_force}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/keybindings validate")
+        wait_for(tmux_exe, session, r"/keybindings validate|Validate \$XDG_CONFIG_HOME/ava/keybinds", "keybindings validate palette row")
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Validate \$XDG_CONFIG_HOME/ava/keybinds", "keybindings validate palette dismissed")
+        send_keys(tmux_exe, session, "Enter", "Enter")
+        keybindings_validate = wait_for(
+            tmux_exe, session, r"keybindings file is valid", "keybindings validate command"
+        )
+        if "keybindings file is valid" not in keybindings_validate:
+            raise RuntimeError(f"/keybindings validate did not report a valid starter file\nscreen:\n{keybindings_validate}")
+
+        (ava_config / "keybinds.json").write_text(
+            '{"submit":"Ctrl+P","model_cycle_forward":"Ctrl+P"}\n', encoding="utf-8"
+        )
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/keybindings validate")
+        wait_for(tmux_exe, session, r"/keybindings validate|Validate \$XDG_CONFIG_HOME/ava/keybinds", "invalid keybindings validate palette row")
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Validate \$XDG_CONFIG_HOME/ava/keybinds", "invalid keybindings validate palette dismissed")
+        send_keys(tmux_exe, session, "Enter", "Enter")
+        invalid_keybindings_validate = wait_for(
+            tmux_exe, session, r"keybindings file is invalid|conflicting TUI keybinding|Ctrl\+P", "invalid keybindings validate command"
+        )
+        if "keybindings file is invalid" not in invalid_keybindings_validate or "Ctrl+P" not in invalid_keybindings_validate:
+            raise RuntimeError(
+                f"/keybindings validate did not report the conflicting keybinding\nscreen:\n{invalid_keybindings_validate}"
+            )
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/keybindings import import-keybinds.json --force")
+        wait_for(tmux_exe, session, r"/keybindings import import-keybinds\.json --force", "keybindings import draft")
+        send_keys(tmux_exe, session, "Enter")
+        keybindings_import = wait_for(tmux_exe, session, r"Imported keybindings file", "keybindings import command")
+        if "Imported keybindings file" not in keybindings_import or "/reload keybindings" not in keybindings_import:
+            raise RuntimeError(f"/keybindings import did not report an installed file\nscreen:\n{keybindings_import}")
+        imported_keybinds = (ava_config / "keybinds.json").read_text(encoding="utf-8")
+        if imported_keybinds != import_keybinds_content:
+            raise RuntimeError(
+                f"/keybindings import did not install the expected keybindings file\ncontent:\n{imported_keybinds}"
+            )
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/keybindings set cursor_left Alt+H")
+        wait_for(tmux_exe, session, r"/keybindings set cursor_left Alt\+H", "keybindings set draft")
+        send_keys(tmux_exe, session, "Enter")
+        keybindings_set = wait_for(tmux_exe, session, r"Set keybinding", "keybindings set command")
+        if "Set keybinding" not in keybindings_set or "/reload keybindings" not in keybindings_set:
+            raise RuntimeError(f"/keybindings set did not report an edited keybinding\nscreen:\n{keybindings_set}")
+        edited_keybinds = (ava_config / "keybinds.json").read_text(encoding="utf-8")
+        if '"tui.editor.cursorLeft": "Alt+H"' not in edited_keybinds or '"cursor_left"' in edited_keybinds:
+            raise RuntimeError(
+                f"/keybindings set did not edit the keybindings file as expected\ncontent:\n{edited_keybinds}"
+            )
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/keybindings reset cursor_left")
+        wait_for(tmux_exe, session, r"/keybindings reset cursor_left", "keybindings reset draft")
+        send_keys(tmux_exe, session, "Enter")
+        keybindings_reset = wait_for(tmux_exe, session, r"Reset keybinding override", "keybindings reset command")
+        if "Reset keybinding override" not in keybindings_reset or "/reload keybindings" not in keybindings_reset:
+            raise RuntimeError(f"/keybindings reset did not report a reset override\nscreen:\n{keybindings_reset}")
+        reset_keybinds = (ava_config / "keybinds.json").read_text(encoding="utf-8")
+        if "tui.editor.cursorLeft" in reset_keybinds or "cursor_left" in reset_keybinds:
+            raise RuntimeError(
+                f"/keybindings reset did not remove the cursor-left override\ncontent:\n{reset_keybinds}"
+            )
 
         send_literal(tmux_exe, session, "\x1b[Z")
         shift_tab_reasoning = wait_for(tmux_exe, session, r"reasoning set to low|reasoning low", "shift-tab reasoning cycle")
         if "reasoning set to low" not in shift_tab_reasoning and "reasoning low" not in shift_tab_reasoning:
             raise RuntimeError(f"Shift+Tab did not cycle the visible reasoning state\nscreen:\n{shift_tab_reasoning}")
+        send_keys(tmux_exe, session, "C-t")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/thinking")
+        wait_for(tmux_exe, session, r"/thinking", "ctrl-t thinking hide oracle draft")
+        send_keys(tmux_exe, session, "Enter")
+        thinking_hidden_key = wait_for(
+            tmux_exe, session, r"thinking blocks are now visible", "ctrl-t thinking hide oracle"
+        )
+        if "thinking blocks are now visible" not in thinking_hidden_key:
+            raise RuntimeError(f"Ctrl+T did not hide thinking blocks before /thinking restored them\nscreen:\n{thinking_hidden_key}")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/thinking")
+        wait_for(tmux_exe, session, r"/thinking", "thinking command hide draft")
+        send_keys(tmux_exe, session, "Enter")
+        thinking_hidden_command = wait_for(
+            tmux_exe, session, r"thinking blocks are now hidden", "thinking command hides blocks"
+        )
+        if "thinking blocks are now hidden" not in thinking_hidden_command:
+            raise RuntimeError(f"/thinking did not hide thinking blocks before Ctrl+T show check\nscreen:\n{thinking_hidden_command}")
+        send_keys(tmux_exe, session, "C-t")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/thinking")
+        wait_for(tmux_exe, session, r"/thinking", "ctrl-t thinking show oracle draft")
+        send_keys(tmux_exe, session, "Enter")
+        thinking_visible_key = wait_for_count(
+            tmux_exe, session, r"thinking blocks are now hidden", 2, "ctrl-t thinking show oracle"
+        )
+        if len(re.findall(r"thinking blocks are now hidden", thinking_visible_key)) < 2:
+            raise RuntimeError(f"Ctrl+T did not show thinking blocks before /thinking hid them again\nscreen:\n{thinking_visible_key}")
         send_keys(tmux_exe, session, "C-p")
         model_cycle = wait_for(tmux_exe, session, r"model cycled|GPT-4\.1 mini|gpt-4\.1-mini", "ctrl-p model cycle")
         if "model cycled" not in model_cycle and "GPT-4.1 mini" not in model_cycle and "gpt-4.1-mini" not in model_cycle:
@@ -227,13 +1224,154 @@ def main() -> int:
         model_selector = wait_for(tmux_exe, session, r"Select model|Search models", "ctrl-l model selector")
         if "Select model" not in model_selector and "Search models" not in model_selector:
             raise RuntimeError(f"Ctrl+L did not open the model selector\nscreen:\n{model_selector}")
+        send_literal(tmux_exe, session, "Diagnostic")
+        diagnostic_model_selector = wait_for(
+            tmux_exe, session, r"Diagnostic Local.*diagnostics|diagnostics.*Diagnostic Local", "model selector diagnostics"
+        )
+        if "Diagnostic Local" not in diagnostic_model_selector or "diagnostics" not in diagnostic_model_selector:
+            raise RuntimeError(
+                f"Model selector did not show the custom model diagnostics\nscreen:\n{diagnostic_model_selector}"
+            )
         send_keys(tmux_exe, session, "Escape")
         wait_for_absent(tmux_exe, session, r"Select model|Search models", "model selector canceled")
+        send_literal(tmux_exe, session, "/scoped-models")
+        wait_for(tmux_exe, session, r"/scoped-models", "scoped model selector draft")
+        send_keys(tmux_exe, session, "Enter")
+        scoped_model_selector = wait_for(
+            tmux_exe, session, r"Scoped model cycle|Search models", "scoped model selector"
+        )
+        if "Scoped model cycle" not in scoped_model_selector or "Ctrl+X clear" not in scoped_model_selector:
+            raise RuntimeError(
+                f"/scoped-models did not open the scoped cycle selector with model controls\nscreen:\n{scoped_model_selector}"
+            )
+        send_literal(tmux_exe, session, "Diagnostic")
+        wait_for(tmux_exe, session, r"Diagnostic Local", "scoped model reorder filtered row")
+        send_keys(tmux_exe, session, "M-Up")
+        time.sleep(0.2)
+        send_keys(tmux_exe, session, "C-s")
+        time.sleep(0.2)
+        saved_reordered_models = (ava_config / "models.json").read_text(encoding="utf-8")
+        try:
+            saved_reordered_cycle = json.loads(saved_reordered_models).get("scoped_model_cycle")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Ctrl+S after Alt+Up wrote invalid models.json: {exc}\ncontent:\n{saved_reordered_models}") from exc
+        if (
+            not isinstance(saved_reordered_cycle, list)
+            or len(saved_reordered_cycle) < 2
+            or "openai/diagnostic-local" not in saved_reordered_cycle
+        ):
+            raise RuntimeError(
+                "Alt+Up did not make the scoped model cycle explicit before saving\n"
+                f"content:\n{saved_reordered_models}"
+            )
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Scoped model cycle|Search models", "scoped model reorder selector canceled")
+        send_literal(tmux_exe, session, "/scoped-models")
+        wait_for(tmux_exe, session, r"/scoped-models", "scoped model selector draft after reorder")
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(tmux_exe, session, r"Scoped model cycle|Search models", "scoped model selector after reorder")
+        send_keys(tmux_exe, session, "C-x")
+        scoped_model_cleared = wait_for(
+            tmux_exe, session, r"0/[0-9]+ enabled|disabled", "scoped model selector clear visible"
+        )
+        if "0/" not in scoped_model_cleared or "disabled" not in scoped_model_cleared:
+            raise RuntimeError(
+                f"Ctrl+X did not clear the visible scoped model cycle\nscreen:\n{scoped_model_cleared}"
+            )
+        send_keys(tmux_exe, session, "C-s")
+        time.sleep(0.2)
+        saved_empty_models = (ava_config / "models.json").read_text(encoding="utf-8")
+        if '"scoped_model_cycle": []' not in saved_empty_models or "Diagnostic Local" not in saved_empty_models:
+            raise RuntimeError(
+                f"Ctrl+S did not persist the empty scoped model cycle while preserving custom models\ncontent:\n{saved_empty_models}"
+            )
+        tmux(
+            tmux_exe,
+            "new-session",
+            "-d",
+            "-s",
+            scoped_persist_session,
+            "-x",
+            "100",
+            "-y",
+            "24",
+            "-c",
+            str(workspace),
+            env_prefix,
+        )
+        wait_for(tmux_exe, scoped_persist_session, r"Type a message|live session", "scoped model restart frame")
+        send_keys(tmux_exe, scoped_persist_session, "C-p")
+        scoped_model_cycle_restart_empty = wait_for(
+            tmux_exe,
+            scoped_persist_session,
+            r"enabled for cycling|no registered provider models",
+            "persisted empty scoped model cycle status",
+        )
+        if (
+            "enabled for cycling" not in scoped_model_cycle_restart_empty
+            and "no registered provider models" not in scoped_model_cycle_restart_empty
+        ):
+            raise RuntimeError(
+                "A fresh TUI did not load the persisted empty scoped model cycle\n"
+                f"screen:\n{scoped_model_cycle_restart_empty}"
+            )
+        send_keys(tmux_exe, scoped_persist_session, "C-d")
+        wait_for_session_exit(tmux_exe, scoped_persist_session)
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Scoped model cycle|Search models", "scoped model selector canceled")
+        send_keys(tmux_exe, session, "C-p")
+        scoped_model_cycle_empty = wait_for(
+            tmux_exe, session, r"enabled for cycling|no registered provider models", "empty scoped model cycle status"
+        )
+        if "enabled for cycling" not in scoped_model_cycle_empty and "no registered provider models" not in scoped_model_cycle_empty:
+            raise RuntimeError(
+                f"Ctrl+P did not report the empty scoped model cycle\nscreen:\n{scoped_model_cycle_empty}"
+            )
+        send_literal(tmux_exe, session, "/scoped-models")
+        wait_for(tmux_exe, session, r"/scoped-models", "scoped model selector restore draft")
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(tmux_exe, session, r"Scoped model cycle|Search models", "scoped model selector restore")
+        send_keys(tmux_exe, session, "C-a")
+        scoped_model_enabled = wait_for(
+            tmux_exe, session, r"all configured registered models enabled|all-enabled", "scoped model selector enable visible"
+        )
+        if "all configured registered models enabled" not in scoped_model_enabled and "all-enabled" not in scoped_model_enabled:
+            raise RuntimeError(
+                f"Ctrl+A did not restore the visible scoped model cycle\nscreen:\n{scoped_model_enabled}"
+        )
+        send_keys(tmux_exe, session, "C-s")
+        time.sleep(0.2)
+        saved_all_models = (ava_config / "models.json").read_text(encoding="utf-8")
+        if "scoped_model_cycle" in saved_all_models or "Diagnostic Local" not in saved_all_models:
+            raise RuntimeError(
+                f"Ctrl+S did not remove the scoped model cycle field while preserving custom models\ncontent:\n{saved_all_models}"
+            )
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Scoped model cycle|Search models", "scoped model selector restore canceled")
+        send_keys(tmux_exe, session, "C-p")
+        restored_model_cycle = wait_for(
+            tmux_exe,
+            session,
+            r"model cycled|GPT-4\.1 mini|gpt-4\.1-mini|Claude Sonnet 4\.5|claude-sonnet-4-5",
+            "restored scoped model cycle",
+        )
+        if (
+            "model cycled" not in restored_model_cycle
+            and "GPT-4.1 mini" not in restored_model_cycle
+            and "gpt-4.1-mini" not in restored_model_cycle
+            and "Claude Sonnet 4.5" not in restored_model_cycle
+            and "claude-sonnet-4-5" not in restored_model_cycle
+        ):
+            raise RuntimeError(f"Ctrl+P did not cycle after restoring scoped models\nscreen:\n{restored_model_cycle}")
         (ava_config / "keybinds.json").write_text(
-            '{"tui.editor.cursorLineStart":["Home","Ctrl+A","Alt+Up"],'
+            '{"tui.editor.cursorLineStart":["Home","Ctrl+A","Alt+Up","Insert"],'
+            '"tui.editor.cursorLineEnd":["F2","Ctrl+1"],'
             '"tui.editor.cursorLeft":["Left","Ctrl+B","Alt+H"],'
             '"tui.editor.cursorWordRight":["Ctrl+Right","Alt+Right","Alt+F","Alt+W"],'
-            '"tui.editor.deleteCharBackward":["Ctrl+H"],'
+            '"tui.editor.deleteCharBackward":["Shift+Backspace","Ctrl+H"],'
+            '"tui.editor.deleteCharForward":["Shift+Delete","Delete"],'
+            '"app.session.resume":"Alt+J",'
+            '"app.session.new":"Alt+K",'
             '"tui.select.confirm":["Enter","Space"],'
             '"tui.select.cancel":["Escape","Ctrl+W"]}\n',
             encoding="utf-8",
@@ -246,6 +1384,40 @@ def main() -> int:
         reload_screen = wait_for(tmux_exe, session, r"keybindings reloaded", "live keybinding reload")
         if "keybindings reloaded" not in reload_screen:
             raise RuntimeError(f"/reload did not report a live keybinding reload\nscreen:\n{reload_screen}")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "fkey")
+        send_keys(tmux_exe, session, "C-a")
+        send_keys(tmux_exe, session, "F2")
+        send_literal(tmux_exe, session, "Z")
+        fkey_end = wait_for(tmux_exe, session, r"fkeyZ", "custom F2 cursor-end binding")
+        if "fkeyZ" not in fkey_end or "Zfkey" in fkey_end:
+            raise RuntimeError(f"F2 custom binding did not move the composer cursor to the end\nscreen:\n{fkey_end}")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "insert")
+        send_keys(tmux_exe, session, "Insert")
+        send_literal(tmux_exe, session, "Z")
+        insert_start = wait_for(tmux_exe, session, r"Zinsert", "custom Insert cursor-start binding")
+        if "Zinsert" not in insert_start or "insertZ" in insert_start:
+            raise RuntimeError(f"Insert custom binding did not move the composer cursor to the start\nscreen:\n{insert_start}")
+        send_keys(tmux_exe, session, "C-c")
+        send_literal(tmux_exe, session, "ctrlone")
+        send_keys(tmux_exe, session, "C-a")
+        send_literal(tmux_exe, session, "\x1b[27;5;49~")
+        send_literal(tmux_exe, session, "Z")
+        ctrl_one_end = wait_for(tmux_exe, session, r"ctrloneZ", "custom Ctrl+1 cursor-end binding")
+        if "ctrloneZ" not in ctrl_one_end or "Zctrlone" in ctrl_one_end:
+            raise RuntimeError(f"Ctrl+1 custom binding did not move the composer cursor to the end\nscreen:\n{ctrl_one_end}")
+        send_keys(tmux_exe, session, "C-u")
+        send_keys(tmux_exe, session, "M-j")
+        session_resume_key = wait_for(tmux_exe, session, r"Select session|Session tree", "custom session resume key")
+        if "Select session" not in session_resume_key and "Session tree" not in session_resume_key:
+            raise RuntimeError(f"Alt+J custom session resume key did not open selector\nscreen:\n{session_resume_key}")
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Select session|Session tree", "custom session resume selector dismissed")
+        send_keys(tmux_exe, session, "M-k")
+        session_new_key = wait_for(tmux_exe, session, r"started session session_", "custom session new key")
+        if "started session session_" not in session_new_key:
+            raise RuntimeError(f"Alt+K custom session new key did not create a session\nscreen:\n{session_new_key}")
         send_literal(tmux_exe, session, "alt-up-visible")
         send_keys(tmux_exe, session, "M-Up")
         send_literal(tmux_exe, session, "Z")
@@ -280,26 +1452,272 @@ def main() -> int:
         if "alphaY beta" not in alt_w_word or "Yalpha beta" in alt_w_word:
             raise RuntimeError(f"Alt+W did not move the composer cursor right by word\nscreen:\n{alt_w_word}")
         send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "alpha beta")
+        click_cursor_draft = wait_for(tmux_exe, session, r"alpha beta", "composer mouse cursor draft")
+        click_cursor_row = next(
+            ((index + 1, line) for index, line in enumerate(click_cursor_draft.splitlines()) if "alpha beta" in line),
+            None,
+        )
+        if click_cursor_row is None:
+            raise RuntimeError(f"composer draft did not expose a clickable row\nscreen:\n{click_cursor_draft}")
+        click_cursor_row_number, click_cursor_row_text = click_cursor_row
+        click_cursor_column = click_cursor_row_text.index("alpha beta") + len("alpha ") + 1
+        send_literal(tmux_exe, session, f"\x1b[<0;{click_cursor_column};{click_cursor_row_number}M")
+        send_literal(tmux_exe, session, "Z")
+        clicked_cursor = wait_for(tmux_exe, session, r"alpha Zbeta", "raw SGR composer cursor click")
+        if "alpha Zbeta" not in clicked_cursor or "alpha betaZ" in clicked_cursor:
+            raise RuntimeError(f"raw SGR composer click did not move the draft cursor\nscreen:\n{clicked_cursor}")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "drag one")
+        drag_cursor_draft = wait_for(tmux_exe, session, r"drag one", "composer mouse selection draft")
+        drag_cursor_row = next(
+            ((index + 1, line) for index, line in enumerate(drag_cursor_draft.splitlines()) if "drag one" in line),
+            None,
+        )
+        if drag_cursor_row is None:
+            raise RuntimeError(f"composer draft did not expose a draggable row\nscreen:\n{drag_cursor_draft}")
+        drag_cursor_row_number, drag_cursor_row_text = drag_cursor_row
+        drag_anchor_column = drag_cursor_row_text.index("drag one") + len("drag ") + 1
+        drag_focus_column = drag_cursor_row_text.index("drag one") + len("drag one") + 1
+        send_literal(tmux_exe, session, f"\x1b[<0;{drag_anchor_column};{drag_cursor_row_number}M")
+        send_literal(tmux_exe, session, f"\x1b[<32;{drag_focus_column};{drag_cursor_row_number}M")
+        send_literal(tmux_exe, session, f"\x1b[<0;{drag_focus_column};{drag_cursor_row_number}m")
+        send_literal(tmux_exe, session, "TWO")
+        dragged_selection = wait_for(tmux_exe, session, r"drag TWO", "raw SGR composer drag selection replacement")
+        if "drag TWO" not in dragged_selection or "drag oneTWO" in dragged_selection:
+            raise RuntimeError(f"raw SGR drag/release did not select and replace draft text\nscreen:\n{dragged_selection}")
+        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_literal(tmux_exe, session, "copy me")
+        send_literal(tmux_exe, session, "\x1b[1;2D")
+        send_literal(tmux_exe, session, "\x1b[1;2D")
+        send_keys(tmux_exe, session, "C-c")
+        time.sleep(0.2)
+        copied_selection = capture(tmux_exe, session)
+        if "copy me" not in copied_selection:
+            raise RuntimeError(f"Ctrl+C on a keyboard selection interrupted or cleared the draft\nscreen:\n{copied_selection}")
+        send_literal(tmux_exe, session, "X")
+        keyboard_selection = wait_for(tmux_exe, session, r"copy X", "keyboard selection replacement")
+        if "copy X" not in keyboard_selection or "copy meX" in keyboard_selection:
+            raise RuntimeError(f"Shift+Arrow selection did not stay replaceable after copy\nscreen:\n{keyboard_selection}")
+        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_literal(tmux_exe, session, "before external")
+        send_keys(tmux_exe, session, "C-g")
+        external_editor = wait_for(
+            tmux_exe,
+            session,
+            r"external editor draft|external editor updated draft",
+            "Ctrl+G external editor draft replacement",
+        )
+        if "external editor draft" not in external_editor:
+            raise RuntimeError(f"Ctrl+G external editor did not replace the visible draft\nscreen:\n{external_editor}")
+        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_literal(tmux_exe, session, "erase XY")
+        send_literal(tmux_exe, session, "\x1b[1;2D")
+        send_literal(tmux_exe, session, "\x1b[1;2D")
+        send_keys(tmux_exe, session, "C-h")
+        time.sleep(0.2)
+        backspace_deleted_selection = capture(tmux_exe, session)
+        if "erase" not in backspace_deleted_selection or "erase XY" in backspace_deleted_selection:
+            raise RuntimeError(
+                f"Backspace did not delete the selected composer text\nscreen:\n{backspace_deleted_selection}"
+            )
+        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_literal(tmux_exe, session, "trim UV")
+        send_literal(tmux_exe, session, "\x1b[1;2D")
+        send_literal(tmux_exe, session, "\x1b[1;2D")
+        send_keys(tmux_exe, session, "Delete")
+        time.sleep(0.2)
+        delete_removed_selection = capture(tmux_exe, session)
+        if "trim" not in delete_removed_selection or "trim UV" in delete_removed_selection:
+            raise RuntimeError(f"Delete did not delete the selected composer text\nscreen:\n{delete_removed_selection}")
+        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_literal(tmux_exe, session, "shiftback")
+        send_literal(tmux_exe, session, "\x1b[127;2u")
+        send_literal(tmux_exe, session, "Z")
+        shift_backspace = wait_for(tmux_exe, session, r"shiftbacZ", "Shift+Backspace delete-backward alias")
+        if "shiftbacZ" not in shift_backspace or "shiftbackZ" in shift_backspace:
+            raise RuntimeError(f"Shift+Backspace did not delete the previous composer character\nscreen:\n{shift_backspace}")
+        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_literal(tmux_exe, session, "shiftdelete")
+        send_keys(tmux_exe, session, "C-a")
+        send_literal(tmux_exe, session, "\x1b[3$")
+        send_literal(tmux_exe, session, "Z")
+        shift_delete = wait_for(tmux_exe, session, r"Zhiftdelete", "Shift+Delete delete-forward alias")
+        if "Zhiftdelete" not in shift_delete or "Zshiftdelete" in shift_delete:
+            raise RuntimeError(f"Shift+Delete did not delete the next composer character\nscreen:\n{shift_delete}")
+        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_literal(tmux_exe, session, "one two three")
+        send_literal(tmux_exe, session, "\x1b[1;6D")
+        send_literal(tmux_exe, session, "THREE")
+        word_selection = wait_for(tmux_exe, session, r"one two THREE", "Shift+Ctrl+Left word selection replacement")
+        if "one two THREE" not in word_selection or "one two threeTHREE" in word_selection:
+            raise RuntimeError(f"Shift+Ctrl+Left did not select and replace the previous word\nscreen:\n{word_selection}")
+        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_literal(tmux_exe, session, "line start")
+        send_literal(tmux_exe, session, "\x1b[1;2H")
+        send_literal(tmux_exe, session, "home")
+        line_start_selection = wait_for(tmux_exe, session, r"home", "Shift+Home line-start selection replacement")
+        if "home" not in line_start_selection or "line starthome" in line_start_selection:
+            raise RuntimeError(f"Shift+Home did not select and replace to the line start\nscreen:\n{line_start_selection}")
+        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_literal(tmux_exe, session, "end line")
+        send_keys(tmux_exe, session, "C-a")
+        send_literal(tmux_exe, session, "\x1b[1;2F")
+        send_literal(tmux_exe, session, "END")
+        line_end_selection = wait_for(tmux_exe, session, r"END", "Shift+End line-end selection replacement")
+        if "END" not in line_end_selection or "ENDend line" in line_end_selection or "end lineEND" in line_end_selection:
+            raise RuntimeError(f"Shift+End did not select and replace to the line end\nscreen:\n{line_end_selection}")
+        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_literal(tmux_exe, session, "\x1b[200~sxhome alpha\nsxhome beta\x1b[201~")
+        send_literal(tmux_exe, session, "\x1b[1;6H")
+        send_literal(tmux_exe, session, "DOCSTART")
+        document_start_selection = wait_for(
+            tmux_exe, session, r"DOCSTART", "Shift+Ctrl+Home document-start selection replacement"
+        )
+        if "DOCSTART" not in document_start_selection or "sxhome" in document_start_selection:
+            raise RuntimeError(
+                "Shift+Ctrl+Home did not select and replace to the document start\n"
+                f"screen:\n{document_start_selection}"
+            )
+        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_literal(tmux_exe, session, "\x1b[200~sxend alpha\nsxend beta\x1b[201~")
+        send_literal(tmux_exe, session, "\x1b[1;5H")
+        send_literal(tmux_exe, session, "\x1b[1;6F")
+        send_literal(tmux_exe, session, "DOCEND")
+        document_end_selection = wait_for(
+            tmux_exe, session, r"DOCEND", "Shift+Ctrl+End document-end selection replacement"
+        )
+        if "DOCEND" not in document_end_selection or "sxend" in document_end_selection:
+            raise RuntimeError(
+                "Ctrl+Home plus Shift+Ctrl+End did not select and replace to the document end\n"
+                f"screen:\n{document_end_selection}"
+            )
+        send_keys(tmux_exe, session, "C-e", "C-u")
+        send_literal(tmux_exe, session, "\x1b[200~top\nbot\x1b[201~")
+        send_literal(tmux_exe, session, "\x1b[1;2A")
+        send_literal(tmux_exe, session, "UP")
+        shift_up_selection = wait_for(tmux_exe, session, r"topUP", "Shift+Up vertical selection replacement")
+        if "topUP" not in shift_up_selection or "botUP" in shift_up_selection:
+            raise RuntimeError(f"Shift+Up did not select and replace the previous line span\nscreen:\n{shift_up_selection}")
+        send_keys(tmux_exe, session, "C-c")
+        wait_for_absent(tmux_exe, session, r"topUP", "Shift+Up selection draft clear")
+        send_literal(tmux_exe, session, "\x1b[200~one\ntwo\x1b[201~")
+        send_keys(tmux_exe, session, "Up")
+        send_literal(tmux_exe, session, "\x1b[1;2B")
+        send_literal(tmux_exe, session, "DOWN")
+        shift_down_selection = wait_for(tmux_exe, session, r"oneDOWN", "Shift+Down vertical selection replacement")
+        if "oneDOWN" not in shift_down_selection or "twoDOWN" in shift_down_selection:
+            raise RuntimeError(f"Shift+Down did not select and replace the next line span\nscreen:\n{shift_down_selection}")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "kitty ")
+        send_literal(tmux_exe, session, "\x1b[57400u")
+        send_literal(tmux_exe, session, " nav")
+        kitty_keypad_text = wait_for(tmux_exe, session, r"kitty 1 nav", "Kitty CSI-u keypad printable input")
+        if "kitty 1 nav" not in kitty_keypad_text:
+            raise RuntimeError(f"Kitty CSI-u keypad printable input did not insert text\nscreen:\n{kitty_keypad_text}")
+        send_literal(tmux_exe, session, "\x1b[57417u")
+        send_literal(tmux_exe, session, "Z")
+        kitty_keypad_left = wait_for(tmux_exe, session, r"kitty 1 naZv", "Kitty CSI-u keypad left navigation")
+        if "kitty 1 naZv" not in kitty_keypad_left or "kitty 1 navZ" in kitty_keypad_left:
+            raise RuntimeError(f"Kitty CSI-u keypad left did not move the composer cursor\nscreen:\n{kitty_keypad_left}")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "neg ")
+        send_literal(tmux_exe, session, "\x1b[?0u")
+        send_literal(tmux_exe, session, "\x1b[?62;4;52c")
+        send_literal(tmux_exe, session, "ok")
+        negotiation_text = wait_for(tmux_exe, session, r"neg ok", "keyboard protocol negotiation replies ignored")
+        if "neg ok" not in negotiation_text or "?0u" in negotiation_text or "?62;4;52c" in negotiation_text:
+            raise RuntimeError(f"keyboard protocol negotiation replies leaked into the draft\nscreen:\n{negotiation_text}")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "modify ")
+        send_literal(tmux_exe, session, "\x1b[27;1;120~")
+        send_literal(tmux_exe, session, "\x1b[27;2;69~")
+        send_literal(tmux_exe, session, " key")
+        modify_text = wait_for(tmux_exe, session, r"modify xE key", "xterm modifyOtherKeys printable input")
+        if "modify xE key" not in modify_text:
+            raise RuntimeError(f"xterm modifyOtherKeys printable input did not insert text\nscreen:\n{modify_text}")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "mod one")
+        send_keys(tmux_exe, session, "C-a")
+        send_literal(tmux_exe, session, "\x1b[27;3;100~")
+        send_literal(tmux_exe, session, "Z")
+        modify_alt_d = wait_for(tmux_exe, session, r"Z one", "xterm modifyOtherKeys Alt+D delete-forward")
+        if "Z one" not in modify_alt_d or "Zmod one" in modify_alt_d:
+            raise RuntimeError(f"xterm modifyOtherKeys Alt+D did not delete the next word\nscreen:\n{modify_alt_d}")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "alpha beta gamma")
+        send_keys(tmux_exe, session, "C-w")
+        send_keys(tmux_exe, session, "C-w")
+        send_keys(tmux_exe, session, "C-y")
+        yanked_text = wait_for(tmux_exe, session, r"alpha beta", "ctrl-y kill-ring yank")
+        if "alpha beta" not in yanked_text:
+            raise RuntimeError(f"Ctrl+Y did not yank the latest kill-ring entry\nscreen:\n{yanked_text}")
+        send_literal(tmux_exe, session, "\x1by")
+        yank_pop = wait_for(tmux_exe, session, r"alpha gamma", "alt-y kill-ring yank-pop")
+        if "alpha gamma" not in yank_pop:
+            raise RuntimeError(f"Alt+Y did not cycle the yanked kill-ring entry\nscreen:\n{yank_pop}")
+        send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "ctrl-enter-one")
         send_literal(tmux_exe, session, "\x1b[13;5u")
-        send_literal(tmux_exe, session, "alt-enter-two")
-        send_literal(tmux_exe, session, "\x1b\r")
         send_literal(tmux_exe, session, "tail")
         modified_enter = wait_for(
             tmux_exe,
             session,
-            r"ctrl-enter-one[^\n]*\n[^\n]*alt-enter-two[^\n]*\n[^\n]*tail",
-            "modified Enter newline aliases",
+            r"ctrl-enter-one[^\n]*\n[^\n]*tail",
+            "Ctrl+Enter newline alias",
         )
-        if "ctrl-enter-onealt-enter-two" in modified_enter or "alt-enter-twotail" in modified_enter:
-            raise RuntimeError(f"modified Enter shortcuts did not create multiline draft breaks\nscreen:\n{modified_enter}")
+        if "ctrl-enter-onetail" in modified_enter:
+            raise RuntimeError(f"Ctrl+Enter did not create a multiline draft break\nscreen:\n{modified_enter}")
         send_keys(tmux_exe, session, "C-c")
-        wait_for_absent(tmux_exe, session, r"ctrl-enter-one|alt-enter-two|tail", "modified Enter draft clear")
+        wait_for_absent(tmux_exe, session, r"ctrl-enter-one|tail", "Ctrl+Enter draft clear")
+
+        send_literal(tmux_exe, session, "slash-newline\\")
+        send_keys(tmux_exe, session, "Enter")
+        send_literal(tmux_exe, session, "tail")
+        backslash_enter = wait_for(
+            tmux_exe,
+            session,
+            r"slash-newline[^\n]*\n[^\n]*tail",
+            "backslash Enter newline workaround",
+        )
+        if "slash-newlinetail" in backslash_enter:
+            raise RuntimeError(f"Backslash+Enter did not create a multiline draft break\nscreen:\n{backslash_enter}")
+        send_keys(tmux_exe, session, "C-c")
+        wait_for_absent(tmux_exe, session, r"slash-newline|tail", "backslash Enter draft clear")
+
+        send_literal(tmux_exe, session, "/help")
+        wait_for(tmux_exe, session, r"/help", "Alt+Enter idle submit draft")
+        send_literal(tmux_exe, session, "\x1b\r")
+        alt_enter_help = wait_for(
+            tmux_exe,
+            session,
+            r"page_up PageUp|model_cycle_forward|details_toggle|tree_fold_or_up|tree_unfold_or_down",
+            "Alt+Enter idle submit help output",
+        )
+        if (
+            "page_up PageUp" not in alt_enter_help
+            and "model_cycle_forward" not in alt_enter_help
+            and "details_toggle" not in alt_enter_help
+            and "tree_fold_or_up" not in alt_enter_help
+            and "tree_unfold_or_down" not in alt_enter_help
+        ):
+            raise RuntimeError(f"Alt+Enter did not submit the /help command while idle\nscreen:\n{alt_enter_help}")
+        send_keys(tmux_exe, session, "C-u")
 
         send_literal(tmux_exe, session, "/")
         palette = wait_for(tmux_exe, session, r"/help|Show commands", "slash palette")
         if "[200~" in palette or "[201~" in palette:
             raise RuntimeError(f"paste markers leaked before paste smoke\nscreen:\n{palette}")
+        help_row = next(
+            (index + 1 for index, line in enumerate(palette.splitlines()) if "/help" in line or "Show commands" in line),
+            None,
+        )
+        if help_row is None:
+            raise RuntimeError(f"slash palette did not expose a clickable help row\nscreen:\n{palette}")
+        send_literal(tmux_exe, session, f"\x1b[<0;4;{help_row}M")
+        clicked_help = wait_for(tmux_exe, session, r"❯ /help|/help", "raw SGR slash palette mouse click")
+        if "/help" not in clicked_help:
+            raise RuntimeError(f"raw SGR mouse click did not select the slash palette row\nscreen:\n{clicked_help}")
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/per")
@@ -352,6 +1770,54 @@ def main() -> int:
         wait_for(tmux_exe, session, r"keybindings reloaded", "default select bindings restored")
 
         send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/rd")
+        fuzzy_slash = wait_for(tmux_exe, session, r"/read", "fuzzy slash command palette")
+        if "/read" not in fuzzy_slash:
+            raise RuntimeError(f"fuzzy slash command palette did not show /read\nscreen:\n{fuzzy_slash}")
+        send_keys(tmux_exe, session, "Tab")
+        selected_fuzzy_slash = wait_for(tmux_exe, session, r"/read ", "fuzzy slash command selection")
+        if "/read " not in selected_fuzzy_slash:
+            raise RuntimeError(f"fuzzy slash command selection did not update the draft\nscreen:\n{selected_fuzzy_slash}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/models 4sonnet")
+        fuzzy_model_arg = wait_for(
+            tmux_exe, session, r"anthropic/claude-sonnet-4-5|Claude Sonnet", "fuzzy model argument completion"
+        )
+        if "claude-sonnet-4-5" not in fuzzy_model_arg and "Claude Sonnet" not in fuzzy_model_arg:
+            raise RuntimeError(
+                f"fuzzy model argument completion did not show the Sonnet model\nscreen:\n{fuzzy_model_arg}"
+            )
+        send_keys(tmux_exe, session, "Tab")
+        selected_fuzzy_model_arg = wait_for(
+            tmux_exe,
+            session,
+            r"/models (?:anthropic/)?claude-sonnet-4-5",
+            "fuzzy model argument completion selection",
+        )
+        if "/models claude-sonnet-4-5" not in selected_fuzzy_model_arg and "/models anthropic/claude-sonnet-4-5" not in selected_fuzzy_model_arg:
+            raise RuntimeError(
+                "fuzzy model argument completion did not update the draft\n"
+                f"screen:\n{selected_fuzzy_model_arg}"
+            )
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/models open")
+        wait_for(tmux_exe, session, r"openai/gpt-5\.5|GPT-5\.5", "slash argument completion before cursor movement")
+        send_keys(tmux_exe, session, "Left", "Left", "Left", "Left", "Left")
+        cursor_scoped_slash_palette = wait_for(
+            tmux_exe,
+            session,
+            r"/models.*List configured models|List configured models.*models",
+            "cursor-scoped slash command palette",
+        )
+        if "openai/gpt-5.5" in cursor_scoped_slash_palette:
+            raise RuntimeError(
+                "slash argument completion stayed visible after cursor moved back into the command name\n"
+                f"screen:\n{cursor_scoped_slash_palette}"
+            )
+
+        send_keys(tmux_exe, session, "C-c")
         send_literal(tmux_exe, session, "/read sr")
         path_palette = wait_for(tmux_exe, session, r"src/main\.cpp|src/", "slash path completion palette")
         if "src/main.cpp" not in path_palette and "src/" not in path_palette:
@@ -359,12 +1825,51 @@ def main() -> int:
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "review @sr")
+        wait_for(tmux_exe, session, r"review @sr", "file reference completion draft")
         reference_palette = wait_for(tmux_exe, session, r"@src/main\.cpp|@src/", "file reference completion palette")
         if "@src/main.cpp" not in reference_palette and "@src/" not in reference_palette:
             raise RuntimeError(f"file reference completion did not show workspace paths\nscreen:\n{reference_palette}")
+        reference_row = next(
+            ((index + 1, line) for index, line in enumerate(reference_palette.splitlines()) if "@src/main.cpp" in line),
+            None,
+        )
+        if reference_row is None:
+            raise RuntimeError(f"file reference completion did not expose a clickable file row\nscreen:\n{reference_palette}")
+        reference_row_number, reference_row_text = reference_row
+        reference_column = max(1, len(reference_row_text) - len(reference_row_text.lstrip()) + 4)
+        send_literal(tmux_exe, session, f"\x1b[<0;{reference_column};{reference_row_number}M")
+        clicked_reference = wait_for(
+            tmux_exe, session, r"review @src/main\.cpp", "file reference completion mouse selection"
+        )
+        if "review @src/main.cpp" not in clicked_reference:
+            raise RuntimeError(f"file reference mouse click did not update the draft\nscreen:\n{clicked_reference}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "include=@sr")
+        wait_for(tmux_exe, session, r"include=@sr", "equals-delimited file reference draft")
+        equals_reference_palette = wait_for(
+            tmux_exe, session, r"@src/main\.cpp|@src/", "equals-delimited file reference completion palette"
+        )
+        if "@src/main.cpp" not in equals_reference_palette and "@src/" not in equals_reference_palette:
+            raise RuntimeError(
+                f"equals-delimited file reference completion did not show workspace paths\nscreen:\n{equals_reference_palette}"
+            )
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "include='@sr")
+        wait_for(tmux_exe, session, r"include='@sr", "single-quote-delimited file reference draft")
+        single_quote_reference_palette = wait_for(
+            tmux_exe, session, r"@src/main\.cpp|@src/", "single-quote-delimited file reference completion palette"
+        )
+        if "@src/main.cpp" not in single_quote_reference_palette and "@src/" not in single_quote_reference_palette:
+            raise RuntimeError(
+                "single-quote-delimited file reference completion did not show workspace paths\n"
+                f"screen:\n{single_quote_reference_palette}"
+            )
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "review @my")
+        wait_for(tmux_exe, session, r"review @my", "quoted file reference draft")
         spaced_reference_palette = wait_for(
             tmux_exe, session, r'@"my folder/"', "quoted file reference completion palette"
         )
@@ -375,9 +1880,53 @@ def main() -> int:
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "inspect src/")
+        wait_for(tmux_exe, session, r"inspect src/", "normal prompt path completion draft")
         prompt_path_palette = wait_for(tmux_exe, session, r"src/main\.cpp", "normal prompt path completion palette")
         if "src/main.cpp" not in prompt_path_palette:
             raise RuntimeError(f"normal prompt path completion did not show workspace paths\nscreen:\n{prompt_path_palette}")
+        path_row = next(
+            ((index + 1, line) for index, line in enumerate(prompt_path_palette.splitlines()) if "src/main.cpp" in line),
+            None,
+        )
+        if path_row is None:
+            raise RuntimeError(f"normal prompt path completion did not expose a clickable file row\nscreen:\n{prompt_path_palette}")
+        path_row_number, path_row_text = path_row
+        path_column = max(1, len(path_row_text) - len(path_row_text.lstrip()) + 4)
+        send_literal(tmux_exe, session, f"\x1b[<0;{path_column};{path_row_number}M")
+        clicked_path = wait_for(tmux_exe, session, r"inspect src/main\.cpp", "normal path completion mouse selection")
+        if "inspect src/main.cpp" not in clicked_path:
+            raise RuntimeError(f"normal prompt path mouse click did not update the draft\nscreen:\n{clicked_path}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "inspect ")
+        whitespace_path_palette = wait_for(
+            tmux_exe, session, r"src/main\.cpp|src/", "whitespace new-token path completion palette"
+        )
+        if "src/main.cpp" not in whitespace_path_palette and "src/" not in whitespace_path_palette:
+            raise RuntimeError(
+                f"whitespace new-token path completion did not show workspace paths\nscreen:\n{whitespace_path_palette}"
+            )
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "inspect file=src/")
+        equals_path_palette = wait_for(
+            tmux_exe, session, r"src/main\.cpp", "equals-delimited normal prompt path completion palette"
+        )
+        if "src/main.cpp" not in equals_path_palette:
+            raise RuntimeError(
+                f"equals-delimited normal prompt path completion did not show workspace paths\nscreen:\n{equals_path_palette}"
+            )
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "inspect path='src/")
+        single_quote_path_palette = wait_for(
+            tmux_exe, session, r"src/main\.cpp", "single-quote-delimited normal prompt path completion palette"
+        )
+        if "src/main.cpp" not in single_quote_path_palette:
+            raise RuntimeError(
+                "single-quote-delimited normal prompt path completion did not show workspace paths\n"
+                f"screen:\n{single_quote_path_palette}"
+            )
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "main")
@@ -385,6 +1934,43 @@ def main() -> int:
         forced_path_completion = wait_for(tmux_exe, session, r"src/main\.cpp", "forced bare-token path completion")
         if "src/main.cpp" not in forced_path_completion:
             raise RuntimeError(f"forced path completion did not insert workspace path\nscreen:\n{forced_path_completion}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/read main")
+        wait_for(tmux_exe, session, r"/read main", "slash-command argument path fallback draft")
+        send_keys(tmux_exe, session, "Tab")
+        forced_slash_argument_path = wait_for(
+            tmux_exe, session, r"/read src/main\.cpp", "forced slash-command argument path fallback"
+        )
+        if "/read src/main.cpp" not in forced_slash_argument_path:
+            raise RuntimeError(
+                f"forced slash-command argument path fallback did not update the draft\nscreen:\n{forced_slash_argument_path}"
+            )
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/find src/*.cpp")
+        wait_for(tmux_exe, session, r"/find src/\*\.cpp", "find alias command draft")
+        send_keys(tmux_exe, session, "Enter")
+        find_alias = wait_for(tmux_exe, session, r"(?s)find.*src/main\.cpp", "find alias command result")
+        if "find" not in find_alias or "src/main.cpp" not in find_alias:
+            raise RuntimeError(f"/find alias did not render glob output\nscreen:\n{find_alias}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/ls src")
+        wait_for(tmux_exe, session, r"/ls src", "ls alias command draft")
+        send_keys(tmux_exe, session, "Escape")
+        time.sleep(0.2)
+        send_keys(tmux_exe, session, "Enter")
+        ls_alias = wait_for(tmux_exe, session, r"(?s)ls.*main\.cpp", "ls alias command result")
+        if "ls" not in ls_alias or "main.cpp" not in ls_alias:
+            raise RuntimeError(f"/ls alias did not render directory output\nscreen:\n{ls_alias}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "!pwd")
+        send_keys(tmux_exe, session, "Enter")
+        bang_shell = wait_for(tmux_exe, session, r"(?s)!pwd.*exit: 0", "bang shell helper")
+        if "PERMISSION REQUIRED" in bang_shell:
+            raise RuntimeError(f"! shell helper unexpectedly opened a permission prompt for pwd\nscreen:\n{bang_shell}")
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/bash git push origin main")
@@ -428,11 +2014,43 @@ def main() -> int:
         expanded_tool_details = wait_for(
             tmux_exe,
             session,
-            r"(?s)permission: deny.*command: git push origin main|command: git push origin main.*permission: deny",
+            r"(?s)request_id: permreq_.*command: git push origin main.*inspect: /permissions audit show",
             "ctrl-o tool detail expansion",
         )
-        if "permission: deny" not in expanded_tool_details or "command: git push origin main" not in expanded_tool_details:
+        if (
+            "request_id: permreq_" not in expanded_tool_details
+            or "command: git push origin main" not in expanded_tool_details
+            or "inspect: /permissions audit show" not in expanded_tool_details
+            or "diagnose: /permissions diagnose" not in expanded_tool_details
+        ):
             raise RuntimeError(f"Ctrl+O did not expand the visible permission tool-card details\nscreen:\n{expanded_tool_details}")
+        tmux(tmux_exe, "resize-window", "-t", f"{session}:0", "-x", "56", "-y", "28")
+        narrow_plain_permission = wait_for(
+            tmux_exe,
+            session,
+            r"(?s)permission_denied: command requires permission.*action: ask.*reason: command can change.*risk: high.*request_id:\s*permreq_.*command: git push origin main.*inspect: /permissions audit show\s*permreq_.*diagnose: /permissions diagnose\s*permreq_",
+            "narrow plain permission detail rows",
+        )
+        if (
+            "permission_denied: command requires permission" not in narrow_plain_permission
+            or "action: ask" not in narrow_plain_permission
+            or "risk: high" not in narrow_plain_permission
+            or "request_id:" not in narrow_plain_permission
+            or "permreq_" not in narrow_plain_permission
+            or "reason: command can change" not in narrow_plain_permission
+            or "inspect: /permissions audit show" not in narrow_plain_permission
+            or "diagnose: /permissions diagnose" not in narrow_plain_permission
+        ):
+            raise RuntimeError(
+                f"narrow NO_COLOR permission details did not remain readable as text rows\nscreen:\n{narrow_plain_permission}"
+            )
+        styled_narrow_permission = capture_styled(tmux_exe, session)
+        if "\x1b[" in styled_narrow_permission:
+            raise RuntimeError(
+                f"narrow NO_COLOR permission details still captured ANSI style escapes\nscreen:\n{styled_narrow_permission}"
+            )
+        tmux(tmux_exe, "resize-window", "-t", f"{session}:0", "-x", "120", "-y", "32")
+        wait_for(tmux_exe, session, r"command: git push origin main", "permission detail rows after resize restore")
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/copy tool")
@@ -440,6 +2058,20 @@ def main() -> int:
         copied_tool = wait_for(tmux_exe, session, r"copied latest tool details to clipboard", "copy latest tool details")
         if "copied latest tool details to clipboard" not in copied_tool:
             raise RuntimeError(f"/copy tool did not report a copied tool-detail payload\nscreen:\n{copied_tool}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/copy permission git push")
+        send_keys(tmux_exe, session, "Enter")
+        copied_permission = wait_for(
+            tmux_exe,
+            session,
+            r"copied matching permission details to clipboard",
+            "copy matching permission details",
+        )
+        if "copied matching permission details to clipboard" not in copied_permission:
+            raise RuntimeError(
+                f"/copy permission <query> did not report copied matching permission details\nscreen:\n{copied_permission}"
+            )
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/write src/main.cpp int changed() { return 1; }")
@@ -455,6 +2087,16 @@ def main() -> int:
             write_result = wait_for(tmux_exe, session, r"(?s)wrote .*src/main\.cpp", "allowed write command result")
         if "wrote" not in write_result or "src/main.cpp" not in write_result:
             raise RuntimeError(f"/write did not render a successful mutation tool card\nscreen:\n{write_result}")
+        write_changed_details = wait_for(
+            tmux_exe,
+            session,
+            r"(?s)changed:\s+.*src/main\.cpp",
+            "write changed-file detail row",
+        )
+        if "changed:" not in write_changed_details or "src/main.cpp" not in write_changed_details:
+            raise RuntimeError(
+                f"/write did not render the changed-file summary row in expanded tool details\nscreen:\n{write_changed_details}"
+            )
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/copy diff")
@@ -462,6 +2104,48 @@ def main() -> int:
         copied_diff = wait_for(tmux_exe, session, r"copied latest tool diff to clipboard", "copy latest tool diff")
         if "copied latest tool diff to clipboard" not in copied_diff:
             raise RuntimeError(f"/copy diff did not report a copied unified diff\nscreen:\n{copied_diff}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/copy diff main.cpp")
+        send_keys(tmux_exe, session, "Enter")
+        copied_matching_diff = wait_for(
+            tmux_exe, session, r"copied matching tool diff to clipboard", "copy matching tool diff"
+        )
+        if "copied matching tool diff to clipboard" not in copied_matching_diff:
+            raise RuntimeError(f"/copy diff <query> did not report a copied matching diff\nscreen:\n{copied_matching_diff}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/diff main.cpp")
+        send_keys(tmux_exe, session, "Enter")
+        visible_matching_diff = wait_for(
+            tmux_exe,
+            session,
+            r"(?s)Matching tool diff:.*src/main\.cpp.*\+int changed\(\)",
+            "visible matching tool diff",
+        )
+        if "Matching tool diff:" not in visible_matching_diff or "+int changed()" not in visible_matching_diff:
+            raise RuntimeError(f"/diff <query> did not render the matching unified diff\nscreen:\n{visible_matching_diff}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/tool write")
+        send_keys(tmux_exe, session, "Enter")
+        visible_matching_tool = wait_for(
+            tmux_exe,
+            session,
+            r"(?s)showing matching tool details.*\[\+\] write.*changed:",
+            "visible matching tool details",
+        )
+        if "showing matching tool details" not in visible_matching_tool or "[+] write" not in visible_matching_tool or "changed:" not in visible_matching_tool:
+            raise RuntimeError(f"/tool <query> did not render the matching expanded tool card\nscreen:\n{visible_matching_tool}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/copy tool write")
+        send_keys(tmux_exe, session, "Enter")
+        copied_matching_tool = wait_for(
+            tmux_exe, session, r"copied matching tool details to clipboard", "copy matching tool details"
+        )
+        if "copied matching tool details to clipboard" not in copied_matching_tool:
+            raise RuntimeError(f"/copy tool <query> did not report a copied matching tool\nscreen:\n{copied_matching_tool}")
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/permissions audit git push")
@@ -474,6 +2158,70 @@ def main() -> int:
         )
         if "session permission decisions" not in permission_audit or "git push origin" not in permission_audit:
             raise RuntimeError(f"permission audit command did not render the denied command\nscreen:\n{permission_audit}")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/permissions audit summary git push")
+        send_keys(tmux_exe, session, "Enter")
+        permission_audit_summary = wait_for(
+            tmux_exe,
+            session,
+            r"(?s)Permission audit summary:.*denials: [1-9].*by resolution: deny=",
+            "permission audit summary command output",
+        )
+        if (
+            "Permission audit summary:" not in permission_audit_summary
+            or "denials: " not in permission_audit_summary
+            or "by resolution: deny=" not in permission_audit_summary
+        ):
+            raise RuntimeError(
+                f"permission audit summary command did not render grouped audit counts\nscreen:\n{permission_audit_summary}"
+            )
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/permissions audit export git push")
+        send_keys(tmux_exe, session, "Enter")
+        permission_audit_export = wait_for(
+            tmux_exe,
+            session,
+            r"(?s)``` markdown.*git push origin",
+            "permission audit export command output",
+        )
+        if "``` markdown" not in permission_audit_export or "git push origin" not in permission_audit_export:
+            raise RuntimeError(
+                f"permission audit export command did not render the denied command\nscreen:\n{permission_audit_export}"
+            )
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/permissions diagnose git push")
+        send_keys(tmux_exe, session, "Enter")
+        permission_diagnostics = wait_for(
+            tmux_exe,
+            session,
+            r"(?s)Recent permission denials:.*git push origin",
+            "permission denial diagnostics command output",
+        )
+        if "Recent permission denials:" not in permission_diagnostics or "git push origin" not in permission_diagnostics:
+            raise RuntimeError(
+                f"permission denial diagnostics command did not explain the denied command\nscreen:\n{permission_diagnostics}"
+            )
+        request_match = re.search(r"request=(permreq_[A-Za-z0-9_]+)", permission_diagnostics)
+        if not request_match:
+            raise RuntimeError(f"permission diagnostics did not expose a request id\nscreen:\n{permission_diagnostics}")
+        permission_request_prefix = request_match.group(1)
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, f"/permissions audit show {permission_request_prefix}")
+        send_keys(tmux_exe, session, "Enter")
+        permission_audit_detail = wait_for(
+            tmux_exe,
+            session,
+            r"(?s)request: permreq_.*git push origin.*Related commands",
+            "permission audit detail command output",
+        )
+        if "request: permreq_" not in permission_audit_detail or "git push origin" not in permission_audit_detail:
+            raise RuntimeError(
+                f"permission audit detail command did not render the denied command\nscreen:\n{permission_audit_detail}"
+            )
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/name TUI smoke")
@@ -537,10 +2285,10 @@ def main() -> int:
         wait_for(tmux_exe, session, r"Select session|Session tree", "resume selector before label draft")
         send_literal(tmux_exe, session, "Selector rename")
         wait_for(tmux_exe, session, r"›\s+Selector rename", "resume selector filtered before label draft")
-        send_keys(tmux_exe, session, "C-l")
-        labels_draft = wait_for(tmux_exe, session, r"/sessions labels session_", "session selector labels draft")
+        send_literal(tmux_exe, session, "L")
+        labels_draft = wait_for(tmux_exe, session, r"/sessions labels session_", "session selector Shift+L labels draft")
         if "/sessions labels session_" not in labels_draft:
-            raise RuntimeError(f"session selector Ctrl+L did not restore a labels command draft\nscreen:\n{labels_draft}")
+            raise RuntimeError(f"session selector Shift+L did not restore a labels command draft\nscreen:\n{labels_draft}")
         send_literal(tmux_exe, session, "picker bookmark")
         send_keys(tmux_exe, session, "Enter")
         wait_for(tmux_exe, session, r"session .* labels set: picker,bookmark", "session selector labels command")
@@ -553,6 +2301,21 @@ def main() -> int:
             r"(?s)Sessions:.*Selector rename.*labels=picker,bookmark",
             "session selector labels visible in tree",
         )
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/resume")
+        wait_for(tmux_exe, session, r"/resume.*Resume a session", "resume palette before label-time toggle")
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"/resume.*Resume a session", "resume palette dismissed before label-time toggle")
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(tmux_exe, session, r"Select session|Session tree", "resume selector before label-time toggle")
+        send_literal(tmux_exe, session, "Selector rename")
+        wait_for(tmux_exe, session, r"›\s+Selector rename", "resume selector filtered before label-time toggle")
+        send_literal(tmux_exe, session, "T")
+        label_time = wait_for(tmux_exe, session, r"e shown|hide label time", "session selector Shift+T label-time toggle")
+        if "Selector rename" not in label_time:
+            raise RuntimeError(f"session selector Shift+T lost the filtered labeled row\nscreen:\n{label_time}")
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Select session|Session tree", "session selector closed after label-time toggle")
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/new Archive current")
@@ -567,9 +2330,29 @@ def main() -> int:
         wait_for(tmux_exe, session, r"Select session|Session tree", "resume selector before archive")
         send_literal(tmux_exe, session, "Selector rename")
         wait_for(tmux_exe, session, r"›\s+Selector rename", "session selector non-current row selected")
-        send_keys(tmux_exe, session, "C-d")
+        send_literal(tmux_exe, session, "\x1b[127;5u")
         time.sleep(0.2)
-        send_keys(tmux_exe, session, "C-d")
+        ctrl_backspace_filtered = capture(tmux_exe, session)
+        if (
+            "press Ctrl+Backspace again" in ctrl_backspace_filtered
+            or "press Ctrl+D again" in ctrl_backspace_filtered
+        ):
+            raise RuntimeError(
+                "Ctrl+Backspace opened archive confirmation while the selector query was non-empty\n"
+                f"screen:\n{ctrl_backspace_filtered}"
+            )
+        for _ in range(len("Selector rename")):
+            send_literal(tmux_exe, session, "\x1b[127;2u")
+        wait_for(tmux_exe, session, r"›\s+Selector rename", "session selector row selected after clearing query")
+        send_literal(tmux_exe, session, "\x1b[127;5u")
+        time.sleep(0.2)
+        ctrl_backspace_confirmation = capture(tmux_exe, session)
+        if "Select session" not in ctrl_backspace_confirmation and "Session tree" not in ctrl_backspace_confirmation:
+            raise RuntimeError(
+                "Ctrl+Backspace first archive press closed the selector instead of waiting for confirmation\n"
+                f"screen:\n{ctrl_backspace_confirmation}"
+            )
+        send_literal(tmux_exe, session, "\x1b[127;5u")
         time.sleep(0.2)
         send_keys(tmux_exe, session, "C-c")
         wait_for_absent(tmux_exe, session, r"Select session|Session tree", "session selector closed after archive")
@@ -606,6 +2389,70 @@ def main() -> int:
         send_literal(tmux_exe, session, "/sessions Selector rename")
         send_keys(tmux_exe, session, "Enter")
         wait_for(tmux_exe, session, r"(?s)Sessions:.*Selector rename", "restored session visible in default list")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/name Branch parent")
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(tmux_exe, session, r"session name set: \"Branch parent\"", "branch parent session name")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/fork Branch child")
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(
+            tmux_exe,
+            session,
+            r"(?s)forked session session_.*name=\"Branch child\".*switched to session_",
+            "forked child session before selector branch navigation",
+        )
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/resume")
+        wait_for(tmux_exe, session, r"/resume.*Resume a session", "resume palette before parent branch navigation")
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(
+            tmux_exe,
+            session,
+            r"/resume.*Resume a session",
+            "resume palette dismissed before parent branch navigation",
+        )
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(tmux_exe, session, r"Select session|Session tree", "resume selector before parent branch navigation")
+        send_literal(tmux_exe, session, "\x1b[1;3D")
+        wait_for(tmux_exe, session, r"opened parent branch session_", "selector alt-left opened parent branch")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/sessions Branch parent")
+        send_keys(tmux_exe, session, "Enter")
+        parent_active = wait_for(
+            tmux_exe,
+            session,
+            r"(?s)Sessions:.*\* Branch parent",
+            "parent branch active after selector alt-left",
+        )
+        if "* Branch parent" not in parent_active:
+            raise RuntimeError(f"selector Alt+Left did not make the parent branch current\nscreen:\n{parent_active}")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/resume")
+        wait_for(tmux_exe, session, r"/resume.*Resume a session", "resume palette before child branch navigation")
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(
+            tmux_exe,
+            session,
+            r"/resume.*Resume a session",
+            "resume palette dismissed before child branch navigation",
+        )
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(tmux_exe, session, r"Select session|Session tree", "resume selector before child branch navigation")
+        send_literal(tmux_exe, session, "\x1b[1;3C")
+        wait_for(tmux_exe, session, r"opened child branch session_", "selector alt-right opened child branch")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/sessions Branch child")
+        send_keys(tmux_exe, session, "Enter")
+        child_active = wait_for(
+            tmux_exe,
+            session,
+            r"(?s)Sessions:.*\* Branch child",
+            "child branch active after selector alt-right",
+        )
+        if "* Branch child" not in child_active:
+            raise RuntimeError(f"selector Alt+Right did not make the child branch current\nscreen:\n{child_active}")
 
         large_paste = "\n".join(f"line{i:02d}" for i in range(1, 12))
         send_literal(tmux_exe, session, f"\x1b[200~{large_paste}\x1b[201~")
@@ -658,6 +2505,18 @@ def main() -> int:
             raise RuntimeError(f"Alt+Right did not move to the next word before insertion\nscreen:\n{alt_right_word}")
         send_keys(tmux_exe, session, "C-c")
         wait_for_absent(tmux_exe, session, r"alphaY beta", "alt-right word movement clear")
+
+        send_literal(tmux_exe, session, "path/to/file")
+        send_keys(tmux_exe, session, "C-a")
+        send_literal(tmux_exe, session, "\x1b[1;3C")
+        send_literal(tmux_exe, session, "Z")
+        punctuation_word = wait_for(tmux_exe, session, r"pathZ/to/file", "alt-right punctuation word boundary")
+        if "path/to/fileZ" in punctuation_word:
+            raise RuntimeError(
+                f"Alt+Right skipped the path punctuation boundary instead of stopping after the first segment\nscreen:\n{punctuation_word}"
+            )
+        send_keys(tmux_exe, session, "C-c")
+        wait_for_absent(tmux_exe, session, r"pathZ/to/file", "alt-right punctuation word boundary clear")
 
         send_literal(tmux_exe, session, "one two three")
         send_keys(tmux_exe, session, "C-a", "M-f", "M-d")
@@ -776,12 +2635,95 @@ def main() -> int:
         if tmux(tmux_exe, "has-session", "-t", session, check=False).returncode != 0:
             return 0
         wait_for_absent(tmux_exe, session, r"alpha|beta", "draft clear before quit")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/help")
+        wait_for(tmux_exe, session, r"/help", "help draft before mouse wheel scroll")
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(
+            tmux_exe,
+            session,
+            r"page_up PageUp|model_cycle_forward|details_toggle|tree_fold_or_up|tree_unfold_or_down|models_clear_all|models_reorder_down",
+            "long help output before mouse wheel scroll",
+        )
+        send_literal(tmux_exe, session, "\x1b[<64;4;6M")
+        wheel_scrolled = wait_for(tmux_exe, session, r"scrollback detached", "raw SGR mouse wheel scrollback")
+        if "scrollback detached" not in wheel_scrolled:
+            raise RuntimeError(f"raw SGR mouse wheel up did not detach transcript scrollback\nscreen:\n{wheel_scrolled}")
+        send_literal(tmux_exe, session, "\x1b[<65;4;6M")
+        wait_for_absent(tmux_exe, session, r"scrollback detached", "raw SGR mouse wheel return to live tail")
+
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/att")
+        attach_palette = wait_for(tmux_exe, session, r"/attach.*Attach an image", "attach command palette")
+        if "/attach" not in attach_palette or "Attach an image" not in attach_palette:
+            raise RuntimeError(f"/attach did not appear in the slash palette\nscreen:\n{attach_palette}")
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Attach an image", "attach palette dismissed")
+        send_keys(tmux_exe, session, "C-u")
+        send_literal(tmux_exe, session, "/attach screen.png")
+        wait_for(tmux_exe, session, r"/attach screen\.png", "attach image draft")
+        send_keys(tmux_exe, session, "Enter")
+        attached_image = wait_for(
+            tmux_exe, session, r"attached image.*screen\.png|screen\.png.*next prompt", "attached image pending row"
+        )
+        if (
+            "attached image" not in attached_image
+            or "screen.png" not in attached_image
+            or "preview text-only" not in attached_image
+            or "next prompt" not in attached_image
+        ):
+            raise RuntimeError(f"/attach did not import and queue the image visibly\nscreen:\n{attached_image}")
+        send_keys(tmux_exe, session, "C-v")
+        clipboard_image = wait_for(
+            tmux_exe,
+            session,
+            r"attached clipboard image.*clipboard image|clipboard image.*next prompt",
+            "Ctrl+V clipboard image pending row",
+        )
+        if (
+            "attached clipboard image" not in clipboard_image
+            or "clipboard image" not in clipboard_image
+            or "preview text-only" not in clipboard_image
+            or "next prompt" not in clipboard_image
+        ):
+            raise RuntimeError(f"Ctrl+V did not import and queue the clipboard image visibly\nscreen:\n{clipboard_image}")
+
         send_keys(tmux_exe, session, "C-d")
         wait_for_session_exit(tmux_exe, session)
         return 0
     finally:
         tmux(tmux_exe, "kill-session", "-t", conflict_session, check=False)
+        tmux(tmux_exe, "kill-session", "-t", suspend_session, check=False)
+        tmux(tmux_exe, "kill-session", "-t", theme_session, check=False)
+        tmux(tmux_exe, "kill-session", "-t", background_theme_session, check=False)
+        tmux(tmux_exe, "kill-session", "-t", persisted_theme_session, check=False)
+        tmux(tmux_exe, "kill-session", "-t", active_session, check=False)
+        tmux(tmux_exe, "kill-session", "-t", restore_active_session, check=False)
+        tmux(tmux_exe, "kill-session", "-t", scoped_persist_session, check=False)
         tmux(tmux_exe, "kill-session", "-t", session, check=False)
+        if active_provider is not None and active_provider.poll() is None:
+            active_provider.terminate()
+            try:
+                active_provider.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                active_provider.kill()
+                active_provider.wait(timeout=2.0)
+        if restore_provider is not None and restore_provider.poll() is None:
+            restore_provider.terminate()
+            try:
+                restore_provider.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                restore_provider.kill()
+                restore_provider.wait(timeout=2.0)
+        if active_provider_stdout is not None:
+            active_provider_stdout.close()
+        if active_provider_stderr is not None:
+            active_provider_stderr.close()
+        if restore_provider_stdout is not None:
+            restore_provider_stdout.close()
+        if restore_provider_stderr is not None:
+            restore_provider_stderr.close()
 
 
 if __name__ == "__main__":

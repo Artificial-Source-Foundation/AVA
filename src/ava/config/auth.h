@@ -59,6 +59,8 @@ struct ProviderCredential {
     XdgPaths const& paths, std::string_view provider_id, ava::provider::Transport& transport);
 [[nodiscard]] ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(
     XdgPaths const& paths, std::string_view provider_id, ava::provider::Transport& transport, long long now_seconds);
+[[nodiscard]] ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_startup(
+    XdgPaths const& paths, std::string_view provider_id);
 [[nodiscard]] ava::core::VoidResult store_provider_credential(XdgPaths const& paths,
                                                                ProviderCredential const& credential);
 [[nodiscard]] std::string authorization_header_value(OpenAICredential const& credential);

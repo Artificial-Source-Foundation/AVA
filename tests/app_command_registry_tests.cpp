@@ -2,6 +2,7 @@
 #include "tests/support/test_harness.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/commands.h"
+#include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
 #include "ava/permissions/permission.h"
 
@@ -65,11 +66,15 @@ void test_prompt_commands_load_project_global_and_expand_arguments()
   std::filesystem::create_directories(workspace);
   ScopedEnvVar home("HOME", (root / "home").string());
   ScopedEnvVar xdg_config("XDG_CONFIG_HOME", paths.config_home.string());
+  auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(trusted.has_value(), trusted ? "command registry prompt test trusts project"
+                                      : "command registry prompt test trusts project: " + trusted.error().format());
 
   write_app_test_file(paths.ava_config_dir / "commands" / "review.md", "---\ndescription: Global review\n---\nGlobal $1\n");
   write_app_test_file(workspace / ".ava" / "commands" / "review.md",
                       "---\ndescription: Project review\nargument-hint: <topic>\n---\nProject $1 $2 $@ $ARGUMENTS ${@:2}\n");
   write_app_test_file(workspace / ".ava" / "commands" / "ship.md", "Ship $$ $1 ${@:2:1}\n");
+  write_app_test_file(workspace / ".ava" / "commands" / "defaults.md", "Default ${1:-release} ${2:-notes}\n");
 
   auto session = open_test_session(root, workspace);
   auto registry = ava::app::load_command_registry(session, ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
@@ -86,6 +91,13 @@ void test_prompt_commands_load_project_global_and_expand_arguments()
   auto literal = ava::app::run_command(session, ava::app::CommandRequest{.command = "/ship release notes extra"});
   expect(literal && literal->prompt_message && literal->prompt_message->find("Ship $ release notes") != std::string::npos,
          "prompt command invocation treats $$ as a literal dollar and supports bounded slices");
+  auto defaulted = ava::app::run_command(session, ava::app::CommandRequest{.command = "/defaults"});
+  expect(defaulted && defaulted->prompt_message && defaulted->prompt_message->find("Default release notes") != std::string::npos,
+         "prompt command invocation applies positional defaults when arguments are missing");
+  auto direct_defaults = ava::app::expand_prompt_command_template(
+      "Defaults ${1:-seven} ${2:-fallback} ${3:-tail} ${0:-bad} ${x:-bad}", "\"\" custom");
+  expect(direct_defaults && *direct_defaults == "Defaults seven custom tail ${0:-bad} ${x:-bad}",
+         "prompt command expansion applies defaults for missing or empty args and leaves malformed defaults literal");
 }
 
 void test_skill_commands_are_registry_entries_and_permissioned_prompts()
@@ -97,6 +109,9 @@ void test_skill_commands_are_registry_entries_and_permissioned_prompts()
   auto const paths = app_test_paths(root);
   ScopedEnvVar home("HOME", (root / "home").string());
   ScopedEnvVar xdg_config("XDG_CONFIG_HOME", paths.config_home.string());
+  auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(trusted.has_value(), trusted ? "command registry skill test trusts project"
+                                      : "command registry skill test trusts project: " + trusted.error().format());
   write_app_test_file(workspace / ".ava" / "skills" / "release" / "SKILL.md",
                       "---\nname: release\ndescription: Prepare release work\n---\nRelease skill body\n");
 
@@ -121,6 +136,9 @@ void test_plugin_commands_are_registry_entries()
   std::filesystem::remove_all(root, remove_error);
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
+  auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(trusted.has_value(), trusted ? "command registry plugin test trusts project"
+                                      : "command registry plugin test trusts project: " + trusted.error().format());
   auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.cmd";
   write_app_test_file(plugin_dir / "plugin.json", app_test_plugin_manifest_json("com.example.cmd", "Command Plugin"));
 
@@ -145,6 +163,9 @@ void test_mcp_prompts_are_registry_entries_and_permissioned_prompts()
   std::filesystem::remove_all(root, remove_error);
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
+  auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(trusted.has_value(), trusted ? "command registry MCP test trusts project"
+                                      : "command registry MCP test trusts project: " + trusted.error().format());
   write_app_test_file(workspace / ".ava" / "mcp.json", app_test_mcp_config_json("demo", "Demo MCP", AVA_FAKE_MCP_SERVER_PATH));
 
   auto session = open_test_session(root, workspace);
@@ -170,6 +191,113 @@ void test_mcp_prompts_are_registry_entries_and_permissioned_prompts()
          "MCP prompt command invocation stays behind MCP launch, connect, and call permissions");
 }
 
+void test_project_trust_gates_project_resource_commands()
+{
+  auto const root = temp_root() / "command-registry-project-trust";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  ScopedEnvVar home("HOME", (root / "home").string());
+  ScopedEnvVar xdg_config("XDG_CONFIG_HOME", paths.config_home.string());
+  write_app_test_file(paths.ava_config_dir / "commands" / "global.md", "Global command $1\n");
+  write_app_test_file(paths.ava_config_dir / "APPEND_SYSTEM.md", "Global append instruction.\n");
+  write_app_test_file(workspace / "AGENTS.md", "Project AGENTS context still loads while untrusted.\n");
+  write_app_test_file(workspace / ".ava" / "SYSTEM.md", "Project system replacement.\n");
+  write_app_test_file(workspace / ".ava" / "APPEND_SYSTEM.md", "Project append instruction.\n");
+  write_app_test_file(workspace / ".ava" / "commands" / "local.md", "Local project command $1\n");
+  write_app_test_file(workspace / ".ava" / "skills" / "local-skill" / "SKILL.md",
+                      "---\nname: local-skill\ndescription: Local project skill\n---\nLocal skill body\n");
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.local" / "plugin.json",
+                      "{\n"
+                      "  \"schema_version\": 1,\n"
+                      "  \"id\": \"com.example.local\",\n"
+                      "  \"name\": \"Local Plugin\",\n"
+                      "  \"version\": \"0.1.0\",\n"
+                      "  \"api_version\": \"ava.plugin.v1\",\n"
+                      "  \"description\": \"local plugin\",\n"
+                      "  \"entrypoint\": {\"command\": \"node\", \"args\": [\"plugin.js\"]},\n"
+                      "  \"capabilities\": [\"commands\"],\n"
+                      "  \"contributes\": {\n"
+                      "    \"commands\": [{\"name\": \"todo\", \"description\": \"Local todo\"}],\n"
+                      "    \"prompts\": [{\"name\": \"review\", \"description\": \"Local review\", \"path\": \"prompts/review.md\"}],\n"
+                      "    \"skills\": [{\"name\": \"triage\", \"description\": \"Local triage\", \"path\": \"skills/triage.md\"}]\n"
+                      "  }\n"
+                      "}");
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.local" / "prompts" / "review.md",
+                      "Local plugin prompt\n");
+  write_app_test_file(workspace / ".ava" / "plugins" / "com.example.local" / "skills" / "triage.md",
+                      "Local plugin skill\n");
+
+  auto session = open_test_session(root, workspace);
+  expect(session.project_trust.decision == ava::app::ProjectTrustDecision::Unknown &&
+             !ava::app::project_resources_trusted(session.project_trust),
+         "runtime session defaults project resources to skipped without a trust decision");
+  expect(session.system_prompt.find("Project AGENTS context still loads") != std::string::npos &&
+             session.system_prompt.find("Global append instruction") != std::string::npos &&
+             session.system_prompt.find("Project system replacement") == std::string::npos &&
+             session.system_prompt.find("Project append instruction") == std::string::npos &&
+             session.system_prompt.find("local-skill") == std::string::npos,
+         "project AGENTS context loads while project system prompt files and skills remain gated");
+
+  auto registry = ava::app::load_command_registry(session, ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
+  expect(find_entry(registry, "/global") != nullptr && find_entry(registry, "/local") == nullptr &&
+             find_entry(registry, "/skill:local-skill") == nullptr,
+         "untrusted sessions load global prompt commands but skip project prompt and skill commands");
+  auto context_before = ava::app::run_command(session, ava::app::CommandRequest{.command = "/context"});
+  expect(context_before && context_before->handled && !context_before->output.empty() &&
+             context_before->output[0].find("project_trust=unknown project_resources=skipped") != std::string::npos &&
+             context_before->output[0].find("system_prompt_sources=1") != std::string::npos &&
+             context_before->output[0].find("append_system_prompt  global  APPEND_SYSTEM.md") != std::string::npos &&
+             context_before->output[0].find("system_prompt  project  SYSTEM.md") == std::string::npos &&
+             context_before->output[0].find("prompt_commands=1") != std::string::npos &&
+             context_before->output[0].find("skills=0") != std::string::npos &&
+             context_before->output[0].find("plugin_sources=0") != std::string::npos &&
+             context_before->output[0].find("prompt_command  project  local") == std::string::npos,
+         "untrusted /context reports skipped project resources without listing project freshness sources");
+  auto plugins_before = ava::app::run_command(session, ava::app::CommandRequest{.command = "/plugins list"});
+  expect(plugins_before && plugins_before->handled && !plugins_before->output.empty() &&
+             plugins_before->output[0].find("com.example.local") == std::string::npos,
+         "untrusted plugin commands do not discover project plugin manifests");
+
+  auto trust = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust project"});
+  expect(trust && trust->handled && !trust->output.empty() &&
+             trust->output[0].find("trusted project resources") != std::string::npos &&
+             trust->output[0].find("project_resources=enabled") != std::string::npos &&
+             session.project_trust.decision == ava::app::ProjectTrustDecision::Trusted,
+         "/trust project persists trust outside the workspace and reloads the runtime prompt state");
+  expect(session.system_prompt.find("Project system replacement") != std::string::npos &&
+             session.system_prompt.find("Project append instruction") != std::string::npos &&
+             session.system_prompt.find("Global append instruction") == std::string::npos &&
+             session.system_prompt.find("Implement changes directly") == std::string::npos &&
+             session.system_prompt.find("local-skill") != std::string::npos,
+         "trusted project resources replace/append the active system prompt after reload");
+
+  registry = ava::app::load_command_registry(session, ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
+  expect(find_entry(registry, "/local") != nullptr && find_entry(registry, "/skill:local-skill") != nullptr,
+         "trusted sessions expose project prompt and skill commands");
+  auto local = ava::app::run_command(session, ava::app::CommandRequest{.command = "/local topic"});
+  expect(local && local->handled && local->prompt_message &&
+             local->prompt_message->find("Local project command topic") != std::string::npos,
+         "trusted project prompt commands can be invoked");
+  auto skill =
+      ava::app::run_command(session, ava::app::CommandRequest{.command = "/skill:local-skill",
+                                                              .permission_resolver = allow_all_permissions()});
+  expect(skill && skill->handled && skill->prompt_message &&
+             skill->prompt_message->find("Local skill body") != std::string::npos,
+         "trusted project skill commands can be invoked");
+  auto context_after = ava::app::run_command(session, ava::app::CommandRequest{.command = "/context"});
+  expect(context_after && context_after->handled && !context_after->output.empty() &&
+             context_after->output[0].find("project_trust=trusted project_resources=enabled") != std::string::npos &&
+             context_after->output[0].find("system_prompt  project  SYSTEM.md") != std::string::npos &&
+             context_after->output[0].find("append_system_prompt  project  APPEND_SYSTEM.md") != std::string::npos &&
+             context_after->output[0].find("prompt_command  project  local") != std::string::npos &&
+             context_after->output[0].find("skill  project  local-skill") != std::string::npos &&
+             context_after->output[0].find("plugin_manifest  project  com.example.local/manifest") != std::string::npos,
+         "trusted /context reports project prompt, skill, and plugin freshness sources");
+}
+
 }  // namespace
 
 void run_app_command_registry_tests()
@@ -178,4 +306,5 @@ void run_app_command_registry_tests()
   test_skill_commands_are_registry_entries_and_permissioned_prompts();
   test_plugin_commands_are_registry_entries();
   test_mcp_prompts_are_registry_entries_and_permissioned_prompts();
+  test_project_trust_gates_project_resource_commands();
 }

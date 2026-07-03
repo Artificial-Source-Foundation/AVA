@@ -6,6 +6,7 @@
 #include "ava/core/result.h"
 
 #include <filesystem>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -74,6 +75,15 @@ struct CommandRegistry
   std::vector<CommandRegistryDiagnostic> diagnostics;
 };
 
+struct PromptCommandSourceFile
+{
+  std::string command_name = {};
+  std::string scope = {};
+  std::filesystem::path path = {};
+  std::size_t byte_count = 0;
+  std::uint64_t content_fingerprint = 0;
+};
+
 struct CommandRegistryOptions
 {
   bool include_builtins = true;
@@ -87,6 +97,9 @@ struct CommandRegistryOptions
 
 [[nodiscard]] std::string to_string(UnifiedCommandSource source);
 [[nodiscard]] std::string to_string(UnifiedCommandKind kind);
+[[nodiscard]] std::vector<PromptCommandSourceFile> prompt_command_source_files(std::filesystem::path const& workspace_dir,
+                                                                               ava::config::XdgPaths const& paths,
+                                                                               bool include_project_commands = true);
 [[nodiscard]] CommandRegistry load_command_registry(RuntimeSession& session, CommandRegistryOptions options = {});
 [[nodiscard]] CommandRegistryEntry const* find_command_registry_entry(CommandRegistry const& registry, std::string_view line) noexcept;
 [[nodiscard]] bool command_registry_contains(RuntimeSession& session, std::string_view line);

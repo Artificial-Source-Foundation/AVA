@@ -391,7 +391,11 @@ McpConfigLoadOptions config_options_for_context(ava::tools::ToolContext const& c
 {
   auto options = default_mcp_config_options(context.workspace_dir);
   if (!context.mcp_global_config_file.empty()) options.global_config_file = context.mcp_global_config_file;
-  if (!context.mcp_project_config_file.empty()) options.project_config_file = context.mcp_project_config_file;
+  if (!context.include_project_mcp_config) {
+    options.project_config_file.clear();
+  } else if (!context.mcp_project_config_file.empty()) {
+    options.project_config_file = context.mcp_project_config_file;
+  }
   return options;
 }
 

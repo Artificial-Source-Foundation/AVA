@@ -11,6 +11,13 @@
 
 namespace ava::app {
 
+struct RpcImageUpload
+{
+  std::string type;
+  std::string data_base64;
+  std::string mime_type;
+};
+
 struct RpcCommand
 {
   std::string id;
@@ -43,11 +50,14 @@ struct RpcCommand
   std::optional<std::string> answer;
   std::optional<std::string> selected;
   std::optional<std::vector<std::string>> selected_options;
+  std::optional<std::vector<std::string>> attachments;
+  std::optional<std::vector<RpcImageUpload>> images;
   std::optional<std::string> plugin_id;
   std::optional<std::string> name;
   std::optional<std::string> arguments;
   std::optional<std::string> command_arguments;
   std::optional<std::string> server_id;
+  std::optional<std::string> output_path;
   std::optional<std::string> path;
   std::optional<std::string> target_path;
   std::optional<std::string> command;
@@ -62,7 +72,7 @@ struct RpcCommand
 
 namespace ava::app::rpc {
 
-inline constexpr std::size_t kMaxRpcLineBytes = 1024 * 1024;
+inline constexpr std::size_t kMaxRpcLineBytes = 32 * 1024 * 1024;
 inline constexpr std::size_t kMaxRpcMessagesResponseBytes = 1024 * 1024;
 inline constexpr std::size_t kMaxRpcMessagesEntries = 1000;
 inline constexpr std::size_t kMaxRpcQueuedMessages = 64;
@@ -72,6 +82,7 @@ inline constexpr std::size_t kMaxRpcIdentifierBytes = 256;
 inline constexpr std::size_t kMaxRpcReasonBytes = 1024;
 inline constexpr std::size_t kMaxRpcRuleCommandBytes = 8192;
 inline constexpr std::size_t kMaxRpcRulePathBytes = 8192;
+inline constexpr std::size_t kMaxRpcExportPathBytes = 8192;
 inline constexpr std::size_t kMaxRpcSessionNameBytes = 256;
 inline constexpr std::size_t kMaxRpcSessionLabels = 32;
 inline constexpr std::size_t kMaxRpcSessionLabelBytes = 64;
@@ -79,6 +90,10 @@ inline constexpr std::size_t kMaxRpcEntryIdBytes = 256;
 inline constexpr std::size_t kMaxRpcBranchSummaryBytes = 8192;
 inline constexpr std::size_t kMaxRpcQuestionAnswerBytes = 8192;
 inline constexpr std::size_t kMaxRpcQuestionSelectedOptions = 64;
+inline constexpr std::size_t kMaxRpcPromptAttachments = 16;
+inline constexpr std::size_t kMaxRpcPromptAttachmentPathBytes = 8192;
+inline constexpr std::size_t kMaxRpcPromptImageDataBase64Bytes = ((20 * 1024 * 1024 + 2) / 3) * 4;
+inline constexpr std::size_t kMaxRpcPromptImageMimeTypeBytes = 128;
 inline constexpr long long kRpcProtocolVersion = 1;
 
 [[nodiscard]] ava::core::Error invalid_rpc(std::string message);

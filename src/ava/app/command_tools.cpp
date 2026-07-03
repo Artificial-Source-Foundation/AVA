@@ -177,9 +177,10 @@ void add_permission_request_ids(ava::agent::ToolTimelineEntry& entry, std::vecto
 ava::tools::ToolContext make_tool_context(RuntimeSession& session,
                                            ava::permissions::PermissionResolver permission_resolver)
 {
+  auto const include_project_resources = project_resources_trusted(session.project_trust);
   auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
       .global_config_file = session.paths.ava_config_dir / "lsp.json",
-      .project_config_file = session.workspace_dir / ".ava" / "lsp.json",
+      .project_config_file = include_project_resources ? session.workspace_dir / ".ava" / "lsp.json" : std::filesystem::path{},
       .workspace_root = session.workspace_dir,
       .mode = session.mode,
       .permission_resolver = permission_resolver,
@@ -201,10 +202,13 @@ ava::tools::ToolContext make_tool_context(RuntimeSession& session,
       },
       .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
       .plugin_global_plugins_dir = session.paths.ava_config_dir / "plugins",
-      .plugin_project_plugins_dir = session.workspace_dir / ".ava" / "plugins",
+      .plugin_project_plugins_dir = include_project_resources ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{},
       .plugin_enablement_file = session.paths.ava_state_dir / "plugin-enablement.json",
+      .include_project_plugins = include_project_resources,
       .mcp_global_config_file = session.paths.ava_config_dir / "mcp.json",
-      .mcp_project_config_file = session.workspace_dir / ".ava" / "mcp.json",
+      .mcp_project_config_file = include_project_resources ? session.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{},
+      .include_project_mcp_config = include_project_resources,
+      .include_project_skills = include_project_resources,
       .session_id = session.store.session_id(),
       .provider_id = session.model.provider_id,
       .model_id = session.model.model_id,
@@ -292,16 +296,18 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
     return result;
   }
 
-  if (line.starts_with("/glob ")) {
+  if (line.starts_with("/glob ") || line.starts_with("/find ")) {
+    bool const pi_find_alias = line.starts_with("/find ");
     auto const pattern = line.substr(6);
     auto const call_id = ava::core::make_id("cmd");
-    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "glob", pattern); !recorded) {
+    auto const timeline_name = pi_find_alias ? std::string("find") : std::string("glob");
+    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, timeline_name, pattern); !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }
     auto const glob = ava::tools::glob_files(context, pattern);
     if (!glob) {
       auto const text = glob.error().format();
-      if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "glob",
+      if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, timeline_name,
                                              ava::agent::ToolTimelineStatus::Error, text, {}, linked_permission_ids());
           !recorded) {
         return std::unexpected(std::move(recorded.error()));
@@ -326,9 +332,58 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
                         ",\"output_matches\":" + std::to_string(glob->paths.size());
     append_spill_fields(glob_result_json, glob->spill_path, glob->spill_truncated);
     glob_result_json += "}";
-    if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "glob",
+    if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, timeline_name,
                                            ava::agent::ToolTimelineStatus::Success,
                                            std::to_string(glob->paths.size()) + " matches", glob_result_json,
+                                           linked_permission_ids());
+        !recorded) {
+      return std::unexpected(std::move(recorded.error()));
+    }
+    add_output(result, std::move(output));
+    return result;
+  }
+
+  if (line == "/ls" || line.starts_with("/ls ")) {
+    auto const argument = line == "/ls" ? std::string(".") : line.substr(4);
+    auto const call_id = ava::core::make_id("cmd");
+    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "ls", argument); !recorded) {
+      return std::unexpected(std::move(recorded.error()));
+    }
+    auto const listed = ava::tools::list_directory(context, session.current_dir / argument);
+    if (!listed) {
+      auto const text = listed.error().format();
+      if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "ls",
+                                             ava::agent::ToolTimelineStatus::Error, text, {}, linked_permission_ids());
+          !recorded) {
+        return std::unexpected(std::move(recorded.error()));
+      }
+      add_output(result, text);
+      return result;
+    }
+    std::string output;
+    for (auto const& entry : listed->entries) {
+      output += entry.name;
+      if (entry.directory) output += '/';
+      output += '\n';
+    }
+    if (listed->truncated) {
+      output += "[truncated " + std::to_string(listed->entries.size()) + '/' +
+                std::to_string(listed->total_entries) + " entries]\n";
+    }
+    std::string list_result_json = "{\"tool\":\"list_directory\",\"ok\":true,\"path\":\"" +
+                                   ava::core::json::escape(argument) + "\",\"entries\":[";
+    for (std::size_t index = 0; index < listed->entries.size(); ++index) {
+      if (index > 0) list_result_json += ',';
+      auto const& entry = listed->entries[index];
+      list_result_json += "{\"name\":\"" + ava::core::json::escape(entry.name) + "\",\"type\":\"" +
+                          std::string(entry.directory ? "directory" : "file") + "\",\"size\":" +
+                          std::to_string(entry.size) + "}";
+    }
+    list_result_json += "],\"truncated\":" + json_bool(listed->truncated) +
+                        ",\"total_entries\":" + std::to_string(listed->total_entries) + "}";
+    if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "ls",
+                                           ava::agent::ToolTimelineStatus::Success,
+                                           std::to_string(listed->entries.size()) + " entries", list_result_json,
                                            linked_permission_ids());
         !recorded) {
       return std::unexpected(std::move(recorded.error()));

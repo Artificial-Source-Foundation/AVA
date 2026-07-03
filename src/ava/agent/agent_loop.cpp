@@ -99,6 +99,15 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
                                                        ava::provider::Provider const& provider,
                                                        ava::provider::Transport& transport)
 {
+  return run_turn(user_message, {}, store, provider, transport);
+}
+
+ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_message,
+                                                       std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
+                                                       ava::session::SessionStore& store,
+                                                       ava::provider::Provider const& provider,
+                                                       ava::provider::Transport& transport)
+{
   auto check_canceled_locked = [&](std::string_view boundary) -> ava::core::VoidResult {
     if (options_.session_mutex) {
       std::lock_guard lock(*options_.session_mutex);
@@ -106,12 +115,13 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
     }
     return check_canceled(options_, store, boundary);
   };
-  auto append_user_message_locked = [&](std::string const& text) -> ava::core::Result<std::string> {
+  auto append_user_message_locked = [&](std::string const& text,
+                                        std::vector<ava::session::ImageAttachmentRef> const& attachments) -> ava::core::Result<std::string> {
     if (options_.session_mutex) {
       std::lock_guard lock(*options_.session_mutex);
-      return append_user_message(store, text);
+      return append_user_message(store, text, attachments);
     }
-    return append_user_message(store, text);
+    return append_user_message(store, text, attachments);
   };
   auto build_messages_locked = [&]() -> ava::core::Result<BuiltProviderMessages> {
     if (options_.session_mutex) {
@@ -168,6 +178,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
   struct ActiveTurnUserMessage {
     std::string id;
     std::string text;
+    std::vector<ava::session::ImageAttachmentRef> image_attachments;
   };
   std::vector<ActiveTurnUserMessage> active_turn_user_messages;
   auto replayable_active_turn_texts = [&]() {
@@ -185,10 +196,12 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
     auto const replayed_messages = replayable_active_turn_texts();
     return options_.compact_context(store, trigger, replayed_messages);
   };
-  auto append_active_turn_user_message_locked = [&](std::string const& text) -> ava::core::VoidResult {
-    auto appended = append_user_message_locked(text);
+  auto append_active_turn_user_message_locked =
+      [&](std::string const& text,
+          std::vector<ava::session::ImageAttachmentRef> const& attachments) -> ava::core::VoidResult {
+    auto appended = append_user_message_locked(text, attachments);
     if (!appended) return std::unexpected(std::move(appended.error()));
-    active_turn_user_messages.push_back(ActiveTurnUserMessage{.id = *appended, .text = text});
+    active_turn_user_messages.push_back(ActiveTurnUserMessage{.id = *appended, .text = text, .image_attachments = attachments});
     return {};
   };
   auto replay_active_turn_user_messages_locked = [&]() -> ava::core::VoidResult {
@@ -196,9 +209,9 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       auto replayed = [&]() -> ava::core::VoidResult {
         if (options_.session_mutex) {
           std::lock_guard lock(*options_.session_mutex);
-          return append_replay_user_message(store, message.text, message.id);
+          return append_replay_user_message(store, message.text, message.image_attachments, message.id);
         }
-        return append_replay_user_message(store, message.text, message.id);
+        return append_replay_user_message(store, message.text, message.image_attachments, message.id);
       }();
       if (!replayed) return replayed;
     }
@@ -245,7 +258,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       return std::unexpected(std::move(not_canceled.error()));
     }
   }
-  if (auto appended = append_active_turn_user_message_locked(user_message); !appended)
+  if (auto appended = append_active_turn_user_message_locked(user_message, image_attachments); !appended)
     return std::unexpected(appended.error());
 
   AgentLoopResult result;
@@ -271,10 +284,14 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       .cancel_requested = options_.cancel_requested,
       .question_resolver = options_.question_resolver,
       .lsp_diagnostics_provider = options_.lsp_diagnostics_provider,
+      .include_project_plugins = options_.include_project_resources,
+      .include_project_mcp_config = options_.include_project_resources,
+      .include_project_skills = options_.include_project_resources,
       .session_id = store.session_id(),
       .provider_id = options_.provider_id,
       .model_id = options_.model_id,
-      .current_dir = options_.current_dir.empty() ? options_.workspace_dir : options_.current_dir};
+      .current_dir = options_.current_dir.empty() ? options_.workspace_dir : options_.current_dir,
+      .tool_visibility = options_.tool_visibility};
   ToolDispatcher const dispatcher(tool_context);
 
   std::size_t tool_iterations = 0;
@@ -288,7 +305,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       auto steering_messages = options_.take_steering_messages();
       if (!steering_messages) return std::unexpected(std::move(steering_messages.error()));
       for (auto const& steering_message : *steering_messages) {
-        if (auto appended = append_active_turn_user_message_locked(steering_message); !appended) {
+        if (auto appended = append_active_turn_user_message_locked(steering_message, {}); !appended) {
           return std::unexpected(appended.error());
         }
       }

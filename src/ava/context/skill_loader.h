@@ -38,6 +38,7 @@ struct SkillLoadOptions
   std::vector<std::filesystem::path> global_skill_dirs = {};
   std::vector<std::filesystem::path> project_skill_dirs = {};
   std::size_t max_file_bytes = 64 * 1024;
+  bool include_project_skills = true;
 };
 
 struct SkillLoadResult

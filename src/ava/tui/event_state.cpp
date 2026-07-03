@@ -476,7 +476,26 @@ std::string_view trim_trailing_ascii_space(std::string_view text)
 
 ToolTimelineStatus tool_status_from_event(ava::app::RuntimeEvent const& event)
 {
-  return event.status == "error" ? ToolTimelineStatus::Error : ToolTimelineStatus::Success;
+  if (event.status == "error") return ToolTimelineStatus::Error;
+  if (event.status == "canceled" || event.status == "cancelled" || event.status == "aborted")
+    return ToolTimelineStatus::Canceled;
+  if (event.status == "running") return ToolTimelineStatus::Running;
+  return ToolTimelineStatus::Success;
+}
+
+ToolLifecycleState tool_lifecycle_for_status(ToolTimelineStatus status)
+{
+  switch (status) {
+    case ToolTimelineStatus::Running:
+      return ToolLifecycleState::ExecutionStarted;
+    case ToolTimelineStatus::Success:
+      return ToolLifecycleState::Complete;
+    case ToolTimelineStatus::Canceled:
+      return ToolLifecycleState::Canceled;
+    case ToolTimelineStatus::Error:
+      return ToolLifecycleState::Error;
+  }
+  return ToolLifecycleState::Error;
 }
 
 std::string title_case_ascii(std::string_view text)
@@ -592,6 +611,19 @@ std::string retry_activity_id(ava::app::RuntimeEvent const& event)
   return "retry:" + first_non_empty({event.reason, event.trigger, "retry"});
 }
 
+void upsert_retry_countdown_transcript(TuiEventState& state, std::string detail)
+{
+  auto existing = std::ranges::find_if(state.transcript.rbegin(), state.transcript.rend(), [](TranscriptItem const& item) {
+    return item.label == "audit" && item.text.starts_with("retry countdown");
+  });
+  if (existing != state.transcript.rend()) {
+    existing->text = std::move(detail);
+    existing->text_model = text_from_plain(existing->text);
+    return;
+  }
+  state.transcript.push_back(transcript_text_item("audit", std::move(detail)));
+}
+
 void apply_canceled_event(TuiEventState& state, ava::app::RuntimeEvent const& event)
 {
   state.error_text = "stopped by user";
@@ -599,14 +631,14 @@ void apply_canceled_event(TuiEventState& state, ava::app::RuntimeEvent const& ev
   auto text = event.text.empty() ? std::string("stopped by user") : event.text;
   if (text == "stopped by user") text += ". Submit a new prompt to continue.";
   state.transcript.push_back(assistant_transcript_item(std::move(text), {}));
-  settle_responding_activity(state, ToolTimelineStatus::Error, "assistant stopped");
+  settle_responding_activity(state, ToolTimelineStatus::Canceled, "assistant stopped");
   auto detail = event.reason.empty() ? std::string("active work was stopped") : event.reason;
   detail += "; submit a new prompt to continue";
   upsert_sidebar_activity(
       state, SidebarActivityItem{.id = "stopped",
                                  .label = "stopped",
                                  .detail = std::move(detail),
-                                 .status = ToolTimelineStatus::Error});
+                                 .status = ToolTimelineStatus::Canceled});
   state.run_status = TuiEventRunStatus::Canceled;
 }
 
@@ -732,8 +764,7 @@ ToolTimelineItem tool_item_from_event(ava::app::RuntimeEvent const& event, ToolT
                         .arguments_json = event.tool_arguments_json,
                         .result_json = event.tool_result_json,
                         .call_id = event.call_id,
-                        .lifecycle = status == ToolTimelineStatus::Running ? ToolLifecycleState::ExecutionStarted
-                                                                           : ToolLifecycleState::Complete};
+                        .lifecycle = tool_lifecycle_for_status(status)};
   item.diff = event.diff;
   item.diff_truncated = event.diff_truncated;
   item.changed_paths = event.changed_paths;
@@ -822,7 +853,7 @@ void apply_tool_result(TuiEventState& state, ava::app::RuntimeEvent const& event
       .arguments_json = event.tool_arguments_json,
       .result_json = event.tool_result_json,
       .call_id = event.call_id,
-      .lifecycle = status == ToolTimelineStatus::Error ? ToolLifecycleState::Error : ToolLifecycleState::Complete};
+      .lifecycle = tool_lifecycle_for_status(status)};
   item.diff = event.diff;
   item.diff_truncated = event.diff_truncated;
   item.changed_paths = event.changed_paths;
@@ -1032,6 +1063,7 @@ std::optional<ToolLifecycleState> lifecycle_from_payload(std::string_view payloa
   if (*value == "execution_started" || *value == "executing") return ToolLifecycleState::ExecutionStarted;
   if (*value == "progress") return ToolLifecycleState::Progress;
   if (*value == "complete" || *value == "completed") return ToolLifecycleState::Complete;
+  if (*value == "canceled" || *value == "cancelled" || *value == "aborted") return ToolLifecycleState::Canceled;
   if (*value == "error") return ToolLifecycleState::Error;
   return std::nullopt;
 }
@@ -1268,6 +1300,7 @@ void apply_runtime_event(TuiEventState& state, ava::app::RuntimeEvent const& eve
       if (event.delay_ms > 0) detail += " delay=" + std::to_string(event.delay_ms) + "ms";
       detail += " remaining=" + std::to_string(event.remaining_ms) + "ms";
       if (!event.text.empty()) detail += " - " + event.text;
+      upsert_retry_countdown_transcript(state, detail);
       upsert_sidebar_activity(state, SidebarActivityItem{.id = retry_activity_id(event),
                                                          .label = "retry",
                                                          .detail = std::move(detail),

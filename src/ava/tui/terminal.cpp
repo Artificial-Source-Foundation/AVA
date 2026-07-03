@@ -21,10 +21,22 @@ namespace ava::tui {
 namespace {
 
 constexpr int kTerminalEscapeDelayMs = 100;
+constexpr std::string_view kKittyKeyboardPushSequence = "\x1b[>5u";
+constexpr std::string_view kKittyKeyboardQuerySequence = "\x1b[>5u\x1b[?u\x1b[c";
+constexpr std::string_view kKittyKeyboardPopSequence = "\x1b[<u";
+constexpr std::string_view kModifyOtherKeysEnableSequence = "\x1b[>4;2m";
+constexpr std::string_view kModifyOtherKeysDisableSequence = "\x1b[>4;0m";
 
 sig_atomic_t volatile g_terminal_signal = 0;
+bool g_keyboard_protocol_kitty_response_seen = false;
+bool g_modify_other_keys_enabled = false;
 struct sigaction g_curses_previous_sigint{};
 struct sigaction g_curses_previous_sigterm{};
+
+InputEvent key_event(Key key)
+{
+  return InputEvent{.key = key, .character = '\0', .text = {}, .mouse_column = 0, .mouse_row = 0};
+}
 
 void mark_terminal_signal(int signal_number)
 {
@@ -74,6 +86,59 @@ void set_bracketed_paste(bool enabled)
   static_cast<void>(std::fflush(stdout));
 }
 
+void write_terminal_sequence(std::string_view sequence)
+{
+  static_cast<void>(std::fwrite(sequence.data(), 1, sequence.size(), stdout));
+  static_cast<void>(std::fflush(stdout));
+}
+
+void push_kitty_keyboard_protocol()
+{
+  write_terminal_sequence(kKittyKeyboardQuerySequence);
+}
+
+void pop_kitty_keyboard_protocol()
+{
+  write_terminal_sequence(kKittyKeyboardPopSequence);
+}
+
+void reset_keyboard_protocol_negotiation()
+{
+  g_keyboard_protocol_kitty_response_seen = false;
+  g_modify_other_keys_enabled = false;
+}
+
+void enable_modify_other_keys_fallback()
+{
+  if (g_modify_other_keys_enabled)
+    return;
+  write_terminal_sequence(kModifyOtherKeysEnableSequence);
+  g_modify_other_keys_enabled = true;
+}
+
+void disable_modify_other_keys_fallback()
+{
+  if (!g_modify_other_keys_enabled)
+    return;
+  write_terminal_sequence(kModifyOtherKeysDisableSequence);
+  g_modify_other_keys_enabled = false;
+}
+
+void apply_keyboard_protocol_response_action(KeyboardProtocolResponseAction action)
+{
+  switch (action)
+  {
+    case KeyboardProtocolResponseAction::EnableModifyOtherKeys:
+      enable_modify_other_keys_fallback();
+      break;
+    case KeyboardProtocolResponseAction::DisableModifyOtherKeys:
+      disable_modify_other_keys_fallback();
+      break;
+    case KeyboardProtocolResponseAction::None:
+      break;
+  }
+}
+
 bool is_utf8_continuation(unsigned char byte)
 {
   return (byte & 0xC0U) == 0x80U;
@@ -114,6 +179,604 @@ bool consume_char(std::string_view text, std::size_t& index, char expected)
     return false;
   ++index;
   return true;
+}
+
+struct KittyCsiUSequence
+{
+  int codepoint = 0;
+  std::optional<int> shifted_key = std::nullopt;
+  std::optional<int> base_layout_key = std::nullopt;
+  int modifiers = 0;
+  int event_type = 1;
+};
+
+struct ModifyOtherKeysSequence
+{
+  int codepoint = 0;
+  int modifiers = 0;
+};
+
+std::optional<int> parse_optional_unsigned_int(std::string_view text, std::size_t& index)
+{
+  if (index >= text.size() || text[index] < '0' || text[index] > '9')
+    return std::nullopt;
+  return parse_unsigned_int(text, index);
+}
+
+std::optional<KittyCsiUSequence> parse_kitty_csi_u_sequence(std::string_view sequence)
+{
+  if (!sequence.starts_with('[') || sequence.size() < 3 || sequence.back() != 'u')
+    return std::nullopt;
+
+  auto index = std::size_t{1};
+  auto const codepoint = parse_unsigned_int(sequence, index);
+  if (!codepoint)
+    return std::nullopt;
+
+  auto shifted_key = std::optional<int>{};
+  auto base_layout_key = std::optional<int>{};
+  if (index < sequence.size() && sequence[index] == ':')
+  {
+    ++index;
+    shifted_key = parse_optional_unsigned_int(sequence, index);
+    if (index < sequence.size() && sequence[index] == ':')
+    {
+      ++index;
+      base_layout_key = parse_optional_unsigned_int(sequence, index);
+      if (!base_layout_key)
+        return std::nullopt;
+    }
+  }
+
+  auto modifier_value = 1;
+  auto event_type = 1;
+  if (index < sequence.size() && sequence[index] == ';')
+  {
+    ++index;
+    auto const parsed_modifier = parse_unsigned_int(sequence, index);
+    if (!parsed_modifier || *parsed_modifier <= 0)
+      return std::nullopt;
+    modifier_value = *parsed_modifier;
+
+    if (index < sequence.size() && sequence[index] == ':')
+    {
+      ++index;
+      auto const parsed_event_type = parse_unsigned_int(sequence, index);
+      if (!parsed_event_type || *parsed_event_type <= 0)
+        return std::nullopt;
+      event_type = *parsed_event_type;
+    }
+  }
+
+  if (index + 1 != sequence.size() || sequence[index] != 'u')
+    return std::nullopt;
+
+  return KittyCsiUSequence{
+      .codepoint = *codepoint,
+      .shifted_key = shifted_key,
+      .base_layout_key = base_layout_key,
+      .modifiers = modifier_value - 1,
+      .event_type = event_type};
+}
+
+constexpr int kKittyModifierShift = 1;
+constexpr int kKittyModifierAlt = 2;
+constexpr int kKittyModifierCtrl = 4;
+constexpr int kKittyModifierSuper = 8;
+constexpr int kKittyLockModifiers = 64 + 128;
+
+int effective_kitty_modifiers(int modifiers)
+{
+  return modifiers & ~kKittyLockModifiers;
+}
+
+int normalize_kitty_functional_codepoint(int codepoint)
+{
+  switch (codepoint)
+  {
+    case 57399:
+      return '0';
+    case 57400:
+      return '1';
+    case 57401:
+      return '2';
+    case 57402:
+      return '3';
+    case 57403:
+      return '4';
+    case 57404:
+      return '5';
+    case 57405:
+      return '6';
+    case 57406:
+      return '7';
+    case 57407:
+      return '8';
+    case 57408:
+      return '9';
+    case 57409:
+      return '.';
+    case 57410:
+      return '/';
+    case 57411:
+      return '*';
+    case 57412:
+      return '-';
+    case 57413:
+      return '+';
+    case 57415:
+      return '=';
+    case 57416:
+      return ',';
+    case 57417:
+      return -4;
+    case 57418:
+      return -3;
+    case 57419:
+      return -1;
+    case 57420:
+      return -2;
+    case 57421:
+      return -12;
+    case 57422:
+      return -13;
+    case 57423:
+      return -14;
+    case 57424:
+      return -15;
+    case 57425:
+      return -11;
+    case 57426:
+      return -10;
+    default:
+      return codepoint;
+  }
+}
+
+bool is_ascii_letter_or_symbol(int codepoint)
+{
+  if ((codepoint >= 'a' && codepoint <= 'z') || (codepoint >= 'A' && codepoint <= 'Z') ||
+      (codepoint >= '0' && codepoint <= '9'))
+    return true;
+  switch (codepoint)
+  {
+    case '`':
+    case '-':
+    case '=':
+    case '[':
+    case ']':
+    case '\\':
+    case ';':
+    case '\'':
+    case ',':
+    case '.':
+    case '/':
+    case '!':
+    case '@':
+    case '#':
+    case '$':
+    case '%':
+    case '^':
+    case '&':
+    case '*':
+    case '(':
+    case ')':
+    case '_':
+    case '+':
+    case '|':
+    case '~':
+    case '{':
+    case '}':
+    case ':':
+    case '<':
+    case '>':
+    case '?':
+      return true;
+    default:
+      return false;
+  }
+}
+
+int lowercase_ascii_letter(int codepoint)
+{
+  if (codepoint >= 'A' && codepoint <= 'Z')
+    return codepoint + ('a' - 'A');
+  return codepoint;
+}
+
+int kitty_key_identity_codepoint(KittyCsiUSequence const& parsed)
+{
+  auto const normalized = lowercase_ascii_letter(normalize_kitty_functional_codepoint(parsed.codepoint));
+  if (is_ascii_letter_or_symbol(normalized))
+    return normalized;
+  if (parsed.base_layout_key)
+    return lowercase_ascii_letter(normalize_kitty_functional_codepoint(*parsed.base_layout_key));
+  return normalized;
+}
+
+int text_identity_codepoint(int codepoint)
+{
+  return lowercase_ascii_letter(normalize_kitty_functional_codepoint(codepoint));
+}
+
+Key control_key_from_codepoint(int codepoint)
+{
+  switch (codepoint)
+  {
+    case '0':
+      return Key::Ctrl0;
+    case '1':
+      return Key::Ctrl1;
+    case '2':
+      return Key::Ctrl2;
+    case '3':
+      return Key::Ctrl3;
+    case '4':
+      return Key::Ctrl4;
+    case '5':
+      return Key::Ctrl5;
+    case '6':
+      return Key::Ctrl6;
+    case '7':
+      return Key::Ctrl7;
+    case '8':
+      return Key::Ctrl8;
+    case '9':
+      return Key::Ctrl9;
+    case 'a':
+      return Key::CtrlA;
+    case 'b':
+      return Key::CtrlB;
+    case 'c':
+      return Key::CtrlC;
+    case 'd':
+      return Key::CtrlD;
+    case 'e':
+      return Key::CtrlE;
+    case 'f':
+      return Key::CtrlF;
+    case 'g':
+      return Key::CtrlG;
+    case 'h':
+      return Key::CtrlH;
+    case 'k':
+      return Key::CtrlK;
+    case 'l':
+      return Key::CtrlL;
+    case 'n':
+      return Key::CtrlN;
+    case 'o':
+      return Key::CtrlO;
+    case 'p':
+      return Key::CtrlP;
+    case 'r':
+      return Key::CtrlR;
+    case 's':
+      return Key::CtrlS;
+    case 't':
+      return Key::CtrlT;
+    case 'u':
+      return Key::CtrlU;
+    case 'v':
+      return Key::CtrlV;
+    case 'w':
+      return Key::CtrlW;
+    case 'x':
+      return Key::CtrlX;
+    case 'y':
+      return Key::CtrlY;
+    case 'z':
+      return Key::CtrlZ;
+    case ']':
+      return Key::CtrlRightBracket;
+    case '-':
+      return Key::CtrlMinus;
+    case '/':
+      return Key::CtrlSlash;
+    default:
+      return Key::Unknown;
+  }
+}
+
+Key alt_key_from_codepoint(int codepoint)
+{
+  switch (codepoint)
+  {
+    case 'b':
+      return Key::AltB;
+    case 'd':
+      return Key::AltD;
+    case 'f':
+      return Key::AltF;
+    case 'h':
+      return Key::AltH;
+    case 'j':
+      return Key::AltJ;
+    case 'k':
+      return Key::AltK;
+    case 'l':
+      return Key::AltL;
+    case 'w':
+      return Key::AltW;
+    case 'y':
+      return Key::AltY;
+    default:
+      return Key::Unknown;
+  }
+}
+
+Key key_from_codepoint_and_modifiers(int codepoint, int modifiers)
+{
+  auto const effective_modifiers = effective_kitty_modifiers(modifiers);
+  if ((effective_modifiers & kKittyModifierSuper) != 0)
+    return Key::Unknown;
+
+  auto const normalized = normalize_kitty_functional_codepoint(codepoint);
+  auto const has_shift = (effective_modifiers & kKittyModifierShift) != 0;
+  auto const has_alt = (effective_modifiers & kKittyModifierAlt) != 0;
+  auto const has_ctrl = (effective_modifiers & kKittyModifierCtrl) != 0;
+  auto const identity = text_identity_codepoint(normalized);
+
+  if (has_ctrl && has_shift && !has_alt && identity == 'p')
+    return Key::CtrlShiftP;
+  if (has_ctrl && has_alt && !has_shift && identity == ']')
+    return Key::CtrlAltRightBracket;
+  if (is_ascii_letter_or_symbol(identity))
+  {
+    if (has_ctrl && !has_alt && !has_shift)
+      return control_key_from_codepoint(identity);
+    if (has_alt && !has_ctrl && !has_shift)
+      return alt_key_from_codepoint(identity);
+  }
+
+  switch (normalized)
+  {
+    case 13:
+      if (has_shift && !has_ctrl && !has_alt)
+        return Key::ShiftEnter;
+      if (has_ctrl && !has_shift && !has_alt)
+        return Key::CtrlEnter;
+      if (has_alt && !has_shift && !has_ctrl)
+        return Key::AltEnter;
+      return effective_modifiers == 0 ? Key::Enter : Key::Unknown;
+    case 9:
+      if (has_shift && !has_ctrl && !has_alt)
+        return Key::ShiftTab;
+      return effective_modifiers == 0 ? Key::Tab : Key::Unknown;
+    case 27:
+      return effective_modifiers == 0 ? Key::Escape : Key::Unknown;
+    case 32:
+      if (has_ctrl && !has_shift && !has_alt)
+        return Key::CtrlSpace;
+      return effective_modifiers == 0 ? Key::Space : Key::Unknown;
+    case 127:
+      if (has_shift && !has_ctrl && !has_alt)
+        return Key::ShiftBackspace;
+      if (has_ctrl && !has_shift && !has_alt)
+        return Key::CtrlBackspace;
+      if (has_alt && !has_ctrl && !has_shift)
+        return Key::AltBackspace;
+      return effective_modifiers == 0 ? Key::Backspace : Key::Unknown;
+    case -4:
+      if (has_ctrl && has_shift && !has_alt)
+        return Key::ShiftCtrlArrowLeft;
+      if (has_alt && has_shift && !has_ctrl)
+        return Key::ShiftAltArrowLeft;
+      if (has_ctrl && !has_alt && !has_shift)
+        return Key::CtrlArrowLeft;
+      if (has_alt && !has_ctrl && !has_shift)
+        return Key::AltArrowLeft;
+      if (has_shift && !has_ctrl && !has_alt)
+        return Key::ShiftArrowLeft;
+      return (!has_ctrl && !has_alt) ? Key::ArrowLeft : Key::Unknown;
+    case -3:
+      if (has_ctrl && has_shift && !has_alt)
+        return Key::ShiftCtrlArrowRight;
+      if (has_alt && has_shift && !has_ctrl)
+        return Key::ShiftAltArrowRight;
+      if (has_ctrl && !has_alt && !has_shift)
+        return Key::CtrlArrowRight;
+      if (has_alt && !has_ctrl && !has_shift)
+        return Key::AltArrowRight;
+      if (has_shift && !has_ctrl && !has_alt)
+        return Key::ShiftArrowRight;
+      return (!has_ctrl && !has_alt) ? Key::ArrowRight : Key::Unknown;
+    case -1:
+      if (has_shift && !has_ctrl && !has_alt)
+        return Key::ShiftArrowUp;
+      if (has_alt && !has_ctrl && !has_shift)
+        return Key::AltArrowUp;
+      return (!has_ctrl && !has_alt && !has_shift) ? Key::ArrowUp : Key::Unknown;
+    case -2:
+      if (has_shift && !has_ctrl && !has_alt)
+        return Key::ShiftArrowDown;
+      if (has_alt && !has_ctrl && !has_shift)
+        return Key::AltArrowDown;
+      return (!has_ctrl && !has_alt && !has_shift) ? Key::ArrowDown : Key::Unknown;
+    case -10:
+      if (has_shift && !has_ctrl && !has_alt)
+        return Key::ShiftDelete;
+      if (has_alt && !has_ctrl && !has_shift)
+        return Key::AltDelete;
+      return !has_alt ? Key::Delete : Key::Unknown;
+    case -12:
+      return Key::PageUp;
+    case -13:
+      return Key::PageDown;
+    case -14:
+      if (has_ctrl && has_shift && !has_alt)
+        return Key::ShiftCtrlHome;
+      if (has_ctrl && !has_shift && !has_alt)
+        return Key::CtrlHome;
+      if (has_shift && !has_ctrl && !has_alt)
+        return Key::ShiftHome;
+      return Key::Home;
+    case -15:
+      if (has_ctrl && has_shift && !has_alt)
+        return Key::ShiftCtrlEnd;
+      if (has_ctrl && !has_shift && !has_alt)
+        return Key::CtrlEnd;
+      if (has_shift && !has_ctrl && !has_alt)
+        return Key::ShiftEnd;
+      return Key::End;
+    default:
+      return Key::Unknown;
+  }
+}
+
+Key key_from_kitty_csi_u_sequence(std::string_view sequence)
+{
+  auto const parsed = parse_kitty_csi_u_sequence(sequence);
+  if (!parsed)
+    return Key::Unknown;
+
+  auto const modifiers = effective_kitty_modifiers(parsed->modifiers);
+  if (parsed->event_type == 3)
+    return Key::Unknown;
+  auto const identity = kitty_key_identity_codepoint(*parsed);
+  if (identity != text_identity_codepoint(parsed->codepoint))
+    return key_from_codepoint_and_modifiers(identity, modifiers);
+  return key_from_codepoint_and_modifiers(parsed->codepoint, modifiers);
+}
+
+void append_utf8_codepoint(std::string& text, int codepoint)
+{
+  if (codepoint < 0 || codepoint > 0x10FFFF || (codepoint >= 0xD800 && codepoint <= 0xDFFF))
+    return;
+  if (codepoint <= 0x7F)
+  {
+    text.push_back(static_cast<char>(codepoint));
+  }
+  else if (codepoint <= 0x7FF)
+  {
+    text.push_back(static_cast<char>(0xC0 | ((codepoint >> 6) & 0x1F)));
+    text.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+  }
+  else if (codepoint <= 0xFFFF)
+  {
+    text.push_back(static_cast<char>(0xE0 | ((codepoint >> 12) & 0x0F)));
+    text.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+    text.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+  }
+  else
+  {
+    text.push_back(static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07)));
+    text.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+    text.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+    text.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+  }
+}
+
+std::optional<InputEvent> kitty_csi_u_printable_event(std::string_view sequence)
+{
+  auto const parsed = parse_kitty_csi_u_sequence(sequence);
+  if (!parsed)
+    return std::nullopt;
+
+  auto const modifiers = effective_kitty_modifiers(parsed->modifiers);
+  if (parsed->event_type == 3)
+    return std::nullopt;
+  if ((modifiers & ~(kKittyModifierShift | kKittyLockModifiers)) != 0)
+    return std::nullopt;
+
+  auto codepoint = parsed->codepoint;
+  if ((modifiers & kKittyModifierShift) != 0 && parsed->shifted_key)
+    codepoint = *parsed->shifted_key;
+  codepoint = normalize_kitty_functional_codepoint(codepoint);
+  if (codepoint < 32)
+    return std::nullopt;
+
+  std::string text;
+  append_utf8_codepoint(text, codepoint);
+  if (text.empty())
+    return std::nullopt;
+  return InputEvent{.key = Key::Character,
+                    .character = text.size() == 1 ? text.front() : '\0',
+                    .text = std::move(text),
+                    .mouse_column = 0,
+                    .mouse_row = 0};
+}
+
+std::optional<ModifyOtherKeysSequence> parse_modify_other_keys_sequence(std::string_view sequence)
+{
+  if (!sequence.starts_with('[') || sequence.size() < 8 || sequence.back() != '~')
+    return std::nullopt;
+
+  auto index = std::size_t{1};
+  auto const escape_code = parse_unsigned_int(sequence, index);
+  if (!escape_code || *escape_code != 27 || !consume_char(sequence, index, ';'))
+    return std::nullopt;
+
+  auto const modifier_value = parse_unsigned_int(sequence, index);
+  if (!modifier_value || *modifier_value <= 0 || !consume_char(sequence, index, ';'))
+    return std::nullopt;
+
+  auto const codepoint = parse_unsigned_int(sequence, index);
+  if (!codepoint || index + 1 != sequence.size() || sequence[index] != '~')
+    return std::nullopt;
+
+  return ModifyOtherKeysSequence{.codepoint = *codepoint, .modifiers = *modifier_value - 1};
+}
+
+Key key_from_modify_other_keys_sequence(std::string_view sequence)
+{
+  auto const parsed = parse_modify_other_keys_sequence(sequence);
+  if (!parsed)
+    return Key::Unknown;
+  return key_from_codepoint_and_modifiers(parsed->codepoint, parsed->modifiers);
+}
+
+Key function_key_from_sequence(std::string_view sequence)
+{
+  if (sequence == "OP" || sequence == "[11~")
+    return Key::F1;
+  if (sequence == "OQ" || sequence == "[12~")
+    return Key::F2;
+  if (sequence == "OR" || sequence == "[13~")
+    return Key::F3;
+  if (sequence == "OS" || sequence == "[14~")
+    return Key::F4;
+  if (sequence == "[15~")
+    return Key::F5;
+  if (sequence == "[17~")
+    return Key::F6;
+  if (sequence == "[18~")
+    return Key::F7;
+  if (sequence == "[19~")
+    return Key::F8;
+  if (sequence == "[20~")
+    return Key::F9;
+  if (sequence == "[21~")
+    return Key::F10;
+  if (sequence == "[23~")
+    return Key::F11;
+  if (sequence == "[24~")
+    return Key::F12;
+  return Key::Unknown;
+}
+
+std::optional<InputEvent> modify_other_keys_printable_event(std::string_view sequence)
+{
+  auto const parsed = parse_modify_other_keys_sequence(sequence);
+  if (!parsed)
+    return std::nullopt;
+
+  auto const modifiers = effective_kitty_modifiers(parsed->modifiers);
+  if ((modifiers & ~(kKittyModifierShift | kKittyLockModifiers)) != 0)
+    return std::nullopt;
+  auto const codepoint = normalize_kitty_functional_codepoint(parsed->codepoint);
+  if (codepoint < 32)
+    return std::nullopt;
+
+  std::string text;
+  append_utf8_codepoint(text, codepoint);
+  if (text.empty())
+    return std::nullopt;
+  return InputEvent{.key = Key::Character,
+                    .character = text.size() == 1 ? text.front() : '\0',
+                    .text = std::move(text),
+                    .mouse_column = 0,
+                    .mouse_row = 0};
 }
 
 bool is_modified_enter_csi_u(std::string_view sequence, int expected_modifiers)
@@ -239,18 +902,38 @@ Key page_key_from_csi_tilde(std::string_view sequence)
   if (!code)
     return Key::Unknown;
 
+  auto modifier = std::optional<int>{};
   while (index + 1 < sequence.size())
   {
     if (!consume_char(sequence, index, ';') && !consume_char(sequence, index, ':'))
       return Key::Unknown;
-    if (!parse_unsigned_int(sequence, index))
+    auto const parsed_modifier = parse_unsigned_int(sequence, index);
+    if (!parsed_modifier)
       return Key::Unknown;
+    if (!modifier)
+      modifier = parsed_modifier;
   }
   if (index + 1 != sequence.size())
     return Key::Unknown;
 
+  if (modifier && *modifier == 6 && (*code == 1 || *code == 7))
+    return Key::ShiftCtrlHome;
+  if (modifier && *modifier == 6 && (*code == 4 || *code == 8))
+    return Key::ShiftCtrlEnd;
+  if (modifier && *modifier == 5 && (*code == 1 || *code == 7))
+    return Key::CtrlHome;
+  if (modifier && *modifier == 5 && (*code == 4 || *code == 8))
+    return Key::CtrlEnd;
+  if (modifier && *modifier == 2 && (*code == 1 || *code == 7))
+    return Key::ShiftHome;
+  if (modifier && *modifier == 2 && (*code == 4 || *code == 8))
+    return Key::ShiftEnd;
+  if (modifier && *modifier == 2 && *code == 3)
+    return Key::ShiftDelete;
   if (*code == 3)
     return Key::Delete;
+  if (*code == 2)
+    return Key::Insert;
   if (*code == 1 || *code == 7)
     return Key::Home;
   if (*code == 4 || *code == 8)
@@ -262,24 +945,47 @@ Key page_key_from_csi_tilde(std::string_view sequence)
   return Key::Unknown;
 }
 
-Key sgr_mouse_key(std::string_view sequence)
+std::optional<InputEvent> sgr_mouse_event(std::string_view sequence)
 {
   if (!sequence.starts_with("[<") || sequence.size() < 7)
-    return Key::Unknown;
+    return std::nullopt;
   auto index = std::size_t{2};
   auto const button = parse_unsigned_int(sequence, index);
   if (!button || !consume_char(sequence, index, ';'))
-    return Key::Unknown;
-  if (!parse_unsigned_int(sequence, index) || !consume_char(sequence, index, ';'))
-    return Key::Unknown;
-  if (!parse_unsigned_int(sequence, index))
-    return Key::Unknown;
-  if (index + 1 != sequence.size() || sequence[index] != 'M')
-    return Key::Unknown;
+    return std::nullopt;
+  auto const column = parse_unsigned_int(sequence, index);
+  if (!column || !consume_char(sequence, index, ';'))
+    return std::nullopt;
+  auto const row = parse_unsigned_int(sequence, index);
+  if (!row || index + 1 != sequence.size() || (sequence[index] != 'M' && sequence[index] != 'm'))
+    return std::nullopt;
+  auto key = Key::Unknown;
+  auto const button_code = *button;
+  auto const final = sequence[index];
+  auto const is_motion = (button_code & 32) != 0;
+  auto const is_wheel = (button_code & 64) != 0;
+  auto const base_button = button_code & 3;
+  if (is_wheel && final == 'M') {
+    key = (button_code & 1) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
+  } else if (final == 'm' && base_button == 0 && !is_wheel) {
+    key = Key::MouseLeftRelease;
+  } else if (final == 'M' && is_motion && base_button == 0 && !is_wheel) {
+    key = Key::MouseLeftDrag;
+  } else if (final == 'M' && !is_motion && base_button == 0 && !is_wheel) {
+    key = Key::MouseLeftClick;
+  }
+  return InputEvent{.key = key,
+                    .character = '\0',
+                    .text = {},
+                    .mouse_column = key == Key::Unknown ? 0U : static_cast<std::size_t>(*column),
+                    .mouse_row = key == Key::Unknown ? 0U : static_cast<std::size_t>(*row)};
+}
 
-  if ((*button & 64) == 0)
-    return Key::Unknown;
-  return (*button & 1) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
+Key sgr_mouse_key(std::string_view sequence)
+{
+  if (auto event = sgr_mouse_event(sequence))
+    return event->key;
+  return Key::Unknown;
 }
 
 bool is_legacy_mouse_sequence(std::string_view sequence)
@@ -287,17 +993,41 @@ bool is_legacy_mouse_sequence(std::string_view sequence)
   return sequence.starts_with("[M") && sequence.size() >= 5;
 }
 
-Key legacy_mouse_key(std::string_view sequence)
+std::optional<InputEvent> legacy_mouse_event(std::string_view sequence)
 {
   if (!is_legacy_mouse_sequence(sequence))
-    return Key::Unknown;
+    return std::nullopt;
   auto const button_byte = static_cast<unsigned char>(sequence[2]);
-  if (button_byte < 32)
-    return Key::Unknown;
+  auto const column_byte = static_cast<unsigned char>(sequence[3]);
+  auto const row_byte = static_cast<unsigned char>(sequence[4]);
+  if (button_byte < 32 || column_byte < 32 || row_byte < 32)
+    return key_event(Key::Unknown);
   auto const button = static_cast<unsigned int>(button_byte - 32U);
-  if ((button & 64U) == 0)
-    return Key::Unknown;
-  return (button & 1U) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
+  auto key = Key::Unknown;
+  auto const is_motion = (button & 32U) != 0;
+  auto const is_wheel = (button & 64U) != 0;
+  auto const base_button = button & 3U;
+  if (is_wheel) {
+    key = (button & 1U) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
+  } else if (base_button == 3U) {
+    key = Key::MouseLeftRelease;
+  } else if (is_motion && base_button == 0U) {
+    key = Key::MouseLeftDrag;
+  } else if (!is_motion && base_button == 0U) {
+    key = Key::MouseLeftClick;
+  }
+  return InputEvent{.key = key,
+                    .character = '\0',
+                    .text = {},
+                    .mouse_column = key == Key::Unknown ? 0U : static_cast<std::size_t>(column_byte - 32U),
+                    .mouse_row = key == Key::Unknown ? 0U : static_cast<std::size_t>(row_byte - 32U)};
+}
+
+Key legacy_mouse_key(std::string_view sequence)
+{
+  if (auto event = legacy_mouse_event(sequence))
+    return event->key;
+  return Key::Unknown;
 }
 
 bool is_csi_final_byte(unsigned char byte)
@@ -416,6 +1146,8 @@ ava::core::Result<CursesSession> CursesSession::enter()
   configure_curses_colors();
   configure_curses_mouse();
   set_bracketed_paste(true);
+  reset_keyboard_protocol_negotiation();
+  push_kitty_keyboard_protocol();
   restore_signal_mask();
   return session;
 }
@@ -425,6 +1157,8 @@ void CursesSession::restore() noexcept
   if (!active_)
     return;
   static_cast<void>(set_term(static_cast<SCREEN*>(screen_.get())));
+  disable_modify_other_keys_fallback();
+  pop_kitty_keyboard_protocol();
   set_bracketed_paste(false);
   if (restore_terminal_attrs_)
   {
@@ -485,6 +1219,119 @@ int terminal_escape_delay_ms()
   return kTerminalEscapeDelayMs;
 }
 
+std::string_view terminal_kitty_keyboard_push_sequence()
+{
+  return kKittyKeyboardPushSequence;
+}
+
+std::string_view terminal_kitty_keyboard_query_sequence()
+{
+  return kKittyKeyboardQuerySequence;
+}
+
+std::string_view terminal_kitty_keyboard_pop_sequence()
+{
+  return kKittyKeyboardPopSequence;
+}
+
+std::string_view terminal_modify_other_keys_enable_sequence()
+{
+  return kModifyOtherKeysEnableSequence;
+}
+
+std::string_view terminal_modify_other_keys_disable_sequence()
+{
+  return kModifyOtherKeysDisableSequence;
+}
+
+std::optional<int> terminal_kitty_keyboard_flags_response(std::string_view sequence)
+{
+  if (!sequence.starts_with("[?") || sequence.size() < 4 || sequence.back() != 'u')
+    return std::nullopt;
+
+  auto index = std::size_t{2};
+  auto const flags = parse_unsigned_int(sequence, index);
+  if (!flags || index + 1 != sequence.size() || sequence[index] != 'u')
+    return std::nullopt;
+  return flags;
+}
+
+bool terminal_device_attributes_response(std::string_view sequence)
+{
+  if (!sequence.starts_with("[?") || sequence.size() < 4 || sequence.back() != 'c')
+    return false;
+
+  auto index = std::size_t{2};
+  if (!parse_unsigned_int(sequence, index))
+    return false;
+  while (index + 1 < sequence.size())
+  {
+    if (!consume_char(sequence, index, ';'))
+      return false;
+    if (!parse_unsigned_int(sequence, index))
+      return false;
+  }
+  return index + 1 == sequence.size() && sequence[index] == 'c';
+}
+
+KeyboardProtocolResponseAction terminal_keyboard_protocol_response_action(
+    std::string_view sequence, bool kitty_response_seen, bool modify_other_keys_enabled)
+{
+  if (auto const flags = terminal_kitty_keyboard_flags_response(sequence))
+  {
+    if (*flags > 0)
+      return modify_other_keys_enabled ? KeyboardProtocolResponseAction::DisableModifyOtherKeys
+                                       : KeyboardProtocolResponseAction::None;
+    return modify_other_keys_enabled ? KeyboardProtocolResponseAction::None
+                                     : KeyboardProtocolResponseAction::EnableModifyOtherKeys;
+  }
+
+  if (terminal_device_attributes_response(sequence))
+  {
+    if (!kitty_response_seen && !modify_other_keys_enabled)
+      return KeyboardProtocolResponseAction::EnableModifyOtherKeys;
+  }
+
+  return KeyboardProtocolResponseAction::None;
+}
+
+bool terminal_keyboard_protocol_handle_response(std::string_view sequence)
+{
+  if (terminal_kitty_keyboard_flags_response(sequence))
+  {
+    auto const action = terminal_keyboard_protocol_response_action(
+        sequence, g_keyboard_protocol_kitty_response_seen, g_modify_other_keys_enabled);
+    g_keyboard_protocol_kitty_response_seen = true;
+    apply_keyboard_protocol_response_action(action);
+    return true;
+  }
+
+  if (terminal_device_attributes_response(sequence))
+  {
+    apply_keyboard_protocol_response_action(terminal_keyboard_protocol_response_action(
+        sequence, g_keyboard_protocol_kitty_response_seen, g_modify_other_keys_enabled));
+    return true;
+  }
+
+  return false;
+}
+
+InputEvent terminal_escape_sequence_event(std::string_view sequence)
+{
+  if (auto event = sgr_mouse_event(sequence))
+    return *event;
+  if (auto event = legacy_mouse_event(sequence))
+    return *event;
+  auto const key = terminal_escape_sequence_key(sequence);
+  if (key != Key::Unknown)
+    return key_event(key);
+  if (auto event = kitty_csi_u_printable_event(sequence))
+    return *event;
+  if (auto event = modify_other_keys_printable_event(sequence))
+    return *event;
+  return key_event(Key::Unknown);
+}
+
 Key terminal_escape_sequence_key(std::string_view sequence)
 {
   if (sequence == "\x7f" || sequence == "\b")
@@ -493,12 +1340,16 @@ Key terminal_escape_sequence_key(std::string_view sequence)
     return Key::CtrlAltRightBracket;
   if (sequence == "\x1f" || is_ctrl_minus_csi_u(sequence))
     return Key::CtrlMinus;
+  if (sequence == std::string_view("\x00", 1))
+    return Key::CtrlSpace;
   if (sequence == "\r" || sequence == "\n")
     return Key::AltEnter;
   if (sequence == "[Z")
     return Key::ShiftTab;
   if (sequence == "[1;6P" || is_ctrl_shift_p_csi_u(sequence))
     return Key::CtrlShiftP;
+  if (sequence == "[3$")
+    return Key::ShiftDelete;
   if (is_alt_delete_sequence(sequence))
     return Key::AltDelete;
   if (sequence == "b" || sequence == "B")
@@ -519,16 +1370,46 @@ Key terminal_escape_sequence_key(std::string_view sequence)
     return Key::AltW;
   if (sequence == "y" || sequence == "Y")
     return Key::AltY;
+  if (sequence == "[1;6D" || sequence == "[6D")
+    return Key::ShiftCtrlArrowLeft;
+  if (sequence == "[1;6C" || sequence == "[6C")
+    return Key::ShiftCtrlArrowRight;
+  if (sequence == "[1;4D" || sequence == "[4D")
+    return Key::ShiftAltArrowLeft;
+  if (sequence == "[1;4C" || sequence == "[4C")
+    return Key::ShiftAltArrowRight;
   if (sequence == "[1;5D" || sequence == "[5D")
     return Key::CtrlArrowLeft;
   if (sequence == "[1;5C" || sequence == "[5C")
     return Key::CtrlArrowRight;
+  if (sequence == "[1;2D" || sequence == "[2D" || sequence == "[d")
+    return Key::ShiftArrowLeft;
+  if (sequence == "[1;2C" || sequence == "[2C" || sequence == "[c")
+    return Key::ShiftArrowRight;
+  if (sequence == "[1;2A" || sequence == "[2A" || sequence == "[a")
+    return Key::ShiftArrowUp;
+  if (sequence == "[1;2B" || sequence == "[2B" || sequence == "[b")
+    return Key::ShiftArrowDown;
   if (sequence == "[1;3D" || sequence == "[3D")
     return Key::AltArrowLeft;
   if (sequence == "[1;3C" || sequence == "[3C")
     return Key::AltArrowRight;
   if (sequence == "[1;3A" || sequence == "[3A")
     return Key::AltArrowUp;
+  if (sequence == "[1;3B" || sequence == "[3B")
+    return Key::AltArrowDown;
+  if (sequence == "[1;6H")
+    return Key::ShiftCtrlHome;
+  if (sequence == "[1;6F")
+    return Key::ShiftCtrlEnd;
+  if (sequence == "[1;5H")
+    return Key::CtrlHome;
+  if (sequence == "[1;5F")
+    return Key::CtrlEnd;
+  if (sequence == "[1;2H" || sequence == "[2H" || sequence == "[7$")
+    return Key::ShiftHome;
+  if (sequence == "[1;2F" || sequence == "[2F" || sequence == "[8$")
+    return Key::ShiftEnd;
   if (sequence == "[H" || sequence == "OH")
     return Key::Home;
   if (sequence == "[F" || sequence == "OF")
@@ -539,6 +1420,12 @@ Key terminal_escape_sequence_key(std::string_view sequence)
     return Key::CtrlEnter;
   if (is_legacy_alt_enter_sequence(sequence) || is_alt_enter_csi_u(sequence))
     return Key::AltEnter;
+  if (auto const key = function_key_from_sequence(sequence); key != Key::Unknown)
+    return key;
+  if (auto const key = key_from_kitty_csi_u_sequence(sequence); key != Key::Unknown)
+    return key;
+  if (auto const key = key_from_modify_other_keys_sequence(sequence); key != Key::Unknown)
+    return key;
   if (auto const key = page_key_from_csi_tilde(sequence); key != Key::Unknown)
     return key;
   if (auto const key = sgr_mouse_key(sequence); key != Key::Unknown)
@@ -563,6 +1450,8 @@ bool terminal_escape_sequence_complete(std::string_view sequence)
       return false;
     if (sequence.starts_with("[M"))
       return is_legacy_mouse_sequence(sequence);
+    if (sequence == "[3$" || sequence == "[7$" || sequence == "[8$")
+      return true;
     return is_csi_final_byte(static_cast<unsigned char>(sequence.back()));
   }
 
@@ -583,7 +1472,8 @@ bool terminal_escape_sequence_complete(std::string_view sequence)
   if (sequence.size() == 1)
   {
     auto const byte = static_cast<unsigned char>(sequence.front());
-    if (byte == 0x08U || byte == 0x0AU || byte == 0x0DU || byte == 0x1DU || byte == 0x1FU || byte == 0x7FU)
+    if (byte == 0x00U || byte == 0x08U || byte == 0x0AU || byte == 0x0DU || byte == 0x1DU || byte == 0x1FU ||
+        byte == 0x7FU)
       return true;
     return byte >= 0x30U && byte <= 0x7EU;
   }

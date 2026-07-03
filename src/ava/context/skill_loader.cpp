@@ -357,7 +357,7 @@ SkillLoadResult load_skills(SkillLoadOptions options)
 {
   if (options.global_skill_dirs.empty())
     options.global_skill_dirs = default_global_skill_dirs();
-  if (options.project_skill_dirs.empty())
+  if (options.include_project_skills && options.project_skill_dirs.empty())
     options.project_skill_dirs = default_project_skill_dirs(options.workspace_root);
   if (options.max_file_bytes == 0)
     options.max_file_bytes = 64 * 1024;
@@ -367,9 +367,12 @@ SkillLoadResult load_skills(SkillLoadOptions options)
   {
     discover_from_root(result.skills, result.diagnostics, dir, SkillSourceType::Global, options.max_file_bytes);
   }
-  for (auto const& dir : options.project_skill_dirs)
+  if (options.include_project_skills)
   {
-    discover_from_root(result.skills, result.diagnostics, dir, SkillSourceType::Project, options.max_file_bytes);
+    for (auto const& dir : options.project_skill_dirs)
+    {
+      discover_from_root(result.skills, result.diagnostics, dir, SkillSourceType::Project, options.max_file_bytes);
+    }
   }
   std::ranges::sort(result.skills, [](LoadedSkill const& left, LoadedSkill const& right) { return left.name < right.name; });
   return result;

@@ -287,8 +287,11 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview()
              jsonl.find("\"permission_request_id\":\"" + permission_request_id + "\"") != std::string::npos &&
              jsonl.find("\"diff_preview\"") != std::string::npos && jsonl.find("+rpc new") != std::string::npos &&
              jsonl.find("\"diff_truncated\":false") != std::string::npos && jsonl.find("\"name\":\"permission_replied\"") != std::string::npos &&
-             jsonl.find("\"decision\":\"deny\"") != std::string::npos,
-         "RPC permission request payload includes backend-provided unified diff preview and reply event");
+             jsonl.find("\"decision\":\"deny\"") != std::string::npos &&
+             jsonl.find("request_id: " + permission_request_id) != std::string::npos &&
+             jsonl.find("/permissions audit show " + permission_request_id) != std::string::npos &&
+             jsonl.find("/permissions diagnose " + permission_request_id) != std::string::npos,
+         "RPC permission request payload includes backend-provided unified diff preview, reply event, and actionable denial details");
 }
 
 void test_app_rpc_persistent_permission_rule_lifecycle()

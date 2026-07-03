@@ -704,7 +704,20 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
     case Key::CtrlD:
       return {.selected_choice = PermissionPromptChoice::Deny, .action = PermissionPromptInputAction::ResolveDeny};
     case Key::Backspace:
+    case Key::ShiftBackspace:
+    case Key::CtrlBackspace:
     case Key::Delete:
+    case Key::ShiftDelete:
+    case Key::Insert:
+    case Key::Clear:
+    case Key::ShiftArrowUp:
+    case Key::ShiftArrowDown:
+    case Key::ShiftArrowLeft:
+    case Key::ShiftArrowRight:
+    case Key::ShiftCtrlArrowLeft:
+    case Key::ShiftCtrlArrowRight:
+    case Key::ShiftAltArrowLeft:
+    case Key::ShiftAltArrowRight:
     case Key::CtrlArrowLeft:
     case Key::CtrlArrowRight:
     case Key::AltArrowLeft:
@@ -713,24 +726,40 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
     case Key::CtrlB:
     case Key::CtrlE:
     case Key::CtrlF:
+    case Key::CtrlG:
     case Key::CtrlH:
     case Key::CtrlK:
     case Key::CtrlL:
     case Key::CtrlMinus:
+    case Key::CtrlSlash:
+    case Key::Ctrl0:
+    case Key::Ctrl1:
+    case Key::Ctrl2:
+    case Key::Ctrl3:
+    case Key::Ctrl4:
+    case Key::Ctrl5:
+    case Key::Ctrl6:
+    case Key::Ctrl7:
+    case Key::Ctrl8:
+    case Key::Ctrl9:
     case Key::CtrlN:
     case Key::CtrlO:
     case Key::CtrlP:
+    case Key::CtrlSpace:
     case Key::CtrlShiftP:
     case Key::CtrlR:
     case Key::CtrlS:
     case Key::CtrlT:
     case Key::CtrlU:
+    case Key::CtrlV:
     case Key::CtrlW:
+    case Key::CtrlX:
     case Key::CtrlY:
     case Key::CtrlZ:
     case Key::CtrlRightBracket:
     case Key::AltBackspace:
     case Key::AltArrowUp:
+    case Key::AltArrowDown:
     case Key::AltB:
     case Key::AltD:
     case Key::AltDelete:
@@ -748,13 +777,35 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
     case Key::PageDown:
     case Key::Home:
     case Key::End:
+    case Key::CtrlHome:
+    case Key::CtrlEnd:
+    case Key::ShiftHome:
+    case Key::ShiftEnd:
+    case Key::ShiftCtrlHome:
+    case Key::ShiftCtrlEnd:
     case Key::MouseWheelUp:
     case Key::MouseWheelDown:
     case Key::MouseLeftClick:
+    case Key::MouseLeftDrag:
+    case Key::MouseLeftRelease:
     case Key::ShiftTab:
+    case Key::ShiftL:
+    case Key::ShiftT:
     case Key::ShiftEnter:
     case Key::CtrlEnter:
     case Key::AltEnter:
+    case Key::F1:
+    case Key::F2:
+    case Key::F3:
+    case Key::F4:
+    case Key::F5:
+    case Key::F6:
+    case Key::F7:
+    case Key::F8:
+    case Key::F9:
+    case Key::F10:
+    case Key::F11:
+    case Key::F12:
     case Key::Unknown:
       break;
   }
@@ -951,6 +1002,7 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
       result.action = QuestionPromptInputAction::None;
       return result;
     case Key::Backspace:
+    case Key::ShiftBackspace:
       if ((prompt.allow_custom || prompt.searchable) && !result.custom_text.empty())
       {
         erase_last_utf8_codepoint(result.custom_text);
@@ -1017,28 +1069,48 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
       result.action = QuestionPromptInputAction::Cancel;
       return result;
     case Key::Delete:
+    case Key::CtrlBackspace:
+    case Key::ShiftDelete:
+    case Key::Insert:
+    case Key::Clear:
     case Key::CtrlA:
     case Key::CtrlB:
     case Key::CtrlE:
     case Key::CtrlF:
+    case Key::CtrlG:
     case Key::CtrlH:
     case Key::CtrlK:
     case Key::CtrlL:
     case Key::CtrlMinus:
+    case Key::CtrlSlash:
+    case Key::Ctrl0:
+    case Key::Ctrl1:
+    case Key::Ctrl2:
+    case Key::Ctrl3:
+    case Key::Ctrl4:
+    case Key::Ctrl5:
+    case Key::Ctrl6:
+    case Key::Ctrl7:
+    case Key::Ctrl8:
+    case Key::Ctrl9:
     case Key::CtrlN:
     case Key::CtrlO:
     case Key::CtrlP:
+    case Key::CtrlSpace:
     case Key::CtrlShiftP:
     case Key::CtrlR:
     case Key::CtrlS:
     case Key::CtrlT:
     case Key::CtrlU:
+    case Key::CtrlV:
     case Key::CtrlW:
+    case Key::CtrlX:
     case Key::CtrlY:
     case Key::CtrlZ:
     case Key::CtrlRightBracket:
     case Key::AltBackspace:
     case Key::AltArrowUp:
+    case Key::AltArrowDown:
     case Key::AltB:
     case Key::AltD:
     case Key::AltDelete:
@@ -1052,6 +1124,14 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
     case Key::AltY:
     case Key::ArrowLeft:
     case Key::ArrowRight:
+    case Key::ShiftArrowUp:
+    case Key::ShiftArrowDown:
+    case Key::ShiftArrowLeft:
+    case Key::ShiftArrowRight:
+    case Key::ShiftCtrlArrowLeft:
+    case Key::ShiftCtrlArrowRight:
+    case Key::ShiftAltArrowLeft:
+    case Key::ShiftAltArrowRight:
     case Key::CtrlArrowLeft:
     case Key::CtrlArrowRight:
     case Key::AltArrowLeft:
@@ -1060,13 +1140,35 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
     case Key::PageDown:
     case Key::Home:
     case Key::End:
+    case Key::CtrlHome:
+    case Key::CtrlEnd:
+    case Key::ShiftHome:
+    case Key::ShiftEnd:
+    case Key::ShiftCtrlHome:
+    case Key::ShiftCtrlEnd:
     case Key::MouseWheelUp:
     case Key::MouseWheelDown:
     case Key::MouseLeftClick:
+    case Key::MouseLeftDrag:
+    case Key::MouseLeftRelease:
     case Key::ShiftTab:
+    case Key::ShiftL:
+    case Key::ShiftT:
     case Key::ShiftEnter:
     case Key::CtrlEnter:
     case Key::AltEnter:
+    case Key::F1:
+    case Key::F2:
+    case Key::F3:
+    case Key::F4:
+    case Key::F5:
+    case Key::F6:
+    case Key::F7:
+    case Key::F8:
+    case Key::F9:
+    case Key::F10:
+    case Key::F11:
+    case Key::F12:
     case Key::Unknown:
       break;
   }

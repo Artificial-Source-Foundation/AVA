@@ -3,12 +3,15 @@
 #include "ava/core/result.h"
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 
 namespace ava::session {
 
 class SessionStore;
+
+inline constexpr std::size_t kMaxImageAttachmentBytes = 20 * 1024 * 1024;
 
 struct ImageAttachmentRef {
   std::string id;
@@ -27,6 +30,12 @@ struct LoadedImageAttachment {
 [[nodiscard]] std::filesystem::path attachment_storage_root(SessionStore const& store);
 [[nodiscard]] ava::core::Result<std::filesystem::path> resolve_attachment_storage_path(SessionStore const& store,
                                                                                         std::string_view storage_path);
+[[nodiscard]] ava::core::Result<ImageAttachmentRef> import_image_attachment(SessionStore const& store,
+                                                                            std::filesystem::path const& source_path);
+[[nodiscard]] ava::core::Result<ImageAttachmentRef> import_image_attachment_bytes(
+    SessionStore const& store,
+    std::string_view bytes,
+    std::optional<std::string_view> expected_mime_type = std::nullopt);
 [[nodiscard]] ava::core::Result<LoadedImageAttachment> load_image_attachment(SessionStore const& store,
                                                                              ImageAttachmentRef const& attachment);
 

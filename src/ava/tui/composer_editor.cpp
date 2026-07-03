@@ -30,6 +30,68 @@ bool is_ascii_space_at(std::string_view text, std::size_t cursor)
   return (byte & 0x80U) == 0 && std::isspace(byte) != 0;
 }
 
+enum class WordSegmentClass
+{
+  Space,
+  Word,
+  WideWord,
+  Punctuation,
+};
+
+bool is_unicode_space_codepoint(char32_t codepoint)
+{
+  return codepoint == 0x00A0 || codepoint == 0x1680 || (codepoint >= 0x2000 && codepoint <= 0x200A) ||
+         codepoint == 0x2028 || codepoint == 0x2029 || codepoint == 0x202F || codepoint == 0x205F ||
+         codepoint == 0x3000;
+}
+
+bool is_unicode_punctuation_codepoint(char32_t codepoint)
+{
+  return (codepoint >= 0x2000 && codepoint <= 0x206F) || (codepoint >= 0x2E00 && codepoint <= 0x2E7F) ||
+         (codepoint >= 0x3001 && codepoint <= 0x3003) || (codepoint >= 0x3008 && codepoint <= 0x3020) ||
+         codepoint == 0x3030 || codepoint == 0x303D || (codepoint >= 0xFE10 && codepoint <= 0xFE19) ||
+         (codepoint >= 0xFE30 && codepoint <= 0xFE4F) || (codepoint >= 0xFF01 && codepoint <= 0xFF0F) ||
+         (codepoint >= 0xFF1A && codepoint <= 0xFF20) || (codepoint >= 0xFF3B && codepoint <= 0xFF40) ||
+         (codepoint >= 0xFF5B && codepoint <= 0xFF65);
+}
+
+bool is_wide_word_codepoint(char32_t codepoint)
+{
+  return (codepoint >= 0x2E80 && codepoint <= 0x2EFF) || (codepoint >= 0x3040 && codepoint <= 0x30FF) ||
+         (codepoint >= 0x31F0 && codepoint <= 0x31FF) || (codepoint >= 0x3400 && codepoint <= 0x4DBF) ||
+         (codepoint >= 0x4E00 && codepoint <= 0x9FFF) || (codepoint >= 0xA960 && codepoint <= 0xA97F) ||
+         (codepoint >= 0xAC00 && codepoint <= 0xD7A3) || (codepoint >= 0xF900 && codepoint <= 0xFAFF) ||
+         (codepoint >= 0xFF10 && codepoint <= 0xFF19) || (codepoint >= 0xFF21 && codepoint <= 0xFF3A) ||
+         (codepoint >= 0xFF41 && codepoint <= 0xFF5A) || (codepoint >= 0x20000 && codepoint <= 0x3FFFD);
+}
+
+WordSegmentClass word_segment_class_at(std::string_view text, std::size_t cursor)
+{
+  if (is_ascii_space_at(text, cursor))
+    return WordSegmentClass::Space;
+  if (cursor >= text.size())
+    return WordSegmentClass::Space;
+  auto const byte = static_cast<unsigned char>(text[cursor]);
+  if ((byte & 0x80U) == 0)
+  {
+    if (std::isalnum(byte) != 0 || byte == '_')
+      return WordSegmentClass::Word;
+    return WordSegmentClass::Punctuation;
+  }
+
+  auto const length = detail::utf8_sequence_length(byte);
+  char32_t codepoint = 0;
+  if (!detail::decode_utf8_codepoint(text, cursor, length, codepoint))
+    return WordSegmentClass::Word;
+  if (is_unicode_space_codepoint(codepoint))
+    return WordSegmentClass::Space;
+  if (is_unicode_punctuation_codepoint(codepoint))
+    return WordSegmentClass::Punctuation;
+  if (is_wide_word_codepoint(codepoint))
+    return WordSegmentClass::WideWord;
+  return WordSegmentClass::Word;
+}
+
 std::size_t previous_input_cursor(std::string_view text, std::size_t cursor)
 {
   cursor = clamp_composer_draft_cursor(text, cursor);
@@ -339,19 +401,22 @@ std::size_t previous_atomic_word_cursor(ComposerDraftState const& draft)
   auto cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
   while (cursor > 0)
   {
-    if (paste_marker_touching_left(draft, cursor))
-      break;
     auto const previous = previous_input_cursor(draft.text, cursor);
-    if (!is_ascii_space_at(draft.text, previous))
+    if (word_segment_class_at(draft.text, previous) != WordSegmentClass::Space)
       break;
     cursor = previous;
   }
+  if (cursor == 0)
+    return 0;
+  if (auto marker = paste_marker_touching_left(draft, cursor))
+    return marker->start;
+  auto const target_class = word_segment_class_at(draft.text, previous_input_cursor(draft.text, cursor));
   while (cursor > 0)
   {
     if (auto marker = paste_marker_touching_left(draft, cursor))
       return marker->start;
     auto const previous = previous_input_cursor(draft.text, cursor);
-    if (is_ascii_space_at(draft.text, previous))
+    if (word_segment_class_at(draft.text, previous) != target_class)
       break;
     cursor = previous;
   }
@@ -365,13 +430,16 @@ std::size_t next_atomic_word_cursor(ComposerDraftState const& draft)
     return marker->end;
   if (auto marker = paste_marker_touching_left(draft, cursor); marker && cursor < marker->end)
     return marker->end;
-  while (cursor < draft.text.size() && is_ascii_space_at(draft.text, cursor))
+  while (cursor < draft.text.size() && word_segment_class_at(draft.text, cursor) == WordSegmentClass::Space)
   {
     cursor = next_input_cursor(draft.text, cursor);
   }
   if (auto marker = paste_marker_starting_at(draft, cursor))
     return marker->end;
-  while (cursor < draft.text.size() && !is_ascii_space_at(draft.text, cursor))
+  if (cursor >= draft.text.size())
+    return cursor;
+  auto const target_class = word_segment_class_at(draft.text, cursor);
+  while (cursor < draft.text.size() && word_segment_class_at(draft.text, cursor) == target_class)
   {
     if (auto marker = paste_marker_starting_at(draft, cursor))
       return marker->end;
@@ -411,6 +479,24 @@ std::size_t clamp_composer_draft_cursor(std::string_view text, std::size_t curso
   return cursor;
 }
 
+std::size_t clamp_composer_draft_cursor_to_atomic_boundary(ComposerDraftState const& draft, std::size_t cursor)
+{
+  cursor = clamp_composer_draft_cursor(draft.text, cursor);
+  for (auto const& entry : draft.paste_entries)
+  {
+    if (!active_paste_entry_matches(draft, entry))
+      continue;
+    auto const end = entry.start + entry.marker.size();
+    if (entry.start < cursor && cursor < end)
+    {
+      auto const left = cursor - entry.start;
+      auto const right = end - cursor;
+      return left <= right ? entry.start : end;
+    }
+  }
+  return cursor;
+}
+
 void reset_composer_draft(ComposerDraftState& draft, std::string text, std::size_t cursor)
 {
   draft.text = std::move(text);
@@ -435,6 +521,22 @@ bool replace_composer_draft(ComposerDraftState& draft, std::string text, std::si
   return true;
 }
 
+bool replace_composer_draft_range(ComposerDraftState& draft, std::size_t start, std::size_t end,
+                                  std::string_view replacement)
+{
+  start = clamp_composer_draft_cursor(draft.text, start);
+  end = clamp_composer_draft_cursor(draft.text, end);
+  if (end < start)
+    std::swap(start, end);
+  if (start == end && replacement.empty())
+    return false;
+  record_undo(draft);
+  shift_paste_markers_for_replace(draft, start, end, replacement.size());
+  draft.text.replace(start, end - start, replacement);
+  draft.cursor = start + replacement.size();
+  return true;
+}
+
 bool insert_composer_draft_text(ComposerDraftState& draft, std::string_view text)
 {
   if (text.empty())
@@ -445,6 +547,14 @@ bool insert_composer_draft_text(ComposerDraftState& draft, std::string_view text
   draft.text.insert(draft.cursor, text);
   draft.cursor += text.size();
   return true;
+}
+
+bool replace_composer_backslash_before_cursor_with_newline(ComposerDraftState& draft)
+{
+  auto const cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
+  if (cursor == 0 || draft.text[cursor - 1] != '\\')
+    return false;
+  return replace_composer_draft_range(draft, cursor - 1, cursor, "\n");
 }
 
 bool insert_composer_paste_text(ComposerDraftState& draft, std::string_view text)
@@ -640,6 +750,10 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
     case TuiAction::Submit:
     case TuiAction::NewLine:
     case TuiAction::Cancel:
+    case TuiAction::CopySelection:
+    case TuiAction::ExternalEditor:
+    case TuiAction::Suspend:
+    case TuiAction::ClipboardPasteImage:
     case TuiAction::HistoryPrev:
     case TuiAction::HistoryNext:
     case TuiAction::PalettePrev:
@@ -660,13 +774,37 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
     case TuiAction::Interrupt:
     case TuiAction::Exit:
     case TuiAction::VariantCycle:
+    case TuiAction::ThinkingToggle:
     case TuiAction::ModelSelect:
     case TuiAction::ModelCycleForward:
     case TuiAction::ModelCycleBackward:
+    case TuiAction::ModelsSave:
+    case TuiAction::ModelsEnableAll:
+    case TuiAction::ModelsClearAll:
+    case TuiAction::ModelsToggleProvider:
+    case TuiAction::ModelsReorderUp:
+    case TuiAction::ModelsReorderDown:
+    case TuiAction::MessageFollowUp:
     case TuiAction::MessageDequeue:
     case TuiAction::MessagePrev:
     case TuiAction::MessageNext:
     case TuiAction::JumpToBottom:
+    case TuiAction::SessionNew:
+    case TuiAction::SessionTree:
+    case TuiAction::SessionFork:
+    case TuiAction::SessionResume:
+    case TuiAction::SessionTogglePath:
+    case TuiAction::SessionToggleSort:
+    case TuiAction::SessionToggleNamedFilter:
+    case TuiAction::SessionRename:
+    case TuiAction::SessionArchive:
+    case TuiAction::SessionArchiveNoninvasive:
+    case TuiAction::TreeFoldOrUp:
+    case TuiAction::TreeUnfoldOrDown:
+    case TuiAction::TreeEditLabel:
+    case TuiAction::TreeToggleLabelTimestamp:
+    case TuiAction::TreeFilterLabeledOnly:
+    case TuiAction::TreeFilterAll:
       return false;
   }
   return false;

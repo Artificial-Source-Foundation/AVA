@@ -29,6 +29,7 @@ struct Rendition
   bool dim = false;
   bool underline = false;
   bool italic = false;
+  bool strikethrough = false;
   bool code = false;
   TextColorRole color = TextColorRole::Default;
 };
@@ -46,6 +47,7 @@ struct TextSpan
 {
   std::string text;
   Rendition rendition;
+  std::string link_target;
 };
 
 using TextRun = std::variant<NewLine, String, TextSpan>;
@@ -62,7 +64,7 @@ struct Text
 void append_newline(Text& text);
 void append_plain_text(Text& text, std::string_view value);
 [[nodiscard]] Text text_from_plain(std::string_view value);
-[[nodiscard]] Text text_from_markdown(std::string_view value);
+[[nodiscard]] Text text_from_markdown(std::string_view value, bool include_link_fallbacks = true);
 [[nodiscard]] std::string to_plain_text(Text const& text);
 [[nodiscard]] ava::core::VoidResult validate_text(Text const& text);
 

@@ -27,12 +27,14 @@ if(NOT EXISTS "${SAMPLE_TODO_PLUGIN_DIR}/plugin.sh")
 endif()
 
 file(REMOVE_RECURSE "${TEST_ROOT}")
-file(MAKE_DIRECTORY "${WORKSPACE}/.ava/plugins" "${TEST_ROOT}/home" "${TEST_ROOT}/config" "${TEST_ROOT}/state"
+file(MAKE_DIRECTORY "${WORKSPACE}/.ava/plugins" "${TEST_ROOT}/home" "${TEST_ROOT}/config" "${TEST_ROOT}/state/ava"
                     "${TEST_ROOT}/data")
 file(COPY "${SAMPLE_TODO_PLUGIN_DIR}/" DESTINATION "${PLUGIN_DIR}")
 file(READ "${PLUGIN_SCRIPT}" PLUGIN_SCRIPT_ORIGINAL)
 file(WRITE "${PLUGIN_SCRIPT}" "printf '%s\\n' plugin-entrypoint-ran > '${PLUGIN_RAN_FILE}'\n${PLUGIN_SCRIPT_ORIGINAL}")
 file(REAL_PATH "${WORKSPACE}" REAL_WORKSPACE)
+file(WRITE "${TEST_ROOT}/state/ava/project-trust.json"
+     "{\"schema_version\":1,\"decisions\":[{\"path\":\"${REAL_WORKSPACE}\",\"trusted\":true}]}\n")
 
 file(WRITE "${INPUT_FILE}"
      "{\"id\":\"plugins\",\"type\":\"list_plugins\",\"protocol_version\":1}\n"

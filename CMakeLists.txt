@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25...4.3.2)
+cmake_minimum_required(VERSION 3.25...4.3.4)
 
 project(ava
   VERSION 1.0.0
@@ -13,7 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #==============================================================================
 # Begin of gitache configuration.
 
-set(GITACHE_PACKAGES libcwd_r)  # List of requested packages.
+set(GITACHE_PACKAGES libcwd)  # List of requested packages.
 
 include(FetchContent)
 
@@ -56,7 +56,7 @@ function(ava_apply_warnings target)
   if(MSVC)
     target_compile_options(${target} PRIVATE /W4 /WX)
   else()
-    target_compile_options(${target} PRIVATE -Wall -Werror -fmax-errors=2)
+    target_compile_options(${target} PRIVATE -Wall -Werror -Wextra -Wpedantic -Wundef)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14)
       # Keep GCC's optimizer-driven maybe-uninitialized diagnostics visible, but
       # do not promote them to errors for GCC 13.x. That release can report false
@@ -64,6 +64,12 @@ function(ava_apply_warnings target)
       # and std::variant when Release optimization inlines those implementations.
       target_compile_options(${target} PRIVATE -Wno-error=maybe-uninitialized)
     endif()
+    # Limit number of errors to two.
+    target_compile_options(${target} PRIVATE
+      $<$<CXX_COMPILER_ID:GNU>:-fmax-errors=2>
+      $<$<CXX_COMPILER_ID:Clang>:-ferror-limit=2>
+      $<$<CXX_COMPILER_ID:AppleClang>:-ferror-limit=2>
+    )
   endif()
 endfunction()
 

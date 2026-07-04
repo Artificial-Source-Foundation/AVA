@@ -19,7 +19,6 @@ constexpr std::size_t kAnthropicMaxImageBytes = 5 * 1024 * 1024;
 constexpr std::string_view kDefaultAnthropicBaseUrl = "https://api.anthropic.com";
 constexpr std::string_view kAnthropicVersion = "2023-06-01";
 constexpr int kDefaultMaxTokens = 4096;
-constexpr std::size_t kMaxReasoningOpaqueBytes = 64 * 1024;
 
 struct PendingToolUse {
   std::string id;

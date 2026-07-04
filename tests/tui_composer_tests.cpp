@@ -193,7 +193,7 @@ void test_tui_terminal_image_support()
   png[20] = 0;
   png[21] = 0;
   png[22] = 0;
-  png[23] = 200;
+  png[23] = static_cast<char>(200);
   auto const dimensions = ava::tui::image_dimensions_from_bytes(png, "image/png");
   expect(dimensions && dimensions->width_px == 300 && dimensions->height_px == 200,
          "terminal image dimension parser reads PNG dimensions for future preview row sizing");

@@ -62,7 +62,7 @@ function(ava_apply_warnings target)
       # do not promote them to errors for GCC 13.x. That release can report false
       # positives through libstdc++ internals such as std::regex, std::optional,
       # and std::variant when Release optimization inlines those implementations.
-      target_compile_options(${target} PRIVATE -Wno-error=maybe-uninitialized)
+      target_compile_options(${target} PRIVATE -Wno-error=maybe-uninitialized -Wno-missing-field-initializers)
     endif()
     # Limit number of errors to two.
     target_compile_options(${target} PRIVATE

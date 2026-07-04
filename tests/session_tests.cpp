@@ -70,6 +70,23 @@ bool has_replay_issue(ava::session::SessionReplayValidation const& validation, a
   return std::ranges::any_of(validation.issues, [kind](ava::session::SessionReplayIssue const& issue) { return issue.kind == kind; });
 }
 
+std::string tiny_png_bytes()
+{
+  std::string bytes;
+  bytes.push_back(static_cast<char>(0x89));
+  bytes += "PNG\r\n";
+  bytes.push_back(static_cast<char>(0x1A));
+  bytes += "\nava-image";
+  return bytes;
+}
+
+void write_binary_file(std::filesystem::path const& path, std::string_view bytes)
+{
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+
 void test_session_store_round_trip()
 {
   std::error_code remove_error;
@@ -327,6 +344,49 @@ void test_session_store_round_trip()
   expect(!invalid_parent_append, "session append rejects unsafe parent_id values");
 }
 
+void test_ephemeral_session_store_stays_in_memory()
+{
+  auto const workspace = temp_root() / "ephemeral-session-store" / "workspace";
+  std::filesystem::create_directories(workspace);
+
+  std::filesystem::path scratch_root;
+  std::filesystem::path session_path;
+  {
+    auto store = ava::session::SessionStore::create_ephemeral(workspace);
+    expect(store.has_value() && store->is_ephemeral(), "ephemeral session store creates in no-session mode");
+    if (!store)
+      return;
+
+    session_path = store->session_path();
+    scratch_root = session_path.parent_path().parent_path();
+    auto append = store->append(ava::session::SessionEntry{
+        .id = "entry_ephemeral",
+        .parent_id = "",
+        .type = ava::session::EntryType::UserMessage,
+        .timestamp = "2026-04-27T00:00:00Z",
+        .data_json = "{\"text\":\"hello\"}",
+    });
+    expect(append.has_value(), "ephemeral session store accepts valid entries");
+    expect(!std::filesystem::exists(session_path), "ephemeral session store does not create a JSONL history file");
+
+    auto loaded = store->load();
+    expect(loaded && loaded->size() == 1 && (*loaded)[0].id == "entry_ephemeral",
+           "ephemeral session store reloads entries from memory");
+
+    auto imported = ava::session::import_image_attachment_bytes(*store, tiny_png_bytes(), std::string_view("image/png"));
+    expect(imported.has_value(), "ephemeral session store supports temp-only attachment storage");
+    if (imported) {
+      auto loaded_attachment = ava::session::load_image_attachment(*store, *imported);
+      expect(loaded_attachment && loaded_attachment->bytes == tiny_png_bytes(),
+             "ephemeral session attachments reload while the store is alive");
+    }
+    expect(!std::filesystem::exists(session_path), "ephemeral attachments do not create a JSONL history file");
+  }
+
+  expect(!scratch_root.empty() && !std::filesystem::exists(scratch_root),
+         "ephemeral session scratch directory is removed when the store is released");
+}
+
 void test_session_record_round_trip()
 {
   ava::session::SessionEntry const original{.id = "entry_\n",
@@ -386,7 +446,7 @@ void test_session_tree_metadata_entries_validate_and_export()
                                  .type = ava::session::EntryType::SessionMetadata,
                                  .timestamp = "2026-04-27T00:00:00Z",
                                  .data_json = "{\"schema_version\":1,\"name\":\"Investigate auth flow\","
-                                              "\"labels\":[\"bug\",\"auth\"],\"branch_origin\":\"root\","
+                                              "\"labels\":[\"bug\",\"auth\"],\"archived\":true,\"branch_origin\":\"root\","
                                               "\"actor\":\"auditor\"}"},
       ava::session::SessionEntry{.id = "entry_branch_summary",
                                  .parent_id = "entry_metadata",
@@ -403,7 +463,9 @@ void test_session_tree_metadata_entries_validate_and_export()
   auto const validation = ava::session::validate_session_replay(entries);
   expect(validation.ok(), "session tree metadata and branch summary entries are replay-valid");
   auto const metadata = ava::session::session_metadata_from_entries(entries);
-  expect(metadata && metadata->actor == "auditor", "session metadata read-back exposes persisted actor");
+  expect(metadata && metadata->actor == "auditor" && metadata->archived &&
+             metadata->labels_updated == "2026-04-27T00:00:00Z",
+         "session metadata read-back exposes persisted actor, archive state, and label update time");
 
   auto const metadata_type = ava::session::parse_entry_type("session_metadata");
   auto const summary_type = ava::session::parse_entry_type("branch_summary");
@@ -507,6 +569,13 @@ void test_session_tree_metadata_entries_validate_and_export()
   expect(
       !non_string_origin_validation.ok() && has_replay_issue(non_string_origin_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
       "session replay validator rejects non-string branch_origin values");
+
+  auto non_bool_archived = entries;
+  non_bool_archived[0].data_json = "{\"schema_version\":1,\"name\":\"Named\",\"archived\":\"yes\"}";
+  auto const non_bool_archived_validation = ava::session::validate_session_replay(non_bool_archived);
+  expect(
+      !non_bool_archived_validation.ok() && has_replay_issue(non_bool_archived_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
+      "session replay validator rejects non-boolean archived metadata values");
 
   auto only_empty_origin = entries;
   only_empty_origin[0].data_json = "{\"schema_version\":1,\"branch_origin\":\"\"}";
@@ -1763,6 +1832,11 @@ void test_session_markdown_export()
                                  .data_json = "{\"text\":\"Hello human\",\"tool_calls\":1,"
                                               "\"usage\":{\"input_tokens\":10,\"output_tokens\":5,"
                                               "\"total_tokens\":15,\"source\":\"provider\"}}"},
+      ava::session::SessionEntry{.id = "unsafe_html_1",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-04-29T00:00:02Z",
+                                 .data_json = R"json({"text":"<script>alert('x')</script> & raw"})json"},
       ava::session::SessionEntry{.id = "reasoning_1",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::ReasoningBlock,
@@ -1861,6 +1935,14 @@ void test_session_markdown_export()
   expect(with_metadata.find("Metadata:") != std::string::npos && with_metadata.find("\"id\":\"user_1\"") != std::string::npos &&
              with_metadata.find("Estimated tokens") != std::string::npos && with_metadata.find("gpt-5.5-mini") != std::string::npos,
          "markdown export includes entry and compaction metadata when requested");
+
+  auto const html = ava::session::format_session_html(entries);
+  expect(html.find("<!doctype html>") != std::string::npos && html.find("<title>AVA Session Export</title>") != std::string::npos &&
+             html.find("<pre>") != std::string::npos && html.find("# AVA Session Export") != std::string::npos,
+         "html export wraps the session markdown in a self-contained document");
+  expect(html.find("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt; &amp; raw") != std::string::npos &&
+             html.find("<script>alert") == std::string::npos,
+         "html export escapes user and model text instead of emitting executable markup");
 }
 
 void test_compaction_config_and_thresholds()
@@ -2607,6 +2689,49 @@ void test_image_attachment_storage_boundary()
   }
 }
 
+void test_image_attachment_import()
+{
+  auto const root = temp_root() / "image-attachment-import";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto store = ava::session::SessionStore::create(workspace, root / "sessions");
+  expect(store.has_value(), "session store opens for image attachment import test");
+  if (!store)
+    return;
+
+  auto const image_path = root / "input.png";
+  auto const bytes = tiny_png_bytes();
+  write_binary_file(image_path, bytes);
+
+  auto imported = ava::session::import_image_attachment(*store, image_path);
+  expect(imported && imported->id.starts_with("img_") && imported->mime_type == "image/png" &&
+             imported->storage_path.starts_with("attachments/") && imported->byte_size == bytes.size(),
+         "image attachment import stores byte-sniffed PNG metadata under the session attachment namespace");
+  if (!imported)
+    return;
+  auto loaded = ava::session::load_image_attachment(*store, *imported);
+  expect(loaded && loaded->bytes == bytes, "imported image attachment reloads only after size and sha verification");
+
+  auto const unsupported_path = root / "not-image.txt";
+  write_binary_file(unsupported_path, "hello");
+  auto unsupported = ava::session::import_image_attachment(*store, unsupported_path);
+  expect(!unsupported && unsupported.error().message().find("unsupported image format") != std::string::npos,
+         "image attachment import rejects unsupported byte signatures");
+
+  auto const outside = root / "outside.png";
+  write_binary_file(outside, bytes);
+  auto const link = root / "linked.png";
+  std::error_code symlink_error;
+  std::filesystem::create_symlink(outside, link, symlink_error);
+  if (!symlink_error) {
+    auto symlink_import = ava::session::import_image_attachment(*store, link);
+    expect(!symlink_import && symlink_import.error().message().find("symlink") != std::string::npos,
+           "image attachment import rejects symlink source paths");
+  }
+}
+
 void test_provider_base64_encoding()
 {
   expect(ava::provider::base64_encode("") == "", "base64 encoder handles empty input");
@@ -2623,6 +2748,7 @@ void test_provider_base64_encoding()
 void run_session_tests()
 {
   test_session_store_round_trip();
+  test_ephemeral_session_store_stays_in_memory();
   test_session_record_round_trip();
   test_session_tree_metadata_entries_validate_and_export();
   test_session_tree_index_derives_branches();
@@ -2641,5 +2767,6 @@ void run_session_tests()
   test_tool_content_parts_reconstruction();
   test_image_attachment_message_reconstruction_and_validation();
   test_image_attachment_storage_boundary();
+  test_image_attachment_import();
   test_provider_base64_encoding();
 }

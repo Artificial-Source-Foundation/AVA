@@ -97,7 +97,7 @@ ava::core::Result<PromptSelection> select_prompt(XdgPaths const& paths, ModelInf
     auto text = read_text(family_path);
     if (!text)
       return std::unexpected(text.error());
-    return PromptSelection{.text = *text, .from_override = true};
+    return PromptSelection{.text = *text, .from_override = true, .source_path = family_path};
   }
   auto const provider_path = paths.prompts_dir / model.provider_id / mode_filename(mode);
   if (std::filesystem::exists(provider_path))
@@ -105,7 +105,7 @@ ava::core::Result<PromptSelection> select_prompt(XdgPaths const& paths, ModelInf
     auto text = read_text(provider_path);
     if (!text)
       return std::unexpected(text.error());
-    return PromptSelection{.text = *text, .from_override = true};
+    return PromptSelection{.text = *text, .from_override = true, .source_path = provider_path};
   }
   return PromptSelection{.text = builtin_prompt(model.provider_id, model.family, mode), .from_override = false};
 }

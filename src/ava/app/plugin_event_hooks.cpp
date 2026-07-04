@@ -110,7 +110,9 @@ class PluginEventObserverState final {
     if (!options_.plugin_global_plugins_dir.empty()) {
       discovery_options.global_plugins_dir = options_.plugin_global_plugins_dir;
     }
-    if (!options_.plugin_project_plugins_dir.empty()) {
+    if (!options_.include_project_plugins) {
+      discovery_options.project_plugins_dir.clear();
+    } else if (!options_.plugin_project_plugins_dir.empty()) {
       discovery_options.project_plugins_dir = options_.plugin_project_plugins_dir;
     }
     auto enablement_file = options_.plugin_enablement_file;
@@ -205,8 +207,11 @@ PluginEventObserverOptions plugin_event_observer_options(RuntimeSession& session
   return PluginEventObserverOptions{
       .workspace_dir = session.workspace_dir,
       .plugin_global_plugins_dir = session.paths.ava_config_dir / "plugins",
-      .plugin_project_plugins_dir = session.workspace_dir / ".ava" / "plugins",
+      .plugin_project_plugins_dir = project_resources_trusted(session.project_trust)
+                                        ? session.workspace_dir / ".ava" / "plugins"
+                                        : std::filesystem::path{},
       .plugin_enablement_file = session.paths.ava_state_dir / "plugin-enablement.json",
+      .include_project_plugins = project_resources_trusted(session.project_trust),
       .mode = session.mode,
       .permission_resolver = std::move(permission_resolver),
       .permission_audit_sink = [&store = session.store,

@@ -4,6 +4,7 @@
 #include "ava/core/result.h"
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -62,12 +63,14 @@ class SessionStore
 
   [[nodiscard]] std::string const& session_id() const noexcept;
   [[nodiscard]] std::filesystem::path session_path() const;
+  [[nodiscard]] bool is_ephemeral() const noexcept;
 
   [[nodiscard]] ava::core::VoidResult append(SessionEntry const& entry);
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load() const;
 
   [[nodiscard]] static ava::core::Result<SessionStore> create(std::filesystem::path const& workspace_dir,
                                                               std::filesystem::path const& root_dir = default_root_dir());
+  [[nodiscard]] static ava::core::Result<SessionStore> create_ephemeral(std::filesystem::path const& workspace_dir);
   [[nodiscard]] static ava::core::Result<SessionStore> open(std::filesystem::path const& workspace_dir, std::string session_id,
                                                             std::filesystem::path const& root_dir = default_root_dir());
   [[nodiscard]] static ava::core::Result<std::vector<SessionSummary>> list_sessions(std::filesystem::path const& workspace_dir,
@@ -75,7 +78,12 @@ class SessionStore
   [[nodiscard]] static std::filesystem::path default_root_dir();
 
  private:
+  struct EphemeralState;
+
+  explicit SessionStore(SessionStoreOptions options, std::shared_ptr<EphemeralState> ephemeral_state);
+
   SessionStoreOptions options_;
+  std::shared_ptr<EphemeralState> ephemeral_state_;
 };
 
 [[nodiscard]] std::string to_string(EntryType type);

@@ -16,6 +16,35 @@ std::string json_string(std::string_view value)
   return "\"" + ava::core::json::escape(value) + "\"";
 }
 
+std::string html_escape(std::string_view value)
+{
+  std::string escaped;
+  escaped.reserve(value.size());
+  for (char const ch : value) {
+    switch (ch) {
+      case '&':
+        escaped += "&amp;";
+        break;
+      case '<':
+        escaped += "&lt;";
+        break;
+      case '>':
+        escaped += "&gt;";
+        break;
+      case '"':
+        escaped += "&quot;";
+        break;
+      case '\'':
+        escaped += "&#39;";
+        break;
+      default:
+        escaped.push_back(ch);
+        break;
+    }
+  }
+  return escaped;
+}
+
 std::size_t longest_backtick_run(std::string_view text) noexcept
 {
   std::size_t longest = 0;
@@ -358,6 +387,40 @@ std::string format_session_markdown(std::vector<SessionEntry> const& entries, Ex
     }
   }
 
+  return out;
+}
+
+std::string format_session_html(std::vector<SessionEntry> const& entries, ExportOptions const& options)
+{
+  auto const markdown = format_session_markdown(entries, options);
+  std::string out;
+  out.reserve(markdown.size() + 1024);
+  out += "<!doctype html>\n";
+  out += "<html lang=\"en\">\n";
+  out += "<head>\n";
+  out += "<meta charset=\"utf-8\">\n";
+  out += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n";
+  out += "<title>AVA Session Export</title>\n";
+  out += "<style>\n";
+  out += ":root{color-scheme:light dark;font-family:ui-sans-serif,system-ui,sans-serif;}"
+         "body{margin:0;padding:2rem;background:Canvas;color:CanvasText;}"
+         "main{max-width:72rem;margin:0 auto;}"
+         "pre{white-space:pre-wrap;word-break:break-word;border:1px solid color-mix(in srgb,CanvasText 18%,transparent);"
+         "border-radius:6px;padding:1rem;background:color-mix(in srgb,CanvasText 4%,Canvas);line-height:1.45;}"
+         "h1{font-size:1.5rem;margin:0 0 1rem;}"
+         ".meta{color:color-mix(in srgb,CanvasText 65%,transparent);font-size:.875rem;margin-bottom:1rem;}\n";
+  out += "</style>\n";
+  out += "</head>\n";
+  out += "<body>\n";
+  out += "<main>\n";
+  out += "<h1>AVA Session Export</h1>\n";
+  out += "<div class=\"meta\">Generated from AVA JSONL session entries. Markdown content is escaped as text.</div>\n";
+  out += "<pre>";
+  out += html_escape(markdown);
+  out += "</pre>\n";
+  out += "</main>\n";
+  out += "</body>\n";
+  out += "</html>\n";
   return out;
 }
 

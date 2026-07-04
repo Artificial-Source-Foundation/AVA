@@ -281,6 +281,303 @@ std::optional<ModelPricing> model_pricing_from_item(std::string_view item)
   return pricing_from_object(item);
 }
 
+std::string string_array_json(std::vector<std::string> const& values)
+{
+  std::string output = "[";
+  for (std::size_t index = 0; index < values.size(); ++index)
+  {
+    if (index > 0)
+      output += ",";
+    output += "\"";
+    output += ava::core::json::escape(values[index]);
+    output += "\"";
+  }
+  output += "]";
+  return output;
+}
+
+struct JsonMemberRange
+{
+  std::size_t key_start = 0;
+  std::size_t value_start = 0;
+  std::size_t value_end = 0;
+};
+
+std::optional<std::size_t> json_string_value_end(std::string_view object, std::size_t start)
+{
+  bool escaped = false;
+  for (std::size_t index = start + 1; index < object.size(); ++index)
+  {
+    char const ch = object[index];
+    if (escaped)
+    {
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\')
+    {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"')
+      return index + 1;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::size_t> json_balanced_value_end(std::string_view object, std::size_t start, char open, char close)
+{
+  bool in_string = false;
+  bool escaped = false;
+  int depth = 0;
+  for (std::size_t index = start; index < object.size(); ++index)
+  {
+    char const ch = object[index];
+    if (in_string)
+    {
+      if (escaped)
+      {
+        escaped = false;
+        continue;
+      }
+      if (ch == '\\')
+      {
+        escaped = true;
+        continue;
+      }
+      if (ch == '"')
+        in_string = false;
+      continue;
+    }
+    if (ch == '"')
+    {
+      in_string = true;
+      continue;
+    }
+    if (ch == open)
+    {
+      ++depth;
+      continue;
+    }
+    if (ch == close)
+    {
+      --depth;
+      if (depth == 0)
+        return index + 1;
+      if (depth < 0)
+        return std::nullopt;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<std::size_t> json_value_end(std::string_view object, std::size_t start)
+{
+  while (start < object.size() && std::isspace(static_cast<unsigned char>(object[start])) != 0) ++start;
+  if (start >= object.size())
+    return std::nullopt;
+
+  char const first = object[start];
+  if (first == '"')
+    return json_string_value_end(object, start);
+  if (first == '{')
+    return json_balanced_value_end(object, start, '{', '}');
+  if (first == '[')
+    return json_balanced_value_end(object, start, '[', ']');
+
+  std::size_t end = start;
+  while (end < object.size() && object[end] != ',' && object[end] != '}' && object[end] != ']') ++end;
+  while (end > start && std::isspace(static_cast<unsigned char>(object[end - 1])) != 0) --end;
+  return end > start ? std::optional<std::size_t>(end) : std::nullopt;
+}
+
+std::optional<JsonMemberRange> top_level_member_range(std::string_view object, std::string_view key)
+{
+  std::string const needle = "\"" + ava::core::json::escape(key) + "\"";
+  bool in_string = false;
+  bool escaped = false;
+  int object_depth = 0;
+  int array_depth = 0;
+  for (std::size_t index = 0; index < object.size(); ++index)
+  {
+    char const ch = object[index];
+    if (in_string)
+    {
+      if (escaped)
+      {
+        escaped = false;
+        continue;
+      }
+      if (ch == '\\')
+      {
+        escaped = true;
+        continue;
+      }
+      if (ch == '"')
+        in_string = false;
+      continue;
+    }
+
+    if (ch == '"')
+    {
+      if (object_depth == 1 && array_depth == 0 && object.substr(index, needle.size()) == needle)
+      {
+        auto colon = index + needle.size();
+        while (colon < object.size() && std::isspace(static_cast<unsigned char>(object[colon])) != 0) ++colon;
+        if (colon < object.size() && object[colon] == ':')
+        {
+          ++colon;
+          while (colon < object.size() && std::isspace(static_cast<unsigned char>(object[colon])) != 0) ++colon;
+          auto end = json_value_end(object, colon);
+          if (!end)
+            return std::nullopt;
+          return JsonMemberRange{.key_start = index, .value_start = colon, .value_end = *end};
+        }
+      }
+      in_string = true;
+      continue;
+    }
+
+    if (ch == '{')
+    {
+      ++object_depth;
+    }
+    else if (ch == '}')
+    {
+      if (object_depth > 0)
+        --object_depth;
+    }
+    else if (ch == '[')
+    {
+      ++array_depth;
+    }
+    else if (ch == ']')
+    {
+      if (array_depth > 0)
+        --array_depth;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<std::size_t> top_level_closing_brace(std::string_view content)
+{
+  for (std::size_t index = content.size(); index > 0; --index)
+  {
+    if (std::isspace(static_cast<unsigned char>(content[index - 1])) != 0)
+      continue;
+    return content[index - 1] == '}' ? std::optional<std::size_t>(index - 1) : std::nullopt;
+  }
+  return std::nullopt;
+}
+
+bool object_has_members(std::string_view content, std::size_t closing_brace)
+{
+  auto open = content.find('{');
+  if (open == std::string_view::npos || open >= closing_brace)
+    return false;
+  for (std::size_t index = open + 1; index < closing_brace; ++index)
+  {
+    if (std::isspace(static_cast<unsigned char>(content[index])) == 0)
+      return true;
+  }
+  return false;
+}
+
+void erase_member(std::string& content, JsonMemberRange range)
+{
+  auto erase_begin = range.key_start;
+  auto erase_end = range.value_end;
+  auto before = erase_begin;
+  while (before > 0 && std::isspace(static_cast<unsigned char>(content[before - 1])) != 0) --before;
+  if (before > 0 && content[before - 1] == ',')
+  {
+    erase_begin = before - 1;
+  }
+  else
+  {
+    auto after = erase_end;
+    while (after < content.size() && std::isspace(static_cast<unsigned char>(content[after])) != 0) ++after;
+    if (after < content.size() && content[after] == ',')
+    {
+      erase_end = after + 1;
+      while (erase_end < content.size() && std::isspace(static_cast<unsigned char>(content[erase_end])) != 0) ++erase_end;
+    }
+  }
+  content.erase(erase_begin, erase_end - erase_begin);
+}
+
+ava::core::Result<std::string> update_scoped_model_cycle_json(std::string content,
+                                                              std::optional<std::vector<std::string>> const& scoped_model_cycle)
+{
+  if (!ava::core::json::is_valid_object(content))
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model config is not a valid JSON object"));
+
+  auto const range = top_level_member_range(content, "scoped_model_cycle");
+  if (!scoped_model_cycle)
+  {
+    if (range)
+      erase_member(content, *range);
+    return content;
+  }
+
+  auto const value = string_array_json(*scoped_model_cycle);
+  if (range)
+  {
+    content.replace(range->value_start, range->value_end - range->value_start, value);
+    return content;
+  }
+
+  auto const closing = top_level_closing_brace(content);
+  if (!closing)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model config is missing a top-level closing object"));
+  std::string insertion = object_has_members(content, *closing) ? ",\n  \"scoped_model_cycle\": " : "\n  \"scoped_model_cycle\": ";
+  insertion += value;
+  insertion += "\n";
+  content.insert(*closing, insertion);
+  return content;
+}
+
+ava::core::VoidResult write_text_atomic(std::filesystem::path const& path, std::string_view body)
+{
+  std::error_code create_error;
+  std::filesystem::create_directories(path.parent_path(), create_error);
+  if (create_error)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to create model config directory")
+                               .with_context("path", path.parent_path().string())
+                               .with_context("cause", create_error.message()));
+  }
+
+  auto const temp_path = path.string() + ".tmp";
+  {
+    std::ofstream output(temp_path, std::ios::binary | std::ios::trunc);
+    if (!output)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write model config")
+                                 .with_context("path", temp_path));
+    output << body;
+    if (!output)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to finish model config write")
+                                 .with_context("path", temp_path));
+  }
+
+  std::error_code permission_error;
+  std::filesystem::permissions(temp_path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+                               std::filesystem::perm_options::replace, permission_error);
+
+  std::error_code rename_error;
+  std::filesystem::rename(temp_path, path, rename_error);
+  if (rename_error)
+  {
+    std::error_code remove_error;
+    std::filesystem::remove(temp_path, remove_error);
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to replace model config")
+                               .with_context("path", path.string())
+                               .with_context("cause", rename_error.message()));
+  }
+  return {};
+}
+
 long double millionths(long long tokens, long double price_per_million)
 {
   return (static_cast<long double>(tokens) * price_per_million) / 1'000'000.0L;
@@ -300,6 +597,11 @@ ModelRegistry parse_model_registry(std::string_view content)
     registry.default_provider_id = *provider;
   if (auto model = ava::core::json::string_field(content, "default_model"))
     registry.default_model_id = *model;
+  if (auto const scoped_start = ava::core::json::field_value_start(content, "scoped_model_cycle");
+      scoped_start && *scoped_start < content.size() && content[*scoped_start] == '[')
+  {
+    registry.scoped_model_cycle = ava::core::json::strings_in_array_field(content, "scoped_model_cycle");
+  }
 
   for (auto const& item : ava::core::json::objects_in_array_field(content, "models"))
   {
@@ -388,6 +690,32 @@ ava::core::Result<ModelRegistry> load_model_registry(XdgPaths const& paths)
   if (!content)
     return std::unexpected(content.error());
   return parse_model_registry(*content);
+}
+
+ava::core::VoidResult store_scoped_model_cycle(XdgPaths const& paths,
+                                               std::optional<std::vector<std::string>> scoped_model_cycle)
+{
+  std::string content = "{}\n";
+  if (std::filesystem::exists(paths.models_file))
+  {
+    auto loaded = read_text(paths.models_file);
+    if (!loaded)
+      return std::unexpected(std::move(loaded.error()));
+    content = std::move(*loaded);
+  }
+  else if (!scoped_model_cycle)
+  {
+    return {};
+  }
+
+  auto updated = update_scoped_model_cycle_json(std::move(content), scoped_model_cycle);
+  if (!updated)
+  {
+    auto error = std::move(updated.error());
+    error.with_context("path", paths.models_file.string());
+    return std::unexpected(std::move(error));
+  }
+  return write_text_atomic(paths.models_file, *updated);
 }
 
 std::optional<ModelInfo> find_model(ModelRegistry const& registry, std::string_view provider_id, std::string_view model_id)

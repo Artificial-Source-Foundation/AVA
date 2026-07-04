@@ -5,10 +5,58 @@
 #include "ava/config/openai_oauth.h"
 #include "ava/provider/registry.h"
 
+#include <algorithm>
 #include <utility>
 #include <vector>
 
 namespace ava::app::rpc {
+namespace {
+
+std::string model_cycle_key(std::string_view provider_id, std::string_view model_id)
+{
+  return std::string(provider_id) + "/" + std::string(model_id);
+}
+
+std::vector<ava::config::ModelInfo> registered_cycle_models(RuntimeSession const& session,
+                                                            ava::config::ModelRegistry const& registry)
+{
+  auto const providers = ava::provider::builtin_provider_registry();
+  std::vector<ava::config::ModelInfo> registered;
+  for (auto const& model : effective_models(registry))
+  {
+    if (providers.contains(model.provider_id))
+      registered.push_back(model);
+  }
+
+  if (!session.scoped_model_cycle)
+    return registered;
+
+  std::vector<ava::config::ModelInfo> scoped;
+  scoped.reserve(session.scoped_model_cycle->size());
+  for (auto const& id : *session.scoped_model_cycle)
+  {
+    auto const found = std::ranges::find_if(registered, [&](auto const& model) {
+      return id == model_cycle_key(model.provider_id, model.model_id);
+    });
+    if (found != registered.end())
+      scoped.push_back(*found);
+  }
+  return scoped;
+}
+
+ava::core::Result<std::vector<ava::config::ModelInfo>> cycle_model_candidates(RuntimeSession const& session)
+{
+  auto registry = ava::config::load_model_registry(session.paths);
+  if (!registry)
+    return std::unexpected(std::move(registry.error()));
+  auto models = registered_cycle_models(session, *registry);
+  if (models.empty())
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::NotFound, "no registered provider models are enabled for cycling"));
+  return models;
+}
+
+}  // namespace
 
 ava::core::Result<RuntimeRunOptions> ensure_prompt_runtime_options(ava::config::XdgPaths const& paths, std::string_view provider_id, RuntimeRunOptions options,
                                                                    ava::provider::Transport& auth_transport, std::string_view purpose)
@@ -107,29 +155,38 @@ ava::core::Result<ava::config::ModelInfo> resolve_requested_model(RuntimeSession
 
 ava::core::Result<ava::config::ModelInfo> next_runtime_model(RuntimeSession const& session)
 {
-  auto registry = ava::config::load_model_registry(session.paths);
-  if (!registry)
-    return std::unexpected(std::move(registry.error()));
-  auto const providers = ava::provider::builtin_provider_registry();
-  std::vector<ava::config::ModelInfo> models;
-  for (auto const& model : effective_models(*registry))
-  {
-    if (providers.contains(model.provider_id))
-      models.push_back(model);
-  }
-  if (models.empty())
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "no registered provider models are configured"));
+  auto models = cycle_model_candidates(session);
+  if (!models)
+    return std::unexpected(std::move(models.error()));
 
   std::size_t next_index = 0;
-  for (std::size_t index = 0; index < models.size(); ++index)
+  for (std::size_t index = 0; index < models->size(); ++index)
   {
-    if (models[index].provider_id == session.model.provider_id && models[index].model_id == session.model.model_id)
+    if ((*models)[index].provider_id == session.model.provider_id && (*models)[index].model_id == session.model.model_id)
     {
-      next_index = (index + 1) % models.size();
+      next_index = (index + 1) % models->size();
       break;
     }
   }
-  return models[next_index];
+  return (*models)[next_index];
+}
+
+ava::core::Result<ava::config::ModelInfo> previous_runtime_model(RuntimeSession const& session)
+{
+  auto models = cycle_model_candidates(session);
+  if (!models)
+    return std::unexpected(std::move(models.error()));
+
+  std::size_t previous_index = models->size() - 1;
+  for (std::size_t index = 0; index < models->size(); ++index)
+  {
+    if ((*models)[index].provider_id == session.model.provider_id && (*models)[index].model_id == session.model.model_id)
+    {
+      previous_index = index == 0 ? models->size() - 1 : index - 1;
+      break;
+    }
+  }
+  return (*models)[previous_index];
 }
 
 ava::core::Result<ProviderHandle> provider_for_session_model(RuntimeSession const& session, std::string_view injected_provider_id,

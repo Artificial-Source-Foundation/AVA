@@ -24,6 +24,7 @@ struct PluginEventObserverOptions
   std::filesystem::path plugin_global_plugins_dir;
   std::filesystem::path plugin_project_plugins_dir;
   std::filesystem::path plugin_enablement_file;
+  bool include_project_plugins = true;
   ava::agent::Mode mode = ava::agent::Mode::Build;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   ava::tools::PermissionAuditSink permission_audit_sink = nullptr;

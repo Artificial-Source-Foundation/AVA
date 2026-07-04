@@ -3,9 +3,11 @@
 #include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/question.h"
+#include "ava/agent/tool_visibility.h"
 
 #include "ava/config/model_config.h"
 
+#include "ava/session/attachments.h"
 #include "ava/session/session_store.h"
 
 #include "ava/permissions/permission.h"
@@ -97,6 +99,8 @@ struct AgentLoopOptions {
   bool stream = true;
   bool model_supports_tools = true;
   bool model_supports_streaming = true;
+  bool include_project_resources = true;
+  ToolVisibilityOptions tool_visibility;
   std::vector<std::string> model_input_modalities = {"text"};
   std::optional<long long> model_max_output_tokens = std::nullopt;
   std::optional<ava::provider::ProviderReasoningOptions> reasoning = std::nullopt;
@@ -133,6 +137,11 @@ class AgentLoop {
   explicit AgentLoop(AgentLoopOptions options);
 
   [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn(std::string const& user_message,
+                                                            ava::session::SessionStore& store,
+                                                            ava::provider::Provider const& provider,
+                                                            ava::provider::Transport& transport);
+  [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn(std::string const& user_message,
+                                                            std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
                                                             ava::session::SessionStore& store,
                                                             ava::provider::Provider const& provider,
                                                             ava::provider::Transport& transport);

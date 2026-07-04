@@ -12,6 +12,7 @@ Current position:
 
 Post-1.0 path:
 
+- Use `docs/product/mvp-baseline.md` for the current Pi-first/OpenCode-second product MVP baseline and gap ledger.
 - Use `docs/product/capabilities-1.1.md` for the current backend-only 1.1 candidate capability list.
 - Keep Anthropic, Moonshot, and OpenRouter-compatible live smokes as follow-up provider-breadth validation unless the product decision changes.
 - Use `docs/roadmap/backend.md` and the post-1.0 roadmap sections for 1.1+ follow-up planning.

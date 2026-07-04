@@ -202,7 +202,9 @@ ToolDispatchResult write_file_result(ava::tools::ToolContext const& context, Pro
                             .success = true,
                             .result_text = "{\"tool\":\"write_file\",\"ok\":true,\"path\":\"" +
                                            ava::core::json::escape(result->path.generic_string()) +
-                                           "\",\"bytes_written\":" + std::to_string(result->bytes_written) + "}"};
+                                           "\",\"bytes_written\":" + std::to_string(result->bytes_written) +
+                                           ",\"diff\":\"" + ava::core::json::escape(result->diff) +
+                                           "\",\"diff_truncated\":" + json_bool(result->diff_truncated) + "}"};
 }
 
 ToolDispatchResult edit_file_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
@@ -471,7 +473,9 @@ ToolDispatchResult skill_result(ava::tools::ToolContext const& context, Provider
   auto skills =
       ava::context::load_skills(ava::context::SkillLoadOptions{.workspace_root = context.workspace_dir,
                                                                .global_skill_dirs = context.skill_global_dirs,
-                                                               .project_skill_dirs = context.skill_project_dirs});
+                                                               .project_skill_dirs = context.skill_project_dirs,
+                                                               .include_project_skills =
+                                                                   context.include_project_skills});
   auto const match =
       std::ranges::find_if(skills.skills, [&](ava::context::LoadedSkill const& skill) { return skill.name == *name; });
   if (match == skills.skills.end()) {
@@ -705,6 +709,7 @@ ToolRegistry build_tool_registry(ava::tools::ToolContext const& context)
   }
   ava::plugin::register_enabled_plugin_tools(registry, context);
   ava::mcp::register_enabled_mcp_tools(registry, context);
+  registry.apply_visibility_filter(context);
   return registry;
 }
 

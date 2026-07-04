@@ -3,6 +3,9 @@
 #include "ava/app/runtime_model.h"
 #include "ava/app/runtime_prompt.h"
 #include "ava/app/runtime_reasoning.h"
+#include "ava/app/project_trust.h"
+#include "ava/session/session_branch.h"
+#include "ava/session/session_metadata.h"
 
 #include <filesystem>
 #include <utility>
@@ -61,6 +64,14 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either requested session id or continue, not both"));
   }
+  if (options.fork_session_id && (options.requested_session_id || options.continue_last_session))
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either fork or session resume options, not both"));
+  }
+  if (options.sessionless && (options.requested_session_id || options.continue_last_session || options.fork_session_id))
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either no-session or session resume options, not both"));
+  }
 
   auto cwd = current_path_result();
   if (!cwd)
@@ -74,8 +85,31 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
   auto model = ava::config::select_default_model(*registry);
 
   bool created = true;
+  bool append_session_start = true;
   ava::core::Result<ava::session::SessionStore> store = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session was not initialized"));
-  if (options.requested_session_id)
+  if (options.sessionless)
+  {
+    store = ava::session::SessionStore::create_ephemeral(workspace_dir);
+  }
+  else if (options.fork_session_id)
+  {
+    auto resolved = resolve_session_id(workspace_dir, options.paths.sessions_dir, *options.fork_session_id);
+    if (!resolved)
+      return std::unexpected(resolved.error());
+    auto branch = ava::session::create_session_branch(ava::session::SessionBranchOptions{.workspace_dir = workspace_dir,
+                                                                                         .root_dir = options.paths.sessions_dir,
+                                                                                         .source_session_id = *resolved,
+                                                                                         .branch_from_entry_id = {},
+                                                                                         .name = options.initial_session_name,
+                                                                                         .labels = std::nullopt,
+                                                                                         .mode = ava::session::SessionBranchMode::Fork,
+                                                                                         .actor = "cli"});
+    if (!branch)
+      return std::unexpected(branch.error());
+    store = std::move(branch->store);
+    append_session_start = false;
+  }
+  else if (options.requested_session_id)
   {
     auto resolved = resolve_session_id(workspace_dir, options.paths.sessions_dir, *options.requested_session_id);
     if (!resolved)
@@ -106,7 +140,7 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
     return std::unexpected(store.error());
 
   std::optional<std::vector<ava::session::SessionEntry>> loaded_entries;
-  if (!created)
+  if (!created || options.fork_session_id)
   {
     auto entries = store->load();
     if (!entries)
@@ -120,15 +154,28 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
   if (loaded_entries)
     reasoning = runtime::latest_persisted_reasoning(*loaded_entries, model);
 
-  auto prompt_state = runtime::load_runtime_prompt_state(options.paths, model, options.mode, workspace_dir, current_dir);
+  auto project_trust = load_project_trust_state(options.paths, workspace_dir);
+  auto prompt_state = runtime::load_runtime_prompt_state(options.paths, model, options.mode, workspace_dir, current_dir,
+                                                         project_resources_trusted(project_trust),
+                                                         options.prompt_overrides);
   if (!prompt_state)
     return std::unexpected(prompt_state.error());
 
   if (created)
   {
-    auto appended = runtime::append_session_start(*store, options.mode, model, prompt_state->prompt, prompt_state->context_sources.size());
-    if (!appended)
-      return std::unexpected(appended.error());
+    if (append_session_start)
+    {
+      auto appended = runtime::append_session_start(*store, options.mode, model, prompt_state->prompt, prompt_state->context_sources.size());
+      if (!appended)
+        return std::unexpected(appended.error());
+    }
+  }
+
+  if (options.initial_session_name && !options.fork_session_id)
+  {
+    auto metadata = ava::session::append_session_metadata(*store, ava::session::SessionMetadataUpdate{.name = options.initial_session_name, .actor = "cli"});
+    if (!metadata)
+      return std::unexpected(metadata.error());
   }
 
   return RuntimeSession{.store = std::move(*store),
@@ -138,10 +185,16 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
                         .paths = options.paths,
                         .workspace_dir = workspace_dir,
                         .current_dir = current_dir,
+                        .project_trust = std::move(project_trust),
+                        .prompt_overrides = options.prompt_overrides,
+                        .tool_visibility = options.tool_visibility,
                         .context_sources = std::move(prompt_state->context_sources),
+                        .freshness_sources = std::move(prompt_state->freshness_sources),
                         .system_prompt = std::move(prompt_state->system_prompt),
                         .reasoning = std::move(reasoning),
-                        .created = created};
+                        .scoped_model_cycle = registry->scoped_model_cycle,
+                        .created = created,
+                        .sessionless = options.sessionless};
 }
 
 }  // namespace ava::app

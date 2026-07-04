@@ -251,7 +251,9 @@ ava::core::Result<bool> switch_runtime_model(RuntimeSession& session, ava::confi
   if (!compatible) return std::unexpected(std::move(compatible.error()));
 
   auto prompt_state = runtime::load_runtime_prompt_state(session.paths, model, session.mode, session.workspace_dir,
-                                                         session.current_dir);
+                                                         session.current_dir,
+                                                         project_resources_trusted(session.project_trust),
+                                                         session.prompt_overrides);
   if (!prompt_state) return std::unexpected(std::move(prompt_state.error()));
 
   auto const previous = session.model;
@@ -262,6 +264,7 @@ ava::core::Result<bool> switch_runtime_model(RuntimeSession& session, ava::confi
   session.mode = prompt_state->mode;
   session.prompt = std::move(prompt_state->prompt);
   session.context_sources = std::move(prompt_state->context_sources);
+  session.freshness_sources = std::move(prompt_state->freshness_sources);
   session.system_prompt = std::move(prompt_state->system_prompt);
   session.reasoning = std::nullopt;
   return true;

@@ -1,5 +1,7 @@
 #include "ava/app/headless_policy.h"
+#include "ava/app/project_trust.h"
 #include "ava/app/rpc/serialization.h"
+#include "ava/app/rpc/handlers.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 
@@ -14,6 +16,7 @@
 #include "ava/permissions/permission.h"
 
 #include "ava/provider/openai_provider.h"
+#include "ava/provider/provider_utils.h"
 
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -42,6 +45,16 @@
 namespace {
 
 using namespace ava::tests;
+
+std::string rpc_tiny_png_bytes()
+{
+  std::string bytes;
+  bytes.push_back(static_cast<char>(0x89));
+  bytes += "PNG\r\n";
+  bytes.push_back(static_cast<char>(0x1A));
+  bytes += "\nava-rpc-image";
+  return bytes;
+}
 
 void test_app_rpc_prompt_payload_serialization()
 {
@@ -234,6 +247,45 @@ void test_app_rpc_parsing_and_response_serialization()
              *command->instructions == "keep",
          "RPC parser extracts string envelope fields and unescapes JSON strings");
 
+  auto image_prompt = ava::app::parse_rpc_command_line(R"JSON({"id":"img","type":"prompt","message":"look","attachments":["screen.png"]})JSON");
+  expect(image_prompt && image_prompt->attachments && image_prompt->attachments->size() == 1 &&
+             (*image_prompt->attachments)[0] == "screen.png",
+         "RPC parser preserves prompt image attachment path arrays");
+
+  auto uploaded_image_prompt = ava::app::parse_rpc_command_line(
+      R"JSON({"id":"img-upload","type":"prompt","message":"look","images":[{"type":"image","data":"QUJD","mimeType":"image/png"}]})JSON");
+  expect(uploaded_image_prompt && uploaded_image_prompt->images && uploaded_image_prompt->images->size() == 1 &&
+             (*uploaded_image_prompt->images)[0].type == "image" &&
+             (*uploaded_image_prompt->images)[0].data_base64 == "QUJD" &&
+             (*uploaded_image_prompt->images)[0].mime_type == "image/png",
+         "RPC parser preserves Pi-style inline image upload objects");
+
+  auto invalid_uploaded_image =
+      ava::app::parse_rpc_command_line(R"JSON({"id":"img-upload-bad","type":"prompt","message":"look","images":["bad"]})JSON");
+  expect(!invalid_uploaded_image &&
+             invalid_uploaded_image.error().message() == "RPC images must be an array of image objects",
+         "RPC parser rejects non-object inline image upload entries");
+
+  auto missing_upload_data = ava::app::parse_rpc_command_line(
+      R"JSON({"id":"img-upload-missing","type":"prompt","message":"look","images":[{"type":"image","mimeType":"image/png"}]})JSON");
+  expect(!missing_upload_data && missing_upload_data.error().message() == "RPC images entries require data",
+         "RPC parser rejects inline image uploads without data");
+
+  auto invalid_upload_type = ava::app::parse_rpc_command_line(
+      R"JSON({"id":"img-upload-type","type":"prompt","message":"look","images":[{"type":"file","data":"QUJD","mimeType":"image/png"}]})JSON");
+  expect(!invalid_upload_type && invalid_upload_type.error().message() == "RPC images entries must have type image",
+         "RPC parser rejects inline image upload entries with non-image type");
+
+  auto invalid_image_prompt =
+      ava::app::parse_rpc_command_line(R"JSON({"id":"img-bad","type":"prompt","message":"look","attachments":["ok.png",2]})JSON");
+  expect(!invalid_image_prompt && invalid_image_prompt.error().message() == "RPC attachments must be an array of strings",
+         "RPC parser rejects non-string prompt attachment path entries");
+
+  auto empty_image_prompt =
+      ava::app::parse_rpc_command_line(R"JSON({"id":"img-empty","type":"prompt","message":"look","attachments":[""]})JSON");
+  expect(!empty_image_prompt && empty_image_prompt.error().message() == "RPC attachments entries must be non-empty",
+         "RPC parser rejects empty prompt attachment paths");
+
   auto reply = ava::app::parse_rpc_command_line(R"JSON({"id":"reply","type":"permission_reply","request_id":"permission_1",)JSON"
                                                 R"JSON("correlation_id":"prompt_1","decision":"deny","reason":"not approved for this run"})JSON");
   expect(reply && reply->reason && *reply->reason == "not approved for this run", "RPC parser preserves optional permission reply reasons");
@@ -414,6 +466,164 @@ void test_app_rpc_prompt_with_fake_transport_streams_events()
              jsonl.find("\"request_id\":\"p1\"") != std::string::npos && completed && jsonl.find("\"id\":\"p1\"") != std::string::npos &&
              jsonl.find("\"success\":true") != std::string::npos && jsonl.find("rpc answer") != std::string::npos,
          "RPC prompt streams runtime event envelopes and ends with a successful response");
+}
+
+void test_app_rpc_prompt_imports_image_attachments()
+{
+  auto const root = temp_root() / "app-rpc-prompt-image-attachment";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  auto const image_path = workspace / "screen.png";
+  write_app_test_file(image_path, rpc_tiny_png_bytes());
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC image prompt test opens runtime session");
+  if (!session)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"rpc image answer\"}\n\n"
+              "data: [DONE]\n\n",
+  }});
+  ava::app::RuntimeRunOptions runtime_options;
+  runtime_options.access_token = "token";
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult result;
+  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  input_buffer.push("{\"id\":\"p-img\",\"type\":\"prompt\",\"message\":\"describe\",\"attachments\":[\"" +
+                    ava::core::json::escape(image_path.string()) + "\"]}\n");
+  bool const completed = output_buffer.wait_contains("rpc image answer", std::chrono::seconds(2));
+  input_buffer.close();
+  rpc_thread.join();
+  auto const jsonl = output_buffer.str();
+  auto entries = session->store.load();
+  expect(result.has_value(), "RPC image prompt loop completes successfully");
+  expect(completed && jsonl.find("\"id\":\"p-img\"") != std::string::npos &&
+             jsonl.find("\"success\":true") != std::string::npos,
+         "RPC image prompt returns a successful prompt response");
+  expect(transport.requests().size() == 1 &&
+             transport.requests()[0].body.find("\"type\":\"input_image\"") != std::string::npos &&
+             transport.requests()[0].body.find("data:image/png;base64,") != std::string::npos,
+         "RPC image prompt imports local image paths into provider image payloads");
+  auto const persisted_metadata =
+      entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+        return entry.type == ava::session::EntryType::UserMessage &&
+               entry.data_json.find("\"attachments\"") != std::string::npos &&
+               entry.data_json.find("\"storage_path\":\"attachments/") != std::string::npos &&
+               entry.data_json.find("data_base64") == std::string::npos;
+      });
+  expect(persisted_metadata, "RPC image prompt persists session-owned attachment metadata without raw image bytes");
+}
+
+void test_app_rpc_prompt_imports_inline_image_uploads()
+{
+  auto const root = temp_root() / "app-rpc-prompt-inline-image-upload";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC inline image upload prompt test opens runtime session");
+  if (!session)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"rpc upload answer\"}\n\n"
+              "data: [DONE]\n\n",
+  }});
+  ava::app::RuntimeRunOptions runtime_options;
+  runtime_options.access_token = "token";
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult result;
+  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  input_buffer.push("{\"id\":\"p-upload\",\"type\":\"prompt\",\"message\":\"describe\",\"images\":[{\"type\":\"image\",\"data\":\"" +
+                    ava::provider::base64_encode(rpc_tiny_png_bytes()) + "\",\"mimeType\":\"image/png\"}]}\n");
+  bool const completed = output_buffer.wait_contains("rpc upload answer", std::chrono::seconds(2));
+  input_buffer.close();
+  rpc_thread.join();
+  auto const jsonl = output_buffer.str();
+  auto entries = session->store.load();
+  expect(result.has_value(), "RPC inline image upload prompt loop completes successfully");
+  expect(completed && jsonl.find("\"id\":\"p-upload\"") != std::string::npos &&
+             jsonl.find("\"success\":true") != std::string::npos,
+         "RPC inline image upload prompt returns a successful prompt response");
+  expect(transport.requests().size() == 1 &&
+             transport.requests()[0].body.find("\"type\":\"input_image\"") != std::string::npos &&
+             transport.requests()[0].body.find("data:image/png;base64,") != std::string::npos,
+         "RPC inline image uploads are imported into provider image payloads");
+  auto const persisted_metadata =
+      entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+        return entry.type == ava::session::EntryType::UserMessage &&
+               entry.data_json.find("\"attachments\"") != std::string::npos &&
+               entry.data_json.find("\"mime_type\":\"image/png\"") != std::string::npos &&
+               entry.data_json.find("\"storage_path\":\"attachments/") != std::string::npos &&
+               entry.data_json.find("data_base64") == std::string::npos;
+      });
+  expect(persisted_metadata, "RPC inline image upload persists metadata without raw image bytes");
+}
+
+void test_app_rpc_prompt_rejects_inline_image_upload_mime_mismatch()
+{
+  auto const root = temp_root() / "app-rpc-prompt-inline-image-upload-mismatch";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC inline image MIME mismatch test opens runtime session");
+  if (!session)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  ava::app::RuntimeRunOptions runtime_options;
+  runtime_options.access_token = "token";
+  std::istringstream in("{\"id\":\"p-upload-bad\",\"type\":\"prompt\",\"message\":\"describe\",\"images\":[{\"type\":\"image\",\"data\":\"" +
+                        ava::provider::base64_encode(rpc_tiny_png_bytes()) + "\",\"mimeType\":\"image/jpeg\"}]}\n");
+  std::ostringstream out;
+
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
+  auto const jsonl = out.str();
+  expect(result.has_value(), "RPC inline image MIME mismatch loop completes after error response");
+  expect(jsonl.find("\"id\":\"p-upload-bad\"") != std::string::npos &&
+             jsonl.find("\"success\":false") != std::string::npos &&
+             jsonl.find("image attachment MIME type does not match detected bytes") != std::string::npos,
+         "RPC inline image upload MIME mismatches are machine-readable error responses");
+  expect(transport.requests().empty(), "RPC inline image MIME mismatch avoids dispatching a provider request");
 }
 
 void test_app_rpc_prompt_streams_provider_deltas_before_final_response()
@@ -775,6 +985,7 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   ava::session::SessionMetadataUpdate child_metadata;
   child_metadata.name = "Child";
   child_metadata.labels = std::vector<std::string>{"branch"};
+  child_metadata.archived = true;
   child_metadata.parent_session_id = parent_id;
   child_metadata.source_session_id = parent_id;
   child_metadata.branch_from_entry_id = parent_entries->front().id;
@@ -796,8 +1007,10 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
              jsonl.find("\"path\":[\"" + parent_id + "\",\"" + child_id + "\"]") != std::string::npos &&
              jsonl.find("\"parent_session_id\":\"" + parent_id + "\"") != std::string::npos &&
              jsonl.find("\"children\":[\"" + child_id + "\"]") != std::string::npos && jsonl.find("\"labels\":[\"branch\"]") != std::string::npos &&
+             jsonl.find("\"labels_updated\":\"") != std::string::npos &&
+             jsonl.find("\"archived\":true") != std::string::npos &&
              jsonl.find("\"actor\":\"test\"") != std::string::npos,
-         "RPC session_tree returns current path, children, labels, actor, and provenance metadata");
+         "RPC session_tree returns current path, children, labels, archive state, actor, and provenance metadata");
   expect(jsonl.find("\"id\":\"switch\"") != std::string::npos && jsonl.find("\"current_session_id\":\"" + parent_id + "\"") != std::string::npos &&
              child->store.session_id() == parent_id,
          "RPC switch_session navigates the active session used by following tree calls");
@@ -963,6 +1176,23 @@ void test_app_rpc_model_commands()
   expect(jsonl.find("\"id\":\"cycle\"") != std::string::npos && jsonl.find("\"provider\":\"kimi\"") != std::string::npos,
          "RPC cycle_model advances to the next configured provider model");
   expect(session->model.provider_id == "kimi", "RPC cycle_model updates active session model");
+  auto previous = ava::app::rpc::previous_runtime_model(*session);
+  expect(previous && previous->provider_id == "anthropic" && previous->model_id == "claude-sonnet-4-5",
+         "runtime previous model helper returns the configured predecessor for TUI reverse cycling");
+  session->scoped_model_cycle =
+      std::vector<std::string>{"anthropic/claude-sonnet-4-5", "openai/gpt-5.5"};
+  auto scoped_next = ava::app::rpc::next_runtime_model(*session);
+  expect(scoped_next && scoped_next->provider_id == "anthropic" && scoped_next->model_id == "claude-sonnet-4-5",
+         "runtime next model helper starts at the first scoped model when current model is outside the scoped cycle");
+  if (scoped_next)
+    session->model = *scoped_next;
+  auto scoped_previous = ava::app::rpc::previous_runtime_model(*session);
+  expect(scoped_previous && scoped_previous->provider_id == "openai" && scoped_previous->model_id == "gpt-5.5",
+         "runtime previous model helper wraps within the session-scoped model cycle");
+  session->scoped_model_cycle = std::vector<std::string>{};
+  auto empty_scoped_next = ava::app::rpc::next_runtime_model(*session);
+  expect(!empty_scoped_next && empty_scoped_next.error().message().find("enabled for cycling") != std::string::npos,
+         "runtime model cycling fails visibly when the session-scoped model cycle is empty");
 }
 
 void test_app_rpc_reasoning_commands()
@@ -1216,6 +1446,9 @@ void test_app_rpc_mcp_command_responses()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
   write_app_test_file(workspace / ".ava" / "mcp.json", app_test_mcp_config_json("demo", "Demo MCP", AVA_FAKE_MCP_SERVER_PATH));
+  auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(trusted.has_value(), trusted ? "RPC MCP command test trusts project config"
+                                      : "RPC MCP command test trusts project config: " + trusted.error().format());
 
   ava::app::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
@@ -1275,6 +1508,9 @@ void test_app_rpc_command_responses_for_context_compact_export()
   }
   write_app_test_file(workspace / ".ava" / "plugins" / "com.example.rpc" / "plugin.json", app_test_plugin_manifest_json("com.example.rpc", "RPC Plugin"));
   write_app_test_file(workspace / ".ava" / "plugins" / "com.example.rpcbad" / "plugin.json", "{not-json");
+  auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(trusted.has_value(), trusted ? "RPC command test trusts project plugin resources"
+                                      : "RPC command test trusts project plugin resources: " + trusted.error().format());
 
   ava::app::RuntimeOpenOptions open_options;
   open_options.workspace_dir = workspace;
@@ -1301,12 +1537,20 @@ void test_app_rpc_command_responses_for_context_compact_export()
       "{\"id\":\"ctx\",\"type\":\"context\"}\n"
       "{\"id\":\"read\",\"type\":\"invoke_command\",\"name\":\"read\",\"command_arguments\":\"AGENTS.md\"}\n"
       "{\"id\":\"cmp\",\"type\":\"compact\",\"instructions\":\"remember rpc facts\"}\n"
-      "{\"id\":\"exp\",\"type\":\"export\"}\n");
+      "{\"id\":\"exp\",\"type\":\"export\"}\n"
+      "{\"id\":\"exp-html\",\"type\":\"export_html\"}\n"
+      "{\"id\":\"exp-html-file\",\"type\":\"export_html\",\"outputPath\":\"rpc-session.html\"}\n");
   std::ostringstream out;
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
+  runtime_options.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Allow, "test export write"};
+  };
   auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out);
   auto const jsonl = out.str();
+  std::ifstream exported_html_file(workspace / "rpc-session.html", std::ios::binary);
+  std::ostringstream exported_html_text;
+  exported_html_text << exported_html_file.rdbuf();
   expect(result.has_value(), "RPC context/compact/export loop completes successfully");
   expect(jsonl.find("\"id\":\"plugins\"") != std::string::npos && jsonl.find("com.example.rpc") != std::string::npos &&
              jsonl.find("\"id\":\"plugin-enable\"") != std::string::npos && jsonl.find("No plugin process was started") != std::string::npos &&
@@ -1320,8 +1564,14 @@ void test_app_rpc_command_responses_for_context_compact_export()
              jsonl.find("\"id\":\"cmp\"") != std::string::npos && jsonl.find("\"name\":\"compaction_start\"") != std::string::npos &&
              jsonl.find("\"name\":\"compaction_end\"") != std::string::npos && jsonl.find("compaction summary recorded") != std::string::npos &&
              jsonl.find("\"id\":\"exp\"") != std::string::npos && jsonl.find("# AVA Session Export") != std::string::npos &&
-             jsonl.find("remember rpc facts") != std::string::npos,
-         "RPC command responses expose command dispatcher output as JSONL protocol records");
+             jsonl.find("remember rpc facts") != std::string::npos &&
+             jsonl.find("\"id\":\"exp-html\"") != std::string::npos &&
+             jsonl.find("<!doctype html>") != std::string::npos &&
+             jsonl.find("\"id\":\"exp-html-file\"") != std::string::npos &&
+             jsonl.find("format: html") != std::string::npos &&
+             exported_html_text.str().find("<!doctype html>") != std::string::npos &&
+             exported_html_text.str().find("# AVA Session Export") != std::string::npos,
+         "RPC command responses expose dispatcher output plus Pi-style export_html records");
 }
 
 void test_app_rpc_compact_provider_failure_is_error_response()
@@ -1408,6 +1658,9 @@ void run_app_rpc_tests()
   test_app_rpc_parsing_and_response_serialization();
   test_app_rpc_identifier_validation();
   test_app_rpc_prompt_with_fake_transport_streams_events();
+  test_app_rpc_prompt_imports_image_attachments();
+  test_app_rpc_prompt_imports_inline_image_uploads();
+  test_app_rpc_prompt_rejects_inline_image_upload_mime_mismatch();
   test_app_rpc_prompt_streams_provider_deltas_before_final_response();
   test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event();
   test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag();

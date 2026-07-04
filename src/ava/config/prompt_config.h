@@ -5,6 +5,8 @@
 #include "ava/config/xdg_paths.h"
 #include "ava/core/result.h"
 
+#include <filesystem>
+#include <optional>
 #include <string>
 
 namespace ava::config {
@@ -13,6 +15,7 @@ struct PromptSelection
 {
   std::string text;
   bool from_override = false;
+  std::optional<std::filesystem::path> source_path = std::nullopt;
 };
 
 [[nodiscard]] std::string builtin_prompt(std::string_view provider_id, std::string_view family, ava::agent::Mode mode);

@@ -1,6 +1,6 @@
 # AVA 1.1 Backend Candidate Capabilities
 
-This document captures post-1.0 backend candidate work discovered from AVA code/docs audits plus behavior comparison against local reference repositories under `docs/reference-code/`. Reference repositories are product-behavior inputs only; do not copy their source code or architecture into AVA.
+This document captures post-1.0 backend candidate work discovered from AVA code/docs audits plus behavior comparison against local reference repositories under `docs/reference-code/`. The current product MVP baseline and Pi/OpenCode gap map lives in `docs/product/mvp-baseline.md`. Reference repositories are product-behavior inputs only; do not copy their source code or architecture into AVA.
 
 The 1.0 backend MVP is shipped. This file is the backend planning surface for 1.1 and later; it is not a promise that every row ships in one release. Frontend/TUI planning is Carlo-owned and intentionally excluded.
 
@@ -17,14 +17,14 @@ Priority legend:
 
 Backend/product capabilities that AVA does not fully match yet:
 
-- Session tree workflows: fork, clone, tree navigation, branch summaries, labels, and user-facing session names.
-- Multimodal/image support: image prompt parts, image-capable model metadata, attachment storage, and provider payload support.
+- Session tree product workflows: backend/RPC fork, clone, tree inspection, labels, names, and caller-supplied branch summaries exist; frontend/TUI tree navigation and provider-generated branch summaries remain follow-up work.
+- Multimodal/image support: image prompt parts, image-capable model metadata, attachment storage, fork/clone copy, and provider payload support exist; RPC upload/input plumbing and user-facing import flows remain follow-up work.
 - Broader provider/auth matrix: completed backend Anthropic OAuth request/refresh handling still needs interactive login/live validation; opt-in live-smoke harnessing now exists; GitHub Copilot OAuth, Google, Bedrock, Vertex, Azure, and larger generated model catalogs remain separate follow-up work, not part of the current hardening batch.
 - Subagents/task workers: named agent definitions, isolated delegated runs, parallel or chained tasks.
 - Plugin ecosystem scale: package install/remove/list, remote package sources, dynamic resources, and custom provider registration.
 - Plugin core-service proxy: plugins asking AVA to perform file, shell, network, and session operations through AVA permissions instead of doing side effects directly.
 - Stronger sandbox options: Docker or OS-level sandboxing for shell/plugin execution where portability allows it.
-- Full LSP/code intelligence: document symbols, workspace symbols, definitions, references, and bounded on-disk `didOpen` sync now have a backend slice; explicit server discovery remains follow-up scope.
+- Full LSP/code intelligence: document symbols, workspace symbols, definitions, references, and bounded on-disk `didOpen` sync now have a backend slice; automatic server recipe discovery and incremental/unsaved-buffer sync remain follow-up scope.
 - Unified settings: global plus project merge, validation, migrations, hot reload, and config write locking.
 
 ## 1.1 Candidate Table

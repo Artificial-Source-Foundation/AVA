@@ -1,3 +1,7 @@
+set(CURSES_NEED_NCURSES TRUE)
+set(CURSES_NEED_WIDE TRUE)
+find_package(Curses REQUIRED)
+
 add_library(ava_test_support
   "support/app_runtime_support.cpp"
   "support/fake_transport.cpp"
@@ -52,6 +56,7 @@ add_executable(ava_tests
   "tui_composer_tests.cpp"
 )
 target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_LIBRARIES} ava_test_support)
+target_include_directories(ava_tests PRIVATE ${CURSES_INCLUDE_DIRS})
 add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_provider_server)
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_FILE:ava_fake_mcp_server>")
@@ -112,6 +117,62 @@ add_test(
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-context-export
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_context_export.cmake)
+
+add_test(
+  NAME ava_cli.headless_print_prompt_overrides
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_EXE=$<TARGET_FILE:ava>
+          -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-print-prompt-overrides
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_print_prompt_overrides.cmake)
+
+add_test(
+  NAME ava_cli.headless_print_positional_prompt
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_EXE=$<TARGET_FILE:ava>
+          -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-print-positional-prompt
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_print_positional_prompt.cmake)
+
+add_test(
+  NAME ava_cli.headless_print_no_session
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_EXE=$<TARGET_FILE:ava>
+          -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-print-no-session
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_print_no_session.cmake)
+
+add_test(
+  NAME ava_cli.headless_print_session_startup_options
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_EXE=$<TARGET_FILE:ava>
+          -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-print-session-startup-options
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_print_session_startup_options.cmake)
+
+add_test(
+  NAME ava_cli.headless_print_file_args
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_EXE=$<TARGET_FILE:ava>
+          -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-print-file-args
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_print_file_args.cmake)
+
+add_test(
+  NAME ava_cli.headless_mode_json_alias
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_EXE=$<TARGET_FILE:ava>
+          -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-mode-json-alias
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_mode_json_alias.cmake)
+
+add_test(
+  NAME ava_cli.headless_tool_visibility
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_EXE=$<TARGET_FILE:ava>
+          -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-tool-visibility
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_tool_visibility.cmake)
 
 add_test(
   NAME ava_cli.headless_rpc_compact_success
@@ -186,6 +247,14 @@ add_test(
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_tool_failure.cmake)
 
 add_test(
+  NAME ava_cli.headless_performance_smoke
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_EXE=$<TARGET_FILE:ava>
+          -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-performance-smoke
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_performance_smoke.cmake)
+
+add_test(
   NAME ava_cli.headless_rpc_bash_process_cleanup
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
@@ -245,3 +314,31 @@ add_test(
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-mcp-config-errors
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_mcp_config_errors.cmake)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(
+    NAME ava_tui.tmux_smoke
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tui_tmux_smoke.py
+            --ava $<TARGET_FILE:ava>
+            --root ${CMAKE_BINARY_DIR}/tui-tmux-smoke)
+  set_tests_properties(ava_tui.tmux_smoke PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45)
+
+  add_test(
+    NAME ava_tui.kitty_image_smoke
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tui_kitty_image_smoke.py
+            --ava $<TARGET_FILE:ava>
+            --root ${CMAKE_BINARY_DIR}/tui-kitty-image-smoke)
+  set_tests_properties(ava_tui.kitty_image_smoke PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 20)
+
+  add_test(
+    NAME ava_tui.osc8_smoke
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tui_osc8_smoke.py
+            --ava $<TARGET_FILE:ava>
+            --fake-provider $<TARGET_FILE:ava_fake_provider_server>
+            --root ${CMAKE_BINARY_DIR}/tui-osc8-smoke)
+  set_tests_properties(ava_tui.osc8_smoke PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 20)
+endif()

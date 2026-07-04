@@ -17,8 +17,10 @@ set(PLUGIN_RAN_FILE "${PLUGIN_DIR}/ran.txt")
 
 file(REMOVE_RECURSE "${TEST_ROOT}")
 file(MAKE_DIRECTORY "${PLUGIN_DIR}/prompts" "${PLUGIN_DIR}/skills" "${BAD_PLUGIN_DIR}" "${TEST_ROOT}/home"
-                    "${TEST_ROOT}/config" "${TEST_ROOT}/state" "${TEST_ROOT}/data")
+                    "${TEST_ROOT}/config" "${TEST_ROOT}/state/ava" "${TEST_ROOT}/data")
 file(REAL_PATH "${WORKSPACE}" REAL_WORKSPACE)
+file(WRITE "${TEST_ROOT}/state/ava/project-trust.json"
+     "{\"schema_version\":1,\"decisions\":[{\"path\":\"${REAL_WORKSPACE}\",\"trusted\":true}]}\n")
 file(WRITE "${PLUGIN_MANIFEST}"
      [=[
 {

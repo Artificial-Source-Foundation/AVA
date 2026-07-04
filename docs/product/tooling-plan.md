@@ -49,6 +49,22 @@ Rules:
 - Enforce max bytes and max lines.
 - Mark long lines as truncated.
 
+### list_directory
+
+Lists readable entries in one directory without reading file contents.
+
+Inputs:
+
+- `path` optional.
+- `max_entries` optional.
+
+Rules:
+
+- Normalize the directory path through the safe file layer.
+- Return names, type, and size only.
+- Omit entries denied by read/search policy.
+- Bound entry count and output bytes.
+
 ### write
 
 Creates or overwrites one file.
@@ -179,6 +195,25 @@ Rules:
 - Return bounded `content`, `content_type` when available, `status_code`, `truncated`, `total_bytes`, and `output_bytes` metadata.
 - Do not perform web search, browser automation, credential handling, image attachment conversion, or provider-specific multimodal payloads in this tool.
 
+### websearch
+
+Searches the web for current sources after explicit network-search permission.
+
+Inputs:
+
+- `query`
+- `num_results` optional, capped by backend policy.
+- `context_max_chars` optional, capped by backend policy.
+- `timeout_ms` optional, clamped by backend policy.
+
+Rules:
+
+- Validate query size and control bytes before network access.
+- Request `network.search` permission for the query.
+- Return bounded search results suitable for source discovery, not long-form reading.
+- Prefer following with `webfetch` on a specific result URL when the model needs source detail.
+- Do not perform browser automation, credential handling, or workspace mutation.
+
 ### question
 
 Asks the user for structured input.
@@ -193,6 +228,21 @@ Rules:
 
 - Only available in interactive mode.
 - In non-interactive mode, returns unavailable with guidance.
+
+### skill
+
+Loads a listed local or global `SKILL.md` instruction file into the conversation.
+
+Inputs:
+
+- `name`
+
+Rules:
+
+- Only load skills that the context loader has discovered and listed.
+- Request `skill` permission before loading the selected skill content.
+- Bound loaded skill content and sampled file lists.
+- Treat skill text as untrusted instructions that augment context; it must not bypass tool permissions.
 
 ### LSP code intelligence
 
@@ -235,6 +285,8 @@ Examples:
 - File deletion requests `file.delete` and is not part of MVP write/edit behavior.
 - `bash` requests `shell.run` and may request `shell.destructive` based on command scan.
 - `webfetch` requests `network.fetch`.
+- `websearch` requests `network.search`.
+- `skill` requests `skill`.
 - LSP diagnostics/symbols/definitions/references request `lsp.query` for the target file path; workspace symbol search uses the workspace root as the permission target and the query as command context. Configured server startup separately requests `lsp.server.launch` with the exact JSON-array encoded argv vector in `command`.
 
 ## Output Truncation
@@ -269,6 +321,8 @@ Required regression areas:
 - Bash output truncation.
 - Search `.gitignore` pruning, provider-inaccessible `no_ignore`, spill files, and `tool_progress` events.
 - Webfetch URL validation, DNS pinning, redirect-disabled behavior, content-type filtering, and headless `network.fetch` permission.
+- Websearch query validation, result bounding, provider failure shaping, and headless `network.search` permission.
+- Skill discovery, bounded skill loading, permission behavior, and rejection of unavailable/unknown skills.
 - LSP diagnostics/symbols/definitions/references permission, bounded `didOpen` sync, file URI encoding/decoding, timeout/size caps, provider error redaction, malformed response handling, and provider JSON bounds.
 - OpenAI Responses tool-call event parsing, including `response.output_item.added` function-call items.
 - Live headless smoke for every model-visible tool class: read/search/webfetch in print mode; write/edit/apply_patch/bash/question through RPC resolver replies; LSP through fake-server tests unless a local diagnostics provider is configured.

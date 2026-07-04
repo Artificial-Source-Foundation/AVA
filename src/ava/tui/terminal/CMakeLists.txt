@@ -17,6 +17,8 @@ target_include_directories(terminal_ObjLib
     "${CWDS_INTERFACE_INCLUDE_DIRECTORIES}" # For sys.h and debug.h.
   INTERFACE
     "${CMAKE_SOURCE_DIR}/src/ava/tui"
+  PRIVATE
+    ${CURSES_INCLUDE_DIRS}
 )
 
 # Set link dependencies.

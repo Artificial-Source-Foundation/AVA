@@ -400,6 +400,70 @@ void test_app_print_mode_uses_headless_permission_policy()
          "print mode continuation includes allow-tool-approved read_file result");
 }
 
+void test_app_print_mode_default_permission_denial_is_actionable()
+{
+  auto const root = temp_root() / "app-print-default-permission-deny";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const outside_path = root / "outside.txt";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  {
+    std::ofstream file(outside_path, std::ios::binary | std::ios::trunc);
+    file << "outside print deny";
+  }
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "print permission denial test opens runtime session");
+  if (!session) return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+                                           .status_code = 200,
+                                           .headers = {},
+                                           .body = "data: {\"type\":\"response.function_call.added\",\"item_id\":"
+                                                   "\"call_outside\",\"name\":\"read_file\"}\n\n"
+                                                   "data: "
+                                                   "{\"type\":\"response.function_call_arguments.delta\","
+                                                   "\"item_id\":\"call_outside\",\"delta\":\"{"
+                                                   "\\\"path\\\":\\\"" +
+                                                   ava::core::json::escape(outside_path.generic_string()) +
+                                                   "\\\"}\"}\n\n"
+                                                   "data: [DONE]\n\n",
+                                       },
+                                       ava::provider::HttpResponse{
+                                           .status_code = 200,
+                                           .headers = {},
+                                           .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":"
+                                                   "\"denied handled\"}\n\n"
+                                                   "data: [DONE]\n\n",
+                                       }});
+
+  ava::app::RuntimeRunOptions runtime_options;
+  runtime_options.access_token = "token";
+  ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text,
+                                                  .runtime_options = std::move(runtime_options)};
+  std::ostringstream out;
+  std::ostringstream err;
+  auto result =
+      ava::app::run_print_prompt(*session, "read outside without permission policy", provider, transport, run_options, out, err);
+  auto const diagnostic = err.str();
+  expect(result && result->final_text == "denied handled" && result->tool_calls == 1,
+         "print mode continues the turn after returning a denied tool result to the provider");
+  expect(diagnostic.find("permission_denied: tool requires permission") != std::string::npos &&
+             diagnostic.find("request_id: permreq_") != std::string::npos &&
+             diagnostic.find("resolution_reason: print mode denied permission by default") != std::string::npos &&
+             diagnostic.find("inspect: /permissions audit show permreq_") != std::string::npos &&
+             diagnostic.find("diagnose: /permissions diagnose permreq_") != std::string::npos,
+         "print mode emits actionable permission denial diagnostics to stderr");
+}
+
 void test_app_print_mode_uses_persistent_permission_rules()
 {
   auto const root = temp_root() / "app-print-persistent-permission-rule";
@@ -834,6 +898,7 @@ void run_app_print_tests()
   test_app_print_text_mode_with_streaming_keeps_stdout_final_only();
   test_app_print_text_mode_reports_stdout_write_failure();
   test_app_print_mode_uses_headless_permission_policy();
+  test_app_print_mode_default_permission_denial_is_actionable();
   test_app_print_mode_uses_persistent_permission_rules();
   test_app_print_mode_refreshes_expired_oauth_before_provider_request();
   test_app_connect_provider_credentials_headlessly();

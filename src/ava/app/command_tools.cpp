@@ -14,8 +14,10 @@
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <filesystem>
+#include <memory>
 #include <utility>
 
 namespace ava::app {
@@ -160,14 +162,25 @@ ava::core::VoidResult record_tool_event(RuntimeSession const& session, RuntimeEv
   return {};
 }
 
+void add_permission_request_ids(ava::agent::ToolTimelineEntry& entry, std::vector<std::string> const& permission_request_ids)
+{
+  for (auto const& id : permission_request_ids) {
+    if (id.empty()) continue;
+    if (std::ranges::find(entry.permission_request_ids, id) == entry.permission_request_ids.end()) {
+      entry.permission_request_ids.push_back(id);
+    }
+  }
+}
+
 }  // namespace
 
 ava::tools::ToolContext make_tool_context(RuntimeSession& session,
                                            ava::permissions::PermissionResolver permission_resolver)
 {
+  auto const include_project_resources = project_resources_trusted(session.project_trust);
   auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
       .global_config_file = session.paths.ava_config_dir / "lsp.json",
-      .project_config_file = session.workspace_dir / ".ava" / "lsp.json",
+      .project_config_file = include_project_resources ? session.workspace_dir / ".ava" / "lsp.json" : std::filesystem::path{},
       .workspace_root = session.workspace_dir,
       .mode = session.mode,
       .permission_resolver = permission_resolver,
@@ -189,10 +202,13 @@ ava::tools::ToolContext make_tool_context(RuntimeSession& session,
       },
       .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
       .plugin_global_plugins_dir = session.paths.ava_config_dir / "plugins",
-      .plugin_project_plugins_dir = session.workspace_dir / ".ava" / "plugins",
+      .plugin_project_plugins_dir = include_project_resources ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{},
       .plugin_enablement_file = session.paths.ava_state_dir / "plugin-enablement.json",
+      .include_project_plugins = include_project_resources,
       .mcp_global_config_file = session.paths.ava_config_dir / "mcp.json",
-      .mcp_project_config_file = session.workspace_dir / ".ava" / "mcp.json",
+      .mcp_project_config_file = include_project_resources ? session.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{},
+      .include_project_mcp_config = include_project_resources,
+      .include_project_skills = include_project_resources,
       .session_id = session.store.session_id(),
       .provider_id = session.model.provider_id,
       .model_id = session.model.model_id,
@@ -213,11 +229,11 @@ ava::core::VoidResult record_tool_start(RuntimeSession const& session, RuntimeEv
 ava::core::VoidResult record_tool_result(RuntimeSession const& session, RuntimeEventSink const& sink,
                                          CommandResult& result, std::string const& call_id, std::string name,
                                          ava::agent::ToolTimelineStatus status, std::string result_summary,
-                                         std::string result_content)
+                                         std::string result_content, std::vector<std::string> permission_request_ids)
 {
-  return record_tool_event(
-      session, sink, result,
-      command_result_entry(call_id, std::move(name), status, std::move(result_summary), std::move(result_content)));
+  auto entry = command_result_entry(call_id, std::move(name), status, std::move(result_summary), std::move(result_content));
+  add_permission_request_ids(entry, permission_request_ids);
+  return record_tool_event(session, sink, result, std::move(entry));
 }
 
 ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, CommandRequest& request)
@@ -226,6 +242,11 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
   result.handled = true;
   auto const& line = request.command;
   auto context = make_tool_context(session, request.permission_resolver);
+  context.permission_request_ids = std::make_shared<std::vector<std::string>>();
+  if (context.lsp_diagnostics_provider) context.lsp_diagnostics_provider->set_permission_request_ids(context.permission_request_ids);
+  auto linked_permission_ids = [&]() -> std::vector<std::string> {
+    return context.permission_request_ids ? *context.permission_request_ids : std::vector<std::string>{};
+  };
 
   if (line.starts_with("/read ")) {
     auto const argument = line.substr(6);
@@ -237,7 +258,7 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
     if (!output) {
       auto const text = output.error().format();
       if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "read",
-                                             ava::agent::ToolTimelineStatus::Error, text);
+                                             ava::agent::ToolTimelineStatus::Error, text, {}, linked_permission_ids());
           !recorded) {
         return std::unexpected(std::move(recorded.error()));
       }
@@ -266,7 +287,8 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
         "}";
     if (auto recorded =
             record_tool_result(session, request.event_sink, result, call_id, "read",
-                               ava::agent::ToolTimelineStatus::Success, read_line_summary(*output), read_result_json);
+                               ava::agent::ToolTimelineStatus::Success, read_line_summary(*output), read_result_json,
+                               linked_permission_ids());
         !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }
@@ -274,17 +296,19 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
     return result;
   }
 
-  if (line.starts_with("/glob ")) {
+  if (line.starts_with("/glob ") || line.starts_with("/find ")) {
+    bool const pi_find_alias = line.starts_with("/find ");
     auto const pattern = line.substr(6);
     auto const call_id = ava::core::make_id("cmd");
-    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "glob", pattern); !recorded) {
+    auto const timeline_name = pi_find_alias ? std::string("find") : std::string("glob");
+    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, timeline_name, pattern); !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }
     auto const glob = ava::tools::glob_files(context, pattern);
     if (!glob) {
       auto const text = glob.error().format();
-      if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "glob",
-                                             ava::agent::ToolTimelineStatus::Error, text);
+      if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, timeline_name,
+                                             ava::agent::ToolTimelineStatus::Error, text, {}, linked_permission_ids());
           !recorded) {
         return std::unexpected(std::move(recorded.error()));
       }
@@ -308,9 +332,59 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
                         ",\"output_matches\":" + std::to_string(glob->paths.size());
     append_spill_fields(glob_result_json, glob->spill_path, glob->spill_truncated);
     glob_result_json += "}";
-    if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "glob",
+    if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, timeline_name,
                                            ava::agent::ToolTimelineStatus::Success,
-                                           std::to_string(glob->paths.size()) + " matches", glob_result_json);
+                                           std::to_string(glob->paths.size()) + " matches", glob_result_json,
+                                           linked_permission_ids());
+        !recorded) {
+      return std::unexpected(std::move(recorded.error()));
+    }
+    add_output(result, std::move(output));
+    return result;
+  }
+
+  if (line == "/ls" || line.starts_with("/ls ")) {
+    auto const argument = line == "/ls" ? std::string(".") : line.substr(4);
+    auto const call_id = ava::core::make_id("cmd");
+    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "ls", argument); !recorded) {
+      return std::unexpected(std::move(recorded.error()));
+    }
+    auto const listed = ava::tools::list_directory(context, session.current_dir / argument);
+    if (!listed) {
+      auto const text = listed.error().format();
+      if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "ls",
+                                             ava::agent::ToolTimelineStatus::Error, text, {}, linked_permission_ids());
+          !recorded) {
+        return std::unexpected(std::move(recorded.error()));
+      }
+      add_output(result, text);
+      return result;
+    }
+    std::string output;
+    for (auto const& entry : listed->entries) {
+      output += entry.name;
+      if (entry.directory) output += '/';
+      output += '\n';
+    }
+    if (listed->truncated) {
+      output += "[truncated " + std::to_string(listed->entries.size()) + '/' +
+                std::to_string(listed->total_entries) + " entries]\n";
+    }
+    std::string list_result_json = "{\"tool\":\"list_directory\",\"ok\":true,\"path\":\"" +
+                                   ava::core::json::escape(argument) + "\",\"entries\":[";
+    for (std::size_t index = 0; index < listed->entries.size(); ++index) {
+      if (index > 0) list_result_json += ',';
+      auto const& entry = listed->entries[index];
+      list_result_json += "{\"name\":\"" + ava::core::json::escape(entry.name) + "\",\"type\":\"" +
+                          std::string(entry.directory ? "directory" : "file") + "\",\"size\":" +
+                          std::to_string(entry.size) + "}";
+    }
+    list_result_json += "],\"truncated\":" + json_bool(listed->truncated) +
+                        ",\"total_entries\":" + std::to_string(listed->total_entries) + "}";
+    if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "ls",
+                                           ava::agent::ToolTimelineStatus::Success,
+                                           std::to_string(listed->entries.size()) + " entries", list_result_json,
+                                           linked_permission_ids());
         !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }
@@ -331,7 +405,7 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
     if (!grep) {
       auto const text = grep.error().format();
       if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "grep",
-                                             ava::agent::ToolTimelineStatus::Error, text);
+                                             ava::agent::ToolTimelineStatus::Error, text, {}, linked_permission_ids());
           !recorded) {
         return std::unexpected(std::move(recorded.error()));
       }
@@ -358,7 +432,8 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
     grep_result_json += "}";
     if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "grep",
                                            ava::agent::ToolTimelineStatus::Success,
-                                           std::to_string(grep->matches.size()) + " matches", grep_result_json);
+                                           std::to_string(grep->matches.size()) + " matches", grep_result_json,
+                                           linked_permission_ids());
         !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }
@@ -384,7 +459,7 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
     if (!write) {
       auto const error_text = write.error().format();
       if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "write",
-                                             ava::agent::ToolTimelineStatus::Error, error_text);
+                                             ava::agent::ToolTimelineStatus::Error, error_text, {}, linked_permission_ids());
           !recorded) {
         return std::unexpected(std::move(recorded.error()));
       }
@@ -394,9 +469,13 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
     auto const output = "wrote " + std::to_string(write->bytes_written) + " bytes to " + write->path.string();
     auto const write_result_json = "{\"tool\":\"write\",\"ok\":true,\"path\":\"" +
                                    ava::core::json::escape(write->path.generic_string()) +
-                                   "\",\"bytes_written\":" + std::to_string(write->bytes_written) + "}";
+                                   "\",\"bytes_written\":" + std::to_string(write->bytes_written) +
+                                   ",\"diff\":\"" + ava::core::json::escape(write->diff) +
+                                   "\",\"diff_truncated\":" + json_bool(write->diff_truncated) +
+                                   ",\"changed_paths\":[\"" + ava::core::json::escape(write->path.generic_string()) + "\"]}";
     if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "write",
-                                           ava::agent::ToolTimelineStatus::Success, output, write_result_json);
+                                           ava::agent::ToolTimelineStatus::Success, output, write_result_json,
+                                           linked_permission_ids());
         !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }
@@ -414,7 +493,7 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
     if (!bash) {
       auto const text = bash.error().format();
       if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "bash",
-                                             ava::agent::ToolTimelineStatus::Error, text);
+                                             ava::agent::ToolTimelineStatus::Error, text, {}, linked_permission_ids());
           !recorded) {
         return std::unexpected(std::move(recorded.error()));
       }
@@ -448,7 +527,8 @@ ava::core::Result<CommandResult> run_tool_command(RuntimeSession& session, Comma
                                 bash->canceled                                ? ava::agent::ToolTimelineStatus::Canceled
                                 : bash->exit_code == 0 && !bash->timed_out ? ava::agent::ToolTimelineStatus::Success
                                                                            : ava::agent::ToolTimelineStatus::Error,
-                                "exit " + std::to_string(bash->exit_code), bash_result_json);
+                                "exit " + std::to_string(bash->exit_code), bash_result_json,
+                                linked_permission_ids());
         !recorded) {
       return std::unexpected(std::move(recorded.error()));
     }

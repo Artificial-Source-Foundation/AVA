@@ -114,7 +114,9 @@ ava::permissions::PermissionResolver build_headless_permission_resolver(Headless
     if (prompt_matches_allowed_tool(prompt, allowed_tools)) {
       return ava::permissions::PermissionResolution::Allow;
     }
-    return ava::permissions::PermissionResolution::Deny;
+    return ava::permissions::PermissionResolutionDecision{
+        ava::permissions::PermissionResolution::Deny,
+        "headless policy denied permission; use --allow read-only, --allow-tool <tool>, or an RPC permission_reply for supported prompts"};
   };
 }
 

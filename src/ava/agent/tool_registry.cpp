@@ -20,6 +20,41 @@ std::optional<std::string> tool_name_from_schema(std::string_view schema_json)
   return std::nullopt;
 }
 
+std::string_view native_tool_name_for_visibility(std::string_view name)
+{
+  if (name == "read") return "read_file";
+  if (name == "write") return "write_file";
+  if (name == "edit") return "edit_file";
+  if (name == "find") return "glob";
+  if (name == "ls") return "list_directory";
+  return name;
+}
+
+bool visibility_name_matches(std::string_view configured, std::string_view registered)
+{
+  return configured == registered || native_tool_name_for_visibility(configured) == registered;
+}
+
+bool name_list_contains(std::vector<std::string> const& names, std::string_view name)
+{
+  return std::ranges::any_of(names, [name](std::string const& candidate) {
+    return visibility_name_matches(candidate, name);
+  });
+}
+
+bool tool_is_visible(ToolVisibilityOptions const& options, RegisteredTool const& tool)
+{
+  if (name_list_contains(options.excluded_tools, tool.metadata.name))
+    return false;
+  if (!options.included_tools.empty())
+    return name_list_contains(options.included_tools, tool.metadata.name);
+  if (options.mode == ToolVisibilityMode::NoTools)
+    return false;
+  if (options.mode == ToolVisibilityMode::NoBuiltinTools && tool.source == ToolSource::Builtin)
+    return false;
+  return true;
+}
+
 }  // namespace
 
 std::string_view to_string(ToolSource source) noexcept
@@ -107,6 +142,13 @@ ava::core::VoidResult ToolRegistry::register_tool(RegisteredTool tool)
 
   tools_.push_back(tool);
   return {};
+}
+
+void ToolRegistry::apply_visibility_filter(ava::tools::ToolContext const& context)
+{
+  std::erase_if(tools_, [&context](RegisteredTool const& tool) {
+    return !tool_is_visible(context.tool_visibility, tool);
+  });
 }
 
 RegisteredTool const* ToolRegistry::find(std::string_view name) const noexcept

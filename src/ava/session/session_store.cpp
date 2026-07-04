@@ -13,11 +13,30 @@
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
+#include <mutex>
 #include <sstream>
 #include <string_view>
 #include <utility>
 
 namespace ava::session {
+
+struct SessionStore::EphemeralState
+{
+  explicit EphemeralState(std::filesystem::path root) : root_dir(std::move(root)) {}
+
+  EphemeralState(EphemeralState const&) = delete;
+  EphemeralState& operator=(EphemeralState const&) = delete;
+
+  ~EphemeralState()
+  {
+    std::error_code remove_error;
+    std::filesystem::remove_all(root_dir, remove_error);
+  }
+
+  std::filesystem::path root_dir;
+  mutable std::mutex mutex;
+  std::vector<SessionEntry> entries;
+};
 
 namespace {
 
@@ -40,6 +59,11 @@ SessionStore::SessionStore(SessionStoreOptions options) : options_(std::move(opt
 {
 }
 
+SessionStore::SessionStore(SessionStoreOptions options, std::shared_ptr<EphemeralState> ephemeral_state)
+    : options_(std::move(options)), ephemeral_state_(std::move(ephemeral_state))
+{
+}
+
 std::string const& SessionStore::session_id() const noexcept
 {
   return options_.session_id;
@@ -48,6 +72,11 @@ std::string const& SessionStore::session_id() const noexcept
 std::filesystem::path SessionStore::session_path() const
 {
   return options_.root_dir / project_key(options_.workspace_dir) / (options_.session_id + ".jsonl");
+}
+
+bool SessionStore::is_ephemeral() const noexcept
+{
+  return static_cast<bool>(ephemeral_state_);
 }
 
 ava::core::VoidResult SessionStore::append(SessionEntry const& entry)
@@ -70,6 +99,15 @@ ava::core::VoidResult SessionStore::append(SessionEntry const& entry)
   }
   if (auto valid_parent_id = validate_parent_id(entry.parent_id, entry.id); !valid_parent_id) {
     return valid_parent_id;
+  }
+
+  auto line = serialize_session_entry_line(entry);
+  if (!line) return std::unexpected(std::move(line.error()));
+
+  if (ephemeral_state_) {
+    std::lock_guard lock(ephemeral_state_->mutex);
+    ephemeral_state_->entries.push_back(entry);
+    return {};
   }
 
   auto const path = session_path();
@@ -133,9 +171,6 @@ ava::core::VoidResult SessionStore::append(SessionEntry const& entry)
     return std::unexpected(std::move(error));
   }
 
-  auto line = serialize_session_entry_line(entry);
-  if (!line) return std::unexpected(std::move(line.error()));
-
   file << *line << '\n';
   file.flush();
 
@@ -152,6 +187,11 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const
 {
   if (auto valid_session_id = validate_session_id(options_.session_id); !valid_session_id) {
     return std::unexpected(std::move(valid_session_id.error()));
+  }
+
+  if (ephemeral_state_) {
+    std::lock_guard lock(ephemeral_state_->mutex);
+    return ephemeral_state_->entries;
   }
 
   std::error_code status_error;
@@ -205,6 +245,25 @@ ava::core::Result<SessionStore> SessionStore::create(std::filesystem::path const
       .workspace_dir = workspace_dir,
       .session_id = ava::core::make_id("session"),
   });
+}
+
+ava::core::Result<SessionStore> SessionStore::create_ephemeral(std::filesystem::path const& workspace_dir)
+{
+  std::error_code temp_error;
+  auto temp_root = std::filesystem::temp_directory_path(temp_error);
+  if (temp_error) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to resolve temporary directory for ephemeral session");
+    error.with_context("cause", temp_error.message());
+    return std::unexpected(std::move(error));
+  }
+
+  auto scratch_root = temp_root / ("ava-" + ava::core::make_id("ephemeral-session"));
+  return SessionStore(SessionStoreOptions{
+                          .root_dir = scratch_root,
+                          .workspace_dir = workspace_dir,
+                          .session_id = ava::core::make_id("session"),
+                      },
+                      std::make_shared<EphemeralState>(scratch_root));
 }
 
 ava::core::Result<SessionStore> SessionStore::open(std::filesystem::path const& workspace_dir, std::string session_id,

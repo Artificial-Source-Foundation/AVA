@@ -1,5 +1,7 @@
 # AVA Architecture Plan
 
+Status: historical first-shape architecture plan. Current backend capabilities have moved beyond several "later" notes here, including prompt/skill resources, persistent permission rules, plugin/MCP foundations, LSP, and multimodal replay/storage. Use `docs/product/mvp-baseline.md`, `docs/product/capabilities-1.1.md`, and `docs/roadmap/backend.md` for current planning truth.
+
 This is a product architecture plan, not implementation code. It defines the first shape of the C++ system so implementation can stay small.
 
 ## Initial Shape

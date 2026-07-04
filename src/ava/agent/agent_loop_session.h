@@ -4,6 +4,7 @@
 #include "ava/agent/tool_types.h"
 #include "ava/tools/file_tools.h"
 #include "ava/session/session_store.h"
+#include "ava/session/attachments.h"
 #include "ava/provider/provider.h"
 #include "ava/core/result.h"
 
@@ -11,11 +12,17 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace ava::agent {
 
 [[nodiscard]] ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text);
+[[nodiscard]] ava::core::Result<std::string> append_user_message(ava::session::SessionStore& store, std::string const& text,
+                                                                 std::vector<ava::session::ImageAttachmentRef> const& attachments);
 [[nodiscard]] ava::core::VoidResult append_replay_user_message(ava::session::SessionStore& store, std::string const& text, std::string const& replay_of);
+[[nodiscard]] ava::core::VoidResult append_replay_user_message(ava::session::SessionStore& store, std::string const& text,
+                                                               std::vector<ava::session::ImageAttachmentRef> const& attachments,
+                                                               std::string const& replay_of);
 [[nodiscard]] ava::core::VoidResult append_assistant_message(ava::session::SessionStore& store, std::string const& text, std::size_t tool_call_count,
                                                              ava::provider::TokenUsage const& usage, std::optional<long double> const& cost_usd);
 [[nodiscard]] ava::core::VoidResult append_reasoning_block(ava::session::SessionStore& store, ParsedReasoningBlock const& block, std::string_view provider_id,

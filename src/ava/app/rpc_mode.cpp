@@ -14,7 +14,10 @@
 #include "ava/app/rpc/session_commands.h"
 
 #include "ava/provider/curl_transport.h"
+#include "ava/provider/provider_utils.h"
 #include "ava/provider/registry.h"
+
+#include "ava/session/attachments.h"
 
 #include <atomic>
 #include <functional>
@@ -22,11 +25,77 @@
 #include <mutex>
 #include <optional>
 #include <ostream>
+#include <filesystem>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
 
 namespace ava::app {
+namespace {
+
+std::filesystem::path resolve_rpc_attachment_path(std::filesystem::path const& current_dir,
+                                                  std::string const& attachment_path)
+{
+  auto path = std::filesystem::path(attachment_path);
+  if (path.is_absolute())
+    return path;
+  return current_dir / path;
+}
+
+int rpc_base64_value(char ch)
+{
+  if (ch >= 'A' && ch <= 'Z')
+    return ch - 'A';
+  if (ch >= 'a' && ch <= 'z')
+    return ch - 'a' + 26;
+  if (ch >= '0' && ch <= '9')
+    return ch - '0' + 52;
+  if (ch == '+')
+    return 62;
+  if (ch == '/')
+    return 63;
+  return -1;
+}
+
+ava::core::Result<std::string> decode_rpc_image_base64(std::string_view data)
+{
+  if (!ava::provider::is_valid_base64(data)) {
+    return std::unexpected(rpc::invalid_rpc("RPC image upload data must be base64"));
+  }
+  std::size_t padding = 0;
+  if (!data.empty() && data.back() == '=') {
+    ++padding;
+    if (data.size() >= 2 && data[data.size() - 2] == '=') ++padding;
+  }
+  auto const decoded_size = (data.size() / 4U) * 3U - padding;
+  if (decoded_size == 0 || decoded_size > ava::session::kMaxImageAttachmentBytes) {
+    auto error = rpc::invalid_rpc("RPC image upload byte size is invalid");
+    error.with_context("max_bytes", std::to_string(ava::session::kMaxImageAttachmentBytes));
+    error.with_context("byte_size", std::to_string(decoded_size));
+    return std::unexpected(std::move(error));
+  }
+
+  std::string bytes;
+  bytes.reserve(decoded_size);
+  for (std::size_t index = 0; index < data.size(); index += 4U) {
+    auto const a = rpc_base64_value(data[index]);
+    auto const b = rpc_base64_value(data[index + 1]);
+    auto const c = data[index + 2] == '=' ? 0 : rpc_base64_value(data[index + 2]);
+    auto const d = data[index + 3] == '=' ? 0 : rpc_base64_value(data[index + 3]);
+    if (a < 0 || b < 0 || c < 0 || d < 0) {
+      return std::unexpected(rpc::invalid_rpc("RPC image upload data must be base64"));
+    }
+    auto const value = static_cast<unsigned int>((a << 18) | (b << 12) | (c << 6) | d);
+    bytes.push_back(static_cast<char>((value >> 16) & 0xFFU));
+    if (data[index + 2] != '=') bytes.push_back(static_cast<char>((value >> 8) & 0xFFU));
+    if (data[index + 3] != '=') bytes.push_back(static_cast<char>(value & 0xFFU));
+  }
+  return bytes;
+}
+
+}  // namespace
 
 ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options,
                                    ava::provider::Provider const& provider, ava::provider::Transport& transport,
@@ -406,7 +475,8 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
       continue;
     }
 
-    if (command->type == "context" || command->type == "export" || command->type == "compact" ||
+    if (command->type == "context" || command->type == "export" || command->type == "export_html" ||
+        command->type == "compact" ||
         rpc::is_plugin_rpc_command(command->type) || rpc::is_mcp_rpc_command(command->type)) {
       bool compact_active_run = false;
       {
@@ -444,6 +514,9 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
         slash_command = "/context";
       } else if (command->type == "export") {
         slash_command = "/export";
+      } else if (command->type == "export_html") {
+        slash_command = "/export html";
+        if (command->output_path && !command->output_path->empty()) slash_command += " " + *command->output_path;
       } else if (command->type == "compact") {
         slash_command = "/compact";
         if (command->instructions) slash_command += " " + *command->instructions;
@@ -542,10 +615,57 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
 
       reap_finished_prompt();
       ava::config::XdgPaths paths;
+      std::vector<ava::session::ImageAttachmentRef> image_attachments;
+      bool attachment_import_failed = false;
+      std::filesystem::path current_dir;
       {
         std::lock_guard lock(session_mutex);
         paths = session.paths;
+        current_dir = session.current_dir.empty() ? session.workspace_dir : session.current_dir;
+        image_attachments.reserve((command->attachments ? command->attachments->size() : 0U) +
+                                  (command->images ? command->images->size() : 0U));
+        if (command->attachments) {
+          for (auto const& attachment_path : *command->attachments) {
+            auto imported = ava::session::import_image_attachment(
+                session.store, resolve_rpc_attachment_path(current_dir, attachment_path));
+            if (!imported) {
+              if (auto written = rpc::write_error(output, command->id, imported.error()); !written) {
+                return written;
+              }
+              attachment_import_failed = true;
+              break;
+            }
+            image_attachments.push_back(std::move(*imported));
+          }
+        }
+        if (!attachment_import_failed && command->images) {
+          for (auto const& image : *command->images) {
+            auto bytes = decode_rpc_image_base64(image.data_base64);
+            if (!bytes) {
+              if (auto written = rpc::write_error(output, command->id, bytes.error()); !written) {
+                return written;
+              }
+              attachment_import_failed = true;
+              break;
+            }
+            auto imported = ava::session::import_image_attachment_bytes(session.store, *bytes,
+                                                                         std::string_view(image.mime_type));
+            if (!imported) {
+              if (auto written = rpc::write_error(output, command->id, imported.error()); !written) {
+                return written;
+              }
+              attachment_import_failed = true;
+              break;
+            }
+            image_attachments.push_back(std::move(*imported));
+          }
+        }
       }
+      if (attachment_import_failed) {
+        continue;
+      }
+      auto prompt_runtime_options = runtime_options;
+      prompt_runtime_options.image_attachments.clear();
       rpc::set_active_run(run_state, true, command->id);
       prompt_worker.emplace(rpc::make_rpc_prompt_worker(rpc::RpcPromptWorkerOptions{
           .session = session,
@@ -557,10 +677,11 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
           .injected_provider_id = injected_provider_id,
           .transport = transport,
           .auth_transport = auth_transport,
-          .runtime_options = runtime_options,
+          .runtime_options = std::move(prompt_runtime_options),
           .paths = std::move(paths),
           .request_id = command->id,
           .message = *command->message,
+          .image_attachments = std::move(image_attachments),
       }));
       continue;
     }

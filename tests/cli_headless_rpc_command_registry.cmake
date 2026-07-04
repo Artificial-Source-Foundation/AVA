@@ -35,7 +35,10 @@ string(REPLACE "\"" "\\\"" FAKE_MCP_SERVER_JSON "${FAKE_MCP_SERVER_JSON}")
 
 file(REMOVE_RECURSE "${TEST_ROOT}")
 file(MAKE_DIRECTORY "${WORKSPACE}/.ava/commands" "${WORKSPACE}/.ava/skills/release" "${HOME_DIR}"
-                    "${CONFIG_DIR}/ava" "${STATE_DIR}" "${DATA_DIR}")
+                    "${CONFIG_DIR}/ava" "${STATE_DIR}/ava" "${DATA_DIR}")
+file(REAL_PATH "${WORKSPACE}" REAL_WORKSPACE)
+file(WRITE "${STATE_DIR}/ava/project-trust.json"
+     "{\"schema_version\":1,\"decisions\":[{\"path\":\"${REAL_WORKSPACE}\",\"trusted\":true}]}\n")
 file(WRITE "${CONFIG_DIR}/ava/models.json"
      "{\"default_provider\":\"moonshot\",\"default_model\":\"ava-headless-fake\","
      "\"models\":[{\"provider\":\"moonshot\",\"id\":\"ava-headless-fake\",\"family\":\"fake\","

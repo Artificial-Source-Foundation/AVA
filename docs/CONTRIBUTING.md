@@ -5,6 +5,8 @@
 - CMake 3.25 or newer.
 - A C++23 compiler. GCC 13+, Clang 16+, or a recent MSVC 2022 toolchain are good starting points.
 - `ctest` from CMake.
+- Boost development headers and CMake package (`boost-devel` on Fedora).
+- Wide-character ncurses development headers/library (`ncurses-devel` on Fedora).
 - `clang-format` version 22 or newer.
 - `clang-tidy` when touching core logic or safety-sensitive paths.
 - internet access to `github.com` is required during configuration.

@@ -1,6 +1,8 @@
 #include "ava/app/command_format.h"
 #include "ava/app/command_models.h"
+#include "ava/config/model_config.h"
 #include "ava/config/reasoning_profiles.h"
+#include "ava/config/provider_profiles.h"
 #include "ava/provider/registry.h"
 
 #include <algorithm>
@@ -69,6 +71,71 @@ std::string optional_bool_text(std::optional<bool> const& value)
   return *value ? "yes" : "no";
 }
 
+bool contains_string(std::vector<std::string> const& values, std::string_view value)
+{
+  return std::ranges::find(values, value) != values.end();
+}
+
+bool model_is_builtin(ava::config::ModelInfo const& model)
+{
+  auto const builtin = ava::config::builtin_model_registry();
+  return ava::config::find_model(builtin, model.provider_id, model.model_id).has_value();
+}
+
+std::vector<std::string> model_diagnostics(ava::config::ModelInfo const& model, bool provider_registered)
+{
+  std::vector<std::string> diagnostics;
+  if (!provider_registered)
+  {
+    diagnostics.push_back("provider is not registered; selector is disabled and switching will fail");
+  }
+
+  bool const custom_model = !model_is_builtin(model);
+  if (!custom_model)
+    return diagnostics;
+
+  if (!model.context_window_tokens)
+  {
+    diagnostics.push_back("custom model missing context_window_tokens; token percentage and auto-compaction use unknown context");
+  }
+  if (model.input_modalities.empty())
+  {
+    diagnostics.push_back("custom model missing input_modalities; image replay is disabled unless text/image are declared");
+  }
+  else if (!contains_string(model.input_modalities, "text"))
+  {
+    diagnostics.push_back("input_modalities does not include text; normal prompt replay may be unsupported");
+  }
+  if (model.api_family.empty())
+  {
+    diagnostics.push_back("custom model missing api_family; provider-specific reasoning and replay checks are limited");
+  }
+  if (!model.supports_tools)
+  {
+    diagnostics.push_back("custom model has unknown tool support; AVA will assume tools are supported");
+  }
+  if (!model.supports_streaming)
+  {
+    diagnostics.push_back("custom model has unknown streaming support; AVA may request streaming when the transport supports it");
+  }
+  if (!model.reports_usage && !model.pricing)
+  {
+    diagnostics.push_back("custom model has unknown usage/pricing; cost reporting may be incomplete");
+  }
+  if (model.supports_reasoning.value_or(false))
+  {
+    if (model.reasoning_levels.empty())
+    {
+      diagnostics.push_back("reasoning model has no reasoning_levels; Shift+Tab/Ctrl+T cannot cycle levels");
+    }
+    if (!ava::config::reasoning_provider_profile_for_model(model))
+    {
+      diagnostics.push_back("reasoning api_family is not recognized; provider-specific reasoning validation is limited");
+    }
+  }
+  return diagnostics;
+}
+
 std::string format_models_text(RuntimeSession const& session, ava::config::ModelRegistry const& registry, std::string_view query)
 {
   auto const providers = ava::provider::builtin_provider_registry();
@@ -101,6 +168,15 @@ std::string format_models_text(RuntimeSession const& session, ava::config::Model
     if (model.max_output_tokens)
       output += " max_output=" + std::to_string(*model.max_output_tokens);
     output += '\n';
+    auto const diagnostics = model_diagnostics(model, registered);
+    if (!diagnostics.empty())
+    {
+      output += "    diagnostics:\n";
+      for (auto const& diagnostic : diagnostics)
+      {
+        output += "      - " + diagnostic + "\n";
+      }
+    }
     if (!model.reasoning_levels.empty())
     {
       output += "    reasoning levels: " + joined_strings(model.reasoning_levels, ", ") + "\n";
@@ -121,12 +197,18 @@ std::string format_models_text(RuntimeSession const& session, ava::config::Model
     output += "  no configured models match the filter\n";
   }
   output +=
-      "\nModel switching is not enabled here. In the TUI, Ctrl+T cycles the current model's declared "
+      "\nModel switching is not enabled here. In the TUI, Shift+Tab or Ctrl+T cycles the current model's declared "
       "reasoning levels using the provider/model-specific reasoning parameters above.";
   return output;
 }
 
 }  // namespace
+
+std::vector<std::string> model_configuration_diagnostics(ava::config::ModelInfo const& model,
+                                                         bool provider_registered)
+{
+  return model_diagnostics(model, provider_registered);
+}
 
 ava::core::Result<CommandResult> run_models_command(RuntimeSession& session, std::string_view query)
 {

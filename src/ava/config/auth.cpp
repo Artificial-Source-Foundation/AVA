@@ -523,6 +523,30 @@ ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_req
   return std::optional<ProviderCredential>{};
 }
 
+ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_startup(
+    XdgPaths const& paths, std::string_view provider_id)
+{
+  if (provider_id == "openai") {
+    auto stored = load_openai_credential(paths);
+    if (!stored) return std::unexpected(std::move(stored.error()));
+    if (*stored) {
+      return ProviderCredential{
+          .provider_id = "openai",
+          .access_token = (*stored)->access_token,
+          .credential_type = (*stored)->type == OpenAICredentialType::OAuth ? "oauth" : "api_key",
+          .account_id = (*stored)->account_id,
+          .source = (*stored)->source_path.empty() ? "auth_file" : (*stored)->source_path.string()};
+    }
+  } else {
+    auto stored = load_provider_credential_from_auth_file(paths, provider_id);
+    if (!stored) return std::unexpected(std::move(stored.error()));
+    if (*stored) return *stored;
+  }
+
+  if (auto env_credential = provider_credential_from_env(provider_id)) return env_credential;
+  return std::optional<ProviderCredential>{};
+}
+
 ava::core::VoidResult store_provider_credential(XdgPaths const& paths, ProviderCredential const& credential)
 {
   auto body = provider_credential_object_json(credential);

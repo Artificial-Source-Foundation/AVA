@@ -12,9 +12,11 @@ set(INPUT_FILE "${TEST_ROOT}/rpc-input.jsonl")
 set(PROJECT_MCP_CONFIG "${WORKSPACE}/.ava/mcp.json")
 
 file(REMOVE_RECURSE "${TEST_ROOT}")
-file(MAKE_DIRECTORY "${WORKSPACE}/.ava" "${TEST_ROOT}/home" "${TEST_ROOT}/config" "${TEST_ROOT}/state"
+file(MAKE_DIRECTORY "${WORKSPACE}/.ava" "${TEST_ROOT}/home" "${TEST_ROOT}/config" "${TEST_ROOT}/state/ava"
                     "${TEST_ROOT}/data")
 file(REAL_PATH "${WORKSPACE}" REAL_WORKSPACE)
+file(WRITE "${TEST_ROOT}/state/ava/project-trust.json"
+     "{\"schema_version\":1,\"decisions\":[{\"path\":\"${REAL_WORKSPACE}\",\"trusted\":true}]}\n")
 set(EXPECTED_PROJECT_MCP_CONFIG "${REAL_WORKSPACE}/.ava/mcp.json")
 file(WRITE "${PROJECT_MCP_CONFIG}" "{\"servers\":[{\"id\":\"bad id\",\"command\":\"fake-mcp\"}]}\n")
 file(WRITE "${INPUT_FILE}"

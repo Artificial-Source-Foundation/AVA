@@ -1,0 +1,46 @@
+{
+  "stage": "interview",
+  "title": "AVA MVP Baseline With Pi And TUI Verification",
+  "goalSlug": "ava-mvp-baseline-pi-tui",
+  "submitted": false,
+  "fallbackReason": "The Plannotator browser interview was launched and listened on http://127.0.0.1:46443, but no submitted or dismissed result was returned after repeated checks. The process was stopped and the recommended answers from interview.json were used to keep the goal setup moving.",
+  "answers": [
+    {
+      "id": "priority_order",
+      "answer": "Start with TUI/frontend MVP gaps because that is the current product push, but keep the full Pi-first MVP baseline as the governing checklist. Backend/RPC/session/provider/tool work remains in scope whenever a TUI feature needs a safe contract behind it.",
+      "selectedOptionIds": [
+        "tui_first_full_baseline"
+      ]
+    },
+    {
+      "id": "mvp_breadth",
+      "answer": "Treat P0 and P1 as implementation scope. P2/research items should be compared against Pi/OpenCode only when useful, then documented as deferred unless a P0/P1 feature depends on them.",
+      "selectedOptionIds": [
+        "p0_truth",
+        "p1_product",
+        "p2_document_only"
+      ]
+    },
+    {
+      "id": "terminal_verification",
+      "answer": "Require deterministic CTest coverage for renderer/editor/state logic, plus PTY or tmux-backed smoke tests for real terminal behavior whenever a TUI change affects full-screen interaction. If a real terminal smoke cannot run in the environment, the blocker and exact command must be documented before handoff.",
+      "selectedOptionIds": [
+        "automated_pty_when_feasible"
+      ]
+    },
+    {
+      "id": "reference_policy",
+      "answer": "Use Pi as the primary behavior and capability reference, especially docs/reference-code/pi/packages/coding-agent and docs/reference-code/pi/packages/tui. Do not copy Pi source or architecture; implement AVA-native C++23 modules and document any MVP exclusions.",
+      "selectedOptionIds": [
+        "behavior_only"
+      ]
+    },
+    {
+      "id": "live_smokes",
+      "answer": "Make optional-environment checks explicit and credential/tool-gated. The agent must run them when prerequisites are present, skip with a clear reason when they are absent, and always run normal CMake tests plus git diff checks before handoff.",
+      "selectedOptionIds": [
+        "gated_required_when_available"
+      ]
+    }
+  ]
+}

@@ -19,6 +19,8 @@ add_library(ava_tui
   "keybindings.cpp"
   "runtime.cpp"
   "terminal.cpp"
+  "terminal_image.cpp"
+  "theme.cpp"
   "text.cpp"
   "tool_cards.cpp"
 )

@@ -29,6 +29,30 @@ int failures()
 
 namespace {
 
+bool skip_osc_sequence(std::string_view text, std::size_t& index)
+{
+  if (index + 1 >= text.size() || text[index] != '\x1b' || text[index + 1] != ']')
+  {
+    return false;
+  }
+  auto end = index + 2;
+  while (end < text.size())
+  {
+    if (text[end] == '\a')
+    {
+      index = end + 1;
+      return true;
+    }
+    if (text[end] == '\x1b' && end + 1 < text.size() && text[end + 1] == '\\')
+    {
+      index = end + 2;
+      return true;
+    }
+    ++end;
+  }
+  return false;
+}
+
 bool is_zero_width_codepoint(char32_t codepoint)
 {
   return (codepoint >= 0x0300 && codepoint <= 0x036F) || (codepoint >= 0x0483 && codepoint <= 0x0489) || (codepoint >= 0x0591 && codepoint <= 0x05BD) ||
@@ -103,6 +127,10 @@ std::string strip_sgr(std::string_view text)
   stripped.reserve(text.size());
   for (std::size_t index = 0; index < text.size();)
   {
+    if (skip_osc_sequence(text, index))
+    {
+      continue;
+    }
     if (text[index] == '\x1b' && index + 1 < text.size() && text[index + 1] == '[')
     {
       auto end = index + 2;

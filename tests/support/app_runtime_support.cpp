@@ -101,10 +101,14 @@ std::string ThreadSafeStringBuf::str() const
   return text_;
 }
 
-bool ThreadSafeStringBuf::wait_contains(std::string_view value, std::chrono::milliseconds timeout) const
+// Return true if the buffer contains `value` at or beyond search_pos_ and updates search_pos_.
+bool ThreadSafeStringBuf::wait_contains(std::string_view value, std::chrono::milliseconds timeout)
 {
   std::unique_lock lock(mutex_);
-  return cv_.wait_for(lock, timeout, [&] { return text_.find(value) != std::string::npos; });
+  std::string::size_type pos;
+  bool found = cv_.wait_for(lock, timeout, [&] { return (pos = text_.find(value, search_pos_)) != std::string::npos; });
+  search_pos_ = found ? pos + value.length() : text_.length();
+  return found;
 }
 
 int ThreadSafeStringBuf::overflow(int ch)

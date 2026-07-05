@@ -43,7 +43,7 @@ class ThreadSafeStringBuf final : public std::streambuf
 {
  public:
   std::string str() const;
-  bool wait_contains(std::string_view value, std::chrono::milliseconds timeout) const;
+  bool wait_contains(std::string_view value, std::chrono::milliseconds timeout);
 
  protected:
   int overflow(int ch) override;
@@ -53,6 +53,7 @@ class ThreadSafeStringBuf final : public std::streambuf
   mutable std::mutex mutex_;
   mutable std::condition_variable cv_;
   std::string text_;
+  std::string::size_type search_pos_{0}; // The position from which wait_contains must search.
 };
 
 class ChunkedStreamingTransport final : public ava::provider::Transport

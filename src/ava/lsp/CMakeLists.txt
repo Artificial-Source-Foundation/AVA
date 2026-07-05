@@ -4,5 +4,6 @@ add_library(ava_lsp
 )
 
 target_include_directories(ava_lsp PUBLIC "${CMAKE_SOURCE_DIR}/src")
+ava_apply_debugging(ava_lsp)
 ava_apply_warnings(ava_lsp)
 ava_apply_sanitizers(ava_lsp)

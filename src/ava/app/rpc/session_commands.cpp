@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/rpc/session_commands.h"
 
 #include "ava/app/rpc/handlers.h"

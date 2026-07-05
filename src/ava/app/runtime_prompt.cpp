@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/runtime_prompt.h"
 
 #include "ava/app/command_registry.h"

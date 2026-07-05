@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/provider/anthropic_provider.h"
 #include "ava/provider/openai_compatible_provider.h"

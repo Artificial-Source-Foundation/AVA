@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/config/prompt_config.h"
 
 #include <array>

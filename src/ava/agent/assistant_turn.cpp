@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/agent/assistant_turn.h"
 #include "ava/agent/provider_output_validation.h"
 #include "ava/agent/usage_accounting.h"

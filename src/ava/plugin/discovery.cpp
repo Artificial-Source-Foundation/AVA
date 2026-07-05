@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/plugin/discovery.h"
 #include "ava/config/xdg_paths.h"
 

@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/rpc_mode.h"
 
 #include "ava/app/command_registry.h"

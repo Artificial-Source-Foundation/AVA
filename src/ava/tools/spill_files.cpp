@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/tools/spill_files.h"
 #include "ava/core/ids.h"
 

@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/tui/keybindings.h"
 #include "ava/core/error.h"
 

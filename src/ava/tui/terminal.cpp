@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/tui/terminal.h"
 
 #include <curses.h>

@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "tests/support/test_harness.h"
 
 #include <array>

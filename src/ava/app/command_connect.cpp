@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/browser_open.h"
 #include "ava/app/command_connect.h"
 #include "ava/app/command_format.h"

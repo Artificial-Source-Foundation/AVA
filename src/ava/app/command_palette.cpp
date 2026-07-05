@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/command_palette.h"
 #include "ava/app/command_models.h"
 #include "ava/app/display_settings.h"

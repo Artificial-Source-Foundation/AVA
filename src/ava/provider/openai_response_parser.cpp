@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/provider/openai_response_parser.h"
 #include "ava/provider/openai_response_parser_detail.h"
 #include "ava/provider/openai_stream_parser.h"

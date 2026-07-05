@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/plugin/runner.h"
 
 #include "ava/plugin/runner_protocol.h"

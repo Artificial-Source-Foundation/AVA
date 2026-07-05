@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/command_help.h"
 #include "ava/tui/keybindings.h"
 

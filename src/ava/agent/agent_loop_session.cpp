@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/agent/agent_loop_session.h"
 
 #include "ava/agent/tool_result.h"

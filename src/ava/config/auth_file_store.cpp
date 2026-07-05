@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/config/auth_file_store.h"
 #include "ava/config/auth_record.h"
 

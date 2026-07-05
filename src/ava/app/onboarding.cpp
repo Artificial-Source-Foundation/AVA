@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/onboarding.h"
 
 #include "ava/config/auth.h"

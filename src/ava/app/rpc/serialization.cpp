@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/rpc/serialization.h"
 
 #include "ava/app/rpc/protocol.h"

@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/rpc/protocol.h"
 #include "ava/app/rpc/run_state.h"
 

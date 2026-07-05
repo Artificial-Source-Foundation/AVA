@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/context/skill_loader.h"
 #include "ava/core/error.h"

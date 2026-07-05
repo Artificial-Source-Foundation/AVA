@@ -100,7 +100,7 @@ struct AgentLoopOptions {
   bool model_supports_tools = true;
   bool model_supports_streaming = true;
   bool include_project_resources = true;
-  ToolVisibilityOptions tool_visibility;
+  ToolVisibilityOptions tool_visibility = {};
   std::vector<std::string> model_input_modalities = {"text"};
   std::optional<long long> model_max_output_tokens = std::nullopt;
   std::optional<ava::provider::ProviderReasoningOptions> reasoning = std::nullopt;

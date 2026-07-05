@@ -28,14 +28,14 @@ struct ModelInfo
   std::optional<long long> context_window_tokens = std::nullopt;
   std::optional<long long> max_output_tokens = std::nullopt;
   std::optional<ModelPricing> pricing = std::nullopt;
-  std::string api_family;
-  std::vector<std::string> input_modalities;
+  std::string api_family = {};
+  std::vector<std::string> input_modalities = {};
   std::optional<bool> supports_tools = std::nullopt;
   std::optional<bool> supports_streaming = std::nullopt;
   std::optional<bool> supports_reasoning = std::nullopt;
   std::optional<bool> reports_usage = std::nullopt;
-  std::vector<std::string> reasoning_levels;
-  std::vector<std::string> compatibility_quirks;
+  std::vector<std::string> reasoning_levels = {};
+  std::vector<std::string> compatibility_quirks = {};
   std::vector<std::string> output_modalities = {};
   std::string reasoning_format = {};
 };

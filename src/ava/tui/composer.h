@@ -241,7 +241,7 @@ struct PermissionPromptView
   std::string target;
   std::string command;
   std::string reason;
-  std::string risk;
+  std::string risk = {};
   std::string diff_preview = {};
   bool diff_truncated = false;
   bool remember_available = false;

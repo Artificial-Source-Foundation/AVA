@@ -41,7 +41,7 @@ struct TuiThemeInfo
   std::string name = "ava-dark";
   std::string detail = "built-in dark ncurses token palette";
   std::string badge = "built-in";
-  std::optional<TuiThemePalette> palette;
+  std::optional<TuiThemePalette> palette = {};
   std::string revision = "built-in-dark";
 };
 

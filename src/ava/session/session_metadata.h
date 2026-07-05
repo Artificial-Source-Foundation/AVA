@@ -19,24 +19,24 @@ struct SessionMetadataView
 {
   std::string name;
   std::vector<std::string> labels;
-  std::string labels_updated;
+  std::string labels_updated = {};
   bool archived = false;
-  std::string parent_session_id;
-  std::string source_session_id;
-  std::string branch_from_entry_id;
-  std::string branch_origin;
-  std::string actor;
+  std::string parent_session_id = {};
+  std::string source_session_id = {};
+  std::string branch_from_entry_id = {};
+  std::string branch_origin = {};
+  std::string actor = {};
 };
 
 struct SessionMetadataUpdate
 {
   std::optional<std::string> name;
-  std::optional<std::vector<std::string>> labels;
-  std::optional<bool> archived;
-  std::string parent_session_id;
-  std::string source_session_id;
-  std::string branch_from_entry_id;
-  std::string branch_origin;
+  std::optional<std::vector<std::string>> labels = {};
+  std::optional<bool> archived = {};
+  std::string parent_session_id = {};
+  std::string source_session_id = {};
+  std::string branch_from_entry_id = {};
+  std::string branch_origin = {};
   std::string actor = "rpc";
 };
 

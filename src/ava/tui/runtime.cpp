@@ -688,7 +688,7 @@ std::optional<PendingAttachmentItem::Preview> attachment_preview(
 struct CopyTarget
 {
   std::string name;
-  std::string query;
+  std::string query = {};
 };
 
 CopyTarget parse_copy_target(std::string_view argument)

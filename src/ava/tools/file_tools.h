@@ -30,7 +30,7 @@ struct PermissionAuditEvent
   ava::permissions::PermissionAction action = ava::permissions::PermissionAction::Deny;
   std::string reason;
   ava::permissions::PermissionRisk risk = ava::permissions::PermissionRisk::Low;
-  std::filesystem::path target_path;
+  std::filesystem::path target_path = {};
   std::string command;
   std::string resolution;
   std::string resolution_source;
@@ -82,7 +82,7 @@ struct ToolContext
   std::string provider_id = {};
   std::string model_id = {};
   std::filesystem::path current_dir = {};
-  ava::agent::ToolVisibilityOptions tool_visibility;
+  ava::agent::ToolVisibilityOptions tool_visibility = {};
 };
 
 struct TextOutput

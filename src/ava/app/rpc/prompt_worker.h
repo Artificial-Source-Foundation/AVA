@@ -29,7 +29,7 @@ struct RpcPromptWorkerOptions
   ava::config::XdgPaths paths;
   std::string request_id;
   std::string message;
-  std::vector<ava::session::ImageAttachmentRef> image_attachments;
+  std::vector<ava::session::ImageAttachmentRef> image_attachments = {};
 };
 
 [[nodiscard]] std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options);

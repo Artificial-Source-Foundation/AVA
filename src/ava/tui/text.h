@@ -47,7 +47,7 @@ struct TextSpan
 {
   std::string text;
   Rendition rendition;
-  std::string link_target;
+  std::string link_target = {};
 };
 
 using TextRun = std::variant<NewLine, String, TextSpan>;

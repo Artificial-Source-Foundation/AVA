@@ -35,7 +35,7 @@ struct CapturedCommand
 {
   bool ok = false;
   bool too_large = false;
-  std::string stdout_data;
+  std::string stdout_data = {};
 };
 
 class Fd

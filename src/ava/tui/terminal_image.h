@@ -25,10 +25,10 @@ struct TerminalImageCapabilities
 
 struct TerminalEnvironment
 {
-  std::string term_program;
-  std::string terminal_emulator;
-  std::string term;
-  std::string color_term;
+  std::string term_program = {};
+  std::string terminal_emulator = {};
+  std::string term = {};
+  std::string color_term = {};
   bool tmux = false;
   bool kitty_window_id = false;
   bool ghostty_resources_dir = false;

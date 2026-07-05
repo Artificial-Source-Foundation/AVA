@@ -18,6 +18,7 @@
 #include <string_view>
 #include <thread>
 #include <vector>
+#include <iostream>
 
 namespace {
 
@@ -362,8 +363,18 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
                                                 ava::core::json::string_field(audit.data_json, "rule_id") == rule_id &&
                                                 ava::core::json::string_field(audit.data_json, "actor") == "agent");
   }
+  // Temporary split of boolean test.
+  std::cout << "jsonl = \"" << jsonl << "\"." << std::endl;
+  expect(result.has_value(), "result.has_value()");
+  expect(invalid_rejected, "invalid_rejected");
+  expect(added, "added");
+  expect(!rule_id.empty(), "!rule_id.empty()");
+  expect(listed, "listed");
+  expect(completed, "completed");
+  expect(removed, "removed");
   expect(result.has_value() && invalid_rejected && added && !rule_id.empty() && listed && completed && removed,
          "RPC persistent permission rule add/list/apply/remove flow completes");
+  expect(false, "Forced failure");
   expect(jsonl.find("\"name\":\"permission_requested\"") == std::string::npos && persistent_audited,
          "persistent permission rules resolve matching RPC permission prompts without resolver events and are audited");
 }

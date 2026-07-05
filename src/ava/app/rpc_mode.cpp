@@ -32,6 +32,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include "debug.h"
 
 namespace ava::app {
 namespace {
@@ -103,6 +104,9 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
                                    ava::provider::Transport& auth_transport, RuntimeRunOptions runtime_options,
                                    std::istream& in, std::ostream& out)
 {
+  // This function is called first-thing after creating a thread.
+  Debug(NAMESPACE_DEBUG::init_thread("run_rpc_loop"));
+
   rpc::RpcOutput output(out);
   rpc::RpcRunState run_state;
   rpc::PendingResolverState pending_state;

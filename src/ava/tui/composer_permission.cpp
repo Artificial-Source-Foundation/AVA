@@ -35,18 +35,18 @@ std::string permission_dock_header(std::size_t width)
   {
     return fit_line_preserving_sgr(std::string(kSgrBold) + std::string(kSgrError) + "PERM" + std::string(kSgrReset), width);
   }
-  std::string text = "  -- PERMISSION REQUIRED";
+  std::string text = "  -- Permission required";
   auto text_cols = terminal_text_columns(text);
   if (text_cols < width)
     text += std::string(width - text_cols, '-');
   text = fit_line(text, width);
 
-  auto pos = text.find("PERMISSION REQUIRED");
+  auto pos = text.find("Permission required");
   if (pos != std::string::npos)
   {
     std::string result;
     result += std::string(kSgrDim) + text.substr(0, pos) + std::string(kSgrReset);
-    result += std::string(kSgrBold) + std::string(kSgrError) + "PERMISSION REQUIRED" + std::string(kSgrReset);
+    result += std::string(kSgrBold) + std::string(kSgrError) + "Permission required" + std::string(kSgrReset);
     if (pos + 19 < text.size())
     {
       result += std::string(kSgrDim) + text.substr(pos + 19) + std::string(kSgrReset);
@@ -75,7 +75,10 @@ std::string permission_dock_summary(PermissionPromptView const& prompt, std::siz
   }
   else if (!prompt.target.empty())
   {
-    detail_text = sanitize_terminal_text(prompt.target);
+    if (prompt.reason.find("outside the workspace") != std::string::npos)
+      detail_text = "Access external directory " + sanitize_terminal_text(prompt.target);
+    else
+      detail_text = sanitize_terminal_text(prompt.target);
   }
   else if (!prompt.operation.empty())
   {
@@ -95,6 +98,8 @@ std::string permission_metadata_text(PermissionPromptView const& prompt)
   std::vector<std::string> parts;
   if (!prompt.risk.empty())
     parts.push_back("risk " + sanitize_terminal_text(prompt.risk));
+  if (!prompt.request_id.empty())
+    parts.push_back("id " + sanitize_terminal_text(prompt.request_id));
   if (!prompt.reason.empty())
     parts.push_back("reason " + sanitize_terminal_text(prompt.reason));
   if (parts.empty())
@@ -193,14 +198,14 @@ std::string permission_dock_actions(PermissionPromptChoice selected, bool rememb
   if (remember_available)
   {
     std::array const candidates = {
-        std::string("  ") + render_permission_choice("[Deny]", selected == PermissionPromptChoice::Deny) + "  " +
+        std::string("  ") + render_permission_choice("[Reject]", selected == PermissionPromptChoice::Deny) + "  " +
             render_permission_choice("[Allow once]", selected == PermissionPromptChoice::Allow) + "  " +
-            render_permission_choice("[Deny rule]", selected == PermissionPromptChoice::DenyRemember) + "  " +
-            render_permission_choice("[Allow rule]", selected == PermissionPromptChoice::AllowRemember),
+            render_permission_choice("[Reject rule]", selected == PermissionPromptChoice::DenyRemember) + "  " +
+            render_permission_choice("[Always]", selected == PermissionPromptChoice::AllowRemember),
         std::string("  ") + render_compact_permission_choice("[D]", selected == PermissionPromptChoice::Deny) + " " +
             render_compact_permission_choice("[A]", selected == PermissionPromptChoice::Allow) + " " +
             render_compact_permission_choice("[D rule]", selected == PermissionPromptChoice::DenyRemember) + " " +
-            render_compact_permission_choice("[A rule]", selected == PermissionPromptChoice::AllowRemember),
+            render_compact_permission_choice("[Always]", selected == PermissionPromptChoice::AllowRemember),
         std::string("  ") + render_permission_choice("[D]", selected == PermissionPromptChoice::Deny) + " " +
             render_permission_choice("[A]", selected == PermissionPromptChoice::Allow) + " " +
             render_permission_choice("[DR]", selected == PermissionPromptChoice::DenyRemember) + " " +
@@ -216,11 +221,11 @@ std::string permission_dock_actions(PermissionPromptChoice selected, bool rememb
   }
 
   std::array const candidates = {
-      std::string("  ") + render_permission_choice("[Deny]", selected == PermissionPromptChoice::Deny) + "  " +
+      std::string("  ") + render_permission_choice("[Reject]", selected == PermissionPromptChoice::Deny) + "  " +
           render_permission_choice("[Allow once]", selected == PermissionPromptChoice::Allow),
       std::string("  ") + render_compact_permission_choice("[D]", selected == PermissionPromptChoice::Deny) + " " +
           render_compact_permission_choice("[A]", selected == PermissionPromptChoice::Allow),
-      std::string("  ") + render_permission_choice("[Deny]", selected == PermissionPromptChoice::Deny) + " " +
+      std::string("  ") + render_permission_choice("[Reject]", selected == PermissionPromptChoice::Deny) + " " +
           render_permission_choice("[Allow]", selected == PermissionPromptChoice::Allow),
       std::string("  ") + render_permission_choice("[D]", selected == PermissionPromptChoice::Deny) + " " +
           render_permission_choice("[A]", selected == PermissionPromptChoice::Allow),
@@ -239,11 +244,11 @@ std::string permission_dock_keys(bool remember_available, std::size_t width)
   if (remember_available)
   {
     std::array const candidates = {
-        std::string("  ") + key_pill("A") + " allow once  " + key_pill("D") + " deny  " + key_pill("R") + " remember selected  " +
-            key_pill("Enter") + " confirm  " + key_pill("Esc") + " deny",
-        std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " deny  " + key_pill("R") + " remember  " + key_pill("Enter") +
+        std::string("  ") + key_pill("A") + " allow once  " + key_pill("D") + " reject  " + key_pill("R") + " remember selected  " +
+            key_pill("Enter") + " confirm  " + key_pill("Esc") + " reject",
+        std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " reject  " + key_pill("R") + " remember  " + key_pill("Enter") +
             " ok  " + key_pill("Esc") + " no",
-        std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=deny " + key_pill("R") + "=remember",
+        std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=reject " + key_pill("R") + "=remember",
     };
 
     for (auto const& candidate : candidates)
@@ -255,14 +260,14 @@ std::string permission_dock_keys(bool remember_available, std::size_t width)
   }
 
   std::array const candidates = {
-      std::string("  ") + key_pill("A") + " allow once  " + key_pill("D") + " deny  " + key_pill("Enter") + " confirm  " + key_pill("Esc") + " deny  " +
+      std::string("  ") + key_pill("A") + " allow once  " + key_pill("D") + " reject  " + key_pill("Enter") + " confirm  " + key_pill("Esc") + " reject  " +
           key_pill("Tab/arrows") + " move",
-      std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " deny  " + key_pill("Enter") + " confirm  " + key_pill("Esc") + " deny  " +
+      std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " reject  " + key_pill("Enter") + " ok  " + key_pill("Esc") + " reject  " +
           key_pill("Tab") + " move",
-      std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " deny  " + key_pill("Enter") + " ok  " + key_pill("Esc") + " no  " + key_pill("Tab") +
+      std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " reject  " + key_pill("Enter") + " ok  " + key_pill("Esc") + " no  " + key_pill("Tab") +
           " move",
-      std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " deny  " + key_pill("Enter/Esc") + " ok/no",
-      std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=deny",
+      std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " reject  " + key_pill("Enter/Esc") + " ok/no",
+      std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=reject",
   };
 
   for (auto const& candidate : candidates)
@@ -270,7 +275,7 @@ std::string permission_dock_keys(bool remember_available, std::size_t width)
     if (terminal_text_columns(candidate) <= width)
       return candidate;
   }
-  return fit_line_preserving_sgr(std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=deny", width);
+  return fit_line_preserving_sgr(std::string("  ") + key_pill("A") + "=allow " + key_pill("D") + "=reject", width);
 }
 
 void append_permission_diff_lines(std::vector<std::string>& lines, PermissionPromptView const& prompt, std::size_t width, std::size_t budget)

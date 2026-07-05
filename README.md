@@ -14,6 +14,8 @@ Dependencies:
 - `ncursesw` development headers/library
 - `curl` executable for provider HTTP transport
 
+The optional Qt Quick desktop prototype additionally requires Qt 6.5+ with QML, Quick, and Quick Controls 2. See `docs/desktop-qml.md`.
+
 ```sh
 cmake -S . -B build -DAVA_BUILD_TESTS=ON
 cmake --build build
@@ -55,7 +57,9 @@ GitHub Actions runs both the normal and sanitizer test jobs on pushes and pull r
 ./build/ava connect openai
 ./build/ava --mode plan
 ./build/ava --continue
+./build/ava --resume
 ./build/ava --session <id-or-prefix>
+./build/ava --session-id <id-or-prefix>
 ./build/ava "summarize this repo"
 ./build/ava @README.md "summarize this file"
 ./build/ava --print "summarize this repo"
@@ -103,7 +107,7 @@ The built-in default is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME
 - `/keybindings reset <action>`: remove one override so the action inherits built-in defaults
 - `/keybindings validate`: validate `keybinds.json` without changing active bindings
 - `/theme [dark|light|plain|custom-name|reset]`: show or persist the TUI display theme
-- `/reload [keybindings|theme]`: reload keybindings or the persisted display theme in the running TUI
+- `/reload [all|theme|models|prompts|trust|compaction|keybindings|auth|permissions|lsp|mcp|plugins]`: reload supported runtime config domains in the running TUI and report restart-required domains
 - `/mode`: toggle build/plan mode
 - `/details` or Ctrl+O: toggle TUI tool detail expansion
 - Ctrl+G: open the current composer draft in `$VISUAL` or `$EDITOR`
@@ -128,7 +132,8 @@ The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json
 - `/context [query|source]`: list prompt, system-prompt resource, context, prompt-command, skill, and plugin freshness with current/changed/missing status
 - `/trust [status|project|deny|clear]`: inspect or change this workspace's project-resource trust decision
 - `/compact [instructions]`: generate and record a provider summary
-- `/export [markdown|html] [path]`: export this session as Markdown or safe self-contained HTML; `/export <file.html>` writes Pi-style HTML through the permissioned file path
+- `/export [markdown|html|jsonl] [path]`: export this session as Markdown, safe self-contained HTML, or raw AVA JSONL; `/export <file.html>` writes Pi-style HTML and `/export <file.jsonl>` writes re-importable JSONL through the permissioned file path
+- `/import <path.jsonl> --confirm`: validate an AVA JSONL session archive, create a new local session, and switch to it; without `--confirm`, AVA only previews the entry count
 - `/stats`: show session counts, usage, cost, and resume/export hints; `/status` is an alias
 - `/permissions <list|audit|diagnose|explain|add|remove> ...`: inspect session permission audits and manage persistent permission rules; `/permission-rules` and `/perms` are aliases
 - `/read <path>`: read a file through permissions
@@ -178,7 +183,7 @@ The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json
 ## 0.65 Backend Notes
 
 - 0.65 is the provider-native hardening line after the 0.60 platform catch-up.
-- That slice keeps OpenAI as the default production path, hardens Anthropic native Messages support with offline/fake coverage, and adds Kimi/Moonshot/OpenRouter-compatible contract coverage for request shape, reasoning content, usage/error parsing, auth/header/base URL behavior, and context-overflow classification.
+- That slice keeps OpenAI as the default production path, hardens Anthropic native Messages support with offline/fake coverage, and adds DeepSeek/Kimi/Moonshot/OpenRouter-compatible contract coverage for request shape, reasoning content, usage/error parsing, auth/header/base URL behavior, and context-overflow classification.
 - The 0.70 reasoning/model lifecycle closeout is bundled into this work for protocol docs, focused tests, and reasoning-change export polish.
 - Live credentialed provider smokes are still release-validation evidence and are deferred unless credentials are available.
 

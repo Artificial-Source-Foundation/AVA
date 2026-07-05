@@ -289,13 +289,64 @@ void test_project_trust_gates_project_resource_commands()
          "trusted project skill commands can be invoked");
   auto context_after = ava::app::run_command(session, ava::app::CommandRequest{.command = "/context"});
   expect(context_after && context_after->handled && !context_after->output.empty() &&
-             context_after->output[0].find("project_trust=trusted project_resources=enabled") != std::string::npos &&
-             context_after->output[0].find("system_prompt  project  SYSTEM.md") != std::string::npos &&
+              context_after->output[0].find("project_trust=trusted project_resources=enabled") != std::string::npos &&
+              context_after->output[0].find("system_prompt  project  SYSTEM.md") != std::string::npos &&
              context_after->output[0].find("append_system_prompt  project  APPEND_SYSTEM.md") != std::string::npos &&
              context_after->output[0].find("prompt_command  project  local") != std::string::npos &&
              context_after->output[0].find("skill  project  local-skill") != std::string::npos &&
-             context_after->output[0].find("plugin_manifest  project  com.example.local/manifest") != std::string::npos,
-         "trusted /context reports project prompt, skill, and plugin freshness sources");
+              context_after->output[0].find("plugin_manifest  project  com.example.local/manifest") != std::string::npos,
+          "trusted /context reports project prompt, skill, and plugin freshness sources");
+
+  auto const global_append = paths.ava_config_dir / "APPEND_SYSTEM.md";
+  auto const symlink_target = root / "outside-append.md";
+  write_app_test_file(symlink_target, "outside append\n");
+  std::error_code symlink_setup_error;
+  std::filesystem::remove(global_append, symlink_setup_error);
+  symlink_setup_error.clear();
+  std::filesystem::create_symlink(symlink_target, global_append, symlink_setup_error);
+  if (!symlink_setup_error)
+  {
+    auto denied_with_bad_prompt = ava::app::set_project_trust_decision(paths, workspace, false);
+    expect(denied_with_bad_prompt.has_value(), denied_with_bad_prompt
+                                                ? "test denies project trust for failed reload"
+                                                : "test denies project trust for failed reload: " +
+                                                      denied_with_bad_prompt.error().format());
+    auto failed_reload = ava::app::run_command(session, ava::app::CommandRequest{.command = "/reload trust"});
+    expect(failed_reload && failed_reload->handled && !failed_reload->output.empty() &&
+               failed_reload->output[0].find("trust: error") != std::string::npos &&
+               failed_reload->output[0].find("freshness source is not a regular file") != std::string::npos &&
+               session.project_trust.decision == ava::app::ProjectTrustDecision::Trusted,
+           "/reload trust keeps the old trust state if dependent prompt reload fails");
+    expect(session.system_prompt.find("Project system replacement") != std::string::npos &&
+               session.system_prompt.find("Project append instruction") != std::string::npos,
+           "/reload trust keeps the old prompt state if dependent prompt reload fails");
+    std::error_code restore_error;
+    std::filesystem::remove(global_append, restore_error);
+    write_app_test_file(global_append, "Global append instruction.\n");
+  }
+  else
+  {
+    write_app_test_file(global_append, "Global append instruction.\n");
+  }
+
+  auto denied = ava::app::set_project_trust_decision(paths, workspace, false);
+  expect(denied.has_value(), denied ? "test denies project trust outside the active session"
+                                    : "test denies project trust outside the active session: " + denied.error().format());
+  auto reload_trust = ava::app::run_command(session, ava::app::CommandRequest{.command = "/reload trust"});
+  expect(reload_trust && reload_trust->handled && !reload_trust->output.empty() &&
+             reload_trust->output[0].find("Reload report:") != std::string::npos &&
+             reload_trust->output[0].find("trust: loaded") != std::string::npos &&
+             reload_trust->output[0].find("decision: denied") != std::string::npos &&
+             reload_trust->output[0].find("project_resources: skipped") != std::string::npos &&
+             session.project_trust.decision == ava::app::ProjectTrustDecision::Denied,
+         "/reload trust applies external deny decisions and disables project resources");
+  expect(session.system_prompt.find("Project system replacement") == std::string::npos &&
+             session.system_prompt.find("Project append instruction") == std::string::npos &&
+             session.system_prompt.find("local-skill") == std::string::npos,
+         "/reload trust removes trusted project prompt content after denial");
+  registry = ava::app::load_command_registry(session, ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
+  expect(find_entry(registry, "/local") == nullptr && find_entry(registry, "/skill:local-skill") == nullptr,
+         "/reload trust removes project prompt and skill commands after denial");
 }
 
 }  // namespace

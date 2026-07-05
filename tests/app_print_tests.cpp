@@ -264,6 +264,63 @@ void test_app_print_text_mode_outputs_final_text_only()
          "print text mode sends prompt through shared runtime");
 }
 
+void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_requested()
+{
+  auto const root = temp_root() / "app-print-text-terminal-sanitize";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "print terminal sanitize test opens runtime session");
+  if (!session) return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"safe \\u001b]52;c;QUJD\\u0007 text\\nnext\\tline\"}\n\n"
+              "data: [DONE]\n\n",
+  }});
+  ava::app::RuntimeRunOptions runtime_options;
+  runtime_options.access_token = "token";
+  ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text,
+                                                  .runtime_options = runtime_options,
+                                                  .sanitize_terminal_output = true,
+                                                  .sanitize_terminal_diagnostics = true};
+  std::ostringstream out;
+  std::ostringstream err;
+  auto result = ava::app::run_print_prompt(*session, "hello terminal sanitize", provider, transport, run_options, out, err);
+  expect(result && result->final_text.find("\x1b]52;c;QUJD\a") != std::string::npos,
+         "print terminal sanitize test keeps raw model text in the returned agent result");
+  expect(out.str() == "safe ?]52;c;QUJD? text\nnext  line" && out.str().find('\x1b') == std::string::npos && err.str().empty(),
+         "print text mode strips terminal controls from tty-bound final output while preserving line breaks");
+
+  auto error_session = ava::app::open_runtime_session(open_options);
+  expect(error_session.has_value(), "print terminal sanitize error test opens runtime session");
+  if (!error_session) return;
+  ava::tests::FakeTransport error_transport({ava::provider::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = "data: {\"type\":\"response.error\",\"error\":{\"message\":\"bad \\u001b]52;c;RElBRw==\\u0007 diagnostic\"}}\n\n"
+              "data: [DONE]\n\n",
+  }});
+  std::ostringstream error_out;
+  std::ostringstream error_err;
+  auto error_result = ava::app::run_print_prompt(*error_session, "bad terminal sanitize", provider, error_transport,
+                                                 run_options, error_out, error_err);
+  expect(!error_result && error_out.str().empty() && error_err.str().find('\x1b') == std::string::npos &&
+             error_err.str().find("?]52;c;RElBRw==? diagnostic") != std::string::npos,
+         "print text mode strips terminal controls from tty-bound diagnostics");
+}
+
 void test_app_print_text_mode_with_streaming_keeps_stdout_final_only()
 {
   auto const root = temp_root() / "app-print-text-streaming";
@@ -895,6 +952,7 @@ void run_app_print_tests()
   test_app_print_prompt_merging();
   test_headless_permission_policy();
   test_app_print_text_mode_outputs_final_text_only();
+  test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_requested();
   test_app_print_text_mode_with_streaming_keeps_stdout_final_only();
   test_app_print_text_mode_reports_stdout_write_failure();
   test_app_print_mode_uses_headless_permission_policy();

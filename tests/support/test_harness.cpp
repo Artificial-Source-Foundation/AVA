@@ -14,7 +14,9 @@
 namespace ava::test {
 namespace {
 int failures_value = 0;
-}
+bool skip_requested_value = false;
+std::string skip_message_value;
+} // namespace
 
 int& failure_count()
 {
@@ -24,6 +26,28 @@ int& failure_count()
 int failures()
 {
   return failures_value;
+}
+
+void clear_skip()
+{
+  skip_requested_value = false;
+  skip_message_value.clear();
+}
+
+void request_skip(std::string message)
+{
+  skip_requested_value = true;
+  skip_message_value = std::move(message);
+}
+
+bool skip_requested()
+{
+  return skip_requested_value;
+}
+
+std::string skip_message()
+{
+  return skip_message_value;
 }
 }  // namespace ava::test
 

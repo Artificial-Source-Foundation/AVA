@@ -47,6 +47,7 @@ struct Location {
 struct ServerConfig {
   std::vector<std::string> argv;
   std::filesystem::path workspace_root;
+  std::filesystem::path process_cwd;
   std::chrono::milliseconds request_timeout{3000};
   std::string language_id = "plaintext";
 };

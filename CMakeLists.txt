@@ -50,6 +50,7 @@ configure_file(
 )
 
 option(AVA_BUILD_TESTS "Build AVA tests" ON)
+option(AVA_BUILD_DESKTOP_QML "Build the experimental Qt Quick/QML desktop prototype" OFF)
 option(AVA_ENABLE_SANITIZERS "Build AVA with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
 function(ava_apply_warnings target)
@@ -57,9 +58,9 @@ function(ava_apply_warnings target)
     target_compile_options(${target} PRIVATE /W4 /WX)
   else()
     target_compile_options(${target} PRIVATE -Wall -Werror -Wextra -Wpedantic -Wundef)
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 17)
       # Keep GCC's optimizer-driven maybe-uninitialized diagnostics visible, but
-      # do not promote them to errors for GCC 13.x. That release can report false
+      # do not promote them to errors for GCC 13.x through 16.x. Those releases can report false
       # positives through libstdc++ internals such as std::regex, std::optional,
       # and std::variant when Release optimization inlines those implementations.
       target_compile_options(${target} PRIVATE -Wno-error=maybe-uninitialized)

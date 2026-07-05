@@ -601,7 +601,8 @@ ava::core::VoidResult SubprocessLspClient::launch()
     }
     close((*stdin_pipe)[0]);
     close((*stdout_pipe)[1]);
-    if (chdir(config_.workspace_root.string().c_str()) != 0) _exit(127);
+    auto const child_cwd = config_.process_cwd.empty() ? config_.workspace_root : config_.process_cwd;
+    if (chdir(child_cwd.string().c_str()) != 0) _exit(127);
     if (setenv("PATH", kTrustedExecPath, 1) != 0) _exit(127);
 
     std::vector<char*> argv;

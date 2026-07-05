@@ -25,8 +25,10 @@
 #include "ava/permissions/permission.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/context/context_loader.h"
+#include "ava/core/atomic_file.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/core/process_args.h"
 
 #include <algorithm>
 #include <chrono>
@@ -93,6 +95,77 @@ void test_core_json_top_level_lookup()
          "JSON string_field leaves non-low escape after replacing high surrogate");
   expect(!ava::core::json::string_field("{\"text\":\"\\u12xz\"}", "text"), "JSON string_field rejects malformed unicode escapes");
   expect(!ava::core::json::string_field("{\"text\":\"\\q\"}", "text"), "JSON string_field rejects invalid escapes");
+}
+
+std::string read_test_file(std::filesystem::path const& path)
+{
+  std::ifstream input(path, std::ios::binary);
+  std::ostringstream buffer;
+  buffer << input.rdbuf();
+  return buffer.str();
+}
+
+void write_test_file(std::filesystem::path const& path, std::string_view content)
+{
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  output << content;
+}
+
+void test_process_arg_workspace_relative_detection()
+{
+  expect(!ava::core::is_workspace_relative_process_arg("node"), "bare executable names are not treated as workspace-relative paths");
+  expect(!ava::core::is_workspace_relative_process_arg("--stdio"), "plain flags are not treated as workspace-relative paths");
+  expect(!ava::core::is_workspace_relative_process_arg("/usr/bin/node"), "absolute paths are not workspace-relative paths");
+  expect(ava::core::is_workspace_relative_process_arg("."), "current-directory process arg is workspace-relative");
+  expect(ava::core::is_workspace_relative_process_arg("../server.js"), "parent-relative process arg is workspace-relative");
+  expect(ava::core::is_workspace_relative_process_arg(".ava/server.js"), "slash-containing relative process arg is workspace-relative");
+  expect(ava::core::is_workspace_relative_process_arg("--loader=.ava/loader.js"), "flag value paths are checked for workspace-relative launches");
+
+  auto const root = temp_root() / "core-process-cwd";
+  std::error_code cleanup_error;
+  std::filesystem::remove_all(root, cleanup_error);
+  auto const workspace = root / "workspace";
+  auto const global_config_dir = root / "config";
+  std::filesystem::create_directories(workspace / ".ava");
+  std::filesystem::create_directories(global_config_dir);
+  expect(ava::core::safe_global_process_cwd(global_config_dir / "mcp.json", workspace) == std::filesystem::weakly_canonical(global_config_dir),
+         "global process cwd uses the config directory when it is outside the workspace");
+  expect(ava::core::safe_global_process_cwd(workspace / "global-lsp.json", workspace) == std::filesystem::path{"/"},
+         "global process cwd falls back outside the workspace when the config source is workspace-contained");
+}
+
+void test_atomic_text_file_write()
+{
+  auto const root = temp_root() / "core-atomic-file";
+  std::error_code cleanup_error;
+  std::filesystem::remove_all(root, cleanup_error);
+  auto const target = root / "config" / "settings.json";
+  auto first = ava::core::write_text_file_atomic(target, "{\"ok\":true}\n", "test config");
+  expect(first.has_value(),
+         first ? "atomic text writer creates parent directories" : "atomic text writer creates parent directories: " + first.error().format());
+  expect(read_test_file(target) == "{\"ok\":true}\n", "atomic text writer stores full file content");
+
+  struct stat target_stat{};
+  expect(::stat(target.c_str(), &target_stat) == 0 && (target_stat.st_mode & (S_IRWXG | S_IRWXO)) == 0,
+         "atomic text writer uses owner-only target permissions");
+
+  auto replaced = ava::core::write_text_file_atomic(target, "{\"ok\":false}\n", "test config");
+  expect(replaced.has_value(),
+         replaced ? "atomic text writer replaces regular files" : "atomic text writer replaces regular files: " + replaced.error().format());
+  expect(read_test_file(target) == "{\"ok\":false}\n", "atomic text writer replacement updates content");
+
+  auto const outside = root / "outside.json";
+  write_test_file(outside, "outside\n");
+  auto const link = root / "config" / "linked.json";
+  std::error_code symlink_error;
+  std::filesystem::create_symlink(outside, link, symlink_error);
+  if (!symlink_error)
+  {
+    auto rejected = ava::core::write_text_file_atomic(link, "changed\n", "test config");
+    expect(!rejected && rejected.error().category() == ava::core::ErrorCategory::PermissionDenied, "atomic text writer rejects symlink replacement targets");
+    expect(read_test_file(outside) == "outside\n", "atomic text writer does not modify symlink referents");
+  }
 }
 
 void test_permission_defaults()
@@ -229,5 +302,7 @@ void run_core_json_permission_tests()
 {
   test_json_escape_control_characters();
   test_core_json_top_level_lookup();
+  test_process_arg_workspace_relative_detection();
+  test_atomic_text_file_write();
   test_permission_defaults();
 }

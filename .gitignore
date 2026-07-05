@@ -16,6 +16,7 @@ compile_commands.json
 /core
 /core.*
 .plans/
+/.env
 
 # Local reference repositories used for comparison only
 docs/reference-code/

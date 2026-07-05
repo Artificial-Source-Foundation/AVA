@@ -1,5 +1,6 @@
 #include "ava/app/project_trust.h"
 
+#include "ava/core/atomic_file.h"
 #include "ava/core/error.h"
 #include "ava/core/json.h"
 
@@ -178,36 +179,7 @@ std::optional<TrustRecord> closest_matching_record(std::vector<TrustRecord> cons
 ava::core::VoidResult write_trust_records(std::filesystem::path const& path,
                                           std::vector<TrustRecord> const& records)
 {
-  std::error_code directory_error;
-  std::filesystem::create_directories(path.parent_path(), directory_error);
-  if (directory_error)
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to create project trust directory")
-                               .with_context("path", path.parent_path().string())
-                               .with_context("cause", directory_error.message()));
-  }
-  auto const temp_path = path.string() + ".tmp";
-  {
-    std::ofstream file(temp_path, std::ios::binary | std::ios::trunc);
-    if (!file)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write project trust file")
-                                 .with_context("path", temp_path));
-    file << trust_records_json(records);
-    if (!file)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to finish project trust file")
-                                 .with_context("path", temp_path));
-  }
-  std::error_code rename_error;
-  std::filesystem::rename(temp_path, path, rename_error);
-  if (rename_error)
-  {
-    std::error_code remove_error;
-    std::filesystem::remove(temp_path, remove_error);
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to replace project trust file")
-                               .with_context("path", path.string())
-                               .with_context("cause", rename_error.message()));
-  }
-  return {};
+  return ava::core::write_text_file_atomic(path, trust_records_json(records), "project trust file");
 }
 
 ava::core::Result<std::vector<TrustRecord>> load_records_for_write(std::filesystem::path const& path)

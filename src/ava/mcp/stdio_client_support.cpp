@@ -1,5 +1,6 @@
 #include "ava/mcp/stdio_client_support.h"
 #include "ava/core/json.h"
+#include "ava/core/process_args.h"
 
 #include <fcntl.h>
 #include <sys/wait.h>
@@ -227,8 +228,10 @@ std::vector<std::string> mcp_argv(McpServerConfig const& server)
   return argv;
 }
 
-std::filesystem::path child_working_dir(McpStdioClientOptions const& options)
+std::filesystem::path child_working_dir(McpServerConfig const& server, McpStdioClientOptions const& options)
 {
+  if (server.scope == McpServerScope::Global)
+    return ava::core::safe_global_process_cwd(server.source_path, options.workspace_dir);
   if (!options.workspace_dir.empty())
     return options.workspace_dir;
   return std::filesystem::current_path();

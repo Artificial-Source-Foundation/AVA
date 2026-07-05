@@ -132,7 +132,7 @@ foreach(NEEDLE
         "\"tool_call_id\":\"call_read\""
         "${TARGET_PATH}"
         "\\\"ok\\\":false"
-        "failed to open file for reading")
+        "failed to inspect file for reading")
   string(FIND "${PROVIDER_REQUEST}" "${NEEDLE}" NEEDLE_INDEX)
   if(NEEDLE_INDEX EQUAL -1)
     message(FATAL_ERROR "fake provider request log did not contain ${NEEDLE}\nrequest:\n${PROVIDER_REQUEST}\nstderr:\n${AVA_ERROR}")

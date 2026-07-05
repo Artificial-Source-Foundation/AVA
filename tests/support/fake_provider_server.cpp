@@ -180,6 +180,14 @@ std::string text_body(std::string_view text)
          "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}";
 }
 
+std::string tool_body(std::string_view call_id, std::string_view name, std::string_view arguments)
+{
+  return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"" + json_escape(call_id) +
+         "\",\"type\":\"function\","
+         "\"function\":{\"name\":\"" +
+         json_escape(name) + "\",\"arguments\":\"" + json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+}
+
 std::string read_tool_body(std::string_view path)
 {
   auto const arguments = std::string("{\"path\":\"") + json_escape(path) + "\"}";
@@ -190,8 +198,7 @@ std::string read_tool_body(std::string_view path)
 
 std::string grep_tool_body(std::string_view include)
 {
-  auto const arguments = std::string("{\"pattern\":\"needle\",\"include\":\"") + json_escape(include) +
-                         "\",\"max_matches\":5,\"literal\":true}";
+  auto const arguments = std::string("{\"pattern\":\"needle\",\"include\":\"") + json_escape(include) + "\",\"max_matches\":5,\"literal\":true}";
   return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_grep\",\"type\":\"function\","
          "\"function\":{\"name\":\"grep\",\"arguments\":\"" +
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
@@ -264,6 +271,41 @@ std::string mcp_tool_body()
   return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"call_mcp\",\"type\":\"function\","
          "\"function\":{\"name\":\"mcp_demo_echo\",\"arguments\":\"" +
          json_escape(arguments) + "\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+}
+
+std::string e2e_tool_body(int request_index, std::string_view target_path)
+{
+  std::string const workspace_path = "src/todo.txt";
+  auto const edit_path = target_path.empty() ? workspace_path : std::string(target_path);
+  if (request_index == 0)
+  {
+    auto const arguments = std::string("{\"path\":\"") + json_escape(workspace_path) + "\",\"limit\":40}";
+    return tool_body("call_read_e2e", "read_file", arguments);
+  }
+  if (request_index == 1)
+  {
+    std::string const arguments = "{\"pattern\":\"TODO\",\"include\":\"src/*.txt\",\"max_matches\":10,\"literal\":true}";
+    return tool_body("call_grep_e2e", "grep", arguments);
+  }
+  if (request_index == 2)
+  {
+    std::string const arguments = "{\"path\":\"src\",\"max_entries\":20}";
+    return tool_body("call_list_e2e", "list_directory", arguments);
+  }
+  if (request_index == 3)
+  {
+    auto const old_text = std::string("status: TODO\n") + "detail: replace TODO with DONE and verify.\n";
+    auto const new_text = std::string("status: DONE\n") + "detail: replace TODO with DONE and verify.\n";
+    auto const arguments = std::string("{\"edits\":[{\"path\":\"") + json_escape(edit_path) + "\",\"old_text\":\"" + json_escape(old_text) +
+                           "\",\"new_text\":\"" + json_escape(new_text) + "\"}]}";
+    return tool_body("call_patch_e2e", "apply_patch", arguments);
+  }
+  if (request_index == 4)
+  {
+    auto const arguments = std::string("{\"command\":\"cat ") + json_escape(edit_path) + "\",\"timeout_ms\":5000,\"max_lines\":20}";
+    return tool_body("call_bash_e2e", "bash", arguments);
+  }
+  return text_body("E2E task complete: TODO fixed and verification command passed.");
 }
 
 struct ProviderResponse
@@ -344,6 +386,10 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
   {
     return ProviderResponse{.body = request_index == 0 ? mcp_tool_body() : text_body("after mcp tool")};
   }
+  if (scenario == "end-to-end-workflow")
+  {
+    return ProviderResponse{.body = e2e_tool_body(request_index, target_path)};
+  }
   if (scenario == "compact")
   {
     return ProviderResponse{.body = request_index == 0 ? text_body("before compact") : text_body("# Goal\nHeadless compact summary\n# Next Steps\nContinue.")};
@@ -370,16 +416,17 @@ int main(int argc, char** argv)
   auto const delay = std::chrono::milliseconds(std::stoi(argv[3]));
   std::string const scenario = argc == 6 ? argv[4] : "text";
   std::string const target_path = argc == 6 ? argv[5] : "";
-  int const request_count = scenario == "http-error"         ? 3
-                            : scenario == "text-three"       ? 3
-                            : scenario == "read-tool-twice"  ? 4
-                            : scenario == "read-tool-thrice" ? 6
-                            : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "grep-tool" ||
-                               scenario == "write-tool" || scenario == "bash-timeout-tree" || scenario == "question-tool" ||
-                               scenario == "question-tool-multi" || scenario == "skill-tool" || scenario == "websearch-tool" ||
-                               scenario == "webfetch-tool" || scenario == "mcp-tool" || scenario == "compact")
-                                ? 2
-                                : 1;
+  int const request_count =
+      scenario == "http-error"            ? 3
+      : scenario == "text-three"          ? 3
+      : scenario == "end-to-end-workflow" ? 6
+      : scenario == "read-tool-twice"     ? 4
+      : scenario == "read-tool-thrice"    ? 6
+      : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "grep-tool" || scenario == "write-tool" || scenario == "bash-timeout-tree" ||
+         scenario == "question-tool" || scenario == "question-tool-multi" || scenario == "skill-tool" || scenario == "websearch-tool" ||
+         scenario == "webfetch-tool" || scenario == "mcp-tool" || scenario == "compact")
+          ? 2
+          : 1;
 
   Fd server(::socket(AF_INET, SOCK_STREAM, 0));
   if (server.get() < 0)

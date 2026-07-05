@@ -70,10 +70,15 @@ constexpr std::array kTestSuites{
 
 void run_suite(TestSuite const& suite)
 {
+  ava::test::clear_skip();
   suite.run();
 
   int const failures = ava::test::failures();
-  if (failures == 0)
+  if (failures == 0 && ava::test::skip_requested())
+  {
+    std::cout << suite.name << " tests skipped: " << ava::test::skip_message() << '\n';
+  }
+  else if (failures == 0)
   {
     std::cout << suite.name << " tests passed\n";
   }
@@ -108,6 +113,8 @@ int main(int argc, char** argv)
       if (suite.name == requested_suite)
       {
         run_suite(suite);
+        if (ava::test::failures() == 0 && ava::test::skip_requested())
+          return 77;
         return print_failures();
       }
     }

@@ -1,5 +1,7 @@
 #include "ava/app/command_format.h"
 #include "ava/app/command_models.h"
+#include "ava/config/auth.h"
+#include "ava/config/auth_record.h"
 #include "ava/config/model_config.h"
 #include "ava/config/reasoning_profiles.h"
 #include "ava/config/provider_profiles.h"
@@ -82,9 +84,25 @@ bool model_is_builtin(ava::config::ModelInfo const& model)
   return ava::config::find_model(builtin, model.provider_id, model.model_id).has_value();
 }
 
+bool api_family_is_known(std::string_view api_family)
+{
+  if (api_family.empty())
+    return false;
+  for (auto const& profile : ava::config::builtin_provider_profiles())
+  {
+    if (profile.api_family == api_family)
+      return true;
+  }
+  return false;
+}
+
 std::vector<std::string> model_diagnostics(ava::config::ModelInfo const& model, bool provider_registered)
 {
   std::vector<std::string> diagnostics;
+  if (!ava::config::is_valid_provider_id(model.provider_id))
+  {
+    diagnostics.push_back("provider id contains unsupported characters; auth storage and provider lookup will reject it");
+  }
   if (!provider_registered)
   {
     diagnostics.push_back("provider is not registered; selector is disabled and switching will fail");
@@ -109,6 +127,18 @@ std::vector<std::string> model_diagnostics(ava::config::ModelInfo const& model, 
   if (model.api_family.empty())
   {
     diagnostics.push_back("custom model missing api_family; provider-specific reasoning and replay checks are limited");
+  }
+  else
+  {
+    auto const provider_profile = ava::config::find_provider_profile(model.provider_id);
+    if (provider_profile && !provider_profile->api_family.empty() && provider_profile->api_family != model.api_family)
+    {
+      diagnostics.push_back("custom model api_family does not match provider profile; provider-specific request validation may fail");
+    }
+    if (!api_family_is_known(model.api_family))
+    {
+      diagnostics.push_back("custom model api_family is not recognized by built-in provider profiles; compatibility validation is limited");
+    }
   }
   if (!model.supports_tools)
   {
@@ -202,6 +232,98 @@ std::string format_models_text(RuntimeSession const& session, ava::config::Model
   return output;
 }
 
+bool provider_matches_query(ava::config::ProviderProfile const& profile, std::string_view query)
+{
+  if (query.empty())
+    return true;
+  return contains_ascii_case_insensitive(profile.provider_id, query) ||
+         contains_ascii_case_insensitive(profile.display_name, query) ||
+         contains_ascii_case_insensitive(profile.api_family, query) ||
+         contains_ascii_case_insensitive(profile.connect_detail, query);
+}
+
+std::size_t model_count_for_provider(ava::config::ModelRegistry const& registry, std::string_view provider_id)
+{
+  std::size_t count = 0;
+  for (auto const& model : effective_models(registry))
+  {
+    if (model.provider_id == provider_id)
+      ++count;
+  }
+  return count;
+}
+
+std::string provider_oauth_status(ava::config::ProviderProfile const& profile)
+{
+  if (!profile.supports_oauth)
+    return "no";
+  if (profile.provider_id == "openai")
+    return "interactive supported";
+  if (profile.provider_id == "anthropic")
+    return "stored/env bearer only; interactive deferred pending official third-party flow";
+  return "stored/env bearer";
+}
+
+std::string provider_credential_status(ava::config::XdgPaths const& paths,
+                                       ava::config::ProviderProfile const& profile)
+{
+  auto credential = ava::config::provider_credential_for_startup(paths, profile.provider_id);
+  if (!credential)
+  {
+    return "error: " + sanitize_inline_text(credential.error().format());
+  }
+  if (!*credential)
+    return "missing";
+
+  auto type = (*credential)->credential_type.empty() ? std::string("configured") : (*credential)->credential_type;
+  auto source = (*credential)->source.empty() ? std::string("configured") : (*credential)->source;
+  return sanitize_inline_text(type) + " source=" + sanitize_inline_text(source);
+}
+
+std::string format_providers_text(RuntimeSession const& session, ava::config::ModelRegistry const& registry,
+                                  std::string_view query)
+{
+  auto const provider_registry = ava::provider::builtin_provider_registry();
+  std::string output = "Providers:\n";
+  if (!query.empty())
+    output += "filter " + sanitize_inline_text(std::string(query)) + "\n";
+
+  std::size_t shown = 0;
+  for (auto const& profile : ava::config::builtin_provider_profiles())
+  {
+    if (!provider_matches_query(profile, query))
+      continue;
+    ++shown;
+    bool const registered = provider_registry.contains(profile.provider_id);
+    output += "  " + profile.provider_id;
+    if (!profile.display_name.empty())
+      output += "  " + profile.display_name;
+    output += registered ? "\n" : "  unavailable: no runtime provider factory\n";
+    output += "    runtime=" + std::string(registered ? "registered" : "not registered") +
+              " selectable=" + std::string(profile.runtime_selectable ? "yes" : "no") +
+              " models=" + std::to_string(model_count_for_provider(registry, profile.provider_id)) + "\n";
+    output += "    auth=" + provider_credential_status(session.paths, profile) + "\n";
+    output += "    connect=" + sanitize_inline_text(profile.connect_detail.empty() ? std::string("not documented") : profile.connect_detail) +
+              " oauth=" + provider_oauth_status(profile) + "\n";
+    if (!profile.api_family.empty())
+      output += "    api_family=" + profile.api_family + "\n";
+    if (!profile.default_base_url.empty() || !profile.default_base_url_env.empty())
+    {
+      output += "    endpoint=";
+      output += profile.default_base_url.empty() ? "provider default" : profile.default_base_url;
+      if (!profile.default_base_url_env.empty())
+        output += " env=" + profile.default_base_url_env;
+      output += "\n";
+    }
+    if (!profile.default_compatibility_quirks.empty())
+      output += "    compatibility=" + joined_strings(profile.default_compatibility_quirks, ", ") + "\n";
+  }
+  if (shown == 0 && !query.empty())
+    output += "  no providers match the filter\n";
+  output += "\nUse /connect <provider> to store API keys. OpenAI supports interactive OAuth; Anthropic interactive OAuth is deferred until Anthropic documents a third-party flow.";
+  return output;
+}
+
 }  // namespace
 
 std::vector<std::string> model_configuration_diagnostics(ava::config::ModelInfo const& model,
@@ -219,6 +341,18 @@ ava::core::Result<CommandResult> run_models_command(RuntimeSession& session, std
   if (!registry)
     return std::unexpected(std::move(registry.error()));
   add_output(result, format_models_text(session, *registry, trimmed_query));
+  return result;
+}
+
+ava::core::Result<CommandResult> run_providers_command(RuntimeSession& session, std::string_view query)
+{
+  CommandResult result;
+  result.handled = true;
+  auto const trimmed_query = trim_ascii(query);
+  auto registry = ava::config::load_model_registry(session.paths);
+  if (!registry)
+    return std::unexpected(std::move(registry.error()));
+  add_output(result, format_providers_text(session, *registry, trimmed_query));
   return result;
 }
 

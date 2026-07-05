@@ -96,6 +96,7 @@ set(AVA_TEST_SUITES
 foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   add_test(NAME ava_tests.${AVA_TEST_SUITE} COMMAND ava_tests ${AVA_TEST_SUITE})
 endforeach()
+set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 77)
 
 add_test(
   NAME ava_cli.headless_rpc_validate_session
@@ -157,6 +158,12 @@ add_test(
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-print-file-args
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_print_file_args.cmake)
+
+add_test(
+  NAME ava_cli.package_manager_deferred
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_EXE=$<TARGET_FILE:ava>
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_package_manager_deferred.cmake)
 
 add_test(
   NAME ava_cli.headless_mode_json_alias
@@ -253,6 +260,15 @@ add_test(
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-performance-smoke
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_performance_smoke.cmake)
+
+add_test(
+  NAME ava_cli.headless_e2e_model_smoke
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_EXE=$<TARGET_FILE:ava>
+          -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-e2e-model-smoke
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_e2e_model_smoke.cmake)
+set_tests_properties(ava_cli.headless_e2e_model_smoke PROPERTIES TIMEOUT 60)
 
 add_test(
   NAME ava_cli.headless_rpc_bash_process_cleanup

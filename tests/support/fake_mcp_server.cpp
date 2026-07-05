@@ -94,6 +94,17 @@ void write_process_group_marker(std::string const& path)
   file << static_cast<long long>(getpgrp()) << '\n';
 }
 
+void write_cwd_marker(std::string const& path)
+{
+  if (path.empty())
+    return;
+  char buffer[4096]{};
+  if (getcwd(buffer, sizeof(buffer)) == nullptr)
+    return;
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  file << buffer << '\n';
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -135,6 +146,8 @@ int main(int argc, char** argv)
 
     if (*method == "initialize")
     {
+      if (mode == "cwd-marker")
+        write_cwd_marker(marker_path);
       write_message(response(*id,
                              "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{},\"prompts\":{},\"resources\":{}},"
                              "\"serverInfo\":{\"name\":\"fake-mcp\",\"version\":\"1.0.0\"}}"));

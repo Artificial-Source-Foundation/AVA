@@ -210,6 +210,17 @@ struct ThemeOptionItem
   std::string detail;
 };
 
+struct ProjectTrustSnapshot
+{
+  std::string decision;
+  std::string project_resources;
+  std::string workspace;
+  std::string matched_path;
+  std::string trust_file;
+  std::size_t protected_resource_count = 0;
+  std::string diagnostic = {};
+};
+
 enum class PermissionPromptChoice
 {
   Deny,
@@ -239,13 +250,14 @@ struct PermissionPromptView
   std::string tool_name;
   std::string operation;
   std::string target;
-  std::string command;
+  std::string command = {};
   std::string reason;
   std::string risk = {};
   std::string diff_preview = {};
   bool diff_truncated = false;
   bool remember_available = false;
   PermissionPromptChoice selected_choice = PermissionPromptChoice::Deny;
+  std::string request_id = {};
 };
 
 struct QuestionPromptOptionView
@@ -379,6 +391,7 @@ struct ComposerSnapshot
   std::size_t draft_scroll_offset = 0;
   bool tool_details_visible = false;
   bool thinking_visible = true;
+  std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
 };
 
 [[nodiscard]] std::vector<SlashCommandItem> filter_slash_commands(std::string_view input, std::vector<SlashCommandItem> const& commands);

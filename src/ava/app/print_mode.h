@@ -28,6 +28,8 @@ struct PrintModeRunOptions
 {
   PrintOutputFormat output_format = PrintOutputFormat::Text;
   RuntimeRunOptions runtime_options;
+  bool sanitize_terminal_output = false;
+  bool sanitize_terminal_diagnostics = false;
 };
 
 struct PrintModeOptions

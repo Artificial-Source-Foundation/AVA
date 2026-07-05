@@ -69,6 +69,6 @@ void close_nonstandard_fds();
 [[nodiscard]] std::string json_string(std::string_view value);
 [[nodiscard]] std::string exit_detail(int status);
 [[nodiscard]] std::vector<std::string> mcp_argv(McpServerConfig const& server);
-[[nodiscard]] std::filesystem::path child_working_dir(McpStdioClientOptions const& options);
+[[nodiscard]] std::filesystem::path child_working_dir(McpServerConfig const& server, McpStdioClientOptions const& options);
 
 }  // namespace ava::mcp

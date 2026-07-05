@@ -1,6 +1,10 @@
 add_subdirectory(ava)
 add_subdirectory(experimental)
 
+if(AVA_BUILD_DESKTOP_QML)
+  add_subdirectory(ava/desktop)
+endif()
+
 add_executable(ava
   "main.cpp"
 )

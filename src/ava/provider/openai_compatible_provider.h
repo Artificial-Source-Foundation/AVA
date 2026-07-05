@@ -17,6 +17,7 @@ struct OpenAICompatibleProviderOptions
   std::string user_agent = {};
   std::optional<double> default_temperature = std::nullopt;
   std::string reasoning_request_field = "thinking";
+  bool reasoning_request_effort_string = false;
   bool preserve_reasoning_content = false;
   bool include_stream_usage = false;
 };

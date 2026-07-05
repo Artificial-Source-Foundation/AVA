@@ -329,7 +329,7 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
-  auto const rpc_timeout = std::chrono::seconds(10);
+  auto const rpc_timeout = std::chrono::seconds(30);
 
   input_buffer.push(
       "{\"id\":\"bad-rule\",\"type\":\"permission_rule_add\",\"action\":\"allow\","

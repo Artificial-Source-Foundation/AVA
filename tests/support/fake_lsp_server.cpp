@@ -27,6 +27,7 @@ enum class Mode
   HugeContentLength,
   HugeHeader,
   MalformedSymbols,
+  CwdMarker,
 };
 
 struct Options
@@ -129,6 +130,11 @@ Options parse_options(int argc, char** argv)
       options.mode = Mode::HugeHeader;
     if (std::strcmp(argv[index], "--malformed-symbols") == 0)
       options.mode = Mode::MalformedSymbols;
+    if (std::strcmp(argv[index], "--cwd-marker") == 0 && index + 1 < argc)
+    {
+      options.mode = Mode::CwdMarker;
+      options.marker_path = argv[++index];
+    }
   }
   return options;
 }
@@ -139,6 +145,17 @@ void write_process_group_marker(std::string const& path)
     return;
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file << static_cast<long long>(getpgrp()) << '\n';
+}
+
+void write_cwd_marker(std::string const& path)
+{
+  if (path.empty())
+    return;
+  char buffer[4096]{};
+  if (getcwd(buffer, sizeof(buffer)) == nullptr)
+    return;
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  file << buffer << '\n';
 }
 
 void respond_initialize(long long id)
@@ -282,6 +299,8 @@ int main(int argc, char** argv)
         usleep(1000000);
         continue;
       }
+      if (options.mode == Mode::CwdMarker)
+        write_cwd_marker(options.marker_path);
       respond_initialize(*id);
     }
     else if (*method == "textDocument/diagnostic" && id)

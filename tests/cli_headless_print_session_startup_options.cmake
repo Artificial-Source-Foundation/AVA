@@ -86,7 +86,9 @@ file(WRITE "${DRIVER_FILE}"
 "if [ -z \"$session_file\" ]; then echo \"startup run did not create a custom session\" >&2; exit 1; fi\n"
 "session_id=$(basename \"$session_file\" .jsonl)\n"
 "printf '%s\\n' \"$session_id\" > \"${SOURCE_SESSION_ID_FILE}\"\n"
-"run_ava fork --session-dir \"${CUSTOM_SESSIONS}\" --fork \"$session_id\" --name \"fork startup\" --output text \"forked\" \"prompt\"\n")
+"run_ava sessionid --session-dir \"${CUSTOM_SESSIONS}\" --session-id \"$session_id\" --output text \"session id\" \"prompt\"\n"
+"run_ava fork --session-dir \"${CUSTOM_SESSIONS}\" --fork \"$session_id\" --name \"fork startup\" --output text \"forked\" \"prompt\"\n"
+"run_ava resume --session-dir \"${CUSTOM_SESSIONS}\" --resume --output text \"resume alias\" \"prompt\"\n")
 
 execute_process(
   COMMAND /bin/sh "${DRIVER_FILE}"
@@ -104,20 +106,26 @@ endif()
 file(READ "${TEST_ROOT}/ava-named.out" NAMED_OUTPUT)
 file(READ "${TEST_ROOT}/ava-named.err" NAMED_ERROR)
 file(READ "${TEST_ROOT}/provider-named-request.log" NAMED_REQUEST)
+file(READ "${TEST_ROOT}/ava-sessionid.out" SESSION_ID_OUTPUT)
+file(READ "${TEST_ROOT}/ava-sessionid.err" SESSION_ID_ERROR)
+file(READ "${TEST_ROOT}/provider-sessionid-request.log" SESSION_ID_REQUEST)
 file(READ "${TEST_ROOT}/ava-fork.out" FORK_OUTPUT)
 file(READ "${TEST_ROOT}/ava-fork.err" FORK_ERROR)
 file(READ "${TEST_ROOT}/provider-fork-request.log" FORK_REQUEST)
+file(READ "${TEST_ROOT}/ava-resume.out" RESUME_OUTPUT)
+file(READ "${TEST_ROOT}/ava-resume.err" RESUME_ERROR)
+file(READ "${TEST_ROOT}/provider-resume-request.log" RESUME_REQUEST)
 file(READ "${SOURCE_SESSION_ID_FILE}" SOURCE_SESSION_ID)
 string(STRIP "${SOURCE_SESSION_ID}" SOURCE_SESSION_ID)
 
-foreach(OUTPUT IN ITEMS "${NAMED_OUTPUT}" "${FORK_OUTPUT}")
+foreach(OUTPUT IN ITEMS "${NAMED_OUTPUT}" "${SESSION_ID_OUTPUT}" "${FORK_OUTPUT}" "${RESUME_OUTPUT}")
   string(FIND "${OUTPUT}" "headless active prompt complete" NEEDLE_INDEX)
   if(NEEDLE_INDEX EQUAL -1)
-    message(FATAL_ERROR "ava startup option output did not contain fake provider text\nnamed stdout:\n${NAMED_OUTPUT}\nnamed stderr:\n${NAMED_ERROR}\nfork stdout:\n${FORK_OUTPUT}\nfork stderr:\n${FORK_ERROR}")
+    message(FATAL_ERROR "ava startup option output did not contain fake provider text\nnamed stdout:\n${NAMED_OUTPUT}\nnamed stderr:\n${NAMED_ERROR}\nsession-id stdout:\n${SESSION_ID_OUTPUT}\nsession-id stderr:\n${SESSION_ID_ERROR}\nfork stdout:\n${FORK_OUTPUT}\nfork stderr:\n${FORK_ERROR}\nresume stdout:\n${RESUME_OUTPUT}\nresume stderr:\n${RESUME_ERROR}")
   endif()
 endforeach()
 
-foreach(REQUEST IN ITEMS "${NAMED_REQUEST}" "${FORK_REQUEST}")
+foreach(REQUEST IN ITEMS "${NAMED_REQUEST}" "${SESSION_ID_REQUEST}" "${FORK_REQUEST}" "${RESUME_REQUEST}")
   foreach(NEEDLE "workspace startup option context should remain" "prompt")
     string(FIND "${REQUEST}" "${NEEDLE}" NEEDLE_INDEX)
     if(NEEDLE_INDEX EQUAL -1)

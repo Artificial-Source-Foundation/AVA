@@ -316,6 +316,21 @@ Protocol rules:
 
 Provider plugins, custom UI renderers, and prompt/provider interception can come later after the core event and audit model proves safe.
 
+### Pi Extension Capability Disposition
+
+| Pi extension capability | AVA MVP disposition |
+| --- | --- |
+| Tools | Implemented as out-of-process plugin tools with explicit `plugin.execute`/`plugin.tool.call` permission and bounded structured results. |
+| Commands | Implemented as backend/slash/RPC plugin commands; execution is permissioned and audited. |
+| Prompts | Implemented as static plugin prompt resources and command-registry entries, not automatic provider-request rewrites. |
+| Skills | Implemented as static plugin skill resources plus the built-in bounded `skill` tool. |
+| Events | Implemented as non-mutating event hooks; hooks cannot rewrite prompts, provider requests, or tool results in v1. |
+| UI/render slots | Deferred; arbitrary TUI slots/renderers are not loaded until a UI isolation/accessibility contract exists. |
+| Keybindings | Core AVA keybinding config exists; plugin-contributed keybindings are deferred to avoid hidden input capture and conflict complexity. |
+| Themes | Core built-in/custom theme files exist; plugin theme packages are deferred to the package/trust design. |
+| Custom providers/request interception | Deferred; provider auth, model metadata, and request mutation are security-sensitive and stay in core/config for MVP. |
+| Packages/remote install | Deferred; remote code/resource install requires provenance, signing, compatibility, rollback, and trust policy. |
+
 ## Permissions And Audit
 
 Plugin-contributed operations must not get side-effect authority merely by registering a tool. AVA enforces launch and call permissions today; the current read/search/status core-service proxy slice reuses existing file/search permission categories for file/search work and exposes only capability-gated read-only status metadata for `session.status`. Future side-effecting proxy operations must reuse the relevant shell, network, file mutation, or session permission categories.
@@ -361,7 +376,7 @@ This does not sandbox arbitrary plugin code. It makes well-behaved plugins easy 
 
 ## MCP Integration
 
-MCP is a first-class extension surface that shares AVA's tool registry, permission, runtime event, and audit paths. Current 1.0 support uses explicit global/project MCP config files rather than plugin manifest contributions.
+MCP is a first-class extension surface that shares AVA's tool registry, permission, runtime event, and audit paths. Current 1.0 support uses explicit global/project MCP config files rather than plugin manifest contributions. A shorter user-facing MCP summary lives in [`docs/mcp.md`](mcp.md).
 
 Config locations:
 
@@ -384,7 +399,7 @@ Config shape:
 }
 ```
 
-Global servers default to enabled when `enabled` is omitted. Project servers default to disabled when `enabled` is omitted, so repositories cannot silently opt users into running project-local MCP server commands.
+Global servers default to enabled when `enabled` is omitted. Project servers default to disabled when `enabled` is omitted, so repositories cannot silently opt users into running project-local MCP server commands. Global MCP config must not reference workspace-relative executable or script paths; entries such as `./server`, `.ava/server.js`, or `node_modules/.bin/server` belong in project MCP config and require `/trust project` before they can run.
 
 Current 1.0 MCP scope:
 

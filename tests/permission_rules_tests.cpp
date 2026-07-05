@@ -1,13 +1,11 @@
-#include "ava/tools/file_tools.h"
-
-#include "ava/permissions/permission_rules.h"
-
 #include "tests/support/test_harness.h"
+#include "ava/tools/file_tools.h"
+#include "ava/permissions/permission_rules.h"
 
 #include <filesystem>
 #include <fstream>
 #include <string>
-
+#include <utility>
 #include <sys/stat.h>
 
 namespace {
@@ -123,6 +121,19 @@ void test_permission_rule_precedence_denies_win()
          "persistent deny rules take precedence over matching allows");
 }
 
+ava::permissions::PermissionPrompt command_prompt(ava::permissions::PermissionRuleStore const& store, std::string command)
+{
+  return ava::permissions::PermissionPrompt{.permission_request_id = "permreq_command",
+                                            .operation = ava::permissions::Operation::RunCommand,
+                                            .mode = ava::agent::Mode::Build,
+                                            .workspace_dir = store.workspace_dir,
+                                            .target_path = {},
+                                            .command = std::move(command),
+                                            .tool_name = "bash",
+                                            .reason = "command requires explicit approval",
+                                            .risk = ava::permissions::PermissionRisk::High};
+}
+
 void test_permission_rule_precedence_prefers_specific_same_scope_rules()
 {
   auto const root = temp_root() / "permission-rules-specificity";
@@ -131,32 +142,57 @@ void test_permission_rule_precedence_prefers_specific_same_scope_rules()
   auto const store = test_store(root);
   auto const outside = root / "outside.txt";
 
-  auto broad_allow = ava::permissions::add_persistent_permission_rule(
-      store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
-                                                   .action = ava::permissions::PermissionAction::Allow,
-                                                   .operation = ava::permissions::Operation::ReadFile,
-                                                   .mode = ava::permissions::PermissionRuleMode::Any,
-                                                   .tool_name = "",
-                                                   .target_path = outside,
-                                                   .command = "",
-                                                   .reason = "allow this path",
-                                                   .actor = "test"});
-  auto specific_deny = ava::permissions::add_persistent_permission_rule(
-      store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
-                                                   .action = ava::permissions::PermissionAction::Deny,
-                                                   .operation = ava::permissions::Operation::ReadFile,
-                                                   .mode = ava::permissions::PermissionRuleMode::Any,
-                                                   .tool_name = "read_file",
-                                                   .target_path = outside,
-                                                   .command = "",
-                                                   .reason = "deny this tool/path pair",
-                                                   .actor = "test"});
+  auto broad_allow =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Allow,
+                                                                                                    .operation = ava::permissions::Operation::ReadFile,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Any,
+                                                                                                    .tool_name = "",
+                                                                                                    .target_path = outside,
+                                                                                                    .command = "",
+                                                                                                    .reason = "allow this path",
+                                                                                                    .actor = "test"});
+  auto specific_deny =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Deny,
+                                                                                                    .operation = ava::permissions::Operation::ReadFile,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Any,
+                                                                                                    .tool_name = "read_file",
+                                                                                                    .target_path = outside,
+                                                                                                    .command = "",
+                                                                                                    .reason = "deny this tool/path pair",
+                                                                                                    .actor = "test"});
   expect(broad_allow && specific_deny, "permission rule specificity test creates broad and specific rules");
 
   auto matched = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, outside));
-  expect(matched && *matched && (*matched)->rule_id == specific_deny->rule_id &&
-             (*matched)->action == ava::permissions::PermissionAction::Deny,
+  expect(matched && *matched && (*matched)->rule_id == specific_deny->rule_id && (*matched)->action == ava::permissions::PermissionAction::Deny,
          "persistent permission rules prefer more specific same-scope matches");
+}
+
+void test_permission_rule_matches_command_operations_without_path_targets()
+{
+  auto const root = temp_root() / "permission-rules-command-operation";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const store = test_store(root);
+
+  auto allow_echo =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Allow,
+                                                                                                    .operation = ava::permissions::Operation::RunCommand,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                    .tool_name = "bash",
+                                                                                                    .target_path = {},
+                                                                                                    .command = "echo safe",
+                                                                                                    .reason = "allow exact verification command",
+                                                                                                    .actor = "test"});
+  expect(allow_echo.has_value(), "permission rule storage accepts exact command rules for non-file operations");
+
+  auto matched = ava::permissions::match_persistent_permission_rule(store, command_prompt(store, "echo safe"));
+  auto unmatched = ava::permissions::match_persistent_permission_rule(store, command_prompt(store, "echo unsafe"));
+  expect(matched && *matched && (*matched)->rule_id == allow_echo->rule_id && (*matched)->action == ava::permissions::PermissionAction::Allow && unmatched &&
+             !*unmatched,
+         "persistent permission rules match command operations by exact command/tool without a path target");
 }
 
 void test_permission_rule_storage_fail_closed()
@@ -259,7 +295,8 @@ void test_file_tools_reject_enforceable_permission_rule_writes()
                                                                                                     .command = "",
                                                                                                     .reason = "register protected rule paths",
                                                                                                     .actor = "test"});
-  expect(added.has_value(), added ? "permission rule storage registers protected paths" : "permission rule storage registers protected paths: " + added.error().format());
+  expect(added.has_value(),
+         added ? "permission rule storage registers protected paths" : "permission rule storage registers protected paths: " + added.error().format());
 
   ava::tools::ToolContext context;
   context.workspace_dir = workspace;
@@ -278,8 +315,8 @@ void test_file_tools_reject_enforceable_permission_rule_writes()
   std::filesystem::create_directory_symlink(store.global_rules_file.parent_path(), config_link, symlink_error);
   if (!symlink_error)
   {
-    auto alias_write = ava::tools::write_file(context, config_link / "permission-rules.json", "{}",
-                                             ava::tools::WriteOptions{.permission_already_checked = true});
+    auto alias_write =
+        ava::tools::write_file(context, config_link / "permission-rules.json", "{}", ava::tools::WriteOptions{.permission_already_checked = true});
     expect(!alias_write && alias_write.error().category() == ava::core::ErrorCategory::PermissionDenied,
            "normal file tools use canonical comparison for enforceable permission rule file aliases");
   }
@@ -308,7 +345,7 @@ void test_file_tools_reject_enforceable_permission_rule_writes_before_registrati
   auto const workspace_rules_file = ava::permissions::enforceable_permission_rules_file(store, ava::permissions::PermissionRuleScope::Workspace);
   auto workspace_write = ava::tools::write_file(context, workspace_rules_file, "{}", ava::tools::WriteOptions{.permission_already_checked = true});
   expect(!workspace_write && workspace_write.error().category() == ava::core::ErrorCategory::PermissionDenied,
-          "normal file tools reject workspace-keyed permission rule writes before rule store registration");
+         "normal file tools reject workspace-keyed permission rule writes before rule store registration");
 }
 
 void test_registered_permission_rule_paths_protect_agent_loop_context()
@@ -338,6 +375,7 @@ void run_permission_rules_tests()
   test_permission_rule_storage_add_list_remove();
   test_permission_rule_precedence_denies_win();
   test_permission_rule_precedence_prefers_specific_same_scope_rules();
+  test_permission_rule_matches_command_operations_without_path_targets();
   test_permission_rule_storage_fail_closed();
   test_permission_rule_broad_permissions_rejected();
   test_permission_rule_workspace_legacy_path_is_not_enforceable();

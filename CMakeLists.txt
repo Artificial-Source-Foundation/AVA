@@ -52,6 +52,101 @@ configure_file(
 option(AVA_BUILD_TESTS "Build AVA tests" ON)
 option(AVA_ENABLE_SANITIZERS "Build AVA with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
+#==============================================================================
+# OPTIONAL TOOLS
+
+# Build-time debug printer generation (which feeds src/ava/debug) only runs
+# when libcwd debug support is effectively enabled, i.e. when the aicxx-derived
+# flag OptionEnableLibcwd is ON (note: the raw EnableLibcwd cache entry is a
+# tri-state sentinel that cw_option deliberately clobbers, so always use
+# OptionEnableLibcwd). That generation requires ctags with JSON output, a
+# Universal Ctags feature that Exuberant Ctags and the BSD/emacs ctags lack.
+# The whole detection is therefore gated on OptionEnableLibcwd, and a
+# JSON-capable ctags is then a hard requirement. Configure with
+# -DEnableLibcwd=OFF to skip this entirely.
+if(OptionEnableLibcwd)
+  # CTAGS_EXECUTABLE is the cache variable holding the path to the binary, or
+  # CTAGS_EXECUTABLE-NOTFOUND when no ctags is on the PATH. CTAGS_FOUND is the
+  # normalized boolean recomputed every configure from CTAGS_EXECUTABLE.
+  find_program(CTAGS_EXECUTABLE ctags
+    DOC "Path to the ctags executable; used by build-time code generation targets."
+  )
+  if(CTAGS_EXECUTABLE)
+    set(CTAGS_FOUND TRUE)
+  else()
+    set(CTAGS_FOUND FALSE)
+  endif()
+
+  # Determine whether the available ctags supports JSON output. Probe
+  # `ctags --list-output-formats` and accept only a format literally named
+  # "json" whose AVAILABLE column (the third whitespace-separated field) is
+  # "yes".
+  set(CTAGS_HAS_JSON FALSE)
+  if(CTAGS_FOUND)
+    execute_process(
+      COMMAND "${CTAGS_EXECUTABLE}" --list-output-formats
+      RESULT_VARIABLE _ctags_formats_result
+      OUTPUT_VARIABLE _ctags_formats_output
+      ERROR_QUIET
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(_ctags_formats_result EQUAL 0)
+      # Turn the multi-line output into a CMake list of lines, escaping any
+      # literal semicolons first so they survive the newline-to-';' conversion.
+      string(REPLACE ";" "\\;" _ctags_formats_output "${_ctags_formats_output}")
+      string(REGEX REPLACE "\r?\n" ";" _ctags_format_lines "${_ctags_formats_output}")
+      foreach(_line ${_ctags_format_lines})
+        # Strip leading whitespace, then skip blank lines and the header line.
+        string(REGEX REPLACE "^[ \t]+" "" _line "${_line}")
+        if(_line STREQUAL "" OR _line MATCHES "^#")
+          continue()
+        endif()
+        # Collapse runs of whitespace into list separators and drop empties.
+        string(REGEX REPLACE "[ \t]+" ";" _tokens "${_line}")
+        list(FILTER _tokens EXCLUDE REGEX "^$")
+        list(LENGTH _tokens _ntokens)
+        if(_ntokens GREATER_EQUAL 3)
+          list(GET _tokens 0 _fmt_name)
+          list(GET _tokens 2 _fmt_available)
+          if("${_fmt_name}" STREQUAL "json" AND "${_fmt_available}" STREQUAL "yes")
+            set(CTAGS_HAS_JSON TRUE)
+            break()
+          endif()
+        endif()
+      endforeach()
+    endif()
+  endif()
+  unset(_ctags_formats_result)
+  unset(_ctags_formats_output)
+  unset(_ctags_format_lines)
+  unset(_line)
+  unset(_tokens)
+  unset(_ntokens)
+  unset(_fmt_name)
+  unset(_fmt_available)
+
+  if(CTAGS_FOUND)
+    message(STATUS "Found ctags: ${CTAGS_EXECUTABLE}")
+    if(CTAGS_HAS_JSON)
+      message(STATUS "ctags supports JSON output (Universal Ctags)")
+    else()
+      message(STATUS "ctags does not support JSON output")
+    endif()
+  else()
+    message(STATUS "ctags not found.")
+  endif()
+
+  # Require a JSON-capable ctags (Universal Ctags) when libcwd is enabled.
+  if(NOT CTAGS_HAS_JSON)
+    message(FATAL_ERROR
+      "EnableLibcwd is ON, which requires a ctags with JSON output support "
+      "(Universal Ctags with the 'json' output format available) for "
+      "build-time debug printer generation, but no such ctags was found. "
+      "Install Universal Ctags with JSON support, or work around this by "
+      "configuring with -DEnableLibcwd=OFF.")
+  endif()
+endif()
+
 function(ava_apply_debugging target)
   target_link_libraries(${target} PRIVATE ${AICXX_OBJECTS_LIST})
 endfunction()

@@ -33,6 +33,10 @@
 #include <utility>
 #include <vector>
 
+#ifdef CWDEBUG
+#include "ava/debug/debug_ostream_operators.h"
+#endif
+
 namespace ava::app::runtime {
 namespace {
 
@@ -758,5 +762,15 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
 
   return result;
 }
+
+#ifdef CWDEBUG
+void RuntimePromptOverrides::print_members(std::ostream& os, char const* prefix) const
+{
+  LIBCWD_USING_OSTREAM_PRELUDE
+  os << prefix
+    << "system_prompt:" << system_prompt
+    << "append_system_prompts:" << append_system_prompts;
+}
+#endif
 
 }  // namespace ava::app

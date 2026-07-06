@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "debug.h"
 
 namespace ava::config {
 
@@ -38,6 +39,8 @@ struct ModelInfo
   std::vector<std::string> compatibility_quirks = {};
   std::vector<std::string> output_modalities = {};
   std::string reasoning_format = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ModelRegistry

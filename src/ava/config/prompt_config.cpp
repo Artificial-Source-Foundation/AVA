@@ -5,6 +5,10 @@
 #include <fstream>
 #include <utility>
 
+#ifdef CWDEBUG
+#include "ava/debug/debug_ostream_operators.h"
+#endif // CWDEBUG
+
 namespace ava::config {
 namespace {
 
@@ -110,5 +114,16 @@ ava::core::Result<PromptSelection> select_prompt(XdgPaths const& paths, ModelInf
   }
   return PromptSelection{.text = builtin_prompt(model.provider_id, model.family, mode), .from_override = false};
 }
+
+#ifdef CWDEBUG
+void PromptSelection::print_members(std::ostream& os, char const* prefix) const
+{
+  LIBCWD_USING_OSTREAM_PRELUDE
+  os << prefix
+    << "text:" << text
+    << ", from_override:" << std::boolalpha << from_override
+    << ", source_path:" << source_path;
+}
+#endif
 
 }  // namespace ava::config

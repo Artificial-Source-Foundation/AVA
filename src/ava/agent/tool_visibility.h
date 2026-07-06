@@ -18,6 +18,8 @@ struct ToolVisibilityOptions
   ToolVisibilityMode mode = ToolVisibilityMode::Default;
   std::vector<std::string> included_tools = {};
   std::vector<std::string> excluded_tools = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::string to_string(ToolVisibilityMode mode);

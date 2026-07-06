@@ -42,6 +42,8 @@ struct ContextSourceMetadata
   ava::context::ContextSourceType source_type = ava::context::ContextSourceType::Workspace;
   std::size_t byte_count = 0;
   std::uint64_t content_fingerprint = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeFreshnessSourceMetadata
@@ -53,12 +55,16 @@ struct RuntimeFreshnessSourceMetadata
   std::filesystem::path path;
   std::size_t byte_count = 0;
   std::uint64_t content_fingerprint = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimePromptOverrides
 {
   std::optional<std::string> system_prompt = std::nullopt;
   std::vector<std::string> append_system_prompts;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeOpenOptions
@@ -102,6 +108,8 @@ struct RuntimeSession
   std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
   bool created = false;
   bool sessionless = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimePromptState

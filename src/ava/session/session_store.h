@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "debug.h"
 
 namespace ava::session {
 
@@ -39,6 +40,8 @@ struct SessionEntry
   std::string timestamp;
   std::string data_json;
   long long version = kCurrentSessionEntryVersion;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SessionStoreOptions
@@ -46,6 +49,8 @@ struct SessionStoreOptions
   std::filesystem::path root_dir;
   std::filesystem::path workspace_dir;
   std::string session_id;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SessionSummary
@@ -76,6 +81,8 @@ class SessionStore
   [[nodiscard]] static ava::core::Result<std::vector<SessionSummary>> list_sessions(std::filesystem::path const& workspace_dir,
                                                                                     std::filesystem::path const& root_dir = default_root_dir());
   [[nodiscard]] static std::filesystem::path default_root_dir();
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   struct EphemeralState;

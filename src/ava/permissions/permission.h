@@ -37,6 +37,7 @@ enum class Operation
   LspServerLaunch,
   LspQuery,
   SkillLoad,
+  TaskRun,
   PluginExecute,
   PluginToolCall,
   PluginCommandRun,

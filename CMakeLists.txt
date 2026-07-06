@@ -145,6 +145,26 @@ if(OptionEnableLibcwd)
       "Install Universal Ctags with JSON support, or work around this by "
       "configuring with -DEnableLibcwd=OFF.")
   endif()
+
+  #----------------------------------------------------------------------
+  # ctags-json pseudo-target (goal 03): manually regenerate the JSON tags file
+  # that feeds debug printer generation. It is a phony custom target, so it
+  # only runs when built explicitly (cmake --build <build> --target ctags-json);
+  # a normal build never triggers it. It deliberately depends only on the
+  # scripts involved and on NO .h/.cpp/.cxx source file, so editing a header
+  # does not regenerate it and a normal build pays no cost. Forcing regeneration
+  # after a Debug<->Release configuration switch is handled by the
+  # build-integration target (goal 06), not here.
+  set(_ava_ctags_json_out "${CMAKE_BINARY_DIR}/generated/ctags/tags.json")
+  add_custom_target(ctags-json
+    COMMAND "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_ctags_json.sh"
+            "${_ava_ctags_json_out}"
+            "${CTAGS_EXECUTABLE}"
+    DEPENDS "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_ctags_json.sh"
+            "${CMAKE_SOURCE_DIR}/cmake/scripts/list_ava_sources.sh"
+    COMMENT "Generating JSON tags for debug printer generation: ${_ava_ctags_json_out}"
+    VERBATIM
+  )
 endif()
 
 function(ava_apply_debugging target)

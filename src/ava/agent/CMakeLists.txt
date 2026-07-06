@@ -14,6 +14,7 @@ add_library(ava_agent
   "tool_result.cpp"
   "tool_summaries.cpp"
   "tool_timeline.cpp"
+  "tool_visibility.cpp"
   "usage_accounting.cpp"
 )
 

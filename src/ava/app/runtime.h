@@ -21,6 +21,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "debug.h"
 
 namespace ava::app {
 
@@ -161,5 +162,7 @@ void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prom
                                                                          ava::session::CompactionConfig const& config, std::string_view instructions,
                                                                          std::size_t estimated_tokens, ava::provider::Provider const& provider,
                                                                          ava::provider::Transport& transport, RuntimeRunOptions const& options);
+
+[[nodiscard]] std::string to_string(RuntimeFreshnessSourceKind kind);
 
 }  // namespace ava::app

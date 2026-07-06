@@ -289,10 +289,10 @@ bool prompt_matches_query(RuntimeSession const& session, std::string_view query)
 {
   if (query.empty())
     return true;
-  if (contains_ascii_case_insensitive("prompt", query) || contains_ascii_case_insensitive("builtin", query) ||
-      contains_ascii_case_insensitive("override", query))
+  if (contains_ascii_case_insensitive("prompt", query) || contains_ascii_case_insensitive("base_prompt", query) ||
+      contains_ascii_case_insensitive("builtin", query) || contains_ascii_case_insensitive("override", query))
     return true;
-  return session.prompt.source_path && contains_ascii_case_insensitive(session.prompt.source_path->generic_string(), query);
+  return session.base_prompt.source_path && contains_ascii_case_insensitive(session.base_prompt.source_path->generic_string(), query);
 }
 
 std::string_view freshness_source_kind_text(RuntimeFreshnessSourceKind kind)
@@ -980,19 +980,19 @@ ava::core::Result<CommandResult> run_context_command(RuntimeSession& session, st
             " project_resources=" + (project_resources_trusted(session.project_trust) ? std::string("enabled") : std::string("skipped")) + "\n";
   if (prompt_matches_query(session, trimmed_query))
   {
-    output += "  prompt=";
-    if (session.prompt.from_override)
+    output += "  base_prompt=";
+    if (session.base_prompt.from_override)
     {
       output += "override";
-      if (session.prompt.source_path)
-        output += " path=" + session.prompt.source_path->string() + " " +
-                  context_file_status(*session.prompt.source_path, session.prompt.text.size(), ava::core::content_fingerprint(session.prompt.text));
+      if (session.base_prompt.source_path)
+        output += " path=" + session.base_prompt.source_path->string() + " " +
+                  context_file_status(*session.base_prompt.source_path, session.base_prompt.byte_count, session.base_prompt.content_fingerprint);
     }
     else
     {
       output += "builtin";
     }
-    output += " bytes=" + std::to_string(session.prompt.text.size()) + "\n";
+    output += " bytes=" + std::to_string(session.base_prompt.byte_count) + "\n";
   }
   output += "  context_sources=" + std::to_string(session.context_sources.size()) + "\n";
   auto const system_prompt_sources = freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::SystemPrompt) +

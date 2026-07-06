@@ -16,10 +16,10 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -130,6 +130,15 @@ void append_background_parent_error_best_effort(ava::session::SessionStore store
   error.with_context("background_task_id", task_id);
   error.with_context("subagent_type", subagent_type);
   static_cast<void>(append_error(store, error));
+}
+
+BackgroundJobCompletion background_failure_completion(BackgroundJobContext const& context, ava::core::Error const& error)
+{
+  if (context.stop_token.stop_requested())
+  {
+    return BackgroundJobCompletion{.state = BackgroundJobState::Canceled, .final_text = "", .stop_reason = "canceled", .error = error};
+  }
+  return BackgroundJobCompletion{.state = BackgroundJobState::Failed, .final_text = "", .stop_reason = "failed", .error = error};
 }
 
 }  // namespace
@@ -351,7 +360,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       error.with_context("task_id", *request.task_id);
       return std::unexpected(std::move(error));
     }
-    if (request.background && (!options_.background_provider_factory || !options_.background_transport_factory))
+    if (request.background && (!options_.background_provider_factory || !options_.background_transport_factory || !options_.background_jobs))
     {
       auto error = ava::core::Error(ava::core::ErrorCategory::Tool, "background task subagents are unavailable");
       error.with_context("subagent_type", request.subagent_type);
@@ -388,6 +397,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
     child_options.compact_context = nullptr;
     child_options.background_provider_factory = nullptr;
     child_options.background_transport_factory = nullptr;
+    child_options.background_jobs = nullptr;
 
     if (request.background)
     {
@@ -404,25 +414,58 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       auto parent_store = store;
       child_options.permission_resolver = nullptr;
       child_options.question_resolver = nullptr;
-      child_options.cancel_requested = nullptr;
       child_options.session_mutex = nullptr;
       child_options.lsp_diagnostics_provider = nullptr;
-      std::thread([child_store = std::move(child_store), child_options = std::move(child_options), prompt = request.prompt,
-                   parent_store = std::move(parent_store), task_id, subagent_type = request.subagent_type, provider_instance = std::move(provider_instance),
-                   transport_instance = std::move(transport_instance)]() mutable {
-        AgentLoop child_loop(std::move(child_options));
-        auto child_result = child_loop.run_turn(prompt, child_store, *provider_instance, *transport_instance);
-        if (!child_result)
-        {
-          auto error = child_result.error();
-          append_background_error_best_effort(child_store, error);
-          append_background_parent_error_best_effort(std::move(parent_store), task_id, subagent_type, std::move(error));
-        }
-      }).detach();
+      struct BackgroundTaskRunState
+      {
+        ava::session::SessionStore child_store;
+        AgentLoopOptions child_options;
+        std::string prompt;
+        ava::session::SessionStore parent_store;
+        std::string task_id;
+        std::string subagent_type;
+        std::unique_ptr<ava::provider::Provider> provider_instance;
+        std::unique_ptr<ava::provider::Transport> transport_instance;
+      };
+      auto run_state = std::make_shared<BackgroundTaskRunState>(BackgroundTaskRunState{.child_store = std::move(child_store),
+                                                                                       .child_options = std::move(child_options),
+                                                                                       .prompt = request.prompt,
+                                                                                       .parent_store = std::move(parent_store),
+                                                                                       .task_id = task_id,
+                                                                                       .subagent_type = request.subagent_type,
+                                                                                       .provider_instance = std::move(provider_instance),
+                                                                                       .transport_instance = std::move(transport_instance)});
+      auto job = options_.background_jobs->start(
+          BackgroundJobStartOptions{.title = request.description,
+                                    .description = request.prompt,
+                                    .subagent_type = request.subagent_type,
+                                    .child_session_id = task_id,
+                                    .child_session_path = session_path},
+          [run_state = std::move(run_state)](BackgroundJobContext const& context) mutable {
+            run_state->child_options.cancel_requested = [stop_token = context.stop_token] { return stop_token.stop_requested(); };
+            AgentLoop child_loop(std::move(run_state->child_options));
+            auto child_result = child_loop.run_turn(run_state->prompt, run_state->child_store, *run_state->provider_instance, *run_state->transport_instance);
+            if (!child_result)
+            {
+              auto error = child_result.error();
+              if (!context.stop_token.stop_requested())
+              {
+                append_background_error_best_effort(run_state->child_store, error);
+                append_background_parent_error_best_effort(std::move(run_state->parent_store), run_state->task_id, run_state->subagent_type, error);
+              }
+              return background_failure_completion(context, error);
+            }
+            return BackgroundJobCompletion{.state = BackgroundJobState::Completed,
+                                           .final_text = child_result->final_text,
+                                           .stop_reason = child_result->stop_reason.empty() ? "completed" : child_result->stop_reason};
+          });
+      if (!job)
+        return std::unexpected(std::move(job.error()));
       return ava::tools::TaskSubagentResult{.task_id = task_id,
+                                            .job_id = job->job_id,
                                             .session_path = session_path,
                                             .subagent_type = request.subagent_type,
-                                            .state = "running",
+                                            .state = to_string(job->state),
                                             .final_text = "",
                                             .stop_reason = "background",
                                             .provider_iterations = 0,
@@ -435,6 +478,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
     if (!child_result)
       return std::unexpected(std::move(child_result.error()));
     return ava::tools::TaskSubagentResult{.task_id = child_store.session_id(),
+                                          .job_id = "",
                                           .session_path = child_store.session_path(),
                                           .subagent_type = request.subagent_type,
                                           .final_text = child_result->final_text,

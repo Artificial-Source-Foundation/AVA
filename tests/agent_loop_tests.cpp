@@ -10,7 +10,9 @@
 #include "ava/core/json.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -18,6 +20,7 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -95,6 +98,73 @@ class SharedFakeTransport final : public ava::provider::Transport
   std::shared_ptr<std::vector<ava::provider::HttpResponse>> responses_;
   std::shared_ptr<std::vector<ava::provider::HttpRequest>> requests_;
   std::shared_ptr<std::mutex> mutex_;
+};
+
+class BlockingBackgroundTransport final : public ava::provider::Transport
+{
+ public:
+  struct State
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool request_seen = false;
+    bool release = false;
+    bool cancel_observed = false;
+    std::vector<ava::provider::HttpRequest> requests;
+
+    void release_success()
+    {
+      {
+        std::lock_guard lock(mutex);
+        release = true;
+      }
+      changed.notify_all();
+    }
+
+    void notify() { changed.notify_all(); }
+
+    [[nodiscard]] bool wait_for_request(std::chrono::milliseconds timeout)
+    {
+      std::unique_lock lock(mutex);
+      return changed.wait_for(lock, timeout, [&] { return request_seen; });
+    }
+
+    [[nodiscard]] bool wait_for_cancel(std::chrono::milliseconds timeout)
+    {
+      std::unique_lock lock(mutex);
+      return changed.wait_for(lock, timeout, [&] { return cancel_observed; });
+    }
+
+    [[nodiscard]] std::vector<ava::provider::HttpRequest> requests_snapshot()
+    {
+      std::lock_guard lock(mutex);
+      return requests;
+    }
+  };
+
+  BlockingBackgroundTransport(std::shared_ptr<State> state, ava::provider::HttpResponse response) : state_(std::move(state)), response_(std::move(response)) { }
+
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override { return send(request, nullptr); }
+
+  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request, CancelCallback cancel_requested) override
+  {
+    std::unique_lock lock(state_->mutex);
+    state_->requests.push_back(request);
+    state_->request_seen = true;
+    state_->changed.notify_all();
+    state_->changed.wait(lock, [&] { return state_->release || (cancel_requested && cancel_requested()); });
+    if (cancel_requested && cancel_requested())
+    {
+      state_->cancel_observed = true;
+      state_->changed.notify_all();
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
+    }
+    return response_;
+  }
+
+ private:
+  std::shared_ptr<State> state_;
+  ava::provider::HttpResponse response_;
 };
 
 void test_agent_loop_text_only_turn()
@@ -564,11 +634,8 @@ void test_agent_loop_background_task_starts_child_session()
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-bg"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   std::mutex session_mutex;
-  auto background_responses = std::make_shared<std::vector<ava::provider::HttpResponse>>(
-      std::vector<ava::provider::HttpResponse>{sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"background child\"}\n\n"
-                                                            "data: [DONE]\n\n")});
-  auto background_requests = std::make_shared<std::vector<ava::provider::HttpRequest>>();
-  auto background_mutex = std::make_shared<std::mutex>();
+  auto registry = std::make_shared<ava::agent::BackgroundJobRegistry>();
+  auto background_state = std::make_shared<BlockingBackgroundTransport::State>();
   ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_task\",\"name\":\"task\"}\n\n"
                                                     "data: "
                                                     "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_task\",\"delta\":\"{"
@@ -592,12 +659,13 @@ void test_agent_loop_background_task_starts_child_session()
         std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
         return provider;
       },
-      .background_transport_factory = [background_responses, background_requests,
-                                       background_mutex]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
-        std::unique_ptr<ava::provider::Transport> transport =
-            std::make_unique<SharedFakeTransport>(background_responses, background_requests, background_mutex);
+      .background_transport_factory = [background_state]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
+        std::unique_ptr<ava::provider::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
+            background_state, sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"background child\"}\n\n"
+                                           "data: [DONE]\n\n"));
         return transport;
       },
+      .background_jobs = registry,
       .session_mutex = &session_mutex});
 
   auto result = loop.run_turn("delegate background", store, provider, transport);
@@ -606,38 +674,39 @@ void test_agent_loop_background_task_starts_child_session()
   if (transport.requests().size() == 2)
   {
     expect(transport.requests()[1].body.find("\\\"state\\\":\\\"running\\\"") != std::string::npos, "parent continuation receives running task state");
+    expect(transport.requests()[1].body.find("\\\"job_id\\\":\\\"job_") != std::string::npos, "parent continuation receives registry job id");
   }
 
-  bool saw_background_answer = false;
-  bool saw_background_request_without_lsp = false;
-  for (int attempt = 0; attempt < 100 && (!saw_background_answer || !saw_background_request_without_lsp); ++attempt)
+  auto running_jobs = registry->snapshot();
+  expect(running_jobs.size() == 1 && running_jobs.front().state == ava::agent::BackgroundJobState::Running &&
+             running_jobs.front().child_session_id.starts_with("session_"),
+         "background task appears as running in the registry");
+  expect(background_state->wait_for_request(std::chrono::milliseconds(1000)), "background child reaches provider transport while registered");
+  auto background_requests = background_state->requests_snapshot();
+  bool const saw_background_request_without_lsp = !background_requests.empty() &&
+                                                  background_requests.front().body.find("\"name\":\"lsp_diagnostics\"") == std::string::npos &&
+                                                  background_requests.front().body.find("\"name\":\"lsp_workspace_symbols\"") == std::string::npos;
+  background_state->release_success();
+  ava::core::Result<ava::agent::BackgroundJobSnapshot> completed =
+      std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing background job"));
+  if (!running_jobs.empty())
   {
+    completed = registry->wait(running_jobs.front().job_id, std::chrono::milliseconds(1000));
+  }
+  expect(completed && completed->state == ava::agent::BackgroundJobState::Completed && completed->final_text == "background child",
+         "background task transitions to completed in the registry");
+  registry->join_finished();
+  bool saw_background_answer = false;
+  if (completed)
+  {
+    auto child_store = ava::session::SessionStore::open(workspace, completed->child_session_id, session_root);
+    if (child_store)
     {
-      std::lock_guard lock(*background_mutex);
-      saw_background_request_without_lsp = !background_requests->empty() &&
-                                           background_requests->front().body.find("\"name\":\"lsp_diagnostics\"") == std::string::npos &&
-                                           background_requests->front().body.find("\"name\":\"lsp_workspace_symbols\"") == std::string::npos;
+      auto child_entries = child_store->load();
+      saw_background_answer = child_entries && std::ranges::any_of(*child_entries, [](ava::session::SessionEntry const& entry) {
+                                return entry.type == ava::session::EntryType::AssistantMessage && entry.data_json.find("background child") != std::string::npos;
+                              });
     }
-    auto summaries = ava::session::SessionStore::list_sessions(workspace, session_root);
-    if (summaries)
-    {
-      for (auto const& summary : *summaries)
-      {
-        if (summary.session_id == store.session_id())
-          continue;
-        auto child_store = ava::session::SessionStore::open(workspace, summary.session_id, session_root);
-        if (!child_store)
-          continue;
-        auto child_entries = child_store->load();
-        if (!child_entries)
-          continue;
-        saw_background_answer = std::ranges::any_of(*child_entries, [](ava::session::SessionEntry const& entry) {
-          return entry.type == ava::session::EntryType::AssistantMessage && entry.data_json.find("background child") != std::string::npos;
-        });
-      }
-    }
-    if (!saw_background_answer || !saw_background_request_without_lsp)
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   expect(saw_background_request_without_lsp, "background subagents do not inherit the parent LSP provider");
   expect(saw_background_answer, "background subagent writes completion to the child session");
@@ -657,6 +726,7 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
   auto background_responses = std::make_shared<std::vector<ava::provider::HttpResponse>>();
   auto background_requests = std::make_shared<std::vector<ava::provider::HttpRequest>>();
   auto background_mutex = std::make_shared<std::mutex>();
+  auto registry = std::make_shared<ava::agent::BackgroundJobRegistry>();
   ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_task\",\"name\":\"task\"}\n\n"
                                                     "data: "
                                                     "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_task\",\"delta\":\"{"
@@ -685,49 +755,418 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
             std::make_unique<SharedFakeTransport>(background_responses, background_requests, background_mutex);
         return transport;
       },
+      .background_jobs = registry,
       .session_mutex = &session_mutex});
 
   auto result = loop.run_turn("delegate failing background", store, provider, transport);
   expect(result && result->final_text == "queued failure" && result->tool_calls == 1, "agent loop can queue a background task that later fails");
 
-  bool saw_parent_error = false;
-  bool saw_child_error = false;
-  bool saw_background_request = false;
-  for (int attempt = 0; attempt < 100 && (!saw_parent_error || !saw_child_error || !saw_background_request); ++attempt)
+  auto jobs = registry->snapshot();
+  expect(jobs.size() == 1, "failed background task is registered");
+  ava::core::Result<ava::agent::BackgroundJobSnapshot> failed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing background job"));
+  if (!jobs.empty())
   {
+    failed = registry->wait(jobs.front().job_id, std::chrono::milliseconds(1000));
+  }
+  expect(failed && failed->state == ava::agent::BackgroundJobState::Failed && failed->error &&
+             failed->error->find("fake transport has no response") != std::string::npos,
+         "failed background task is marked failed in the registry");
+  registry->join_finished();
+
+  bool saw_background_request = false;
+  {
+    std::lock_guard lock(*background_mutex);
+    saw_background_request = !background_requests->empty();
+  }
+  auto parent_entries = store.load();
+  bool const saw_parent_error = parent_entries && std::ranges::any_of(*parent_entries, [](ava::session::SessionEntry const& entry) {
+                                  return entry.type == ava::session::EntryType::Error &&
+                                         entry.data_json.find("fake transport has no response") != std::string::npos &&
+                                         entry.data_json.find("background_task_id") != std::string::npos;
+                                });
+  bool saw_child_error = false;
+  if (failed)
+  {
+    auto child_store = ava::session::SessionStore::open(workspace, failed->child_session_id, session_root);
+    if (child_store)
     {
-      std::lock_guard lock(*background_mutex);
-      saw_background_request = !background_requests->empty();
+      auto child_entries = child_store->load();
+      saw_child_error = child_entries && std::ranges::any_of(*child_entries, [](ava::session::SessionEntry const& entry) {
+                          return entry.type == ava::session::EntryType::Error && entry.data_json.find("fake transport has no response") != std::string::npos;
+                        });
     }
-    auto parent_entries = store.load();
-    saw_parent_error = parent_entries && std::ranges::any_of(*parent_entries, [](ava::session::SessionEntry const& entry) {
-                         return entry.type == ava::session::EntryType::Error && entry.data_json.find("fake transport has no response") != std::string::npos &&
-                                entry.data_json.find("background_task_id") != std::string::npos;
-                       });
-    auto summaries = ava::session::SessionStore::list_sessions(workspace, session_root);
-    if (summaries)
-    {
-      for (auto const& summary : *summaries)
-      {
-        if (summary.session_id == store.session_id())
-          continue;
-        auto child_store = ava::session::SessionStore::open(workspace, summary.session_id, session_root);
-        if (!child_store)
-          continue;
-        auto child_entries = child_store->load();
-        if (!child_entries)
-          continue;
-        saw_child_error = saw_child_error || std::ranges::any_of(*child_entries, [](ava::session::SessionEntry const& entry) {
-                            return entry.type == ava::session::EntryType::Error && entry.data_json.find("fake transport has no response") != std::string::npos;
-                          });
-      }
-    }
-    if (!saw_parent_error || !saw_child_error || !saw_background_request)
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   expect(saw_background_request, "background failure test reaches the child provider transport");
   expect(saw_parent_error, "background task failures are visible in the parent session");
   expect(saw_child_error, "background task failures are persisted in the child session");
+}
+
+void test_agent_loop_background_task_cancel_requests_child_cancellation()
+{
+  auto const root = temp_root() / "agent-task-background-cancel";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto const session_root = root / "sessions";
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-bg-cancel"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  auto registry = std::make_shared<ava::agent::BackgroundJobRegistry>();
+  auto background_state = std::make_shared<BlockingBackgroundTransport::State>();
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_task\",\"name\":\"task\"}\n\n"
+                                                    "data: "
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_task\",\"delta\":\"{"
+                                                    "\\\"description\\\":\\\"Cancel async\\\",\\\"prompt\\\":\\\"Wait until canceled.\\\","
+                                                    "\\\"subagent_type\\\":\\\"general\\\",\\\"background\\\":true}\"}\n\n"
+                                                    "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"queued cancel\"}\n\n"
+                                                    "data: [DONE]\n\n")});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .background_provider_factory = []() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
+        std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
+        return provider;
+      },
+      .background_transport_factory = [background_state]() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
+        std::unique_ptr<ava::provider::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
+            background_state, sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"should not complete\"}\n\n"
+                                           "data: [DONE]\n\n"));
+        return transport;
+      },
+      .background_jobs = registry});
+
+  auto result = loop.run_turn("delegate cancelable background", store, provider, transport);
+  expect(result && result->final_text == "queued cancel" && result->tool_calls == 1, "agent loop can queue a cancelable background task");
+  auto jobs = registry->snapshot();
+  expect(jobs.size() == 1 && jobs.front().state == ava::agent::BackgroundJobState::Running, "cancelable background task is running in registry");
+  expect(background_state->wait_for_request(std::chrono::milliseconds(1000)), "cancel test background child reaches provider transport");
+  if (!jobs.empty())
+  {
+    auto canceled = registry->cancel(jobs.front().job_id);
+    background_state->notify();
+    expect(canceled && canceled->cancel_requested, "background registry cancel requests stop");
+    expect(background_state->wait_for_cancel(std::chrono::milliseconds(1000)), "background child transport observes cancellation");
+    auto final = registry->wait(jobs.front().job_id, std::chrono::milliseconds(1000));
+    expect(final && final->state == ava::agent::BackgroundJobState::Canceled, "background registry marks canceled child jobs canceled");
+    expect(final && !final->error, "background registry canceled job snapshots do not carry failure errors");
+    registry->join_finished();
+
+    bool saw_child_cancel = false;
+    if (final)
+    {
+      auto child_store = ava::session::SessionStore::open(workspace, final->child_session_id, session_root);
+      if (child_store)
+      {
+        auto child_entries = child_store->load();
+        saw_child_cancel = child_entries && std::ranges::any_of(*child_entries, [](ava::session::SessionEntry const& entry) {
+                             return entry.type == ava::session::EntryType::Cancel && entry.data_json.find("cancel_requested") != std::string::npos;
+                           });
+      }
+    }
+    expect(saw_child_cancel, "canceled background child records cancellation in its child session");
+  }
+}
+
+void test_agent_loop_background_task_requires_registry_owner()
+{
+  auto const root = temp_root() / "agent-task-background-no-registry";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "no-registry"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_task\",\"name\":\"task\"}\n\n"
+                                                    "data: "
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_task\",\"delta\":\"{"
+                                                    "\\\"description\\\":\\\"No registry\\\",\\\"prompt\\\":\\\"Try background.\\\","
+                                                    "\\\"subagent_type\\\":\\\"general\\\",\\\"background\\\":true}\"}\n\n"
+                                                    "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"handled\"}\n\n"
+                                                    "data: [DONE]\n\n")});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .background_provider_factory = []() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
+        std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
+        return provider;
+      },
+      .background_transport_factory = []() -> ava::core::Result<std::unique_ptr<ava::provider::Transport>> {
+        std::unique_ptr<ava::provider::Transport> transport = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::provider::HttpResponse>{});
+        return transport;
+      }});
+
+  auto result = loop.run_turn("delegate unavailable background", store, provider, transport);
+  expect(result && result->final_text == "handled" && transport.requests().size() == 2,
+         "agent loop continues after unavailable background registry tool error");
+  if (transport.requests().size() == 2)
+  {
+    expect(transport.requests()[1].body.find("background task subagents are unavailable") != std::string::npos,
+           "background task requires an explicit registry owner");
+  }
+}
+
+void test_background_job_registry_worker_exception_marks_failed()
+{
+  ava::agent::BackgroundJobRegistry registry;
+  auto started = registry.start(ava::agent::BackgroundJobStartOptions{.title = "throws"},
+                                [](ava::agent::BackgroundJobContext const&) -> ava::agent::BackgroundJobCompletion { throw std::runtime_error("boom"); });
+  expect(started.has_value(), "background registry starts worker that throws");
+  if (started)
+  {
+    auto failed = registry.wait(started->job_id, std::chrono::milliseconds(1000));
+    expect(failed && failed->state == ava::agent::BackgroundJobState::Failed && failed->error && failed->error->find("boom") != std::string::npos,
+           "background registry records thrown worker exceptions as failed jobs");
+    auto const joined = registry.join_finished();
+    auto retained = registry.wait(started->job_id, std::chrono::milliseconds(0));
+    expect(joined == 1 && retained && retained->state == ava::agent::BackgroundJobState::Failed,
+           "background registry retains terminal job snapshots after joining worker threads");
+  }
+}
+
+void test_background_job_registry_enforces_running_limit()
+{
+  struct State
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool started = false;
+  };
+  auto state = std::make_shared<State>();
+  ava::agent::BackgroundJobRegistry registry(ava::agent::BackgroundJobRegistryOptions{.max_running_jobs = 1, .max_retained_finished_jobs = 4});
+  auto blocking_worker = [state](ava::agent::BackgroundJobContext const& context) {
+    std::unique_lock lock(state->mutex);
+    std::stop_callback notify_stop(context.stop_token, [&] { state->changed.notify_all(); });
+    state->started = true;
+    state->changed.notify_all();
+    state->changed.wait(lock, [&] { return context.stop_token.stop_requested(); });
+    return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Canceled, .final_text = "", .stop_reason = "canceled"};
+  };
+  auto first = registry.start(ava::agent::BackgroundJobStartOptions{.title = "first"}, blocking_worker);
+  expect(first.has_value(), "background registry starts first job under running limit");
+  {
+    std::unique_lock lock(state->mutex);
+    expect(state->changed.wait_for(lock, std::chrono::milliseconds(1000), [&] { return state->started; }),
+           "running-limit test worker starts before second job attempt");
+  }
+  auto second = registry.start(ava::agent::BackgroundJobStartOptions{.title = "second"}, [](ava::agent::BackgroundJobContext const&) {
+    return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Completed, .final_text = "unexpected", .stop_reason = "completed"};
+  });
+  expect(!second && second.error().message().find("limit") != std::string::npos, "background registry rejects jobs above the running limit");
+  if (first)
+  {
+    static_cast<void>(registry.cancel(first->job_id));
+    auto canceled = registry.wait(first->job_id, std::chrono::milliseconds(1000));
+    expect(canceled && canceled->state == ava::agent::BackgroundJobState::Canceled, "background registry frees running capacity after cancellation");
+  }
+  registry.join_finished();
+  auto third = registry.start(ava::agent::BackgroundJobStartOptions{.title = "third"}, [](ava::agent::BackgroundJobContext const&) {
+    return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Completed, .final_text = "third done", .stop_reason = "completed"};
+  });
+  expect(third.has_value(), "background registry accepts a new job after running job completes");
+  if (third)
+  {
+    auto completed = registry.wait(third->job_id, std::chrono::milliseconds(1000));
+    expect(completed && completed->final_text == "third done", "background registry completes job after running limit frees capacity");
+  }
+  registry.join_finished();
+}
+
+void test_background_job_registry_coerces_non_terminal_completion_to_failed()
+{
+  ava::agent::BackgroundJobRegistry registry;
+  auto started = registry.start(ava::agent::BackgroundJobStartOptions{.title = "bad completion"}, [](ava::agent::BackgroundJobContext const&) {
+    return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Running, .final_text = "bad", .stop_reason = "running"};
+  });
+  expect(started.has_value(), "background registry starts worker with invalid completion state");
+  if (started)
+  {
+    auto failed = registry.wait(started->job_id, std::chrono::milliseconds(1000));
+    expect(failed && failed->state == ava::agent::BackgroundJobState::Failed && failed->error && failed->error->find("non-terminal") != std::string::npos,
+           "background registry coerces non-terminal worker completions to failed snapshots");
+    registry.join_finished();
+  }
+}
+
+void test_background_job_registry_bounds_snapshot_text()
+{
+  ava::agent::BackgroundJobRegistry registry(
+      ava::agent::BackgroundJobRegistryOptions{.max_running_jobs = 4, .max_retained_finished_jobs = 4, .max_description_bytes = 5, .max_final_text_bytes = 7});
+  auto const multi_byte_suffix = std::string("\xE2\x82\xAC", 3) + "tail";
+  auto started = registry.start(ava::agent::BackgroundJobStartOptions{.title = "bounded", .description = std::string("abcd") + multi_byte_suffix},
+                                [](ava::agent::BackgroundJobContext const&) {
+                                  return ava::agent::BackgroundJobCompletion{
+                                      .state = ava::agent::BackgroundJobState::Completed,
+                                      .final_text = std::string("abcdef") + std::string("\xE2\x82\xAC", 3) + "tail",
+                                      .stop_reason = "",
+                                  };
+                                });
+  expect(started && started->description == "abcd" && started->description_truncated,
+         "background registry truncates oversized job descriptions without splitting UTF-8 codepoints");
+  if (started)
+  {
+    auto completed = registry.wait(started->job_id, std::chrono::milliseconds(1000));
+    expect(completed && completed->final_text == "abcdef" && completed->final_text_truncated,
+           "background registry truncates oversized final text without splitting UTF-8 codepoints");
+    registry.join_finished();
+  }
+}
+
+void test_background_job_registry_normalizes_terminal_completion_fields()
+{
+  ava::agent::BackgroundJobRegistry registry;
+  auto completed_with_error =
+      registry.start(ava::agent::BackgroundJobStartOptions{.title = "completed with error"}, [](ava::agent::BackgroundJobContext const&) {
+        auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "ignored completion error");
+        return ava::agent::BackgroundJobCompletion{
+            .state = ava::agent::BackgroundJobState::Completed,
+            .final_text = "done",
+            .stop_reason = "",
+            .error = std::move(error),
+        };
+      });
+  auto failed_without_error =
+      registry.start(ava::agent::BackgroundJobStartOptions{.title = "failed without error"}, [](ava::agent::BackgroundJobContext const&) {
+        return ava::agent::BackgroundJobCompletion{
+            .state = ava::agent::BackgroundJobState::Failed,
+            .final_text = "should disappear",
+            .stop_reason = "",
+        };
+      });
+  auto canceled_with_error = registry.start(ava::agent::BackgroundJobStartOptions{.title = "canceled with error"}, [](ava::agent::BackgroundJobContext const&) {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "ignored cancel error");
+    return ava::agent::BackgroundJobCompletion{
+        .state = ava::agent::BackgroundJobState::Canceled,
+        .final_text = "should disappear",
+        .stop_reason = "",
+        .error = std::move(error),
+    };
+  });
+
+  expect(completed_with_error && failed_without_error && canceled_with_error, "background registry starts terminal normalization workers");
+  if (completed_with_error)
+  {
+    auto completed = registry.wait(completed_with_error->job_id, std::chrono::milliseconds(1000));
+    expect(completed && completed->state == ava::agent::BackgroundJobState::Completed && completed->final_text == "done" &&
+               completed->stop_reason == "completed" && !completed->error,
+           "background registry clears completed-job errors and defaults stop reasons");
+  }
+  if (failed_without_error)
+  {
+    auto failed = registry.wait(failed_without_error->job_id, std::chrono::milliseconds(1000));
+    expect(failed && failed->state == ava::agent::BackgroundJobState::Failed && failed->final_text.empty() && failed->stop_reason == "failed" &&
+               failed->error && failed->error->find("without an error") != std::string::npos,
+           "background registry synthesizes failed-job errors and clears final text");
+  }
+  if (canceled_with_error)
+  {
+    auto canceled = registry.wait(canceled_with_error->job_id, std::chrono::milliseconds(1000));
+    expect(canceled && canceled->state == ava::agent::BackgroundJobState::Canceled && canceled->final_text.empty() && canceled->stop_reason == "canceled" &&
+               !canceled->error,
+           "background registry clears canceled-job errors and final text");
+  }
+  registry.join_finished();
+}
+
+void test_background_job_registry_join_finished_is_concurrency_safe()
+{
+  ava::agent::BackgroundJobRegistry registry;
+  auto started = registry.start(ava::agent::BackgroundJobStartOptions{.title = "concurrent join"}, [](ava::agent::BackgroundJobContext const&) {
+    return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Completed, .final_text = "done", .stop_reason = ""};
+  });
+  expect(started.has_value(), "background registry starts concurrent join worker");
+  if (!started)
+    return;
+  auto completed = registry.wait(started->job_id, std::chrono::milliseconds(1000));
+  expect(completed && completed->state == ava::agent::BackgroundJobState::Completed, "background registry has a terminal job before concurrent join");
+
+  std::atomic_bool threw = false;
+  std::atomic_size_t joined_total = 0;
+  auto joiner = [&] {
+    try
+    {
+      joined_total.fetch_add(registry.join_finished(), std::memory_order_relaxed);
+    }
+    catch (...)
+    {
+      threw = true;
+    }
+  };
+  std::thread first(joiner);
+  std::thread second(joiner);
+  first.join();
+  second.join();
+  expect(!threw && joined_total.load(std::memory_order_relaxed) == 1, "background registry concurrent join_finished calls join exactly once");
+}
+
+void test_background_job_registry_prunes_retained_finished_jobs()
+{
+  ava::agent::BackgroundJobRegistry registry(ava::agent::BackgroundJobRegistryOptions{.max_running_jobs = 4, .max_retained_finished_jobs = 1});
+  auto first = registry.start(ava::agent::BackgroundJobStartOptions{.title = "first retained"}, [](ava::agent::BackgroundJobContext const&) {
+    return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Completed, .final_text = "first", .stop_reason = ""};
+  });
+  auto second = registry.start(ava::agent::BackgroundJobStartOptions{.title = "second retained"}, [](ava::agent::BackgroundJobContext const&) {
+    return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Completed, .final_text = "second", .stop_reason = ""};
+  });
+  expect(first && second, "background registry starts retained-pruning workers");
+  if (first)
+    expect(registry.wait(first->job_id, std::chrono::milliseconds(1000)).has_value(), "first retained-pruning job completes");
+  if (second)
+    expect(registry.wait(second->job_id, std::chrono::milliseconds(1000)).has_value(), "second retained-pruning job completes");
+  registry.join_finished();
+  expect(registry.snapshot().size() <= 1, "background registry prunes joined terminal snapshots beyond retention limit");
+}
+
+void test_background_job_registry_destructor_stops_running_jobs()
+{
+  struct State
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool started = false;
+    bool canceled = false;
+  };
+  auto state = std::make_shared<State>();
+
+  {
+    ava::agent::BackgroundJobRegistry registry;
+    auto started = registry.start(ava::agent::BackgroundJobStartOptions{.title = "destructor stop"}, [state](ava::agent::BackgroundJobContext const& context) {
+      std::unique_lock lock(state->mutex);
+      std::stop_callback notify_stop(context.stop_token, [&] { state->changed.notify_all(); });
+      state->started = true;
+      state->changed.notify_all();
+      state->changed.wait(lock, [&] { return context.stop_token.stop_requested(); });
+      state->canceled = true;
+      state->changed.notify_all();
+      return ava::agent::BackgroundJobCompletion{
+          .state = ava::agent::BackgroundJobState::Canceled,
+          .final_text = "",
+          .stop_reason = "canceled",
+      };
+    });
+    expect(started.has_value(), "background registry starts destructor stop worker");
+    std::unique_lock lock(state->mutex);
+    expect(state->changed.wait_for(lock, std::chrono::milliseconds(1000), [&] { return state->started; }),
+           "background registry destructor test worker starts before scope exit");
+  }
+
+  std::lock_guard lock(state->mutex);
+  expect(state->canceled, "background registry destructor requests stop and joins running jobs");
 }
 
 void test_agent_loop_permission_resolver_threads_to_tools()
@@ -1316,6 +1755,16 @@ void run_agent_loop_tests()
   test_agent_loop_custom_subagent_definition_controls_prompt_and_tools();
   test_agent_loop_background_task_starts_child_session();
   test_agent_loop_background_task_failure_records_parent_and_child_errors();
+  test_agent_loop_background_task_cancel_requests_child_cancellation();
+  test_agent_loop_background_task_requires_registry_owner();
+  test_background_job_registry_worker_exception_marks_failed();
+  test_background_job_registry_enforces_running_limit();
+  test_background_job_registry_coerces_non_terminal_completion_to_failed();
+  test_background_job_registry_bounds_snapshot_text();
+  test_background_job_registry_normalizes_terminal_completion_fields();
+  test_background_job_registry_join_finished_is_concurrency_safe();
+  test_background_job_registry_prunes_retained_finished_jobs();
+  test_background_job_registry_destructor_stops_running_jobs();
   test_agent_loop_permission_resolver_threads_to_tools();
   test_agent_loop_question_resolver_threads_to_tools();
   test_agent_loop_non_stream_response();

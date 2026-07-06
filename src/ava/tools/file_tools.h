@@ -68,6 +68,7 @@ struct TaskSubagentRequest
 struct TaskSubagentResult
 {
   std::string task_id;
+  std::string job_id;
   std::filesystem::path session_path;
   std::string subagent_type;
   std::string state = "completed";

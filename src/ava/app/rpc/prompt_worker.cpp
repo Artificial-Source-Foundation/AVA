@@ -7,6 +7,7 @@
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/runtime.h"
 
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -15,8 +16,15 @@ namespace ava::app::rpc {
 std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
 {
   return std::jthread([options = std::move(options)](std::stop_token stop_token) mutable {
+    std::optional<QueuedRpcMessage> next_follow_up;
+
     auto finish_with_queue_cleanup = [&](std::string_view reason) {
       auto cleared = deactivate_and_clear_queued_messages(options.run_state);
+      if (next_follow_up)
+      {
+        cleared.follow_up_messages.push_back(std::move(*next_follow_up));
+        next_follow_up.reset();
+      }
       if (auto written = write_skipped_queue_events(options.output, options.session, options.session_mutex, cleared, reason); !written)
       {
         record_async_error(options.run_state, std::move(written.error()));
@@ -45,8 +53,19 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
     }
     auto policy_permission_resolver = prompt_options->permission_resolver;
 
-    auto run_one_prompt = [&](std::string const& request_id, std::string const& message,
-                              std::vector<ava::session::ImageAttachmentRef> image_attachments) -> ava::core::VoidResult {
+    auto prepare_next_follow_up = [&]() -> std::optional<QueuedRpcMessage> {
+      auto follow_up = take_next_follow_up_message(options.run_state);
+      if (!follow_up)
+      {
+        set_active_run(options.run_state, false);
+        return std::nullopt;
+      }
+      set_active_request_id(options.run_state, follow_up->request_id);
+      return follow_up;
+    };
+
+    auto run_one_prompt = [&](std::string const& request_id, std::string const& message, std::vector<ava::session::ImageAttachmentRef> image_attachments,
+                              auto&& before_terminal_response) -> ava::core::VoidResult {
       set_active_request_id(options.run_state, request_id);
       prompt_options->image_attachments = std::move(image_attachments);
       prompt_options->cancel_requested = [&run_state = options.run_state, stop_token] { return stop_token.stop_requested() || cancel_requested(run_state); };
@@ -94,12 +113,14 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
       }
       if (!result)
       {
+        before_terminal_response();
         if (auto written = write_error(options.output, request_id, result.error()); !written)
         {
           return std::unexpected(std::move(written.error()));
         }
         return {};
       }
+      before_terminal_response();
       if (auto written = write_success(options.output, request_id, prompt_result_json(session_id_snapshot(options.session, options.session_mutex), *result));
           !written)
       {
@@ -108,7 +129,8 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
       return {};
     };
 
-    auto prompt_run = run_one_prompt(options.request_id, options.message, std::move(options.image_attachments));
+    auto prompt_run =
+        run_one_prompt(options.request_id, options.message, std::move(options.image_attachments), [&] { next_follow_up = prepare_next_follow_up(); });
     if (!prompt_run)
     {
       record_async_error(options.run_state, std::move(prompt_run.error()));
@@ -118,19 +140,20 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
 
     while (!cancel_requested(options.run_state))
     {
-      auto follow_up = take_next_follow_up_message(options.run_state);
-      if (!follow_up)
+      if (!next_follow_up)
         break;
-      set_active_request_id(options.run_state, follow_up->request_id);
-      auto started_event = *follow_up;
-      started_event.correlation_id = follow_up->request_id;
+      auto follow_up = std::move(*next_follow_up);
+      next_follow_up.reset();
+      set_active_request_id(options.run_state, follow_up.request_id);
+      auto started_event = follow_up;
+      started_event.correlation_id = follow_up.request_id;
       if (auto written = write_queue_event(options.output, options.session, options.session_mutex, "follow_up_started", started_event); !written)
       {
         record_async_error(options.run_state, std::move(written.error()));
         finish_with_queue_cleanup("prompt_start_failed");
         return;
       }
-      auto follow_up_run = run_one_prompt(follow_up->request_id, follow_up->message, {});
+      auto follow_up_run = run_one_prompt(follow_up.request_id, follow_up.message, {}, [&] { next_follow_up = prepare_next_follow_up(); });
       if (!follow_up_run)
       {
         record_async_error(options.run_state, std::move(follow_up_run.error()));
@@ -141,6 +164,11 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
 
     bool const canceled = cancel_requested(options.run_state);
     auto cleared = deactivate_and_clear_queued_messages(options.run_state);
+    if (next_follow_up)
+    {
+      cleared.follow_up_messages.push_back(std::move(*next_follow_up));
+      next_follow_up.reset();
+    }
     if (auto written = write_skipped_queue_events(options.output, options.session, options.session_mutex, cleared,
                                                   canceled ? "canceled" : "run_completed_before_safe_point");
         !written)

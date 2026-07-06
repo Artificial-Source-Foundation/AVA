@@ -192,6 +192,9 @@ void test_app_runtime_open_session_and_context_prompt()
   expect(session->created && session->mode == ava::agent::Mode::Plan && session->model.model_id == "gpt-5.5",
          "runtime session records created state, mode, and model");
   expect(session->context_sources.size() == 3, "runtime session records workspace and global context metadata");
+  expect(!session->base_prompt.from_override && !session->base_prompt.source_path && session->base_prompt.byte_count > 0 &&
+             session->base_prompt.content_fingerprint != 0,
+         "runtime session records selected base prompt metadata without storing prompt text twice");
   expect(session->system_prompt.find("Plan before changing files") != std::string::npos &&
              session->system_prompt.find("workspace runtime instructions") != std::string::npos &&
              session->system_prompt.find("nested runtime instructions") != std::string::npos &&
@@ -378,8 +381,9 @@ void test_app_runtime_cli_prompt_overrides()
   if (!session)
     return;
 
-  expect(session->prompt.from_override && !session->prompt.source_path && session->prompt.text == "cli system prompt",
-         "cli --system-prompt is recorded as the effective prompt override");
+  expect(session->base_prompt.from_override && !session->base_prompt.source_path &&
+             session->base_prompt.byte_count == std::string_view("cli system prompt").size() && session->base_prompt.content_fingerprint != 0,
+         "cli --system-prompt is recorded as base prompt metadata");
   expect(session->prompt_overrides.system_prompt && *session->prompt_overrides.system_prompt == "cli system prompt" &&
              session->prompt_overrides.append_system_prompts.size() == 2,
          "runtime session retains cli prompt overrides for reloads");

@@ -22,7 +22,7 @@ namespace ava::app::runtime {
 [[nodiscard]] std::optional<bool> bool_json_field(std::string_view object, std::string_view key);
 
 [[nodiscard]] ava::core::VoidResult append_session_start(ava::session::SessionStore& store, ava::agent::Mode mode, ava::config::ModelInfo const& model,
-                                                         ava::config::PromptSelection const& prompt, std::size_t context_source_count);
+                                                         RuntimeBasePromptMetadata const& base_prompt, std::size_t context_source_count);
 [[nodiscard]] ava::core::VoidResult append_model_change(ava::session::SessionStore& store, ava::config::ModelInfo const& previous,
                                                         ava::config::ModelInfo const& current);
 [[nodiscard]] ava::core::VoidResult append_reasoning_change(ava::session::SessionStore& store, ava::config::ModelInfo const& model,

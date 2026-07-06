@@ -214,6 +214,14 @@ void add_plugin_freshness_sources(std::vector<RuntimeFreshnessSourceMetadata>& s
   }
 }
 
+RuntimeBasePromptMetadata base_prompt_metadata(ava::config::PromptSelection const& prompt)
+{
+  return RuntimeBasePromptMetadata{.from_override = prompt.from_override,
+                                   .source_path = prompt.source_path,
+                                   .byte_count = prompt.text.size(),
+                                   .content_fingerprint = ava::core::content_fingerprint(prompt.text)};
+}
+
 }  // namespace
 
 ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::XdgPaths const& paths, ava::config::ModelInfo const& model, ava::agent::Mode mode,
@@ -310,7 +318,7 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::Xdg
   system_prompt += ava::context::format_context_for_prompt(*loaded_context) + ava::context::format_available_skills_for_prompt(loaded_skills.skills) +
                    ava::agent::format_available_subagents_for_prompt(loaded_subagents.subagents);
   return RuntimePromptState{.mode = mode,
-                            .prompt = std::move(selected_prompt),
+                            .base_prompt = base_prompt_metadata(selected_prompt),
                             .context_sources = std::move(context_sources),
                             .freshness_sources = std::move(freshness_sources),
                             .system_prompt = std::move(system_prompt)};
@@ -493,7 +501,7 @@ ava::core::Result<RuntimePromptState> select_runtime_prompt_state(RuntimeSession
 void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prompt_state)
 {
   session.mode = prompt_state.mode;
-  session.prompt = std::move(prompt_state.prompt);
+  session.base_prompt = std::move(prompt_state.base_prompt);
   session.context_sources = std::move(prompt_state.context_sources);
   session.freshness_sources = std::move(prompt_state.freshness_sources);
   session.system_prompt = std::move(prompt_state.system_prompt);
@@ -684,6 +692,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
         std::unique_ptr<ava::provider::Transport> transport = std::make_unique<ava::provider::CurlCliTransport>();
         return transport;
       },
+      .background_jobs = session.background_jobs,
       .session_mutex = runtime_options.session_mutex,
       .model_pricing = session.model.pricing});
 

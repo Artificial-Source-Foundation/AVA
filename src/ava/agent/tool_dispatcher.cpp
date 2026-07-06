@@ -668,15 +668,16 @@ ToolDispatchResult task_result(ava::tools::ToolContext const& context, ProviderT
 
   auto const state = run->state.empty() ? std::string("completed") : run->state;
   auto const summary = state == "running" ? std::string("Background subagent task started: ") : std::string("Subagent task completed: ");
-  auto const content = std::string("<task id=\"") + xml_escape(run->task_id) + "\" state=\"" + xml_escape(state) + "\">" + "<summary>" + summary +
-                       xml_escape(*description) + "</summary>" + "<task_result>" + xml_escape(run->final_text) + "</task_result></task>";
+  auto const job_attr = run->job_id.empty() ? std::string{} : std::string(" job_id=\"") + xml_escape(run->job_id) + "\"";
+  auto const content = std::string("<task id=\"") + xml_escape(run->task_id) + "\"" + job_attr + " state=\"" + xml_escape(state) + "\">" + "<summary>" +
+                       summary + xml_escape(*description) + "</summary>" + "<task_result>" + xml_escape(run->final_text) + "</task_result></task>";
   std::string text = "{\"tool\":\"task\",\"ok\":true,\"task_id\":\"" + ava::core::json::escape(run->task_id) + "\",\"subagent_type\":\"" +
                      ava::core::json::escape(run->subagent_type) + "\",\"description\":\"" + ava::core::json::escape(*description) + "\",\"session_path\":\"" +
                      ava::core::json::escape(run->session_path.generic_string()) + "\",\"state\":\"" + ava::core::json::escape(state) + "\"" +
-                     ",\"stop_reason\":\"" + ava::core::json::escape(run->stop_reason) +
-                     "\",\"provider_iterations\":" + std::to_string(run->provider_iterations) + ",\"tool_calls\":" + std::to_string(run->tool_calls) +
-                     ",\"tool_iterations\":" + std::to_string(run->tool_iterations) + ",\"task_result\":\"" + ava::core::json::escape(run->final_text) +
-                     "\",\"content\":\"" + ava::core::json::escape(content) + "\"}";
+                     (run->job_id.empty() ? std::string{} : ",\"job_id\":\"" + ava::core::json::escape(run->job_id) + "\"") + ",\"stop_reason\":\"" +
+                     ava::core::json::escape(run->stop_reason) + "\",\"provider_iterations\":" + std::to_string(run->provider_iterations) +
+                     ",\"tool_calls\":" + std::to_string(run->tool_calls) + ",\"tool_iterations\":" + std::to_string(run->tool_iterations) +
+                     ",\"task_result\":\"" + ava::core::json::escape(run->final_text) + "\",\"content\":\"" + ava::core::json::escape(content) + "\"}";
   return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = std::move(text)};
 }
 

@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -82,12 +83,20 @@ struct RuntimeReasoningSelection
   std::string display;
 };
 
+struct RuntimeBasePromptMetadata
+{
+  bool from_override = false;
+  std::optional<std::filesystem::path> source_path = std::nullopt;
+  std::size_t byte_count = 0;
+  std::uint64_t content_fingerprint = 0;
+};
+
 struct RuntimeSession
 {
   ava::session::SessionStore store;
   ava::agent::Mode mode = ava::agent::Mode::Build;
   ava::config::ModelInfo model;
-  ava::config::PromptSelection prompt;
+  RuntimeBasePromptMetadata base_prompt;
   ava::config::XdgPaths paths;
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
@@ -101,12 +110,13 @@ struct RuntimeSession
   std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
   bool created = false;
   bool sessionless = false;
+  std::shared_ptr<ava::agent::BackgroundJobRegistry> background_jobs = nullptr;
 };
 
 struct RuntimePromptState
 {
   ava::agent::Mode mode = ava::agent::Mode::Build;
-  ava::config::PromptSelection prompt;
+  RuntimeBasePromptMetadata base_prompt;
   std::vector<ContextSourceMetadata> context_sources;
   std::vector<RuntimeFreshnessSourceMetadata> freshness_sources;
   std::string system_prompt;

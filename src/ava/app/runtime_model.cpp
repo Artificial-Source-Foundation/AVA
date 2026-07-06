@@ -284,7 +284,7 @@ ava::core::Result<bool> switch_runtime_model(RuntimeSession& session, ava::confi
 
   session.model = std::move(model);
   session.mode = prompt_state->mode;
-  session.prompt = std::move(prompt_state->prompt);
+  session.base_prompt = std::move(prompt_state->base_prompt);
   session.context_sources = std::move(prompt_state->context_sources);
   session.freshness_sources = std::move(prompt_state->freshness_sources);
   session.system_prompt = std::move(prompt_state->system_prompt);

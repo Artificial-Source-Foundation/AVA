@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/agent/background_job_registry.h"
 #include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/question.h"
@@ -16,6 +17,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -116,6 +118,7 @@ struct AgentLoopOptions
       compact_context = nullptr;
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Provider>>()> background_provider_factory = nullptr;
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Transport>>()> background_transport_factory = nullptr;
+  std::shared_ptr<BackgroundJobRegistry> background_jobs = nullptr;
   std::mutex* session_mutex = nullptr;
   std::optional<ava::config::ModelPricing> model_pricing = std::nullopt;
 };

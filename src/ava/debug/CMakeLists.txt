@@ -114,28 +114,26 @@ add_custom_target(ctags-json
   VERBATIM
 )
 
-#------------------------------------------------------------------------------
-# Create pseudo target `generate-print-members` that generates all print_members.cpp files.
+# The print_members.cpp files live under here. The build-time rule that
+# (re)generates them and the `generate-print-members` pseudo-target are declared
+# further down, once the set of output files is known.
 #
 set(_ava_print_members_dir "${CMAKE_BINARY_DIR}/generated/print_members")
-
-add_custom_target(generate-print-members
-  COMMAND "${PYTHON3_EXECUTABLE}"
-          "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_print_members.py"
-          "${_ava_ctags_json_out}"
-          "${_ava_print_members_dir}"
-  DEPENDS ctags-json
-          "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_print_members.py"
-  COMMENT "Generating print_members definitions into ${_ava_print_members_dir}"
-  VERBATIM
-)
 
 #------------------------------------------------------------------------------
 # Create the `source_files` list, containing all required print_members.cpp files.
 #
 set(_ava_source_list_file "${_ava_print_members_dir}/source_files")
 
-# Determine if we need to run the generator.
+# Determine if we need to run the generator at configure time.
+#
+# This configure-time generation only exists so CMake can discover the set of
+# generated print_members.cpp files (read from source_files) and add them to the
+# ava_debug library below. It therefore runs only when source_files or any listed
+# cpp is absent (e.g. a fresh checkout). Staleness against tags.json -- e.g.
+# after a manual `ctags-json` refresh -- is handled at BUILD time by the
+# add_custom_command(OUTPUT ...) declared further below, so it is intentionally
+# NOT checked here.
 set(NEED_GENERATION FALSE)
 
 if (NOT EXISTS "${_ava_source_list_file}")
@@ -212,6 +210,52 @@ file(STRINGS "${_ava_source_list_file}" REL_FILES)
 foreach(REL_FILE IN LISTS REL_FILES)
   list(APPEND _ava_generated_source_files "${_ava_print_members_dir}/${REL_FILE}")
 endforeach()
+
+#------------------------------------------------------------------------------
+# Build-time generation rule for the print_members.cpp files.
+#
+# Declaring the generated files as OUTPUT of a custom command that DEPENDS on
+# tags.json (the FILE, not the `ctags-json` target) is what keeps them fresh
+# during a normal build: whenever tags.json is newer than the outputs -- e.g.
+# after a manual `ctags-json` refresh -- Ninja/Make re-runs this command, and
+# because ava_debug lists these same files as sources they are then recompiled
+# and the library relinked. When nothing changed the rule is a no-op, so a plain
+# build pays no generation cost. Depending on the `ctags-json` *target* here
+# would force every build to rerun ctags, which goal 03 explicitly forbids.
+#
+# The guard handles the degenerate case where no type opted into print_members:
+# add_custom_command requires at least one OUTPUT, and there is nothing to drive.
+if (_ava_generated_source_files)
+add_custom_command(
+  OUTPUT ${_ava_generated_source_files}
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ava_print_members_dir}"
+  COMMAND "${PYTHON3_EXECUTABLE}"
+          "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_print_members.py"
+          "${_ava_ctags_json_out}"
+          "${_ava_print_members_dir}"
+  DEPENDS "${_ava_ctags_json_out}"
+          "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_print_members.py"
+  COMMENT "Generating print_members definitions into ${_ava_print_members_dir}"
+  VERBATIM
+)
+
+# Manual pseudo-target that drives the refresh chain: regenerate tags.json via
+# `ctags-json` and (re)build the printers through the add_custom_command above.
+#
+# It deliberately has NO COMMAND of its own. The print_members.cpp files have
+# exactly one producer -- the add_custom_command -- which is the edge Ninja
+# tracks in its build log. If this target also wrote them, the cpp edge's
+# recorded output mtime would stay stale relative to the freshly-written
+# tags.json, and the very next build would needlessly re-run the generator (the
+# "python runs again" symptom). Depending on the cpp edge keeps that record
+# honest. As a side effect, building this target refreshes tags.json immediately
+# but only regenerates the printers when they were already stale at build start;
+# a clean-state refresh is then picked up by the next normal build.
+add_custom_target(generate-print-members
+  DEPENDS ctags-json
+          ${_ava_generated_source_files}
+)
+endif ()
 
 # Tell CMake that these files are generated so IDEs treat them nicely.
 set_source_files_properties(${_ava_generated_source_files} PROPERTIES GENERATED TRUE)

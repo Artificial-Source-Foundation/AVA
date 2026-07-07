@@ -104,10 +104,35 @@ find_program(PYTHON3_EXECUTABLE python3
 #
 set(_ava_ctags_json_out "${CMAKE_BINARY_DIR}/generated/ctags/tags.json")
 
+# Ninja decides whether to rerun the print_members generator by comparing the
+# build-log-RECORDED mtime of the generated .cpp outputs against the CURRENT
+# mtime of the edge's inputs (it does not re-stat the outputs for this check).
+# If the .cpp edge depended on tags.json directly, then every configure that
+# refreshes tags.json -- which configure always does when it has to regenerate
+# the printers -- would leave tags.json newer than the .cpp edge's recorded
+# output mtime, so the very next build would needlessly rerun the generator even
+# though configure already regenerated the .cpp.
+#
+# The stamp breaks that coupling: the .cpp edge depends on the stamp, and ONLY
+# `ctags-json` advances the stamp. A manual `ctags-json` refresh is therefore
+# picked up by the next build (the intended behavior), while a configure-time or
+# `generate-print-members`-time regeneration -- which already refreshed the .cpp
+# themselves -- deliberately leaves the stamp untouched, so no follow-up build
+# reruns the generator.
+set(_ava_ctags_json_stamp "${CMAKE_BINARY_DIR}/generated/ctags/tags.json.stamp")
+
+# Ensure the stamp exists before the build-time edge can reference it. It is
+# created only when absent; its mtime is never bumped here (only `ctags-json`
+# does that), see the rationale above.
+if (NOT EXISTS "${_ava_ctags_json_stamp}")
+  file(WRITE "${_ava_ctags_json_stamp}" "")
+endif ()
+
 add_custom_target(ctags-json
   COMMAND "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_ctags_json.sh"
           "${_ava_ctags_json_out}"
           "${CTAGS_EXECUTABLE}"
+  COMMAND "${CMAKE_COMMAND}" -E touch "${_ava_ctags_json_stamp}"
   DEPENDS "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_ctags_json.sh"
           "${CMAKE_SOURCE_DIR}/cmake/scripts/list_ava_sources.sh"
   COMMENT "Generating JSON tags for debug printer generation: ${_ava_ctags_json_out}"
@@ -214,14 +239,16 @@ endforeach()
 #------------------------------------------------------------------------------
 # Build-time generation rule for the print_members.cpp files.
 #
-# Declaring the generated files as OUTPUT of a custom command that DEPENDS on
-# tags.json (the FILE, not the `ctags-json` target) is what keeps them fresh
-# during a normal build: whenever tags.json is newer than the outputs -- e.g.
-# after a manual `ctags-json` refresh -- Ninja/Make re-runs this command, and
-# because ava_debug lists these same files as sources they are then recompiled
-# and the library relinked. When nothing changed the rule is a no-op, so a plain
-# build pays no generation cost. Depending on the `ctags-json` *target* here
-# would force every build to rerun ctags, which goal 03 explicitly forbids.
+# The edge depends on the stamp (NOT on tags.json directly) for the reason
+# documented where the stamp is declared: Ninja reruns this command whenever the
+# stamp's current mtime is newer than the RECORDED mtime of these outputs, and
+# only `ctags-json` advances the stamp. So a manual `ctags-json` refresh is
+# picked up by the next normal build, while a configure-time or
+# `generate-print-members`-time regeneration (which already wrote the .cpp) does
+# not cause a follow-up build to rerun the generator. The .py script itself is
+# also a dependency so editing it forces a regeneration. The generator reads
+# tags.json at run time; tags.json is intentionally NOT listed here so that a
+# configure-time refresh of tags.json cannot trigger this edge.
 #
 # The guard handles the degenerate case where no type opted into print_members:
 # add_custom_command requires at least one OUTPUT, and there is nothing to drive.
@@ -233,27 +260,48 @@ add_custom_command(
           "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_print_members.py"
           "${_ava_ctags_json_out}"
           "${_ava_print_members_dir}"
-  DEPENDS "${_ava_ctags_json_out}"
+  DEPENDS "${_ava_ctags_json_stamp}"
           "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_print_members.py"
   COMMENT "Generating print_members definitions into ${_ava_print_members_dir}"
   VERBATIM
 )
 
-# Manual pseudo-target that drives the refresh chain: regenerate tags.json via
-# `ctags-json` and (re)build the printers through the add_custom_command above.
+# Manual pseudo-target that forces a full, unconditional refresh of both
+# tags.json and the print_members.cpp files.
 #
-# It deliberately has NO COMMAND of its own. The print_members.cpp files have
-# exactly one producer -- the add_custom_command -- which is the edge Ninja
-# tracks in its build log. If this target also wrote them, the cpp edge's
-# recorded output mtime would stay stale relative to the freshly-written
-# tags.json, and the very next build would needlessly re-run the generator (the
-# "python runs again" symptom). Depending on the cpp edge keeps that record
-# honest. As a side effect, building this target refreshes tags.json immediately
-# but only regenerates the printers when they were already stale at build start;
-# a clean-state refresh is then picked up by the next normal build.
+# It runs the two scripts directly as its own COMMANDS rather than depending on
+# `ctags-json` or on the .cpp edge. Two reasons:
+#
+#  - It must ALWAYS run generate_print_members.py, but the .cpp edge is planned
+#    from the mtimes at build start, so it would only fire when already stale --
+#    a clean-state `generate-print-members` would otherwise be a no-op for the
+#    printers. Running the .py as a COMMAND of this always-out-of-date target
+#    guarantees it.
+#
+#  - It must NOT advance the stamp. Depending on `ctags-json` would touch the
+#    stamp, and since this target refreshes the .cpp as a side effect (not via
+#    the Ninja-tracked .cpp edge), Ninja's recorded output mtime for the .cpp
+#    would stay behind the stamp, making the very next build rerun the generator
+#    (the "python runs again" symptom). Running the scripts directly leaves the
+#    stamp -- and thus the .cpp edge -- untouched, so the next plain build only
+#    recompiles the freshly-written .cpp without regenerating them.
+#
+# The .sh runs to completion before the .py starts (COMMANDS of one edge run
+# sequentially), so the .py always reads a fully-written tags.json.
 add_custom_target(generate-print-members
-  DEPENDS ctags-json
-          ${_ava_generated_source_files}
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ava_print_members_dir}"
+  COMMAND "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_ctags_json.sh"
+          "${_ava_ctags_json_out}"
+          "${CTAGS_EXECUTABLE}"
+  COMMAND "${PYTHON3_EXECUTABLE}"
+          "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_print_members.py"
+          "${_ava_ctags_json_out}"
+          "${_ava_print_members_dir}"
+  DEPENDS "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_ctags_json.sh"
+          "${CMAKE_SOURCE_DIR}/cmake/scripts/list_ava_sources.sh"
+          "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_print_members.py"
+  COMMENT "Forcing regeneration of tags.json and print_members.cpp files"
+  VERBATIM
 )
 endif ()
 

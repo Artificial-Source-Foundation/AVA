@@ -469,48 +469,4 @@ std::string now_timestamp()
   return out.str();
 }
 
-#ifdef CWDEBUG
-// clang-format off
-
-void SessionStoreOptions::print_members(std::ostream& os, char const* prefix) const
-{
-  LIBCWD_USING_OSTREAM_PRELUDE
-  os << prefix
-    << "root_dir:" << root_dir
-    << ", workspace_dir:" << workspace_dir
-    << ", session_id:" << session_id;
-}
-
-void SessionStore::print_members(std::ostream& os, char const* prefix) const
-{
-  LIBCWD_USING_OSTREAM_PRELUDE
-  os << prefix
-    << "options:" << options_
-    << ", ephemeral_state:" << print_pointer(ephemeral_state_);
-}
-
-void SessionEntry::print_members(std::ostream& os, char const* prefix) const
-{
-  LIBCWD_USING_OSTREAM_PRELUDE
-  os << prefix
-    << "id:" << id
-    << ", parent_id:" << parent_id
-    << ", type:" << to_string(type)
-    << ", timestamp:" << timestamp
-    << ", data_json:" << data_json
-    << ", version:" << version;
-}
-
-void SessionStore::EphemeralState::print_members(std::ostream& os, char const* prefix) const
-{
-  LIBCWD_USING_OSTREAM_PRELUDE
-  os << prefix
-    << "root_dir:" << root_dir
-    << ", mutex:" << mutex
-    << ", entries:" << entries;
-}
-
-// clang-format on
-#endif // CWDEBUG
-
 }  // namespace ava::session

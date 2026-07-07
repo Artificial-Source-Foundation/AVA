@@ -203,54 +203,6 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
                         .sessionless = options.sessionless};
 }
 
-#ifdef CWDEBUG
-void ContextSourceMetadata::print_members(std::ostream& os, char const* prefix) const
-{
-  LIBCWD_USING_OSTREAM_PRELUDE
-  os << prefix
-    << "path:" << path
-    << "source_type:" << to_string(source_type)
-    << "byte_count:" << byte_count
-    << "content_fingerprint:" << content_fingerprint;
-}
-
-void RuntimeFreshnessSourceMetadata::print_members(std::ostream& os, char const* prefix) const
-{
-  LIBCWD_USING_OSTREAM_PRELUDE
-  os << prefix
-    << "kind:" << to_string(kind)
-    << ", scope:" << scope
-    << ", source_id:" << source_id
-    << ", name:" << name
-    << ", path:" << path
-    << ", byte_count:" << byte_count
-    << ", content_fingerprint:" << content_fingerprint;
-}
-
-void RuntimeSession::print_members(std::ostream& os, char const* prefix) const
-{
-  LIBCWD_USING_OSTREAM_PRELUDE
-  os << prefix
-    << "store:" << store
-    << ", mode:" << to_string(mode)
-    << ", model:" << model
-    << ", prompt:" << prompt
-    << ", paths:" << paths
-    << ", workspace_dir:" << workspace_dir
-    << ", current_dir:" << current_dir
-    << ", project_trust:" << project_trust
-    << ", prompt_overrides:" << prompt_overrides
-    << ", tool_visibility:" << tool_visibility
-    << ", context_sources:" << context_sources
-    << ", freshness_sources:" << freshness_sources
-    << ", system_prompt:" << system_prompt
-    << ", reasoning:" << reasoning
-    << ", scoped_model_cycle:" << scoped_model_cycle
-    << ", created:" << std::boolalpha << created
-    << ", sessionless:" << std::boolalpha << sessionless;
-}
-#endif
-
 std::string to_string(RuntimeFreshnessSourceKind kind)
 {
   using enum RuntimeFreshnessSourceKind;

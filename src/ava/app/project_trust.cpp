@@ -309,25 +309,4 @@ ava::core::VoidResult clear_project_trust_decision(ava::config::XdgPaths const& 
   return write_trust_records(trust_path, *records);
 }
 
-#ifdef CWDEBUG
-void ProjectTrustResource::print_members(std::ostream& os, char const* prefix) const
-{
-  os << prefix
-    << "kind:" << kind
-    << ", path:" << path;
-}
-
-void ProjectTrustState::print_members(std::ostream& os, char const* prefix) const
-{
-  LIBCWD_USING_OSTREAM_PRELUDE
-  os << prefix
-    << "workspace_dir:" << workspace_dir
-    << ", trust_file:" << trust_file
-    << ", decision:" << to_string(decision)
-    << ", matched_path:" << matched_path
-    << ", protected_resources:" << protected_resources
-    << ", diagnostic:" << diagnostic;
-}
-#endif // CWDEBUG
-
 }  // namespace ava::app

@@ -27,16 +27,26 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/../.." && pwd)
 
 # Create the output directory before ctags tries to write into it.
+# Create the output directory before ctags tries to write into it.
 mkdir -p "$(dirname -- "$out")"
+
+# ctags refuses to overwrite a file that does not look like a tags file; a
+# previously generated JSON tags.json is not a Vi tag file, so remove any stale
+# output first to let ctags write it fresh.
+rm -f "$out"
 
 # Run from the repository root so ctags records repo-root-relative paths.
 cd "$repo_root"
 
 # -L -   read the list of input files from stdin (the script's output).
 # -f out write the JSON tags to the requested path.
+# -D ... expand the opt-in macro to a print_members definition so that the
+#        generator can tell which classes/structs opted in straight from the
+#        tags file (a type declares print_members iff it has the macro).
 "$script_dir"/list_ava_sources.sh | "$ctags_exe" \
   --output-format=json \
   --language-force=C++ \
   --fields=+KinSz \
   --kinds-C++=+p \
+  -D 'AVA_DEBUG_PRINT_MEMBERS_ON=void print_members_opt_in() { }' \
   -L - -f "$out"

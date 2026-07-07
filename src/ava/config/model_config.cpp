@@ -823,29 +823,4 @@ std::optional<long double> usage_cost_usd(ModelPricing const& pricing, ava::prov
   return has_billable_usage ? std::optional<long double>(total) : std::nullopt;
 }
 
-#ifdef CWDEBUG
-void ModelInfo::print_members(std::ostream& os, char const* prefix) const
-{
-  LIBCWD_USING_OSTREAM_PRELUDE
-  os << prefix
-    << "provider_id:" << provider_id
-    << ", model_id:" << model_id
-    << ", display_name:" << display_name
-    << ", family:" << family
-    << ", context_window_tokens:" << context_window_tokens
-    << ", max_output_tokens:" << max_output_tokens
-    << ", pricing:" << pricing
-    << ", api_family:" << api_family
-    << ", input_modalities:" << input_modalities
-    << ", supports_tools:" << supports_tools
-    << ", supports_streaming:" << supports_streaming
-    << ", supports_reasoning:" << supports_reasoning
-    << ", reports_usage:" << reports_usage
-    << ", reasoning_levels:" << reasoning_levels
-    << ", compatibility_quirks:" << compatibility_quirks
-    << ", output_modalities:" << output_modalities
-    << ", reasoning_format:" << reasoning_format;
-}
-#endif // CWDEBUG
-
 }  // namespace ava::config

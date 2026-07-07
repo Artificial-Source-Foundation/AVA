@@ -87,22 +87,4 @@ std::filesystem::path legacy_compatible_auth_path()
   return xdg_paths().data_home / compatible_dir / "auth.json";
 }
 
-#ifdef CWDEBUG
-void XdgPaths::print_members(std::ostream& os, char const* prefix) const
-{
-  LIBCWD_USING_OSTREAM_PRELUDE
-  os << prefix
-    << "config_home:" << config_home
-    << ", state_home:" << state_home
-    << ", data_home:" << data_home
-    << ", ava_config_dir:" << ava_config_dir
-    << ", ava_state_dir:" << auth_file
-    << ", compaction_file:" << compaction_file
-    << ", global_agents_file:" << global_agents_file
-    << ", models_file:" << models_file
-    << ", prompts_dir:" << prompts_dir
-    << ", sessions_dir:" << sessions_dir;
-}
-#endif
-
 }  // namespace ava::config

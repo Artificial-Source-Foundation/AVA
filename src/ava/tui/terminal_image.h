@@ -30,6 +30,7 @@ struct TerminalEnvironment
   std::string term = {};
   std::string color_term = {};
   bool tmux = false;
+  bool tmux_forwards_hyperlinks = false;
   bool kitty_window_id = false;
   bool ghostty_resources_dir = false;
   bool wezterm_pane = false;

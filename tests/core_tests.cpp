@@ -21,6 +21,7 @@ void run_app_runtime_tests();
 void run_app_event_bus_tests();
 void run_provider_openai_tests();
 void run_provider_anthropic_tests();
+void run_provider_gemini_tests();
 void run_provider_live_smoke_tests();
 void run_agent_loop_resilience_tests();
 void run_agent_loop_tests();
@@ -57,6 +58,7 @@ constexpr std::array kTestSuites{
     TestSuite{"app_runtime", run_app_runtime_tests},
     TestSuite{"provider_openai", run_provider_openai_tests},
     TestSuite{"provider_anthropic", run_provider_anthropic_tests},
+    TestSuite{"provider_gemini", run_provider_gemini_tests},
     TestSuite{"provider_live_smoke", run_provider_live_smoke_tests},
     TestSuite{"agent_loop_resilience", run_agent_loop_resilience_tests},
     TestSuite{"agent_loop", run_agent_loop_tests},

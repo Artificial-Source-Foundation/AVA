@@ -76,7 +76,8 @@ struct ScopedTerminalCapabilityProfile
         warp_session_id("WARP_SESSION_ID", ""),
         warp_terminal_session_uuid("WARP_TERMINAL_SESSION_UUID", ""),
         iterm_session_id("ITERM_SESSION_ID", ""),
-        wt_session("WT_SESSION", "")
+        wt_session("WT_SESSION", ""),
+        tmux_hyperlinks("AVA_TUI_TMUX_HYPERLINKS", "")
   {
   }
 
@@ -91,6 +92,7 @@ struct ScopedTerminalCapabilityProfile
   ScopedEnvVar warp_terminal_session_uuid;
   ScopedEnvVar iterm_session_id;
   ScopedEnvVar wt_session;
+  ScopedEnvVar tmux_hyperlinks;
 };
 
 void test_tui_terminal_image_support()
@@ -105,6 +107,26 @@ void test_tui_terminal_image_support()
   expect(tmux_ghostty.images == ava::tui::TerminalImageProtocol::None && tmux_ghostty.true_color && tmux_ghostty.hyperlinks && tmux_ghostty.badge == "tmux" &&
              tmux_ghostty.detail.find("tmux") != std::string::npos,
          "terminal image detection disables image protocols under tmux while preserving explicit truecolor and forwarded hyperlinks");
+
+  auto const tmux_default = ava::tui::detect_terminal_image_capabilities(
+      ava::tui::TerminalEnvironment{.term_program = "ghostty", .term = "tmux-256color", .color_term = "truecolor", .tmux = true});
+  expect(tmux_default.images == ava::tui::TerminalImageProtocol::None && tmux_default.true_color && !tmux_default.hyperlinks &&
+             tmux_default.detail.find("AVA_TUI_TMUX_HYPERLINKS") != std::string::npos,
+         "terminal image detection keeps tmux OSC 8 disabled unless forwarding is explicitly advertised");
+
+  {
+    ScopedEnvVar term("TERM", "tmux-256color");
+    ScopedEnvVar term_program("TERM_PROGRAM", "ghostty");
+    ScopedEnvVar terminal_emulator("TERMINAL_EMULATOR", "");
+    ScopedEnvVar color_term("COLORTERM", "truecolor");
+    ScopedEnvVar tmux("TMUX", "/tmp/tmux-1000/default,123,0");
+    ScopedEnvVar tmux_hyperlinks("AVA_TUI_TMUX_HYPERLINKS", "1");
+    auto const tmux_env = ava::tui::current_terminal_environment();
+    auto const tmux_env_caps = ava::tui::detect_terminal_image_capabilities(tmux_env);
+    expect(tmux_env.tmux && tmux_env.tmux_forwards_hyperlinks && tmux_env_caps.images == ava::tui::TerminalImageProtocol::None && tmux_env_caps.hyperlinks &&
+               tmux_env_caps.detail.find("explicit tmux forwarding") != std::string::npos,
+           "terminal image detection honors the explicit tmux hyperlink forwarding environment hint at runtime");
+  }
 
   auto const kitty = ava::tui::detect_terminal_image_capabilities(ava::tui::TerminalEnvironment{.term_program = "kitty", .term = "xterm-kitty"});
   auto const ghostty = ava::tui::detect_terminal_image_capabilities(ava::tui::TerminalEnvironment{.term_program = "ghostty"});
@@ -142,6 +164,12 @@ void test_tui_terminal_image_support()
   auto const cells = ava::tui::calculate_image_cell_size(ava::tui::ImageDimensions{.width_px = 20, .height_px = 100}, 10, 5,
                                                          ava::tui::TerminalCellDimensions{.width_px = 10, .height_px = 10});
   expect(cells.columns == 1 && cells.rows == 5, "terminal image sizing preserves aspect ratio within cell bounds");
+
+  auto const fallback_cell_size = ava::tui::calculate_image_cell_size(ava::tui::ImageDimensions{.width_px = 90, .height_px = 90}, 10);
+  auto const square_cell_size = ava::tui::calculate_image_cell_size(ava::tui::ImageDimensions{.width_px = 90, .height_px = 90}, 10, std::nullopt,
+                                                                    ava::tui::TerminalCellDimensions{.width_px = 9, .height_px = 9});
+  expect(fallback_cell_size.columns == 10 && fallback_cell_size.rows == 5 && square_cell_size.columns == 10 && square_cell_size.rows == 10,
+         "terminal image sizing documents the 9x18 fallback cell constraint and honors explicit cell dimensions when supplied");
 
   std::string png(24, '\0');
   png[0] = static_cast<char>(0x89);
@@ -7971,6 +7999,7 @@ void run_tui_composer_tests()
   ScopedEnvVar no_color_guard("NO_COLOR", "");
   ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
   ScopedEnvVar colorfgbg_guard("COLORFGBG", "");
+  ScopedEnvVar tmux_hyperlinks_guard("AVA_TUI_TMUX_HYPERLINKS", "");
   test_tui_terminal_image_support();
   test_tui_composer_rendering_and_input();
   test_tui_text_model_conversions();

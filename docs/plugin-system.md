@@ -59,7 +59,7 @@ The compatibility rules for this surface live in [`docs/plugin-compatibility-pol
 - Hard cross-platform sandbox guarantees for arbitrary executables.
 - Trusting MCP servers as safe just because they speak MCP.
 
-These are non-goals for the 1.0 plugin/MCP foundation, not discarded product ideas. Marketplace/install flows, richer UI bridges, advanced remote MCP transports, and subagent orchestration should stay on the 1.1+ roadmap after the out-of-process safety model is proven.
+These are non-goals for the 1.0 plugin/MCP foundation, not discarded product ideas. Marketplace/install flows, richer UI bridges, and advanced remote MCP transports stay on the 1.1+ roadmap after the out-of-process safety model is proven. Native AVA `task` subagents are now a core agent feature, separate from the plugin foundation; plugin-contributed subagent packages remain future work until package provenance, trust, and compatibility policy exist.
 
 ## Plugin Discovery
 

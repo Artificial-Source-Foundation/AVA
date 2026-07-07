@@ -39,12 +39,14 @@ void print_help()
   std::cout << "  ava packages <list|install|remove|update|config>  # deferred\n";
   std::cout << "  ava --version\n";
   std::cout << "  ava --mode build|plan|text|json|rpc\n";
+  std::cout << "  ava --thinking off|<reasoning-level>\n";
   std::cout << "  ava --session <id> | --session-id <id>\n";
   std::cout << "  ava --continue | --resume | -r\n";
   std::cout << "  ava --fork <id>\n";
   std::cout << "  ava --name <name>\n";
   std::cout << "  ava --session-dir <dir>\n";
   std::cout << "  ava --no-session\n";
+  std::cout << "  ava --offline\n";
   std::cout << "  ava [--system-prompt text] [--append-system-prompt text]\n";
   std::cout << "  ava [--tools list] [--exclude-tools list] [--no-builtin-tools|--no-tools]\n";
   std::cout << "  ava --print [@file ...] [prompt] [--json|--output json] [--allow read-only] [--allow-tool list]\n";
@@ -68,9 +70,10 @@ bool is_cli_option(std::string_view arg)
 {
   return arg == "--help" || arg == "-h" || arg == "--version" || arg == "--mode" || arg == "--session" || arg == "--session-id" || arg == "--continue" ||
          arg == "--resume" || arg == "-c" || arg == "-r" || arg == "--fork" || arg == "--name" || arg == "-n" || arg == "--session-dir" ||
-         arg == "--no-session" || arg == "--system-prompt" || arg == "--append-system-prompt" || arg == "--print" || arg == "-p" || arg == "--rpc" ||
-         arg == "--json" || arg == "--output" || arg == "--allow" || arg == "--allow-tool" || arg == "--tools" || arg == "-t" || arg == "--exclude-tools" ||
-         arg == "-xt" || arg == "--no-builtin-tools" || arg == "-nbt" || arg == "--no-tools" || arg == "-nt";
+         arg == "--no-session" || arg == "--offline" || arg == "--thinking" || arg == "--system-prompt" || arg == "--append-system-prompt" ||
+         arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--json" || arg == "--output" || arg == "--allow" || arg == "--allow-tool" ||
+         arg == "--tools" || arg == "-t" || arg == "--exclude-tools" || arg == "-xt" || arg == "--no-builtin-tools" || arg == "-nbt" || arg == "--no-tools" ||
+         arg == "-nt";
 }
 
 bool is_cli_file_argument(std::string_view arg)
@@ -206,6 +209,7 @@ int run(int argc, char** argv)
   std::optional<std::filesystem::path> session_dir;
   bool continue_last_session = false;
   bool sessionless = false;
+  bool offline = false;
   bool print_mode = false;
   bool rpc_mode = false;
   std::optional<std::string> print_prompt;
@@ -216,6 +220,7 @@ int run(int argc, char** argv)
   ava::app::RuntimePromptOverrides prompt_overrides;
   ava::app::HeadlessPermissionPolicyOptions headless_permission_policy;
   ava::agent::ToolVisibilityOptions tool_visibility;
+  std::optional<std::string> initial_reasoning_level;
 
   auto const paths = ava::config::xdg_paths();
 
@@ -569,6 +574,21 @@ int run(int argc, char** argv)
       sessionless = true;
       continue;
     }
+    if (arg == "--offline")
+    {
+      offline = true;
+      continue;
+    }
+    if (arg == "--thinking")
+    {
+      if (index + 1 >= argc || is_cli_option(argv[index + 1]))
+      {
+        std::cerr << "--thinking requires a reasoning level (off or a level supported by the active model)\n";
+        return 2;
+      }
+      initial_reasoning_level = std::string(argv[++index]);
+      continue;
+    }
     if (arg == "--system-prompt")
     {
       if (index + 1 >= argc)
@@ -665,6 +685,8 @@ int run(int argc, char** argv)
   open_options.tool_visibility = std::move(tool_visibility);
   open_options.paths = runtime_paths;
   open_options.prompt_overrides = std::move(prompt_overrides);
+  open_options.initial_reasoning_level = std::move(initial_reasoning_level);
+  open_options.offline = offline;
 
   if (print_mode)
   {

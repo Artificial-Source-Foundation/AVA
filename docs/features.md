@@ -1,0 +1,43 @@
+# AVA vs Pi Feature Matrix
+
+This is a user-facing summary of AVA's current Pi-parity position, based on the recorded Pi audit in the product and goal docs. It is not a fresh source-code audit of Pi.
+
+Status terms:
+
+- **Done**: implemented for AVA's current MVP target and backed by tests, smokes, or documented evidence.
+- **Partial**: useful behavior exists, but AVA is intentionally narrower than Pi or still lacks breadth/evidence.
+- **Deferred**: valid future work, but outside the current MVP until a design or approval gate exists.
+- **Intentional divergence**: AVA chooses a different product/safety shape rather than copying Pi.
+
+| Area | Pi baseline | AVA status | AVA behavior and gap |
+| --- | --- | --- | --- |
+| Providers | Broad provider registry, generated catalogs, env auth, OAuth, compatibility settings, and image-generation entries. | **Partial** | OpenAI, Anthropic, DeepSeek, Gemini, Kimi, Moonshot, and OpenRouter-compatible chat paths are implemented. Vertex, Bedrock, Azure/Copilot, Mistral, Groq, xAI, and other provider-zoo routes are deferred until provider-specific auth, metadata, quirks, and live-smoke plans exist. |
+| Provider auth | API keys and OAuth across selected providers. | **Partial** | OpenAI browser/device OAuth and API keys are implemented; provider-scoped API keys are supported; Anthropic stored/env OAuth bearer refresh is supported. Anthropic interactive OAuth and cloud-specific auth chains are deferred where no supported third-party flow or product design exists. |
+| Model catalog | Generated model/image catalogs and broad provider metadata. | **Intentional divergence** | AVA uses a curated built-in catalog plus `models.json` overrides so release behavior is reviewable and not changed by build-time/runtime network fetches. Generated catalog sync and OpenRouter image generation are deferred. |
+| Reasoning/thinking | Provider-specific thinking and reasoning controls. | **Done** | AVA validates reasoning controls against model metadata, stores/replays provider-native reasoning where safe, emits reasoning events, and lets the TUI hide/show visible thinking without changing provider mode. |
+| Cross-provider reasoning replay | Reasoning history can exist across model/provider changes. | **Intentional divergence** | AVA fails closed instead of sending incompatible reasoning formats across providers; DeepSeek-style `reasoning_content` is parsed but not replayed. |
+| Sessions | Append-only JSONL sessions with resume, tree/fork/clone, compaction, export, and session mobility. | **Done** | AVA has append-only JSONL sessions, resume/list/stats, compaction, usage/cost records, names/labels/archive, tree/fork/clone, `--session-id`, `--resume`, `--fork`, Markdown/HTML/AVA-JSONL export, and local AVA-JSONL import. |
+| Session sharing/import portability | Import/export/share workflows, including public sharing. | **Partial** | Local export/import is implemented. Pi JSONL conversion, public/cloud share, dedicated RPC import/share, and provider-generated branch summaries are deferred. Use `/export html <path>` for local sharing. |
+| TUI/editor/terminal | Polished terminal coding UI with editor, autocomplete, markdown, selectors, images, and terminal protocol handling. | **Done** | AVA has a native `ncursesw` TUI with multiline editing, history, slash/file/path completion, model/session/settings selectors, permissions/tool cards, Markdown/code/diff rendering, themes/keybindings, image attachment import/preview fallback, and PTY/tmux smoke evidence. |
+| TUI architecture and tests | Reusable TypeScript TUI components and virtual-terminal tests. | **Intentional divergence** | AVA keeps a native C++ terminal stack and validates with deterministic renderer/editor tests plus gated real PTY/tmux/Kitty/OSC8 smokes. A Pi-style virtual terminal or component rewrite is deferred unless current evidence becomes insufficient. |
+| Built-in tools | Core read/write/edit/bash/grep/find/ls tool shape. | **Done** | AVA maps Pi aliases to native tools and adds `apply_patch`, `webfetch`, `websearch`, `skill`, `task`, `question`, plugin/MCP tools, and capability-gated LSP tools. Tool output is bounded and side effects route through permission/audit paths. |
+| Permissions and trust | Pi relies more on project trust; no built-in operation-level permission popup. | **Intentional divergence** | AVA keeps stronger allow/ask/deny policy, TUI/RPC/headless resolvers, durable rules outside model-writable workspace files, session grants, hard denies, remembered choices, and permission audit/diagnose/export flows. |
+| Parallel ordinary tool calls | Pi can batch/parallelize ordinary tool calls. | **Deferred** | AVA keeps ordinary model-dispatched tools sequential for permission order, audit order, output order, cancellation, mutation safety, and session replay semantics. |
+| Subagents/background jobs | Pi does not make task subagents a core baseline in the same way. | **Done** | AVA has a model-visible `task` tool, built-in and configured subagents, foreground child sessions, background jobs with `job_id`, explicit `TaskRun` permission, cancellation/status tracking, and recursive-task hiding. |
+| Broader multi-agent orchestration | Richer chained agents and task graphs. | **Deferred** | Background `task` is the supported concurrent subagent path. Chained task graphs, plugin-contributed subagent packages, and broader orchestration are later work. |
+| Plugins | Pi extensions, skills, prompts, package resources, UI hooks, and custom providers. | **Partial** | AVA has out-of-process local plugins with tools, commands, prompts, skills, events, diagnostics, enablement, a sample plugin, and compatibility policy. UI slots, plugin keybindings/themes, custom providers, request interception, marketplace, and remote install are deferred. |
+| MCP | Not a Pi core feature; broader reference systems support advanced MCP transports. | **Partial** | AVA supports a bounded local stdio MCP slice with explicit config, permissioned launch/connect/tool/resource reads, prompt commands, and output bounds. Remote HTTP, OAuth, subscriptions, sampling, templates, binary/blob resources, and daemon pooling are deferred. |
+| LSP/code intelligence | Coding ergonomics and code intelligence. | **Partial** | AVA has explicit-config LSP diagnostics, document/workspace symbols, definitions, references, bounded on-disk sync, and `lsp.server.launch` permission. Automatic server recipes, richer negotiation, and unsaved/incremental sync are deferred. |
+| Platform/install | Local terminal coding agent distribution. | **Partial** | AVA is a native C++23 terminal app built with CMake on Linux/XDG paths, with `ncursesw`, Boost, and `curl` prerequisites plus Docker docs. It does not currently claim broad binary/package-manager distribution parity. |
+| Packages/resource manager | Package install/remove/update/list/config and bundled resource filters. | **Deferred** | `/packages` and `ava packages ...` are recognized but disabled with an explanation. Remote npm/git/marketplace/self-update behavior needs source allowlists, provenance/signing, compatibility, rollback, and trust UX first. Manual resource install paths are documented. |
+| Sandboxing | Trust and execution safety around tools/extensions. | **Intentional divergence** | AVA provides permission policy, process containment, output bounds, and audit, but does not claim OS/container sandbox guarantees for tools, plugins, MCP, or shell commands. Real sandboxing is outside the current MVP unless backed by enforcement and tests. |
+| Offline/update/telemetry | Offline mode, package/update checks, and analytics choices. | **Done** | AVA does not perform telemetry, self-update, package update checks, remote catalog fetches, or live price/model updates. `--offline` is implemented as a fail-closed provider-call disable for prompt turns and provider-backed compaction; local commands remain available, and network-capable tools still require normal visibility plus permission policy. |
+
+## Main unresolved gaps
+
+- Broader provider breadth and live-provider evidence remain credential/API-specific.
+- Pi JSONL conversion, public share, package/resource installs, and self-update remain deferred.
+- AVA does not claim OS/container sandboxing.
+- Broader screen-reader review, broader release-workload profiling, and richer multi-agent graphs remain future product work.
+
+Source docs: [product baseline](product/mvp-baseline.md), [coverage ledger](product/mvp-coverage-ledger.md), [usage](USAGE.md), [configuration](CONFIG.md), [testing](TESTING.md), [headless protocol](headless-protocol.md), [plugin system](plugin-system.md), and [MCP support](mcp.md).

@@ -5,6 +5,7 @@
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
 #include "ava/permissions/permission.h"
+#include "ava/session/session_store.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -191,6 +192,41 @@ void test_mcp_prompts_are_registry_entries_and_permissioned_prompts()
          "MCP prompt command invocation stays behind MCP launch, connect, and call permissions");
 }
 
+void test_builtin_session_alias_registers_as_current_stats_command()
+{
+  auto const root = temp_root() / "command-registry-builtin-session-alias";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+
+  auto session = open_test_session(root, workspace);
+  auto registry = ava::app::load_command_registry(session, ava::app::CommandRegistryOptions{.include_prompt_commands = false,
+                                                                                            .include_skills = false,
+                                                                                            .include_plugin_commands = false,
+                                                                                            .include_mcp_prompts = false});
+  auto const* entry = find_entry(registry, "/session");
+  expect(entry != nullptr && entry->command == "/stats" && entry->source == ava::app::UnifiedCommandSource::Builtin &&
+             entry->kind == ava::app::UnifiedCommandKind::Backend &&
+             std::ranges::find(entry->aliases, "/session") != entry->aliases.end(),
+         "command registry exposes /session as the built-in current-session /stats alias");
+
+  expect(ava::app::is_backend_command("/session"), "command catalog classifies /session as a backend slash command");
+
+  auto seeded_stats_usage = session.store.append(ava::session::SessionEntry{.id = "entry_session_alias_usage",
+                                                                            .parent_id = "",
+                                                                            .type = ava::session::EntryType::AssistantMessage,
+                                                                            .timestamp = "2026-05-02T00:00:00Z",
+                                                                            .data_json = "{\"text\":\"usage\",\"usage\":{\"input_tokens\":12,"
+                                                                                         "\"output_tokens\":7,\"total_tokens\":19}}"});
+  expect(seeded_stats_usage.has_value(), "command registry /session runtime test seeds usage metadata");
+  auto stats = ava::app::run_command(session, ava::app::CommandRequest{.command = "/stats"});
+  auto session_alias = ava::app::run_command(session, ava::app::CommandRequest{.command = "/session"});
+  expect(stats && session_alias && stats->handled && session_alias->handled && !stats->output.empty() && !session_alias->output.empty() &&
+             session_alias->output[0] == stats->output[0] && session_alias->output[0].find("tokens: input=12 output=7 total=19") != std::string::npos,
+         "command dispatcher runs /session with no arguments through the current-session /stats surface");
+}
+
 void test_project_trust_gates_project_resource_commands()
 {
   auto const root = temp_root() / "command-registry-project-trust";
@@ -357,5 +393,6 @@ void run_app_command_registry_tests()
   test_skill_commands_are_registry_entries_and_permissioned_prompts();
   test_plugin_commands_are_registry_entries();
   test_mcp_prompts_are_registry_entries_and_permissioned_prompts();
+  test_builtin_session_alias_registers_as_current_stats_command();
   test_project_trust_gates_project_resource_commands();
 }

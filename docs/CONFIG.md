@@ -21,11 +21,11 @@ Pi-style package/resource management (`packages list|install|remove|update|confi
 
 - custom TUI themes: `$XDG_CONFIG_HOME/ava/themes/*.json`
 - global prompt resources: `$XDG_CONFIG_HOME/ava/SYSTEM.md` and `APPEND_SYSTEM.md`
-- global prompt commands and skills: `$XDG_CONFIG_HOME/ava/commands/` and `skills/`
+- global prompt commands, skills, and subagents: `$XDG_CONFIG_HOME/ava/commands/`, `skills/`, and `agents/`
 - global plugins/MCP/LSP config: `$XDG_CONFIG_HOME/ava/plugins/`, `mcp.json`, and `lsp.json`
-- trusted project resources: `.ava/commands/`, `.ava/skills/`, `.ava/plugins/`, `.ava/mcp.json`, `.ava/lsp.json`, `.ava/SYSTEM.md`, and `.ava/APPEND_SYSTEM.md`
+- trusted project resources: `.ava/commands/`, `.ava/skills/`, `.ava/agents/`, `.ava/plugins/`, `.ava/mcp.json`, `.ava/lsp.json`, `.ava/SYSTEM.md`, and `.ava/APPEND_SYSTEM.md`
 
-`ava packages ...` and `/packages ...` currently report this deferral instead of performing side effects or sending the request to the model. AVA also does not enable analytics/telemetry, version checks, package updates, or self-update behavior. A dedicated `--offline` flag is deferred; the current equivalent is to avoid starting provider turns and to leave network-capable tools disabled or unapproved in headless/TUI permission policy.
+`ava packages ...` and `/packages ...` currently report this deferral instead of performing side effects or sending the request to the model. AVA also does not enable analytics/telemetry, version checks, package updates, or self-update behavior. `--offline` disables provider model calls for prompt turns and provider-backed compaction before credential resolution; it is not an OS/network sandbox, so network-capable tools still depend on tool visibility plus permission policy.
 
 ## TUI Display
 
@@ -70,7 +70,7 @@ Custom themes live under `$XDG_CONFIG_HOME/ava/themes/*.json`. AVA accepts a lea
 }
 ```
 
-Color values can be `""` for the terminal default, a 0-255 xterm color number, a 6-digit hex RGB string approximated to xterm-256, or a variable name from `vars`. Custom theme names must be unique, non-empty, and free of whitespace or path separators. `/settings` shows valid custom theme files as selectable theme rows; invalid custom files are ignored during discovery and reported when directly selected through `display.json` or `/theme`.
+Color values can be `""` for the terminal default, a 0-255 xterm color number, a 6-digit hex RGB string approximated to xterm-256, or a variable name from `vars`. Custom theme names must be unique, non-empty, and free of whitespace or path separators. `/settings` shows valid custom theme files as selectable theme rows; invalid custom files are ignored during discovery and reported when directly selected through `display.json` or `/theme`. An editor-facing schema for this AVA-native format lives at [`docs/schema/theme.schema.json`](schema/theme.schema.json); the runtime loader remains the authoritative validator.
 
 You can also override the theme for the current process:
 
@@ -81,6 +81,18 @@ NO_COLOR=1 ava
 ```
 
 `dark` is the default fallback ncurses palette. `light` selects a light built-in palette. `plain` disables ANSI styling. Precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json`, then terminal background inference from `COLORFGBG`, then the built-in dark fallback. The `/settings` TUI view reports the active display mode and source, and exposes selectable theme rows that write `display.json`. During an interactive TUI run, AVA polls `display.json` and the selected custom theme file and applies valid changes automatically.
+
+## Terminal Hyperlinks Under tmux
+
+AVA emits OSC 8 hyperlinks only when the detected terminal path has an explicit support signal. tmux's `terminal-features` and `terminal-overrides` state is client/server configuration, not pane environment, so AVA does not infer hyperlink forwarding from `$TMUX`, `$TERM_PROGRAM`, or `TERM=tmux-*` alone; a false positive would hide visible URL fallbacks while tmux strips or withholds OSC 8 output. If your tmux config enables hyperlinks, for example with `set -ga terminal-features ',*:hyperlinks'` or equivalent `Hls`/`Hlr` overrides, launch AVA with:
+
+```sh
+AVA_TUI_TMUX_HYPERLINKS=1 ava
+```
+
+To make the hint available to panes from tmux configuration, pair the tmux hyperlink setting with `set-environment -g AVA_TUI_TMUX_HYPERLINKS 1`.
+
+The override only affects the tmux fallback path: image protocols remain disabled under tmux, while assistant Markdown links may use OSC 8.
 
 ## External Editor
 
@@ -111,12 +123,13 @@ ava connect kimi --api-key
 
 When the provider is omitted, `ava auth login`, `ava login`, and interactive `ava connect` open a searchable terminal provider picker before asking for login method and secret. Secrets are read without terminal echo when stdin is a TTY. In the TUI, use `/connect` or `/login` to open the same provider flow as a modal; OpenAI shows browser OAuth, headless OAuth, and API key options. Non-OpenAI providers use API-key setup unless their own documented auth flow is explicitly implemented.
 
-Headless API-key setup is available for OpenAI, Anthropic, DeepSeek, Moonshot/Kimi, OpenRouter, and other provider ids:
+Headless API-key setup is available for OpenAI, Anthropic, DeepSeek, Gemini, Moonshot/Kimi, OpenRouter, and other provider ids:
 
 ```sh
 ava connect openai --headless-oauth
 printf '%s\n' "$OPENAI_API_KEY" | ava connect openai --api-key-stdin
 printf '%s\n' "$ANTHROPIC_API_KEY" | ava connect anthropic --api-key-stdin
+ava connect gemini --api-key-env GEMINI_API_KEY
 ava connect moonshot --api-key-env MOONSHOT_API_KEY
 ava connect kimi --api-key-env KIMI_API_KEY
 ```
@@ -147,7 +160,9 @@ OAuth credentials refresh automatically before use when a refresh token is prese
 
 Persistent permission rules are stored owner-only outside model-writable workspace files. Global rules use `$XDG_CONFIG_HOME/ava/permission-rules.json`. Workspace-scoped rules are keyed by the normalized workspace path and written under `$XDG_CONFIG_HOME/ava/workspace-permission-rules/<workspace-hash>/permission-rules.json`; use `/permissions list` or RPC `permission_rules` as the authoritative way to inspect the exact path for a workspace. Legacy `$WORKSPACE/.ava/permission-rules.json` files are intentionally ignored for enforcement because normal file tools can edit workspace files. Rule storage rejects group/world-readable files, malformed JSON, unsupported schema versions, unsafe symlinks, broad path rules, and unsupported operations before prompting a fallback resolver.
 
-Use `/permissions list`, `/permissions explain <rule_id>`, `/permissions add ...`, `/permissions remove <rule_id>`, `/permissions audit ...`, and `/permissions diagnose ...` in interactive mode, or the matching RPC `permission_rules`, `permission_rule_add`, and `permission_rule_remove` requests for automation. Rules can match exact path-oriented operations such as `read`, `search`, `edit`, and `lsp.query`, or exact command-oriented operations such as `bash`, `network.fetch`, `network.search`, `lsp.server.launch`, MCP, and plugin prompts. Hard policy denies are never upgraded by persistent rules or headless flags.
+Use `/permissions list`, `/permissions explain <rule_id>`, `/permissions add ...`, `/permissions remove <rule_id>`, `/permissions audit ...`, and `/permissions diagnose ...` in interactive mode, or the matching RPC `permission_rules`, `permission_rule_add`, and `permission_rule_remove` requests for automation. Rules can match exact path-oriented operations such as `read`, `search`, `edit`, and `lsp.query`, or exact command-oriented operations such as `bash`, `network.fetch`, `network.search`, `lsp.server.launch`, `task`, MCP, and plugin prompts. Hard policy denies are never upgraded by persistent rules or headless flags.
+
+The `task` operation covers model-visible subagent delegation through the built-in `task` tool. Rules and headless policies match the exact `task` tool name plus the requested `subagent_type` command, such as `general`, `explore`, or a configured custom subagent.
 
 ## Models
 
@@ -178,11 +193,11 @@ Optional model override file: `$XDG_CONFIG_HOME/ava/models.json`.
 }
 ```
 
-Model entries are additive overrides. `provider` and `id` are required; omitted fields on built-in model overrides inherit the built-in metadata, including `context_window_tokens`. For brand-new custom models, set `context_window_tokens` so token percentage and context-aware compaction can work. Optional fields include `display_name`, `family`, `api_family`, `context_window_tokens`, `max_output_tokens`, `supports_tools`, `supports_streaming`, `supports_reasoning`, `reports_usage`, `input_modalities`, `output_modalities`, `reasoning_levels`, `reasoning_format`, `compatibility_quirks`, and `pricing`. `input_modalities` currently recognizes `text` and `image`; models that omit `image` reject replayed image attachments before provider requests. Built-in OpenAI Responses and Anthropic Messages image-capable profiles declare `text` plus `image`; custom compatible-provider image models should do the same only when their endpoint accepts chat-completions image URL blocks. `/providers [query]` reports provider runtime availability, credential source status without secret values, OAuth disposition, endpoint environment knobs, and compatibility quirks. `/models <query>` and the TUI model selector report advisory diagnostics for custom models that omit context windows, input modalities, API family, support flags, usage/pricing metadata, or reasoning levels, plus provider/API-family mismatches, unknown API families, invalid provider ids, and unregistered providers. These diagnostics do not block switching when the provider is registered; rows for unregistered providers are disabled because backend model switching rejects them. Pricing values are USD per one million tokens and are local static metadata; AVA does not fetch live prices. Cost is reported only when the saved provider usage and configured pricing are complete for the billable token types in that assistant response.
+Model entries are additive overrides. `provider` and `id` are required; omitted fields on built-in model overrides inherit the built-in metadata, including `context_window_tokens`. For brand-new custom models, set `context_window_tokens` so token percentage and context-aware compaction can work. Optional fields include `display_name`, `family`, `api_family`, `context_window_tokens`, `max_output_tokens`, `supports_tools`, `supports_streaming`, `supports_reasoning`, `reports_usage`, `input_modalities`, `output_modalities`, `reasoning_levels`, `reasoning_format`, `compatibility_quirks`, and `pricing`. `input_modalities` currently recognizes `text` and `image`; models that omit `image` reject replayed image attachments before provider requests. Built-in OpenAI Responses, Anthropic Messages, and Gemini GenerateContent image-capable profiles declare `text` plus `image`; custom compatible-provider image models should do the same only when their endpoint accepts chat-completions image URL blocks. `/providers [query]` reports provider runtime availability, credential source status without secret values, OAuth disposition, endpoint environment knobs, and compatibility quirks. `/models <query>` and the TUI model selector report advisory diagnostics for custom models that omit context windows, input modalities, API family, support flags, usage/pricing metadata, or reasoning levels, plus provider/API-family mismatches, unknown API families, invalid provider ids, and unregistered providers. These diagnostics do not block switching when the provider is registered; rows for unregistered providers are disabled because backend model switching rejects them. Pricing values are USD per one million tokens and are local static metadata; AVA does not fetch live prices. Cost is reported only when the saved provider usage and configured pricing are complete for the billable token types in that assistant response.
 
 Accepted pricing aliases include `input_usd_per_1m`, `output_usd_per_1m`, `cache_read_usd_per_1m`, `cache_write_usd_per_1m`, and `reasoning_usd_per_1m`.
 
-Reasoning controls are model/API-family specific. OpenAI Responses models accept reasoning level/effort metadata. OpenAI chat-completions compatible routes accept level-only controls where supported. Anthropic Messages models accept `enabled` with a budget at least 1024 tokens and below the model output limit; `adaptive` is accepted only for profiles that explicitly list it and does not accept a manual budget. Kimi/Moonshot-style compatible routes can preserve `reasoning_content` when their model metadata declares the matching reasoning format and compatibility quirk. DeepSeek uses the compatible chat endpoint, maps AVA `high`/`xhigh` reasoning levels to `reasoning_effort=high|max`, and parses `reasoning_content` from responses; AVA intentionally does not replay prior DeepSeek `reasoning_content` into future requests.
+Reasoning controls are model/API-family specific. OpenAI Responses models accept reasoning level/effort metadata. OpenAI chat-completions compatible routes accept level-only controls where supported. Anthropic Messages models accept `enabled` with a budget at least 1024 tokens and below the model output limit; `adaptive` is accepted only for profiles that explicitly list it and does not accept a manual budget. Kimi/Moonshot-style compatible routes can preserve `reasoning_content` when their model metadata declares the matching reasoning format and compatibility quirk. DeepSeek uses the compatible chat endpoint, maps AVA `high`/`xhigh` reasoning levels to `reasoning_effort=high|max`, and parses `reasoning_content` from responses; AVA intentionally does not replay prior DeepSeek `reasoning_content` into future requests. Gemini GenerateContent models currently reject explicit reasoning options until AVA has model metadata and request semantics for them. The Pi-compatible startup flag `--thinking off|<level>` is an alias for the same runtime reasoning selection: `off` clears explicit reasoning and other levels must appear in the active model's `reasoning_levels`.
 
 Provider request metadata also supports prompt/cache-control hints where a provider API can use them. Anthropic content-part serialization preserves native tool use/results, thinking signatures or redacted thinking markers, cache usage, stop reasons, and provider-native reasoning blocks in session replay without exposing opaque signatures in exports.
 
@@ -214,7 +229,7 @@ Both files use the same explicit schema. Global servers are loaded before worksp
 
 `id` is a unique short identifier using letters, digits, `_`, `-`, or `.`. `argv` is a non-empty JSON string array executed directly without a shell. `file_extensions` is an optional JSON string array; when omitted or empty, the server can match any file. `language_id` defaults to `plaintext` and is sent in bounded `textDocument/didOpen` notifications for definition/reference queries. `timeout_ms` defaults to `3000` and must be a base-10 integer from `100` through `30000`. Known fields reject wrong JSON types, mixed arrays, duplicate server ids, control bytes, oversized values, symlinked config files, and configs over 64 KiB.
 
-Using an LSP tool first requests `lsp.query` for the target file or workspace. Starting the configured subprocess separately requests high-risk `lsp.server.launch`; persistent permission rules match the exact JSON-array encoded argv string, not a shell command line. Project-local LSP server code should be declared only in `$WORKSPACE/.ava/lsp.json` and becomes available only after `/trust project`.
+Using an LSP tool first requests `lsp.query` for the target file or workspace. Starting the configured subprocess separately requests high-risk `lsp.server.launch`; persistent permission rules match the exact JSON-array encoded argv string, not a shell command line. Project-local LSP server code should be declared only in `$WORKSPACE/.ava/lsp.json` and becomes available only after `/trust project`. `/context lsp` parses the global and trusted-project config files and reports load errors without launching configured servers.
 
 ## Compaction
 
@@ -251,6 +266,8 @@ Examples:
 
 Context instruction files are discovered from the workspace root to the current directory. In each directory AVA loads the first present file by Pi-compatible priority: `AGENTS.md`, `AGENTS.MD`, `CLAUDE.md`, then `CLAUDE.MD`. The global context file path is `$XDG_CONFIG_HOME/ava/AGENTS.md` by default and uses the same sibling fallback names when `AGENTS.md` is absent. Context files are bounded, symlink-rejected, and loaded without requiring project trust, matching their role as visible user-authored instructions.
 
+AVA records base prompt metadata separately from the effective provider system prompt. `/context` reports whether the selected base prompt came from an override, the source path when one exists, byte count, and a content fingerprint. Persisted JSONL `session_start` entries record the prompt override boolean plus loaded context sources; runtime/RPC `session_start` events intentionally expose only mode/provider/model. The full prompt text is owned by the effective `system_prompt` assembled from base prompt selection, `SYSTEM.md`/`APPEND_SYSTEM.md`, context files, skills, and extension resources; this avoids duplicating prompt text in runtime state.
+
 System prompt resource paths:
 
 ```text
@@ -261,8 +278,8 @@ $WORKSPACE/.ava/APPEND_SYSTEM.md
 ```
 
 `SYSTEM.md` replaces the selected built-in or provider/family/mode prompt text.
-`APPEND_SYSTEM.md` appends to the selected prompt text. Context files and loaded
-skills are still appended after these resources. Trusted project files win over
+`APPEND_SYSTEM.md` appends to the selected prompt text. Context files, loaded
+skills, available subagents, and extension resources are still appended after these resources. Trusted project files win over
 global files with the same name; untrusted project files are skipped and the
 global file is used when present.
 
@@ -277,7 +294,7 @@ ava --append-system-prompt "First extra instruction" --append-system-prompt "Sec
 and `SYSTEM.md` files for the current process. Repeated
 `--append-system-prompt` values are joined with blank lines and replace
 discovered `APPEND_SYSTEM.md` files for the current process. Context files,
-prompt commands, skills, and plugin prompt/skill resources are still appended
+prompt commands, skills, subagents, and plugin prompt/skill resources are still appended
 after the CLI prompt text.
 
 Prompt command template paths:
@@ -294,6 +311,48 @@ Frontmatter can set `description`, `argument-hint`, `argument_hint`, or `hint`.
 The template body supports `$1`, `$2`, `$@`, `$ARGUMENTS`, `${1:-default}`,
 `${@:N}`, `${@:N:L}`, and `$$`.
 
+## Subagents
+
+The built-in `task` tool can run foreground or background child sessions through configured subagents. AVA always provides two built-ins:
+
+- `general`: inherits the parent tool visibility except recursive `task` is hidden.
+- `explore`: read-only preset that exposes `read_file`, `list_directory`, `glob`, and `grep` while hiding mutation, shell, network, LSP, and recursive `task` tools.
+
+Custom subagents are Markdown files with YAML-like frontmatter. Global files are discovered from:
+
+```text
+$XDG_CONFIG_HOME/ava/agents/*.md
+$XDG_CONFIG_HOME/ava/agent/*.md
+~/.agents/agents/*.md
+~/.agents/agent/*.md
+~/.claude/agents/*.md
+~/.claude/agent/*.md
+```
+
+Project-local files are discovered only after `/trust project` from:
+
+```text
+$WORKSPACE/.ava/agents/*.md
+$WORKSPACE/.ava/agent/*.md
+$WORKSPACE/.agents/agents/*.md
+$WORKSPACE/.agents/agent/*.md
+$WORKSPACE/.claude/agents/*.md
+$WORKSPACE/.claude/agent/*.md
+```
+
+Example:
+
+```markdown
+---
+name: reviewer
+description: Review a focused implementation change.
+tools: read-only
+---
+Inspect the requested files and return concise findings with file references.
+```
+
+`name` defaults to the file stem when omitted and must use letters, digits, `.`, `_`, or `-`. Names are capped at 128 bytes, cannot contain consecutive separators, and cannot end with a separator. `description` is required for custom subagents. `mode: primary` is skipped; `mode: subagent` and `mode: all` are usable by `task`. `tools: read-only`, `read_only`, `readonly`, or `explore` applies the read-only preset; other values inherit parent tool visibility with recursive `task` still removed. `hidden: true`, `yes`, or `1` keeps a subagent out of the prompt's visible `available_subagents` list while preserving explicit lookup. Custom definitions cannot override built-in `general` or `explore`. Each file is bounded to 64 KiB, and AVA loads at most 128 subagents.
+
 ## Project Trust
 
 AVA stores project trust decisions outside the workspace in `$XDG_STATE_HOME/ava/project-trust.json`.
@@ -303,8 +362,14 @@ Project `AGENTS.md`/`CLAUDE.md` context files still load without a trust decisio
 ```text
 $WORKSPACE/.ava/commands/
 $WORKSPACE/.ava/command/
+$WORKSPACE/.ava/agents/
+$WORKSPACE/.ava/agent/
 $WORKSPACE/.ava/skills/
+$WORKSPACE/.agents/agents/
+$WORKSPACE/.agents/agent/
 $WORKSPACE/.agents/skills/
+$WORKSPACE/.claude/agents/
+$WORKSPACE/.claude/agent/
 $WORKSPACE/.claude/skills/
 $WORKSPACE/.ava/plugins/
 $WORKSPACE/.ava/mcp.json

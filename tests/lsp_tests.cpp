@@ -538,6 +538,28 @@ void test_lsp_configured_provider_loads_global_config_from_safe_cwd()
          "configured global LSP server process cwd is the global config directory, not the workspace");
 }
 
+void test_lsp_configured_provider_inspection_does_not_launch_servers()
+{
+  auto const workspace = make_lsp_workspace("lsp-config-inspection");
+  std::filesystem::create_directories(workspace / ".ava");
+  auto const marker_path = workspace / "lsp-inspection-marker.txt";
+  auto const config_path = workspace / ".ava" / "lsp.json";
+  std::ofstream config(config_path, std::ios::binary | std::ios::trunc);
+  config << "{\"version\":1,\"servers\":[{\"id\":\"fake\",\"argv\":[\"" << ava::core::json::escape(AVA_FAKE_LSP_SERVER_PATH) << "\",\"--cwd-marker\",\""
+         << ava::core::json::escape(marker_path.generic_string()) << "\"],\"file_extensions\":[\".cpp\"]}]}";
+  config.close();
+
+  auto inspection = ava::lsp::inspect_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
+      .global_config_file = {},
+      .project_config_file = config_path,
+      .workspace_root = workspace,
+  });
+  expect(inspection.configs.size() == 1 && inspection.error_count == 0 && inspection.server_count == 1 && inspection.configs.front().loaded &&
+             inspection.configs.front().server_count == 1,
+         "configured LSP inspection parses valid config metadata");
+  expect(!std::filesystem::exists(marker_path), "configured LSP inspection does not launch configured servers");
+}
+
 void test_lsp_configured_provider_rejects_invalid_config()
 {
   auto const workspace = make_lsp_workspace("lsp-invalid-config");
@@ -629,5 +651,6 @@ void run_lsp_tests()
   test_lsp_dispatcher_bounds_provider_json();
   test_lsp_configured_provider_loads_project_config_lazily();
   test_lsp_configured_provider_loads_global_config_from_safe_cwd();
+  test_lsp_configured_provider_inspection_does_not_launch_servers();
   test_lsp_configured_provider_rejects_invalid_config();
 }

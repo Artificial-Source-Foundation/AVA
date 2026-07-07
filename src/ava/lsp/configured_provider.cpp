@@ -671,6 +671,39 @@ class ConfiguredLspProvider final : public DiagnosticsProvider
   std::shared_ptr<std::vector<std::string>> permission_request_ids_ = nullptr;
 };
 
+ConfiguredLspConfigDiagnostic inspect_config_source(std::string scope, std::filesystem::path const& path, bool project_scoped,
+                                                    std::vector<ConfiguredServer>& servers)
+{
+  ConfiguredLspConfigDiagnostic diagnostic{.scope = std::move(scope), .path = path};
+  std::error_code status_error;
+  auto const status = std::filesystem::symlink_status(path, status_error);
+  if (!status_error)
+    diagnostic.exists = std::filesystem::exists(status);
+
+  auto content = read_config_file(path);
+  if (!content)
+  {
+    diagnostic.error = std::move(content.error());
+    return diagnostic;
+  }
+  if (!diagnostic.exists && content->empty())
+    return diagnostic;
+
+  diagnostic.byte_count = content->size();
+  auto candidate_servers = servers;
+  auto parsed = parse_config(path, *content, candidate_servers, project_scoped);
+  if (!parsed)
+  {
+    diagnostic.error = std::move(parsed.error());
+    return diagnostic;
+  }
+
+  diagnostic.loaded = true;
+  diagnostic.server_count = candidate_servers.size() - servers.size();
+  servers = std::move(candidate_servers);
+  return diagnostic;
+}
+
 }  // namespace
 
 ava::core::Result<std::shared_ptr<DiagnosticsProvider>> make_configured_lsp_provider(ConfiguredLspProviderFiles const& files)
@@ -697,6 +730,24 @@ ava::core::Result<std::shared_ptr<DiagnosticsProvider>> make_configured_lsp_prov
   if (servers.empty())
     return std::shared_ptr<DiagnosticsProvider>{};
   return std::make_shared<ConfiguredLspProvider>(files.workspace_root.lexically_normal(), files.mode, files.permission_resolver, std::move(servers));
+}
+
+ConfiguredLspProviderInspection inspect_configured_lsp_provider(ConfiguredLspProviderFiles const& files)
+{
+  ConfiguredLspProviderInspection inspection;
+  std::vector<ConfiguredServer> servers;
+  if (!files.global_config_file.empty())
+  {
+    inspection.configs.push_back(inspect_config_source("global", files.global_config_file, false, servers));
+  }
+  if (!files.project_config_file.empty())
+  {
+    inspection.configs.push_back(inspect_config_source("project", files.project_config_file, true, servers));
+  }
+  inspection.server_count = servers.size();
+  inspection.error_count = static_cast<std::size_t>(
+      std::ranges::count_if(inspection.configs, [](ConfiguredLspConfigDiagnostic const& diagnostic) { return diagnostic.error.has_value(); }));
+  return inspection;
 }
 
 }  // namespace ava::lsp

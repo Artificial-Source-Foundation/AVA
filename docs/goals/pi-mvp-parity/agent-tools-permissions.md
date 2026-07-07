@@ -226,7 +226,7 @@ git --no-pager diff --check
 - OpenCode's external-directory prompt displays `Access external directory <path>`. AVA now uses that wording in the TUI permission dock for outside-workspace target prompts while keeping the backend reason `target is outside the workspace` for policy tests and structured RPC/headless output.
 - OpenCode's `once`/`always`/`reject` replies map to AVA's one-shot allow, remembered exact workspace-scoped allow rule, and one-shot reject. AVA also supports remembered reject rules, which is intentionally stronger than OpenCode's saved-allow-only model. RPC denial `reason` remains AVA's reject-message equivalent; an interactive TUI reject-message editor is explicitly deferred because it would require a new prompt sub-state and model-feedback semantics.
 - OpenCode deny-wins behavior and explicit deny enforcement match AVA's hard-deny and persistent-rule precedence: built-in hard denies are evaluated before rules, and matching persistent deny rules win over allows.
-- OpenCode subagent permission inheritance is documented as reference-only. AVA has no MVP subagent/task-worker surface; multi-agent orchestration remains deferred in the product baseline.
+- OpenCode subagent permission inheritance is documented as the reference comparison point. AVA now has a native `task` subagent surface with explicit `TaskRun` permission, child sessions, foreground/background execution, and background job tracking; broader multi-agent orchestration and parallel ordinary tool execution remain deferred in the product baseline.
 - OpenCode tool display rules informed AVA's existing tool-card matrix. AVA cards continue to show lifecycle, success/error/canceled state, permission-denied audit details, truncation/spill, changed paths, diffs, and plain/copy-safe payloads where backend events provide them.
 
 #### Closure Matrices
@@ -255,7 +255,7 @@ Tool and permission category mapping:
 | User question | None in Pi core | `question` | `question` resolver in TUI/RPC; fails closed headless without `question_reply`. |
 | Skills/resources | Pi skills/prompts/extensions | `skill`, custom/MCP tools | `skill`, plugins, MCP resources/tools/prompts behind trust, permission, audit, and output bounds. |
 | LSP/code intel | Not a Pi core tool | `lsp` | Capability-gated LSP diagnostics/symbol/definition/reference tools with `lsp.query` and `lsp.server.launch`. |
-| Subagents/tasks | Not AVA MVP | `task`, subagent permission inheritance | Deferred/excluded from AVA MVP until process/session/permission ownership is designed. |
+| Subagents/tasks | Not Pi core | `task`, subagent permission inheritance | AVA `task`, built-in/custom subagents, `Operation::TaskRun`, child-session metadata, background `job_id` tracking, recursive-task hiding, and project-trust-gated custom definitions. |
 | Parallel/batch tools | Pi default parallel batches | `batch`/tool registry supports concurrent surfaces | Deferred in AVA until replay, permission order, audit order, mutation order, and cancellation semantics are designed. |
 
 #### Completed Work
@@ -296,7 +296,7 @@ Tool and permission category mapping:
 - TUI reject-message editor deferred with rationale: AVA already accepts bounded RPC denial reasons and preserves them in audit/tool details; adding a TUI text-entry sub-state would broaden prompt state and model-feedback semantics beyond this closure pass.
 - Parallel/configurable tool execution remains deferred; no implementation was added because replay order, permission-audit order, output order, mutation ordering, and cancellation semantics are not designed.
 - No new side-effect class was added. The side-effect checklist remains the gate for future filesystem, shell, network, provider, credential, plugin, MCP, LSP, config, session, and package/resource side effects.
-- OpenCode desktop/web/SaaS/server/package surfaces and subagent/task-worker execution remain outside the AVA local-terminal MVP unless a future product decision scopes them.
+- OpenCode desktop/web/SaaS/server/package surfaces remain outside the AVA local-terminal MVP unless a future product decision scopes them. Native AVA task-subagent execution is now present; broader OpenCode-style orchestration beyond that slice remains future work.
 
 #### Final Verification And Material Review
 

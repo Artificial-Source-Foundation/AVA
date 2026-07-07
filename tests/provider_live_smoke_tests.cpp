@@ -87,6 +87,14 @@ std::vector<LiveSmokeCase> configured_live_smokes()
                                   .credential_type = "api_key",
                                   .label = "DeepSeek"});
   }
+  if (auto token = env_value("GEMINI_API_KEY"))
+  {
+    cases.push_back(LiveSmokeCase{.provider_id = "gemini",
+                                  .model_id = env_or("AVA_LIVE_GEMINI_MODEL", "gemini-2.5-pro"),
+                                  .access_token = *token,
+                                  .credential_type = "api_key",
+                                  .label = "Gemini"});
+  }
   if (auto token = env_value("KIMI_API_KEY"))
   {
     cases.push_back(LiveSmokeCase{.provider_id = "kimi",

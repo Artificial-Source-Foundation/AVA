@@ -1,4 +1,5 @@
 #include "ava/app/project_trust.h"
+#include "ava/app/reasoning_controls.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime_json.h"
 #include "ava/app/runtime_model.h"
@@ -9,6 +10,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -55,6 +57,58 @@ ava::core::Result<std::string> resolve_session_id(std::filesystem::path const& w
     return std::unexpected(std::move(error));
   }
   return matches.front();
+}
+
+std::string cli_supported_reasoning_levels(ava::config::ModelInfo const& model)
+{
+  std::string levels = "off";
+  for (auto const& level : model.reasoning_levels)
+  {
+    if (level.empty())
+      continue;
+    levels += ", ";
+    levels += level;
+  }
+  return levels;
+}
+
+void add_cli_reasoning_context(ava::core::Error& error, ava::config::ModelInfo const& model)
+{
+  error.with_context("option", "--thinking");
+  error.with_context("supported_levels", cli_supported_reasoning_levels(model));
+}
+
+ava::core::VoidResult apply_initial_reasoning_level(RuntimeSession& session, std::string_view requested_level)
+{
+  auto level = runtime::trimmed_copy(requested_level);
+  if (level.empty())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reasoning level is required");
+    add_cli_reasoning_context(error, session.model);
+    return std::unexpected(std::move(error));
+  }
+
+  std::optional<RuntimeReasoningSelection> selection = std::nullopt;
+  if (level != "off")
+  {
+    auto selected = reasoning_selection_for_level(session.model, std::move(level));
+    if (!selected)
+    {
+      auto error = std::move(selected.error());
+      add_cli_reasoning_context(error, session.model);
+      return std::unexpected(std::move(error));
+    }
+    selection = std::move(*selected);
+  }
+
+  auto changed = set_runtime_reasoning(session, std::move(selection));
+  if (!changed)
+  {
+    auto error = std::move(changed.error());
+    add_cli_reasoning_context(error, session.model);
+    return std::unexpected(std::move(error));
+  }
+  return {};
 }
 
 }  // namespace
@@ -178,24 +232,33 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
       return std::unexpected(metadata.error());
   }
 
-  return RuntimeSession{.store = std::move(*store),
-                        .mode = options.mode,
-                        .model = std::move(model),
-                        .base_prompt = std::move(prompt_state->base_prompt),
-                        .paths = options.paths,
-                        .workspace_dir = workspace_dir,
-                        .current_dir = current_dir,
-                        .project_trust = std::move(project_trust),
-                        .prompt_overrides = options.prompt_overrides,
-                        .tool_visibility = options.tool_visibility,
-                        .context_sources = std::move(prompt_state->context_sources),
-                        .freshness_sources = std::move(prompt_state->freshness_sources),
-                        .system_prompt = std::move(prompt_state->system_prompt),
-                        .reasoning = std::move(reasoning),
-                        .scoped_model_cycle = registry->scoped_model_cycle,
-                        .created = created,
-                        .sessionless = options.sessionless,
-                        .background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>()};
+  RuntimeSession session{.store = std::move(*store),
+                         .mode = options.mode,
+                         .model = std::move(model),
+                         .base_prompt = std::move(prompt_state->base_prompt),
+                         .paths = options.paths,
+                         .workspace_dir = workspace_dir,
+                         .current_dir = current_dir,
+                         .project_trust = std::move(project_trust),
+                         .prompt_overrides = options.prompt_overrides,
+                         .tool_visibility = options.tool_visibility,
+                         .context_sources = std::move(prompt_state->context_sources),
+                         .freshness_sources = std::move(prompt_state->freshness_sources),
+                         .system_prompt = std::move(prompt_state->system_prompt),
+                         .reasoning = std::move(reasoning),
+                         .scoped_model_cycle = registry->scoped_model_cycle,
+                         .created = created,
+                         .sessionless = options.sessionless,
+                         .background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>(),
+                         .offline = options.offline};
+
+  if (options.initial_reasoning_level)
+  {
+    if (auto applied = apply_initial_reasoning_level(session, *options.initial_reasoning_level); !applied)
+      return std::unexpected(std::move(applied.error()));
+  }
+
+  return session;
 }
 
 }  // namespace ava::app

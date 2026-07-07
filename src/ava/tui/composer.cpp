@@ -624,6 +624,9 @@ std::optional<TerminalGraphicOverlay> pending_attachment_graphic(PendingAttachme
     return std::nullopt;
   }
   auto const max_width = width > 4 ? std::min<std::size_t>(60, width - 4) : std::size_t{1};
+  // TODO: Pass measured terminal cell pixel dimensions here once the TUI runtime has a safe
+  // terminal-query seam. Until then image previews use calculate_image_cell_size's deterministic
+  // fallback cell dimensions, so sizing remains bounded but not terminal-specific.
   auto const cells = calculate_image_cell_size(item.preview->dimensions, max_width, max_rows);
   if (cells.rows > max_rows) return std::nullopt;
 

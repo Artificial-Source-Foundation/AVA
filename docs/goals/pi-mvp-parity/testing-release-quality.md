@@ -57,7 +57,7 @@ AVA has strong integration testing, safety testing, fake providers/servers, CMak
 | Slice | Work |
 | --- | --- |
 | Q1. Evidence audit | Compare `docs/product/mvp-baseline.md` checked rows with `docs/product/mvp-coverage-ledger.md`; fix stale claims and missing evidence. |
-| Q2. Provider smoke matrix | Add a table for OpenAI, Anthropic, Kimi, Moonshot, OpenRouter, and any new providers. Include env vars and skipped credentials. |
+| Q2. Provider smoke matrix | Add a table for OpenAI, Anthropic, DeepSeek, Gemini, Kimi, Moonshot, OpenRouter, and any new providers. Include env vars and skipped credentials. |
 | Q3. TUI test decision | Document virtual-terminal vs renderer+PTY strategy. Add missing deterministic tests or smoke assertions. |
 | Q4. Performance thresholds | Turn existing performance tests into named release thresholds where possible. |
 | Q5. Docs consistency pass | Update user-facing docs to match implemented commands/config/features. |
@@ -68,7 +68,7 @@ AVA has strong integration testing, safety testing, fake providers/servers, CMak
 | Checkpoint | Status | Notes |
 | --- | --- | --- |
 | Q1. Evidence audit | Complete | Reconciled checked testing/release rows against `docs/product/mvp-coverage-ledger.md` and added coverage rows for provider live-smoke, performance thresholds, and package trust/signing policy evidence. |
-| Q2. Provider smoke matrix | Complete | `docs/TESTING.md` records env vars, default model overrides, opt-in command, skip behavior, and result classifications for OpenAI, Anthropic API key/OAuth bearer, Kimi, Moonshot, and OpenRouter. |
+| Q2. Provider smoke matrix | Complete | `docs/TESTING.md` records env vars, default model overrides, opt-in command, skip behavior, and result classifications for OpenAI, Anthropic API key/OAuth bearer, DeepSeek, Gemini, Kimi, Moonshot, and OpenRouter. |
 | Q3. TUI test decision | Complete | AVA keeps deterministic renderer/editor tests plus gated PTY/tmux/Kitty/OSC8 smokes for MVP instead of adding a Pi-style virtual-terminal parser now. |
 | Q4. Performance thresholds | Complete | `docs/TESTING.md` names the current large-render, 20,000-line tool-output, very-long transcript, tail-renderer, and headless startup/search/replay thresholds. |
 | Q5. Security/safety checklist | Complete | Added `docs/engineering/side-effect-safety-checklist.md` and linked it from release evidence. |

@@ -74,6 +74,8 @@ struct RuntimeOpenOptions
   ava::agent::ToolVisibilityOptions tool_visibility;
   ava::config::XdgPaths paths = ava::config::xdg_paths();
   RuntimePromptOverrides prompt_overrides;
+  std::optional<std::string> initial_reasoning_level = std::nullopt;
+  bool offline = false;
 };
 
 struct RuntimeReasoningSelection
@@ -111,6 +113,7 @@ struct RuntimeSession
   bool created = false;
   bool sessionless = false;
   std::shared_ptr<ava::agent::BackgroundJobRegistry> background_jobs = nullptr;
+  bool offline = false;
 };
 
 struct RuntimePromptState
@@ -137,6 +140,7 @@ struct RuntimeRunOptions
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
   std::mutex* session_mutex = nullptr;
   std::vector<ava::session::ImageAttachmentRef> image_attachments;
+  bool offline = false;
 };
 
 using CompactionSummaryGenerator =
@@ -159,6 +163,8 @@ void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prom
 [[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& session, std::string const& user_message,
                                                                         ava::provider::Provider const& provider, ava::provider::Transport& transport,
                                                                         RuntimeRunOptions const& options);
+
+[[nodiscard]] ava::core::Error offline_provider_error(std::string_view action);
 
 [[nodiscard]] bool same_session_snapshot(std::vector<ava::session::SessionEntry> const& expected, std::vector<ava::session::SessionEntry> const& actual);
 

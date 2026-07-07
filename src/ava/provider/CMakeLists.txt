@@ -2,6 +2,7 @@ add_library(ava_provider
   "curl_transport.cpp"
   "anthropic_provider.cpp"
   "anthropic_request.cpp"
+  "gemini_provider.cpp"
   "openai_compatible_provider.cpp"
   "openai_compatible_request.cpp"
   "openai_provider.cpp"

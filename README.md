@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Artificial-Source/AVA/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Artificial-Source/AVA/actions/workflows/ci.yml)
 
-AVA is a native C++23 agentic coding tool. The active default branch is `develop`; historical branches are kept under `archive/*`. The shipped 1.0 backend MVP includes OpenAI and Kimi-for-coding live-verified provider paths, safe built-in tools, build/plan modes, permission prompts, tool visibility, append-only JSONL sessions, headless print/RPC modes, local plugin/MCP foundations, and an interactive TUI backed by wide-character ncurses (`ncursesw`). Backend release-position docs moved through the 0.60 platform catch-up, 0.65 provider-native hardening, bundled 0.70 reasoning/model lifecycle closeout, 0.75 extension foundation, 0.80 extension stabilization, and 0.90 release-candidate verification before this `1.0.0` runtime bump.
+AVA is a native C++23 agentic coding tool. The active default branch is `develop`; historical branches are kept under `archive/*`. The current backend baseline declares runtime version `1.0.0` and includes OpenAI and Kimi-for-coding live-verified provider paths, safe built-in tools, build/plan modes, permission prompts, tool visibility, append-only JSONL sessions, headless print/RPC modes, local plugin/MCP foundations, and an interactive TUI backed by wide-character ncurses (`ncursesw`). Backend release-position docs moved through the 0.60 platform catch-up, 0.65 provider-native hardening, bundled 0.70 reasoning/model lifecycle closeout, 0.75 extension foundation, 0.80 extension stabilization, and 0.90 release-candidate verification before this `1.0.0` runtime bump. A runtime version bump is not a published release by itself; tag, artifact, package, and external release publication steps remain separate manual operations.
 
 ## Build
 
@@ -48,7 +48,7 @@ ctest --preset sanitize
 
 GitHub Actions runs both the normal and sanitizer test jobs on pushes and pull requests targeting `develop`. Dependabot is enabled for GitHub Actions updates on `develop`.
 
-**For detailed cmake configuration options and build instructions see [CONTRIBUTING](CONTRIBUTING.md).**
+**For detailed cmake configuration options and build instructions see [CONTRIBUTING](docs/CONTRIBUTING.md).**
 
 ## Run
 
@@ -63,12 +63,13 @@ GitHub Actions runs both the normal and sanitizer test jobs on pushes and pull r
 ./build/ava "summarize this repo"
 ./build/ava @README.md "summarize this file"
 ./build/ava --print "summarize this repo"
+./build/ava --thinking high "reason about this change"
 ./build/ava --tools read_file,grep "inspect safely"
 ./build/ava --tools read,grep,find,ls "inspect with Pi-style names"
 ./build/ava --rpc
 ```
 
-Bare prompt text and `--print` both run one prompt and exit. Multiple positional prompt tokens are joined with spaces, so `ava summarize this repo` is equivalent to `ava "summarize this repo"`. CLI `@path` text file arguments are expanded through the same bounded permissioned file-reference path used by the TUI, including quoted shell arguments for paths with spaces. Add `--json`, `--output json`, or Pi-compatible `--mode json` to emit runtime events instead of final text only. `--tools`, `--exclude-tools`, `--no-builtin-tools`, and `--no-tools` control model-visible tools for TUI, print, and RPC sessions; AVA accepts native names plus Pi aliases such as `read`, `write`, `edit`, `find`, and `ls`, but still advertises one native provider schema per operation. These flags are separate from `--allow-tool`, which only controls permission auto-approval. `--rpc`, `--output rpc`, or Pi-compatible `--mode rpc` starts the JSONL stdio RPC MVP for automation clients; RPC prompt requests can import local image paths through `attachments:["path.png"]` or Pi-style inline uploads through `images:[{"type":"image","data":"...","mimeType":"image/png"}]` for image-capable models. See `docs/headless-protocol.md` for request and event shapes.
+Bare prompt text and `--print` both run one prompt and exit. Multiple positional prompt tokens are joined with spaces, so `ava summarize this repo` is equivalent to `ava "summarize this repo"`. CLI `@path` text file arguments are expanded through the same bounded permissioned file-reference path used by the TUI, including quoted shell arguments for paths with spaces. Add `--json`, `--output json`, or Pi-compatible `--mode json` to emit runtime events instead of final text only. `--thinking off|<level>` is a Pi-compatible startup alias for AVA's reasoning control; non-`off` values must be declared by the active model metadata, such as `low`, `medium`, `high`, or `xhigh` on the default GPT-5.5 profile. `--tools`, `--exclude-tools`, `--no-builtin-tools`, and `--no-tools` control model-visible tools for TUI, print, and RPC sessions; AVA accepts native names plus Pi aliases such as `read`, `write`, `edit`, `find`, and `ls`, but still advertises one native provider schema per operation. These flags are separate from `--allow-tool`, which only controls permission auto-approval. `--rpc`, `--output rpc`, or Pi-compatible `--mode rpc` starts the JSONL stdio RPC MVP for automation clients; RPC prompt requests can import local image paths through `attachments:["path.png"]` or Pi-style inline uploads through `images:[{"type":"image","data":"...","mimeType":"image/png"}]` for image-capable models. See `docs/headless-protocol.md` for request and event shapes.
 
 When stdin/stdout are not a terminal and no headless mode is selected, AVA falls back to a line-oriented shell for scripting:
 
@@ -129,8 +130,8 @@ The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json
 - `/resume [id]`: resume/switch to an existing session by exact id or unique prefix; exact `/resume` opens the TUI session selector, where PageUp/PageDown page through rows, Ctrl+S or Ctrl+T cycles recent/name/path sort, Ctrl+N toggles named sessions only, Ctrl+P toggles path display, Ctrl+A shows/hides archived sessions, Ctrl+R restores a rename command, Ctrl+L or Shift+L restores a labels command, Shift+T toggles label update timestamps, and Ctrl+D twice or Ctrl+Backspace twice archives or restores the highlighted session when the selector search is empty
 - `/name <name|--clear>`: set or clear the current session display name; `/rename` is an alias
 - `/labels <label...|--clear>`: set or clear current session labels; `/label` is an alias
-- `/context [query|source]`: list prompt, system-prompt resource, context, prompt-command, skill, and plugin freshness with current/changed/missing status
-- `/trust [status|project|deny|clear]`: inspect or change this workspace's project-resource trust decision
+- `/context [query|source]`: list base prompt metadata, system-prompt resources, context files, prompt commands, skills, subagents, plugins, LSP config diagnostics, and freshness status
+- `/trust [status|project|deny|clear]`: inspect or change this workspace's project-resource trust decision for commands, skills, subagents, plugins, MCP/LSP config, and system prompt resources
 - `/compact [instructions]`: generate and record a provider summary
 - `/export [markdown|html|jsonl] [path]`: export this session as Markdown, safe self-contained HTML, or raw AVA JSONL; `/export <file.html>` writes Pi-style HTML and `/export <file.jsonl>` writes re-importable JSONL through the permissioned file path
 - `/import <path.jsonl> --confirm`: validate an AVA JSONL session archive, create a new local session, and switch to it; without `--confirm`, AVA only previews the entry count
@@ -147,68 +148,11 @@ The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json
 - `/mcp list|inspect|tools|restart`: inspect configured MCP servers and discover tools
 - `/quit`: exit and print a resume command
 
-## 0.2 Notes
+## Documentation
 
-- Real OpenAI requests use the local `curl` executable as the HTTP transport with a sanitized execution path.
-- Tool calling is implemented through the provider contract and the built-in dispatcher.
-- Startup tool visibility flags filter provider schemas and dispatch by native model-visible tool name, with Pi aliases accepted at the CLI edge. `--tools read,grep,find,ls` maps to `read_file`, `grep`, `glob`, and `list_directory`; `--exclude-tools find` removes the native `glob` schema. `/find` and `/ls` are TUI/line-shell aliases for the same permissioned `/glob` and `list_directory` paths.
-- `apply_patch` currently supports up to 32 exact text replacements through an `edits` array.
-- `question` opens an interactive TUI modal with single-select, multi-select, custom-answer, secret-entry, and cancel handling. Headless RPC clients can answer question requests through the protocol.
-- Interactive TUI permission prompts exist for backend `ask` decisions; file mutation asks show backend-provided unified diffs when available. TUI prompts support one-shot allow/deny plus remembered exact allow/deny rule choices backed by the protected persistent-rule store. Permission decisions are persisted in session audit entries and can be inspected with `/permissions audit`, grouped with `/permissions audit summary`, or drilled into with `/permissions audit show`; denied tool details, `/tool [query]` inspections, and copied tool/permission payloads include the permission request id plus `/permissions audit show <request_id>` and `/permissions diagnose <request_id>` follow-ups when linked audit metadata is available. Non-TTY mode still fails closed unless an explicit headless allow policy is supplied or RPC replies are provided, and text print mode writes the same denial details to stderr.
-- Historical 0.2 deferrals have mostly moved into the backend: multiple providers, plugins, MCP, LSP, persistent permission rules, interactive rule-management commands, and session tree/fork/clone RPC contracts now exist. Remaining follow-up work is product polish such as deeper audit navigation, provider-generated branch summaries, automatic LSP recipes, and richer diff navigation.
-
-## 0.32 TUI Notes
-
-- The interactive TUI now enters a wide-character ncurses (`ncursesw`) session for terminal mode, input, resize, mouse, and screen drawing.
-- The visible layout remains composer-first: compact identity strip, role-aware transcript lines, compact tool cards, and a bottom-pinned AVA-style composer with the elevated surface, blue rail, and `❯` prompt.
-- The composer is intentionally quiet: no persistent keybinding help or transcript status line is rendered in the input area.
-- Shift+Enter or Ctrl+Enter inserts a newline; Alt+Enter submits while idle and queues a follow-up during an active assistant/compact run. Arrow Up/Down move inside multiline drafts and recall prompt history at the draft boundary before falling back to transcript scroll. Home/Ctrl+A and End/Ctrl+E move to the current line boundary. Ctrl+Left/Right, Alt+Left/Right, or Alt+B/F move by word-like segment and stop at punctuation boundaries in paths or dotted names. Ctrl+] jumps forward to the next typed character, Ctrl+Alt+] jumps backward, Delete or Ctrl+D deletes the character after the cursor while the draft has text, Ctrl+W or Alt+Backspace deletes the previous word segment, Alt+D or Alt+Delete deletes the next word segment, Ctrl+K deletes to line end and joins the next line when already at line end, Ctrl+- undoes the last edit, Ctrl+Z suspends AVA to the shell and redraws after `fg`, Ctrl+V imports a clipboard image as a pending attachment when supported, Ctrl+L opens the model selector between turns, Ctrl+P cycles to the next configured or scoped enabled model between turns, and Ctrl+D exits when the composer is empty.
-- The slash palette opens above the composer with command metadata, keyboard focus cues, and narrow-terminal fallback.
-- `/attach <path>` imports a supported local image into AVA-managed session storage, and Ctrl+V can import a clipboard image through `wl-paste` or `xclip` on Linux. Both paths show a pending attachment row above the composer, report the detected terminal preview mode in `/settings`, emit a row-reserved inline preview on Kitty/iTerm2-compatible terminals outside tmux/screen, and send the image with the next normal prompt. Unsupported terminals, tmux/screen, and plain display mode keep the textual metadata fallback.
-- Fresh TUI launches without provider credentials render a setup row with `/connect`/`/login`, CLI, environment-variable, and auth-file guidance; submitting a provider prompt before connecting repeats the same guidance while offline slash commands still work.
-- TUI display can use `/theme dark|light|plain|custom-name|reset` to persist a built-in or custom theme in `$XDG_CONFIG_HOME/ava/display.json`; `/reload theme` applies hand edits without restarting. Custom themes live under `$XDG_CONFIG_HOME/ava/themes/*.json`. `AVA_TUI_THEME=dark|light|plain` overrides persisted themes for the current process, and standard `NO_COLOR=1` remains the highest-precedence plain display override. `/settings` reports the active theme/source and exposes selectable theme, model selector, and scoped model-cycle rows.
-- During an active assistant or `/compact` run, Enter or Alt+Enter on a draft queues a backend-owned follow-up turn. `/steer ...` queues steering for the next safe provider boundary. Pending queued items render above the composer, and `/restore` or Alt+Up restores the latest pending queued item to the draft before it starts. Stopped turns say to submit a new prompt to continue; pending queued items skipped by stop/finish render as transcript audit entries with delivery guidance.
-- Permission requests replace the composer with an approval dock. `Deny` stays the default focus; `A` allows once, `D` denies, and `R` toggles a remembered allow/deny rule choice when persistent rules are available. Mutation prompts render backend-provided diffs before approval when AVA can safely compute them.
-- Non-TTY stdin/stdout still use the line shell fallback for scripts and tests.
-- Later frontend work added live assistant/tool lifecycle updates, inline thinking visibility, and backend-provided tool detail/diff rendering in the TUI. 0.32 did not add providers, persistent permission rules, session-wide allows, MCP, plugins, or a session tree UI.
-
-## 0.60 Backend Notes
-
-- 0.60 is the backend platform catch-up line after the 0.32 ncursesw TUI baseline and the oversized 0.33 maturity ledger.
-- The milestone position is Phases 0-4 complete for the approved backend scope, Phase 5 foundation complete, 0.65/0.70 provider and reasoning work covered by offline/fake validation with live smokes deferred, and 0.75 plugin/MCP foundations implemented but not 1.0-stable.
-- Notable backend slices include semantic runtime events and command results, frontend-owned content adaptation, smaller helper modules, stronger headless CLI/RPC coverage, provider/model registry foundations, session/compaction/usage hardening, and line-first tool output windows.
-- The command-registry foundation now exposes project/global prompt commands, skill prompts, plugin command contributions, and MCP prompts through one discoverable backend/RPC command surface.
-- Use `docs/versions/0.60.md` for the platform catch-up position, `docs/versions/0.65.md` and `docs/versions/0.70.md` for provider/reasoning closeout status, `docs/versions/0.75.md` for the implemented extension foundation line, `docs/versions/0.80.md` for extension stabilization, `docs/versions/0.90.md` for release-candidate evidence, `docs/versions/1.0.md` for the shipped backend MVP, `docs/versions/0.33.md` for detailed slice evidence, and `docs/product/backend-capabilities-1.0.md` for the 1.0 backend capability checklist.
-
-## 0.65 Backend Notes
-
-- 0.65 is the provider-native hardening line after the 0.60 platform catch-up.
-- That slice keeps OpenAI as the default production path, hardens Anthropic native Messages support with offline/fake coverage, and adds DeepSeek/Kimi/Moonshot/OpenRouter-compatible contract coverage for request shape, reasoning content, usage/error parsing, auth/header/base URL behavior, and context-overflow classification.
-- The 0.70 reasoning/model lifecycle closeout is bundled into this work for protocol docs, focused tests, and reasoning-change export polish.
-- Live credentialed provider smokes are still release-validation evidence and are deferred unless credentials are available.
-
-## Planning Docs
-
-- `docs/versions/0.1.md`
-- `docs/versions/0.2.md`
-- `docs/versions/0.21.md`
-- `docs/versions/0.32.md`
-- `docs/versions/0.33.md`
-- `docs/versions/0.60.md`
-- `docs/versions/0.65.md`
-- `docs/versions/0.70.md`
-- `docs/versions/0.75.md`
-- `docs/versions/0.80.md`
-- `docs/versions/0.90.md`
-- `docs/versions/1.0.md`
-- `docs/CONFIG.md`
-- `docs/USAGE.md`
-- `docs/TESTING.md`
-- `docs/CONTRIBUTING.md`
-- `docs/roadmap/backend.md`
-- `docs/product/backend-capabilities-1.0.md`
-- `docs/product/mvp-baseline.md`
-- `docs/product/product-plan.md`
-- `docs/product/tooling-plan.md`
-- `docs/product/architecture-plan.md`
-- `docs/engineering/cpp-safety-rules.md`
+- Start with [`docs/README.md`](docs/README.md) for the full docs map.
+- Use [`docs/USAGE.md`](docs/USAGE.md) for TUI commands, headless modes, tool visibility, and current limits.
+- Use [`docs/CONFIG.md`](docs/CONFIG.md) for XDG paths, auth, models, prompts, subagents, project trust, and local resource layout.
+- Use [`docs/TESTING.md`](docs/TESTING.md) for CTest, opt-in live smokes, terminal smokes, and release evidence.
+- Use [`docs/headless-protocol.md`](docs/headless-protocol.md) for JSONL print/RPC contracts and resolver events.
+- Product and parity status lives under [`docs/product/`](docs/product/), [`docs/roadmap/`](docs/roadmap/), and [`docs/goals/`](docs/goals/); historical release ledgers live under [`docs/versions/`](docs/versions/).

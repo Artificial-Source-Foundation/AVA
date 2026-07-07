@@ -15,6 +15,14 @@ AVA creates a resumable append-only session by default for interactive, print, a
 
 `--session`/`--session-id`, `--continue`/`--resume`/`-r`, and `--fork` are mutually exclusive. `--no-session` starts an ephemeral session for the current process. Runtime entries remain available to in-process commands such as `get_messages`, `/stats`, or `/export`, but AVA does not write a resumable JSONL history file under the configured sessions directory and the session is not returned by session listing. Temporary attachment and spill files may exist only while the process/session store is alive. `--no-session` cannot be combined with `--session`/`--session-id`, `--continue`/`--resume`/`-r`, or `--fork`. RPC `get_state` includes `sessionless:true` when this mode is active.
 
+## Startup Reasoning
+
+`--thinking off|<level>` is a Pi-compatible startup alias for AVA's existing reasoning control. `off` clears the active explicit reasoning selection. Any other value is validated against the active model's declared `reasoning_levels` and provider/API-family rules during startup; for the default GPT-5.5 profile this means `low`, `medium`, `high`, or `xhigh`. Unsupported levels fail with an error that includes `option: --thinking` and the supported levels. The flag changes only AVA's runtime reasoning selection and does not add provider-specific request semantics beyond those already used by RPC `set_reasoning`.
+
+## Offline Mode
+
+`--offline` can be combined with interactive, print, or RPC startup. It sets the session offline flag and disables provider model calls for prompt turns and provider-backed compaction before credential resolution. Print prompt turns fail closed with `permission_denied`, action `prompt` or `compact`, message `offline mode is enabled; provider model calls are disabled`, and hint `rerun without --offline to send prompts to the provider`. RPC provider-backed requests return in-band `success:false` while local non-provider commands remain available. `--offline` does not grant tool permissions and is not an OS/network sandbox; network-capable tools remain controlled by tool visibility plus permission policy.
+
 ## Print Input And Output
 
 Print mode accepts an optional prompt argument after `--print`/`-p`. If no prompt argument is supplied and stdin is not a terminal, stdin is used as the prompt. If both a prompt argument and piped stdin are supplied, AVA merges them deterministically as:
@@ -47,7 +55,7 @@ Headless modes are fail-closed by default for backend permission decisions whose
 Supported policy flags:
 
 - `--allow read-only`: allows read/search-style permission prompts (`read_file`, `list_directory`, `glob`, and `grep` shapes) when the backend asks. Network, write, edit, patch, bash, and question prompts remain denied.
-- `--allow-tool glob,grep,list_directory,read_file,skill,webfetch,websearch,mcp`: allows only the listed exact tool families when they produce compatible ask prompts. Supported values are `glob`, `grep`, `list_directory`, `read_file`, `skill`, `webfetch`, `websearch`, and `mcp`; unsupported values such as `bash`, `write_file`, `edit_file`, `apply_patch`, `question`, or arbitrary strings are rejected as usage errors. `skill` only auto-allows exact `skill` prompts from the `skill` tool, `webfetch` only auto-allows exact `network.fetch` prompts produced by the `webfetch` tool, `websearch` only auto-allows exact `network.search` prompts produced by the `websearch` tool, and `mcp` auto-allows MCP server launch/connect plus `mcp.tool.call` and `mcp.resource.read` prompts for MCP-prefixed tools; `--allow read-only` never allows skill, network, or MCP prompts.
+- `--allow-tool glob,grep,list_directory,read_file,skill,task,webfetch,websearch,mcp,plugin`: allows only the listed exact tool families when they produce compatible ask prompts. Supported values are `glob`, `grep`, `list_directory`, `read_file`, `skill`, `task`, `webfetch`, `websearch`, `mcp`, and `plugin`; unsupported values such as `bash`, `write_file`, `edit_file`, `apply_patch`, `question`, or arbitrary strings are rejected as usage errors. `skill` only auto-allows exact `skill` prompts from the `skill` tool, `task` only auto-allows exact `task`/`TaskRun` prompts from the `task` tool, `webfetch` only auto-allows exact `network.fetch` prompts produced by the `webfetch` tool, `websearch` only auto-allows exact `network.search` prompts produced by the `websearch` tool, `mcp` auto-allows MCP server launch/connect plus `mcp.tool.call` and `mcp.resource.read` prompts for MCP-prefixed tools, and `plugin` auto-allows exact plugin model tool launch/call prompts plus exact plugin command launch/run prompts. `plugin` does not auto-allow plugin proxy file/search/shell/network prompts or passive plugin event hook launch/observe prompts. `--allow read-only` never allows skill, task, network, MCP, or plugin prompts.
 
 Examples:
 
@@ -56,13 +64,15 @@ ava --print "summarize the repo" --allow read-only
 ava --print "inspect this file" --allow-tool read_file
 ava --print "find symbols" --allow-tool glob,grep,list_directory
 ava --print "load the relevant skill" --allow-tool skill
+ava --print "delegate focused exploration" --allow-tool task
 ava --print "fetch release notes" --allow-tool webfetch
 ava --print "search current release notes" --allow-tool websearch
 ava --print "use configured MCP context" --allow-tool mcp
+ava --print "use configured plugin command" --allow-tool plugin
 ava --rpc --allow read-only
 ```
 
-Invalid permission flag values exit with code `2` and write a usage error to stderr before provider/auth startup. In RPC mode, matching read/search, exact `skill`, exact `webfetch`/`websearch` network prompts, or MCP prompts covered by `--allow-tool mcp` are auto-allowed before `permission_requested`; non-matching ask prompts still require an explicit `permission_reply` unless a persistent permission rule matches. RPC clients may reply with `allow_session` to create an in-memory exact-match grant for the current RPC process. Those grants are inspectable, revocable, and clearable through RPC commands; they are not persisted across AVA restarts. Persistent rules are managed only by `permission_rule_add`/`permission_rule_remove` and are stored outside the model-writable workspace path.
+Invalid permission flag values exit with code `2` and write a usage error to stderr before provider/auth startup. In RPC mode, matching read/search, exact `skill`, exact `task`, exact `webfetch`/`websearch` network prompts, MCP prompts covered by `--allow-tool mcp`, or supported plugin prompts covered by `--allow-tool plugin` are auto-allowed before `permission_requested`; non-matching ask prompts still require an explicit `permission_reply` unless a persistent permission rule matches. RPC clients may reply with `allow_session` to create an in-memory exact-match grant for the current RPC process. Those grants are inspectable, revocable, and clearable through RPC commands; they are not persisted across AVA restarts. Persistent rules are managed only by `permission_rule_add`/`permission_rule_remove` and are stored outside the model-writable workspace path.
 
 ## Stdout / Stderr Contract
 
@@ -81,13 +91,15 @@ Invalid permission flag values exit with code `2` and write a usage error to std
 
 Runtime provider calls resolve credentials for the active session provider. OpenAI keeps its existing stored OAuth/API-key behavior and falls back to `OPENAI_API_KEY` when no stored OpenAI credential exists. Non-OpenAI connect setup stores provider-scoped API keys in `auth.json`, for example `{"anthropic":{"type":"api_key","api_key":"..."}}`, and can also read provider API-key environment variables such as `ANTHROPIC_API_KEY`, `KIMI_API_KEY`, `MOONSHOT_API_KEY`, and `OPENROUTER_API_KEY`. Anthropic can additionally read Claude OAuth bearer tokens from `ANTHROPIC_OAUTH_TOKEN` or the Anthropic SDK-compatible `ANTHROPIC_AUTH_TOKEN`; when no stored Anthropic credential exists, precedence is `ANTHROPIC_OAUTH_TOKEN`, then `ANTHROPIC_AUTH_TOKEN`, then `ANTHROPIC_API_KEY`. Stored Anthropic Claude OAuth entries use `{"anthropic":{"type":"oauth","access_token":"...","refresh_token":"...","expires_at":1893456000}}` with optional `account_id`/`source` metadata. AVA writes canonical `refresh_token`/`expires_at` fields and accepts `refresh`/`expires` aliases when reading manually-created files. Interactive setup is available with `ava login [provider]`, `ava auth login [provider]`, `ava connect [provider]`, and TUI `/connect`; omitting the provider opens a searchable provider picker, and TUI `/connect` uses a modal. OpenAI interactive setup offers browser OAuth, headless OAuth, and API key methods. Secrets are read with terminal echo disabled where possible and masked in TUI prompts. Headless setup can store credentials without a browser or TTY, for example `ava connect openai --headless-oauth`, `printf '%s\n' "$ANTHROPIC_API_KEY" | ava connect anthropic --api-key-stdin`, or `ava connect moonshot --api-key-env MOONSHOT_API_KEY`. AVA only reads credential files when they are owned by the current user and not readable by group/other users; manually-created files should use owner-only permissions such as `chmod 600 ~/.config/ava/auth.json`. OpenAI and Anthropic OAuth credentials refresh automatically before use when a refresh token is present; expired/near-expiry stored Anthropic OAuth without a refresh token fails closed and requires updating or removing the stored Anthropic entry before environment credentials are considered.
 
+The direct runtime set also recognizes `DEEPSEEK_API_KEY` and `GEMINI_API_KEY`, and headless API-key setup can store Gemini credentials with `ava connect gemini --api-key-env GEMINI_API_KEY`.
+
 ## Provider Retry And Idempotency
 
 Provider transport retries are bounded and provider-neutral. AVA retries transport I/O failures, HTTP rate limits, and transient HTTP responses before any streaming body chunks are delivered. It parses `Retry-After` when present, emits `retry` and `retry_tick` events for visible backoff, and checks cancellation during retry waits.
 
 Retry policy by request class:
 
-- OpenAI, Anthropic, Kimi, Moonshot, and OpenRouter prompt requests are best-effort retries. AVA does not currently attach provider-specific idempotency keys, so a provider could process a request even if the client later sees a transport failure.
+- OpenAI, Anthropic, DeepSeek, Gemini, Kimi, Moonshot, and OpenRouter prompt requests are best-effort retries. AVA does not currently attach provider-specific idempotency keys, so a provider could process a request even if the client later sees a transport failure.
 - Streaming prompt retries stop after the first response chunk is delivered. Once text, reasoning, tool-call, or provider events have begun, AVA treats the stream as non-replayable and surfaces later failures instead of silently retrying a partial turn.
 - Non-streaming prompt retries may retry transient/rate-limited failures because no response body has been accepted yet. They are still best-effort because provider-side deduplication is not guaranteed.
 - Context-overflow repair is separate from transport retry. AVA may perform one bounded compaction/retry path when the provider error is classified as context overflow.
@@ -118,7 +130,7 @@ Envelope fields:
 
 Current event names:
 
-- `session_start`: session/runtime metadata, including `mode`, `provider`, and `model`.
+- `session_start`: runtime session metadata with `mode`, `provider`, and `model`. Persisted JSONL `session_start` entries record prompt override and loaded context-source metadata; detailed base prompt source path, byte count, and fingerprint are exposed by `/context`, not this event.
 - `user_message`: accepted user input for a turn.
 - `message_update`: live assistant text delta emitted while a streaming provider response is in progress; includes `text` and `status`.
 - `message_end`: live provider stream completion marker; includes `status`.
@@ -384,7 +396,7 @@ File mutation prompts may include a backend-provided unified diff preview. Clien
 {"schema_version":1,"name":"permission_requested","type":"permission_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","permission_request_id":"permreq_...","operation":"edit","mode":"build","target_path":"/workspace/file","command":"","tool_name":"edit_file","reason":"...","risk":"high","diff_preview":"--- /workspace/file\n+++ /workspace/file\n@@ -1,1 +1,1 @@\n-old\n+new\n","diff_truncated":false}}
 ```
 
-Permission `operation` values are backend policy categories such as `read`, `search`, `edit`, `bash`, `network.fetch`, `lsp.server.launch`, `lsp.query`, `plugin.execute`, `plugin.tool.call`, `plugin.command.run`, `plugin.event.observe`, `mcp.server.launch`, `mcp.server.connect`, `mcp.tool.call`, and `mcp.resource.read`. Network fetch prompts use an empty `target_path` and carry the URL in `command`:
+Permission `operation` values are backend policy categories such as `read`, `search`, `edit`, `bash`, `task`, `network.fetch`, `lsp.server.launch`, `lsp.query`, `plugin.execute`, `plugin.tool.call`, `plugin.command.run`, `plugin.event.observe`, `mcp.server.launch`, `mcp.server.connect`, `mcp.tool.call`, and `mcp.resource.read`. `task` prompts carry the requested `subagent_type` in `command` and use `tool_name:"task"`. Network fetch prompts use an empty `target_path` and carry the URL in `command`:
 
 ```json
 {"schema_version":1,"name":"permission_requested","type":"permission_requested","request_id":"prompt_req","correlation_id":"prompt_req","payload":{"resolver_request_id":"permission_...","permission_request_id":"permreq_...","operation":"network.fetch","mode":"build","target_path":"","command":"https://example.com/page","tool_name":"webfetch","reason":"network fetch requires explicit approval","risk":"high"}}
@@ -482,7 +494,7 @@ RPC notifications may reuse the event envelopes above. Request ids are client-ow
 
 Headless operation is fail-closed by default:
 
-- Permission decisions that require user approval fail unless headless policy supplies `--allow read-only`/`--allow-tool` for a supported read/search tool, `--allow-tool skill` for exact skill loads, `--allow-tool webfetch` for exact `network.fetch` webfetch prompts, `--allow-tool websearch` for exact `network.search` websearch prompts, `--allow-tool mcp` for MCP launch/connect/tool/resource prompts, or RPC mode receives an explicit `permission_reply` for the active resolver request.
+- Permission decisions that require user approval fail unless headless policy supplies `--allow read-only`/`--allow-tool` for a supported read/search tool, `--allow-tool skill` for exact skill loads, `--allow-tool task` for exact subagent task prompts, `--allow-tool webfetch` for exact `network.fetch` webfetch prompts, `--allow-tool websearch` for exact `network.search` websearch prompts, `--allow-tool mcp` for MCP launch/connect/tool/resource prompts, or RPC mode receives an explicit `permission_reply` for the active resolver request.
 - Permission-denied tool results include the backend reason, risk label, resolution reason when available, generated `permission_request_id`, and follow-up `/permissions audit show <permission_request_id>` plus `/permissions diagnose <permission_request_id>` commands in `structured_result.error.details`. Text print mode writes those details to stderr for human operators.
 - The `question` tool fails with an unavailable interaction error unless RPC mode receives an explicit `question_reply` for the active resolver request.
 - Destructive operations remain behind existing backend permission policy checks.

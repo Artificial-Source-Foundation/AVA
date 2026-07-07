@@ -46,6 +46,7 @@ add_executable(ava_tests
   "permission_rules_tests.cpp"
   "plugin_tests.cpp"
   "provider_anthropic_tests.cpp"
+  "provider_gemini_tests.cpp"
   "provider_live_smoke_tests.cpp"
   "provider_openai_tests.cpp"
   "session_tests.cpp"
@@ -83,6 +84,7 @@ set(AVA_TEST_SUITES
   app_runtime
   provider_openai
   provider_anthropic
+  provider_gemini
   provider_live_smoke
   agent_loop_resilience
   agent_loop
@@ -111,6 +113,13 @@ add_test(
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-contract
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_contract.cmake)
+
+add_test(
+  NAME ava_cli.headless_thinking_alias
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_EXE=$<TARGET_FILE:ava>
+          -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-thinking-alias
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_thinking_alias.cmake)
 
 add_test(
   NAME ava_cli.headless_rpc_context_export
@@ -158,6 +167,13 @@ add_test(
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-print-file-args
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_print_file_args.cmake)
+
+add_test(
+  NAME ava_cli.offline_print_prompt
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_EXE=$<TARGET_FILE:ava>
+          -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-offline-print-prompt
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_offline_print_prompt.cmake)
 
 add_test(
   NAME ava_cli.package_manager_deferred

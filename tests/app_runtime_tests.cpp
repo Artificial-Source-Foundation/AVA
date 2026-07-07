@@ -423,6 +423,88 @@ void test_app_runtime_cli_prompt_overrides()
          "mode reloads preserve cli system prompt overrides");
 }
 
+void test_app_runtime_project_trust_malformed_diagnostics()
+{
+  auto const root = temp_root() / "app-runtime-project-trust-malformed";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  write_app_test_file(ava::app::project_trust_file(paths), "{\"schema_version\":1,\"decisions\":[\n");
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime opens with malformed project trust file fail-closed");
+  if (!session)
+    return;
+
+  expect(session->project_trust.decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session->project_trust),
+         "malformed project trust file leaves project resources skipped");
+  expect(session->project_trust.diagnostic.find("malformed project trust file") != std::string::npos &&
+             session->project_trust.diagnostic.find(ava::app::project_trust_file(paths).string()) != std::string::npos,
+         "runtime records a path-specific project trust parse diagnostic");
+
+  auto status = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/trust status"});
+  expect(status && status->handled && !status->output.empty() && status->output[0].find("decision=unknown") != std::string::npos &&
+             status->output[0].find("project_resources=skipped") != std::string::npos &&
+             status->output[0].find("diagnostic=invalid_argument: malformed project trust file") != std::string::npos,
+         "/trust status surfaces malformed trust-file diagnostics");
+
+  auto trusted = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/trust project"});
+  expect(trusted && trusted->handled && !trusted->output.empty() && trusted->output[0].find("project_resources=enabled") != std::string::npos &&
+             trusted->output[0].find("diagnostic=") == std::string::npos && session->project_trust.decision == ava::app::ProjectTrustDecision::Trusted,
+         "/trust project repairs a malformed trust file without retaining stale diagnostics");
+
+  write_app_test_file(ava::app::project_trust_file(paths), "{\"decisions\":\"not an array\"}\n");
+  auto reloaded = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/reload trust"});
+  expect(reloaded && reloaded->handled && !reloaded->output.empty() && reloaded->output[0].find("trust: loaded") != std::string::npos &&
+             reloaded->output[0].find("decision: unknown") != std::string::npos &&
+             reloaded->output[0].find("project_resources: skipped") != std::string::npos &&
+             reloaded->output[0].find("diagnostic: invalid_argument: malformed project trust file") != std::string::npos &&
+             session->project_trust.decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session->project_trust),
+         "/reload trust surfaces malformed trust diagnostics and keeps project resources fail-closed");
+}
+
+void test_app_context_reports_lsp_config_load_errors()
+{
+  auto const root = temp_root() / "app-runtime-lsp-config-diagnostics";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  write_app_test_file(paths.ava_config_dir / "lsp.json", "{\"version\":1,\"servers\":[{\"id\":\"bad id\",\"argv\":[\"server\"]}]}\n");
+  write_app_test_file(workspace / ".ava" / "lsp.json", "{\"version\":1,\"servers\":[{\"id\":\"project\",\"argv\":[\"server\"],\"timeout_ms\":99}]}\n");
+  auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(trusted.has_value(), trusted ? "LSP context diagnostic test trusts project resources"
+                                      : "LSP context diagnostic test trusts project resources: " + trusted.error().format());
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime opens even when configured LSP provider would fail to load");
+  if (!session)
+    return;
+
+  auto context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context lsp"});
+  expect(context && context->handled && !context->output.empty() && context->output[0].find("lsp_status=error") != std::string::npos &&
+             context->output[0].find("lsp_configs=2") != std::string::npos && context->output[0].find("lsp_servers=0") != std::string::npos &&
+             context->output[0].find("lsp_errors=2") != std::string::npos && context->output[0].find("lsp_config  global") != std::string::npos &&
+             context->output[0].find((paths.ava_config_dir / "lsp.json").string()) != std::string::npos &&
+             context->output[0].find("LSP server id is invalid") != std::string::npos && context->output[0].find("lsp_config  project") != std::string::npos &&
+             context->output[0].find((workspace / ".ava" / "lsp.json").string()) != std::string::npos &&
+             context->output[0].find("LSP server timeout is outside supported limits") != std::string::npos,
+         "/context lsp surfaces global and trusted-project LSP config load errors without treating them as generic provider unavailability");
+}
+
 void test_app_run_prompt_emits_events()
 {
   auto const root = temp_root() / "app-runtime-run";
@@ -2128,6 +2210,28 @@ void test_app_command_dispatcher()
   expect(malformed_import && malformed_import->handled && !malformed_import->output.empty() &&
              malformed_import->output[0].find("malformed session entry") != std::string::npos && session->store.session_id() == pre_failed_import_session_id,
          "command dispatcher /import surfaces malformed JSONL parse errors without switching sessions");
+  auto const pi_import_path = workspace / "pi-import.jsonl";
+  write_app_test_file(pi_import_path,
+                      "{\"type\":\"session\",\"version\":3,\"id\":\"d703a1a9-1b7b-4fb1-b512-c9738b1fe617\","
+                      "\"timestamp\":\"2025-11-20T23:33:50.805Z\",\"cwd\":\"/tmp/pi-project\"}\n"
+                      "{\"type\":\"message\",\"id\":\"a1b2c3d4\",\"parentId\":null,"
+                      "\"timestamp\":\"2025-11-20T23:33:51.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Hello\"}}\n");
+  auto pi_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import pi-import.jsonl --confirm"});
+  expect(pi_import && pi_import->handled && !pi_import->output.empty() &&
+             pi_import->output[0].find("Pi session import is not supported yet") != std::string::npos &&
+             pi_import->output[0].find("session entry data must be a JSON object") == std::string::npos &&
+             session->store.session_id() == pre_failed_import_session_id,
+         "command dispatcher /import rejects Pi JSONL with a specific unsupported-format error");
+  auto const pi_legacy_import_path = workspace / "pi-legacy-import.jsonl";
+  write_app_test_file(pi_legacy_import_path,
+                      "{\"type\":\"session\",\"id\":\"legacy-pi-session\",\"timestamp\":\"2025-11-20T23:33:50.805Z\","
+                      "\"cwd\":\"/tmp/pi-project\",\"provider\":\"anthropic\",\"modelId\":\"claude-sonnet-4-5\"}\n");
+  auto pi_legacy_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import pi-legacy-import.jsonl --confirm"});
+  expect(pi_legacy_import && pi_legacy_import->handled && !pi_legacy_import->output.empty() &&
+             pi_legacy_import->output[0].find("Pi session import is not supported yet") != std::string::npos &&
+             pi_legacy_import->output[0].find("session entry data must be a JSON object") == std::string::npos &&
+             session->store.session_id() == pre_failed_import_session_id,
+         "command dispatcher /import rejects legacy Pi JSONL headers with the same specific unsupported-format error");
   auto const future_import_path = workspace / "future-import.jsonl";
   write_app_test_file(future_import_path,
                       "{\"version\":99,\"id\":\"entry_future_start\",\"parent_id\":\"\",\"type\":\"session_start\","
@@ -2195,6 +2299,95 @@ void test_app_command_dispatcher()
 
   auto quit = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/quit"});
   expect(quit && quit->handled && quit->quit, "command dispatcher /quit requests shell exit");
+}
+
+void test_app_session_jsonl_import_export_attachment_caveat()
+{
+  auto const root = temp_root() / "app-session-jsonl-attachment-caveat";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "JSONL attachment caveat test opens runtime session");
+  if (!session)
+    return;
+
+  auto const attachment_json = std::string(R"({"id":"img_import_missing","type":"image","mime_type":"image/png","byte_size":12,)"
+                                           R"("sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                                           R"("storage_path":"attachments/img_import_missing.png"})");
+  auto const redacted_attachment_json = std::string(R"({"id":"img_import_redacted","type":"image","mime_type":"image/png","byte_size":12,)"
+                                                    R"("sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
+                                                    R"("storage_path":"attachments/img_import_redacted.png","redacted":true})");
+
+  auto const attached_entry = ava::session::SessionEntry{.id = "entry_jsonl_attachment_user",
+                                                         .parent_id = "",
+                                                         .type = ava::session::EntryType::UserMessage,
+                                                         .timestamp = "2026-05-02T00:00:01Z",
+                                                         .data_json = "{\"text\":\"see attached\",\"attachments\":[" + attachment_json + "]}"};
+  auto appended = session->store.append(attached_entry);
+  expect(appended.has_value(), "JSONL attachment caveat test seeds non-redacted image attachment metadata");
+
+  auto exported = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/export jsonl attachment-export.jsonl"});
+  expect(exported && exported->handled && !exported->output.empty() &&
+             exported->output[0].find("note: raw JSONL exports include 1 image attachment") != std::string::npos &&
+             exported->output[0].find("not the attachment files") != std::string::npos && exported->tool_timeline.size() == 2 &&
+             exported->tool_timeline[1].structured_result_json.find("\"attachment_files_included\":false") != std::string::npos &&
+             exported->tool_timeline[1].structured_result_json.find("\"non_redacted_image_attachment_metadata_count\":1") != std::string::npos,
+         "command dispatcher /export jsonl warns when attachment files are not bundled");
+
+  auto write_import_entries = [](std::filesystem::path const& path, std::vector<ava::session::SessionEntry> const& entries) {
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    for (auto const& entry : entries)
+    {
+      auto line = ava::session::serialize_session_entry_line(entry);
+      expect(line.has_value(), "JSONL attachment import test serializes fixture entry");
+      if (line)
+        file << *line << '\n';
+    }
+  };
+
+  auto const import_start = ava::session::SessionEntry{.id = "entry_import_attachment_start",
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::SessionStart,
+                                                       .timestamp = "2026-05-02T00:00:00Z",
+                                                       .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-5.5\"}"};
+  auto const missing_attachment_import_path = workspace / "missing-attachment-import.jsonl";
+  write_import_entries(missing_attachment_import_path, {import_start, attached_entry});
+
+  auto const session_before_missing_import = session->store.session_id();
+  auto missing_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import missing-attachment-import.jsonl --confirm"});
+  expect(missing_import && missing_import->handled && !missing_import->output.empty() &&
+             missing_import->output[0].find("raw JSONL does not include attachment files") != std::string::npos &&
+             missing_import->output[0].find("first_storage_path: attachments/img_import_missing.png") != std::string::npos &&
+             session->store.session_id() == session_before_missing_import,
+         "command dispatcher /import rejects non-redacted attachment metadata instead of creating dangling storage references");
+
+  auto const redacted_import_path = workspace / "redacted-attachment-import.jsonl";
+  auto const redacted_entry = ava::session::SessionEntry{.id = "entry_import_redacted_user",
+                                                         .parent_id = "",
+                                                         .type = ava::session::EntryType::UserMessage,
+                                                         .timestamp = "2026-05-02T00:00:01Z",
+                                                         .data_json = "{\"text\":\"redacted attached\",\"attachments\":[" + redacted_attachment_json + "]}"};
+  write_import_entries(redacted_import_path, {import_start, redacted_entry});
+
+  auto redacted_import = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/import redacted-attachment-import.jsonl --confirm"});
+  auto redacted_entries = session->store.load();
+  expect(redacted_import && redacted_import->handled && !redacted_import->output.empty() &&
+             redacted_import->output[0].find("imported session") != std::string::npos && redacted_entries &&
+             std::ranges::any_of(*redacted_entries,
+                                 [](ava::session::SessionEntry const& entry) {
+                                   return entry.data_json.find("img_import_redacted") != std::string::npos &&
+                                          entry.data_json.find("\"redacted\":true") != std::string::npos;
+                                 }),
+         "command dispatcher /import still allows redacted attachment metadata that does not require local bytes");
 }
 
 void test_app_session_branch_commands()
@@ -2892,6 +3085,60 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
   }
 }
 
+void test_app_runtime_initial_reasoning_level_option()
+{
+  auto const root = temp_root() / "app-runtime-initial-reasoning-level";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  open_options.initial_reasoning_level = " high ";
+
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value() && session->reasoning && session->reasoning->level == "high", "runtime startup applies initial reasoning level");
+  if (!session)
+    return;
+  auto const session_id = session->store.session_id();
+
+  auto entries = session->store.load();
+  expect(entries.has_value(), "runtime startup reasoning test reloads session entries");
+  if (entries)
+  {
+    auto const reasoning_changes = std::ranges::count_if(*entries, [](auto const& entry) { return entry.type == ava::session::EntryType::ReasoningChange; });
+    expect(reasoning_changes == 1, "runtime startup reasoning appends one durable reasoning_change entry");
+  }
+
+  ava::app::RuntimeOpenOptions clear_options = open_options;
+  clear_options.requested_session_id = session_id;
+  clear_options.initial_reasoning_level = "off";
+  auto cleared = ava::app::open_runtime_session(clear_options);
+  expect(cleared.has_value() && !cleared->reasoning, "runtime startup reasoning accepts off as clear_reasoning alias");
+  if (cleared)
+  {
+    auto cleared_entries = cleared->store.load();
+    expect(cleared_entries.has_value(), "runtime startup reasoning clear reloads entries");
+    if (cleared_entries)
+    {
+      auto const reasoning_changes =
+          std::ranges::count_if(*cleared_entries, [](auto const& entry) { return entry.type == ava::session::EntryType::ReasoningChange; });
+      expect(reasoning_changes == 2, "runtime startup reasoning off appends a clear reasoning_change when clearing existing reasoning");
+    }
+  }
+
+  ava::app::RuntimeOpenOptions invalid_options = open_options;
+  invalid_options.initial_reasoning_level = "minimal";
+  auto invalid = ava::app::open_runtime_session(invalid_options);
+  expect(!invalid.has_value() && invalid.error().format().find("option: --thinking") != std::string::npos &&
+             invalid.error().format().find("supported_levels: off, low, medium, high, xhigh") != std::string::npos,
+         "runtime startup reasoning reports clear --thinking validation errors");
+}
+
 }  // namespace
 
 void run_app_command_classification_tests()
@@ -2910,6 +3157,8 @@ void run_app_runtime_tests()
   test_app_runtime_no_session_mode();
   test_app_runtime_session_startup_options();
   test_app_runtime_cli_prompt_overrides();
+  test_app_runtime_project_trust_malformed_diagnostics();
+  test_app_context_reports_lsp_config_load_errors();
   test_app_run_prompt_emits_events();
   test_app_run_prompt_expands_file_references();
   test_app_run_prompt_sends_imported_image_attachment();
@@ -2919,10 +3168,12 @@ void run_app_runtime_tests()
   test_app_first_run_auth_onboarding();
   test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call();
   test_app_command_dispatcher();
+  test_app_session_jsonl_import_export_attachment_caveat();
   test_app_session_branch_commands();
   test_app_session_new_resume_commands();
   test_app_session_metadata_commands();
   test_app_runtime_model_switch_persists_and_reopens();
   test_app_runtime_model_switch_rejects_incompatible_history();
   test_app_runtime_reasoning_selection_persists_and_requests();
+  test_app_runtime_initial_reasoning_level_option();
 }

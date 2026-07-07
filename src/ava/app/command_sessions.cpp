@@ -10,6 +10,7 @@
 #include "ava/session/stats.h"
 #include "ava/session/validation.h"
 #include "ava/context/context_loader.h"
+#include "ava/lsp/configured_provider.h"
 #include "ava/core/fingerprint.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -84,6 +85,13 @@ struct ExportCommandArguments
   std::string path;
 };
 
+struct JsonlAttachmentSummary
+{
+  std::size_t count = 0;
+  std::string first_entry_id;
+  std::string first_storage_path;
+};
+
 std::string export_format_text(ExportFormat format)
 {
   switch (format)
@@ -145,6 +153,81 @@ ava::core::Result<std::string> format_session_jsonl(std::vector<ava::session::Se
     out += '\n';
   }
   return out;
+}
+
+bool json_bool_field_is_true(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  return start && object.substr(*start, 4) == "true";
+}
+
+JsonlAttachmentSummary summarize_non_redacted_jsonl_attachments(std::vector<ava::session::SessionEntry> const& entries)
+{
+  JsonlAttachmentSummary summary;
+  for (auto const& entry : entries)
+  {
+    if (entry.type != ava::session::EntryType::UserMessage)
+      continue;
+    auto const sanitized = ava::session::sanitized_message_data_json(entry.data_json);
+    for (auto const& attachment : ava::core::json::objects_in_array_field(sanitized, "attachments"))
+    {
+      if (ava::core::json::string_field(attachment, "type").value_or("") != "image")
+        continue;
+      if (json_bool_field_is_true(attachment, "redacted"))
+        continue;
+      auto const storage_path = ava::core::json::string_field(attachment, "storage_path").value_or("");
+      if (storage_path.empty())
+        continue;
+      ++summary.count;
+      if (summary.first_entry_id.empty())
+      {
+        summary.first_entry_id = entry.id;
+        summary.first_storage_path = storage_path;
+      }
+    }
+  }
+  return summary;
+}
+
+std::string raw_jsonl_attachment_note(JsonlAttachmentSummary const& summary)
+{
+  if (summary.count == 0)
+    return {};
+  return "raw JSONL exports include " + std::to_string(summary.count) +
+         " image attachment metadata record(s), but not the attachment files; raw JSONL /import rejects non-redacted attachments until an attachment-aware "
+         "archive format exists";
+}
+
+ava::core::VoidResult validate_raw_jsonl_import_attachments(std::vector<ava::session::SessionEntry> const& entries, std::filesystem::path const& path)
+{
+  auto const summary = summarize_non_redacted_jsonl_attachments(entries);
+  if (summary.count == 0)
+    return {};
+
+  auto error =
+      ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session import has image attachments but raw JSONL does not include attachment files");
+  error.with_context("path", path.string());
+  error.with_context("attachments", std::to_string(summary.count));
+  error.with_context("first_entry_id", summary.first_entry_id);
+  error.with_context("first_storage_path", summary.first_storage_path);
+  error.with_context("remediation", "remove or redact attachment metadata, or use a future attachment-aware archive format");
+  return std::unexpected(std::move(error));
+}
+
+bool looks_like_pi_session_header(std::string_view line)
+{
+  if (!ava::core::json::is_valid_object(line))
+    return false;
+  auto const type = ava::core::json::string_field(line, "type");
+  return type && *type == "session" && ava::core::json::string_field(line, "id") && ava::core::json::string_field(line, "timestamp") &&
+         ava::core::json::string_field(line, "cwd");
+}
+
+ava::core::Error unsupported_pi_session_import_error(std::filesystem::path const& path)
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::Session, "Pi session import is not supported yet");
+  error.with_context("path", path.string());
+  return error;
 }
 
 ava::core::Result<ExportCommandArguments> parse_export_command_arguments(std::string_view argument)
@@ -337,6 +420,78 @@ std::string freshness_source_status_text(RuntimeFreshnessSourceMetadata const& s
     return "<inline>  loaded_bytes=" + std::to_string(source.byte_count) + "  status=inline";
   return source.path.string() + "  loaded_bytes=" + std::to_string(source.byte_count) + "  " +
          context_file_status(source.path, source.byte_count, source.content_fingerprint);
+}
+
+std::string lsp_error_text(ava::core::Error const& error)
+{
+  std::string text = ava::core::to_string(error.category()) + ":" + error.message();
+  for (auto const& item : error.context())
+  {
+    text += " ";
+    text += item.key;
+    text += "=";
+    text += item.value;
+  }
+  return sanitize_inline_text(std::move(text));
+}
+
+bool lsp_config_matches_query(ava::lsp::ConfiguredLspConfigDiagnostic const& diagnostic, std::string_view query)
+{
+  if (query.empty())
+    return true;
+  if (contains_ascii_case_insensitive("lsp", query) || contains_ascii_case_insensitive("lsp_config", query))
+    return true;
+  if (contains_ascii_case_insensitive(diagnostic.scope, query) || contains_ascii_case_insensitive(diagnostic.path.generic_string(), query))
+    return true;
+  if (diagnostic.error && contains_ascii_case_insensitive(diagnostic.error->message(), query))
+    return true;
+  if (diagnostic.error)
+  {
+    return std::ranges::any_of(diagnostic.error->context(), [&](auto const& item) {
+      return contains_ascii_case_insensitive(item.key, query) || contains_ascii_case_insensitive(item.value, query);
+    });
+  }
+  return false;
+}
+
+std::string lsp_config_status_text(ava::lsp::ConfiguredLspConfigDiagnostic const& diagnostic)
+{
+  std::string output = diagnostic.path.string();
+  if (diagnostic.error)
+  {
+    output += "  status=error  error=" + lsp_error_text(*diagnostic.error);
+    return output;
+  }
+  if (!diagnostic.exists)
+  {
+    output += "  status=missing";
+    return output;
+  }
+  output += "  loaded_bytes=" + std::to_string(diagnostic.byte_count) + "  status=";
+  output += diagnostic.loaded ? "loaded" : "skipped";
+  output += " servers=" + std::to_string(diagnostic.server_count);
+  return output;
+}
+
+std::size_t configured_lsp_config_count(std::vector<ava::lsp::ConfiguredLspConfigDiagnostic> const& diagnostics)
+{
+  return static_cast<std::size_t>(std::ranges::count_if(diagnostics, [](auto const& diagnostic) { return diagnostic.exists || diagnostic.error.has_value(); }));
+}
+
+std::string lsp_provider_status_text(ava::lsp::ConfiguredLspProviderInspection const& inspection)
+{
+  if (inspection.error_count > 0)
+    return "error";
+  if (inspection.server_count > 0)
+    return "configured";
+  return "unavailable";
+}
+
+bool path_exists_for_status(std::filesystem::path const& path)
+{
+  std::error_code status_error;
+  auto const status = std::filesystem::symlink_status(path, status_error);
+  return !status_error && std::filesystem::exists(status);
 }
 
 RuntimeEvent base_command_event(RuntimeSession const& session, RuntimeEventType type)
@@ -973,11 +1128,19 @@ ava::core::Result<CommandResult> run_context_command(RuntimeSession& session, st
   CommandResult result;
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);
+  auto const include_project_resources = project_resources_trusted(session.project_trust);
+  auto const project_lsp_config = session.workspace_dir / ".ava" / "lsp.json";
+  auto const lsp_inspection = ava::lsp::inspect_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
+      .global_config_file = session.paths.ava_config_dir / "lsp.json",
+      .project_config_file = include_project_resources ? project_lsp_config : std::filesystem::path{},
+      .workspace_root = session.workspace_dir,
+      .mode = session.mode,
+  });
   std::string output = "Context freshness:\n";
   output += "  mode=" + ava::agent::to_string(session.mode) + "\n";
   output += "  model=" + session.model.provider_id + "/" + session.model.model_id + "\n";
   output += "  project_trust=" + std::string(to_string(session.project_trust.decision)) +
-            " project_resources=" + (project_resources_trusted(session.project_trust) ? std::string("enabled") : std::string("skipped")) + "\n";
+            " project_resources=" + (include_project_resources ? std::string("enabled") : std::string("skipped")) + "\n";
   if (prompt_matches_query(session, trimmed_query))
   {
     output += "  base_prompt=";
@@ -1006,6 +1169,8 @@ ava::core::Result<CommandResult> run_context_command(RuntimeSession& session, st
                               freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PluginPrompt) +
                               freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PluginSkill);
   output += "  plugin_sources=" + std::to_string(plugin_sources) + "\n";
+  output += "  lsp_status=" + lsp_provider_status_text(lsp_inspection) + " lsp_configs=" + std::to_string(configured_lsp_config_count(lsp_inspection.configs)) +
+            " lsp_servers=" + std::to_string(lsp_inspection.server_count) + " lsp_errors=" + std::to_string(lsp_inspection.error_count) + "\n";
 
   bool matched_source = false;
   for (auto const& source : session.context_sources)
@@ -1035,7 +1200,30 @@ ava::core::Result<CommandResult> run_context_command(RuntimeSession& session, st
     }
     output += "  " + freshness_source_status_text(source) + '\n';
   }
-  if (!matched_source && !matched_freshness_source && !prompt_matches_query(session, trimmed_query) && !trimmed_query.empty())
+  bool matched_lsp_config = false;
+  for (auto const& diagnostic : lsp_inspection.configs)
+  {
+    bool const visible = diagnostic.error.has_value() || (!trimmed_query.empty() && lsp_config_matches_query(diagnostic, trimmed_query));
+    if (!visible || !lsp_config_matches_query(diagnostic, trimmed_query))
+      continue;
+    matched_lsp_config = true;
+    output += "  lsp_config  " + sanitize_inline_text(diagnostic.scope) + "  " + lsp_config_status_text(diagnostic) + '\n';
+  }
+  if (!include_project_resources)
+  {
+    ava::lsp::ConfiguredLspConfigDiagnostic skipped_project{
+        .scope = "project",
+        .path = project_lsp_config,
+        .exists = path_exists_for_status(project_lsp_config),
+    };
+    bool const visible = !trimmed_query.empty() && lsp_config_matches_query(skipped_project, trimmed_query);
+    if (visible)
+    {
+      matched_lsp_config = true;
+      output += "  lsp_config  project  " + project_lsp_config.string() + "  status=skipped reason=project_resources_skipped\n";
+    }
+  }
+  if (!matched_source && !matched_freshness_source && !matched_lsp_config && !prompt_matches_query(session, trimmed_query) && !trimmed_query.empty())
   {
     add_output(result, "No context sources matching: " + sanitize_inline_text(trimmed_query));
     return result;
@@ -1238,6 +1426,8 @@ ava::core::Result<std::vector<ava::session::SessionEntry>> load_import_session_e
       return std::unexpected(std::move(line_read.error()));
     if (!*line_read)
       break;
+    if (entries.empty() && looks_like_pi_session_header(line))
+      return std::unexpected(unsupported_pi_session_import_error(path));
     auto entry = ava::session::parse_session_entry_line(line, path);
     if (!entry)
       return std::unexpected(std::move(entry.error()));
@@ -1261,6 +1451,8 @@ ava::core::Result<std::vector<ava::session::SessionEntry>> load_import_session_e
       error.with_context("first_issue", validation.issues.front().message);
     return std::unexpected(std::move(error));
   }
+  if (auto attachments = validate_raw_jsonl_import_attachments(entries, path); !attachments)
+    return std::unexpected(std::move(attachments.error()));
   return entries;
 }
 
@@ -1369,6 +1561,8 @@ ava::core::Result<CommandResult> run_export_command(RuntimeSession& session, Com
   }
 
   auto const format = parsed->format;
+  auto const jsonl_attachment_summary = format == ExportFormat::Jsonl ? summarize_non_redacted_jsonl_attachments(*entries) : JsonlAttachmentSummary{};
+  auto const jsonl_attachment_note = raw_jsonl_attachment_note(jsonl_attachment_summary);
   std::string content;
   if (format == ExportFormat::Html)
   {
@@ -1419,13 +1613,21 @@ ava::core::Result<CommandResult> run_export_command(RuntimeSession& session, Com
   }
 
   auto result_json = std::string("{\"tool\":\"export\",\"ok\":true,\"format\":\"") + export_format_text(format) + "\",\"path\":\"" +
-                     ava::core::json::escape(target_path.string()) + "\",\"bytes_written\":" + std::to_string(written->bytes_written) + "}";
+                     ava::core::json::escape(target_path.string()) + "\",\"bytes_written\":" + std::to_string(written->bytes_written);
+  if (format == ExportFormat::Jsonl)
+  {
+    result_json += ",\"attachment_files_included\":false,\"non_redacted_image_attachment_metadata_count\":" + std::to_string(jsonl_attachment_summary.count);
+  }
+  result_json += "}";
   if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "export", ava::agent::ToolTimelineStatus::Success,
                                          "wrote " + std::to_string(written->bytes_written) + " bytes", result_json, linked_permission_ids());
       !recorded)
     return std::unexpected(std::move(recorded.error()));
-  add_output(result, "exported session:\n  format: " + export_format_text(format) + "\n  path: " + target_path.string() +
-                         "\n  bytes: " + std::to_string(written->bytes_written));
+  auto output = "exported session:\n  format: " + export_format_text(format) + "\n  path: " + target_path.string() +
+                "\n  bytes: " + std::to_string(written->bytes_written);
+  if (!jsonl_attachment_note.empty())
+    output += "\n  note: " + jsonl_attachment_note;
+  add_output(result, std::move(output));
   return result;
 }
 

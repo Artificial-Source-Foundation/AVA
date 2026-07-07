@@ -1,11 +1,11 @@
 # AVA Version Docs
 
-These files track AVA release-position documentation. The shipped backend MVP runtime now reports `1.0.0`; future release-position docs still require a dedicated release-bump slice before their documented line becomes the compiled runtime version.
+These files track AVA release-position documentation. The current backend baseline runtime reports `1.0.0`; future release-position docs still require a dedicated release-bump slice before their documented line becomes the compiled runtime version. A runtime version number does not imply that a tag, binary artifact, package, or external release has been published.
 
 Current position:
 
-- `1.1.md`: planning notes for the next release line. The compiled runtime still reports `1.0.0`; 1.1 needs a dedicated implementation and release-bump slice before it becomes shipped evidence.
-- `1.0.md`: current shipped backend MVP. The compiled runtime reports `1.0.0` after the 0.90 release-candidate evidence map, OpenAI and Kimi-for-coding live smokes, focused/full CTest, and release-bump validation passed.
+- `1.1.md`: planning notes for the next release line. The compiled runtime still reports `1.0.0`; 1.1 needs a dedicated implementation and release-bump slice before it becomes runtime evidence.
+- `1.0.md`: current backend baseline. The compiled runtime reports `1.0.0` after the 0.90 release-candidate evidence map, OpenAI and Kimi-for-coding live smokes, focused/full CTest, and release-bump validation passed.
 - `0.90.md`: v1 release-candidate completion ledger. It owns the 1.0 capability disposition, test evidence map, and provider live-smoke status that justified the 1.0 runtime bump.
 - `0.80.md`: extension API stabilization target. The local plugin authoring guide, sample plugin, real-sample headless RPC smoke coverage, compatibility policy, minimal golden fixtures, the then-current MCP resource deferral decision, focused audit/failure contract tests, and OpenAI 5.5 manual headless release-validation pass are implemented; read-style MCP resources later landed behind `mcp.resource.read`.
 - `0.75.md`: source-backed extension foundation line. Unified command discovery/invocation, plugin diagnostics, plugin prompt/skill resources and commands, and MCP stdio tool/prompt foundations are implemented and validated by later release-candidate evidence.

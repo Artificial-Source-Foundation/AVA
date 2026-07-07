@@ -449,6 +449,52 @@ void test_app_rpc_prompt_with_fake_transport_streams_events()
          "RPC prompt streams runtime event envelopes and ends with a successful response");
 }
 
+void test_app_rpc_offline_allows_local_protocol_and_rejects_prompt_before_provider_request()
+{
+  auto const root = temp_root() / "app-rpc-offline";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  open_options.offline = true;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC offline test opens runtime session");
+  if (!session)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  ava::app::RuntimeRunOptions runtime_options;
+  runtime_options.offline = true;
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult result;
+  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+  input_buffer.push("{\"id\":\"proto\",\"type\":\"get_protocol\"}\n");
+  bool const protocol_completed = output_buffer.wait_contains("\"id\":\"proto\"", std::chrono::seconds(2));
+  input_buffer.push("{\"id\":\"p-offline\",\"type\":\"prompt\",\"message\":\"hello offline rpc\"}\n");
+  bool const prompt_failed = output_buffer.wait_contains("offline mode is enabled", std::chrono::seconds(2));
+  input_buffer.close();
+  rpc_thread.join();
+
+  auto const jsonl = output_buffer.str();
+  expect(result.has_value(), "RPC offline loop completes successfully after prompt rejection");
+  expect(protocol_completed && jsonl.find("\"id\":\"proto\"") != std::string::npos && jsonl.find("\"success\":true") != std::string::npos,
+         "RPC offline mode still serves local protocol commands");
+  expect(prompt_failed && jsonl.find("\"id\":\"p-offline\"") != std::string::npos && jsonl.find("\"success\":false") != std::string::npos,
+         "RPC offline mode rejects prompt commands with a machine-readable error");
+  expect(transport.requests().empty(), "RPC offline prompt rejection avoids provider transport requests");
+}
+
 void test_app_rpc_prompt_imports_image_attachments()
 {
   auto const root = temp_root() / "app-rpc-prompt-image-attachment";
@@ -1620,6 +1666,7 @@ void run_app_rpc_tests()
   test_app_rpc_parsing_and_response_serialization();
   test_app_rpc_identifier_validation();
   test_app_rpc_prompt_with_fake_transport_streams_events();
+  test_app_rpc_offline_allows_local_protocol_and_rejects_prompt_before_provider_request();
   test_app_rpc_prompt_imports_image_attachments();
   test_app_rpc_prompt_imports_inline_image_uploads();
   test_app_rpc_prompt_rejects_inline_image_upload_mime_mismatch();

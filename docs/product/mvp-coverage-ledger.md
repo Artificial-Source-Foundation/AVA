@@ -50,8 +50,8 @@ Latest end-to-end tool-smoke verification (2026-07-05 local): `cmake --build --p
 
 | Checklist item | Coverage evidence |
 | --- | --- |
-| Provider registry with OpenAI, Anthropic, DeepSeek, Kimi, Moonshot, and OpenRouter-compatible families | `ava_tests.config_context_auth_oauth`, `ava_tests.provider_openai`, `ava_tests.provider_anthropic`, `docs/goals/pi-mvp-parity/providers-models-auth.md`; live validation remains credential-gated through `ava_tests.provider_live_smoke` and `docs/TESTING.md`. |
-| Model metadata for capabilities, modalities, context windows, pricing, and reasoning controls | `ava_tests.config_context_auth_oauth`, `ava_tests.app_runtime`, `ava_tests.provider_openai`, `ava_tests.provider_anthropic`. |
+| Provider registry with OpenAI, Anthropic, DeepSeek, Gemini, Kimi, Moonshot, and OpenRouter-compatible families | `ava_tests.config_context_auth_oauth`, `ava_tests.provider_openai`, `ava_tests.provider_anthropic`, `ava_tests.provider_gemini`, `docs/goals/pi-mvp-parity/providers-models-auth.md`; live validation remains credential-gated through `ava_tests.provider_live_smoke` and `docs/TESTING.md`. |
+| Model metadata for capabilities, modalities, context windows, pricing, and reasoning controls | `ava_tests.config_context_auth_oauth`, `ava_tests.app_runtime`, `ava_tests.provider_openai`, `ava_tests.provider_anthropic`, `ava_tests.provider_gemini`. |
 | Provider/model listing UX comparable to Pi model discovery commands | `ava_tests.app_runtime`, `ava_tests.app_command_registry`, `ava_tests.config_context_auth_oauth`, opt-in `ava_tui.tmux_smoke` model selector/scoped-model checks, `docs/USAGE.md`, `docs/TESTING.md`. |
 | API-key auth from secure local storage and environment variables | `ava_tests.config_context_auth_oauth`, `ava_tests.provider_live_smoke` credential-gated path. |
 | OpenAI browser/device/headless OAuth flows | `ava_tests.config_context_auth_oauth`, `ava_tests.app_runtime`, `README.md` auth docs. |
@@ -73,9 +73,10 @@ Latest end-to-end tool-smoke verification (2026-07-05 local): `cmake --build --p
 | Checklist item | Coverage evidence |
 | --- | --- |
 | Pi core file/shell/search/list shape | `ava_tests.tools`, `ava_tests.agent_tool_dispatcher`, `ava_cli.headless_tool_visibility`, `ava_cli.headless_e2e_model_smoke`. |
-| AVA-native `apply_patch`, web, skill, question, and LSP tools | `ava_tests.tools`, `ava_tests.lsp`, `ava_cli.headless_rpc_question_reply`, `ava_cli.headless_rpc_question_reply_multi`, `docs/TESTING.md` headless tool smoke guidance. |
+| AVA-native `apply_patch`, web, skill, task, question, and LSP tools | `ava_tests.tools`, `ava_tests.agent_loop`, `ava_tests.app_print`, `ava_tests.lsp`, `ava_cli.headless_rpc_question_reply`, `ava_cli.headless_rpc_question_reply_multi`, `docs/TESTING.md` headless tool smoke guidance. |
 | Bounded tool outputs and side effects through permission/audit paths | `ava_tests.tools`, `ava_tests.permission_rules`, `ava_cli.headless_rpc_permission_reply`, `ava_cli.headless_rpc_tool_failure`, `ava_cli.headless_e2e_model_smoke`. |
 | Tool allowlist/exclusion controls | `ava_cli.headless_tool_visibility`, `ava_tests.app_runtime`, `README.md` tool flag docs. |
+| Configurable foreground/background subagents through `task` | `ava_tests.agent_loop` task/subagent/background registry coverage, `ava_tests.app_print` `--allow-tool task`, and opt-in `scripts/live-coding-dogfood.sh` for live coding-tool behavior. |
 | Pi-style `find`/`ls` alias mapping | `ava_tests.app_command_registry`, `ava_cli.headless_tool_visibility`, opt-in `ava_tui.tmux_smoke` `/find` and `/ls` checks. |
 | Consistent tool cards and plain/headless representations | `ava_tests.tui_composer`, `ava_tests.app_event_serialization`, `ava_tests.tools`, `ava_cli.headless_rpc_tool_failure`, opt-in `ava_tui.tmux_smoke` `/tool`, `/diff`, `/copy tool`, `/copy diff`, and `/copy permission` checks. |
 
@@ -125,10 +126,10 @@ Latest end-to-end tool-smoke verification (2026-07-05 local): `cmake --build --p
 | Safe display/keybinding writes and validation-before-commit | `ava_tests.app_runtime`, `ava_tests.tui_composer`; display and keybinding writes use `ava::core::write_text_file_atomic` and reject symlink targets. |
 | Reload diagnostics and last-known-good behavior | `ava_tests.app_runtime`, opt-in `ava_tui.tmux_smoke` settings/reload checks, `docs/USAGE.md`. |
 | Project-resource trust gating | `ava_tests.app_runtime`, `ava_tests.app_command_registry`, `ava_tests.plugin`, `ava_tests.mcp`, `ava_tests.lsp`, `docs/CONFIG.md`. |
-| Offline/package/resource deferrals | `ava_cli.package_manager_deferred`, `/packages` coverage in `ava_tests.app_runtime`, `docs/CONFIG.md`, `docs/plugin-system.md`. |
+| Offline/package/resource policy | `ava_cli.offline_print_prompt`, offline coverage in `ava_tests.app_print` and `ava_tests.app_rpc`, `ava_cli.package_manager_deferred`, `/packages` coverage in `ava_tests.app_runtime`, `docs/CONFIG.md`, `docs/plugin-system.md`. |
 | Keybinding customization UX | `ava_tests.tui_composer`, `ava_tests.app_runtime`, `ava_tests.app_command_registry`, opt-in `ava_tui.tmux_smoke` keybinding init/import/set/reset/validate/reload and custom-key checks, `docs/CONFIG.md`, `docs/USAGE.md`. |
 
-Remaining config/settings work is product polish beyond MVP: a possible future unified settings facade, a dedicated `--offline` switch, and remote package/resource install only if the safety policy is approved.
+Remaining config/settings work is product polish beyond MVP: a possible future unified settings facade and remote package/resource install only if the safety policy is approved. Future remote/package surfaces must respect the existing `--offline` provider-call guard.
 
 ## TUI And UX Maturity
 
@@ -164,7 +165,7 @@ The current TUI rows are either checked with deterministic/PTY evidence or expli
 
 | Checklist item | Coverage evidence |
 | --- | --- |
-| Image model metadata, sanitized attachment metadata, managed storage, fork/clone copy, replay validation, provider serialization | `ava_tests.session`, `ava_tests.provider_openai`, `ava_tests.provider_anthropic`, `ava_tests.config_context_auth_oauth`. |
+| Image model metadata, sanitized attachment metadata, managed storage, fork/clone copy, replay validation, provider serialization | `ava_tests.session`, `ava_tests.provider_openai`, `ava_tests.provider_anthropic`, `ava_tests.provider_gemini`, `ava_tests.config_context_auth_oauth`. |
 | RPC image input plumbing | `ava_tests.app_rpc`, `ava_tests.session`, `docs/headless-protocol.md` image request docs. |
 | TUI/user-facing image import | `ava_tests.tui_composer`, `ava_tests.session`, opt-in `ava_tui.tmux_smoke` clipboard-image fallback checks. |
 | Inline preview where terminal capabilities allow plus safe text fallback | `ava_tests.tui_composer`, opt-in `ava_tui.kitty_image_smoke`, opt-in `ava_tui.tmux_smoke`. |
@@ -189,7 +190,7 @@ These unchecked rows are explicitly deferred or excluded from the current MVP cl
 | --- | --- | --- |
 | Provider/model/auth validation | Broader provider zoo, Anthropic interactive OAuth, first-class custom provider registration, scoped credential/config overrides, and cross-provider reasoning replay | Core provider paths exist, DeepSeek is implemented through the compatible path with `reasoning_effort` mapping, `/providers` and `/models` expose current metadata and diagnostics, and live-smoke behavior is credential-gated. The deferred provider items need provider-specific auth, metadata, compatibility, and smoke plans before becoming MVP scope. |
 | Sessions | Provider-generated branch summaries | Append-only session tree/fork/clone, caller-supplied summaries, and the session-versioning policy exist; provider-generated branch summaries remain deferred until branch UX needs them. |
-| Settings/reload/trust | Future unified settings facade, dedicated offline switch, and remote package/resource install if approved | MVP keeps domain configs with safe display/keybinding writes, reload diagnostics, trust-gated project resources, and documented package/offline deferrals. |
+| Settings/reload/trust | Future unified settings facade, broader offline semantics for future remote surfaces, and remote package/resource install if approved | MVP keeps domain configs with safe display/keybinding writes, reload diagnostics, trust-gated project resources, implemented provider-call `--offline`, and documented package/offline deferrals. |
 | TUI/editor/rendering/accessibility/performance | Extra selection polish, richer editor behavior, broader non-tool denial wording, deeper diff navigation, broader screen-reader review, and broader release-workload profiling | MVP TUI/editor/rendering/tool behavior is covered by deterministic tests and opt-in PTY smokes; the deferred items are future product polish or broader audits. |
 | Attachments/export | Attachment export/replay behavior for every session/export format | Import, replay, provider serialization, and metadata export exist; raw attachment byte archive/export policy remains outside the current export slice. |
 | Release proof | Broader TUI harness expansion | Existing tests, smokes, provider live-smoke matrix, performance thresholds, and final docs consistency are broad; future work is deeper TUI/screen-reader/product polish coverage, not current release-evidence agreement. |
@@ -198,15 +199,15 @@ These unchecked rows are explicitly deferred or excluded from the current MVP cl
 
 | Decision | MVP disposition | Rationale / unblocker |
 | --- | --- | --- |
-| Broader provider zoo beyond current OpenAI, Anthropic, DeepSeek, Kimi, Moonshot, and OpenRouter paths: Google, Copilot, Bedrock, Vertex, Azure, Groq, xAI, Mistral, and similar providers | Deferred | Each provider needs auth semantics, model metadata, compatibility quirks, pricing, and credential-gated live-smoke criteria. The provider validation slice may narrow the next provider decision but should not silently expand the MVP. |
+| Broader provider zoo beyond current OpenAI, Anthropic, DeepSeek, Gemini, Kimi, Moonshot, and OpenRouter paths: Copilot, Bedrock, Vertex, Azure, Groq, xAI, Mistral, and similar providers | Deferred | Each provider needs auth semantics, model metadata, compatibility quirks, pricing, and credential-gated live-smoke criteria. The provider validation slice may narrow the next provider decision but should not silently expand the MVP. |
 | Anthropic interactive OAuth setup | Deferred | Stored/env Anthropic OAuth token resolution and refresh exist. Official Anthropic docs do not expose a supported third-party authorization/device flow, so AVA should not initiate one unless Anthropic publishes a stable developer OAuth program. |
 | Provider-generated branch summaries | Deferred | Caller-supplied branch summaries are implemented through RPC `summarize_branch`; provider-generated compaction summaries remain in `/compact`. Provider-generated branch summaries need a branch-navigation UX, model-call budget, permission policy, and stale-session race design before becoming MVP scope. |
-| Parallel or configurable tool execution | Deferred | Needs permission, cancellation, output ordering, and session replay semantics before exposing concurrency. |
+| Parallel or configurable ordinary tool execution | Deferred | Needs permission, cancellation, output ordering, and session replay semantics before exposing concurrent ordinary tool calls. Native background subagents are covered separately by the `task`/`BackgroundJobRegistry` evidence above. |
 | Pi-style automatic `!`/`!!` shell-output injection into provider context | Deferred | AVA currently runs `!`/`!!` through permissioned `/bash` and keeps output visible/audited. Provider-context injection needs a session/replay design first. |
 | HTTP/server daemon, OpenAPI, generated SDKs, and SSE | Deferred | Stdio JSONL RPC is the MVP automation contract until it proves stable enough to wrap. |
 | Plugin package manager, marketplace, remote install, signing, and package trust | Deferred | Remote code/package flows require a trust, provenance, signing, compatibility, and rollback policy first. |
 | Custom provider plugins or dynamic provider package loading | Deferred | Provider auth and model metadata are security-sensitive and should not be loaded dynamically without a strict contract. |
 | OS/container sandboxing | Excluded | AVA should not claim sandbox guarantees without real OS/container enforcement and tests. |
-| Multi-agent orchestration or subagent/task workers | Deferred | Needs process isolation, session ownership, permission boundaries, cancellation semantics, and UX before MVP inclusion. |
+| Broader multi-agent orchestration and chained task graphs | Deferred | Configurable task subagents and background job tracking are present; broader orchestration, task graph UX, and plugin-contributed subagent packages remain future work. |
 | Advanced MCP transports, OAuth, subscriptions, sampling, templates, binary/blob resources | Deferred | Current MVP keeps a bounded local stdio/read-style resource slice behind explicit permission/audit paths. |
 | Desktop/web/cloud surfaces, SaaS sharing, Slack/Discord bots, GPU orchestration, telemetry infrastructure | Excluded | These are OpenCode-style platform surfaces, not AVA local terminal-agent MVP requirements. |

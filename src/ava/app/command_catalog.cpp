@@ -85,7 +85,8 @@ std::vector<CommandCatalogEntry> const& command_catalog()
                           .category = "Sessions"},
       CommandCatalogEntry{
           .command = "/context", .description = "List prompt, context, command, skill, and plugin freshness", .hint = "[query|source]", .category = "Sessions"},
-      CommandCatalogEntry{.command = "/stats", .description = "Show session counts, usage, and cost", .category = "Sessions"},
+      CommandCatalogEntry{
+          .command = "/stats", .aliases = {"/session"}, .description = "Show session counts, usage, and cost", .category = "Sessions"},
       CommandCatalogEntry{.command = "/status", .description = "Alias for /stats session status", .category = "Sessions"},
       CommandCatalogEntry{.command = "/compact", .description = "Generate and record a provider summary", .hint = "[instructions]", .category = "Sessions"},
       CommandCatalogEntry{.command = "/export",

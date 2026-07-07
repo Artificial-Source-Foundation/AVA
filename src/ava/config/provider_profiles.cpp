@@ -90,6 +90,18 @@ ProviderProfile const& deepseek_provider_profile()
   return profile;
 }
 
+ProviderProfile const& gemini_provider_profile()
+{
+  static ProviderProfile const profile{.provider_id = "gemini",
+                                       .display_name = "Google Gemini",
+                                       .connect_detail = "Gemini API key",
+                                       .api_family = "gemini_generate_content",
+                                       .default_base_url_env = "GEMINI_BASE_URL",
+                                       .default_base_url = "https://generativelanguage.googleapis.com",
+                                       .default_compatibility_quirks = {"gemini_generate_content"}};
+  return profile;
+}
+
 ProviderProfile const& kimi_provider_profile()
 {
   static ProviderProfile const profile{.provider_id = "kimi",
@@ -165,8 +177,8 @@ ProviderProfile const& vercel_provider_profile()
 
 std::vector<ProviderProfile> builtin_provider_profiles()
 {
-  return {openai_provider_profile(), anthropic_provider_profile(),  deepseek_provider_profile(), moonshot_provider_profile(),
-          kimi_provider_profile(),   openrouter_provider_profile(), vercel_provider_profile()};
+  return {openai_provider_profile(),   anthropic_provider_profile(), deepseek_provider_profile(),   gemini_provider_profile(),
+          moonshot_provider_profile(), kimi_provider_profile(),      openrouter_provider_profile(), vercel_provider_profile()};
 }
 
 std::optional<ProviderProfile> find_provider_profile(std::string_view provider_id)

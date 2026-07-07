@@ -498,6 +498,15 @@ ava::core::Result<RuntimePromptState> select_runtime_prompt_state(RuntimeSession
                                             project_resources_trusted(session.project_trust), session.prompt_overrides);
 }
 
+ava::core::Error offline_provider_error(std::string_view action)
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "offline mode is enabled; provider model calls are disabled");
+  if (!action.empty())
+    error.with_context("action", std::string(action));
+  error.with_context("hint", "rerun without --offline to send prompts to the provider");
+  return error;
+}
+
 void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prompt_state)
 {
   session.mode = prompt_state.mode;
@@ -510,6 +519,9 @@ void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prom
 ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& session, std::string const& user_message, ava::provider::Provider const& provider,
                                                           ava::provider::Transport& transport, RuntimeRunOptions const& options)
 {
+  if (session.offline || options.offline)
+    return std::unexpected(offline_provider_error("prompt"));
+
   auto plugin_observer_options = plugin_event_observer_options(session, options.permission_resolver, options.session_mutex);
   plugin_observer_options.cancel_requested = options.cancel_requested;
   auto event_sink = make_plugin_event_observer_sink(std::move(plugin_observer_options), options.event_sink);

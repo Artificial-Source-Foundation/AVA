@@ -28,7 +28,7 @@ Reference code is behavior input only. Do not copy Pi source or architecture int
 
 2. Add the terminal smoke harness before broad TUI claims.
 
-   Touches: `tests/`, `tests/CMakeLists.txt`, possibly `docs/dev/ncurses-notes.md`.
+   Touches: `tests/`, `tests/CMakeLists.txt`, and TUI testing docs as needed.
 
    Work:
    - Add a gated PTY/tmux smoke runner that can start `ava` in a real terminal, set rows/columns and `TERM`, send keys/escape sequences, resize, capture visible screen text, and terminate cleanly.
@@ -85,7 +85,7 @@ Reference code is behavior input only. Do not copy Pi source or architecture int
 
 6. Keep docs and checklist evidence synchronized after every slice.
 
-   Touches: `docs/product/mvp-baseline.md`, `docs/USAGE.md`, `docs/CONFIG.md`, `docs/headless-protocol.md`, `docs/dev/ncurses-notes.md`, version/roadmap docs as applicable.
+   Touches: `docs/product/mvp-baseline.md`, `docs/USAGE.md`, `docs/CONFIG.md`, `docs/headless-protocol.md`, version/roadmap docs as applicable.
 
    Work:
    - Mark checklist items complete only when implementation, tests, and smoke evidence agree.

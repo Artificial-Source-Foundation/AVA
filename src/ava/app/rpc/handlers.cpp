@@ -17,8 +17,7 @@ std::string model_cycle_key(std::string_view provider_id, std::string_view model
   return std::string(provider_id) + "/" + std::string(model_id);
 }
 
-std::vector<ava::config::ModelInfo> registered_cycle_models(RuntimeSession const& session,
-                                                            ava::config::ModelRegistry const& registry)
+std::vector<ava::config::ModelInfo> registered_cycle_models(RuntimeSession const& session, ava::config::ModelRegistry const& registry)
 {
   auto const providers = ava::provider::builtin_provider_registry();
   std::vector<ava::config::ModelInfo> registered;
@@ -35,9 +34,7 @@ std::vector<ava::config::ModelInfo> registered_cycle_models(RuntimeSession const
   scoped.reserve(session.scoped_model_cycle->size());
   for (auto const& id : *session.scoped_model_cycle)
   {
-    auto const found = std::ranges::find_if(registered, [&](auto const& model) {
-      return id == model_cycle_key(model.provider_id, model.model_id);
-    });
+    auto const found = std::ranges::find_if(registered, [&](auto const& model) { return id == model_cycle_key(model.provider_id, model.model_id); });
     if (found != registered.end())
       scoped.push_back(*found);
   }
@@ -51,8 +48,7 @@ ava::core::Result<std::vector<ava::config::ModelInfo>> cycle_model_candidates(Ru
     return std::unexpected(std::move(registry.error()));
   auto models = registered_cycle_models(session, *registry);
   if (models.empty())
-    return std::unexpected(
-        ava::core::Error(ava::core::ErrorCategory::NotFound, "no registered provider models are enabled for cycling"));
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "no registered provider models are enabled for cycling"));
   return models;
 }
 
@@ -61,6 +57,8 @@ ava::core::Result<std::vector<ava::config::ModelInfo>> cycle_model_candidates(Ru
 ava::core::Result<RuntimeRunOptions> ensure_prompt_runtime_options(ava::config::XdgPaths const& paths, std::string_view provider_id, RuntimeRunOptions options,
                                                                    ava::provider::Transport& auth_transport, std::string_view purpose)
 {
+  if (options.offline)
+    return std::unexpected(offline_provider_error(purpose));
   if (!options.access_token.empty())
     return options;
 
@@ -94,6 +92,7 @@ ava::core::Result<RuntimeSession> create_new_session(RuntimeSession const& curre
   options.paths = current.paths;
   options.requested_session_id = std::nullopt;
   options.continue_last_session = false;
+  options.initial_reasoning_level = std::nullopt;
   return open_runtime_session(options);
 }
 
@@ -107,6 +106,7 @@ ava::core::Result<RuntimeSession> open_requested_session(RuntimeSession const& c
   options.paths = current.paths;
   options.requested_session_id = std::string(requested_session_id);
   options.continue_last_session = false;
+  options.initial_reasoning_level = std::nullopt;
   return open_runtime_session(options);
 }
 

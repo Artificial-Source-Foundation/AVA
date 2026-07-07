@@ -9,6 +9,7 @@
 #include "ava/core/json.h"
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -27,6 +28,31 @@ std::string read_text_file_for_test(std::filesystem::path const& path)
   std::ostringstream out;
   out << file.rdbuf();
   return out.str();
+}
+
+void test_mutation_queue_cleans_drained_path_entries()
+{
+  std::error_code remove_error;
+  std::filesystem::remove_all(temp_root(), remove_error);
+  auto const workspace = temp_root() / "mutation-queue";
+  std::filesystem::create_directories(workspace);
+
+  ava::tools::MutationQueue queue;
+  expect(queue.tracked_path_count() == 0, "mutation queue starts without tracked path entries");
+
+  auto const single_path = workspace / "single.txt";
+  {
+    [[maybe_unused]] auto lock = queue.lock_path(single_path);
+    expect(queue.tracked_path_count() == 1, "mutation queue tracks a locked path entry");
+  }
+  expect(queue.tracked_path_count() == 0, "mutation queue removes a path entry after queued work drains");
+
+  std::array const paths{workspace / "multi-a.txt", workspace / "." / "multi-a.txt", workspace / "multi-b.txt"};
+  {
+    [[maybe_unused]] auto lock = queue.lock_paths(paths);
+    expect(queue.tracked_path_count() == 2, "mutation queue deduplicates normalized aliases while locked");
+  }
+  expect(queue.tracked_path_count() == 0, "mutation queue removes deduped multi-path entries after queued work drains");
 }
 
 void test_file_tools()
@@ -683,6 +709,7 @@ void test_permission_audit_persistence()
 
 void run_tools_file_tests()
 {
+  test_mutation_queue_cleans_drained_path_entries();
   test_file_tools();
   test_permission_audit_persistence();
 }

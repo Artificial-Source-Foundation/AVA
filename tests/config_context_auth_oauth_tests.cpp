@@ -1325,13 +1325,16 @@ void test_model_and_prompt_config()
              !vercel_profile->runtime_selectable,
          "provider profile centralizes explicit connect-only gateway metadata");
   expect(selected.provider_id == "openai" && selected.model_id == "gpt-5.5", "default model is OpenAI GPT-5.5");
-  expect(selected.context_window_tokens && *selected.context_window_tokens == 200'000, "default model carries context window metadata");
+  expect(selected.context_window_tokens && *selected.context_window_tokens == 272'000 && selected.max_output_tokens && *selected.max_output_tokens == 128'000 &&
+             selected.pricing && selected.pricing->input_per_million && *selected.pricing->input_per_million == 5.0L,
+         "default model carries current context, output, and pricing metadata");
   expect(selected.supports_reasoning.value_or(false) && selected.reasoning_format == "openai_responses" &&
              std::find(selected.reasoning_levels.begin(), selected.reasoning_levels.end(), "xhigh") != selected.reasoning_levels.end(),
          "default GPT-5.5 model declares OpenAI reasoning effort levels including xhigh");
   bool saw_priced_builtin = false;
   bool saw_anthropic_builtin_reasoning_enabled = false;
   bool saw_deepseek_builtin = false;
+  bool saw_deepseek_pro_pricing = false;
   bool saw_kimi_builtin = false;
   bool saw_moonshot_builtin = false;
   bool saw_openrouter_builtin_without_reasoning = false;
@@ -1343,7 +1346,7 @@ void test_model_and_prompt_config()
     all_builtins_have_text_output =
         all_builtins_have_text_output && std::find(model.output_modalities.begin(), model.output_modalities.end(), "text") != model.output_modalities.end();
     saw_priced_builtin =
-        saw_priced_builtin || (model.model_id == "gpt-4.1-mini" && model.context_window_tokens && model.pricing && *model.context_window_tokens == 1'048'576 &&
+        saw_priced_builtin || (model.model_id == "gpt-4.1-mini" && model.context_window_tokens && model.pricing && *model.context_window_tokens == 1'047'576 &&
                                model.pricing->input_per_million && model.pricing->output_per_million && model.api_family == "openai_responses" &&
                                model.supports_tools.value_or(false) && model.supports_streaming.value_or(false) && model.reports_usage.value_or(false));
     expect(ava::config::find_provider_profile(model.provider_id).has_value(), "each builtin model references a centralized provider profile");
@@ -1360,24 +1363,34 @@ void test_model_and_prompt_config()
                             model.pricing->cache_read_per_million && model.supports_tools.value_or(false) && model.supports_streaming.value_or(false) &&
                             model.supports_reasoning.value_or(false) && model.reasoning_levels.size() == 2 && model.reasoning_format == "reasoning_content" &&
                             std::find(model.compatibility_quirks.begin(), model.compatibility_quirks.end(), "deepseek") != model.compatibility_quirks.end());
+    saw_deepseek_pro_pricing = saw_deepseek_pro_pricing || (model.provider_id == "deepseek" && model.model_id == "deepseek-v4-pro" && model.pricing &&
+                                                            model.pricing->input_per_million && *model.pricing->input_per_million == 0.435L &&
+                                                            model.pricing->output_per_million && *model.pricing->output_per_million == 0.87L &&
+                                                            model.pricing->cache_read_per_million && *model.pricing->cache_read_per_million == 0.003625L);
     saw_kimi_builtin =
         saw_kimi_builtin ||
         (model.provider_id == "kimi" && model.model_id == "kimi-k2-thinking" && model.api_family == "openai_chat_completions" &&
-         model.supports_tools.value_or(false) && model.supports_reasoning.value_or(false) && model.reasoning_format == "reasoning_content" && !model.pricing &&
+         model.supports_tools.value_or(false) && model.supports_reasoning.value_or(false) && model.reasoning_format == "reasoning_content" && model.pricing &&
+         model.pricing->input_per_million && *model.pricing->input_per_million == 0.0L && model.pricing->output_per_million &&
+         *model.pricing->output_per_million == 0.0L &&
          std::find(model.compatibility_quirks.begin(), model.compatibility_quirks.end(), "kimi") != model.compatibility_quirks.end() &&
          std::find(model.compatibility_quirks.begin(), model.compatibility_quirks.end(), "preserve_reasoning_content") != model.compatibility_quirks.end());
-    saw_moonshot_builtin = saw_moonshot_builtin || (model.provider_id == "moonshot" && model.model_id == "kimi-k2.6" &&
-                                                    model.api_family == "openai_chat_completions" && model.reasoning_format == "reasoning_content");
+    saw_moonshot_builtin =
+        saw_moonshot_builtin || (model.provider_id == "moonshot" && model.model_id == "kimi-k2.6" && model.api_family == "openai_chat_completions" &&
+                                 model.reasoning_format == "reasoning_content" && model.max_output_tokens && *model.max_output_tokens == 262'144 &&
+                                 model.pricing && model.pricing->input_per_million && *model.pricing->input_per_million == 0.95L &&
+                                 model.pricing->output_per_million && *model.pricing->output_per_million == 4.0L);
     saw_openrouter_builtin_without_reasoning =
         saw_openrouter_builtin_without_reasoning ||
         (model.provider_id == "openrouter" && model.model_id == "moonshotai/kimi-k2.6" && model.api_family == "openai_chat_completions" &&
-         !model.supports_reasoning.value_or(false) && model.reasoning_levels.empty() && model.reasoning_format.empty());
+         model.max_output_tokens && *model.max_output_tokens == 262'144 && !model.supports_reasoning.value_or(false) && model.reasoning_levels.empty() &&
+         model.reasoning_format.empty());
   }
   expect(all_builtins_have_context_windows, "builtin model registry always provides context windows");
   expect(all_builtins_have_text_output, "builtin model registry always declares text output support");
   expect(saw_priced_builtin, "builtin model registry carries static pricing, context, and capability metadata");
   expect(saw_anthropic_builtin_reasoning_enabled, "Anthropic builtin exposes enabled-only native thinking reasoning metadata");
-  expect(saw_deepseek_builtin && saw_kimi_builtin && saw_moonshot_builtin,
+  expect(saw_deepseek_builtin && saw_deepseek_pro_pricing && saw_kimi_builtin && saw_moonshot_builtin,
          "builtin model registry includes DeepSeek, Kimi, and Moonshot OpenAI-compatible coding profiles");
   expect(saw_openrouter_builtin_without_reasoning, "builtin OpenRouter profile does not advertise reasoning until OpenRouter-native reasoning is implemented");
   expect(ava::config::reasoning_parameter_text(selected) == openai_profile->reasoning_request_parameters,
@@ -1444,7 +1457,8 @@ void test_model_and_prompt_config()
   if (registry)
   {
     selected = ava::config::select_default_model(*registry);
-    expect(selected.display_name == "Custom GPT" && selected.context_window_tokens == 200'000 && selected.supports_reasoning == true &&
+    expect(selected.display_name == "Custom GPT" && selected.context_window_tokens == 272'000 && selected.max_output_tokens == 128'000 && selected.pricing &&
+               selected.pricing->input_per_million && *selected.pricing->input_per_million == 5.0L && selected.supports_reasoning == true &&
                selected.reports_usage == true && selected.reasoning_levels.size() == 4 && selected.output_modalities.size() == 1 &&
                selected.output_modalities[0] == "text" && selected.reasoning_format == "openai_responses",
            "builtin model overrides preserve missing capability metadata");

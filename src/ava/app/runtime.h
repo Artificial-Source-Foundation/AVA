@@ -81,6 +81,7 @@ struct RuntimeOpenOptions
 struct RuntimeReasoningSelection
 {
   std::string level;
+  std::optional<std::string> provider_level = std::nullopt;
   std::optional<long long> budget_tokens = std::nullopt;
   std::string display;
 };

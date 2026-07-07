@@ -1,13 +1,10 @@
-#include "ava/app/rpc/serialization.h"
-
 #include "ava/app/rpc/protocol.h"
+#include "ava/app/rpc/serialization.h"
 #include "ava/app/rpc/serialization_json.h"
 #include "ava/app/rpc/serialization_models.h"
-
 #include "ava/session/session_tree.h"
 #include "ava/session/stats.h"
 #include "ava/session/validation.h"
-
 #include "ava/core/json.h"
 
 #include <cctype>
@@ -50,10 +47,8 @@ std::string context_sources_json(RuntimeSession const& session)
 
 std::string session_entry_json(ava::session::SessionEntry const& entry)
 {
-  auto const data_json = (entry.type == ava::session::EntryType::UserMessage ||
-                          entry.type == ava::session::EntryType::AssistantMessage)
-                             ? ava::session::sanitized_message_data_json(entry.data_json,
-                                                                         entry.type == ava::session::EntryType::UserMessage)
+  auto const data_json = (entry.type == ava::session::EntryType::UserMessage || entry.type == ava::session::EntryType::AssistantMessage)
+                             ? ava::session::sanitized_message_data_json(entry.data_json, entry.type == ava::session::EntryType::UserMessage)
                              : entry.data_json;
   std::string json = "{";
   json += integer_field_json("version", entry.version);
@@ -364,6 +359,11 @@ std::string state_result_json(RuntimeSession const& session, bool cancel_request
   {
     json += ',';
     json += string_field_json("reasoning_level", session.reasoning->level);
+    if (session.reasoning->provider_level && *session.reasoning->provider_level != session.reasoning->level)
+    {
+      json += ',';
+      json += string_field_json("reasoning_provider_level", *session.reasoning->provider_level);
+    }
     if (session.reasoning->budget_tokens)
     {
       json += ',';

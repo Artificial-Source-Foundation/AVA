@@ -25,7 +25,7 @@ std::string reasoning_selected_status(RuntimeReasoningSelection const& selection
 std::optional<std::string> reasoning_status_for_session(RuntimeSession const& session)
 {
   auto const& model = session.model;
-  if (!model.supports_reasoning.value_or(false) || model.reasoning_levels.empty())
+  if (!model.supports_reasoning.value_or(false) && ava::config::supported_reasoning_levels(model).size() <= 1)
     return std::nullopt;
   if (!session.reasoning || session.reasoning->level.empty())
     return std::nullopt;
@@ -34,10 +34,26 @@ std::optional<std::string> reasoning_status_for_session(RuntimeSession const& se
 
 ava::core::Result<RuntimeReasoningSelection> reasoning_selection_for_level(ava::config::ModelInfo const& model, std::string level)
 {
+  if (level == "off")
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reasoning level off clears reasoning instead of enabling a selection");
+    error.with_context("provider", model.provider_id);
+    error.with_context("model", model.model_id);
+    return std::unexpected(std::move(error));
+  }
+  auto const resolved = ava::config::resolve_reasoning_level(model, level);
+  if (!resolved.supported)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reasoning level is not supported by the current model");
+    error.with_context("provider", model.provider_id);
+    error.with_context("model", model.model_id);
+    error.with_context("level", level);
+    return std::unexpected(std::move(error));
+  }
   auto profile = ava::config::reasoning_provider_profile_for_model(model);
   if (!profile || !profile->enabled_reasoning_requires_budget_tokens || level != "enabled")
   {
-    return RuntimeReasoningSelection{.level = std::move(level), .budget_tokens = std::nullopt, .display = {}};
+    return RuntimeReasoningSelection{.level = std::move(level), .provider_level = resolved.provider_level, .budget_tokens = std::nullopt, .display = {}};
   }
 
   auto const default_budget =
@@ -54,7 +70,7 @@ ava::core::Result<RuntimeReasoningSelection> reasoning_selection_for_level(ava::
     return std::unexpected(std::move(error));
   }
   auto const budget = std::min<long long>(default_budget, max_output - 1);
-  return RuntimeReasoningSelection{.level = std::move(level), .budget_tokens = budget, .display = {}};
+  return RuntimeReasoningSelection{.level = std::move(level), .provider_level = resolved.provider_level, .budget_tokens = budget, .display = {}};
 }
 
 ava::core::Result<std::string> cycle_runtime_reasoning(RuntimeSession& session)
@@ -64,7 +80,14 @@ ava::core::Result<std::string> cycle_runtime_reasoning(RuntimeSession& session)
   {
     return std::string("reasoning unavailable: current model does not declare reasoning support");
   }
-  if (model.reasoning_levels.empty())
+  auto const supported_levels = ava::config::supported_reasoning_levels(model);
+  std::vector<std::string> active_levels;
+  for (auto const& level : supported_levels)
+  {
+    if (level != "off")
+      active_levels.push_back(level);
+  }
+  if (active_levels.empty())
   {
     return std::string("reasoning unavailable: current model does not declare reasoning levels");
   }
@@ -72,9 +95,9 @@ ava::core::Result<std::string> cycle_runtime_reasoning(RuntimeSession& session)
   std::optional<std::size_t> current_index;
   if (session.reasoning)
   {
-    for (std::size_t index = 0; index < model.reasoning_levels.size(); ++index)
+    for (std::size_t index = 0; index < active_levels.size(); ++index)
     {
-      if (model.reasoning_levels[index] == session.reasoning->level)
+      if (active_levels[index] == session.reasoning->level)
       {
         current_index = index;
         break;
@@ -82,7 +105,7 @@ ava::core::Result<std::string> cycle_runtime_reasoning(RuntimeSession& session)
     }
   }
 
-  if (current_index && *current_index + 1 >= model.reasoning_levels.size())
+  if (current_index && *current_index + 1 >= active_levels.size())
   {
     auto cleared = set_runtime_reasoning(session, std::nullopt);
     if (!cleared)
@@ -91,7 +114,7 @@ ava::core::Result<std::string> cycle_runtime_reasoning(RuntimeSession& session)
   }
 
   auto const next_index = current_index ? *current_index + 1 : std::size_t{0};
-  if (model.reasoning_levels[next_index] == "disabled")
+  if (active_levels[next_index] == "disabled")
   {
     auto cleared = set_runtime_reasoning(session, std::nullopt);
     if (!cleared)
@@ -99,7 +122,7 @@ ava::core::Result<std::string> cycle_runtime_reasoning(RuntimeSession& session)
     return *cleared ? std::string("reasoning cleared") : std::string("reasoning already cleared");
   }
 
-  auto selection = reasoning_selection_for_level(model, model.reasoning_levels[next_index]);
+  auto selection = reasoning_selection_for_level(model, active_levels[next_index]);
   if (!selection)
     return std::unexpected(std::move(selection.error()));
   auto selected = set_runtime_reasoning(session, *selection);

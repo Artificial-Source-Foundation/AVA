@@ -62,9 +62,9 @@ ava::core::Result<std::string> resolve_session_id(std::filesystem::path const& w
 std::string cli_supported_reasoning_levels(ava::config::ModelInfo const& model)
 {
   std::string levels = "off";
-  for (auto const& level : model.reasoning_levels)
+  for (auto const& level : ava::config::supported_reasoning_levels(model))
   {
-    if (level.empty())
+    if (level.empty() || level == "off")
       continue;
     levels += ", ";
     levels += level;

@@ -183,7 +183,8 @@ std::string model_change_data_json(ava::config::ModelInfo const& previous, ava::
   json += ",\"api_family\":\"" + ava::core::json::escape(current.api_family) + "\"";
   json += ",\"input_modalities\":" + string_array_json(current.input_modalities);
   json += ",\"output_modalities\":" + string_array_json(current.output_modalities);
-  json += ",\"reasoning_levels\":" + string_array_json(current.reasoning_levels);
+  json += ",\"reasoning_levels\":" + string_array_json(ava::config::supported_reasoning_levels(current));
+  json += ",\"raw_reasoning_levels\":" + string_array_json(current.reasoning_levels);
   json += ",\"compatibility_quirks\":" + string_array_json(current.compatibility_quirks);
   json += optional_integer_json("context_window_tokens", current.context_window_tokens);
   json += optional_integer_json("max_output_tokens", current.max_output_tokens);
@@ -211,6 +212,8 @@ std::string reasoning_change_data_json(ava::config::ModelInfo const& model, std:
   if (selection)
   {
     json += ",\"level\":\"" + ava::core::json::escape(selection->level) + "\"";
+    if (selection->provider_level && *selection->provider_level != selection->level)
+      json += ",\"provider_level\":\"" + ava::core::json::escape(*selection->provider_level) + "\"";
     if (selection->budget_tokens)
       json += ",\"budget_tokens\":" + std::to_string(*selection->budget_tokens);
     if (!selection->display.empty())

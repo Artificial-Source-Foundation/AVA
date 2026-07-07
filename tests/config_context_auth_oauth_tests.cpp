@@ -1177,11 +1177,19 @@ void test_builtin_provider_model_metadata_contracts()
     {
       expect(!model.reasoning_levels.empty() && !model.reasoning_format.empty() && !ava::config::reasoning_parameter_text(model).empty(),
              "reasoning-capable builtin model declares levels, format, and request parameters: " + model.provider_id + "/" + model.model_id);
+      for (auto const& level : model.reasoning_levels)
+      {
+        expect(ava::config::resolve_reasoning_level(model, level).supported,
+               "reasoning-capable builtin model resolves advertised level: " + model.provider_id + "/" + model.model_id + "/" + level);
+      }
     }
     else
     {
       expect(model.reasoning_levels.empty() && model.reasoning_format.empty(),
              "non-reasoning builtin model does not advertise reasoning levels or format: " + model.provider_id + "/" + model.model_id);
+      auto const supported_reasoning = ava::config::supported_reasoning_levels(model);
+      expect(supported_reasoning.size() == 1 && supported_reasoning.front() == "off",
+             "non-reasoning builtin model resolves only off reasoning policy: " + model.provider_id + "/" + model.model_id);
     }
     if (model.pricing)
     {
@@ -1211,6 +1219,13 @@ void test_builtin_provider_model_metadata_contracts()
     expect(contains_string(openai->input_modalities, "image"), "OpenAI builtin model metadata declares image input for storage-backed serialization");
     expect(!ava::config::provider_accepts_reasoning_format(*openai, "openai_responses"),
            "OpenAI metadata does not claim native reasoning replay until the request builder supports it");
+    auto const openai_off = ava::config::resolve_reasoning_level(*openai, "off");
+    auto const openai_minimal = ava::config::resolve_reasoning_level(*openai, "minimal");
+    auto const openai_xhigh = ava::config::resolve_reasoning_level(*openai, "xhigh");
+    expect(openai_off.explicit_mapping && openai_off.supported && openai_off.provider_level && *openai_off.provider_level == "none" &&
+               openai_minimal.explicit_mapping && !openai_minimal.supported && openai_xhigh.explicit_mapping && openai_xhigh.provider_level &&
+               *openai_xhigh.provider_level == "xhigh",
+           "GPT-5.5 reasoning policy maps off to none, blocks minimal, and preserves xhigh");
     expect(ava::config::validate_reasoning_request(*openai, "high", std::nullopt, "").has_value(), "OpenAI reasoning accepts effort-only requests");
     expect(!ava::config::validate_reasoning_request(*openai, "high", std::optional<long long>(1024), ""), "OpenAI reasoning rejects budget tokens");
     expect(!ava::config::validate_reasoning_request(*openai, "high", std::nullopt, "summarized"), "OpenAI reasoning rejects display options");
@@ -1226,6 +1241,13 @@ void test_builtin_provider_model_metadata_contracts()
     expect(contains_string(anthropic->input_modalities, "image"), "Anthropic builtin model metadata declares image input for storage-backed serialization");
     expect(contains_string(anthropic->reasoning_levels, "enabled") && !contains_string(anthropic->reasoning_levels, "adaptive"),
            "Claude Sonnet 4.5 metadata narrows Anthropic thinking to enabled-only reasoning");
+    auto const anthropic_enabled = ava::config::resolve_reasoning_level(*anthropic, "enabled");
+    auto const anthropic_adaptive = ava::config::resolve_reasoning_level(*anthropic, "adaptive");
+    auto const anthropic_levels = ava::config::supported_reasoning_levels(*anthropic);
+    expect(anthropic_enabled.explicit_mapping && anthropic_enabled.supported && anthropic_enabled.provider_level &&
+               *anthropic_enabled.provider_level == "enabled" && anthropic_adaptive.explicit_mapping && !anthropic_adaptive.supported &&
+               contains_string(anthropic_levels, "enabled") && !contains_string(anthropic_levels, "adaptive"),
+           "Anthropic Sonnet reasoning policy preserves enabled-only native thinking and blocks adaptive for this model");
     expect(ava::config::provider_accepts_reasoning_format(*anthropic, "anthropic_thinking"), "Anthropic provider accepts replay of native thinking blocks");
     expect(ava::config::validate_reasoning_request(*anthropic, "enabled", std::optional<long long>(2048), "summarized").has_value(),
            "Anthropic enabled reasoning accepts a valid budget and display");
@@ -1249,6 +1271,13 @@ void test_builtin_provider_model_metadata_contracts()
                contains_string(deepseek->reasoning_levels, "xhigh") && deepseek->reasoning_format == "reasoning_content" &&
                !ava::config::provider_accepts_reasoning_format(*deepseek, "reasoning_content"),
            "DeepSeek builtin model uses the compatible chat API and reasoning-effort controls without replaying reasoning_content");
+    auto const deepseek_low = ava::config::resolve_reasoning_level(*deepseek, "low");
+    auto const deepseek_high = ava::config::resolve_reasoning_level(*deepseek, "high");
+    auto const deepseek_xhigh = ava::config::resolve_reasoning_level(*deepseek, "xhigh");
+    expect(deepseek_low.explicit_mapping && !deepseek_low.supported && deepseek_high.explicit_mapping && deepseek_high.provider_level &&
+               *deepseek_high.provider_level == "high" && deepseek_xhigh.explicit_mapping && deepseek_xhigh.provider_level &&
+               *deepseek_xhigh.provider_level == "max",
+           "DeepSeek V4 reasoning policy blocks low/medium tiers and maps xhigh to provider max");
   }
 
   auto const kimi = ava::config::find_model(builtin, "kimi", "kimi-k2-thinking");
@@ -1276,8 +1305,23 @@ void test_builtin_provider_model_metadata_contracts()
   expect(openrouter.has_value(), "OpenRouter metadata fixture exists");
   if (openrouter)
   {
-    expect(!openrouter->supports_reasoning.value_or(false) && !ava::config::provider_accepts_reasoning_format(*openrouter, "reasoning_content"),
+    auto const openrouter_off = ava::config::resolve_reasoning_level(*openrouter, "off");
+    auto const openrouter_high = ava::config::resolve_reasoning_level(*openrouter, "high");
+    expect(!openrouter->supports_reasoning.value_or(false) && !ava::config::provider_accepts_reasoning_format(*openrouter, "reasoning_content") &&
+               openrouter_off.explicit_mapping && openrouter_off.supported && !openrouter_off.provider_level && openrouter_high.explicit_mapping &&
+               !openrouter_high.supported,
            "OpenRouter Kimi metadata stays non-reasoning until OpenRouter-native reasoning is implemented");
+  }
+
+  auto const gemini_model = ava::config::find_model(builtin, "gemini", "gemini-2.5-pro");
+  expect(gemini_model.has_value(), "Gemini metadata fixture exists");
+  if (gemini_model)
+  {
+    auto const gemini_levels = ava::config::supported_reasoning_levels(*gemini_model);
+    auto const gemini_high = ava::config::resolve_reasoning_level(*gemini_model, "high");
+    expect(!gemini_model->supports_reasoning.value_or(false) && gemini_levels.size() == 1 && gemini_levels.front() == "off" && gemini_high.explicit_mapping &&
+               !gemini_high.supported,
+           "Gemini reasoning policy explicitly blocks active reasoning levels while preserving non-reasoning off state");
   }
 
   auto const deepseek_profile = ava::config::find_provider_profile("deepseek");
@@ -1406,6 +1450,8 @@ void test_model_and_prompt_config()
             "\"output_modalities\":[\"text\"],\"reasoning_format\":\"reasoning_content\","
             "\"supports_tools\":false,\"supports_streaming\":true,\"supports_reasoning\":true,"
             "\"reports_usage\":true,\"reasoning_levels\":[\"low\",\"high\"],"
+            "\"reasoning_level_map\":{\"off\":\"none\",\"minimal\":null,\"low\":\"low\",\"high\":\"max\","
+            "\"ultra\":\"turbo\",\"future\":true,\"typo\":123},"
             "\"compatibility_quirks\":[\"requires_strict_tools\"],"
             "\"pricing\":{\"input_per_million\":1.5,\"output_per_million\":2.5}}]}";
   }
@@ -1427,12 +1473,22 @@ void test_model_and_prompt_config()
                                           .estimated = false};
     auto cost = selected.pricing ? ava::config::usage_cost_usd(*selected.pricing, usage) : std::nullopt;
     auto const cost_value = cost.value_or(0.0L);
+    auto const custom_off = ava::config::resolve_reasoning_level(selected, "off");
+    auto const custom_minimal = ava::config::resolve_reasoning_level(selected, "minimal");
+    auto const custom_high = ava::config::resolve_reasoning_level(selected, "high");
+    auto const custom_ultra = ava::config::resolve_reasoning_level(selected, "ultra");
+    auto const custom_future = ava::config::resolve_reasoning_level(selected, "future");
+    auto const custom_typo = ava::config::resolve_reasoning_level(selected, "typo");
     expect(selected.context_window_tokens == 12345 && selected.max_output_tokens == 678 && selected.api_family == "openai_responses" &&
                selected.input_modalities.size() == 2 && selected.output_modalities.size() == 1 && selected.output_modalities[0] == "text" &&
                selected.reasoning_format == "reasoning_content" && selected.supports_tools == false && selected.supports_streaming == true &&
                selected.supports_reasoning == true && selected.reports_usage == true && selected.reasoning_levels.size() == 2 &&
-               selected.compatibility_quirks.size() == 1 && cost && cost_value > 0.0064L && cost_value < 0.0066L,
-           "model registry parses local capability and pricing metadata and calculates cost");
+               selected.compatibility_quirks.size() == 1 && cost && cost_value > 0.0064L && cost_value < 0.0066L && custom_off.provider_level &&
+               *custom_off.provider_level == "none" && custom_minimal.explicit_mapping && !custom_minimal.supported && custom_high.provider_level &&
+               *custom_high.provider_level == "max" && custom_ultra.explicit_mapping && custom_ultra.supported && custom_ultra.provider_level &&
+               *custom_ultra.provider_level == "turbo" && custom_future.explicit_mapping && custom_future.supported && !custom_future.provider_level &&
+               custom_typo.explicit_mapping && !custom_typo.supported,
+           "model registry parses local capability, reasoning-level policy, and pricing metadata and calculates cost");
     expect(!ava::config::usage_cost_usd(ava::config::ModelPricing{}, usage), "usage cost remains unknown when pricing rates are absent");
     ava::provider::TokenUsage const cached_usage{.input_tokens = 1000,
                                                  .output_tokens = 0,
@@ -1457,11 +1513,13 @@ void test_model_and_prompt_config()
   if (registry)
   {
     selected = ava::config::select_default_model(*registry);
+    auto const preserved_off = ava::config::resolve_reasoning_level(selected, "off");
     expect(selected.display_name == "Custom GPT" && selected.context_window_tokens == 272'000 && selected.max_output_tokens == 128'000 && selected.pricing &&
                selected.pricing->input_per_million && *selected.pricing->input_per_million == 5.0L && selected.supports_reasoning == true &&
                selected.reports_usage == true && selected.reasoning_levels.size() == 4 && selected.output_modalities.size() == 1 &&
-               selected.output_modalities[0] == "text" && selected.reasoning_format == "openai_responses",
-           "builtin model overrides preserve missing capability metadata");
+               selected.output_modalities[0] == "text" && selected.reasoning_format == "openai_responses" && preserved_off.provider_level &&
+               *preserved_off.provider_level == "none",
+           "builtin model overrides preserve missing capability and reasoning-level policy metadata");
   }
 
   auto saved_scope = ava::config::store_scoped_model_cycle(paths, std::vector<std::string>{"openai/gpt-5.5", "anthropic/claude-sonnet-4-5"});

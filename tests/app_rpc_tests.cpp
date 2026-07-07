@@ -49,6 +49,19 @@ std::string rpc_tiny_png_bytes()
   return bytes;
 }
 
+std::optional<std::string> rpc_string_field_from_output(std::string_view jsonl, std::string_view field)
+{
+  auto const key = "\"" + std::string(field) + "\":\"";
+  auto const start = jsonl.find(key);
+  if (start == std::string_view::npos)
+    return std::nullopt;
+  auto value_start = start + key.size();
+  auto const end = jsonl.find('"', value_start);
+  if (end == std::string_view::npos)
+    return std::nullopt;
+  return std::string(jsonl.substr(value_start, end - value_start));
+}
+
 void test_app_rpc_prompt_payload_serialization()
 {
   auto const permission_json =
@@ -325,6 +338,14 @@ void test_app_rpc_parsing_and_response_serialization()
       ava::app::parse_rpc_command_line(R"JSON({"id":"plugin","type":"run_plugin_command","plugin_id":"com.example.tool","name":"status","arguments":123})JSON");
   expect(!non_object_plugin_command_args && non_object_plugin_command_args.error().message() == "RPC arguments must be an object",
          "RPC parser rejects non-object plugin command arguments instead of silently defaulting");
+
+  auto direct_run_command = ava::app::parse_rpc_command_line(R"JSON({"id":"cmd","type":"run_command","command":"printf rpc-direct"})JSON");
+  expect(direct_run_command && direct_run_command->command && *direct_run_command->command == "printf rpc-direct",
+         "RPC parser preserves direct command execution payloads");
+
+  auto invalid_direct_run_command = ava::app::parse_rpc_command_line(R"JSON({"id":"cmd","type":"run_command","command":123})JSON");
+  expect(!invalid_direct_run_command && invalid_direct_run_command.error().message() == "RPC command must be a string",
+         "RPC parser rejects non-string direct command execution payloads");
 
   auto malformed_with_string_prefix = ava::app::parse_rpc_command_line(R"JSON({"id":"bad","type":"summarize_branch","session_id":"session_a" garbage})JSON");
   expect(!malformed_with_string_prefix && malformed_with_string_prefix.error().message() == "malformed RPC JSON object",
@@ -1234,6 +1255,8 @@ void test_app_rpc_reasoning_commands()
       "{\"id\":\"set\",\"type\":\"set_reasoning\",\"reasoning_level\":\"medium\"}\n"
       "{\"id\":\"state\",\"type\":\"get_state\"}\n"
       "{\"id\":\"invalid\",\"type\":\"set_reasoning\",\"reasoning_level\":\"ultra\"}\n"
+      "{\"id\":\"set-off\",\"type\":\"set_reasoning\",\"reasoning_level\":\" off \"}\n"
+      "{\"id\":\"state-off\",\"type\":\"get_state\"}\n"
       "{\"id\":\"clear\",\"type\":\"clear_reasoning\"}\n");
   std::ostringstream out;
   auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
@@ -1246,6 +1269,9 @@ void test_app_rpc_reasoning_commands()
          "RPC get_state reflects selected reasoning");
   expect(jsonl.find("\"id\":\"invalid\"") != std::string::npos && jsonl.find("reasoning level is not supported") != std::string::npos,
          "RPC set_reasoning reports invalid reasoning levels");
+  expect(jsonl.find("\"id\":\"set-off\"") != std::string::npos && jsonl.find("\"id\":\"state-off\"") != std::string::npos &&
+             jsonl.rfind("\"reasoning_enabled\":false") != std::string::npos,
+         "RPC set_reasoning off clears reasoning state instead of storing an active off selection");
   expect(jsonl.find("\"id\":\"clear\"") != std::string::npos && jsonl.rfind("\"reasoning_enabled\":false") != std::string::npos,
          "RPC clear_reasoning disables reasoning state");
   expect(!session->reasoning, "RPC clear_reasoning updates active session state");
@@ -1257,6 +1283,53 @@ void test_app_rpc_reasoning_commands()
     auto const reasoning_changes = std::ranges::count_if(*entries, [](auto const& entry) { return entry.type == ava::session::EntryType::ReasoningChange; });
     expect(reasoning_changes == 2, "RPC reasoning commands persist set and clear reasoning_change entries");
   }
+}
+
+void test_app_rpc_reasoning_model_serialization_exposes_resolved_maps()
+{
+  auto const root = temp_root() / "app-rpc-reasoning-model-serialization";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC reasoning serialization test opens runtime session");
+  if (!session)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  std::istringstream in(
+      "{\"id\":\"models\",\"type\":\"list_models\"}\n"
+      "{\"id\":\"model\",\"type\":\"set_model\",\"provider\":\"deepseek\",\"model\":\"deepseek-v4-flash\"}\n"
+      "{\"id\":\"set\",\"type\":\"set_reasoning\",\"reasoning_level\":\"xhigh\"}\n"
+      "{\"id\":\"state\",\"type\":\"get_state\"}\n");
+  std::ostringstream out;
+  auto result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out);
+  auto const jsonl = out.str();
+
+  expect(result.has_value(), "RPC reasoning serialization loop completes successfully");
+  expect(jsonl.find("\"id\":\"models\"") != std::string::npos && jsonl.find("\"raw_reasoning_levels\"") != std::string::npos &&
+             jsonl.find("\"reasoning_level_map\":{") != std::string::npos && jsonl.find("\"xhigh\":\"max\"") != std::string::npos &&
+             jsonl.find("\"minimal\":null") != std::string::npos,
+         "RPC list_models exposes raw levels plus resolved reasoning map policy");
+  expect(jsonl.find("\"id\":\"set\"") != std::string::npos && jsonl.find("\"reasoning_level\":\"xhigh\"") != std::string::npos &&
+             jsonl.find("\"reasoning_provider_level\":\"max\"") != std::string::npos && jsonl.find("\"id\":\"state\"") != std::string::npos,
+         "RPC get_state exposes provider-level reasoning rewrites when they differ from user-facing levels");
+
+  auto entries = session->store.load();
+  auto const persisted_provider_level = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+                                          return entry.type == ava::session::EntryType::ReasoningChange &&
+                                                 entry.data_json.find("\"level\":\"xhigh\"") != std::string::npos &&
+                                                 entry.data_json.find("\"provider_level\":\"max\"") != std::string::npos;
+                                        });
+  expect(persisted_provider_level, "RPC reasoning changes persist provider-level rewrites for replay diagnostics");
 }
 
 void test_app_rpc_protocol_version_and_session_commands()
@@ -1379,8 +1452,10 @@ void test_app_rpc_protocol_version_and_session_commands()
   expect(result.has_value(), "RPC protocol/session loop completes successfully");
   expect(jsonl.find("\"id\":\"proto\"") != std::string::npos && jsonl.find("\"protocol_version\":1") != std::string::npos &&
              jsonl.find("\"supported_protocol_versions\":[1]") != std::string::npos && jsonl.find("\"session_entry_version\":3") != std::string::npos &&
-             jsonl.find("\"supported_session_entry_versions\":[0,1,2,3]") != std::string::npos,
-         "RPC get_protocol reports supported protocol and session entry versions");
+             jsonl.find("\"supported_session_entry_versions\":[0,1,2,3]") != std::string::npos &&
+             jsonl.find("\"capabilities\":[\"direct_bash_rpc\"]") != std::string::npos &&
+             jsonl.find("\"direct_command_types\":[\"run_bash\",\"run_command\"]") != std::string::npos,
+         "RPC get_protocol reports supported protocol, session entry versions, and direct bash capabilities");
   expect(jsonl.find("\"id\":\"messages\"") != std::string::npos && jsonl.find("\"messages\"") != std::string::npos &&
              jsonl.find(current_entry_version) != std::string::npos && jsonl.find("hello") != std::string::npos && jsonl.find("answer") != std::string::npos &&
              jsonl.find("visible reasoning") != std::string::npos && jsonl.find("hidden redacted rpc reasoning") == std::string::npos &&
@@ -1585,6 +1660,171 @@ void test_app_rpc_command_responses_for_context_compact_export()
          "RPC command responses expose dispatcher output plus Pi-style export_html records");
 }
 
+void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
+{
+  auto const root = temp_root() / "app-rpc-direct-run-command";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC direct command test opens runtime session");
+  if (!session)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult result;
+  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out); });
+
+  input_buffer.push(R"JSON({"id":"cmd-allow","type":"run_command","command":"printf rpc-direct"})JSON"
+                    "\n");
+  bool const permission_requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
+  auto const request_id = rpc_string_field_from_output(output_buffer.str(), "resolver_request_id");
+  expect(permission_requested && request_id, "RPC direct command emits an Operation::RunCommand permission request before execution");
+  if (request_id)
+  {
+    input_buffer.push("{\"id\":\"allow\",\"type\":\"permission_reply\",\"request_id\":\"" + *request_id +
+                      "\",\"correlation_id\":\"cmd-allow\",\"decision\":\"allow\",\"reason\":\"approved direct rpc\"}\n");
+  }
+  bool const completed = output_buffer.wait_contains("\"output\":\"rpc-direct\"", std::chrono::seconds(2));
+  input_buffer.close();
+  rpc_thread.join();
+
+  auto const jsonl = output_buffer.str();
+  auto entries = session->store.load();
+  auto const audited_allow = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+                               return entry.type == ava::session::EntryType::PermissionDecision &&
+                                      entry.data_json.find("\"operation\":\"bash\"") != std::string::npos &&
+                                      entry.data_json.find("\"command\":\"printf rpc-direct\"") != std::string::npos &&
+                                      entry.data_json.find("\"resolution\":\"allow\"") != std::string::npos;
+                             });
+  expect(result.has_value(), "RPC direct command loop completes successfully");
+  expect(transport.requests().empty(), "RPC direct command execution does not dispatch provider requests");
+  expect(completed && jsonl.find("\"id\":\"cmd-allow\"") != std::string::npos && jsonl.find("\"success\":true") != std::string::npos &&
+             jsonl.find("\"operation\":\"bash\"") != std::string::npos && jsonl.find("\"command\":\"printf rpc-direct\"") != std::string::npos &&
+             jsonl.find("\"tool\":\"bash\"") != std::string::npos && jsonl.find("\"permission_request_ids\":[\"permreq_") != std::string::npos,
+         "RPC direct command returns structured bash tool output linked to the permission request");
+  expect(audited_allow, "RPC direct command persists permission audit decisions in the session");
+}
+
+void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
+{
+  auto const root = temp_root() / "app-rpc-direct-run-command-deny";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC direct command denial test opens runtime session");
+  if (!session)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult result;
+  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, ava::app::RuntimeRunOptions{}, in, out); });
+
+  input_buffer.push(R"JSON({"id":"cmd-deny","type":"run_bash","command":"touch denied.txt"})JSON"
+                    "\n");
+  bool const permission_requested = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(2));
+  auto const request_id = rpc_string_field_from_output(output_buffer.str(), "resolver_request_id");
+  expect(permission_requested && request_id, "RPC direct command denial emits a permission request before execution");
+  if (request_id)
+  {
+    input_buffer.push("{\"id\":\"deny\",\"type\":\"permission_reply\",\"request_id\":\"" + *request_id +
+                      "\",\"correlation_id\":\"cmd-deny\",\"decision\":\"deny\",\"reason\":\"not approved\"}\n");
+  }
+  bool const denied = output_buffer.wait_contains("command requires permission", std::chrono::seconds(2));
+  input_buffer.close();
+  rpc_thread.join();
+
+  auto const jsonl = output_buffer.str();
+  auto entries = session->store.load();
+  auto const audited_deny = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+                              return entry.type == ava::session::EntryType::PermissionDecision &&
+                                     entry.data_json.find("\"operation\":\"bash\"") != std::string::npos &&
+                                     entry.data_json.find("\"command\":\"touch denied.txt\"") != std::string::npos &&
+                                     entry.data_json.find("\"resolution\":\"deny\"") != std::string::npos;
+                            });
+  expect(result.has_value(), "RPC direct command denial loop completes successfully");
+  expect(denied && jsonl.find("\"id\":\"cmd-deny\"") != std::string::npos && jsonl.find("\"tool\":\"bash\"") != std::string::npos,
+         "RPC direct command denial returns a structured bash tool error");
+  expect(!std::filesystem::exists(workspace / "denied.txt"), "RPC direct command denial blocks process execution before side effects");
+  expect(audited_deny, "RPC direct command denial persists the denied permission audit decision");
+}
+
+void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
+{
+  auto const root = temp_root() / "app-rpc-direct-run-command-cancel";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "RPC direct command cancellation test opens runtime session");
+  if (!session)
+    return;
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult result;
+  ava::app::RuntimeRunOptions runtime_options;
+  runtime_options.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  std::jthread rpc_thread([&] { result = ava::app::run_rpc_loop(*session, open_options, provider, transport, runtime_options, in, out); });
+
+  input_buffer.push(R"JSON({"id":"cmd-sleep","type":"run_command","command":"sleep 5"})JSON"
+                    "\n");
+  bool const started = output_buffer.wait_contains("\"name\":\"tool_start\"", std::chrono::seconds(2));
+  input_buffer.push(R"JSON({"id":"cmd-second","type":"run_bash","command":"printf should-not-run"})JSON"
+                    "\n");
+  bool const active_rejected = output_buffer.wait_contains("RPC command is unavailable while a prompt is active", std::chrono::seconds(2));
+  input_buffer.push(R"JSON({"id":"cancel-sleep","type":"cancel"})JSON"
+                    "\n");
+  bool const canceled = output_buffer.wait_contains("\"canceled\":true", std::chrono::seconds(2));
+  input_buffer.close();
+  rpc_thread.join();
+
+  auto const jsonl = output_buffer.str();
+  expect(result.has_value(), "RPC direct command cancellation loop completes successfully");
+  expect(transport.requests().empty(), "RPC direct command cancellation does not dispatch provider requests");
+  expect(started && active_rejected && canceled && jsonl.find("\"id\":\"cmd-second\"") != std::string::npos &&
+             jsonl.find("should-not-run") == std::string::npos && jsonl.find("\"id\":\"cmd-sleep\"") != std::string::npos,
+         "RPC direct command rejects concurrent commands and cancels the running process through the bash tool context");
+}
+
 void test_app_rpc_compact_provider_failure_is_error_response()
 {
   auto const root = temp_root() / "app-rpc-compact-failure";
@@ -1682,10 +1922,14 @@ void run_app_rpc_tests()
   test_app_rpc_summarize_branch_appends_to_source_session();
   test_app_rpc_model_commands();
   test_app_rpc_reasoning_commands();
+  test_app_rpc_reasoning_model_serialization_exposes_resolved_maps();
   test_app_rpc_protocol_version_and_session_commands();
   test_app_rpc_protocol_version_and_resolver_reply_errors();
   test_app_rpc_mcp_command_responses();
   test_app_rpc_command_responses_for_context_compact_export();
+  test_app_rpc_direct_run_command_permission_reply_executes_and_audits();
+  test_app_rpc_direct_run_command_permission_denial_blocks_execution();
+  test_app_rpc_direct_run_command_active_rejects_and_cancels_process();
   test_app_rpc_compact_provider_failure_is_error_response();
   test_app_rpc_compact_cancellation_is_error_response_without_provider_request();
 }

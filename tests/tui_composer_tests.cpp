@@ -21,6 +21,7 @@
 #include "ava/tui/runtime.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
+#include "ava/tui/text_wrap.h"
 #include "ava/tui/theme.h"
 #include "ava/tui/tool_cards.h"
 #include "ava/config/auth.h"
@@ -207,6 +208,39 @@ void test_tui_composer_rendering_and_input()
              ava::tui::detail::fit_line_preserving_sgr(std::string("\x1b]8;;https://example.test\x1b\\abcdef\x1b]8;;\x1b\\"), 4).find("\x1b]8;;\x1b\\...") !=
                  std::string::npos,
          "tui width helpers treat OSC 8 hyperlinks as zero-width and close truncated links before ellipses");
+  auto const underlined_wrap = ava::tui::detail::wrap_ansi_text(std::string(ava::tui::detail::kSgrUnderline) + "abcdef", 3);
+  expect(underlined_wrap.size() == 2 && underlined_wrap[0] == std::string(ava::tui::detail::kSgrUnderline) + "abc" + std::string(ava::tui::detail::kSgrReset) &&
+             underlined_wrap[1] == std::string(ava::tui::detail::kSgrUnderline) + "def" + std::string(ava::tui::detail::kSgrReset),
+         "tui ANSI wrapping closes active underline at synthetic line breaks and reopens it on continuations");
+  auto const reset_before_wrap =
+      ava::tui::detail::wrap_ansi_text(std::string(ava::tui::detail::kSgrUnderline) + "abc" + std::string(ava::tui::detail::kSgrReset) + "def", 3);
+  expect(reset_before_wrap.size() == 2 && reset_before_wrap[1] == "def", "tui ANSI wrapping honors explicit SGR resets before continuing with plain text");
+  auto const background_sgr = std::string("\x1b[48;2;1;2;3m");
+  auto const background_wrap = ava::tui::detail::wrap_ansi_text(background_sgr + "abcd" + std::string(ava::tui::detail::kSgrReset), 2);
+  expect(background_wrap.size() == 2 && background_wrap[0] == background_sgr + "ab" + std::string(ava::tui::detail::kSgrReset) &&
+             background_wrap[1] == background_sgr + "cd" + std::string(ava::tui::detail::kSgrReset),
+         "tui ANSI wrapping preserves truecolor backgrounds across wrapped rows when the background remains active");
+  auto const long_word_wrap = ava::tui::detail::wrap_ansi_text("abcdef", 2);
+  expect(long_word_wrap == std::vector<std::string>({"ab", "cd", "ef"}), "tui ANSI wrapping hard-wraps long unbroken words deterministically");
+  auto const cjk_ansi_wrap = ava::tui::detail::wrap_ansi_text(std::string("a") + "\xE7\x95\x8C" + "\xE7\x95\x8C" + "b", 3);
+  expect(cjk_ansi_wrap.size() == 2 && cjk_ansi_wrap[0] == std::string("a") + "\xE7\x95\x8C" && cjk_ansi_wrap[1] == std::string("\xE7\x95\x8C") + "b" &&
+             ava::tui::detail::terminal_text_columns(cjk_ansi_wrap[0]) == 3 && ava::tui::detail::terminal_text_columns(cjk_ansi_wrap[1]) == 3,
+         "tui ANSI wrapping uses AVA display-width accounting for CJK cells");
+  auto const newline_wrap = ava::tui::detail::wrap_ansi_text("ab\r\ncd\nef", 2);
+  expect(newline_wrap == std::vector<std::string>({"ab", "cd", "ef"}), "tui ANSI wrapping treats CRLF and LF as explicit line breaks");
+  expect(ava::tui::detail::wrap_ansi_text("", 4) == std::vector<std::string>({""}), "tui ANSI wrapping returns one empty row for empty input");
+  expect(ava::tui::detail::wrap_ansi_text("ab", 0) == std::vector<std::string>({"a", "b"}), "tui ANSI wrapping clamps zero width to one column");
+  auto const osc_open = std::string("\x1b]8;;https://example.test\x1b\\");
+  auto const osc_close = std::string("\x1b]8;;\x1b\\");
+  auto const osc_wrap = ava::tui::detail::wrap_ansi_text(osc_open + "abcd" + osc_close, 2);
+  expect(osc_wrap.size() == 2 && osc_wrap[0] == osc_open + "ab" + osc_close && osc_wrap[1] == osc_open + "cd" + osc_close,
+         "tui ANSI wrapping closes and reopens OSC 8 hyperlinks at synthetic line breaks");
+  auto const malformed_color_wrap = ava::tui::detail::wrap_ansi_text(std::string("\x1b[38;2m") + "ab", 1);
+  expect(malformed_color_wrap == std::vector<std::string>({std::string("\x1b[38;2m") + "a", "b"}),
+         "tui ANSI wrapping preserves malformed extended color bytes without leaking dim state");
+  auto const sanitized_wrap = ava::tui::detail::wrap_transcript_text(std::string(ava::tui::detail::kSgrUnderline) + "ab", 3);
+  expect(!sanitized_wrap.empty() && sanitized_wrap[0].find('\x1b') == std::string::npos,
+         "production transcript wrapping still sanitizes raw escape sequences before wrapping");
   expect(ava::tui::terminal_kitty_keyboard_push_sequence() == std::string_view("\x1b[>5u") &&
              ava::tui::terminal_kitty_keyboard_query_sequence() == std::string_view("\x1b[>5u\x1b[?u\x1b[c") &&
              ava::tui::terminal_kitty_keyboard_pop_sequence() == std::string_view("\x1b[<u"),
@@ -3613,24 +3647,21 @@ void test_tui_composer_rendering_and_input()
              std::ranges::any_of(permission_modal, [](std::string const& line) { return strip_sgr(line).find("Esc reject") != std::string::npos; }),
          "tui permission dock controls stay within 80 visible columns without losing controls");
 
-  auto const external_permission_modal = ava::tui::render_composer(
-      ava::tui::ComposerSnapshot{.mode = "build",
-                                 .provider = "openai",
-                                 .model = "gpt-5.5",
-                                 .session_id = "session_test",
-                                 .input = "",
-                                 .status = "permission required",
-                                 .transcript = {},
-                                 .permission_prompt = ava::tui::PermissionPromptView{.tool_name = "read_file",
-                                                                                     .operation = "read",
-                                                                                     .target = "/tmp/outside.txt",
-                                                                                     .reason = "target is outside the workspace"},
-                                 .width = 80,
-                                 .height = 8});
+  auto const external_permission_modal = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "permission required",
+      .transcript = {},
+      .permission_prompt =
+          ava::tui::PermissionPromptView{
+              .tool_name = "read_file", .operation = "read", .target = "/tmp/outside.txt", .reason = "target is outside the workspace"},
+      .width = 80,
+      .height = 8});
   expect(std::ranges::any_of(external_permission_modal,
-                             [](std::string const& line) {
-                               return strip_sgr(line).find("Access external directory /tmp/outside.txt") != std::string::npos;
-                             }),
+                             [](std::string const& line) { return strip_sgr(line).find("Access external directory /tmp/outside.txt") != std::string::npos; }),
          "tui permission dock uses OpenCode-style external-directory wording for outside-workspace targets");
 
   auto const remembered_permission_modal =

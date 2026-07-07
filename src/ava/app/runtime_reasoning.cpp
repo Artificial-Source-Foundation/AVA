@@ -9,63 +9,58 @@
 namespace ava::app::runtime {
 namespace {
 
-bool has_reasoning_level(ava::config::ModelInfo const& model, std::string_view level)
-{
-  return std::ranges::find(model.reasoning_levels, level) != model.reasoning_levels.end();
-}
-
 bool same_reasoning_selection(std::optional<RuntimeReasoningSelection> const& left, std::optional<RuntimeReasoningSelection> const& right)
 {
   if (!left || !right)
     return !left && !right;
-  return left->level == right->level && left->budget_tokens == right->budget_tokens && left->display == right->display;
+  return left->level == right->level && left->provider_level == right->provider_level && left->budget_tokens == right->budget_tokens &&
+         left->display == right->display;
 }
 
-ava::core::VoidResult validate_reasoning_selection(ava::config::ModelInfo const& model, RuntimeReasoningSelection const& selection)
+ava::core::Result<RuntimeReasoningSelection> resolve_runtime_reasoning_selection(ava::config::ModelInfo const& model, RuntimeReasoningSelection selection)
 {
   auto const level = trim(selection.level);
   if (level.empty())
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reasoning level is required"));
   }
-  if (!model.supports_reasoning.value_or(false))
+  auto const resolved = ava::config::resolve_reasoning_level(model, level);
+  if (!resolved.supported)
+  {
+    auto error =
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reasoning level is not supported by the current model's supported reasoning levels");
+    error.with_context("provider", model.provider_id);
+    error.with_context("model", model.model_id);
+    error.with_context("level", std::string(level));
+    return std::unexpected(std::move(error));
+  }
+  if (!model.supports_reasoning.value_or(false) && !resolved.explicit_mapping)
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "current model does not declare reasoning support");
     error.with_context("provider", model.provider_id);
     error.with_context("model", model.model_id);
     return std::unexpected(std::move(error));
   }
-  if (model.reasoning_levels.empty())
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "current model does not declare supported reasoning levels");
-    error.with_context("provider", model.provider_id);
-    error.with_context("model", model.model_id);
-    return std::unexpected(std::move(error));
-  }
-  if (!model.reasoning_levels.empty() && !has_reasoning_level(model, level))
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reasoning level is not supported by the current model");
-    error.with_context("provider", model.provider_id);
-    error.with_context("model", model.model_id);
-    error.with_context("level", std::string(level));
-    return std::unexpected(std::move(error));
-  }
   if (selection.budget_tokens && *selection.budget_tokens <= 0)
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reasoning budget must be positive"));
   }
-  if (auto valid = ava::config::validate_reasoning_request(model, level, selection.budget_tokens, selection.display); !valid)
+  auto const provider_level = resolved.provider_level.value_or(std::string(level));
+  if (auto valid = ava::config::validate_reasoning_request(model, provider_level, selection.budget_tokens, selection.display); !valid)
   {
     return std::unexpected(std::move(valid.error()));
   }
-  return {};
+  selection.level = std::string(level);
+  selection.provider_level = resolved.provider_level;
+  return selection;
 }
 
 }  // namespace
 
 ava::provider::ProviderReasoningOptions provider_reasoning_options(RuntimeReasoningSelection const& selection)
 {
-  return ava::provider::ProviderReasoningOptions{.type = selection.level, .budget_tokens = selection.budget_tokens, .display = selection.display};
+  return ava::provider::ProviderReasoningOptions{
+      .type = selection.provider_level.value_or(selection.level), .budget_tokens = selection.budget_tokens, .display = selection.display};
 }
 
 std::optional<RuntimeReasoningSelection> latest_persisted_reasoning(std::vector<ava::session::SessionEntry> const& entries, ava::config::ModelInfo const& model)
@@ -102,14 +97,16 @@ std::optional<RuntimeReasoningSelection> latest_persisted_reasoning(std::vector<
       continue;
     }
     latest = RuntimeReasoningSelection{.level = std::move(level),
+                                       .provider_level = std::nullopt,
                                        .budget_tokens = ava::core::json::integer_field(entry.data_json, "budget_tokens"),
                                        .display = ava::core::json::string_field(entry.data_json, "display").value_or("")};
   }
   if (!saw_change || !latest)
     return std::nullopt;
-  if (auto valid = validate_reasoning_selection(model, *latest); !valid)
+  auto resolved = resolve_runtime_reasoning_selection(model, *latest);
+  if (!resolved)
     return std::nullopt;
-  return latest;
+  return *resolved;
 }
 
 }  // namespace ava::app::runtime
@@ -122,10 +119,12 @@ ava::core::Result<bool> set_runtime_reasoning(RuntimeSession& session, std::opti
   {
     selection->level = runtime::trimmed_copy(selection->level);
     selection->display = runtime::trimmed_copy(selection->display);
-    if (auto valid = runtime::validate_reasoning_selection(session.model, *selection); !valid)
+    auto resolved = runtime::resolve_runtime_reasoning_selection(session.model, std::move(*selection));
+    if (!resolved)
     {
-      return std::unexpected(std::move(valid.error()));
+      return std::unexpected(std::move(resolved.error()));
     }
+    selection = std::move(*resolved);
   }
   if (runtime::same_reasoning_selection(session.reasoning, selection))
     return false;

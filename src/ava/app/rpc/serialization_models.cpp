@@ -3,6 +3,7 @@
 #include "ava/app/runtime.h"
 #include "ava/config/model_config.h"
 #include "ava/provider/registry.h"
+#include "ava/core/json.h"
 
 #include <algorithm>
 
@@ -22,6 +23,35 @@ bool has_model_key(std::vector<std::string> const& keys, std::string_view key)
       return true;
   }
   return false;
+}
+
+std::string reasoning_level_map_json(std::vector<ava::config::ModelReasoningLevelMapping> const& mappings)
+{
+  std::string json = "{";
+  for (std::size_t index = 0; index < mappings.size(); ++index)
+  {
+    if (index > 0)
+      json += ',';
+    json += '"';
+    json += ava::core::json::escape(mappings[index].level);
+    json += "\":";
+    if (!mappings[index].supported)
+    {
+      json += "null";
+    }
+    else if (mappings[index].provider_level)
+    {
+      json += '"';
+      json += ava::core::json::escape(*mappings[index].provider_level);
+      json += '"';
+    }
+    else
+    {
+      json += "true";
+    }
+  }
+  json += '}';
+  return json;
 }
 
 }  // namespace
@@ -70,7 +100,11 @@ std::string model_info_json(ava::config::ModelInfo const& model, ava::app::Runti
   json += ",\"output_modalities\":";
   json += string_array_json(model.output_modalities);
   json += ",\"reasoning_levels\":";
+  json += string_array_json(ava::config::supported_reasoning_levels(model));
+  json += ",\"raw_reasoning_levels\":";
   json += string_array_json(model.reasoning_levels);
+  json += ",\"reasoning_level_map\":";
+  json += reasoning_level_map_json(model.reasoning_level_mappings);
   if (!model.reasoning_format.empty())
   {
     json += ',';

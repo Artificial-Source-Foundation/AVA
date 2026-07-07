@@ -99,6 +99,94 @@ ava::core::Result<std::string> decode_rpc_image_base64(std::string_view data)
   return bytes;
 }
 
+bool is_direct_run_command_type(std::string_view type)
+{
+  return type == "run_command" || type == "run_bash";
+}
+
+struct RpcDirectCommandWorkerOptions
+{
+  RuntimeSession& session;
+  std::mutex& session_mutex;
+  rpc::RpcOutput& output;
+  rpc::RpcRunState& run_state;
+  rpc::PendingResolverState& pending_state;
+  RuntimeRunOptions runtime_options;
+  std::string request_id;
+  std::string command;
+};
+
+std::jthread make_rpc_direct_command_worker(RpcDirectCommandWorkerOptions options)
+{
+  return std::jthread([options = std::move(options)](std::stop_token stop_token) mutable {
+    auto cleanup_active_run = [&](std::string_view reason) -> bool {
+      auto cleared = rpc::deactivate_and_clear_queued_messages(options.run_state);
+      if (auto written = rpc::write_skipped_queue_events(options.output, options.session, options.session_mutex, cleared, reason); !written)
+      {
+        rpc::record_async_error(options.run_state, std::move(written.error()));
+        return false;
+      }
+      if (auto written = rpc::write_follow_up_errors(options.output, cleared.follow_up_messages, reason); !written)
+      {
+        rpc::record_async_error(options.run_state, std::move(written.error()));
+        return false;
+      }
+      return true;
+    };
+
+    auto finish_reason = [&] {
+      return (stop_token.stop_requested() || rpc::cancel_requested(options.run_state)) ? std::string_view("canceled")
+                                                                                       : std::string_view("run_completed_before_safe_point");
+    };
+
+    auto finish_with_error = [&](ava::core::Error error) {
+      if (!cleanup_active_run(finish_reason()))
+        return;
+      if (auto written = rpc::write_error(options.output, options.request_id, error); !written)
+      {
+        rpc::record_async_error(options.run_state, std::move(written.error()));
+      }
+    };
+
+    auto policy_permission_resolver = options.runtime_options.permission_resolver;
+    auto base_cancel_requested = options.runtime_options.cancel_requested;
+    auto command_cancel_requested = [&run_state = options.run_state, stop_token, base_cancel_requested] {
+      return stop_token.stop_requested() || rpc::cancel_requested(run_state) || (base_cancel_requested && base_cancel_requested());
+    };
+
+    auto permission_resolver = rpc::make_rpc_permission_resolver(options.pending_state, options.output, options.run_state, options.session,
+                                                                 options.session_mutex, std::move(policy_permission_resolver), options.request_id);
+
+    EventBus event_bus;
+    rpc::subscribe_event_envelope_writer(event_bus, options.output);
+    auto result =
+        run_command(options.session, CommandRequest{.command = "/bash " + options.command,
+                                                    .event_sink = make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(options.request_id)),
+                                                    .permission_resolver = std::move(permission_resolver),
+                                                    .cancel_requested = std::move(command_cancel_requested),
+                                                    .session_mutex = &options.session_mutex});
+    if (!result)
+    {
+      finish_with_error(std::move(result.error()));
+      return;
+    }
+    if (!result->handled)
+    {
+      auto error = rpc::invalid_rpc("command not found");
+      error.with_context("type", "run_command");
+      finish_with_error(std::move(error));
+      return;
+    }
+
+    if (!cleanup_active_run(finish_reason()))
+      return;
+    if (auto written = rpc::write_success(options.output, options.request_id, rpc::command_result_json(*result)); !written)
+    {
+      rpc::record_async_error(options.run_state, std::move(written.error()));
+    }
+  });
+}
+
 }  // namespace
 
 ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options, ava::provider::Provider const& provider,
@@ -338,6 +426,38 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
           .request_id = command->id,
           .message = std::move(*prompt_message),
       }));
+      continue;
+    }
+
+    if (is_direct_run_command_type(command->type))
+    {
+      if (!command->command || command->command->empty())
+      {
+        if (auto written = rpc::write_error(output, command->id, rpc::invalid_rpc(command->type + " requires command")); !written)
+        {
+          return written;
+        }
+        continue;
+      }
+      if (rpc::active_run(run_state))
+      {
+        if (auto written = rpc::write_error(output, command->id, rpc::active_run_reject_error(command->type)); !written)
+        {
+          return written;
+        }
+        continue;
+      }
+
+      reap_finished_prompt();
+      rpc::set_active_run(run_state, true, command->id);
+      prompt_worker.emplace(make_rpc_direct_command_worker(RpcDirectCommandWorkerOptions{.session = session,
+                                                                                         .session_mutex = session_mutex,
+                                                                                         .output = output,
+                                                                                         .run_state = run_state,
+                                                                                         .pending_state = pending_state,
+                                                                                         .runtime_options = runtime_options,
+                                                                                         .request_id = command->id,
+                                                                                         .command = *command->command}));
       continue;
     }
 

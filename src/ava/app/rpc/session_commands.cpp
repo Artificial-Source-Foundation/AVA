@@ -1,14 +1,13 @@
-#include "ava/app/rpc/session_commands.h"
-
 #include "ava/app/rpc/handlers.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/rpc/serialization_json.h"
-
+#include "ava/app/rpc/session_commands.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 
 #include <optional>
+#include <string_view>
 #include <utility>
 
 namespace ava::app::rpc {
@@ -19,6 +18,15 @@ ava::core::Result<bool> handled(ava::core::VoidResult result)
   if (!result)
     return std::unexpected(std::move(result.error()));
   return true;
+}
+
+std::string_view trim_rpc_text(std::string_view text)
+{
+  auto const first = text.find_first_not_of(" \t\r\n");
+  if (first == std::string_view::npos)
+    return {};
+  auto const last = text.find_last_not_of(" \t\r\n");
+  return text.substr(first, last - first + 1);
 }
 
 ava::core::Result<bool> reject_active_run_if_needed(RpcSessionCommandContext const& context)
@@ -389,8 +397,16 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       {
         return handled(write_error(context.output, command.id, invalid_rpc("set_reasoning requires reasoning_level")));
       }
-      selection = RuntimeReasoningSelection{
-          .level = *command.reasoning_level, .budget_tokens = command.reasoning_budget_tokens, .display = command.reasoning_display.value_or("")};
+      auto const level = trim_rpc_text(*command.reasoning_level);
+      if (level.empty())
+      {
+        return handled(write_error(context.output, command.id, invalid_rpc("set_reasoning requires reasoning_level")));
+      }
+      if (level != "off")
+      {
+        selection = RuntimeReasoningSelection{
+            .level = std::string(level), .budget_tokens = command.reasoning_budget_tokens, .display = command.reasoning_display.value_or("")};
+      }
     }
 
     std::lock_guard lock(context.session_mutex);
@@ -471,15 +487,15 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!source_session_id)
       return handled(write_error(context.output, command.id, source_session_id.error()));
     auto summary = ava::session::append_branch_summary(ava::session::BranchSummaryOptions{.workspace_dir = context.session.workspace_dir,
-                                                                                         .root_dir = context.session.paths.sessions_dir,
-                                                                                         .source_session_id = *source_session_id,
-                                                                                         .branch_root_entry_id = *command.branch_root_entry_id,
-                                                                                         .branch_tip_entry_id = *command.branch_tip_entry_id,
-                                                                                         .summary = *command.summary,
-                                                                                         .provider = *command.provider,
-                                                                                         .model = *command.model,
-                                                                                         .reason = *command.reason,
-                                                                                         .actor = "rpc"});
+                                                                                          .root_dir = context.session.paths.sessions_dir,
+                                                                                          .source_session_id = *source_session_id,
+                                                                                          .branch_root_entry_id = *command.branch_root_entry_id,
+                                                                                          .branch_tip_entry_id = *command.branch_tip_entry_id,
+                                                                                          .summary = *command.summary,
+                                                                                          .provider = *command.provider,
+                                                                                          .model = *command.model,
+                                                                                          .reason = *command.reason,
+                                                                                          .actor = "rpc"});
     if (!summary)
       return handled(write_error(context.output, command.id, summary.error()));
     return handled(write_success(context.output, command.id, branch_summary_result_json(*summary)));

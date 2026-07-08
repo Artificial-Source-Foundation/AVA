@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/runtime.h"
@@ -13,6 +14,11 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#ifdef CWDEBUG
+#include "cwds/debug_ostream_operators.h"
+#include "ava/debug/debug_ostream_operators.h"
+#endif
 
 namespace ava::app {
 namespace {
@@ -259,6 +265,29 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
   }
 
   return session;
+}
+
+std::string to_string(RuntimeFreshnessSourceKind kind)
+{
+  using enum RuntimeFreshnessSourceKind;
+  switch (kind)
+  {
+    case SystemPrompt:
+      return "SystemPrompt";
+    case AppendSystemPrompt:
+      return "AppendSystemPrompt";
+    case PromptCommand:
+      return "PromptCommand";
+    case Skill:
+      return "Skill";
+    case PluginManifest:
+      return "PluginManifest";
+    case PluginPrompt:
+      return "PluginPrompt";
+    case PluginSkill:
+      return "PluginSkill";
+  }
+  AI_NEVER_REACHED
 }
 
 }  // namespace ava::app

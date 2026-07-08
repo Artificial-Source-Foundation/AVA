@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/config/model_config.h"
 #include "ava/config/model_profiles.h"
 #include "ava/core/atomic_file.h"
@@ -13,6 +14,10 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#ifdef CWDEBUG
+#include "ava/debug/debug_ostream_operators.h"
+#endif // CWDEBUG
 
 namespace ava::config {
 namespace {

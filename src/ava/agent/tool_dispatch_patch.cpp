@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/agent/tool_dispatch_common.h"
 #include "ava/agent/tool_dispatch_patch.h"
 #include "ava/tools/diff_utils.h"

@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/session/compaction.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"

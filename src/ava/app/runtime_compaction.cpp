@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/runtime_compaction.h"
 #include "ava/app/runtime_json.h"
 #include "ava/app/runtime_retry.h"

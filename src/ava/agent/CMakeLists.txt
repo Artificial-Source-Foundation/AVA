@@ -16,9 +16,11 @@ add_library(ava_agent
   "tool_result.cpp"
   "tool_summaries.cpp"
   "tool_timeline.cpp"
+  "tool_visibility.cpp"
   "usage_accounting.cpp"
 )
 
 target_include_directories(ava_agent PUBLIC "${CMAKE_SOURCE_DIR}/src")
+ava_apply_debugging(ava_agent)
 ava_apply_warnings(ava_agent)
 ava_apply_sanitizers(ava_agent)

@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/display_settings.h"
 
 #include "ava/core/atomic_file.h"

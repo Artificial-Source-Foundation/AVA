@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "debug.h"
 
 namespace ava::app {
 
@@ -21,6 +22,8 @@ struct ProjectTrustResource
 {
   std::string kind;
   std::filesystem::path path;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ProjectTrustState
@@ -31,6 +34,8 @@ struct ProjectTrustState
   std::filesystem::path matched_path;
   std::vector<ProjectTrustResource> protected_resources;
   std::string diagnostic;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::string_view to_string(ProjectTrustDecision decision);

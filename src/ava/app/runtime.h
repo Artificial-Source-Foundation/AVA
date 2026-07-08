@@ -22,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "debug.h"
 
 namespace ava::app {
 
@@ -42,6 +43,8 @@ struct ContextSourceMetadata
   ava::context::ContextSourceType source_type = ava::context::ContextSourceType::Workspace;
   std::size_t byte_count = 0;
   std::uint64_t content_fingerprint = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeFreshnessSourceMetadata
@@ -53,12 +56,16 @@ struct RuntimeFreshnessSourceMetadata
   std::filesystem::path path;
   std::size_t byte_count = 0;
   std::uint64_t content_fingerprint = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimePromptOverrides
 {
   std::optional<std::string> system_prompt = std::nullopt;
   std::vector<std::string> append_system_prompts;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeOpenOptions
@@ -115,6 +122,8 @@ struct RuntimeSession
   bool sessionless = false;
   std::shared_ptr<ava::agent::BackgroundJobRegistry> background_jobs = nullptr;
   bool offline = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimePromptState
@@ -178,5 +187,7 @@ void apply_runtime_prompt_state(RuntimeSession& session, RuntimePromptState prom
                                                                          ava::session::CompactionConfig const& config, std::string_view instructions,
                                                                          std::size_t estimated_tokens, ava::provider::Provider const& provider,
                                                                          ava::provider::Transport& transport, RuntimeRunOptions const& options);
+
+[[nodiscard]] std::string to_string(RuntimeFreshnessSourceKind kind);
 
 }  // namespace ava::app

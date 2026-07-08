@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/config/model_config.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/config/reasoning_profiles.h"

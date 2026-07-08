@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include "debug.h"
 
 namespace ava::config {
 
@@ -17,6 +18,8 @@ struct XdgPaths
   std::filesystem::path models_file;
   std::filesystem::path prompts_dir;
   std::filesystem::path sessions_dir;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] XdgPaths xdg_paths();

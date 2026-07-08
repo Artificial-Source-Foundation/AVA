@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/core/json.h"
 #include "ava/core/version.h"

@@ -53,6 +53,10 @@ option(AVA_BUILD_TESTS "Build AVA tests" ON)
 option(AVA_BUILD_DESKTOP_QML "Build the experimental Qt Quick/QML desktop prototype" OFF)
 option(AVA_ENABLE_SANITIZERS "Build AVA with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
+function(ava_apply_debugging target)
+  target_link_libraries(${target} PRIVATE ${AICXX_OBJECTS_LIST})
+endfunction()
+
 function(ava_apply_warnings target)
   if(MSVC)
     target_compile_options(${target} PRIVATE /W4 /WX)

@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/config/auth_record.h"
 #include "ava/core/json.h"
 

@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_tools.h"
 #include "ava/agent/tool_result.h"

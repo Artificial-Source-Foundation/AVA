@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
@@ -19,6 +20,7 @@
 #include <thread>
 #include <vector>
 #include <iostream>
+#include "debug.h"
 
 namespace {
 

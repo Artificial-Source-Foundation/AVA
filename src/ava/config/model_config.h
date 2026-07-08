@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "debug.h"
 
 namespace ava::config {
 
@@ -57,6 +58,8 @@ struct ModelInfo
   std::vector<std::string> output_modalities = {};
   std::string reasoning_format = {};
   std::vector<ModelReasoningLevelMapping> reasoning_level_mappings = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ModelRegistry

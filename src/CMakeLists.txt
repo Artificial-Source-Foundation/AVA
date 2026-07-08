@@ -25,5 +25,6 @@ target_link_libraries(ava
     ${AVA_BACKEND_LIBRARIES}
 )
 
+ava_apply_debugging(ava)
 ava_apply_warnings(ava)
 ava_apply_sanitizers(ava)

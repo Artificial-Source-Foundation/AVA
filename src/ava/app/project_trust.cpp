@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/project_trust.h"
 #include "ava/core/atomic_file.h"
 #include "ava/core/error.h"
@@ -9,6 +10,10 @@
 #include <optional>
 #include <sstream>
 #include <utility>
+
+#ifdef CWDEBUG
+#include "cwds/debug_ostream_operators.h"
+#endif
 
 namespace ava::app {
 namespace {

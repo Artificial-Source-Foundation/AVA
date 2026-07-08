@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/keybindings.h"
 

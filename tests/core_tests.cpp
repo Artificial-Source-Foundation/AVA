@@ -1,8 +1,10 @@
+#include "sys.h"
 #include "tests/support/test_harness.h"
 
 #include <array>
 #include <iostream>
 #include <string_view>
+#include "debug.h"
 
 void run_core_mode_tests();
 void run_session_tests();
@@ -101,6 +103,8 @@ int print_failures()
 
 int main(int argc, char** argv)
 {
+  Debug(NAMESPACE_DEBUG::init());
+
   if (argc > 2)
   {
     std::cerr << "usage: ava_tests [suite]\n";

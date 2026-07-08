@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/provider/openai_compatible_provider.h"
 #include "ava/provider/openai_compatible_request.h"
 #include "ava/provider/provider_utils.h"

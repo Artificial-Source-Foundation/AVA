@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/clipboard_image.h"
 
 #include "ava/core/error.h"

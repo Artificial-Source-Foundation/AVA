@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/app/runtime_compaction.h"
@@ -27,6 +28,10 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#ifdef CWDEBUG
+#include "ava/debug/debug_ostream_operators.h"
+#endif
 
 namespace ava::app::runtime {
 namespace {

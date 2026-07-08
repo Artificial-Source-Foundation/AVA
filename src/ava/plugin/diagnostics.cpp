@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/enablement.h"
 

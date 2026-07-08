@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/tui/text.h"
 #include "ava/core/error.h"
 

@@ -25,6 +25,7 @@ target_include_directories(terminal_ObjLib
 target_link_libraries(terminal_ObjLib
   PUBLIC
     ${CURSES_LIBRARIES}
+    ${AICXX_OBJECTS_LIST}
 )
 
 # Create an ALIAS target.

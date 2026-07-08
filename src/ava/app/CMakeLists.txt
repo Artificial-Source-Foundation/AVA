@@ -54,5 +54,6 @@ target_include_directories(ava_app
     "${AVA_GENERATED_INCLUDE_DIR}"
 )
 
+ava_apply_debugging(ava_app)
 ava_apply_warnings(ava_app)
 ava_apply_sanitizers(ava_app)

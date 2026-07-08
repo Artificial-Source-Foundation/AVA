@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/tool_cards.h"
 #include "ava/core/json.h"

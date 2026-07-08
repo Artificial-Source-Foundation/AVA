@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/session/record.h"
 #include "ava/session/session_store.h"
@@ -15,6 +16,13 @@
 #include <sstream>
 #include <string_view>
 #include <utility>
+#include "debug.h"
+
+#ifdef CWDEBUG
+#include "ava/debug/debug_ostream_operators.h"
+#include "ava/debug/print_pointer.h"
+#include "cwds/debug_ostream_operators.h"
+#endif
 
 namespace ava::session {
 
@@ -34,6 +42,8 @@ struct SessionStore::EphemeralState
   std::filesystem::path root_dir;
   mutable std::mutex mutex;
   std::vector<SessionEntry> entries;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 namespace {

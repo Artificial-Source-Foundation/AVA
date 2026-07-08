@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/tui/terminal_image.h"
 
 #include <algorithm>

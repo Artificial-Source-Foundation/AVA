@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_models.h"
 #include "ava/config/auth.h"

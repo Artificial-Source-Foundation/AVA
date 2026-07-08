@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/tui/runtime.h"
 
 #include "ava/tui/composer.h"

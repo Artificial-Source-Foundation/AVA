@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/plugin/runner_support.h"
 #include "ava/core/json.h"
 

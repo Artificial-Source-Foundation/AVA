@@ -11,5 +11,6 @@ add_library(ava_plugin
 )
 
 target_include_directories(ava_plugin PUBLIC "${CMAKE_SOURCE_DIR}/src")
+ava_apply_debugging(ava_plugin)
 ava_apply_warnings(ava_plugin)
 ava_apply_sanitizers(ava_plugin)

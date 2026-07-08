@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/command_permissions.h"
 
 #include "ava/app/command_format.h"

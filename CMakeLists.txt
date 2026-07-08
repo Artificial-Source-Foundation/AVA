@@ -96,8 +96,10 @@ endfunction()
 
 # Declare aicxx submodules.
 include(AICxxSubmodules)
+set(AICXX_OBJECTS_LIST ${AICXX_OBJECTS_LIST} enchantum::enchantum CACHE INTERNAL "List of OBJECT libaries that this project uses.")
 
 add_subdirectory(src)
+add_subdirectory(enchantum)
 
 if(AVA_BUILD_TESTS)
   enable_testing()

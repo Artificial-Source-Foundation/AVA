@@ -191,6 +191,8 @@ std::string to_string(ContextSourceType source_type)
       return "workspace";
     case ContextSourceType::Global:
       return "global";
+    case ContextSourceType::Plugin:
+      return "plugin";
   }
   return "unknown";
 }

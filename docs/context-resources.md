@@ -28,12 +28,14 @@ AVA builds the prompt in this order:
 2. `SYSTEM.md`, or `--system-prompt`, replaces that selected base text.
 3. `APPEND_SYSTEM.md`, or repeated `--append-system-prompt`, appends extra text.
 4. Loaded `AGENTS.md`/`CLAUDE.md` instruction files are appended.
-5. Available skills and visible subagents are summarized so the model can decide
-   whether to call `skill` or `task`.
+5. Enabled static plugin prompt resources are appended as plugin context sources.
+6. Available skills, including enabled static plugin skill resources, and visible
+   subagents are summarized so the model can decide whether to call `skill` or
+   `task`.
 
-Prompt commands, MCP prompts, plugin commands, plugin static prompts/skills, and
-LSP config are exposed through their command/tool surfaces; they are not
-silently appended as full prompt text.
+Prompt commands, MCP prompts, plugin commands, dynamic plugin resources, and LSP
+config are exposed through their command/tool surfaces; they are not silently
+appended as full prompt text.
 
 ## `AGENTS.md` / `CLAUDE.md` Instruction Files
 
@@ -118,11 +120,19 @@ Plugins are local out-of-process executables described by `plugin.json`.
 - Global plugins live under `$XDG_CONFIG_HOME/ava/plugins/<plugin-id>/`.
 - Project plugins live under `.ava/plugins/<plugin-id>/` and require project
   trust before discovery.
+- `/plugins install <path>` imports a local plugin directory into the global
+  plugin directory; it validates and copies local files only, never starts the
+  entrypoint, and leaves the plugin disabled until `/plugins enable`.
 - Discovered executable plugins are disabled by default. Enablement is local
   state under `$XDG_STATE_HOME/ava/plugin-enablement.json`.
 - Static plugin prompts and skills are read through `/plugins prompt` and
   `/plugins skill`; plugin commands run through `/plugin run` or contributed
   slash commands.
+- Enabled static plugin prompts are also appended to runtime context, and
+  enabled static plugin skills are listed in `available_skills`. This autoload
+  only reads manifest-declared files, never launches plugin entrypoints or the
+  dynamic resource protocol, and project plugin resources still require project
+  trust.
 - Launch, tool, command, and event-hook paths are permissioned and run in fresh
   plugin processes today.
 
@@ -178,8 +188,8 @@ workspace `AGENTS.md`/`CLAUDE.md` instruction files.
 
 - `/context [query]` reports the prompt mode/model, project trust state, loaded
   context files, and freshness for prompt resources, prompt commands, skills,
-  and plugin resources. Status can show `current`, `changed`, `missing`, or
-  `unreadable`.
+  discovered plugin manifests, and enabled static plugin resources. Status can
+  show `current`, `changed`, `missing`, or `unreadable`.
 - `/context` is diagnostic only; it does not update the current system prompt.
 - `/reload prompts` rebuilds the current prompt state from prompt files,
   instruction files, skills, and subagents, and refreshes freshness metadata for

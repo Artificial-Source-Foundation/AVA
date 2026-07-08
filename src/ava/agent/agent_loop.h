@@ -101,6 +101,9 @@ struct AgentLoopOptions
   bool model_supports_tools = true;
   bool model_supports_streaming = true;
   bool include_project_resources = true;
+  std::filesystem::path plugin_global_plugins_dir = {};
+  std::filesystem::path plugin_project_plugins_dir = {};
+  std::filesystem::path plugin_enablement_file = {};
   std::vector<SubagentDefinition> subagents = {};
   ToolVisibilityOptions tool_visibility = {};
   std::vector<std::string> model_input_modalities = {"text"};

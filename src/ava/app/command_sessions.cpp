@@ -332,6 +332,8 @@ std::string context_file_status(std::filesystem::path const& path, std::size_t l
 {
   std::error_code status_error;
   auto const status = std::filesystem::symlink_status(path, status_error);
+  if (status_error == std::errc::no_such_file_or_directory || status_error == std::errc::not_a_directory)
+    return "status=missing";
   if (status_error)
     return "status=unreadable cause=" + sanitize_inline_text(status_error.message());
   if (!std::filesystem::exists(status))

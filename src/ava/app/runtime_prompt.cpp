@@ -8,6 +8,7 @@
 #include "ava/agent/subagent_config.h"
 #include "ava/tools/file_tools.h"
 #include "ava/plugin/diagnostics.h"
+#include "ava/plugin/static_resources.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
@@ -40,6 +41,40 @@ struct RuntimePromptResource
   std::string name;
   std::filesystem::path path;
   std::string text;
+};
+
+struct LoadedPluginPromptResource
+{
+  std::string scope;
+  std::string plugin_id;
+  std::string name;
+  std::filesystem::path path;
+  std::string text;
+};
+
+struct LoadedPluginSkillResource
+{
+  std::string scope;
+  std::string plugin_id;
+  std::string name;
+  ava::context::LoadedSkill skill;
+};
+
+struct PluginResourceLoadFailure
+{
+  RuntimeFreshnessSourceKind kind = RuntimeFreshnessSourceKind::PluginPrompt;
+  std::string scope;
+  std::string plugin_id;
+  std::string name;
+  std::filesystem::path path;
+};
+
+struct PluginRuntimeResources
+{
+  ava::plugin::PluginDiagnostics diagnostics;
+  std::vector<LoadedPluginPromptResource> prompts;
+  std::vector<LoadedPluginSkillResource> skills;
+  std::vector<PluginResourceLoadFailure> failures;
 };
 
 std::filesystem::path normalized_absolute(std::filesystem::path const& path)
@@ -180,38 +215,162 @@ void add_inline_prompt_freshness_source(std::vector<RuntimeFreshnessSourceMetada
                                                    .content_fingerprint = ava::core::content_fingerprint(text)});
 }
 
+ava::core::Result<LoadedPluginPromptResource> load_plugin_prompt_resource(ava::plugin::PluginStatus const& status,
+                                                                          ava::plugin::PluginResourceContribution const& resource)
+{
+  auto const& manifest = status.plugin.manifest;
+  auto path = ava::plugin::plugin_static_resource_path(manifest, resource);
+  if (!path)
+    return std::unexpected(std::move(path.error()));
+  auto text = read_freshness_file(*path, kMaxPluginResourceFreshnessBytes);
+  if (!text)
+    return std::unexpected(std::move(text.error()));
+  return LoadedPluginPromptResource{.scope = std::string(ava::plugin::to_string(status.plugin.scope)),
+                                    .plugin_id = manifest.id,
+                                    .name = resource.name,
+                                    .path = *path,
+                                    .text = std::move(*text)};
+}
+
+ava::core::Result<LoadedPluginSkillResource> load_plugin_skill_resource(ava::plugin::PluginStatus const& status,
+                                                                        ava::plugin::PluginResourceContribution const& resource)
+{
+  auto const& manifest = status.plugin.manifest;
+  auto path = ava::plugin::plugin_static_resource_path(manifest, resource);
+  if (!path)
+    return std::unexpected(std::move(path.error()));
+  auto skill = ava::context::load_declared_skill_file(ava::context::DeclaredSkillFileOptions{.path = *path,
+                                                                                             .name = resource.name,
+                                                                                             .description = resource.description,
+                                                                                             .source_type = ava::context::SkillSourceType::Plugin,
+                                                                                             .max_file_bytes = kMaxPluginResourceFreshnessBytes});
+  if (!skill)
+    return std::unexpected(std::move(skill.error()));
+  return LoadedPluginSkillResource{
+      .scope = std::string(ava::plugin::to_string(status.plugin.scope)), .plugin_id = manifest.id, .name = resource.name, .skill = std::move(*skill)};
+}
+
+PluginRuntimeResources load_plugin_runtime_resources(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir,
+                                                     bool include_project_resources)
+{
+  PluginRuntimeResources resources;
+  resources.diagnostics = ava::plugin::collect_plugin_diagnostics(
+      ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = paths.ava_config_dir / "plugins",
+                                          .project_plugins_dir = include_project_resources ? workspace_dir / ".ava" / "plugins" : std::filesystem::path{}},
+      paths.ava_state_dir / "plugin-enablement.json", workspace_dir);
+  for (auto const& status : resources.diagnostics.plugins)
+  {
+    if (!status.enabled)
+      continue;
+    auto const& manifest = status.plugin.manifest;
+    for (auto const& prompt : manifest.contributes.prompts)
+    {
+      auto loaded = load_plugin_prompt_resource(status, prompt);
+      if (loaded)
+        resources.prompts.push_back(std::move(*loaded));
+      else
+        resources.failures.push_back(PluginResourceLoadFailure{.kind = RuntimeFreshnessSourceKind::PluginPrompt,
+                                                               .scope = std::string(ava::plugin::to_string(status.plugin.scope)),
+                                                               .plugin_id = manifest.id,
+                                                               .name = prompt.name,
+                                                               .path = ava::plugin::plugin_static_resource_display_path(manifest, prompt)});
+    }
+    for (auto const& skill : manifest.contributes.skills)
+    {
+      auto loaded = load_plugin_skill_resource(status, skill);
+      if (loaded)
+        resources.skills.push_back(std::move(*loaded));
+      else
+        resources.failures.push_back(PluginResourceLoadFailure{.kind = RuntimeFreshnessSourceKind::PluginSkill,
+                                                               .scope = std::string(ava::plugin::to_string(status.plugin.scope)),
+                                                               .plugin_id = manifest.id,
+                                                               .name = skill.name,
+                                                               .path = ava::plugin::plugin_static_resource_display_path(manifest, skill)});
+    }
+  }
+  return resources;
+}
+
+void add_plugin_prompt_context_files(std::vector<ava::context::LoadedContextFile>& files, std::vector<LoadedPluginPromptResource> const& prompts)
+{
+  for (auto const& prompt : prompts)
+  {
+    files.push_back(ava::context::LoadedContextFile{
+        .path = prompt.path, .source_type = ava::context::ContextSourceType::Plugin, .byte_count = prompt.text.size(), .content = prompt.text});
+  }
+}
+
+void add_or_replace_loaded_skill(std::vector<ava::context::LoadedSkill>& skills, ava::context::LoadedSkill skill)
+{
+  auto const existing = std::ranges::find_if(skills, [&](ava::context::LoadedSkill const& item) { return item.name == skill.name; });
+  if (existing != skills.end())
+  {
+    *existing = std::move(skill);
+    return;
+  }
+  skills.push_back(std::move(skill));
+}
+
+void add_plugin_skills(std::vector<ava::context::LoadedSkill>& skills, std::vector<LoadedPluginSkillResource> const& plugin_skills)
+{
+  for (auto const& plugin_skill : plugin_skills)
+  {
+    add_or_replace_loaded_skill(skills, plugin_skill.skill);
+  }
+  std::ranges::sort(skills, [](ava::context::LoadedSkill const& left, ava::context::LoadedSkill const& right) { return left.name < right.name; });
+}
+
 void add_skill_freshness_sources(std::vector<RuntimeFreshnessSourceMetadata>& sources, std::vector<ava::context::LoadedSkill> const& skills)
 {
   for (auto const& skill : skills)
   {
+    if (skill.source_type == ava::context::SkillSourceType::Plugin)
+      continue;
     add_freshness_file(sources, RuntimeFreshnessSourceKind::Skill, ava::context::to_string(skill.source_type), skill.name, skill.name, skill.path,
                        skill.byte_count == 0 ? kMaxRuntimeFreshnessBytes : skill.byte_count);
   }
 }
 
-void add_plugin_resource_freshness_source(std::vector<RuntimeFreshnessSourceMetadata>& sources, ava::plugin::PluginStatus const& status,
-                                          ava::plugin::PluginResourceContribution const& resource, RuntimeFreshnessSourceKind kind)
+void add_loaded_plugin_prompt_freshness_source(std::vector<RuntimeFreshnessSourceMetadata>& sources, LoadedPluginPromptResource const& resource)
 {
-  add_freshness_file(sources, kind, std::string(ava::plugin::to_string(status.plugin.scope)), status.plugin.manifest.id, resource.name,
-                     status.plugin.manifest.directory / resource.path, kMaxPluginResourceFreshnessBytes);
+  sources.push_back(RuntimeFreshnessSourceMetadata{.kind = RuntimeFreshnessSourceKind::PluginPrompt,
+                                                   .scope = resource.scope,
+                                                   .source_id = resource.plugin_id,
+                                                   .name = resource.name,
+                                                   .path = resource.path,
+                                                   .byte_count = resource.text.size(),
+                                                   .content_fingerprint = ava::core::content_fingerprint(resource.text)});
 }
 
-void add_plugin_freshness_sources(std::vector<RuntimeFreshnessSourceMetadata>& sources, ava::config::XdgPaths const& paths,
-                                  std::filesystem::path const& workspace_dir, bool include_project_resources)
+void add_loaded_plugin_skill_freshness_source(std::vector<RuntimeFreshnessSourceMetadata>& sources, LoadedPluginSkillResource const& resource)
 {
-  auto const diagnostics = ava::plugin::collect_plugin_diagnostics(
-      ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = paths.ava_config_dir / "plugins",
-                                          .project_plugins_dir = include_project_resources ? workspace_dir / ".ava" / "plugins" : std::filesystem::path{}},
-      paths.ava_state_dir / "plugin-enablement.json", workspace_dir);
+  add_freshness_file(sources, RuntimeFreshnessSourceKind::PluginSkill, resource.scope, resource.plugin_id, resource.name, resource.skill.path,
+                     resource.skill.byte_count == 0 ? kMaxPluginResourceFreshnessBytes : resource.skill.byte_count);
+}
+
+void add_failed_plugin_resource_freshness_source(std::vector<RuntimeFreshnessSourceMetadata>& sources, PluginResourceLoadFailure const& failure)
+{
+  sources.push_back(RuntimeFreshnessSourceMetadata{.kind = failure.kind,
+                                                   .scope = failure.scope,
+                                                   .source_id = failure.plugin_id,
+                                                   .name = failure.name,
+                                                   .path = failure.path,
+                                                   .byte_count = 0,
+                                                   .content_fingerprint = 0});
+}
+
+void add_plugin_freshness_sources(std::vector<RuntimeFreshnessSourceMetadata>& sources, PluginRuntimeResources const& resources)
+{
+  auto const& diagnostics = resources.diagnostics;
   for (auto const& status : diagnostics.plugins)
   {
     auto const& manifest = status.plugin.manifest;
     add_freshness_file(sources, RuntimeFreshnessSourceKind::PluginManifest, std::string(ava::plugin::to_string(status.plugin.scope)), manifest.id, "manifest",
                        manifest.path);
-    for (auto const& prompt : manifest.contributes.prompts)
-      add_plugin_resource_freshness_source(sources, status, prompt, RuntimeFreshnessSourceKind::PluginPrompt);
-    for (auto const& skill : manifest.contributes.skills) add_plugin_resource_freshness_source(sources, status, skill, RuntimeFreshnessSourceKind::PluginSkill);
   }
+  for (auto const& prompt : resources.prompts) add_loaded_plugin_prompt_freshness_source(sources, prompt);
+  for (auto const& skill : resources.skills) add_loaded_plugin_skill_freshness_source(sources, skill);
+  for (auto const& failure : resources.failures) add_failed_plugin_resource_freshness_source(sources, failure);
 }
 
 RuntimeBasePromptMetadata base_prompt_metadata(ava::config::PromptSelection const& prompt)
@@ -240,6 +399,9 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::Xdg
   if (!loaded_context)
     return std::unexpected(loaded_context.error());
 
+  auto plugin_resources = load_plugin_runtime_resources(paths, workspace_dir, include_project_resources);
+  add_plugin_prompt_context_files(*loaded_context, plugin_resources.prompts);
+
   std::vector<ContextSourceMetadata> context_sources;
   context_sources.reserve(loaded_context->size());
   for (auto const& file : *loaded_context)
@@ -254,6 +416,7 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::Xdg
       .workspace_root = workspace_dir,
       .include_project_skills = include_project_resources,
   });
+  add_plugin_skills(loaded_skills.skills, plugin_resources.skills);
   auto loaded_subagents =
       ava::agent::load_subagents(ava::agent::SubagentLoadOptions{.workspace_root = workspace_dir, .include_project_agents = include_project_resources});
   std::vector<RuntimeFreshnessSourceMetadata> freshness_sources;
@@ -313,7 +476,7 @@ ava::core::Result<RuntimePromptState> load_runtime_prompt_state(ava::config::Xdg
 
   add_prompt_command_freshness_sources(freshness_sources, paths, workspace_dir, include_project_resources);
   add_skill_freshness_sources(freshness_sources, loaded_skills.skills);
-  add_plugin_freshness_sources(freshness_sources, paths, workspace_dir, include_project_resources);
+  add_plugin_freshness_sources(freshness_sources, plugin_resources);
 
   system_prompt += ava::context::format_context_for_prompt(*loaded_context) + ava::context::format_available_skills_for_prompt(loaded_skills.skills) +
                    ava::agent::format_available_subagents_for_prompt(loaded_subagents.subagents);
@@ -584,6 +747,9 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
       .model_supports_tools = session.model.supports_tools.value_or(true),
       .model_supports_streaming = session.model.supports_streaming.value_or(true),
       .include_project_resources = project_resources_trusted(session.project_trust),
+      .plugin_global_plugins_dir = session.paths.ava_config_dir / "plugins",
+      .plugin_project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{},
+      .plugin_enablement_file = session.paths.ava_state_dir / "plugin-enablement.json",
       .subagents = loaded_subagents.subagents,
       .tool_visibility = session.tool_visibility,
       .model_input_modalities = session.model.input_modalities,

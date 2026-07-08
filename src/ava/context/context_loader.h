@@ -13,6 +13,7 @@ enum class ContextSourceType
 {
   Workspace,
   Global,
+  Plugin,
 };
 
 struct LoadedContextFile

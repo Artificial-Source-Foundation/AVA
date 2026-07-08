@@ -5,6 +5,7 @@
 #include "ava/app/project_trust.h"
 #include "ava/tools/file_tools.h"
 #include "ava/plugin/diagnostics.h"
+#include "ava/plugin/static_resources.h"
 #include "ava/mcp/config.h"
 #include "ava/context/skill_loader.h"
 #include "ava/core/fingerprint.h"
@@ -412,9 +413,7 @@ void load_prompt_commands(RegistryBuilder& builder, RuntimeSession const& sessio
   load_prompt_command_dir(builder, session.paths.ava_config_dir / "command", UnifiedCommandSource::PromptGlobal, "global");
 }
 
-void add_prompt_command_source_files(std::vector<PromptCommandSourceFile>& sources,
-                                     std::filesystem::path const& root,
-                                     UnifiedCommandSource source,
+void add_prompt_command_source_files(std::vector<PromptCommandSourceFile>& sources, std::filesystem::path const& root, UnifiedCommandSource source,
                                      std::string_view scope)
 {
   std::vector<CommandRegistryDiagnostic> diagnostics;
@@ -441,10 +440,35 @@ void add_prompt_command_source_files(std::vector<PromptCommandSourceFile>& sourc
   }
 }
 
+ava::plugin::PluginDiscoveryOptions plugin_discovery_options(RuntimeSession const& session)
+{
+  return ava::plugin::PluginDiscoveryOptions{
+      .global_plugins_dir = session.paths.ava_config_dir / "plugins",
+      .project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{}};
+}
+
+std::filesystem::path plugin_enablement_file(RuntimeSession const& session)
+{
+  return session.paths.ava_state_dir / "plugin-enablement.json";
+}
+
+std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(ava::plugin::PluginDiagnostics const& diagnostics)
+{
+  std::vector<ava::context::DeclaredSkillFileOptions> files;
+  for (auto const& skill : ava::plugin::enabled_plugin_static_skill_files(diagnostics))
+  {
+    files.push_back(ava::context::DeclaredSkillFileOptions{
+        .path = skill.path, .name = skill.name, .description = skill.description, .source_type = ava::context::SkillSourceType::Plugin});
+  }
+  return files;
+}
+
 void load_skill_commands(RegistryBuilder& builder, RuntimeSession const& session)
 {
+  auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.workspace_dir);
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = session.workspace_dir,
+      .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
       .include_project_skills = project_resources_trusted(session.project_trust),
   });
   for (auto const& diagnostic : loaded.diagnostics)
@@ -468,19 +492,6 @@ void load_skill_commands(RegistryBuilder& builder, RuntimeSession const& session
     entry.command = "/" + skill.name;
     add_entry(builder, std::move(entry));
   }
-}
-
-ava::plugin::PluginDiscoveryOptions plugin_discovery_options(RuntimeSession const& session)
-{
-  return ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = session.paths.ava_config_dir / "plugins",
-                                             .project_plugins_dir = project_resources_trusted(session.project_trust)
-                                                                        ? session.workspace_dir / ".ava" / "plugins"
-                                                                        : std::filesystem::path{}};
-}
-
-std::filesystem::path plugin_enablement_file(RuntimeSession const& session)
-{
-  return session.paths.ava_state_dir / "plugin-enablement.json";
 }
 
 void load_plugin_commands(RegistryBuilder& builder, RuntimeSession const& session)
@@ -553,9 +564,7 @@ void load_mcp_prompt_commands(RegistryBuilder& builder, RuntimeSession& session,
 {
   auto config_options = ava::mcp::default_mcp_config_options(session.workspace_dir);
   config_options.global_config_file = session.paths.ava_config_dir / "mcp.json";
-  config_options.project_config_file = project_resources_trusted(session.project_trust)
-                                           ? session.workspace_dir / ".ava" / "mcp.json"
-                                           : std::filesystem::path{};
+  config_options.project_config_file = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{};
   auto config = ava::mcp::load_mcp_config(config_options);
   if (!config)
   {
@@ -832,8 +841,7 @@ std::string to_string(UnifiedCommandKind kind)
   return "unknown";
 }
 
-std::vector<PromptCommandSourceFile> prompt_command_source_files(std::filesystem::path const& workspace_dir,
-                                                                 ava::config::XdgPaths const& paths,
+std::vector<PromptCommandSourceFile> prompt_command_source_files(std::filesystem::path const& workspace_dir, ava::config::XdgPaths const& paths,
                                                                  bool include_project_commands)
 {
   std::vector<PromptCommandSourceFile> sources;

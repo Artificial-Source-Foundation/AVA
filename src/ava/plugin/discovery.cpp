@@ -12,6 +12,11 @@ ava::core::Error discovery_error(std::string message, std::filesystem::path cons
   return ava::core::Error(ava::core::ErrorCategory::Io, std::move(message)).with_context("path", path.string());
 }
 
+bool is_install_staging_directory(std::filesystem::path const& path)
+{
+  return path.filename().generic_string().find(".installing-") != std::string::npos;
+}
+
 ava::core::VoidResult discover_from_dir(std::filesystem::path const& root, PluginScope scope, std::vector<DiscoveredPlugin>& out)
 {
   if (root.empty())
@@ -29,6 +34,8 @@ ava::core::VoidResult discover_from_dir(std::filesystem::path const& root, Plugi
     if (it->is_symlink(entry_error) || entry_error)
       continue;
     if (!it->is_directory(entry_error) || entry_error)
+      continue;
+    if (scope == PluginScope::Global && is_install_staging_directory(it->path()))
       continue;
     auto const manifest_path = it->path() / "plugin.json";
     std::error_code manifest_error;

@@ -420,6 +420,12 @@ void test_app_rpc_identifier_validation()
 
   auto path = ava::app::parse_rpc_command_line(R"JSON({"id":"path-ok","type":"validate_plugin","path":"./plugins/bad; path.json"})JSON");
   expect(path && path->path && *path->path == "./plugins/bad; path.json", "RPC parser leaves validate_plugin path validation to the plugin path handler");
+
+  std::string escaped_control_path = R"JSON({"id":"path-bad","type":"install_plugin","path":"./plugins/)JSON";
+  escaped_control_path += "\\u001f";
+  escaped_control_path += R"JSON(bad"})JSON";
+  auto control_path = ava::app::parse_rpc_command_line(escaped_control_path);
+  expect(!control_path && control_path.error().message() == "RPC text field contains invalid character", "RPC parser rejects control bytes in path fields");
 }
 
 void test_app_rpc_prompt_with_fake_transport_streams_events()
@@ -1598,6 +1604,8 @@ void test_app_rpc_command_responses_for_context_compact_export()
   }
   write_app_test_file(workspace / ".ava" / "plugins" / "com.example.rpc" / "plugin.json", app_test_plugin_manifest_json("com.example.rpc", "RPC Plugin"));
   write_app_test_file(workspace / ".ava" / "plugins" / "com.example.rpcbad" / "plugin.json", "{not-json");
+  auto const rpc_install_source = root / "rpc-install-source";
+  write_app_test_file(rpc_install_source / "plugin.json", app_test_plugin_manifest_json("com.example.rpcinstall", "RPC Installed Plugin"));
   auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
   expect(trusted.has_value(),
          trusted ? "RPC command test trusts project plugin resources" : "RPC command test trusts project plugin resources: " + trusted.error().format());
@@ -1617,19 +1625,21 @@ void test_app_rpc_command_responses_for_context_compact_export()
       "# Files Read or Modified\nNone noted.\n# Unresolved Tasks\nNone noted.\n# Next Steps\nContinue.";
   ava::tests::FakeTransport transport(
       {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"" + ava::core::json::escape(rpc_summary) + "\"}"}});
-  std::istringstream in(
-      "{\"id\":\"plugins\",\"type\":\"list_plugins\"}\n"
-      "{\"id\":\"plugin-enable\",\"type\":\"enable_plugin\",\"plugin_id\":\"com.example.rpc\"}\n"
-      "{\"id\":\"plugin-inspect\",\"type\":\"inspect_plugin\",\"plugin_id\":\"com.example.rpc\"}\n"
-      "{\"id\":\"plugin-validate\",\"type\":\"validate_plugin\",\"path\":\".ava/plugins/com.example.rpc/"
-      "plugin.json\"}\n"
-      "{\"id\":\"plugin-failures\",\"type\":\"plugin_failures\"}\n"
-      "{\"id\":\"ctx\",\"type\":\"context\"}\n"
-      "{\"id\":\"read\",\"type\":\"invoke_command\",\"name\":\"read\",\"command_arguments\":\"AGENTS.md\"}\n"
-      "{\"id\":\"cmp\",\"type\":\"compact\",\"instructions\":\"remember rpc facts\"}\n"
-      "{\"id\":\"exp\",\"type\":\"export\"}\n"
-      "{\"id\":\"exp-html\",\"type\":\"export_html\"}\n"
-      "{\"id\":\"exp-html-file\",\"type\":\"export_html\",\"outputPath\":\"rpc-session.html\"}\n");
+  std::istringstream in(std::string("{\"id\":\"plugins\",\"type\":\"list_plugins\"}\n") +
+                        "{\"id\":\"plugin-enable\",\"type\":\"enable_plugin\",\"plugin_id\":\"com.example.rpc\"}\n"
+                        "{\"id\":\"plugin-inspect\",\"type\":\"inspect_plugin\",\"plugin_id\":\"com.example.rpc\"}\n"
+                        "{\"id\":\"plugin-validate\",\"type\":\"validate_plugin\",\"path\":\".ava/plugins/com.example.rpc/"
+                        "plugin.json\"}\n" +
+                        "{\"id\":\"plugin-install\",\"type\":\"install_plugin\",\"path\":\"" + ava::core::json::escape(rpc_install_source.generic_string()) +
+                        "\"}\n"
+                        "{\"id\":\"plugin-remove\",\"type\":\"remove_plugin\",\"plugin_id\":\"com.example.rpcinstall\"}\n"
+                        "{\"id\":\"plugin-failures\",\"type\":\"plugin_failures\"}\n"
+                        "{\"id\":\"ctx\",\"type\":\"context\"}\n"
+                        "{\"id\":\"read\",\"type\":\"invoke_command\",\"name\":\"read\",\"command_arguments\":\"AGENTS.md\"}\n"
+                        "{\"id\":\"cmp\",\"type\":\"compact\",\"instructions\":\"remember rpc facts\"}\n"
+                        "{\"id\":\"exp\",\"type\":\"export\"}\n"
+                        "{\"id\":\"exp-html\",\"type\":\"export_html\"}\n"
+                        "{\"id\":\"exp-html-file\",\"type\":\"export_html\",\"outputPath\":\"rpc-session.html\"}\n");
   std::ostringstream out;
   ava::app::RuntimeRunOptions runtime_options;
   runtime_options.access_token = "token";
@@ -1646,6 +1656,10 @@ void test_app_rpc_command_responses_for_context_compact_export()
              jsonl.find("\"id\":\"plugin-enable\"") != std::string::npos && jsonl.find("No plugin process was started") != std::string::npos &&
              jsonl.find("\"id\":\"plugin-inspect\"") != std::string::npos && jsonl.find("status: enabled") != std::string::npos &&
              jsonl.find("\"id\":\"plugin-validate\"") != std::string::npos && jsonl.find("Valid plugin manifest") != std::string::npos &&
+             jsonl.find("\"id\":\"plugin-install\"") != std::string::npos &&
+             jsonl.find("Installed global plugin com.example.rpcinstall") != std::string::npos && jsonl.find("\"id\":\"plugin-remove\"") != std::string::npos &&
+             jsonl.find("Removed global plugin com.example.rpcinstall") != std::string::npos &&
+             !std::filesystem::exists(paths.ava_config_dir / "plugins" / "com.example.rpcinstall") &&
              jsonl.find("\"id\":\"plugin-failures\"") != std::string::npos && jsonl.find("com.example.rpcbad") != std::string::npos &&
              jsonl.find("\"id\":\"ctx\"") != std::string::npos && jsonl.find("AGENTS.md") != std::string::npos &&
              jsonl.find("\"id\":\"read\"") != std::string::npos && jsonl.find("\"tool_timeline\"") != std::string::npos &&

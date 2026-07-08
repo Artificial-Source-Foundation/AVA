@@ -954,6 +954,14 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
     }
   }
 
+  auto path = rpc::exact_optional_string_field(line, "path");
+  if (!path)
+    return std::unexpected(std::move(path.error()));
+  if (auto valid = rpc::validate_optional_rpc_text(*path, "path", rpc::kMaxRpcRulePathBytes); !valid)
+  {
+    return std::unexpected(std::move(valid.error()));
+  }
+
   return RpcCommand{.id = std::move(*id),
                     .type = std::move(*type),
                     .protocol_version = std::move(*protocol_version),
@@ -992,7 +1000,7 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
                     .command_arguments = std::move(command_arguments),
                     .server_id = std::move(server_id),
                     .output_path = std::move(output_path),
-                    .path = ava::core::json::string_field(line, "path"),
+                    .path = std::move(*path),
                     .target_path = std::move(target_path),
                     .command = std::move(command_text),
                     .tool_name = std::move(tool_name)};

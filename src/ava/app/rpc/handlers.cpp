@@ -214,9 +214,9 @@ ava::permissions::PermissionRuleStore permission_rule_store_for_session(RuntimeS
 
 bool is_plugin_rpc_command(std::string_view type)
 {
-  return type == "list_plugins" || type == "plugin_failures" || type == "inspect_plugin" || type == "enable_plugin" || type == "disable_plugin" ||
-         type == "validate_plugin" || type == "list_plugin_prompts" || type == "get_plugin_prompt" || type == "list_plugin_skills" ||
-         type == "get_plugin_skill" || type == "run_plugin_command";
+  return type == "list_plugins" || type == "plugin_failures" || type == "inspect_plugin" || type == "install_plugin" || type == "remove_plugin" ||
+         type == "enable_plugin" || type == "disable_plugin" || type == "validate_plugin" || type == "list_plugin_prompts" || type == "get_plugin_prompt" ||
+         type == "list_plugin_skills" || type == "get_plugin_skill" || type == "run_plugin_command";
 }
 
 bool is_mcp_rpc_command(std::string_view type)
@@ -236,6 +236,12 @@ ava::core::Result<std::string> plugin_rpc_slash_command(RpcCommand const& comman
       return std::unexpected(invalid_rpc("validate_plugin requires path"));
     return "/plugins validate " + *command.path;
   }
+  if (command.type == "install_plugin")
+  {
+    if (!command.path || command.path->empty())
+      return std::unexpected(invalid_rpc("install_plugin requires path"));
+    return "/plugins install " + *command.path;
+  }
 
   if (!command.plugin_id || command.plugin_id->empty())
   {
@@ -247,6 +253,8 @@ ava::core::Result<std::string> plugin_rpc_slash_command(RpcCommand const& comman
     return "/plugins enable " + *command.plugin_id;
   if (command.type == "disable_plugin")
     return "/plugins disable " + *command.plugin_id;
+  if (command.type == "remove_plugin")
+    return "/plugins remove " + *command.plugin_id;
   if (command.type == "list_plugin_prompts")
     return "/plugins prompts " + *command.plugin_id;
   if (command.type == "list_plugin_skills")

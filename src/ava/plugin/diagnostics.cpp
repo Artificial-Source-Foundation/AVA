@@ -18,6 +18,11 @@ PluginFailure make_failure(PluginScope scope, std::filesystem::path const& path,
   return PluginFailure{.scope = scope, .path = path, .message = std::move(message), .details = std::move(details)};
 }
 
+bool is_install_staging_directory(std::filesystem::path const& path)
+{
+  return path.filename().generic_string().find(".installing-") != std::string::npos;
+}
+
 void collect_from_dir(std::filesystem::path const& root, PluginScope scope, PluginDiagnostics& diagnostics)
 {
   if (root.empty())
@@ -38,6 +43,8 @@ void collect_from_dir(std::filesystem::path const& root, PluginScope scope, Plug
     if (it->is_symlink(entry_error) || entry_error)
       continue;
     if (!it->is_directory(entry_error) || entry_error)
+      continue;
+    if (scope == PluginScope::Global && is_install_staging_directory(it->path()))
       continue;
     auto const manifest_path = it->path() / "plugin.json";
     std::error_code manifest_error;

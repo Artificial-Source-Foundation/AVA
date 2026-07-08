@@ -10,6 +10,10 @@
 #include "ava/tools/search_tools.h"
 #include "ava/tools/webfetch_tool.h"
 #include "ava/tools/websearch_tool.h"
+#include "ava/plugin/diagnostics.h"
+#include "ava/plugin/discovery.h"
+#include "ava/plugin/enablement.h"
+#include "ava/plugin/static_resources.h"
 #include "ava/plugin/tool_broker.h"
 #include "ava/mcp/tool_broker.h"
 #include "ava/context/skill_loader.h"
@@ -123,6 +127,36 @@ std::string xml_escape(std::string_view value)
     }
   }
   return escaped;
+}
+
+ava::plugin::PluginDiscoveryOptions plugin_discovery_options_for_context(ava::tools::ToolContext const& context)
+{
+  auto options = ava::plugin::default_plugin_discovery_options(context.workspace_dir);
+  if (!context.plugin_global_plugins_dir.empty())
+    options.global_plugins_dir = context.plugin_global_plugins_dir;
+  if (!context.plugin_project_plugins_dir.empty())
+    options.project_plugins_dir = context.plugin_project_plugins_dir;
+  if (!context.include_project_plugins)
+    options.project_plugins_dir = std::filesystem::path{};
+  return options;
+}
+
+std::filesystem::path plugin_enablement_file_for_context(ava::tools::ToolContext const& context)
+{
+  if (!context.plugin_enablement_file.empty())
+    return context.plugin_enablement_file;
+  return ava::plugin::default_plugin_enablement_file();
+}
+
+std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(ava::plugin::PluginDiagnostics const& diagnostics)
+{
+  std::vector<ava::context::DeclaredSkillFileOptions> files;
+  for (auto const& skill : ava::plugin::enabled_plugin_static_skill_files(diagnostics))
+  {
+    files.push_back(ava::context::DeclaredSkillFileOptions{
+        .path = skill.path, .name = skill.name, .description = skill.description, .source_type = ava::context::SkillSourceType::Plugin});
+  }
+  return files;
 }
 
 ava::core::VoidResult reject_oversized_task_arg(std::string_view value, std::string_view field, std::size_t max_bytes, std::string_view tool_name)
@@ -570,9 +604,12 @@ ToolDispatchResult skill_result(ava::tools::ToolContext const& context, Provider
   auto name = required_safe_string_arg(call.arguments_json, "name", call.name);
   if (!name)
     return tool_error_result(call, name.error());
+  auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(plugin_discovery_options_for_context(context), plugin_enablement_file_for_context(context),
+                                                                    context.workspace_dir);
   auto skills = ava::context::load_skills(ava::context::SkillLoadOptions{.workspace_root = context.workspace_dir,
                                                                          .global_skill_dirs = context.skill_global_dirs,
                                                                          .project_skill_dirs = context.skill_project_dirs,
+                                                                         .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
                                                                          .include_project_skills = context.include_project_skills});
   auto const match = std::ranges::find_if(skills.skills, [&](ava::context::LoadedSkill const& skill) { return skill.name == *name; });
   if (match == skills.skills.end())

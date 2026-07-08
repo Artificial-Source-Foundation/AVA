@@ -17,6 +17,7 @@ namespace {
 
 constexpr std::size_t kMaxSkillNameBytes = 64;
 constexpr std::size_t kMaxSkillDescriptionBytes = 1024;
+constexpr std::size_t kMaxDeclaredSkillNameBytes = 96;
 
 std::filesystem::path normalized_absolute(std::filesystem::path const& path)
 {
@@ -83,6 +84,34 @@ bool valid_skill_name(std::string_view name)
     previous_hyphen = ch == '-';
   }
   return name.front() != '-' && name.back() != '-';
+}
+
+bool valid_declared_skill_name(std::string_view name)
+{
+  if (name.empty() || name.size() > kMaxDeclaredSkillNameBytes)
+    return false;
+  for (char const ch : name)
+  {
+    auto const byte = static_cast<unsigned char>(ch);
+    bool const allowed = std::isalnum(byte) != 0 || ch == '_' || ch == '-' || ch == '.';
+    if (!allowed)
+      return false;
+  }
+  return true;
+}
+
+bool valid_skill_name_for_source(std::string_view name, SkillSourceType source_type)
+{
+  if (source_type == SkillSourceType::Plugin)
+    return valid_declared_skill_name(name);
+  return valid_skill_name(name);
+}
+
+bool valid_skill_description_for_source(std::string_view description, SkillSourceType source_type)
+{
+  if (description.size() > kMaxSkillDescriptionBytes || has_control_byte(description))
+    return false;
+  return source_type == SkillSourceType::Plugin || !description.empty();
 }
 
 std::string xml_escape(std::string_view value)
@@ -331,6 +360,8 @@ std::string to_string(SkillSourceType source_type)
       return "global";
     case SkillSourceType::Project:
       return "project";
+    case SkillSourceType::Plugin:
+      return "plugin";
   }
   return "unknown";
 }
@@ -353,6 +384,44 @@ std::vector<std::filesystem::path> default_project_skill_dirs(std::filesystem::p
   return {workspace_root / ".ava" / "skills", workspace_root / ".agents" / "skills", workspace_root / ".claude" / "skills"};
 }
 
+ava::core::Result<LoadedSkill> load_declared_skill_file(DeclaredSkillFileOptions options)
+{
+  if (options.max_file_bytes == 0)
+    options.max_file_bytes = 64 * 1024;
+
+  auto content = read_skill_file(options.path, options.max_file_bytes);
+  if (!content)
+    return std::unexpected(std::move(content.error()));
+
+  auto parsed = parse_skill_markdown(*content);
+  auto name = trim(options.name);
+  auto description = trim(options.description);
+
+  if (!valid_skill_name_for_source(name, options.source_type))
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "skill name is invalid");
+    error.with_context("path", options.path.string());
+    error.with_context("skill", name);
+    return std::unexpected(std::move(error));
+  }
+  if (!valid_skill_description_for_source(description, options.source_type))
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "skill description is missing or invalid");
+    error.with_context("path", options.path.string());
+    error.with_context("skill", name);
+    return std::unexpected(std::move(error));
+  }
+
+  auto const directory = normalized_absolute(options.path.parent_path());
+  return LoadedSkill{.name = std::move(name),
+                     .description = std::move(description),
+                     .path = normalized_absolute(options.path),
+                     .directory = directory,
+                     .source_type = options.source_type,
+                     .byte_count = content->size(),
+                     .content = std::move(parsed.body)};
+}
+
 SkillLoadResult load_skills(SkillLoadOptions options)
 {
   if (options.global_skill_dirs.empty())
@@ -373,6 +442,19 @@ SkillLoadResult load_skills(SkillLoadOptions options)
     {
       discover_from_root(result.skills, result.diagnostics, dir, SkillSourceType::Project, options.max_file_bytes);
     }
+  }
+  for (auto declared : options.declared_skill_files)
+  {
+    if (declared.max_file_bytes == 0)
+      declared.max_file_bytes = options.max_file_bytes;
+    auto const diagnostic_path = declared.path;
+    auto skill = load_declared_skill_file(std::move(declared));
+    if (!skill)
+    {
+      result.diagnostics.push_back(SkillDiagnostic{.path = diagnostic_path, .message = skill.error().format()});
+      continue;
+    }
+    add_or_replace_skill(result.skills, std::move(*skill));
   }
   std::ranges::sort(result.skills, [](LoadedSkill const& left, LoadedSkill const& right) { return left.name < right.name; });
   return result;

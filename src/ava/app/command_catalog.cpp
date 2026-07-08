@@ -85,8 +85,7 @@ std::vector<CommandCatalogEntry> const& command_catalog()
                           .category = "Sessions"},
       CommandCatalogEntry{
           .command = "/context", .description = "List prompt, context, command, skill, and plugin freshness", .hint = "[query|source]", .category = "Sessions"},
-      CommandCatalogEntry{
-          .command = "/stats", .aliases = {"/session"}, .description = "Show session counts, usage, and cost", .category = "Sessions"},
+      CommandCatalogEntry{.command = "/stats", .aliases = {"/session"}, .description = "Show session counts, usage, and cost", .category = "Sessions"},
       CommandCatalogEntry{.command = "/status", .description = "Alias for /stats session status", .category = "Sessions"},
       CommandCatalogEntry{.command = "/compact", .description = "Generate and record a provider summary", .hint = "[instructions]", .category = "Sessions"},
       CommandCatalogEntry{.command = "/export",
@@ -113,8 +112,8 @@ std::vector<CommandCatalogEntry> const& command_catalog()
       CommandCatalogEntry{.command = "/providers", .description = "List provider capability and credential status", .hint = "[query]", .category = "Models"},
       CommandCatalogEntry{.command = "/scoped-models", .description = "Enable, disable, order, and save models for Ctrl+P cycling", .category = "Models"},
       CommandCatalogEntry{.command = "/plugins",
-                          .description = "List, inspect, enable, disable, and validate plugins",
-                          .hint = "<list|inspect|enable|disable|validate|failures|prompts|prompt|skills|skill> ...",
+                          .description = "List, install, remove, inspect, enable, disable, and validate plugins",
+                          .hint = "<list|install|remove|inspect|enable|disable|validate|failures|prompts|prompt|skills|skill> ...",
                           .category = "Plugins"},
       CommandCatalogEntry{
           .command = "/trust", .description = "Inspect or save project resource trust", .hint = "[status|project|deny|clear]", .category = "Plugins"},

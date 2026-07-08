@@ -6,6 +6,7 @@ add_library(ava_plugin
   "runner.cpp"
   "runner_protocol.cpp"
   "runner_support.cpp"
+  "static_resources.cpp"
   "tool_broker.cpp"
 )
 

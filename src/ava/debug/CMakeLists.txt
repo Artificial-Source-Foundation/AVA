@@ -7,9 +7,6 @@
 # capable ctags is then a hard requirement. Configure with -DEnableLibcwd=OFF
 # to skip this entirely.
 #
-if (OptionEnableLibcwd)
-# Below is deliberately no indentation used, because it concerns the whole file.
-
 
 # CTAGS_EXECUTABLE is the cache variable holding the path to the binary, or
 # CTAGS_EXECUTABLE-NOTFOUND when no ctags is on the PATH. CTAGS_FOUND is the
@@ -321,6 +318,3 @@ target_include_directories(ava_debug PUBLIC "${CMAKE_SOURCE_DIR}/src")
 ava_apply_debugging(ava_debug)
 ava_apply_warnings(ava_debug)
 ava_apply_sanitizers(ava_debug)
-
-
-endif (OptionEnableLibcwd)

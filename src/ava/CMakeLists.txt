@@ -3,7 +3,6 @@ set(AVA_BACKEND_LIBRARIES
   ava_config
   ava_context
   ava_core
-  ava_debug
   ava_lsp
   ava_mcp
   ava_permissions
@@ -19,7 +18,6 @@ add_subdirectory(agent)
 add_subdirectory(config)
 add_subdirectory(context)
 add_subdirectory(core)
-add_subdirectory(debug)
 add_subdirectory(lsp)
 add_subdirectory(mcp)
 add_subdirectory(permissions)
@@ -37,3 +35,9 @@ set(AVA_FRONTEND_LIBRARIES
 
 add_subdirectory(app)
 add_subdirectory(tui)
+
+if (OptionEnableLibcwd)
+  add_subdirectory(debug)
+  list(APPEND AVA_BACKEND_LIBRARIES ava_debug)
+  set(AVA_BACKEND_LIBRARIES ${AVA_BACKEND_LIBRARIES} CACHE INTERNAL "AVA backend libraries (with debugging enabled)")
+endif ()

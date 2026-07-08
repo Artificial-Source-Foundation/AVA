@@ -33,6 +33,9 @@
 #include <utility>
 #include <vector>
 #include "debug.h"
+#ifdef CWDEBUG
+#include "ava/debug/print_reference.h"
+#endif
 
 namespace ava::app {
 namespace {

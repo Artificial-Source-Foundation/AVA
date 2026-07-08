@@ -2,7 +2,7 @@
 
 #include "utils/iomanip.h"
 
-namespace vk_utils {
+namespace ava_utils {
 
 template<typename T>
 class PrintingReference : public utils::iomanip::Sticky
@@ -36,9 +36,10 @@ template<typename T>
 std::ostream& operator<<(std::ostream& os, PrintReference<T> ref)
 {
   os << '@' << (void*)&ref.m_ref;
-  if (!PrintingReference<T>::get_iword_value(os))
-    os << ':' << PrintingReference<T>(1L) << ref.m_ref;
+  if constexpr (requires { os << ref.m_ref; })
+    if (!PrintingReference<T>::get_iword_value(os))
+      os << ':' << PrintingReference<T>(1L) << ref.m_ref << PrintingReference<T>(0L);
   return os;
 }
 
-} // namespace vk_utils
+} // namespace ava_utils

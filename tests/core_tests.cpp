@@ -32,6 +32,9 @@ void run_plugin_tests();
 void run_mcp_tests();
 void run_permission_rules_tests();
 void run_tui_composer_tests();
+#ifdef CWDEBUG
+void run_debug_tests();
+#endif
 
 namespace {
 
@@ -68,6 +71,9 @@ constexpr std::array kTestSuites{
     TestSuite{"mcp", run_mcp_tests},
     TestSuite{"permission_rules", run_permission_rules_tests},
     TestSuite{"tui_composer", run_tui_composer_tests},
+#ifdef CWDEBUG
+    TestSuite{"debug", run_debug_tests},
+#endif
 };
 
 void run_suite(TestSuite const& suite)

@@ -79,14 +79,14 @@ def emit_body(out, rel, members):
     out.write("{\n")
     out.write("  os << prefix;\n")
     out.write("  LIBCWD_USING_OSTREAM_PRELUDE\n")
-    out.write("  os\n")
+    out.write("  os << std::boolalpha\n")
     if not members:
         out.write("      ;\n")
     else:
         for idx, m in enumerate(members):
             sep = "" if idx == 0 else ", "
-            out.write('      << "' + sep + label(m) + ':" << ' + m + "\n")
-        out.write("      ;\n")
+            out.write('     << __write__("' + sep + label(m) + ':") << ' + m + "\n")
+        out.write("     ;\n")
     out.write("}\n\n")
 
 
@@ -132,9 +132,7 @@ def main(argv):
                 out.write('#include "sys.h"\n')
                 for h in headers:
                     out.write('#include "' + h + '"\n')
-                out.write('#include "debug.h"\n')
-                out.write('#include "ava/debug/debug_ostream_operators.h"\n')
-                out.write('#include "utils/print_pointer.h"\n\n')
+                out.write('#include "ava/debug/debug_ostream_operators.h"\n\n')
                 for ns in bucket_ns.split("::"):
                     out.write("namespace " + ns + " {\n")
                 out.write("\n")

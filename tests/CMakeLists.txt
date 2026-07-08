@@ -26,7 +26,7 @@ add_executable(ava_fake_provider_server "support/fake_provider_server.cpp")
 ava_apply_warnings(ava_fake_provider_server)
 ava_apply_sanitizers(ava_fake_provider_server)
 
-add_executable(ava_tests
+set(AVA_TESTS_SOURCES
   "agent_loop_resilience_tests.cpp"
   "agent_loop_tests.cpp"
   "agent_tool_dispatcher_tests.cpp"
@@ -55,6 +55,13 @@ add_executable(ava_tests
   "tools_tests.cpp"
   "tui_composer_tests.cpp"
 )
+# The debug suite relies on libcwd-backed machinery (ava_debug, CWDEBUG), so it is
+# only compiled in when libcwd is effectively enabled.
+if(OptionEnableLibcwd)
+  list(APPEND AVA_TESTS_SOURCES "debug_tests.cpp")
+endif()
+
+add_executable(ava_tests ${AVA_TESTS_SOURCES})
 target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_LIBRARIES} ava_test_support ${AICXX_OBJECTS_LIST})
 target_include_directories(ava_tests PRIVATE ${CURSES_INCLUDE_DIRS})
 add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_provider_server)
@@ -93,6 +100,9 @@ set(AVA_TEST_SUITES
   permission_rules
   tui_composer
 )
+if(OptionEnableLibcwd)
+  list(APPEND AVA_TEST_SUITES "debug")
+endif()
 foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   add_test(NAME ava_tests.${AVA_TEST_SUITE} COMMAND ava_tests ${AVA_TEST_SUITE})
 endforeach()

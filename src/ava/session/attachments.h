@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include "debug.h"
 
 namespace ava::session {
 
@@ -19,12 +20,16 @@ struct ImageAttachmentRef {
   std::string storage_path;
   std::string sha256;
   std::size_t byte_size = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct LoadedImageAttachment {
   ImageAttachmentRef metadata;
   std::string bytes;
   std::filesystem::path path;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::filesystem::path attachment_storage_root(SessionStore const& store);

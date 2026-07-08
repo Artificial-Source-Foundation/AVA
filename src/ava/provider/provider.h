@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "debug.h"
 
 namespace ava::provider {
 
@@ -165,6 +166,8 @@ struct StreamEvent
   std::string reasoning_redacted_data = {};
   bool redacted = false;
   bool reasoning_signature_present = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class StreamParser
@@ -173,6 +176,8 @@ class StreamParser
   virtual ~StreamParser() = default;
   [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> append(std::string_view chunk) = 0;
   [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> finish() = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class Provider
@@ -184,6 +189,8 @@ class Provider
   [[nodiscard]] virtual ava::core::VoidResult apply_auth_options(HttpRequest& request, ProviderAuthContext const& auth) const;
   [[nodiscard]] virtual std::unique_ptr<StreamParser> create_stream_parser() const;
   [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> parse_response(HttpResponse const& response, bool stream) const;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class Transport
@@ -198,6 +205,7 @@ class Transport
   [[nodiscard]] virtual bool supports_streaming() const noexcept;
   [[nodiscard]] virtual ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
                                                                        CancelCallback cancel_requested = nullptr);
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RetryOptions
@@ -219,6 +227,8 @@ struct RetryOptions
   };
   std::function<ava::core::VoidResult(Event const&)> on_retry = nullptr;
   Transport::CancelCallback cancel_requested = nullptr;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class RetryTransport final : public Transport
@@ -230,6 +240,7 @@ class RetryTransport final : public Transport
   [[nodiscard]] bool supports_streaming() const noexcept override;
   [[nodiscard]] ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
                                                                CancelCallback cancel_requested = nullptr) override;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   Transport& inner_;

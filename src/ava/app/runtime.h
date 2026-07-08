@@ -80,6 +80,8 @@ struct RuntimeOpenOptions
   ava::agent::ToolVisibilityOptions tool_visibility;
   ava::config::XdgPaths paths = ava::config::xdg_paths();
   RuntimePromptOverrides prompt_overrides;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeReasoningSelection
@@ -121,6 +123,8 @@ struct RuntimePromptState
   std::vector<ContextSourceMetadata> context_sources;
   std::vector<RuntimeFreshnessSourceMetadata> freshness_sources;
   std::string system_prompt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeRunOptions
@@ -138,6 +142,8 @@ struct RuntimeRunOptions
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
   std::mutex* session_mutex = nullptr;
   std::vector<ava::session::ImageAttachmentRef> image_attachments;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 using CompactionSummaryGenerator =

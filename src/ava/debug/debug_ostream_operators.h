@@ -29,6 +29,13 @@ inline std::ostream& operator<<(std::ostream& os, std::mutex const& UNUSED_ARG(m
 }
 
 template<typename T>
+inline std::ostream& operator<<(std::ostream& os, std::function<T> const& UNUSED_ARG(func))
+{
+  os.write("$std::function$", 15);
+  return os;
+}
+
+template<typename T>
 concept ConceptHasToString = requires(T t)
 {
   { to_string(t) } -> std::convertible_to<std::string>;

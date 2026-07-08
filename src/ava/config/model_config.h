@@ -18,6 +18,8 @@ struct ModelPricing
   std::optional<long double> cache_read_per_million;
   std::optional<long double> cache_write_per_million;
   std::optional<long double> reasoning_per_million;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ModelInfo
@@ -49,6 +51,8 @@ struct ModelRegistry
   std::string default_model_id = "gpt-5.5";
   std::vector<ModelInfo> models;
   std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ModelRegistry builtin_model_registry();

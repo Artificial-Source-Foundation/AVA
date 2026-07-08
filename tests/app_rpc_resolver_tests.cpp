@@ -376,6 +376,7 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
   expect(removed, "removed");
   expect(result.has_value() && invalid_rejected && added && !rule_id.empty() && listed && completed && removed,
          "RPC persistent permission rule add/list/apply/remove flow completes");
+  //expect(false, "Forced failure");
   expect(jsonl.find("\"name\":\"permission_requested\"") == std::string::npos && persistent_audited,
          "persistent permission rules resolve matching RPC permission prompts without resolver events and are audited");
 }

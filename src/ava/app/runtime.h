@@ -87,6 +87,8 @@ struct RuntimeReasoningSelection
   std::string level;
   std::optional<long long> budget_tokens = std::nullopt;
   std::string display;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeSession

@@ -77,8 +77,9 @@ def load_tags(tags_path):
 def emit_body(out, rel, members):
     out.write("void " + rel + "::print_members(std::ostream& os, char const* prefix) const\n")
     out.write("{\n")
+    out.write("  os << prefix;\n")
     out.write("  LIBCWD_USING_OSTREAM_PRELUDE\n")
-    out.write("  os << prefix\n")
+    out.write("  os\n")
     if not members:
         out.write("      ;\n")
     else:

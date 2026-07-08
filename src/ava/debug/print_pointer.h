@@ -59,6 +59,7 @@ std::ostream& operator<<(std::ostream& os, PrintPointer<T> ptr)
   {
     if (!PrintingPointer<T>::get_iword_value(os))
     {
+      LIBCWD_USING_OSTREAM_PRELUDE
       os << '&';
       os << PrintingPointer<T>(1L) << *ptr.m_ptr;
       os << '@';

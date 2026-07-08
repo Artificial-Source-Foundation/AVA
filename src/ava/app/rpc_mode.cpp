@@ -107,6 +107,9 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
   // This function is called first-thing after creating a thread.
   Debug(NAMESPACE_DEBUG::init_thread("run_rpc_loop"));
 
+  DoutEntering(dc::rpc, "run_rpc_loop(" << session /*FIXME<< ", " << open_options << ", " << provider << ", " << transport << ", " <<
+      auth_transport << ", " << runtime_options*/ << ", istream@" << (void*)&in << ", ostream@" << (void*)&out << ")");
+
   rpc::RpcOutput output(out);
   rpc::RpcRunState run_state;
   rpc::PendingResolverState pending_state;

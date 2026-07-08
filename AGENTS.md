@@ -64,6 +64,9 @@ git --no-pager diff --check
 - Keep destructive operations behind explicit policy checks.
 - Treat model output, terminal input, paths, JSON, session files, auth files, and shell text as untrusted.
 - Preserve actionable error context: operation, path/provider/tool name, and underlying cause.
+- New classes and structs must have their last public block end with `AVA_DEBUG_PRINT_MEMBERS_ON` (without trailing semicolon),
+  use `#include "debug.h"` as last include in the header to get its definition.
+- If you get a linker error: undefined symbol: *::print_members then try to build the cmake target `generate-print-members`.
 
 ## Change Guidelines
 

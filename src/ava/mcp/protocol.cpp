@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/mcp/protocol.h"
 #include "ava/core/json.h"
 

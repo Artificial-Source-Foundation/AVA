@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/mcp/stdio_client_support.h"
 #include "ava/core/json.h"
 

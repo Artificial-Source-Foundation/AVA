@@ -69,6 +69,8 @@ struct ToolTimelineEntry {
   std::optional<std::size_t> total_matches = std::nullopt;
   std::string spill_path = {};
   bool spill_truncated = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ToolProgressEntry {
@@ -76,6 +78,8 @@ struct ToolProgressEntry {
   std::string name = {};
   std::string text = {};
   std::string status = "running";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::string to_string(ToolTimelineStatus status);
@@ -117,6 +121,8 @@ struct AgentLoopOptions {
       compact_context = nullptr;
   std::mutex* session_mutex = nullptr;
   std::optional<ava::config::ModelPricing> model_pricing = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct AgentLoopResult {
@@ -130,6 +136,8 @@ struct AgentLoopResult {
   std::size_t tool_iterations = 0;
   std::string stop_reason = "unknown";
   std::vector<ToolTimelineEntry> tool_timeline;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class AgentLoop {
@@ -145,6 +153,7 @@ class AgentLoop {
                                                             ava::session::SessionStore& store,
                                                             ava::provider::Provider const& provider,
                                                             ava::provider::Transport& transport);
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   AgentLoopOptions options_;

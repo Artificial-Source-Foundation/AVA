@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -29,6 +31,8 @@ class MutationQueue
 
   [[nodiscard]] Lock lock_path(std::filesystem::path const& path);
   [[nodiscard]] Lock lock_paths(std::span<std::filesystem::path const> paths);
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   struct Entry

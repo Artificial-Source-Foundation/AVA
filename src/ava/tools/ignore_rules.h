@@ -25,12 +25,16 @@ class IgnoreMatcher
     bool directory_only = false;
     bool anchored = false;
     bool contains_slash = false;
+
+    AVA_DEBUG_PRINT_MEMBERS_ON
   };
 
  public:
   [[nodiscard]] static ava::core::Result<IgnoreMatcher> load(std::filesystem::path const& workspace_dir);
 
   [[nodiscard]] bool ignored(std::filesystem::path const& path, bool is_directory) const;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   explicit IgnoreMatcher(std::filesystem::path workspace_dir);

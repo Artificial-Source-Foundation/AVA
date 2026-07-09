@@ -59,6 +59,8 @@ struct SessionSummary
   std::filesystem::path path;
   std::string last_updated;
   std::size_t entry_count = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class SessionStore

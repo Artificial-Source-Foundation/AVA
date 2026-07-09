@@ -19,6 +19,8 @@ struct OpenAICompatibleProviderOptions
   std::string reasoning_request_field = "thinking";
   bool preserve_reasoning_content = false;
   bool include_stream_usage = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class OpenAICompatibleStreamParser final : public StreamParser
@@ -27,6 +29,8 @@ class OpenAICompatibleStreamParser final : public StreamParser
   explicit OpenAICompatibleStreamParser(std::string reasoning_format = "reasoning_content");
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> append(std::string_view chunk) override;
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> finish() override;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   std::string pending_line_;
@@ -51,6 +55,8 @@ class OpenAICompatibleProvider final : public Provider
   [[nodiscard]] ava::core::Result<HttpRequest> build_request(ProviderRequest const& request, std::string_view access_token) const override;
   [[nodiscard]] std::unique_ptr<StreamParser> create_stream_parser() const override;
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_response(HttpResponse const& response, bool stream) const override;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   OpenAICompatibleProviderOptions options_;

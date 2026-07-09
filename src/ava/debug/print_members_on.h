@@ -2,6 +2,11 @@
  * Convenience marocs                                                         *
  ******************************************************************************/
 
+#ifdef CWDEBUG
+#include <iostream>
+#include <libcwd/type_info.h>
+#endif
+
 // The idea behind passing a prefix to print_members is so that you can call
 // print_members(os, prefix) from within another print_members to append the
 // members (start with an optional leading ", " if anything was already printed
@@ -38,7 +43,8 @@ namespace libcwd { class Channel; }
 
 #include "NAMESPACE_DEBUG.h"            // NAMESPACE_DEBUG_CHANNELS_START/END
 
-NAMESPACE_DEBUG_CHANNELS_START
+namespace LIBCWD_DEBUG_CHANNELS::dc {
+using libcwd::Channel;
 extern Channel ava;
 extern Channel agent;
 extern Channel app;
@@ -56,6 +62,6 @@ extern Channel provider;
 extern Channel session;
 extern Channel tools;
 extern Channel tui;
-NAMESPACE_DEBUG_CHANNELS_END
+} // namespace LIBCWD_DEBUG_CHANNELS::dc
 
 #endif // CWDEBUG

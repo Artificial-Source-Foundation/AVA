@@ -22,6 +22,8 @@ struct PluginRunnerOptions {
   std::chrono::milliseconds request_timeout{5000};
   std::size_t max_record_bytes = 64 * 1024;
   std::size_t max_stderr_bytes = 64 * 1024;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PluginInitialization {
@@ -29,6 +31,8 @@ struct PluginInitialization {
   std::string plugin_version;
   std::string contributions_json;
   std::string raw_json;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PluginToolCallResult {
@@ -36,6 +40,8 @@ struct PluginToolCallResult {
   std::string content;
   std::string metadata_json;
   std::string raw_json;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PluginCommandCallResult {
@@ -43,6 +49,8 @@ struct PluginCommandCallResult {
   std::string content;
   std::string metadata_json;
   std::string raw_json;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PluginEventObserveResult {
@@ -50,6 +58,8 @@ struct PluginEventObserveResult {
   std::string content;
   std::string metadata_json;
   std::string raw_json;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PluginProxyRequest {
@@ -57,6 +67,8 @@ struct PluginProxyRequest {
   std::string operation;
   std::string arguments_json;
   std::string raw_json;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PluginProxyResponse {
@@ -66,6 +78,8 @@ struct PluginProxyResponse {
   std::string error_category;
   std::string error_message;
   std::string error_details;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 using PluginProxyHandler =
@@ -105,6 +119,8 @@ class PluginProcess final {
                                                                           CancelCallback cancel_requested = nullptr,
                                                                           PluginProxyHandler proxy_handler = nullptr);
   [[nodiscard]] ava::core::VoidResult shutdown(std::chrono::milliseconds grace = std::chrono::milliseconds(250));
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   [[nodiscard]] ava::core::VoidResult launch();

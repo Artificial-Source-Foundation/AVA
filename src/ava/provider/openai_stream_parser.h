@@ -16,6 +16,8 @@ class OpenAIStreamParser final : public StreamParser
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> append(std::string_view chunk) override;
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> finish() override;
 
+  AVA_DEBUG_PRINT_MEMBERS_ON
+
  private:
   std::string pending_line_;
   std::string data_;

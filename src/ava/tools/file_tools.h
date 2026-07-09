@@ -37,6 +37,8 @@ struct PermissionAuditEvent
   std::string resolution_reason;
   std::string actor = "agent";
   std::string rule_id;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 using PermissionAuditSink = std::function<ava::core::VoidResult(PermissionAuditEvent const&)>;
@@ -47,6 +49,8 @@ struct ToolProgressEvent
   std::string call_id;
   std::string tool_name;
   std::string status = "running";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 using ToolProgressSink = std::function<ava::core::VoidResult(ToolProgressEvent const&)>;
@@ -83,6 +87,8 @@ struct ToolContext
   std::string model_id = {};
   std::filesystem::path current_dir = {};
   ava::agent::ToolVisibilityOptions tool_visibility = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TextOutput
@@ -98,6 +104,8 @@ struct TextOutput
   std::size_t end_line = 0;
   std::size_t total_lines = 0;
   std::size_t next_offset_line = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct FileMutationResult
@@ -108,6 +116,8 @@ struct FileMutationResult
   bool diff_truncated = false;
   std::string line_endings;
   bool had_utf8_bom = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ReadOptions
@@ -116,12 +126,16 @@ struct ReadOptions
   std::size_t offset_line = 1;
   std::size_t max_lines = 200;
   bool permission_already_checked = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct WriteOptions
 {
   bool permission_already_checked = false;
   bool mutation_already_locked = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<TextOutput> read_file(ToolContext const& context, std::filesystem::path const& path, ReadOptions options = {});

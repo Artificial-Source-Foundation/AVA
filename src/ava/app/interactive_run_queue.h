@@ -23,6 +23,8 @@ struct InteractiveQueuedMessage
   std::string correlation_id;
   std::string message;
   std::size_t sequence = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct InteractiveRestoredMessage
@@ -30,6 +32,8 @@ struct InteractiveRestoredMessage
   std::string request_id;
   std::string message;
   bool steering = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class InteractiveRunQueue
@@ -46,6 +50,8 @@ class InteractiveRunQueue
   [[nodiscard]] ava::core::VoidResult mark_follow_up_started(InteractiveQueuedMessage const& message);
   [[nodiscard]] ava::core::Result<InteractiveRestoredMessage> restore_latest();
   [[nodiscard]] ava::core::VoidResult finish(bool canceled);
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   [[nodiscard]] ava::core::VoidResult queue_message_locked(std::deque<InteractiveQueuedMessage>& queue, std::string message, std::string_view event_name);

@@ -23,6 +23,8 @@ class ToolDispatcher
   [[nodiscard]] static std::vector<std::string> tool_schemas_json();
   [[nodiscard]] static std::vector<std::string> tool_schemas_json(ava::tools::ToolContext const& context);
 
+  AVA_DEBUG_PRINT_MEMBERS_ON
+
  private:
   ava::tools::ToolContext context_;
   ToolRegistry registry_;

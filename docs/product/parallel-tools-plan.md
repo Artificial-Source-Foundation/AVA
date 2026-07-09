@@ -1,6 +1,6 @@
 # Parallel Ordinary Tool Execution Plan
 
-Status: design note only. Do not implement this from the current documentation pass.
+Status: staged implementation prep. Stages 1-2 of the recommended rollout have landed in this batch: sequential contract/replay tests, plus a dormant internal scheduler seam in `src/ava/agent/tool_scheduler.{h,cpp}` behind the current sequential path. No parallel ordinary-tool workers are enabled yet, and no provider prompt, user-facing tool text, CLI output, or RPC behavior advertises parallel execution.
 
 ## Problem
 
@@ -9,11 +9,19 @@ AVA can receive more than one provider tool call in a single assistant turn, but
 The relevant current surface is:
 
 - `src/ava/agent/agent_loop.cpp`: parses the assistant turn, appends each `tool_call`, dispatches it, appends the `tool_result`, then moves to the next call.
+- `src/ava/agent/tool_scheduler.{h,cpp}`: builds provider-ordered schedule slots, classifies tools conservatively for future scheduling decisions, and currently runs those slots sequentially through the agent-loop callback.
 - `src/ava/agent/tool_dispatcher.cpp`: dispatches one `ProviderToolCall` through built-in, plugin, and MCP registry paths and gathers permission request ids into the structured result.
 - `src/ava/tools/file_tools.cpp`: performs permission decisions/audit entries and owns file read/write/edit semantics.
 - `src/ava/tools/mutation_queue.*`: serializes same-path mutations and multi-path patch locks in deterministic path order.
 - `src/ava/agent/message_builder.cpp` and `src/ava/session/validation.cpp`: define replay assumptions for tool call/result pairing.
 - `src/ava/agent/background_job_registry.*`: owns the already-shipped `task background=true` subagent path, which is intentionally separate from ordinary tool parallelism.
+
+The landed scheduler classification is intentionally conservative and not yet load-bearing for concurrency:
+
+- Identifiable future candidates: built-in filesystem read/search tools (`read_file`, `list_directory`, `glob`, `grep`).
+- Barriers or deferred until separately reviewed: mutation tools (`write_file`, `edit_file`, `apply_patch`), shell/process tools, `question`, `task`/subagent, `skill`, LSP tools, network tools (`webfetch`, `websearch`), plugin/MCP-brokered external tools, and unknown or otherwise unreviewed tools.
+
+Actual read/search/network epochs, worker pools, parallel permission gates, cancellation fan-out, and replay-ordering changes remain future work pending the design gates below.
 
 ## Goals
 
@@ -26,18 +34,20 @@ The relevant current surface is:
 ## Non-goals
 
 - Do not use `task background=true` as the implementation substrate for ordinary tool parallelism.
-- Do not make mutation, shell, plugin, MCP, question, or task tools parallel-eligible by default.
+- Do not make mutation, shell/process, network, plugin, MCP, question, task/subagent, skill, LSP, unknown, or unreviewed tools parallel-eligible in the current dormant seam.
 - Do not change provider prompts or advertise parallel behavior until replay and permission ordering are proven.
 
 ## Proposed model
 
 Introduce a turn-local scheduler with explicit per-tool eligibility metadata. The scheduler should treat provider order as the semantic order and worker completion order as an implementation detail.
 
-Initial eligibility should be conservative:
+Future activation eligibility should be conservative:
 
-- Parallel-eligible candidates: `read_file`, `list_directory`, `glob`, `grep`, `webfetch`, `websearch` after their current permission and output-bound paths are proven thread-safe.
-- Deferred until separately reviewed: LSP queries, `skill`, plugin tools, and MCP tools.
+- Parallel-eligible candidates: `read_file`, `list_directory`, `glob`, `grep`, and eventually `webfetch`/`websearch` only after their current permission, cancellation, network, and output-bound paths are proven thread-safe.
+- Deferred until separately reviewed: LSP queries, `skill`, plugin tools, MCP tools, and other brokered external integrations.
 - Barriers by default: `write_file`, `edit_file`, `apply_patch`, `bash`, `question`, `task`, unknown tools, and any tool whose metadata does not explicitly opt in.
+
+The current landed classifier is narrower than this future target: it only identifies the built-in filesystem read/search tools as future candidates and keeps network tools deferred.
 
 The scheduler should split a provider tool-call batch into epochs. A read/search/network epoch can run concurrently. A barrier tool runs alone in provider order. Calls after a mutation or shell command must not observe the workspace before that barrier completes, because today's sequential semantics let later file reads/searches see earlier mutations and command effects.
 
@@ -130,9 +140,9 @@ Ordinary parallel tools need a different scheduler because they must preserve on
 
 ## Recommended rollout
 
-1. Land only replay/order tests that document the current sequential contract.
-2. Add an internal scheduler abstraction behind the existing sequential path, with no parallel workers yet.
-3. Add explicit parallel eligibility metadata and deterministic fake-tool tests.
+1. Landed in this batch: replay/order tests that document the current sequential contract.
+2. Landed in this batch: an internal scheduler abstraction behind the existing sequential path, with no parallel workers yet.
+3. Promote the dormant conservative classification into explicit parallel eligibility metadata and deterministic fake-tool tests.
 4. Choose and implement the replay ordering path, including versioning docs if the durable batch path is selected.
-5. Enable read/search/network epochs behind an opt-in flag.
+5. Enable read/search/network epochs behind an opt-in flag only after replay, permission-ordering, and cancellation gates are satisfied.
 6. Consider broader tools only after separate safety reviews.

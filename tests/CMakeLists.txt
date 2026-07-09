@@ -50,6 +50,7 @@ add_executable(ava_tests
   "provider_live_smoke_tests.cpp"
   "provider_openai_tests.cpp"
   "session_tests.cpp"
+  "tool_scheduler_tests.cpp"
   "tools_file_tests.cpp"
   "tools_process_network_tests.cpp"
   "tools_search_tests.cpp"
@@ -89,6 +90,7 @@ set(AVA_TEST_SUITES
   agent_loop_resilience
   agent_loop
   agent_tool_dispatcher
+  tool_scheduler
   lsp
   plugin
   mcp

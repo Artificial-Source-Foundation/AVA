@@ -14,6 +14,7 @@ add_library(ava_agent
   "tool_dispatcher.cpp"
   "tool_registry.cpp"
   "tool_result.cpp"
+  "tool_scheduler.cpp"
   "tool_summaries.cpp"
   "tool_timeline.cpp"
   "tool_visibility.cpp"

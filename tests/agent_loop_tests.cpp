@@ -1583,14 +1583,64 @@ void test_agent_loop_multiple_tools_and_denied_continuation()
                                                     "data: [DONE]\n\n"),
                                        sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n"
                                                     "data: [DONE]\n\n")});
+  std::vector<ava::agent::ToolTimelineEntry> tool_events;
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                           .mode = ava::agent::Mode::Build,
                                                           .provider_id = "openai",
                                                           .model_id = "gpt-5.5",
                                                           .system_prompt = "system prompt",
-                                                          .access_token = "token"});
+                                                          .access_token = "token",
+                                                          .on_tool_event = [&tool_events](auto const& entry) { tool_events.push_back(entry); }});
   auto result = loop.run_turn("read both", store, provider, transport);
   expect(result && result->tool_calls == 2 && result->final_text == "done", "agent loop handles multiple tool calls before continuation");
+  expect(result && result->tool_timeline.size() == 2 && result->tool_timeline[0].call_id == "call_1" && result->tool_timeline[0].name == "read_file" &&
+             result->tool_timeline[0].status == ava::agent::ToolTimelineStatus::Success &&
+             result->tool_timeline[0].argument_summary.find("path=one.txt") != std::string::npos && result->tool_timeline[0].output_lines &&
+             *result->tool_timeline[0].output_lines == 1 &&
+             result->tool_timeline[0].structured_result_json.find("\"call_id\":\"call_1\"") != std::string::npos &&
+             result->tool_timeline[1].call_id == "call_2" && result->tool_timeline[1].name == "read_file" &&
+             result->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success &&
+             result->tool_timeline[1].argument_summary.find("path=two.txt") != std::string::npos && result->tool_timeline[1].output_lines &&
+             *result->tool_timeline[1].output_lines == 1 && result->tool_timeline[1].structured_result_json.find("\"call_id\":\"call_2\"") != std::string::npos,
+         "agent loop preserves provider-order timeline metadata for multiple tool calls");
+  expect(tool_events.size() == 4 && tool_events[0].call_id == "call_1" && tool_events[0].status == ava::agent::ToolTimelineStatus::Running &&
+             tool_events[1].call_id == "call_1" && tool_events[1].status == ava::agent::ToolTimelineStatus::Success && tool_events[2].call_id == "call_2" &&
+             tool_events[2].status == ava::agent::ToolTimelineStatus::Running && tool_events[3].call_id == "call_2" &&
+             tool_events[3].status == ava::agent::ToolTimelineStatus::Success,
+         "agent loop publishes running and completed tool events in provider order");
+
+  auto entries = store.load();
+  std::vector<ava::session::SessionEntry const*> replay_entries;
+  if (entries)
+  {
+    for (auto const& entry : *entries)
+    {
+      if (entry.type == ava::session::EntryType::AssistantMessage || entry.type == ava::session::EntryType::ToolCall ||
+          entry.type == ava::session::EntryType::ToolResult)
+      {
+        replay_entries.push_back(&entry);
+      }
+    }
+  }
+  expect(entries && replay_entries.size() == 6, "agent loop multi-tool session has assistant, paired tools, and final assistant replay entries");
+  if (entries && replay_entries.size() == 6)
+  {
+    expect(replay_entries[0]->type == ava::session::EntryType::AssistantMessage && replay_entries[1]->type == ava::session::EntryType::ToolCall &&
+               replay_entries[2]->type == ava::session::EntryType::ToolResult && replay_entries[3]->type == ava::session::EntryType::ToolCall &&
+               replay_entries[4]->type == ava::session::EntryType::ToolResult && replay_entries[5]->type == ava::session::EntryType::AssistantMessage,
+            "agent loop persists multi-tool entries as AssistantMessage -> ToolCall_1 -> ToolResult_1 -> ToolCall_2 -> ToolResult_2 before continuation");
+    expect(replay_entries[0]->data_json.find("\"tool_calls\":2") != std::string::npos &&
+               ava::core::json::string_field(replay_entries[1]->data_json, "call_id").value_or("") == "call_1" &&
+               ava::core::json::string_field(replay_entries[1]->data_json, "name").value_or("") == "read_file" &&
+               ava::core::json::string_field(replay_entries[2]->data_json, "call_id").value_or("") == "call_1" &&
+               ava::core::json::string_field(replay_entries[2]->data_json, "name").value_or("") == "read_file" &&
+               ava::core::json::string_field(replay_entries[3]->data_json, "call_id").value_or("") == "call_2" &&
+               ava::core::json::string_field(replay_entries[3]->data_json, "name").value_or("") == "read_file" &&
+               ava::core::json::string_field(replay_entries[4]->data_json, "call_id").value_or("") == "call_2" &&
+               ava::core::json::string_field(replay_entries[4]->data_json, "name").value_or("") == "read_file" &&
+               ava::core::json::string_field(replay_entries[5]->data_json, "text").value_or("") == "done",
+           "agent loop keeps provider call ids attached to their immediate provider-order tool results");
+  }
 
   auto const denied_root = temp_root() / "agent-denied-continuation";
   std::filesystem::remove_all(denied_root, remove_error);
@@ -1624,6 +1674,81 @@ void test_agent_loop_multiple_tools_and_denied_continuation()
          "agent loop marks denied tool results as safe error timeline entries");
   expect(denied_transport.requests().size() == 2 && denied_transport.requests()[1].body.find("permission_denied") != std::string::npos,
          "permission-denied tool result is framed into continuation context");
+}
+
+void test_agent_loop_cancellation_stops_later_sequential_tools()
+{
+  auto const root = temp_root() / "agent-multi-tools-cancel";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  {
+    std::ofstream one(workspace / "one.txt", std::ios::binary | std::ios::trunc);
+    one << "one";
+    std::ofstream two(workspace / "two.txt", std::ios::binary | std::ios::trunc);
+    two << "two";
+  }
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "multi-cancel"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_1\",\"name\":\"read_file\"}\n\n"
+                    "data: "
+                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_1\",\"delta\":\"{\\\"path\\\":"
+                    "\\\"one.txt\\\"}\"}\n\n"
+                    "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_1\"}\n\n"
+                    "data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_2\",\"name\":\"read_file\"}\n\n"
+                    "data: "
+                    "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"call_2\",\"delta\":\"{\\\"path\\\":"
+                    "\\\"two.txt\\\"}\"}\n\n"
+                    "data: {\"type\":\"response.function_call.done\",\"item_id\":\"call_2\"}\n\n"
+                    "data: [DONE]\n\n")});
+  bool cancel_after_first_tool = false;
+  std::vector<ava::agent::ToolTimelineEntry> tool_events;
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                          .mode = ava::agent::Mode::Build,
+                                                          .provider_id = "openai",
+                                                          .model_id = "gpt-5.5",
+                                                          .system_prompt = "system prompt",
+                                                          .access_token = "token",
+                                                          .on_tool_event =
+                                                              [&](ava::agent::ToolTimelineEntry const& entry) {
+                                                                tool_events.push_back(entry);
+                                                                if (entry.call_id == "call_1" && entry.status == ava::agent::ToolTimelineStatus::Success)
+                                                                {
+                                                                  cancel_after_first_tool = true;
+                                                                }
+                                                              },
+                                                          .cancel_requested = [&cancel_after_first_tool] { return cancel_after_first_tool; }});
+
+  auto result = loop.run_turn("read both but cancel after first", store, provider, transport);
+  expect(!result && result.error().message().find("canceled") != std::string::npos, "agent loop reports cancellation after the first sequential tool dispatch");
+  expect(tool_events.size() == 2 && tool_events[0].call_id == "call_1" && tool_events[0].status == ava::agent::ToolTimelineStatus::Running &&
+             tool_events[1].call_id == "call_1" && tool_events[1].status == ava::agent::ToolTimelineStatus::Success,
+         "agent loop does not publish events for later provider tool calls after cancellation");
+
+  auto entries = store.load();
+  std::size_t tool_calls = 0;
+  std::size_t tool_results = 0;
+  bool saw_second_tool = false;
+  if (entries)
+  {
+    for (auto const& entry : *entries)
+    {
+      if (entry.type == ava::session::EntryType::ToolCall)
+      {
+        ++tool_calls;
+        saw_second_tool = saw_second_tool || ava::core::json::string_field(entry.data_json, "call_id").value_or("") == "call_2";
+      }
+      if (entry.type == ava::session::EntryType::ToolResult)
+      {
+        ++tool_results;
+        saw_second_tool = saw_second_tool || ava::core::json::string_field(entry.data_json, "call_id").value_or("") == "call_2";
+      }
+    }
+  }
+  expect(entries && tool_calls == 1 && tool_results == 1 && !saw_second_tool,
+         "agent loop cancellation stops launching later tools under current sequential dispatch behavior");
 }
 
 void test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids()
@@ -1772,6 +1897,7 @@ void run_agent_loop_tests()
   test_agent_loop_replays_steering_after_mid_turn_auto_compaction();
   test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction();
   test_agent_loop_multiple_tools_and_denied_continuation();
+  test_agent_loop_cancellation_stops_later_sequential_tools();
   test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids();
   test_agent_loop_truncates_tool_context();
 }

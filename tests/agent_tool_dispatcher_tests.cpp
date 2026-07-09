@@ -418,6 +418,47 @@ void test_tool_dispatcher()
              linked_permission_audits[1].permission_request_id == linked_prompt_request_id,
          "tool dispatcher links structured tool results to permission audit request ids");
 
+  auto const first_per_dispatch_permission_path = root / "dispatcher-per-dispatch-one.txt";
+  auto const second_per_dispatch_permission_path = root / "dispatcher-per-dispatch-two.txt";
+  {
+    std::ofstream file(first_per_dispatch_permission_path, std::ios::binary | std::ios::trunc);
+    file << "first per-dispatch permission";
+  }
+  {
+    std::ofstream file(second_per_dispatch_permission_path, std::ios::binary | std::ios::trunc);
+    file << "second per-dispatch permission";
+  }
+  std::vector<std::string> per_dispatch_permission_request_ids;
+  ava::agent::ToolDispatcher const per_dispatch_permission_dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [&per_dispatch_permission_request_ids](ava::permissions::PermissionPrompt const& prompt)
+          -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        per_dispatch_permission_request_ids.push_back(prompt.permission_request_id);
+        return ava::permissions::PermissionResolution::Allow;
+      }});
+  auto first_per_dispatch_permission_read = per_dispatch_permission_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_first_per_dispatch_permission",
+      .name = "read_file",
+      .arguments_json = "{\"path\":\"" + ava::core::json::escape(first_per_dispatch_permission_path.generic_string()) + "\"}"});
+  auto second_per_dispatch_permission_read = per_dispatch_permission_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "call_second_per_dispatch_permission",
+      .name = "read_file",
+      .arguments_json = "{\"path\":\"" + ava::core::json::escape(second_per_dispatch_permission_path.generic_string()) + "\"}"});
+  expect(first_per_dispatch_permission_read && second_per_dispatch_permission_read &&
+             first_per_dispatch_permission_read->success && second_per_dispatch_permission_read->success &&
+             per_dispatch_permission_request_ids.size() == 2 &&
+             per_dispatch_permission_request_ids[0].starts_with("permreq_") &&
+             per_dispatch_permission_request_ids[1].starts_with("permreq_") &&
+             per_dispatch_permission_request_ids[0] != per_dispatch_permission_request_ids[1] &&
+             first_per_dispatch_permission_read->payload.permission_request_ids.size() == 1 &&
+             second_per_dispatch_permission_read->payload.permission_request_ids.size() == 1 &&
+             first_per_dispatch_permission_read->payload.permission_request_ids[0] ==
+                 per_dispatch_permission_request_ids[0] &&
+             second_per_dispatch_permission_read->payload.permission_request_ids[0] ==
+                 per_dispatch_permission_request_ids[1],
+         "tool dispatcher keeps each dispatch result attached to its own permission request id");
+
   auto malformed_args = dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "call_bad_args", .name = "read_file", .arguments_json = "{not-json}"});
   expect(

@@ -7,6 +7,7 @@
 #include "ava/agent/stream_bridge.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_result.h"
+#include "ava/agent/tool_scheduler.h"
 #include "ava/agent/tool_summaries.h"
 #include "ava/agent/tool_timeline.h"
 #include "ava/agent/usage_accounting.h"
@@ -934,8 +935,10 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       return result;
     }
 
-    for (auto const& call : turn->tool_calls)
-    {
+    auto const registered_tool_metadata = dispatcher.registered_tool_metadata();
+    auto const schedule = build_sequential_tool_schedule(turn->tool_calls, registered_tool_metadata);
+    auto scheduled = run_sequential_tool_schedule(schedule, [&](ToolScheduleSlot const& slot) -> ava::core::Result<ToolDispatchResult> {
+      auto const& call = slot.call;
       if (auto not_canceled = check_canceled_locked("before_tool_dispatch"); !not_canceled)
       {
         return std::unexpected(std::move(not_canceled.error()));
@@ -981,6 +984,11 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       {
         return std::unexpected(std::move(not_canceled.error()));
       }
+      return dispatch_result;
+    });
+    if (!scheduled)
+    {
+      return std::unexpected(std::move(scheduled.error()));
     }
 
     ++tool_iterations;

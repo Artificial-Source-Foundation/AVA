@@ -2159,6 +2159,82 @@ void test_tool_content_parts_reconstruction()
   expect((*permission_messages)[0].content_parts.size() == 1 && (*permission_messages)[1].content_parts.size() == 1,
          "native tool replay allows internal permission metadata between tool call and result");
 
+  std::vector<ava::session::SessionEntry> const paired_batch_entries = {
+      ava::session::SessionEntry{.id = "batch_assistant",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-04-27T00:00:00Z",
+                                 .data_json = "{\"text\":\"\",\"tool_calls\":2}"},
+      ava::session::SessionEntry{.id = "batch_call_first",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-27T00:00:01Z",
+                                 .data_json = "{\"call_id\":\"call_batch_first\",\"name\":\"read_file\","
+                                              "\"arguments\":\"{\\\"path\\\":\\\"first.txt\\\"}\"}"},
+      ava::session::SessionEntry{.id = "batch_result_first",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-27T00:00:02Z",
+                                 .data_json = "{\"call_id\":\"call_batch_first\",\"name\":\"read_file\","
+                                              "\"success\":true,\"result\":\"first result\"}"},
+      ava::session::SessionEntry{.id = "batch_call_second",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolCall,
+                                 .timestamp = "2026-04-27T00:00:03Z",
+                                 .data_json = "{\"call_id\":\"call_batch_second\",\"name\":\"read_file\","
+                                              "\"arguments\":\"{\\\"path\\\":\\\"second.txt\\\"}\"}"},
+      ava::session::SessionEntry{.id = "batch_result_second",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::ToolResult,
+                                 .timestamp = "2026-04-27T00:00:04Z",
+                                 .data_json = "{\"call_id\":\"call_batch_second\",\"name\":\"read_file\","
+                                              "\"success\":true,\"result\":\"second result\"}"}};
+  auto paired_batch_messages = ava::agent::build_provider_messages_from_entries(paired_batch_entries);
+  expect(paired_batch_messages && paired_batch_messages->size() == 2,
+         "provider-order multi-tool pairs replay as one native tool-use/tool-result batch");
+  if (!paired_batch_messages || paired_batch_messages->size() != 2)
+    return;
+  expect((*paired_batch_messages)[0].role == "assistant" &&
+             (*paired_batch_messages)[0].content_parts.size() == 2 &&
+             (*paired_batch_messages)[0].content_parts[0].type == ava::provider::ContentPartType::ToolUse &&
+             (*paired_batch_messages)[0].content_parts[0].tool_call_id == "call_batch_first" &&
+             (*paired_batch_messages)[0].content_parts[0].tool_name == "read_file" &&
+             (*paired_batch_messages)[0].content_parts[1].type == ava::provider::ContentPartType::ToolUse &&
+             (*paired_batch_messages)[0].content_parts[1].tool_call_id == "call_batch_second" &&
+             (*paired_batch_messages)[0].content_parts[1].tool_name == "read_file" &&
+             (*paired_batch_messages)[1].role == "user" &&
+             (*paired_batch_messages)[1].content_parts.size() == 2 &&
+             (*paired_batch_messages)[1].content_parts[0].type == ava::provider::ContentPartType::ToolResult &&
+             (*paired_batch_messages)[1].content_parts[0].tool_call_id == "call_batch_first" &&
+             (*paired_batch_messages)[1].content_parts[1].type == ava::provider::ContentPartType::ToolResult &&
+             (*paired_batch_messages)[1].content_parts[1].tool_call_id == "call_batch_second" &&
+             (*paired_batch_messages)[1].content_parts[0].text == "first result" &&
+             (*paired_batch_messages)[1].content_parts[1].text == "second result",
+         "native multi-tool replay preserves provider-order tool-use and tool-result content parts");
+
+  auto const content_parts_empty = [](std::vector<ava::provider::ChatMessage> const& built_messages) {
+    for (auto const& message : built_messages)
+    {
+      if (!message.content_parts.empty())
+        return false;
+    }
+    return true;
+  };
+
+  std::vector<ava::session::SessionEntry> const detached_batch_entries = {paired_batch_entries[0], paired_batch_entries[1],
+                                                                          paired_batch_entries[3], paired_batch_entries[2],
+                                                                          paired_batch_entries[4]};
+  auto detached_batch_messages = ava::agent::build_provider_messages_from_entries(detached_batch_entries);
+  expect(detached_batch_messages && detached_batch_messages->size() == 5 && content_parts_empty(*detached_batch_messages),
+         "native multi-tool replay requires contiguous call/result pairs and falls back when results are detached from their calls");
+
+  std::vector<ava::session::SessionEntry> const reordered_batch_entries = {paired_batch_entries[0], paired_batch_entries[1],
+                                                                           paired_batch_entries[4], paired_batch_entries[3],
+                                                                           paired_batch_entries[2]};
+  auto reordered_batch_messages = ava::agent::build_provider_messages_from_entries(reordered_batch_entries);
+  expect(reordered_batch_messages && reordered_batch_messages->size() == 5 && content_parts_empty(*reordered_batch_messages),
+         "native multi-tool replay rejects reordered tool results instead of attaching them to the wrong calls");
+
   constexpr std::string_view truncation_marker = "\n[AVA: tool result content truncated]";
   std::string const euro = std::string("\xE2") + "\x82" + "\xAC";
   std::string const utf8_result = "abc" + euro + std::string(80, 'x');

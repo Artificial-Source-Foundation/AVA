@@ -1023,6 +1023,11 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(ProviderToolCall 
   return with_tool_result_payload(simple_error_result(normalized, ava::core::ErrorCategory::Tool, "unknown tool"));
 }
 
+std::vector<ToolMetadata> ToolDispatcher::registered_tool_metadata() const
+{
+  return registry_.metadata();
+}
+
 std::span<ToolMetadata const> ToolDispatcher::tool_metadata()
 {
   return builtin_tool_metadata();

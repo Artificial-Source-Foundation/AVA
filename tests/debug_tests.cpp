@@ -65,6 +65,8 @@ std::string render_debug_values()
   std::optional<boost::intrusive_ptr<ava::session::Foo>> const optional_foo_empty;
   std::vector<bool> vector_bool = {true, false};
   std::vector<std::string> vector_strings = {"one", "two"};
+  std::shared_ptr<ava::session::Foo> shared_foo_ptr(new ava::session::Foo);
+  std::shared_ptr<ava::session::Foo> shared_foo_ptr_empty;
 
   {
     AVA_USING_OSTREAM_PRELUDE(ss)
@@ -84,6 +86,8 @@ std::string render_debug_values()
        << __write__("\nvector_with_bool:") << vector_bool
        << __write__("\nvector_with_strings:") << vector_strings
        << __write__("\noptional_bool:") << optional_bool
+       << __write__("\nshared_foo_ptr:") << shared_foo_ptr
+       << __write__("\nshared_foo_ptr_empty:") << shared_foo_ptr_empty
        << '\n';
   }
 
@@ -211,7 +215,6 @@ void test_vector_bool_renders_boolalpha_list()
   {
     AVA_USING_OSTREAM_PRELUDE(ss) << vector_bool;
   }
-  // Should render each element still as boolalpha.
   expect(ss.str() == "{true, false}", "vector of bools renders elements with boolalpha");
 }
 
@@ -233,8 +236,24 @@ void test_optional_bool_renders_with_boolalpha()
   {
     AVA_USING_OSTREAM_PRELUDE(ss) << optional_bool;
   }
-  // Should render each element quoted, but not the ", " seperator.
   expect(ss.str() == "true", "engaged optional<bool> renders with boolalpha");
+}
+
+void test_shared_ptr_uses_print_pointer()
+{
+  std::stringstream ss;
+  std::shared_ptr<ava::session::Foo> const shared_foo_ptr(new ava::session::Foo);
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss) << shared_foo_ptr;
+  }
+  expect(ss.str().find("&{Foo}@0x") != std::string::npos, "shared_ptr<Foo> dereferences Foo and shows ptr value");
+
+  std::stringstream ss_empty;
+  std::shared_ptr<ava::session::Foo> const shared_foo_ptr_empty;
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss_empty) << shared_foo_ptr_empty;
+  }
+  expect(ss_empty.str() == "nullptr", "Empty shared_ptr<Foo> renders as nullptr");
 }
 
 void test_full_render_smoke()
@@ -260,5 +279,6 @@ void run_debug_tests()
   test_vector_bool_renders_boolalpha_list();
   test_vector_string_renders_quoted_list();
   test_optional_bool_renders_with_boolalpha();
+  test_shared_ptr_uses_print_pointer();
   test_full_render_smoke();
 }

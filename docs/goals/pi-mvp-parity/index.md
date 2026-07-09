@@ -115,6 +115,8 @@ AVA_LIVE_PROVIDER_SMOKE=1 ctest --test-dir build -R provider_live_smoke --output
 
 The follow-up `end-to-end-ava-tool-smoke-goal.md` was added after this closure audit to fill an integrated full-binary dogfood evidence gap. It does not reopen the area-file closure result; it defines a post-closure release-hardening smoke.
 
+2026-07-08 follow-up after M6/M7 plugin resource/install work and the Carlo debug print-members merge: no checkbox totals were recalculated. Product/parity docs now treat enabled static plugin prompt/skill resource autoload plus local/offline `/plugins install <path>` and `/plugins remove <id>` as implemented, while preserving deferrals for `/packages`, remote marketplaces, git/npm installs, self-update, source signing, provenance, and custom provider packages. Default validation passed 62/62 with expected provider-live and opt-in TUI smoke skips; libcwd/ctags-ON debug print-members codegen remains unvalidated locally because `ctags` and `ccache` are missing.
+
 Final validation passed locally:
 
 ```sh

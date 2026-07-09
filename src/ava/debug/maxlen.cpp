@@ -68,11 +68,33 @@ std::string render_maxlen_string(std::string const& str, long max_length)
   std::string out;
   out.reserve(prefix_len + suffix_len + marker_len);
   out.append(str, 0, prefix_len);
-  out += " ...(";
+  out += "\"...(";
   out += std::to_string(K);
-  out += " chars)... ";
+  out += " chars)...\"";
   out.append(str, len - suffix_len, suffix_len);
   return out;
 }
 
 NAMESPACE_DEBUG_END
+
+namespace debug::ostream_operators {
+
+std::ostream& operator<<(std::ostream& os, std::string const& str)
+{
+  // Put double quotes around strings, cutting the middle out of overly long
+  // strings when a maxlen() limit is active on the stream.
+  os << '"';
+  long const maxlen = iomanip::MaxLen::get_value(os);
+  size_t const max_length = maxlen ? maxlen : config::ava_debug_maxlen_c;
+  if (str.length() < max_length + 2)
+    os.write(str.data(), str.size());
+  else
+  {
+    std::string const rendered = debug::render_maxlen_string(str, max_length);
+    os.write(rendered.data(), rendered.size());
+  }
+  os << '"';
+  return os;
+}
+
+} // namespace debug::ostream_operators

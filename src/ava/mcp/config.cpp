@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/mcp/config.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/core/json.h"

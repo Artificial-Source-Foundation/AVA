@@ -56,6 +56,26 @@ cw_option(EnableAvaSanitizers
     "Build AVA with AddressSanitizer and UndefinedBehaviorSanitizer" OFF
     "" OFF)
 
+# Default maximum string length for debug output truncation. When no maxlen()
+# IO manipulator is active on the debug stream, strings longer than this are
+# truncated in debug output. 0 means no limit. The value ends up in the
+# generated ava/core/config.h as config::ava_debug_maxlen_c.
+#
+# This is a numeric config value, not a boolean, so it uses set(CACHE STRING)
+# rather than cw_option (which is ON/OFF only: a value like 50 is neither "ON"
+# nor "OFF" and would be silently replaced by the default).
+set(AVA_DEBUG_MAXLEN 100 CACHE STRING "Default maximum string length for debug output truncation (0 = no limit).")
+if(AVA_DEBUG_MAXLEN EQUAL 100)
+  set(_ava_debug_maxlen_color "${OptionColorYay}")
+  set(_ava_debug_maxlen_info " (default)")
+else()
+  set(_ava_debug_maxlen_color "${OptionColorAlert}")
+  set(_ava_debug_maxlen_info "")
+endif()
+message(STATUS "${Option} ${OptionColor}AVA_DEBUG_MAXLEN${ColourReset} (Default maximum string length for debug output truncation) =\n\t${_ava_debug_maxlen_color}${AVA_DEBUG_MAXLEN}${ColourReset}${_ava_debug_maxlen_info}")
+unset(_ava_debug_maxlen_color)
+unset(_ava_debug_maxlen_info)
+
 function(ava_apply_debugging target)
   target_link_libraries(${target} PRIVATE ${AICXX_OBJECTS_LIST})
 endfunction()
@@ -91,9 +111,17 @@ endfunction()
 #==============================================================================
 # CONFIG FILES
 
+# Generate config.h from config.h.in.
+configure_file(
+  "${CMAKE_SOURCE_DIR}/config.h.in"
+  "${CMAKE_BINARY_DIR}/config.h"
+  @ONLY
+)
+
 # Tell cwds/sys.h that we have a config.h.
-#add_definitions(-DHAVE_CONFIG_H)
-#include_directories(${top_objdir})
+add_definitions(-DHAVE_CONFIG_H)
+include_directories(${top_objdir})
+
 # End of CONFIG FILES section.
 
 #==============================================================================

@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/test_harness.h"
 #include "ava/app/command_registry.h"

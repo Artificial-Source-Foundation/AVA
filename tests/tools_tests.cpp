@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "tests/support/test_harness.h"
 
 void run_tools_file_tests();

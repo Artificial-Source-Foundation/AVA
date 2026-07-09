@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/app/connect_openai.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/print_mode.h"

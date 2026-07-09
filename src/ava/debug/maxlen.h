@@ -18,7 +18,9 @@
 // 20 characters would be removed the string is printed in full (the marker would
 // not earn its place).
 //
-// A limit of 0 (or not using maxlen at all) means "no limit".
+// When no maxlen() manipulator is active, the configured default
+// config::ava_debug_maxlen_c is used (set via -DAVA_DEBUG_MAXLEN=N,
+// default 100). A value of 0 means "no limit".
 
 #ifdef CWDEBUG
 
@@ -58,7 +60,7 @@ class MaxLen : public utils::iomanip::Unsticky<1>
   // destruction. A value of 0 means "no limit".
   explicit MaxLen(long max_length) : Unsticky(s_index, max_length) { }
 
-  // Returns the active limit for os, or 0 when maxlen() was not used (no limit).
+  // Returns the raw iword value for os, or 0 when maxlen() was not used.
   static long get_value(std::ostream& os) { return get_iword_from(os, s_index); }
 };
 
@@ -70,13 +72,19 @@ class MaxLen : public utils::iomanip::Unsticky<1>
 // then pass a larger value).
 inline iomanip::MaxLen maxlen(std::size_t max_length = 20000) { return iomanip::MaxLen(static_cast<long>(max_length)); }
 
-// Returns the active maxlen limit for os, or 0 when maxlen() was not used.
+// Returns the effective maxlen limit for os. When no maxlen() manipulator was
+// used (the iword is 0), falls back to the configured default
+// config::ava_debug_maxlen_c. A return value of 0 means "no limit".
 //
 // This is a thin wrapper around MaxLen::get_value exposed as a free function so
 // that the std::string inserter in ava/debug/debug_ostream_operators.h can be
 // defined before MaxLen's full definition is visible (it only needs the
 // declaration, which is forward-declared in that header).
-inline long get_maxlen_value(std::ostream& os) { return iomanip::MaxLen::get_value(os); }
+inline long get_maxlen_value(std::ostream& os)
+{
+  long const v = iomanip::MaxLen::get_value(os);
+  return (v > 0) ? v : static_cast<long>(config::ava_debug_maxlen_c);   // "error: ‘config’ has not been declared" means that you forgot to #include "sys.h" at the top of the current .cpp file.
+}
 
 NAMESPACE_DEBUG_END
 

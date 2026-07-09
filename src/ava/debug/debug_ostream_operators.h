@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <type_traits>
+#include "NAMESPACE_DEBUG.h"
 
 // Do NOT include "debug.h" here.
 
@@ -18,7 +19,8 @@
 #error "ava/debug/debug_ostream_operators.h must be included before cwds/debug_ostream_operators.h is."
 #endif
 
-namespace debug {
+NAMESPACE_DEBUG_START
+
 // Allow using `os << __write__("member:")` in the generated `print_members`
 // member functions to avoid getting quotes around those string literals.
 struct AvaRawDebugString { char const* ptr; };
@@ -29,13 +31,7 @@ struct AvaRawDebugString { char const* ptr; };
   return os;
 }
 
-// Forward declarations of the maxlen() helpers. These are defined in
-// ava/debug/maxlen.h, which is only fully visible once <debug.h> has been
-// included (it is pulled in by cwds/debug_ostream_operators.h below). The
-// std::string inserter in this file needs them, so they are declared here.
-long get_maxlen_value(std::ostream& os);
-std::string render_maxlen_string(std::string const& str, long max_length);
-} // namespace debug
+NAMESPACE_DEBUG_END
 
 namespace debug::ostream_operators {
 
@@ -83,22 +79,7 @@ inline std::basic_ostream<E, T>& operator<<(std::basic_ostream<E, T>& os, boost:
 template<typename T>
 inline std::ostream& operator<<(std::ostream& os, std::shared_ptr<T> const& ptr);
 
-inline std::ostream& operator<<(std::ostream& os, std::string const& str)
-{
-  // Put double quotes around strings, cutting the middle out of overly long
-  // strings when a maxlen() limit is active on the stream.
-  os << '"';
-  long const limit = debug::get_maxlen_value(os);
-  if (limit <= 0)
-    os.write(str.data(), str.size());
-  else
-  {
-    std::string const rendered = debug::render_maxlen_string(str, limit);
-    os.write(rendered.data(), rendered.size());
-  }
-  os << '"';
-  return os;
-}
+std::ostream& operator<<(std::ostream& os, std::string const& str);
 
 inline std::ostream& operator<<(std::ostream& os, char const* str);
 

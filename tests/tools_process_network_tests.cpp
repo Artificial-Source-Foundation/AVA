@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/agent/mode.h"
 
 #include "ava/tools/bash_tool.h"

@@ -120,14 +120,14 @@ void test_std_string_is_quoted()
 void test_maxlen_truncates_long_string()
 {
   // A 150-char string under maxlen(100) loses 68 chars from the middle: the
-  // kept 82 chars (41 + 41) plus the 18-char marker " ...(68 chars)... " fill
+  // kept 82 chars (41 + 41) plus the 18-char marker "\"...(68 chars)...\"" fill
   // the 100-char limit exactly.
   std::stringstream ss;
   std::string const s150(150, 'a');
   {
     AVA_USING_OSTREAM_PRELUDE(ss) << maxlen(100) << s150;
   }
-  std::string const expected = "\"" + std::string(41, 'a') + " ...(68 chars)... " + std::string(41, 'a') + "\"";
+  std::string const expected = "\"" + std::string(41, 'a') + "\"...(68 chars)...\"" + std::string(41, 'a') + "\"";
   if (ss.str() != expected)
     std::cout << "ss.str() = \"" << ss.str() << "\"." << std::endl;
   expect(ss.str() == expected, "long string is cut in the middle with removed-count marker");
@@ -157,16 +157,15 @@ void test_maxlen_under_20_removed_prints_full()
 
 void test_maxlen_exactly_20_removed_truncates()
 {
-  // A 102-char string under maxlen(100) removes exactly 20 chars, which meets
-  // the threshold, so the middle is cut.
+  // A 102-char string under maxlen(100) removes exactly 20 chars, which meets the threshold, so the middle is cut.
   std::stringstream ss;
   std::string const s102(102, 'a');
+  int const ml = 100;
   {
-    AVA_USING_OSTREAM_PRELUDE(ss) << maxlen(100) << s102;
+    AVA_USING_OSTREAM_PRELUDE(ss) << maxlen(ml) << s102;
   }
-  std::string const expected = "\"" + std::string(41, 'a') + " ...(20 chars)... " + std::string(41, 'a') + "\"";
-  if (ss.str() != expected)
-    std::cout << "ss.str() = \"" << ss.str() << "\"." << std::endl;
+  int part_len = (ml - 18) / 2;
+  std::string const expected = "\"" + std::string(part_len, 'a') + "\"...(" + std::to_string(102 - 2 * part_len) + " chars)...\"" + std::string(part_len, 'a') + "\"";
   expect(ss.str() == expected, "string that removes exactly 20 chars is truncated");
 }
 
@@ -179,7 +178,7 @@ void test_maxlen_three_digit_removal()
   {
     AVA_USING_OSTREAM_PRELUDE(ss) << maxlen(100) << s1000;
   }
-  std::string const expected = "\"" + std::string(40, 'a') + " ...(919 chars)... " + std::string(41, 'a') + "\"";
+  std::string const expected = "\"" + std::string(40, 'a') + "\"...(919 chars)...\"" + std::string(41, 'a') + "\"";
   if (ss.str() != expected)
     std::cout << "ss.str() = \"" << ss.str() << "\"." << std::endl;
   expect(ss.str() == expected, "very long string truncates with a 3-digit removed count");
@@ -191,15 +190,18 @@ void test_maxlen_is_scoped_to_expression()
   // the manipulator temporary is destroyed at the end of the statement, so a
   // string printed in a later expression is not truncated.
   std::stringstream ss;
-  std::string const s150(150, 'a');
+  std::string const s50(config::ava_debug_maxlen_c, 'a');
+  int const ml = 30;
   {
-    AVA_USING_OSTREAM_PRELUDE(ss) << maxlen(100) << s150;
+    AVA_USING_OSTREAM_PRELUDE(ss) << maxlen(ml) << s50;
   }
   {
-    AVA_USING_OSTREAM_PRELUDE(ss) << s150;
+    AVA_USING_OSTREAM_PRELUDE(ss) << s50;
   }
-  std::string const truncated = "\"" + std::string(41, 'a') + " ...(68 chars)... " + std::string(41, 'a') + "\"";
-  std::string const full = "\"" + std::string(150, 'a') + "\"";
+  int const part_len = (ml - 18) / 2;
+  std::string const truncated = "\"" + std::string(part_len, 'a') + "\"...(" +
+    std::to_string(config::ava_debug_maxlen_c - 2 * part_len) + " chars)...\"" + std::string(part_len, 'a') + "\"";
+  std::string const full = "\"" + s50 + "\"";
   expect(ss.str() == truncated + full, "maxlen is scoped to its expression (Unsticky restores stream state)");
 }
 
@@ -211,7 +213,7 @@ void test_maxlen_applies_to_whole_expression()
   {
     AVA_USING_OSTREAM_PRELUDE(ss) << maxlen(100) << s150 << s150;
   }
-  std::string const truncated = "\"" + std::string(41, 'a') + " ...(68 chars)... " + std::string(41, 'a') + "\"";
+  std::string const truncated = "\"" + std::string(41, 'a') + "\"...(68 chars)...\"" + std::string(41, 'a') + "\"";
   expect(ss.str() == truncated + truncated, "maxlen applies to every string in the expression");
 }
 

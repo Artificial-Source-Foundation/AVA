@@ -111,7 +111,7 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
   Debug(NAMESPACE_DEBUG::init_thread("run_rpc_loop"));
 
   DoutEntering(dc::rpc, "run_rpc_loop(" << session << ", " << open_options
-      << ", " << provider << ", " << ", " << auth_transport << ", " << runtime_options
+      << ", " << provider << ", " << auth_transport << ", " << runtime_options
       << ", " << print_reference(in) << ", " << print_reference(out) << ")");
 
   rpc::RpcOutput output(out);

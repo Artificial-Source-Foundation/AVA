@@ -59,7 +59,7 @@ AVA has strong context, skills, plugin, MCP, and LSP foundations, including stat
 | Slice | Work |
 | --- | --- |
 | E1. Resource matrix | Map Pi resources to AVA: context, prompt templates, skills, extensions, packages, themes, custom providers, MCP/LSP. |
-| E2. Prompt/template closure | Finish docs/tests for prompt resources, command args, context freshness, and deferred shell-output injection. |
+| E2. Prompt/template closure | Finish docs/tests for prompt resources, command args, context freshness, and the intentional MVP exclusion of automatic shell-output injection. |
 | E3. Plugin capability closure | Document model exposure decisions for plugin commands/prompts/skills, including static-resource autoload and process-per-call tradeoffs. |
 | E4. MCP prompt/resource closure | Decide and implement or defer MCP prompt exposure as model tools. Keep blob/binary safeguards. |
 | E5. LSP maturity | Add automatic server recipes only if product-approved. Otherwise document explicit config as MVP. |

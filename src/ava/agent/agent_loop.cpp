@@ -5,6 +5,7 @@
 #include "ava/agent/message_builder.h"
 #include "ava/agent/provider_output_validation.h"
 #include "ava/agent/stream_bridge.h"
+#include "ava/agent/tool_dispatch_common.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_result.h"
 #include "ava/agent/tool_scheduler.h"
@@ -21,6 +22,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
+#include <stop_token>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -54,6 +57,16 @@ ava::core::VoidResult check_canceled(AgentLoopOptions const& options, ava::sessi
   auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled");
   error.with_context("boundary", std::string(boundary));
   return std::unexpected(std::move(error));
+}
+
+bool error_has_context(ava::core::Error const& error, std::string_view key, std::string_view value)
+{
+  return std::ranges::any_of(error.context(), [&](ava::core::ErrorContext const& item) { return item.key == key && item.value == value; });
+}
+
+bool is_scheduler_canceled_error(ava::core::Error const& error)
+{
+  return error_has_context(error, "canceled", "true");
 }
 
 ava::core::VoidResult attach_verified_image_payloads(ava::provider::ProviderRequest& request, ava::session::SessionStore const& store)
@@ -120,6 +133,123 @@ std::string subagent_system_prompt(std::string base, std::string_view role_promp
   base += role;
   return base;
 }
+
+bool permission_decision_cannot_ask(ava::tools::ToolContext const& context, ava::permissions::Operation operation, std::filesystem::path const& target_path)
+{
+  auto const decision = ava::permissions::decide(ava::permissions::PermissionRequest{
+      .operation = operation,
+      .mode = context.mode,
+      .workspace_dir = context.workspace_dir,
+      .target_path = target_path,
+      .command = "",
+  });
+  return decision.action != ava::permissions::PermissionAction::Ask;
+}
+
+bool preflight_read_file_parallel_ready(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto path = tool_dispatch::required_safe_string_arg(call.arguments_json, "path", call.name);
+  if (!path)
+    return false;
+  return permission_decision_cannot_ask(context, ava::permissions::Operation::ReadFile, tool_dispatch::workspace_path(context, *path));
+}
+
+bool preflight_list_directory_entries_cannot_ask(ava::tools::ToolContext const& context, std::filesystem::path const& path)
+{
+  std::error_code status_error;
+  if (!std::filesystem::exists(path, status_error) || status_error)
+    return true;
+  if (!std::filesystem::is_directory(path, status_error) || status_error)
+    return true;
+
+  std::error_code iter_error;
+  for (std::filesystem::directory_iterator it(path, iter_error), end; !iter_error && it != end; it.increment(iter_error))
+  {
+    if (!permission_decision_cannot_ask(context, ava::permissions::Operation::ReadFile, it->path()))
+      return false;
+  }
+  return !iter_error;
+}
+
+bool preflight_list_directory_parallel_ready(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto path_value = ava::core::json::string_field(call.arguments_json, "path");
+  if (path_value)
+  {
+    if (auto safe = tool_dispatch::reject_control_arg(*path_value, "path", call.name); !safe)
+      return false;
+  }
+  auto const path = tool_dispatch::workspace_path(context, path_value.value_or("."));
+  if (!permission_decision_cannot_ask(context, ava::permissions::Operation::SearchFiles, path))
+    return false;
+  return preflight_list_directory_entries_cannot_ask(context, path);
+}
+
+bool preflight_glob_parallel_ready(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto pattern = tool_dispatch::required_safe_string_arg(call.arguments_json, "pattern", call.name);
+  if (!pattern)
+    return false;
+  if (auto no_ignore_allowed = tool_dispatch::reject_provider_no_ignore(call.arguments_json, call.name); !no_ignore_allowed)
+    return false;
+  return permission_decision_cannot_ask(context, ava::permissions::Operation::SearchFiles, context.workspace_dir);
+}
+
+bool preflight_grep_parallel_ready(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  auto pattern = tool_dispatch::required_text_arg(call.arguments_json, "pattern", call.name);
+  if (!pattern)
+    return false;
+  auto const include_value = ava::core::json::string_field(call.arguments_json, "include");
+  if (include_value)
+  {
+    if (auto safe = tool_dispatch::reject_control_arg(*include_value, "include", call.name); !safe)
+      return false;
+  }
+  if (auto no_ignore_allowed = tool_dispatch::reject_provider_no_ignore(call.arguments_json, call.name); !no_ignore_allowed)
+    return false;
+  if (auto literal = tool_dispatch::optional_bool_arg(call.arguments_json, "literal", true, call.name); !literal)
+    return false;
+  if (auto case_insensitive = tool_dispatch::optional_bool_arg(call.arguments_json, "case_insensitive", false, call.name); !case_insensitive)
+    return false;
+  return permission_decision_cannot_ask(context, ava::permissions::Operation::SearchFiles, context.workspace_dir);
+}
+
+bool preflight_parallel_ready(ava::tools::ToolContext const& context, ProviderToolCall const& call)
+{
+  if (call.name == "read_file")
+    return preflight_read_file_parallel_ready(context, call);
+  if (call.name == "list_directory")
+    return preflight_list_directory_parallel_ready(context, call);
+  if (call.name == "glob")
+    return preflight_glob_parallel_ready(context, call);
+  if (call.name == "grep")
+    return preflight_grep_parallel_ready(context, call);
+  return false;
+}
+
+void mark_parallel_ready_slots(std::vector<ToolScheduleSlot>& schedule, ava::tools::ToolContext const& context)
+{
+  for (auto& slot : schedule)
+  {
+    if (slot.classification.eligibility != ToolScheduleEligibility::ReadOnlyCandidate)
+      continue;
+    if (preflight_parallel_ready(context, slot.call))
+      slot.parallel_readiness = ToolScheduleParallelReadiness::PreflightProvenNonInteractive;
+  }
+}
+
+bool is_parallel_ready_slot(ToolScheduleSlot const& slot) noexcept
+{
+  return slot.classification.eligibility == ToolScheduleEligibility::ReadOnlyCandidate &&
+         slot.parallel_readiness == ToolScheduleParallelReadiness::PreflightProvenNonInteractive;
+}
+
+struct BufferedToolCallbacks
+{
+  std::vector<ava::tools::PermissionAuditEvent> permission_audits;
+  std::vector<ava::tools::ToolProgressEvent> progress_events;
+};
 
 void append_background_error_best_effort(ava::session::SessionStore& store, ava::core::Error const& error)
 {
@@ -242,6 +372,14 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       return append_tool_result(store, dispatch_result);
     }
     return append_tool_result(store, dispatch_result);
+  };
+  auto append_permission_decision_locked = [&](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+    if (options_.session_mutex)
+    {
+      std::lock_guard lock(*options_.session_mutex);
+      return append_permission_decision(store, event);
+    }
+    return append_permission_decision(store, event);
   };
   auto append_error_locked = [&](ava::core::Error const& error) -> ava::core::VoidResult {
     if (options_.session_mutex)
@@ -494,14 +632,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       .spill_dir = store.session_path().parent_path() / "spill",
       .mode = options_.mode,
       .permission_resolver = options_.permission_resolver,
-      .permission_audit_sink = [&store, session_mutex = options_.session_mutex](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
-        if (session_mutex)
-        {
-          std::lock_guard lock(*session_mutex);
-          return append_permission_decision(store, event);
-        }
-        return append_permission_decision(store, event);
-      },
+      .permission_audit_sink = append_permission_decision_locked,
       .progress_sink = [this](ava::tools::ToolProgressEvent const& event) -> ava::core::VoidResult {
         return publish_tool_progress(options_,
                                      ToolProgressEntry{.call_id = event.call_id, .name = event.tool_name, .text = event.text, .status = event.status});
@@ -935,10 +1066,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       return result;
     }
 
-    auto const registered_tool_metadata = dispatcher.registered_tool_metadata();
-    auto const schedule = build_sequential_tool_schedule(turn->tool_calls, registered_tool_metadata);
-    auto scheduled = run_sequential_tool_schedule(schedule, [&](ToolScheduleSlot const& slot) -> ava::core::Result<ToolDispatchResult> {
-      auto const& call = slot.call;
+    auto dispatch_and_commit_tool = [&](ProviderToolCall const& call) -> ava::core::Result<ToolDispatchResult> {
       if (auto not_canceled = check_canceled_locked("before_tool_dispatch"); !not_canceled)
       {
         return std::unexpected(std::move(not_canceled.error()));
@@ -985,10 +1113,193 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
         return std::unexpected(std::move(not_canceled.error()));
       }
       return dispatch_result;
-    });
-    if (!scheduled)
+    };
+
+    auto commit_buffered_tool = [&](ProviderToolCall const& call, ToolDispatchResult dispatch_result,
+                                    BufferedToolCallbacks const& callbacks) -> ava::core::VoidResult {
+      dispatch_result.payload.summary = summarize_tool_result(dispatch_result);
+      if (auto appended = append_tool_call_locked(call); !appended)
+        return std::unexpected(appended.error());
+      ToolTimelineEntry timeline_entry{.status = ToolTimelineStatus::Running,
+                                       .call_id = call.id,
+                                       .name = call.name,
+                                       .argument_summary = summarize_tool_arguments(call),
+                                       .result_summary = "",
+                                       .arguments_json = call.arguments_json};
+      publish_tool_event(options_, timeline_entry);
+      for (auto const& event : callbacks.permission_audits)
+      {
+        if (auto appended = append_permission_decision_locked(event); !appended)
+        {
+          return std::unexpected(appended.error());
+        }
+      }
+      for (auto const& event : callbacks.progress_events)
+      {
+        if (auto published = publish_tool_progress(
+                options_, ToolProgressEntry{.call_id = event.call_id, .name = event.tool_name, .text = event.text, .status = event.status});
+            !published)
+        {
+          return std::unexpected(std::move(published.error()));
+        }
+      }
+      if (auto appended = append_tool_result_locked(dispatch_result); !appended)
+      {
+        return std::unexpected(appended.error());
+      }
+      if (dispatch_result.payload.status == ToolResultStatus::Canceled)
+      {
+        timeline_entry.status = ToolTimelineStatus::Canceled;
+      }
+      else
+      {
+        timeline_entry.status = dispatch_result.success ? ToolTimelineStatus::Success : ToolTimelineStatus::Error;
+      }
+      timeline_entry.result_summary = dispatch_result.payload.summary;
+      populate_tool_timeline_metadata(timeline_entry, dispatch_result);
+      result.tool_timeline.push_back(timeline_entry);
+      publish_tool_event(options_, timeline_entry);
+      ++result.tool_calls;
+      return {};
+    };
+
+    auto run_parallel_epoch_and_commit = [&](std::span<ToolScheduleSlot const> epoch) -> ava::core::VoidResult {
+      if (auto not_canceled = check_canceled_locked("before_parallel_tool_epoch"); !not_canceled)
+      {
+        return std::unexpected(std::move(not_canceled.error()));
+      }
+
+      auto const max_workers = std::max<std::size_t>(1, options_.parallel_read_search_max_workers);
+      std::stop_source schedule_stop_source;
+      std::vector<BufferedToolCallbacks> callbacks_by_provider_index(turn->tool_calls.size());
+      std::vector<std::optional<ToolDispatchResult>> dispatch_results_by_provider_index(turn->tool_calls.size());
+      std::mutex buffered_results_mutex;
+      auto commit_recorded_prefix = [&]() -> ava::core::VoidResult {
+        for (auto const& slot : epoch)
+        {
+          if (slot.provider_index >= dispatch_results_by_provider_index.size() || !dispatch_results_by_provider_index[slot.provider_index])
+          {
+            break;
+          }
+          auto const& callbacks = callbacks_by_provider_index[slot.provider_index];
+          auto dispatch_result = *dispatch_results_by_provider_index[slot.provider_index];
+          if (auto committed = commit_buffered_tool(slot.call, std::move(dispatch_result), callbacks); !committed)
+          {
+            return std::unexpected(std::move(committed.error()));
+          }
+        }
+        return {};
+      };
+      auto scheduled = run_parallel_tool_schedule(
+          epoch,
+          [&](ToolScheduleSlot const& slot, std::stop_token stop_token) -> ava::core::Result<ToolDispatchResult> {
+            BufferedToolCallbacks callbacks;
+            auto worker_context = tool_context;
+            // Parallel slots are preflighted as non-interactive. Drop live
+            // resolvers in the worker so a filesystem race that turns an
+            // Allow/Deny decision into Ask fails closed instead of prompting
+            // from a worker thread.
+            worker_context.permission_resolver = nullptr;
+            worker_context.question_resolver = nullptr;
+            worker_context.task_subagent_runner = nullptr;
+            worker_context.lsp_diagnostics_provider = nullptr;
+            worker_context.permission_audit_sink = [&callbacks](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+              callbacks.permission_audits.push_back(event);
+              return {};
+            };
+            worker_context.progress_sink = [&callbacks](ava::tools::ToolProgressEvent const& event) -> ava::core::VoidResult {
+              callbacks.progress_events.push_back(event);
+              return {};
+            };
+            worker_context.cancel_requested = [base_cancel = options_.cancel_requested, stop_token, &schedule_stop_source] {
+              if (stop_token.stop_requested())
+                return true;
+              if (base_cancel && base_cancel())
+              {
+                schedule_stop_source.request_stop();
+                return true;
+              }
+              return false;
+            };
+
+            auto dispatch = dispatcher.dispatch_with_context(std::move(worker_context), slot.call);
+            auto dispatch_result = dispatch ? *dispatch : synthetic_failed_dispatch_result(slot.call, dispatch.error());
+            dispatch_result.payload.summary = summarize_tool_result(dispatch_result);
+            if (slot.provider_index < callbacks_by_provider_index.size())
+            {
+              std::lock_guard lock(buffered_results_mutex);
+              callbacks_by_provider_index[slot.provider_index] = std::move(callbacks);
+              dispatch_results_by_provider_index[slot.provider_index] = dispatch_result;
+            }
+            return dispatch_result;
+          },
+          ToolParallelScheduleOptions{.max_workers = max_workers, .stop_token = schedule_stop_source.get_token()});
+      if (!scheduled)
+      {
+        auto schedule_error = std::move(scheduled.error());
+        if (auto committed = commit_recorded_prefix(); !committed)
+        {
+          return std::unexpected(std::move(committed.error()));
+        }
+        if (is_scheduler_canceled_error(schedule_error))
+        {
+          if (auto not_canceled = check_canceled_locked("after_parallel_tool_epoch"); !not_canceled)
+          {
+            return std::unexpected(std::move(not_canceled.error()));
+          }
+        }
+        return std::unexpected(std::move(schedule_error));
+      }
+      for (auto& outcome : *scheduled)
+      {
+        auto const& callbacks = callbacks_by_provider_index[outcome.slot.provider_index];
+        if (auto committed = commit_buffered_tool(outcome.slot.call, std::move(outcome.result), callbacks); !committed)
+        {
+          return std::unexpected(std::move(committed.error()));
+        }
+      }
+      if (auto not_canceled = check_canceled_locked("after_parallel_tool_epoch"); !not_canceled)
+      {
+        return std::unexpected(std::move(not_canceled.error()));
+      }
+      return {};
+    };
+
+    auto const registered_tool_metadata = dispatcher.registered_tool_metadata();
+    auto schedule = build_sequential_tool_schedule(turn->tool_calls, registered_tool_metadata);
+    if (!options_.parallel_read_search_tools)
     {
-      return std::unexpected(std::move(scheduled.error()));
+      auto scheduled = run_sequential_tool_schedule(
+          schedule, [&](ToolScheduleSlot const& slot) -> ava::core::Result<ToolDispatchResult> { return dispatch_and_commit_tool(slot.call); });
+      if (!scheduled)
+      {
+        return std::unexpected(std::move(scheduled.error()));
+      }
+    }
+    else
+    {
+      mark_parallel_ready_slots(schedule, tool_context);
+      for (std::size_t index = 0; index < schedule.size();)
+      {
+        if (is_parallel_ready_slot(schedule[index]))
+        {
+          auto epoch_end = index + 1;
+          while (epoch_end < schedule.size() && is_parallel_ready_slot(schedule[epoch_end])) ++epoch_end;
+          if (auto committed = run_parallel_epoch_and_commit(std::span<ToolScheduleSlot const>(schedule).subspan(index, epoch_end - index)); !committed)
+          {
+            return std::unexpected(std::move(committed.error()));
+          }
+          index = epoch_end;
+          continue;
+        }
+
+        auto dispatched = dispatch_and_commit_tool(schedule[index].call);
+        if (!dispatched)
+        {
+          return std::unexpected(std::move(dispatched.error()));
+        }
+        ++index;
+      }
     }
 
     ++tool_iterations;

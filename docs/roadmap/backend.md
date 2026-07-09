@@ -38,7 +38,7 @@ Explicitly post-MVP or current-develop follow-up work still on the product roadm
 
 - Landed after the original 1.0 cut-line in current backend/RPC: persistent permission rules, session tree/fork/clone/labels/names/caller-supplied branch-summary APIs, full LSP symbols/definitions/references with bounded on-disk sync, backend multimodal/image attachment replay/storage/provider serialization, configurable `task` subagents, the runtime-owned background job registry, and base prompt metadata.
 - 1.1 candidates that remain active: unified settings and reload diagnostics, broader live-provider smoke automation, plugin core-service proxy expansion, frontend/TUI consumption of existing session-tree contracts, automatic LSP server recipes, unsaved-buffer/incremental LSP sync, and RPC upload/input plumbing for attachments. Provider-generated branch summaries and Anthropic interactive OAuth are deferred unless their product/API prerequisites become concrete; AVA keeps caller-supplied branch summaries, provider-generated compaction summaries, and API-key plus stored/env OAuth bearer support.
-- 1.2+ candidates: HTTP/server daemon mode, plugin marketplace/package manager/remote install, extension UI bridge, advanced MCP HTTP/OAuth/subscriptions/sampling/elicitation/pagination/resources, parallel ordinary tool execution, OS-level plugin/shell sandboxing, dynamic custom-provider registration, and broader chained multi-agent orchestration beyond the native `task` slice.
+- 1.2+ candidates: HTTP/server daemon mode, plugin marketplace/package manager/remote install, extension UI bridge, advanced MCP HTTP/OAuth/subscriptions/sampling/elicitation/pagination/resources, public/default parallel ordinary tool execution beyond the current internal read/search opt-in, OS-level plugin/shell sandboxing, dynamic custom-provider registration, and broader chained multi-agent orchestration beyond the native `task` slice.
 - Later research: in-process native plugin ABI only if AVA accepts the crash/memory/C++ ABI support burden.
 
 The current backend-only 1.1 candidate product list lives in `docs/product/capabilities-1.1.md`.
@@ -69,14 +69,14 @@ AVA's backend is a version `1.0.0` local coding-agent backend baseline, not a to
 - CLI/runtime orchestration in `src/ava/app/`, including TUI, print, and JSONL RPC entry points.
 - OpenAI auth, model config, prompt config, provider profiles, and curl transport.
 - OpenAI Responses, Anthropic Messages, Gemini GenerateContent, DeepSeek/Kimi/Moonshot-compatible, and OpenRouter-compatible provider paths in `src/ava/provider/`.
-- Sequential agent loop plus configurable task subagents and background job registry in `src/ava/agent/`.
+- Sequential-by-default agent loop plus configurable task subagents, background job registry, and a backend-only default-off read/search parallel opt-in in `src/ava/agent/`.
 - Built-in tools for read, write, edit, glob, grep, bash, apply_patch, question, skill, task, webfetch, websearch, and capability-gated LSP diagnostics.
 - Build/plan permission policy, session grants, and permission audit entries in `src/ava/permissions/` and session records.
 - Append-only JSONL sessions, resume/list/export/stats/validation, usage/cost accounting, model/reasoning entries, and compaction entries in `src/ava/session/`.
 - Project/global `AGENTS.md`, prompt command, skill, and subagent loading in `src/ava/context/`, `src/ava/agent/`, and the unified command registry.
 - Out-of-process plugin and stdio MCP foundations with bounded protocols, enablement, diagnostics, permission/audit identity, and sample/fake-server coverage.
 
-The remaining gap is post-1.0 breadth and product depth: richer permission-rule UX/diagnostics, session tree workflow polish over the implemented backend/RPC fork/clone/tree/caller-supplied summary contracts, unified settings/reload, automatic LSP server recipes and unsaved-buffer sync, RPC upload/input flows for multimodal attachments, plugin core-service proxy expansion, advanced MCP, plugin marketplace flows, HTTP/server daemon mode, broader live-provider smoke automation, parallel ordinary tool execution, and multi-agent orchestration beyond the native `task` subagent/background-job slice.
+The remaining gap is post-1.0 breadth and product depth: richer permission-rule UX/diagnostics, session tree workflow polish over the implemented backend/RPC fork/clone/tree/caller-supplied summary contracts, unified settings/reload, automatic LSP server recipes and unsaved-buffer sync, RPC upload/input flows for multimodal attachments, plugin core-service proxy expansion, advanced MCP, plugin marketplace flows, HTTP/server daemon mode, broader live-provider smoke automation, public/default parallel ordinary tool execution beyond the current internal read/search opt-in, and multi-agent orchestration beyond the native `task` subagent/background-job slice.
 
 ## Milestone Audit Summary
 
@@ -106,14 +106,14 @@ Missing or incomplete:
 - Interactive frontend consumption of the shared event stream is Carlo-owned; the backend event stream is implemented and replayable.
 - Broader reasoning presentation polish beyond the provider-neutral reasoning lifecycle events already emitted for supported models.
 - Deeper cancellation interruption inside buffered/non-streaming provider calls and individual long-running tools beyond the current cooperative boundaries.
-- Parallel tool execution controls, if the tool and permission model can safely support it.
+- Public parallel tool execution controls beyond the current internal read/search opt-in, if the tool and permission model can safely support them.
 
 1.0 target:
 
 - Every run emits structured lifecycle events.
 - TUI and RPC consume the same event stream.
 - Cancellation is observed promptly at tool and shell boundaries and at safe provider boundaries. Direct interruption of in-flight provider transport calls remains a hardening item unless the transport boundary can support it safely.
-- Tool execution remains sequential by default, with explicit parallel eligibility later.
+- Tool execution remains sequential by default. Explicit public parallel eligibility is later work; current develop has only an internal read/search opt-in for preflight-proven builtin calls.
 
 ### Providers And Auth
 

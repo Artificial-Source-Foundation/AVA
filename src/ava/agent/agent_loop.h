@@ -124,6 +124,8 @@ struct AgentLoopOptions
   std::shared_ptr<BackgroundJobRegistry> background_jobs = nullptr;
   std::mutex* session_mutex = nullptr;
   std::optional<ava::config::ModelPricing> model_pricing = std::nullopt;
+  bool parallel_read_search_tools = false;
+  std::size_t parallel_read_search_max_workers = 4;
 };
 
 struct AgentLoopResult

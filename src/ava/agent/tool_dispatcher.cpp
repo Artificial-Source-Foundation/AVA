@@ -984,6 +984,11 @@ ToolDispatcher::ToolDispatcher(ava::tools::ToolContext context)
 
 ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(ProviderToolCall const& call) const
 {
+  return dispatch_with_context(context_, call);
+}
+
+ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch_with_context(ava::tools::ToolContext context, ProviderToolCall const& call) const
+{
   auto const arguments = call.arguments_json.empty() ? std::string("{}") : call.arguments_json;
   ProviderToolCall const normalized{.id = call.id, .name = call.name, .arguments_json = arguments};
   if (normalized.id.empty())
@@ -1007,9 +1012,8 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch(ProviderToolCall 
   auto const* tool = registry_.find(normalized.name);
   if (tool != nullptr)
   {
-    if (is_canceled(context_))
+    if (is_canceled(context))
       return with_tool_result_payload(tool_error_result(normalized, canceled_error(normalized)));
-    auto context = context_;
     context.permission_request_ids = std::make_shared<std::vector<std::string>>();
     if (context.lsp_diagnostics_provider)
       context.lsp_diagnostics_provider->set_permission_request_ids(context.permission_request_ids);

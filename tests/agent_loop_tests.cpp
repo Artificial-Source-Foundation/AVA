@@ -34,6 +34,14 @@ ava::provider::HttpResponse sse_response(std::string const& body)
   return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = body};
 }
 
+std::string tool_call_sse(std::string_view id, std::string_view name, std::string_view arguments_json)
+{
+  return "data: {\"type\":\"response.function_call.added\",\"item_id\":\"" + ava::core::json::escape(id) + "\",\"name\":\"" + ava::core::json::escape(name) +
+         "\"}\n\n" + "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"" + ava::core::json::escape(id) + "\",\"delta\":\"" +
+         ava::core::json::escape(arguments_json) + "\"}\n\n" + "data: {\"type\":\"response.function_call.done\",\"item_id\":\"" + ava::core::json::escape(id) +
+         "\"}\n\n";
+}
+
 class OverflowOnceProvider final : public ava::provider::Provider
 {
  public:
@@ -1628,7 +1636,7 @@ void test_agent_loop_multiple_tools_and_denied_continuation()
     expect(replay_entries[0]->type == ava::session::EntryType::AssistantMessage && replay_entries[1]->type == ava::session::EntryType::ToolCall &&
                replay_entries[2]->type == ava::session::EntryType::ToolResult && replay_entries[3]->type == ava::session::EntryType::ToolCall &&
                replay_entries[4]->type == ava::session::EntryType::ToolResult && replay_entries[5]->type == ava::session::EntryType::AssistantMessage,
-            "agent loop persists multi-tool entries as AssistantMessage -> ToolCall_1 -> ToolResult_1 -> ToolCall_2 -> ToolResult_2 before continuation");
+           "agent loop persists multi-tool entries as AssistantMessage -> ToolCall_1 -> ToolResult_1 -> ToolCall_2 -> ToolResult_2 before continuation");
     expect(replay_entries[0]->data_json.find("\"tool_calls\":2") != std::string::npos &&
                ava::core::json::string_field(replay_entries[1]->data_json, "call_id").value_or("") == "call_1" &&
                ava::core::json::string_field(replay_entries[1]->data_json, "name").value_or("") == "read_file" &&
@@ -1674,6 +1682,444 @@ void test_agent_loop_multiple_tools_and_denied_continuation()
          "agent loop marks denied tool results as safe error timeline entries");
   expect(denied_transport.requests().size() == 2 && denied_transport.requests()[1].body.find("permission_denied") != std::string::npos,
          "permission-denied tool result is framed into continuation context");
+}
+
+void test_agent_loop_parallel_read_search_preserves_provider_order_and_replay()
+{
+  auto const root = temp_root() / "agent-parallel-read-search";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace / "a");
+  std::filesystem::create_directories(workspace / "b");
+  for (int index = 0; index < 500; ++index)
+  {
+    std::ofstream a(workspace / "a" / ("file_" + std::to_string(index) + ".txt"), std::ios::binary | std::ios::trunc);
+    a << "alpha " << index;
+    std::ofstream b(workspace / "b" / ("file_" + std::to_string(index) + ".txt"), std::ios::binary | std::ios::trunc);
+    b << "bravo " << index;
+  }
+
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "parallel-order"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response(tool_call_sse("glob_a", "glob", R"({"pattern":"a/*.txt"})") +
+                                                    tool_call_sse("glob_b", "glob", R"({"pattern":"b/*.txt"})") + "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n"
+                                                    "data: [DONE]\n\n")});
+  std::vector<ava::agent::ToolTimelineEntry> tool_events;
+  std::vector<ava::agent::ToolProgressEntry> progress_events;
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                          .mode = ava::agent::Mode::Build,
+                                                          .provider_id = "openai",
+                                                          .model_id = "gpt-5.5",
+                                                          .system_prompt = "system prompt",
+                                                          .access_token = "token",
+                                                          .on_tool_event = [&tool_events](auto const& entry) { tool_events.push_back(entry); },
+                                                          .on_tool_progress = [&progress_events](auto const& entry) -> ava::core::VoidResult {
+                                                            progress_events.push_back(entry);
+                                                            return {};
+                                                          },
+                                                          .parallel_read_search_tools = true,
+                                                          .parallel_read_search_max_workers = 2});
+  auto result = loop.run_turn("glob both", store, provider, transport);
+  expect(result && result->final_text == "done" && result->tool_calls == 2 && result->provider_iterations == 2,
+         "parallel read/search opt-in completes provider continuation");
+  expect(result && result->tool_timeline.size() == 2 && result->tool_timeline[0].call_id == "glob_a" &&
+             result->tool_timeline[0].status == ava::agent::ToolTimelineStatus::Success && result->tool_timeline[0].total_matches &&
+             *result->tool_timeline[0].total_matches == 500 && result->tool_timeline[1].call_id == "glob_b" &&
+             result->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success && result->tool_timeline[1].total_matches &&
+             *result->tool_timeline[1].total_matches == 500,
+         "parallel read/search timeline remains in provider order");
+  expect(tool_events.size() == 4 && tool_events[0].call_id == "glob_a" && tool_events[0].status == ava::agent::ToolTimelineStatus::Running &&
+             tool_events[1].call_id == "glob_a" && tool_events[1].status == ava::agent::ToolTimelineStatus::Success && tool_events[2].call_id == "glob_b" &&
+             tool_events[2].status == ava::agent::ToolTimelineStatus::Running && tool_events[3].call_id == "glob_b" &&
+             tool_events[3].status == ava::agent::ToolTimelineStatus::Success,
+         "parallel read/search publishes running and final tool events in provider order");
+
+  std::size_t glob_a_progress = 0;
+  std::size_t glob_b_progress = 0;
+  bool saw_glob_b_progress = false;
+  bool glob_a_after_glob_b = false;
+  for (auto const& event : progress_events)
+  {
+    if (event.call_id == "glob_b")
+      saw_glob_b_progress = true;
+    if (event.call_id == "glob_a")
+    {
+      ++glob_a_progress;
+      glob_a_after_glob_b = glob_a_after_glob_b || saw_glob_b_progress;
+    }
+    if (event.call_id == "glob_b")
+      ++glob_b_progress;
+  }
+  expect(glob_a_progress >= 2 && glob_b_progress >= 2 && !glob_a_after_glob_b, "parallel read/search buffers progress and publishes it by provider slot");
+
+  auto entries = store.load();
+  auto audits = entries ? permission_entries(*entries) : std::vector<ava::session::SessionEntry>{};
+  auto const audit_id_0 = audits.size() >= 1 ? ava::core::json::string_field(audits[0].data_json, "permission_request_id").value_or("") : "";
+  auto const audit_id_1 = audits.size() >= 2 ? ava::core::json::string_field(audits[1].data_json, "permission_request_id").value_or("") : "";
+  expect(audits.size() == 2 && audit_id_0.starts_with("permreq_") && audit_id_1.starts_with("permreq_") && audit_id_0 != audit_id_1 &&
+             ava::core::json::string_field(audits[0].data_json, "operation") == "search" &&
+             ava::core::json::string_field(audits[1].data_json, "operation") == "search",
+         "parallel read/search commits unique buffered permission audit entries in provider order");
+
+  std::vector<ava::session::SessionEntry const*> ordered_entries;
+  if (entries)
+  {
+    for (auto const& entry : *entries)
+    {
+      if (entry.type == ava::session::EntryType::AssistantMessage || entry.type == ava::session::EntryType::ToolCall ||
+          entry.type == ava::session::EntryType::PermissionDecision || entry.type == ava::session::EntryType::ToolResult)
+      {
+        ordered_entries.push_back(&entry);
+      }
+    }
+  }
+  expect(entries && ordered_entries.size() == 8, "parallel read/search session has assistant, ordered tool pairs, audits, and final assistant");
+  if (entries && ordered_entries.size() == 8)
+  {
+    expect(ordered_entries[0]->type == ava::session::EntryType::AssistantMessage && ordered_entries[1]->type == ava::session::EntryType::ToolCall &&
+               ordered_entries[2]->type == ava::session::EntryType::PermissionDecision && ordered_entries[3]->type == ava::session::EntryType::ToolResult &&
+               ordered_entries[4]->type == ava::session::EntryType::ToolCall && ordered_entries[5]->type == ava::session::EntryType::PermissionDecision &&
+               ordered_entries[6]->type == ava::session::EntryType::ToolResult && ordered_entries[7]->type == ava::session::EntryType::AssistantMessage &&
+               ava::core::json::string_field(ordered_entries[1]->data_json, "call_id") == "glob_a" &&
+               ava::core::json::string_field(ordered_entries[3]->data_json, "call_id") == "glob_a" &&
+               ava::core::json::string_field(ordered_entries[4]->data_json, "call_id") == "glob_b" &&
+               ava::core::json::string_field(ordered_entries[6]->data_json, "call_id") == "glob_b",
+           "parallel read/search persists ToolCall -> PermissionDecision -> ToolResult in provider order");
+  }
+  auto const continuation = transport.requests().size() >= 2 ? transport.requests()[1].body : std::string{};
+  auto const continuation_a = continuation.find("glob_a");
+  auto const continuation_b = continuation.find("glob_b");
+  expect(transport.requests().size() == 2 && continuation_a != std::string::npos && continuation_b != std::string::npos && continuation_a < continuation_b,
+         "parallel read/search continuation replay keeps provider-order tool results");
+}
+
+void test_agent_loop_parallel_read_search_zero_max_workers_clamps_to_one()
+{
+  auto const root = temp_root() / "agent-parallel-zero-workers";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  {
+    std::ofstream one(workspace / "one.txt", std::ios::binary | std::ios::trunc);
+    one << "one";
+    std::ofstream two(workspace / "two.txt", std::ios::binary | std::ios::trunc);
+    two << "two";
+  }
+
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "parallel-zero-workers"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({sse_response(tool_call_sse("call_1", "read_file", R"({"path":"one.txt"})") +
+                                                    tool_call_sse("call_2", "read_file", R"({"path":"two.txt"})") + "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n"
+                                                    "data: [DONE]\n\n")});
+  std::vector<ava::agent::ToolTimelineEntry> tool_events;
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                          .mode = ava::agent::Mode::Build,
+                                                          .provider_id = "openai",
+                                                          .model_id = "gpt-5.5",
+                                                          .system_prompt = "system prompt",
+                                                          .access_token = "token",
+                                                          .on_tool_event = [&tool_events](auto const& entry) { tool_events.push_back(entry); },
+                                                          .parallel_read_search_tools = true,
+                                                          .parallel_read_search_max_workers = 0});
+  auto result = loop.run_turn("read both with zero worker cap", store, provider, transport);
+  expect(result && result->final_text == "done" && result->tool_calls == 2 && result->provider_iterations == 2,
+         "parallel read/search zero max_workers is clamped and does not fail the turn");
+  expect(tool_events.size() == 4 && tool_events[0].call_id == "call_1" && tool_events[1].call_id == "call_1" &&
+             tool_events[1].status == ava::agent::ToolTimelineStatus::Success && tool_events[2].call_id == "call_2" && tool_events[3].call_id == "call_2" &&
+             tool_events[3].status == ava::agent::ToolTimelineStatus::Success,
+         "zero-worker clamp keeps provider-order tool event commits");
+}
+
+void test_agent_loop_parallel_read_search_falls_back_for_ask_preflight()
+{
+  auto const root = temp_root() / "agent-parallel-ask-fallback";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto const outside_path = root / "outside.txt";
+  {
+    std::ofstream outside(outside_path, std::ios::binary | std::ios::trunc);
+    outside << "outside content";
+    std::ofstream inside(workspace / "inside.txt", std::ios::binary | std::ios::trunc);
+    inside << "inside content";
+  }
+
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "ask-fallback"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {sse_response(tool_call_sse("outside_read", "read_file", "{\"path\":\"" + ava::core::json::escape(outside_path.generic_string()) + "\"}") +
+                    tool_call_sse("inside_read", "read_file", R"({"path":"inside.txt"})") + "data: [DONE]\n\n"),
+       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n"
+                    "data: [DONE]\n\n")});
+  auto const main_thread = std::this_thread::get_id();
+  std::thread::id resolver_thread;
+  int prompts = 0;
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .permission_resolver = [&](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++prompts;
+        resolver_thread = std::this_thread::get_id();
+        expect(prompt.target_path == outside_path, "parallel ask fallback resolver sees the outside read path");
+        auto entries = store.load();
+        bool saw_tool_call_before_prompt = false;
+        if (entries)
+        {
+          for (auto const& entry : *entries)
+          {
+            saw_tool_call_before_prompt =
+                saw_tool_call_before_prompt ||
+                (entry.type == ava::session::EntryType::ToolCall && ava::core::json::string_field(entry.data_json, "call_id").value_or("") == "outside_read");
+          }
+        }
+        expect(entries && saw_tool_call_before_prompt, "Ask fallback appends the ToolCall before invoking the resolver");
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .parallel_read_search_tools = true,
+      .parallel_read_search_max_workers = 2});
+  auto result = loop.run_turn("read outside and inside", store, provider, transport);
+  expect(result && result->final_text == "done" && prompts == 1 && resolver_thread == main_thread,
+         "Ask read/search calls stay on the sequential barrier path when parallel opt-in is enabled");
+
+  auto entries = store.load();
+  std::vector<ava::session::SessionEntry const*> ordered_entries;
+  if (entries)
+  {
+    for (auto const& entry : *entries)
+    {
+      if (entry.type == ava::session::EntryType::ToolCall || entry.type == ava::session::EntryType::PermissionDecision ||
+          entry.type == ava::session::EntryType::ToolResult)
+      {
+        ordered_entries.push_back(&entry);
+      }
+    }
+  }
+  expect(entries && ordered_entries.size() == 7, "Ask fallback and later parallel-ready read both persist paired tool entries");
+  if (entries && ordered_entries.size() == 7)
+  {
+    expect(ordered_entries[0]->type == ava::session::EntryType::ToolCall && ordered_entries[1]->type == ava::session::EntryType::PermissionDecision &&
+               ordered_entries[2]->type == ava::session::EntryType::PermissionDecision && ordered_entries[3]->type == ava::session::EntryType::ToolResult &&
+               ava::core::json::string_field(ordered_entries[0]->data_json, "call_id") == "outside_read" &&
+               ava::core::json::string_field(ordered_entries[3]->data_json, "call_id") == "outside_read" &&
+               ordered_entries[4]->type == ava::session::EntryType::ToolCall && ordered_entries[5]->type == ava::session::EntryType::PermissionDecision &&
+               ordered_entries[6]->type == ava::session::EntryType::ToolResult &&
+               ava::core::json::string_field(ordered_entries[4]->data_json, "call_id") == "inside_read" &&
+               ava::core::json::string_field(ordered_entries[6]->data_json, "call_id") == "inside_read",
+           "Ask fallback preserves sequential ToolCall -> PermissionDecision entries before the next ready read slot");
+  }
+}
+
+void test_agent_loop_parallel_read_search_active_cancellation_stops_unstarted_slots()
+{
+  auto const root = temp_root() / "agent-parallel-active-cancel";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  for (int index = 1; index <= 4; ++index)
+  {
+    std::ofstream file(workspace / ("file_" + std::to_string(index) + ".txt"), std::ios::binary | std::ios::trunc);
+    file << "file " << index;
+  }
+
+  struct ActiveCancelState
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    std::thread::id main_thread;
+    std::vector<std::thread::id> worker_threads;
+    bool cancel_requested = false;
+    bool timed_out = false;
+
+    bool operator()()
+    {
+      auto const thread_id = std::this_thread::get_id();
+      std::unique_lock lock(mutex);
+      if (thread_id == main_thread)
+      {
+        return cancel_requested;
+      }
+
+      if (std::ranges::find(worker_threads, thread_id) == worker_threads.end())
+      {
+        worker_threads.push_back(thread_id);
+      }
+      if (worker_threads.size() >= 2)
+      {
+        cancel_requested = true;
+        changed.notify_all();
+      }
+      if (!changed.wait_for(lock, std::chrono::seconds(5), [&] { return cancel_requested || worker_threads.size() >= 2; }))
+      {
+        timed_out = true;
+        cancel_requested = true;
+        changed.notify_all();
+      }
+      return cancel_requested;
+    }
+  } cancel_state;
+  cancel_state.main_thread = std::this_thread::get_id();
+
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "parallel-active-cancel"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {sse_response(tool_call_sse("call_1", "read_file", R"({"path":"file_1.txt"})") + tool_call_sse("call_2", "read_file", R"({"path":"file_2.txt"})") +
+                    tool_call_sse("call_3", "read_file", R"({"path":"file_3.txt"})") + tool_call_sse("call_4", "read_file", R"({"path":"file_4.txt"})") +
+                    tool_call_sse("call_bash", "bash", R"({"command":"true"})") + "data: [DONE]\n\n"),
+       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"should not continue\"}\n\n"
+                    "data: [DONE]\n\n")});
+  std::atomic<int> resolver_calls = 0;
+  std::vector<ava::agent::ToolTimelineEntry> tool_events;
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .provider_id = "openai",
+      .model_id = "gpt-5.5",
+      .system_prompt = "system prompt",
+      .access_token = "token",
+      .on_tool_event = [&tool_events](auto const& entry) { tool_events.push_back(entry); },
+      .permission_resolver = [&resolver_calls](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++resolver_calls;
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .cancel_requested = [&cancel_state] { return cancel_state(); },
+      .parallel_read_search_tools = true,
+      .parallel_read_search_max_workers = 2});
+  auto result = loop.run_turn("read four then cancel during active epoch", store, provider, transport);
+
+  std::vector<std::thread::id> worker_threads;
+  bool cancel_timed_out = false;
+  {
+    std::lock_guard lock(cancel_state.mutex);
+    worker_threads = cancel_state.worker_threads;
+    cancel_timed_out = cancel_state.timed_out;
+  }
+  expect(!cancel_timed_out, "active parallel cancellation test releases workers through condition variables without timing out");
+  expect(worker_threads.size() == 2, "active parallel cancellation stops unstarted later read/search workers after the capped active batch");
+  expect(!result && result.error().message().find("canceled") != std::string::npos,
+         "active parallel read/search cancellation returns the agent-loop cancellation error");
+  expect(resolver_calls.load() == 0, "active parallel cancellation does not call live permission resolvers from workers");
+  expect(tool_events.size() == 4 && tool_events[0].call_id == "call_1" && tool_events[0].status == ava::agent::ToolTimelineStatus::Running &&
+             tool_events[1].call_id == "call_1" && tool_events[1].status == ava::agent::ToolTimelineStatus::Canceled && tool_events[2].call_id == "call_2" &&
+             tool_events[2].status == ava::agent::ToolTimelineStatus::Running && tool_events[3].call_id == "call_2" &&
+             tool_events[3].status == ava::agent::ToolTimelineStatus::Canceled,
+         "active parallel cancellation commits launched canceled slots in provider order only");
+
+  auto entries = store.load();
+  std::vector<ava::session::SessionEntry const*> ordered_tool_entries;
+  bool saw_later_slot = false;
+  bool saw_cancel_boundary = false;
+  if (entries)
+  {
+    for (auto const& entry : *entries)
+    {
+      if (entry.type == ava::session::EntryType::ToolCall || entry.type == ava::session::EntryType::ToolResult)
+      {
+        auto const call_id = ava::core::json::string_field(entry.data_json, "call_id").value_or("");
+        saw_later_slot = saw_later_slot || call_id == "call_3" || call_id == "call_4" || call_id == "call_bash";
+        ordered_tool_entries.push_back(&entry);
+      }
+      saw_cancel_boundary = saw_cancel_boundary || entry.type == ava::session::EntryType::Cancel;
+    }
+  }
+  expect(entries && ordered_tool_entries.size() == 4 && !saw_later_slot && saw_cancel_boundary && transport.requests().size() == 1,
+         "active parallel cancellation persists only launched tool pairs, appends a cancel boundary, and skips the later barrier/provider continuation");
+  if (entries && ordered_tool_entries.size() == 4)
+  {
+    expect(ordered_tool_entries[0]->type == ava::session::EntryType::ToolCall && ordered_tool_entries[1]->type == ava::session::EntryType::ToolResult &&
+               ordered_tool_entries[2]->type == ava::session::EntryType::ToolCall && ordered_tool_entries[3]->type == ava::session::EntryType::ToolResult &&
+               ava::core::json::string_field(ordered_tool_entries[0]->data_json, "call_id") == "call_1" &&
+               ava::core::json::string_field(ordered_tool_entries[1]->data_json, "call_id") == "call_1" &&
+               ava::core::json::string_field(ordered_tool_entries[1]->data_json, "status") == "canceled" &&
+               ava::core::json::string_field(ordered_tool_entries[2]->data_json, "call_id") == "call_2" &&
+               ava::core::json::string_field(ordered_tool_entries[3]->data_json, "call_id") == "call_2" &&
+               ava::core::json::string_field(ordered_tool_entries[3]->data_json, "status") == "canceled",
+           "active parallel cancellation keeps provider-order ToolCall -> canceled ToolResult pairs for launched slots");
+  }
+}
+
+void test_agent_loop_parallel_read_search_cancellation_stops_later_barrier()
+{
+  auto const root = temp_root() / "agent-parallel-cancel";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  {
+    std::ofstream one(workspace / "one.txt", std::ios::binary | std::ios::trunc);
+    one << "one";
+    std::ofstream two(workspace / "two.txt", std::ios::binary | std::ios::trunc);
+    two << "two";
+  }
+
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "parallel-cancel"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {sse_response(tool_call_sse("call_1", "read_file", R"({"path":"one.txt"})") + tool_call_sse("call_2", "read_file", R"({"path":"two.txt"})") +
+                    tool_call_sse("call_bash", "bash", R"({"command":"true"})") + "data: [DONE]\n\n")});
+  bool cancel_after_first_tool = false;
+  std::vector<ava::agent::ToolTimelineEntry> tool_events;
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
+                                                          .mode = ava::agent::Mode::Build,
+                                                          .provider_id = "openai",
+                                                          .model_id = "gpt-5.5",
+                                                          .system_prompt = "system prompt",
+                                                          .access_token = "token",
+                                                          .on_tool_event =
+                                                              [&](ava::agent::ToolTimelineEntry const& entry) {
+                                                                tool_events.push_back(entry);
+                                                                if (entry.call_id == "call_1" && entry.status == ava::agent::ToolTimelineStatus::Success)
+                                                                {
+                                                                  cancel_after_first_tool = true;
+                                                                }
+                                                              },
+                                                          .cancel_requested = [&cancel_after_first_tool] { return cancel_after_first_tool; },
+                                                          .parallel_read_search_tools = true,
+                                                          .parallel_read_search_max_workers = 2});
+  auto result = loop.run_turn("read both then cancel before bash", store, provider, transport);
+  expect(!result && result.error().message().find("canceled") != std::string::npos,
+         "parallel read/search reports cancellation after committing the completed epoch");
+  expect(tool_events.size() == 4 && tool_events[0].call_id == "call_1" && tool_events[0].status == ava::agent::ToolTimelineStatus::Running &&
+             tool_events[1].call_id == "call_1" && tool_events[1].status == ava::agent::ToolTimelineStatus::Success && tool_events[2].call_id == "call_2" &&
+             tool_events[2].status == ava::agent::ToolTimelineStatus::Running && tool_events[3].call_id == "call_2" &&
+             tool_events[3].status == ava::agent::ToolTimelineStatus::Success,
+         "parallel cancellation commits completed read/search outcomes in provider order and does not publish later barrier events");
+
+  auto entries = store.load();
+  std::size_t tool_calls = 0;
+  std::size_t tool_results = 0;
+  bool saw_bash = false;
+  if (entries)
+  {
+    for (auto const& entry : *entries)
+    {
+      if (entry.type == ava::session::EntryType::ToolCall)
+      {
+        ++tool_calls;
+        saw_bash = saw_bash || ava::core::json::string_field(entry.data_json, "call_id").value_or("") == "call_bash";
+      }
+      if (entry.type == ava::session::EntryType::ToolResult)
+      {
+        ++tool_results;
+        saw_bash = saw_bash || ava::core::json::string_field(entry.data_json, "call_id").value_or("") == "call_bash";
+      }
+    }
+  }
+  expect(entries && tool_calls == 2 && tool_results == 2 && !saw_bash && transport.requests().size() == 1,
+         "parallel cancellation leaves no orphan read/search entries and does not launch the later barrier or continuation");
 }
 
 void test_agent_loop_cancellation_stops_later_sequential_tools()
@@ -1897,6 +2343,11 @@ void run_agent_loop_tests()
   test_agent_loop_replays_steering_after_mid_turn_auto_compaction();
   test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction();
   test_agent_loop_multiple_tools_and_denied_continuation();
+  test_agent_loop_parallel_read_search_preserves_provider_order_and_replay();
+  test_agent_loop_parallel_read_search_zero_max_workers_clamps_to_one();
+  test_agent_loop_parallel_read_search_falls_back_for_ask_preflight();
+  test_agent_loop_parallel_read_search_active_cancellation_stops_unstarted_slots();
+  test_agent_loop_parallel_read_search_cancellation_stops_later_barrier();
   test_agent_loop_cancellation_stops_later_sequential_tools();
   test_agent_loop_tool_delta_dedupes_and_rejects_empty_tool_ids();
   test_agent_loop_truncates_tool_context();

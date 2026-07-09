@@ -22,7 +22,7 @@ Status terms:
 | TUI architecture and tests | Reusable TypeScript TUI components and virtual-terminal tests. | **Intentional divergence** | AVA keeps a native C++ terminal stack and validates with deterministic renderer/editor tests plus gated real PTY/tmux/Kitty/OSC8 smokes. A Pi-style virtual terminal or component rewrite is deferred unless current evidence becomes insufficient. |
 | Built-in tools | Core read/write/edit/bash/grep/find/ls tool shape. | **Done** | AVA maps Pi aliases to native tools and adds `apply_patch`, `webfetch`, `websearch`, `skill`, `task`, `question`, plugin/MCP tools, and capability-gated LSP tools. Tool output is bounded and side effects route through permission/audit paths. |
 | Permissions and trust | Pi relies more on project trust; no built-in operation-level permission popup. | **Intentional divergence** | AVA keeps stronger allow/ask/deny policy, TUI/RPC/headless resolvers, durable rules outside model-writable workspace files, session grants, hard denies, remembered choices, and permission audit/diagnose/export flows. |
-| Parallel ordinary tool calls | Pi can batch/parallelize ordinary tool calls. | **Deferred** | AVA keeps ordinary model-dispatched tools sequential for permission order, audit order, output order, cancellation, mutation safety, and session replay semantics. |
+| Parallel ordinary tool calls | Pi can batch/parallelize ordinary tool calls. | **Partial** | AVA defaults ordinary model-dispatched tools to sequential execution. A backend-only internal `AgentLoopOptions` opt-in can parallelize preflight-proven builtin read/search calls (`read_file`, `list_directory`, `glob`, `grep`) with provider-order commits, but there is no public CLI/TUI/RPC flag or user-facing/default parallel-tools claim yet. |
 | Subagents/background jobs | Pi does not make task subagents a core baseline in the same way. | **Done** | AVA has a model-visible `task` tool, built-in and configured subagents, foreground child sessions, background jobs with `job_id`, explicit `TaskRun` permission, cancellation/status tracking, and recursive-task hiding. |
 | Broader multi-agent orchestration | Richer chained agents and task graphs. | **Deferred** | Background `task` is the supported concurrent subagent path. Chained task graphs, plugin-contributed subagent packages, and broader orchestration are later work. |
 | Plugins | Pi extensions, skills, prompts, package resources, UI hooks, and custom providers. | **Partial** | AVA has out-of-process local plugins with tools, commands, prompts, skills, events, diagnostics, enablement, a sample plugin, and compatibility policy. UI slots, plugin keybindings/themes, custom providers, request interception, marketplace, and remote install are deferred. |
@@ -37,6 +37,7 @@ Status terms:
 
 - Broader provider breadth and live-provider evidence remain credential/API-specific.
 - Pi JSONL conversion, public share, package/resource installs, and self-update remain deferred.
+- Public/default ordinary-tool parallelism remains deferred; only the internal read/search backend opt-in exists.
 - AVA does not claim OS/container sandboxing.
 - Broader screen-reader review, broader release-workload profiling, and richer multi-agent graphs remain future product work.
 

@@ -18,6 +18,7 @@ class ToolDispatcher
   explicit ToolDispatcher(ava::tools::ToolContext context);
 
   [[nodiscard]] ava::core::Result<ToolDispatchResult> dispatch(ProviderToolCall const& call) const;
+  [[nodiscard]] ava::core::Result<ToolDispatchResult> dispatch_with_context(ava::tools::ToolContext context, ProviderToolCall const& call) const;
   [[nodiscard]] std::vector<ToolMetadata> registered_tool_metadata() const;
   [[nodiscard]] static std::span<ToolMetadata const> tool_metadata();
   [[nodiscard]] static std::vector<ToolMetadata> tool_metadata(ava::tools::ToolContext const& context);

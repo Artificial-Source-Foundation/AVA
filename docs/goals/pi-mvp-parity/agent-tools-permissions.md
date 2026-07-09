@@ -163,7 +163,7 @@ git --no-pager diff --check
 #### Completed Work
 
 - Documented AVA's agent-control vocabulary in `docs/USAGE.md`: cancel/interrupt, steer-now, queue-next/follow-up, restore draft, and resume-later now have explicit cross-mode semantics.
-- Added a Pi-to-AVA tool parity matrix and AVA-only tool safety constraints in `docs/USAGE.md`; parallel/configurable tool execution is explicitly deferred pending replay-safe ordering, permission-audit ordering, and cancellation semantics.
+- Added a Pi-to-AVA tool parity matrix and AVA-only tool safety constraints in `docs/USAGE.md`; public/default parallel/configurable tool execution remained deferred at that checkpoint pending replay-safe ordering, permission-audit ordering, and cancellation semantics.
 - Expanded permission-rule documentation in `docs/CONFIG.md` with the real enforceable global and workspace-keyed paths, the authoritative `/permissions list`/RPC discovery path, protected-file rationale, command-rule matching, and hard-deny behavior.
 - Expanded `docs/headless-protocol.md` permission resolver docs to show `permission_request_id`, `risk`, and `structured_result.permission_request_ids` linkage used by TUI/headless/RPC diagnostics.
 - Added regression coverage:
@@ -190,7 +190,7 @@ git --no-pager diff --check
 #### Decisions / Deferrals / Exclusions
 
 - Preserved AVA's stronger per-operation permission model; Pi-style no-popup trust remains excluded from AVA MVP behavior.
-- Deferred parallel/configurable tool execution. Pi defaults to parallel tool execution, but AVA keeps sequential execution until permission order, audit order, output ordering, cancellation, and session replay semantics are explicitly designed.
+- Deferred public/default parallel/configurable tool execution. Pi defaults to parallel tool execution, but AVA kept sequential execution at that checkpoint until permission order, audit order, output ordering, cancellation, and session replay semantics were explicitly designed.
 - No new side-effect class was added; the existing side-effect checklist remains the required gate for future filesystem, shell, network, provider, credential, plugin, MCP, LSP, config, session, and package/resource changes.
 
 #### Validation
@@ -209,7 +209,7 @@ git --no-pager diff --check
 #### Residual Risks / Pending Questions
 
 - No blocker for the next area.
-- Parallel tool execution remains intentionally deferred and documented; revisit only with an approved replay/permission/cancellation design.
+- User-facing/default parallel tool execution remains intentionally deferred and documented; revisit only with an approved replay/permission/cancellation design and public opt-in surface.
 - Opt-in TUI/PTX and live-provider smokes remained skipped by default gates in this non-visual area; full default CTest passed.
 
 ### 2026-07-04 OpenCode Closure Pass
@@ -217,7 +217,7 @@ git --no-pager diff --check
 #### Reference Inspection Summary
 
 - OpenCode references inspected: `packages/web/src/content/docs/permissions.mdx`, `packages/core/src/permission.ts`, `packages/schema/src/permission.ts`, `packages/schema/src/permission-saved.ts`, `packages/opencode/src/cli/cmd/run/permission.shared.ts`, `footer.permission.tsx`, `tool.ts`, `packages/opencode/src/agent/subagent-permissions.ts`, `packages/web/src/content/docs/agents.mdx`, `packages/core/src/tool/`, `packages/web/src/content/docs/tools.mdx`, `custom-tools.mdx`, `specs/v2/tools.md`, and the listed permission tests under `packages/core/test` and `packages/opencode/test`.
-- Pi references rechecked: agent steering/follow-up queues remain one-at-a-time by default, Pi built-ins remain `read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`, and Pi still defaults to parallel tool execution while providing no operation-level permission popup. AVA keeps sequential execution and granular permissions as AVA-superior safety behavior.
+- Pi references rechecked: agent steering/follow-up queues remain one-at-a-time by default, Pi built-ins remain `read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`, and Pi still defaults to parallel tool execution while providing no operation-level permission popup. AVA keeps default user-facing execution sequential and granular permissions as AVA-superior safety behavior; a later internal backend opt-in covers only preflight-proven builtin read/search calls.
 - AVA references rechecked: `agent_loop`, `tool_dispatcher`, `tool_metadata`, `tool_visibility`, `src/ava/tools`, `src/ava/permissions`, `src/ava/app/events`, `src/ava/tui/event_state.cpp`, `tool_cards.cpp`, `composer_permission.cpp`, and the matching tests.
 
 #### OpenCode Behavior Notes Applied Or Intentionally Exceeded
@@ -226,7 +226,7 @@ git --no-pager diff --check
 - OpenCode's external-directory prompt displays `Access external directory <path>`. AVA now uses that wording in the TUI permission dock for outside-workspace target prompts while keeping the backend reason `target is outside the workspace` for policy tests and structured RPC/headless output.
 - OpenCode's `once`/`always`/`reject` replies map to AVA's one-shot allow, remembered exact workspace-scoped allow rule, and one-shot reject. AVA also supports remembered reject rules, which is intentionally stronger than OpenCode's saved-allow-only model. RPC denial `reason` remains AVA's reject-message equivalent; an interactive TUI reject-message editor is explicitly deferred because it would require a new prompt sub-state and model-feedback semantics.
 - OpenCode deny-wins behavior and explicit deny enforcement match AVA's hard-deny and persistent-rule precedence: built-in hard denies are evaluated before rules, and matching persistent deny rules win over allows.
-- OpenCode subagent permission inheritance is documented as the reference comparison point. AVA now has a native `task` subagent surface with explicit `TaskRun` permission, child sessions, foreground/background execution, and background job tracking; broader multi-agent orchestration and parallel ordinary tool execution remain deferred in the product baseline.
+- OpenCode subagent permission inheritance is documented as the reference comparison point. AVA now has a native `task` subagent surface with explicit `TaskRun` permission, child sessions, foreground/background execution, and background job tracking; broader multi-agent orchestration and user-facing/default parallel ordinary tool execution remain deferred in the product baseline.
 - OpenCode tool display rules informed AVA's existing tool-card matrix. AVA cards continue to show lifecycle, success/error/canceled state, permission-denied audit details, truncation/spill, changed paths, diffs, and plain/copy-safe payloads where backend events provide them.
 
 #### Closure Matrices
@@ -256,7 +256,7 @@ Tool and permission category mapping:
 | Skills/resources | Pi skills/prompts/extensions | `skill`, custom/MCP tools | `skill`, plugins, MCP resources/tools/prompts behind trust, permission, audit, and output bounds. |
 | LSP/code intel | Not a Pi core tool | `lsp` | Capability-gated LSP diagnostics/symbol/definition/reference tools with `lsp.query` and `lsp.server.launch`. |
 | Subagents/tasks | Not Pi core | `task`, subagent permission inheritance | AVA `task`, built-in/custom subagents, `Operation::TaskRun`, child-session metadata, background `job_id` tracking, recursive-task hiding, and project-trust-gated custom definitions. |
-| Parallel/batch tools | Pi default parallel batches | `batch`/tool registry supports concurrent surfaces | Deferred in AVA until replay, permission order, audit order, mutation order, and cancellation semantics are designed. |
+| Parallel/batch tools | Pi default parallel batches | `batch`/tool registry supports concurrent surfaces | Internal/backend opt-in only for preflight-proven builtin read/search epochs; public/default behavior remains sequential until replay, permission order, audit order, mutation order, cancellation, and opt-in UX are designed for the exposed surface. |
 
 #### Completed Work
 
@@ -294,7 +294,7 @@ Tool and permission category mapping:
 #### Decisions / Deferrals / Exclusions
 
 - TUI reject-message editor deferred with rationale: AVA already accepts bounded RPC denial reasons and preserves them in audit/tool details; adding a TUI text-entry sub-state would broaden prompt state and model-feedback semantics beyond this closure pass.
-- Parallel/configurable tool execution remains deferred; no implementation was added because replay order, permission-audit order, output order, mutation ordering, and cancellation semantics are not designed.
+- Public/default parallel/configurable tool execution remains deferred; no implementation was added in this checkpoint because replay order, permission-audit order, output order, mutation ordering, and cancellation semantics were not yet designed.
 - No new side-effect class was added. The side-effect checklist remains the gate for future filesystem, shell, network, provider, credential, plugin, MCP, LSP, config, session, and package/resource side effects.
 - OpenCode desktop/web/SaaS/server/package surfaces remain outside the AVA local-terminal MVP unless a future product decision scopes them. Native AVA task-subagent execution is now present; broader OpenCode-style orchestration beyond that slice remains future work.
 
@@ -307,13 +307,13 @@ Tool and permission category mapping:
 - Material review: checked correctness, permission bypass risk, destructive-operation risk, DX, code quality, architecture boundaries, test adequacy, manual evidence, and docs consistency against the goal criteria. No material implementation findings remained after the prompt wording/test updates.
 - Reviewer subagent result: no material issues; confirmed prompt changes are display/wording-only, default reject behavior and deny/Esc/Ctrl-C/Ctrl-D resolution remain intact, remembered-rule creation still routes through backend-safe callbacks, and deterministic tests cover request ids, external-directory wording, remembered choices, and width bounds. Noted only non-blocking future polish: structured outside-workspace prompt metadata would avoid TUI substring matching, and duplicated runtime status strings could diverge later.
 - Security review subagent result: no material security findings; confirmed the change is user-facing wording/request-id/external-directory display only and does not weaken backend permission policy, rule precedence, or trust boundaries.
-- Docs audit subagent result: no material docs findings; confirmed all 13 closure topics are consistently covered, including agent control vocabulary, tool/permission matrices, OpenCode prompt wording, rule persistence, hard-deny/deny-wins, tool-card coverage, side-effect checklist, parallel-tools deferral, AVA manual evidence, and OpenCode reference-test blocker/next commands.
+- Docs audit subagent result: no material docs findings; confirmed all 13 closure topics are consistently covered, including agent control vocabulary, tool/permission matrices, OpenCode prompt wording, rule persistence, hard-deny/deny-wins, tool-card coverage, side-effect checklist, public/default parallel-tools deferral, AVA manual evidence, and OpenCode reference-test blocker/next commands.
 
 #### Residual Risks / Pending Questions
 
 - OpenCode manual permission-prompt capture is blocked by missing reference dependencies and unavailable model/interactive setup in this checkout; the exact blocker and next commands are recorded above, and AVA-side deterministic plus tmux PTY evidence compensates for this goal.
 - Broader non-tool denial wording and richer per-tool affordances remain future product polish, not unresolved MVP blockers.
-- Parallel tool execution remains intentionally deferred and documented; revisit only with an approved replay/permission/cancellation design.
+- User-facing/default parallel tool execution remains intentionally deferred and documented; revisit only with an approved replay/permission/cancellation design and public opt-in surface. The later internal read/search opt-in is backend-only evidence, not this goal's user-facing parity closure.
 
 ### 2026-07-04 Backend Aggregate Regression Fix
 

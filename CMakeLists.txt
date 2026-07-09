@@ -49,8 +49,12 @@ configure_file(
   @ONLY
 )
 
-option(AVA_BUILD_TESTS "Build AVA tests" ON)
-option(AVA_ENABLE_SANITIZERS "Build AVA with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+cw_option(EnableAvaBuildTests
+    "Build AVA tests" ON
+    "" OFF)
+cw_option(EnableAvaSanitizers
+    "Build AVA with AddressSanitizer and UndefinedBehaviorSanitizer" OFF
+    "" OFF)
 
 function(ava_apply_debugging target)
   target_link_libraries(${target} PRIVATE ${AICXX_OBJECTS_LIST})
@@ -78,7 +82,7 @@ function(ava_apply_warnings target)
 endfunction()
 
 function(ava_apply_sanitizers target)
-  if(AVA_ENABLE_SANITIZERS AND NOT MSVC)
+  if(OptionEnableAvaSanitizers AND NOT MSVC)
     target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(${target} PRIVATE -fsanitize=address,undefined)
   endif()
@@ -101,7 +105,7 @@ set(AICXX_OBJECTS_LIST ${AICXX_OBJECTS_LIST} enchantum::enchantum CACHE INTERNAL
 add_subdirectory(src)
 add_subdirectory(enchantum)
 
-if(AVA_BUILD_TESTS)
+if(OptionEnableAvaBuildTests)
   enable_testing()
   add_subdirectory(tests)
 endif()

@@ -12,7 +12,7 @@
       "description": "Configure a local developer build with tests and compile commands enabled.",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "AVA_BUILD_TESTS": "ON",
+        "EnableAvaBuildTests": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },
@@ -23,7 +23,7 @@
       "inherits": "dev",
       "binaryDir": "${sourceDir}/build-sanitize",
       "cacheVariables": {
-        "AVA_ENABLE_SANITIZERS": "ON"
+        "EnableAvaSanitizers": "ON"
       }
     },
     {
@@ -32,7 +32,7 @@
       "description": "Configure an optimized build without tests.",
       "binaryDir": "${sourceDir}/build-release",
       "cacheVariables": {
-        "AVA_BUILD_TESTS": "OFF",
+        "EnableAvaBuildTests": "OFF",
         "CMAKE_BUILD_TYPE": "Release"
       }
     }

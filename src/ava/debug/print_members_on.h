@@ -6,6 +6,7 @@
 // Only include debug.h if it wasn't already included before.
 #include "debug.h"
 #endif
+#include "print_reference.h"
 
 // The idea behind passing a prefix to print_members is so that you can call
 // print_members(os, prefix) from within another print_members to append the
@@ -20,11 +21,19 @@
   } \
   void print_members(std::ostream& os, char const* prefix) const;
 
+#define AVA_PURE_VIRTUAL_PRINT_ON_MEMBERS \
+  void print_on(std::ostream& os) const \
+  { \
+    os << libcwd::type_info_of(*this).demangled_name() << '@' << (void*)this; \
+  }
+
 #ifndef CWDEBUG
 // AVA_DEBUG_MEMBERS only declares print_on in Debug mode.
 #define AVA_DEBUG_PRINT_MEMBERS_ON
+#define AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS
 #else
 #define AVA_DEBUG_PRINT_MEMBERS_ON AVA_PRINT_ON_MEMBERS
+#define AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS AVA_PURE_VIRTUAL_PRINT_ON_MEMBERS
 
 NAMESPACE_DEBUG_CHANNELS_START
 extern Channel ava;

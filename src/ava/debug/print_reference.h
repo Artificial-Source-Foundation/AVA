@@ -1,6 +1,7 @@
 #pragma once
 
 #include "utils/iomanip.h"
+#include <libcwd/type_info.h>
 
 namespace ava_utils {
 
@@ -35,6 +36,9 @@ PrintReference<T> print_reference(T const& ref)
 template<typename T>
 std::ostream& operator<<(std::ostream& os, PrintReference<T> ref)
 {
+#if CWDEBUG_LOCATION
+  os << libcwd::type_info_of<T>().demangled_name();
+#endif
   os << '@' << (void*)&ref.m_ref;
   if constexpr (requires { os << ref.m_ref; })
     if (!PrintingReference<T>::get_iword_value(os))

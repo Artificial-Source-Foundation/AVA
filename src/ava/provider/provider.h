@@ -50,6 +50,8 @@ struct ContentPart
   // Transient provider payload populated only after session attachment storage
   // has verified size, hash, and path containment. Never persist this field.
   std::string data_base64 = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ChatMessage
@@ -63,6 +65,8 @@ struct ChatMessage
   // these parts as canonical and treat content only as fallback/diagnostic text.
   // Text-only providers should ignore this field.
   std::vector<ContentPart> content_parts = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ProviderReasoningOptions
@@ -70,6 +74,8 @@ struct ProviderReasoningOptions
   std::string type = {};
   std::optional<long long> budget_tokens = std::nullopt;
   std::string display = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ProviderRequest
@@ -83,6 +89,8 @@ struct ProviderRequest
   std::optional<long long> max_output_tokens = std::nullopt;
   std::optional<ProviderReasoningOptions> reasoning = std::nullopt;
   std::string system_prompt_cache_ttl = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ProviderAuthContext
@@ -90,6 +98,8 @@ struct ProviderAuthContext
   std::string access_token;
   std::string credential_type;
   std::string account_id;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TokenUsage
@@ -104,6 +114,8 @@ struct TokenUsage
   std::optional<long long> estimated_output_bytes;
   std::optional<long long> estimated_total_bytes;
   bool estimated = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct HttpRequest
@@ -117,6 +129,8 @@ struct HttpRequest
   bool follow_redirects = true;
   bool include_response_headers = false;
   std::vector<std::string> resolve_hosts;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct HttpResponse
@@ -124,6 +138,8 @@ struct HttpResponse
   int status_code = 0;
   std::map<std::string, std::string> headers;
   std::string body;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 enum class StreamEventType
@@ -177,7 +193,7 @@ class StreamParser
   [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> append(std::string_view chunk) = 0;
   [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> finish() = 0;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS
 };
 
 class Provider
@@ -190,7 +206,7 @@ class Provider
   [[nodiscard]] virtual std::unique_ptr<StreamParser> create_stream_parser() const;
   [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> parse_response(HttpResponse const& response, bool stream) const;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS
 };
 
 class Transport
@@ -205,7 +221,8 @@ class Transport
   [[nodiscard]] virtual bool supports_streaming() const noexcept;
   [[nodiscard]] virtual ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
                                                                        CancelCallback cancel_requested = nullptr);
-  AVA_DEBUG_PRINT_MEMBERS_ON
+
+  AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS
 };
 
 struct RetryOptions

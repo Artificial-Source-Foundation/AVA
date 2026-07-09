@@ -1,14 +1,19 @@
 #pragma once
 
-#include "utils/print_pointer.h"
-#include "utils/to_string.h"
+#include <boost/intrusive_ptr.hpp>
 #include <concepts>
 #include <iostream>
 #include <mutex>
 #include <type_traits>
-#include "debug.h"
+#include <cstring>
+#include <functional>
+#include <memory>
 
-NAMESPACE_DEBUG_START
+#ifdef CWDS_DEBUG_OSTREAM_OPERATORS_H
+#error "ava/debug/debug_ostream_operators.h must be included before cwds/debug_ostream_operators.h is."
+#endif
+
+namespace debug {
 // Allow using `os << __write__("member:")` in the generated `print_members`
 // member functions to avoid getting quotes around those string literals.
 struct AvaRawDebugString { char const* ptr; };
@@ -18,7 +23,7 @@ struct AvaRawDebugString { char const* ptr; };
   os.write(raw_str.ptr, std::strlen(raw_str.ptr));
   return os;
 }
-NAMESPACE_DEBUG_END
+} // namespace debug
 
 namespace debug::ostream_operators {
 
@@ -45,14 +50,7 @@ template<typename T>
 concept ConceptIsEnum = std::is_enum_v<T>;
 
 template<ConceptIsEnum T>
-inline std::ostream& operator<<(std::ostream& os, T const& e)
-{
-  if constexpr (ConceptHasToString<T>)
-    os << to_string(e);
-  else
-    os << utils::to_string(e);
-  return os;
-}
+inline std::ostream& operator<<(std::ostream& os, T const& e);
 
 template<typename T>
 concept ConceptIsNonIntrusiveNonArrayPointer =
@@ -61,7 +59,37 @@ concept ConceptIsNonIntrusiveNonArrayPointer =
     std::is_pointer_v<T>;
 
 template<ConceptIsNonIntrusiveNonArrayPointer T>
-inline std::ostream& operator<<(std::ostream& os, T const& obj)
+inline std::ostream& operator<<(std::ostream& os, T const& obj);
+
+// boost::intrusive_ptr defines its own operator<< as
+// template<class E, class T, class Y> std::basic_ostream<E, T> & operator<< (std::basic_ostream<E, T> & os, intrusive_ptr<Y> const & p)
+// In order to override that we use a constrained template to win over the unconstrained one:
+template<class E, class T, class Y>
+requires (sizeof(E) <= sizeof(char32_t)) // Expected to be always true, but it counts as a constrain.
+inline std::basic_ostream<E, T>& operator<<(std::basic_ostream<E, T>& os, boost::intrusive_ptr<Y> const& p);
+
+inline std::ostream& operator<<(std::ostream& os, std::string const& str)
+{
+  // Put double quotes around strings.
+  os << '"';
+  os.write(str.data(), str.size());
+  os << '"';
+  return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, char const* str);
+
+} // namespace debug::ostream_operators
+
+// Include all operator<<'s before defining ones that use LIBCWD_USING_OSTREAM_PRELUDE.
+#include <cwds/debug_ostream_operators.h>
+#include "utils/print_pointer.h"
+#include "utils/to_string.h"
+
+namespace debug::ostream_operators {
+
+template<ConceptIsNonIntrusiveNonArrayPointer T>
+std::ostream& operator<<(std::ostream& os, T const& obj)
 {
   utils::operator<<(os, utils::print_pointer(obj));
   return os;
@@ -78,16 +106,23 @@ std::basic_ostream<E, T>& operator<<(std::basic_ostream<E, T>& os, boost::intrus
   return os;
 }
 
-inline std::ostream& operator<<(std::ostream& os, std::string const& str)
+template<ConceptIsEnum T>
+std::ostream& operator<<(std::ostream& os, T const& e)
 {
-  // Put double quotes around strings.
-  os << '"';
-  os.write(str.data(), str.size());
-  os << '"';
+  if constexpr (ConceptHasToString<T>)
+  {
+    std::string str(to_string(e));
+    os.write(str.data(), str.size());
+  }
+  else
+  {
+    std::string str(utils::to_string(e));
+    os.write(str.data(), str.size());
+  }
   return os;
 }
 
-inline std::ostream& operator<<(std::ostream& os, char const* str)
+std::ostream& operator<<(std::ostream& os, char const* str)
 {
   os << debug::print_string(str);
   return os;
@@ -98,11 +133,13 @@ std::ostream& operator<<(std::ostream& os, std::optional<T> const& opt)
 {
   if (opt.has_value())
   {
+    // There is no need to write std::boolalpha here because we can only get here if LIBCWD_USING_OSTREAM_PRELUDE
+    // was already used, in which case that should already have been taken care of.
     LIBCWD_USING_OSTREAM_PRELUDE;
     os << opt.value();
   }
   else
-    os.write("$no value$", 10);
+    os.write("$no_value$", 10);
   return os;
 }
 

@@ -1,8 +1,7 @@
 #include "sys.h"
-#include "tests/support/test_harness.h"
+#include "ava/debug/debug_ostream_operators.h"          // This header must be included before test_harness.h
 
-#include "ava/debug/debug_ostream_operators.h"
-#include "utils/to_string.h"
+#include "tests/support/test_harness.h"
 
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
 #include <boost/intrusive_ptr.hpp>
@@ -57,17 +56,19 @@ std::string render_debug_values()
   test_adl::Color const color_value = test_adl::Color::Green;
   Plain const plain_value = Plain::Beta;
   std::mutex mutex_value;
+  std::optional<bool> const optional_bool = true;
   std::optional<std::string> const optional_string_value = std::string("present");
   std::optional<std::string> const optional_string_empty;
   ava::session::Foo const foo;
   boost::intrusive_ptr<ava::session::Foo> const foo_ptr(new ava::session::Foo);
   std::optional<boost::intrusive_ptr<ava::session::Foo>> const optional_foo(foo_ptr);
   std::optional<boost::intrusive_ptr<ava::session::Foo>> const optional_foo_empty;
+  std::vector<bool> vector_bool = {true, false};
+  std::vector<std::string> vector_strings = {"one", "two"};
 
   {
-    ss << std::boolalpha;
-    LIBCWD_USING_OSTREAM_PRELUDE
-    ss << __write__("string_literal:") << "literal"
+    AVA_USING_OSTREAM_PRELUDE(ss)
+       << __write__("string_literal:") << "literal"
        << __write__("\nstd::string:") << string_value
        << __write__("\nbool:") << bool_value
        << __write__("\nint:") << int_value
@@ -80,6 +81,9 @@ std::string render_debug_values()
        << __write__("\nintrusive_ptr:") << foo_ptr
        << __write__("\noptional_intrusive_ptr:") << optional_foo
        << __write__("\noptional_intrusive_ptr_empty:") << optional_foo_empty
+       << __write__("\nvector_with_bool:") << vector_bool
+       << __write__("\nvector_with_strings:") << vector_strings
+       << __write__("\noptional_bool:") << optional_bool
        << '\n';
   }
 
@@ -92,8 +96,8 @@ void test_string_literal_renders_raw()
   std::stringstream ss;
   {
     ss << "<prefix>";
-    LIBCWD_USING_OSTREAM_PRELUDE
-    ss << __write__("literal:")
+    AVA_USING_OSTREAM_PRELUDE(ss)
+       << __write__("literal:")
        << "literal";
   }
   expect(ss.str() == "<prefix>literal:\"literal\"", "prefix renders raw, string literal is quoted");
@@ -104,8 +108,7 @@ void test_std_string_is_quoted()
   std::stringstream ss;
   std::string const value = "hello";
   {
-    LIBCWD_USING_OSTREAM_PRELUDE
-    ss << value;
+    AVA_USING_OSTREAM_PRELUDE(ss) << value;
   }
   expect(ss.str() == "\"hello\"", "std::string renders double-quoted");
 }
@@ -116,9 +119,7 @@ void test_bool_renders_boolalpha()
   // encodes the desired contract; tighten the project operators to make it pass.
   std::stringstream ss;
   {
-    ss << std::boolalpha;
-    LIBCWD_USING_OSTREAM_PRELUDE
-    ss << true;
+    AVA_USING_OSTREAM_PRELUDE(ss) << true;
   }
   expect(ss.str() == "true", "bool renders through std::boolalpha");
 }
@@ -127,9 +128,7 @@ void test_int_renders_value()
 {
   std::stringstream ss;
   {
-    ss << std::boolalpha;
-    LIBCWD_USING_OSTREAM_PRELUDE
-    ss << 42;
+    AVA_USING_OSTREAM_PRELUDE(ss) << 42;
   }
   expect(ss.str() == "42", "int renders its value");
 }
@@ -138,8 +137,7 @@ void test_enum_with_to_string_renders_name()
 {
   std::stringstream ss;
   {
-    LIBCWD_USING_OSTREAM_PRELUDE
-    ss << test_adl::Color::Green;
+    AVA_USING_OSTREAM_PRELUDE(ss) << test_adl::Color::Green;
   }
   expect(ss.str() == "GREEN", "enum with to_string renders using that to_string");
 }
@@ -150,8 +148,7 @@ void test_enum_without_to_string_renders()
   // prelude; this is the gap to fill. The expectation is intentionally lenient.
   std::stringstream ss;
   {
-    LIBCWD_USING_OSTREAM_PRELUDE
-    ss << Plain::Beta;
+    AVA_USING_OSTREAM_PRELUDE(ss) << Plain::Beta;
   }
   expect(ss.str() == "Beta", "enum without to_string renders using enchantum");
 }
@@ -161,8 +158,7 @@ void test_mutex_renders_marker()
   std::stringstream ss;
   std::mutex m;
   {
-    LIBCWD_USING_OSTREAM_PRELUDE
-    ss << m;
+    AVA_USING_OSTREAM_PRELUDE(ss) << m;
   }
   expect(ss.str() == "$mutex$", "std::mutex renders its marker");
 }
@@ -173,8 +169,7 @@ void test_optional_string_renders_value_or_marker()
     std::stringstream ss;
     std::optional<std::string> const value = std::string("present");
     {
-      LIBCWD_USING_OSTREAM_PRELUDE
-      ss << value;
+      AVA_USING_OSTREAM_PRELUDE(ss) << value;
     }
     if (ss.str() != "\"present\"")
       std::cout << "ss.str() = \"" << ss.str() << "\"." << std::endl;
@@ -184,10 +179,9 @@ void test_optional_string_renders_value_or_marker()
     std::stringstream ss;
     std::optional<std::string> const empty;
     {
-      LIBCWD_USING_OSTREAM_PRELUDE
-      ss << empty;
+      AVA_USING_OSTREAM_PRELUDE(ss) << empty;
     }
-    expect(ss.str() == "$no value$", "disengaged optional renders the marker");
+    expect(ss.str() == "$no_value$", "disengaged optional renders the marker");
   }
 }
 
@@ -197,8 +191,7 @@ void test_optional_intrusive_ptr_renders()
   boost::intrusive_ptr<ava::session::Foo> const foo(new ava::session::Foo);
   std::optional<boost::intrusive_ptr<ava::session::Foo>> const value(foo);
   {
-    LIBCWD_USING_OSTREAM_PRELUDE
-    ss << value;
+    AVA_USING_OSTREAM_PRELUDE(ss) << value;
   }
   // The engaged case should dereference through print_pointer and show {Foo}.
   expect(ss.str().find("{Foo}") != std::string::npos, "engaged optional<intrusive_ptr> dereferences Foo");
@@ -206,10 +199,42 @@ void test_optional_intrusive_ptr_renders()
   std::stringstream ss_empty;
   std::optional<boost::intrusive_ptr<ava::session::Foo>> const empty;
   {
-    LIBCWD_USING_OSTREAM_PRELUDE
-    ss_empty << empty;
+    AVA_USING_OSTREAM_PRELUDE(ss_empty) << empty;
   }
-  expect(ss_empty.str() == "$no value$", "disengaged optional<intrusive_ptr> renders the marker");
+  expect(ss_empty.str() == "$no_value$", "disengaged optional<intrusive_ptr> renders the marker");
+}
+
+void test_vector_bool_renders_boolalpha_list()
+{
+  std::stringstream ss;
+  std::vector<bool> const vector_bool = { true, false };
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss) << vector_bool;
+  }
+  // Should render each element still as boolalpha.
+  expect(ss.str() == "{true, false}", "vector of bools renders elements with boolalpha");
+}
+
+void test_vector_string_renders_quoted_list()
+{
+  std::stringstream ss;
+  std::vector<std::string> const vector_string = { "one", "two" };
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss) << vector_string;
+  }
+  // Should render each element quoted, but not the ", " seperator.
+  expect(ss.str() == "{\"one\", \"two\"}", "vector of strings renders elements quoted");
+}
+
+void test_optional_bool_renders_with_boolalpha()
+{
+  std::stringstream ss;
+  std::optional<bool> const optional_bool = true;
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss) << optional_bool;
+  }
+  // Should render each element quoted, but not the ", " seperator.
+  expect(ss.str() == "true", "engaged optional<bool> renders with boolalpha");
 }
 
 void test_full_render_smoke()
@@ -232,5 +257,8 @@ void run_debug_tests()
   test_mutex_renders_marker();
   test_optional_string_renders_value_or_marker();
   test_optional_intrusive_ptr_renders();
+  test_vector_bool_renders_boolalpha_list();
+  test_vector_string_renders_quoted_list();
+  test_optional_bool_renders_with_boolalpha();
   test_full_render_smoke();
 }

@@ -11,10 +11,6 @@
 #include <sstream>
 #include <utility>
 
-#ifdef CWDEBUG
-#include "cwds/debug_ostream_operators.h"
-#endif
-
 namespace ava::app {
 namespace {
 

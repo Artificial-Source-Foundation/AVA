@@ -117,6 +117,104 @@ void test_std_string_is_quoted()
   expect(ss.str() == "\"hello\"", "std::string renders double-quoted");
 }
 
+void test_maxlen_truncates_long_string()
+{
+  // A 150-char string under maxlen(100) loses 68 chars from the middle: the
+  // kept 82 chars (41 + 41) plus the 18-char marker " ...(68 chars)... " fill
+  // the 100-char limit exactly.
+  std::stringstream ss;
+  std::string const s150(150, 'a');
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss) << maxlen(100) << s150;
+  }
+  std::string const expected = "\"" + std::string(41, 'a') + " ...(68 chars)... " + std::string(41, 'a') + "\"";
+  if (ss.str() != expected)
+    std::cout << "ss.str() = \"" << ss.str() << "\"." << std::endl;
+  expect(ss.str() == expected, "long string is cut in the middle with removed-count marker");
+}
+
+void test_maxlen_short_string_prints_full()
+{
+  std::stringstream ss;
+  std::string const value = "hello";
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss) << maxlen(100) << value;
+  }
+  expect(ss.str() == "\"hello\"", "string shorter than maxlen prints in full");
+}
+
+void test_maxlen_under_20_removed_prints_full()
+{
+  // A 101-char string under maxlen(100) would remove only 19 chars, which is
+  // below the 20-char threshold, so the full string is printed instead.
+  std::stringstream ss;
+  std::string const s101(101, 'a');
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss) << maxlen(100) << s101;
+  }
+  expect(ss.str() == "\"" + std::string(101, 'a') + "\"", "string that would remove <20 chars prints in full");
+}
+
+void test_maxlen_exactly_20_removed_truncates()
+{
+  // A 102-char string under maxlen(100) removes exactly 20 chars, which meets
+  // the threshold, so the middle is cut.
+  std::stringstream ss;
+  std::string const s102(102, 'a');
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss) << maxlen(100) << s102;
+  }
+  std::string const expected = "\"" + std::string(41, 'a') + " ...(20 chars)... " + std::string(41, 'a') + "\"";
+  if (ss.str() != expected)
+    std::cout << "ss.str() = \"" << ss.str() << "\"." << std::endl;
+  expect(ss.str() == expected, "string that removes exactly 20 chars is truncated");
+}
+
+void test_maxlen_three_digit_removal()
+{
+  // A 1000-char string under maxlen(100) removes 919 chars; the 3-digit count
+  // widens the marker to 19 chars, leaving 81 kept (40 + 41).
+  std::stringstream ss;
+  std::string const s1000(1000, 'a');
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss) << maxlen(100) << s1000;
+  }
+  std::string const expected = "\"" + std::string(40, 'a') + " ...(919 chars)... " + std::string(41, 'a') + "\"";
+  if (ss.str() != expected)
+    std::cout << "ss.str() = \"" << ss.str() << "\"." << std::endl;
+  expect(ss.str() == expected, "very long string truncates with a 3-digit removed count");
+}
+
+void test_maxlen_is_scoped_to_expression()
+{
+  // maxlen() derives from utils::iomanip::Unsticky: the limit is restored when
+  // the manipulator temporary is destroyed at the end of the statement, so a
+  // string printed in a later expression is not truncated.
+  std::stringstream ss;
+  std::string const s150(150, 'a');
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss) << maxlen(100) << s150;
+  }
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss) << s150;
+  }
+  std::string const truncated = "\"" + std::string(41, 'a') + " ...(68 chars)... " + std::string(41, 'a') + "\"";
+  std::string const full = "\"" + std::string(150, 'a') + "\"";
+  expect(ss.str() == truncated + full, "maxlen is scoped to its expression (Unsticky restores stream state)");
+}
+
+void test_maxlen_applies_to_whole_expression()
+{
+  // Both strings streamed after maxlen() in the same expression are truncated.
+  std::stringstream ss;
+  std::string const s150(150, 'a');
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss) << maxlen(100) << s150 << s150;
+  }
+  std::string const truncated = "\"" + std::string(41, 'a') + " ...(68 chars)... " + std::string(41, 'a') + "\"";
+  expect(ss.str() == truncated + truncated, "maxlen applies to every string in the expression");
+}
+
 void test_bool_renders_boolalpha()
 {
   // NOTE: boolalpha is not yet handled by the prelude operators. This assertion
@@ -269,6 +367,13 @@ void run_debug_tests()
 {
   test_string_literal_renders_raw();
   test_std_string_is_quoted();
+  test_maxlen_truncates_long_string();
+  test_maxlen_short_string_prints_full();
+  test_maxlen_under_20_removed_prints_full();
+  test_maxlen_exactly_20_removed_truncates();
+  test_maxlen_three_digit_removal();
+  test_maxlen_is_scoped_to_expression();
+  test_maxlen_applies_to_whole_expression();
   test_bool_renders_boolalpha();
   test_int_renders_value();
   test_enum_with_to_string_renders_name();

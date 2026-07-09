@@ -11,4 +11,6 @@
 #ifdef CWDEBUG
 // Make print_on members visible.
 #include "src/ava/debug/ava_print_on.h"
+// Make the maxlen() debug IO manipulator available inside Dout() expressions.
+#include "src/ava/debug/maxlen.h"
 #endif

@@ -310,6 +310,7 @@ set_source_files_properties(${_ava_generated_source_files} PROPERTIES GENERATED 
 #
 add_library(ava_debug
   "print_members_on.cpp"
+  "maxlen.cpp"
   ${_ava_generated_source_files}
 )
 

@@ -17,6 +17,7 @@ namespace debug::hidden_dummies::utils {
 namespace debug::hidden_dummies::debug {
   [[maybe_unused]] inline constexpr int print_string = 0;               // Defined in NAMESPACE_DEBUG by "cwds/debug_ostream_operators.h".
   [[maybe_unused]] inline constexpr int __write__ = 0;                  // Defined in NAMESPACE_DEBUG by "ava/debug/debug_ostream_operators.h".
+  [[maybe_unused]] inline constexpr int maxlen = 0;                     // Defined in NAMESPACE_DEBUG by "ava/debug/maxlen.h".
 } // namespace debug::hidden_dummies::debug
 
 namespace libcwd::ostream_operators { using namespace debug::hidden_dummies::ostream_operators; }
@@ -32,9 +33,12 @@ namespace debug { using namespace debug::hidden_dummies::debug; }
   using ::ava_utils::print_reference; \
   using ::utils::print_pointer; \
   using ::debug::print_string; \
+  using ::debug::maxlen; \
   using ::debug::__write__
 
 #define AVA_USING_OSTREAM_PRELUDE(os) \
   os << std::boolalpha; \
   LIBCWD_USING_OSTREAM_PRELUDE; \
   os
+
+#include "NAMESPACE_DEBUG.h"

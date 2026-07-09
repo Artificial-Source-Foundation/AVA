@@ -28,6 +28,13 @@ struct AvaRawDebugString { char const* ptr; };
   os.write(raw_str.ptr, std::strlen(raw_str.ptr));
   return os;
 }
+
+// Forward declarations of the maxlen() helpers. These are defined in
+// ava/debug/maxlen.h, which is only fully visible once <debug.h> has been
+// included (it is pulled in by cwds/debug_ostream_operators.h below). The
+// std::string inserter in this file needs them, so they are declared here.
+long get_maxlen_value(std::ostream& os);
+std::string render_maxlen_string(std::string const& str, long max_length);
 } // namespace debug
 
 namespace debug::ostream_operators {
@@ -78,9 +85,17 @@ inline std::ostream& operator<<(std::ostream& os, std::shared_ptr<T> const& ptr)
 
 inline std::ostream& operator<<(std::ostream& os, std::string const& str)
 {
-  // Put double quotes around strings.
+  // Put double quotes around strings, cutting the middle out of overly long
+  // strings when a maxlen() limit is active on the stream.
   os << '"';
-  os.write(str.data(), str.size());
+  long const limit = debug::get_maxlen_value(os);
+  if (limit <= 0)
+    os.write(str.data(), str.size());
+  else
+  {
+    std::string const rendered = debug::render_maxlen_string(str, limit);
+    os.write(rendered.data(), rendered.size());
+  }
   os << '"';
   return os;
 }

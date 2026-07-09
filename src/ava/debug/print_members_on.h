@@ -2,16 +2,11 @@
  * Convenience marocs                                                         *
  ******************************************************************************/
 
-#ifndef NAMESPACE_DEBUG_START
-// Only include debug.h if it wasn't already included before.
-#include "debug.h"
-#endif
-#include "print_reference.h"
-
 // The idea behind passing a prefix to print_members is so that you can call
 // print_members(os, prefix) from within another print_members to append the
 // members (start with an optional leading ", " if anything was already printed
 // before that point).
+//
 #define AVA_PRINT_ON_MEMBERS \
   void print_on(std::ostream& os) const \
   { \
@@ -21,6 +16,9 @@
   } \
   void print_members(std::ostream& os, char const* prefix) const;
 
+// If a type is pure virtual then it must have been passed as reference,
+// just print it as such.
+//
 #define AVA_PURE_VIRTUAL_PRINT_ON_MEMBERS \
   void print_on(std::ostream& os) const \
   { \
@@ -34,6 +32,11 @@
 #else
 #define AVA_DEBUG_PRINT_MEMBERS_ON AVA_PRINT_ON_MEMBERS
 #define AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS AVA_PURE_VIRTUAL_PRINT_ON_MEMBERS
+
+// Forward declaration.
+namespace libcwd { class Channel; }
+
+#include "NAMESPACE_DEBUG.h"            // NAMESPACE_DEBUG_CHANNELS_START/END
 
 NAMESPACE_DEBUG_CHANNELS_START
 extern Channel ava;

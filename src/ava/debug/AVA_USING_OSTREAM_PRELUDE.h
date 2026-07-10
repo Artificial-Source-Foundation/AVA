@@ -3,6 +3,10 @@
 // If one of the functions that LIBCWD_USING_OSTREAM_PRELUDE has a using for doesn't exist
 // because its header wasn't included, then these dummy objects will be used instead of
 // producing a compile error.
+//
+// Note: a compile error involving `debug::hidden_dummies` means the dummy was NOT hidden
+// and therefore means that the code isn't including a required header. See the comments
+// on the right of the dummy for the name of the missing header.
 namespace debug::hidden_dummies::ostream_operators {
   struct Dummy;
   [[maybe_unused]] inline constexpr void operator<<(Dummy&, int) { }    // Defined in libcwd::ostream_operators and debug::ostream_operators,

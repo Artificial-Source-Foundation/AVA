@@ -311,7 +311,7 @@ set_source_files_properties(${_ava_generated_source_files} PROPERTIES GENERATED 
 add_library(ava_debug
   "print_members_on.cpp"
   "maxlen.cpp"
-  "debug_ostream_operators.h"
+  "debug_ostream_operators.cpp"
   ${_ava_generated_source_files}
 )
 

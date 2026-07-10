@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <condition_variable>
+#include <optional>
 #include <type_traits>
 #include "NAMESPACE_DEBUG.h"
 
@@ -33,6 +34,8 @@ struct AvaRawDebugString { char const* ptr; };
 }
 
 NAMESPACE_DEBUG_END
+
+struct termios;
 
 namespace debug::ostream_operators {
 
@@ -122,8 +125,11 @@ std::ostream& operator<<(std::ostream& os, T const& e);
 template<typename T>
 std::ostream& operator<<(std::ostream& os, std::optional<T> const& opt);
 
-// Non-inline, defined in debug_ostream_operators.cpp.
+// Non-inline, defined in maxlen.cpp.
 std::ostream& operator<<(std::ostream& os, std::string const& str);
+
+// Non-inline, defined in debug_ostream_operators.cpp.
+std::ostream& operator<<(std::ostream& os, struct termios const& te);
 
 //=============================================================================
 

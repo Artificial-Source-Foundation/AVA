@@ -6,7 +6,6 @@
 #include "ava/tui/keybindings.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
-#include "ava/core/version.h"
 #include "ava/session/attachments.h"
 
 #include <functional>
@@ -114,7 +113,7 @@ struct TuiRuntimeOptions
   std::string session_path;
   std::string workspace;
   std::string git_branch;
-  std::string app_version = std::string(ava::core::version::kDisplayVersion);
+  std::string app_version;
   std::optional<std::size_t> context_source_count = std::nullopt;
   std::string initial_status = "";
   std::vector<TranscriptItem> initial_transcript = {};

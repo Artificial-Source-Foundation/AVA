@@ -14,7 +14,8 @@ target_sources(terminal_ObjLib
 get_target_property(CWDS_INTERFACE_INCLUDE_DIRECTORIES AICxx::cwds INTERFACE_INCLUDE_DIRECTORIES)
 target_include_directories(terminal_ObjLib
   PUBLIC
-    "${CWDS_INTERFACE_INCLUDE_DIRECTORIES}" # For sys.h and debug.h.
+    "${CWDS_INTERFACE_INCLUDE_DIRECTORIES}"     # For sys.h and debug.h.
+    "${CMAKE_SOURCE_DIR}/src"                   # Because headers of terminal/ use #include "ava/...".
   INTERFACE
     "${CMAKE_SOURCE_DIR}/src/ava/tui"
   PRIVATE

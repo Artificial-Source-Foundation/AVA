@@ -311,10 +311,15 @@ set_source_files_properties(${_ava_generated_source_files} PROPERTIES GENERATED 
 add_library(ava_debug
   "print_members_on.cpp"
   "maxlen.cpp"
+  "debug_ostream_operators.h"
   ${_ava_generated_source_files}
 )
 
-target_include_directories(ava_debug PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_include_directories(ava_debug
+  PUBLIC
+  "${CMAKE_BINARY_DIR}/src"   # Needed for ava/
+    "${CMAKE_SOURCE_DIR}/src"
+)
 
 ava_apply_debugging(ava_debug)
 ava_apply_warnings(ava_debug)

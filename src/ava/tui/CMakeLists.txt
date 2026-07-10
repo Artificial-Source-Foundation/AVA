@@ -26,7 +26,14 @@ add_library(ava_tui
 )
 
 target_link_libraries(ava_tui PRIVATE ${CURSES_LIBRARIES})
-target_include_directories(ava_tui PUBLIC "${CMAKE_SOURCE_DIR}/src" "${AVA_GENERATED_INCLUDE_DIR}" PRIVATE ${CURSES_INCLUDE_DIRS})
+message(STATUS "AVA_GENERATED_INCLUDE_DIR = ${AVA_GENERATED_INCLUDE_DIR}")
+target_include_directories(ava_tui
+  PUBLIC
+    "${CMAKE_SOURCE_DIR}/src"
+    "${AVA_GENERATED_INCLUDE_DIR}"
+  PRIVATE
+  ${CURSES_INCLUDE_DIRS}
+)
 ava_apply_debugging(ava_tui)
 ava_apply_warnings(ava_tui)
 ava_apply_sanitizers(ava_tui)

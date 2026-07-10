@@ -25,6 +25,7 @@
 #ifdef CWDEBUG
 
 #include "NAMESPACE_DEBUG.h"    // NAMESPACE_DEBUG_START/END
+#include "config.h"
 #include "utils/iomanip.h"      // utils::iomanip::Unsticky, utils::iomanip::Index
 
 #include <cstddef>              // std::size_t

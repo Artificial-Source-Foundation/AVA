@@ -10,6 +10,13 @@ target_sources(terminal_ObjLib
     "private_convert.cxx"
 )
 
+if (OptionEnableLibcwd)
+target_sources(terminal_ObjLib
+  PRIVATE
+    "print_members.cpp"
+)
+endif ()
+
 # Set required include directories.
 get_target_property(CWDS_INTERFACE_INCLUDE_DIRECTORIES AICxx::cwds INTERFACE_INCLUDE_DIRECTORIES)
 target_include_directories(terminal_ObjLib
@@ -27,6 +34,7 @@ target_link_libraries(terminal_ObjLib
   PUBLIC
     ${CURSES_LIBRARIES}
     ${AICXX_OBJECTS_LIST}
+    ava_debug
 )
 
 # Create an ALIAS target.

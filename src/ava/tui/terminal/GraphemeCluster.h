@@ -82,7 +82,10 @@ class GraphemeCluster
   // Return true iff data() is guaranteed to be zero terminated.
   bool is_zero_terminated() const { return length() < storage_.size(); }
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+#ifdef CWDEBUG
+  // Custom print_members.
+  AVA_PRINT_ON_MEMBERS
+#endif
 };
 
 } // namespace ava::tui::terminal

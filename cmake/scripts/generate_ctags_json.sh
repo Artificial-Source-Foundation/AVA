@@ -40,9 +40,9 @@ cd "$repo_root"
 
 # -L -   read the list of input files from stdin (the script's output).
 # -f out write the JSON tags to the requested path.
-# -D ... expand the opt-in macro to a print_members definition so that the
+# -D ... expand the opt-in/out macros to a print_members definition so that the
 #        generator can tell which classes/structs opted in straight from the
-#        tags file (a type declares print_members iff it has the macro).
+#        tags file (a type declares print_members_opt_in/out iff it has the macro).
 "$script_dir"/list_ava_sources.sh | "$ctags_exe" \
   --output-format=json \
   --language-force=C++ \
@@ -51,4 +51,5 @@ cd "$repo_root"
   -D 'AVA_DEBUG_PRINT_MEMBERS_ON=void print_members_opt_in() { }' \
   -D 'AVA_DEBUG_PRINT_MEMBERS_OPT_OUT=void print_members_opt_out() { }' \
   -D 'AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS=void print_members_opt_out() { }' \
+  -D 'AVA_PRINT_ON_MEMBERS=void print_members_opt_out() { }' \
   -L - -f "$out"

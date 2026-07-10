@@ -2,9 +2,9 @@
 # find_types_without_print_members.py -- report ava header types missing AVA_DEBUG_PRINT_MEMBERS_ON.
 #
 # Reads the JSON tags file ($BUILDDIR/generated/ctags/tags.json) and lists every
-# struct (and, optionally, class) defined in a header under src/ava/ that does
-# not yet declare the AVA_DEBUG_PRINT_MEMBERS_ON or AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS
-# opt-in marker, nor the AVA_DEBUG_PRINT_MEMBERS_OPT_OUT marker.
+# struct and class defined in a header under src/ava/ that does not yet declare
+# the AVA_DEBUG_PRINT_MEMBERS_ON or AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS opt-in
+# marker, nor the AVA_DEBUG_PRINT_MEMBERS_OPT_OUT marker.
 #
 # How opt-in/out is detected: the ctags invocation that produced tags.json passed
 # `-D AVA_DEBUG_PRINT_MEMBERS_ON=void print_members_opt_in() { }`, so every
@@ -16,7 +16,7 @@
 #
 # This mirrors the detection logic in generate_print_members.py.
 #
-# Usage: find_types_without_print_members.py <tags.json> [--include-classes]
+# Usage: find_types_without_print_members.py <tags.json>
 import argparse
 import json
 import re
@@ -30,6 +30,15 @@ AVA_HEADER_PREFIX = "src/ava/"
 # are not application types and are not expected to carry AVA_DEBUG_PRINT_MEMBERS_ON,
 # so they are excluded from the scan.
 AVA_DEBUG_EXCLUDE_PREFIX = "src/ava/debug/"
+# Types that are intentionally exempt from the AVA_DEBUG_PRINT_MEMBERS_ON
+# requirement and must never be reported by this scan, keyed by fully-qualified
+# name. These are typically tiny RAII/utility helpers (e.g. deleters or trivial
+# value types) where debug-print support adds no value. Add a type here only when
+# it has been deliberately reviewed and accepted without debug printing.
+EXEMPT_TYPES = {
+    "ava::tui::CursesSession::ScreenDeleter",
+    "ava::tui::NewLine",
+}
 
 
 def is_real_definition(tag):
@@ -103,6 +112,8 @@ def collect_missing(classes, opted, kinds):
             continue
         if fqname in opted:
             continue
+        if fqname in EXEMPT_TYPES:
+            continue
         if not is_real_definition(tag):
             continue
         line = tag.get("line", 0)
@@ -133,10 +144,9 @@ def report(title, by_file, out):
 
 def main(argv):
     parser = argparse.ArgumentParser(
-        description="List ava header structs missing AVA_DEBUG_PRINT_MEMBERS_ON.")
+        description="List ava header structs and classes missing "
+                    "AVA_DEBUG_PRINT_MEMBERS_ON.")
     parser.add_argument("tags_json", help="Path to the ctags tags.json file.")
-    parser.add_argument("--include-classes", action="store_true",
-                        help="Also report classes in addition to structs.")
     args = parser.parse_args()
 
     classes, opted = load_tags(args.tags_json)
@@ -145,20 +155,14 @@ def main(argv):
     struct_total = report("Structs in src/ava/ headers WITHOUT "
                           "AVA_DEBUG_PRINT_MEMBERS_ON or AVA_DEBUG_PRINT_MEMBERS_OPT_OUT:", struct_files, sys.stdout)
 
-    class_total = 0
-    if args.include_classes:
-        print()
-        class_files = collect_missing(classes, opted, {"class"})
-        class_total = report("Classes in src/ava/ headers WITHOUT "
-                             "AVA_DEBUG_PRINT_MEMBERS_ON, AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS "
-                             "or AVA_DEBUG_PRINT_MEMBERS_OPT_OUT:", class_files, sys.stdout)
+    print()
+    class_files = collect_missing(classes, opted, {"class"})
+    class_total = report("Classes in src/ava/ headers WITHOUT "
+                         "AVA_DEBUG_PRINT_MEMBERS_ON, AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS "
+                         "or AVA_DEBUG_PRINT_MEMBERS_OPT_OUT:", class_files, sys.stdout)
 
-    if args.include_classes:
-        sys.stderr.write("\nSummary: %d struct(s), %d class(es) missing an opt-in or "
-                         "opt-out marker.\n" % (struct_total, class_total))
-    else:
-        sys.stderr.write("\nSummary: %d struct(s) missing the opt-in/out marker.\n"
-                         % struct_total)
+    sys.stderr.write("\nSummary: %d struct(s), %d class(es) missing an opt-in or "
+                     "opt-out marker.\n" % (struct_total, class_total))
     return 0
 
 

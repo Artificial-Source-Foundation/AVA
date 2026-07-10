@@ -100,9 +100,6 @@ set(AVA_TEST_SUITES
   permission_rules
   tui_composer
 )
-if(OptionEnableLibcwd)
-  list(APPEND AVA_TEST_SUITES "debug")
-endif()
 foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   add_test(NAME ava_tests.${AVA_TEST_SUITE} COMMAND ava_tests ${AVA_TEST_SUITE})
 endforeach()
@@ -351,4 +348,26 @@ if(Python3_Interpreter_FOUND)
             --fake-provider $<TARGET_FILE:ava_fake_provider_server>
             --root ${CMAKE_BINARY_DIR}/tui-osc8-smoke)
   set_tests_properties(ava_tui.osc8_smoke PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 20)
+
+  if(OptionEnableLibcwd)
+    # The debug-printer coverage check requires the `ctags-json` target and the generated tags.json,
+    # both of which only exist when libcwd debug support is enabled (OptionEnableLibcwd).
+    # It rebuilds ctags-json to guarantee a fresh tags.json, then asserts that no src/ava/ header
+    # type is missing a print_members opt-in/opt-out marker, printing any offenders on failure.
+    add_test(
+      NAME ava_debug.print_members_coverage
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/print_members_coverage_test.py
+              --source-dir ${CMAKE_SOURCE_DIR}
+              --build-dir ${CMAKE_BINARY_DIR})
+    set_tests_properties(ava_debug.print_members_coverage PROPERTIES TIMEOUT 60)
+  endif()
+endif()
+
+if(OptionEnableLibcwd)
+  # The print_members_format suite relies on libcwd-backed machinery (ava_debug, CWDEBUG),
+  # so it is only registered when libcwd is effectively enabled.
+  add_test(
+    NAME ava_debug.print_members_format
+    COMMAND ava_tests debug)
 endif()

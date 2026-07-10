@@ -20,7 +20,7 @@
 //
 // grep '^extern.*WINDOW *\*.*implemented' /usr/include/curses.h | grep -v SCREEN | sed -re 's/^extern NCURSES_EXPORT\([^)]*\) ([^ (]*).*/\1/' | sort -u
 //
-namespace terminal {
+namespace ava::tui::terminal {
 
 // Forward declaration.
 class Session;
@@ -383,4 +383,4 @@ class Window
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 // Forward declaration.
 class Session;
@@ -34,4 +34,4 @@ class ColorPair
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

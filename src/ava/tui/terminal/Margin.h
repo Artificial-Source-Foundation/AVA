@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 // Struct Margin
 //
@@ -36,4 +36,4 @@ struct Margin
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

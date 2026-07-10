@@ -7,7 +7,7 @@
 
 #include <vector>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 // Session
 //
@@ -44,4 +44,4 @@ class Session final
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

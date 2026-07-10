@@ -7,7 +7,7 @@
 
 int main()
 {
-  terminal::Session terminal_session;
+  ava::tui::terminal::Session terminal_session;
 
   move(10, 0);
 

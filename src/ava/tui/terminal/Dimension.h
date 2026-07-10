@@ -5,7 +5,7 @@
 
 #include <cstdint>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 // class Dimension
 //
@@ -48,4 +48,4 @@ class Dimension
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

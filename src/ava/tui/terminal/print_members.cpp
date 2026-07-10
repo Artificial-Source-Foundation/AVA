@@ -7,7 +7,7 @@
 #include <codecvt>
 #include <locale>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 void Border::print_members(std::ostream& os, char const* prefix) const
 {
@@ -48,4 +48,4 @@ void GraphemeCluster::print_members(std::ostream& os, char const* prefix) const
      ;
 }
 
-} // namespace terminal
+} // namespace ava::tui::terminal

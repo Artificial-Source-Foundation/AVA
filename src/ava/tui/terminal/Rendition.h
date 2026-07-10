@@ -4,7 +4,7 @@
 #include "ColorPair.h"
 #include "ava/debug/print_members_on.h"
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 // class Rendition
 //
@@ -32,4 +32,4 @@ class Rendition
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

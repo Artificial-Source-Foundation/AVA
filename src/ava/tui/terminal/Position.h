@@ -5,7 +5,7 @@
 
 #include <cstdint>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 // class Position
 //
@@ -33,4 +33,4 @@ class Position
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <type_traits>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 enum class Attribute
 {
@@ -70,4 +70,4 @@ Attributes operator|=(AttributesConcept auto&& lhs, AttributesConcept auto&& rhs
   return result;
 }
 
-} // namespace terminal
+} // namespace ava::tui::terminal

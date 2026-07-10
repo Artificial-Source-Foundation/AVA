@@ -27,9 +27,9 @@
 #error "NCURSES_WIDECHAR is expected to be defined to 1."
 #endif
 
-using Attributes = terminal::Attributes;
-using Attribute = terminal::Attribute;
-using ComplexChar = terminal::ComplexChar;
+using Attributes = ava::tui::terminal::Attributes;
+using Attribute = ava::tui::terminal::Attribute;
+using ComplexChar = ava::tui::terminal::ComplexChar;
 
 attr_t convert_to_attr(Attributes attributes);
 Attributes convert_to_Attributes(attr_t attributes);

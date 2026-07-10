@@ -5,7 +5,7 @@
 #include <array>
 #include <string>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 // class Border
 //
@@ -49,8 +49,11 @@ class Border
     return {GraphemeCluster{zero_terminated_character}, rendition};
   }
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+#ifdef CWDEBUG
+  // Custom print_members.
+  AVA_PRINT_ON_MEMBERS
+#endif
 };
 // clang-format on
 
-} // namespace terminal
+} // namespace ava::tui::terminal

@@ -7,7 +7,7 @@
 // This header must be included last.
 #include "private_convert.h"
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 ComplexChar::ComplexChar(GraphemeCluster const& cell_character, Rendition rendition) : rendition_(rendition)
 {
@@ -18,4 +18,4 @@ ComplexChar::ComplexChar(GraphemeCluster const& cell_character, Rendition rendit
   cell_character_ = cell_character;
 }
 
-} // namespace terminal
+} // namespace ava::tui::terminal

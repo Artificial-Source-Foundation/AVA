@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <cwchar>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 // class GraphemeCluster
 //
@@ -85,4 +85,4 @@ class GraphemeCluster
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

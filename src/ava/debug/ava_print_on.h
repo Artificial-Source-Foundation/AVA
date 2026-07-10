@@ -57,8 +57,6 @@ using utils::has_print_on::operator<<;
 
 namespace provider {
 using utils::has_print_on::operator<<;
-namespace detail {
-} // namespace detail
 } // namespace provider
 
 namespace session {
@@ -67,23 +65,13 @@ using utils::has_print_on::operator<<;
 
 namespace tools {
 using utils::has_print_on::operator<<;
-namespace detail {
-} // namespace detail
 } // namespace tools
 
 namespace tui {
 using utils::has_print_on::operator<<;
-namespace detail {
-} // namespace detail
+namespace terminal {
+using utils::has_print_on::operator<<;
+} // namespace terminal
 } // namespace tui
-
-// These only occur in tests/.
-#if 0
-namespace test {
-} // namespace test
-
-namespace tests {
-} // namespace tests
-#endif
 
 } // namespace ava

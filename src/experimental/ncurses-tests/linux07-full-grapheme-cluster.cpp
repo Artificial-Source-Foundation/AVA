@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <iostream>
 
+namespace terminal = ava::tui::terminal;
+
 namespace {
 
 using Storage = terminal::GraphemeCluster::Storage;

@@ -6,7 +6,7 @@
 #include <limits>
 #include "debug.h"
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 // class Color
 //
@@ -46,4 +46,4 @@ class Color
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

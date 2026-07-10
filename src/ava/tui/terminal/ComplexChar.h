@@ -5,7 +5,7 @@
 
 #include <cstdint>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 // ComplexChar
 //
@@ -47,4 +47,4 @@ class ComplexChar
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

@@ -11,7 +11,7 @@
 // This header must be included last.
 #include "private_convert.h"
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 struct Window::Impl
 {
@@ -1747,4 +1747,4 @@ ScrollRegion Window::getscrreg() const
   return region;
 }
 
-} // namespace terminal
+} // namespace ava::tui::terminal

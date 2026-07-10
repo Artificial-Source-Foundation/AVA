@@ -7,6 +7,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <condition_variable>
 #include <type_traits>
 #include "NAMESPACE_DEBUG.h"
 
@@ -34,19 +35,41 @@ struct AvaRawDebugString { char const* ptr; };
 NAMESPACE_DEBUG_END
 
 namespace debug::ostream_operators {
+namespace detail {
+  template<typename T>
+  struct is_std_function : std::false_type { };
 
-inline std::ostream& operator<<(std::ostream& os, std::mutex const& UNUSED_ARG(mutex))
+  template<typename Signature>
+  struct is_std_function<std::function<Signature>> : std::true_type { };
+} // namespace detail
+
+template<typename T>
+concept ConceptAnyStdFunction = detail::is_std_function<std::remove_cvref_t<T>>::value;
+
+template<ConceptAnyStdFunction T>
+inline std::ostream& operator<<(std::ostream& os, T const& UNUSED_ARG(fn))
+{
+  os.write("$std::function$", 15);
+  return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, std::same_as<std::mutex> auto const& UNUSED_ARG(mx))
 {
   os.write("$mutex$", 7);
   return os;
 }
 
-template<typename T>
-inline std::ostream& operator<<(std::ostream& os, std::function<T> const& UNUSED_ARG(func))
+inline std::ostream& operator<<(std::ostream& os, std::same_as<std::condition_variable> auto const& UNUSED_ARG(cv))
 {
-  os.write("$std::function$", 15);
+  os.write("$condition_variable$", 20);
   return os;
 }
+
+inline std::ostream& operator<<(std::ostream& os, std::same_as<std::ostream> auto const& out);
+inline std::ostream& operator<<(std::ostream& os, std::same_as<std::istream> auto const& in);
+
+template<typename T>
+inline std::ostream& operator<<(std::ostream& os, std::reference_wrapper<T> const& ref);
 
 template<typename T>
 concept ConceptHasToString = requires(T t)
@@ -87,15 +110,32 @@ inline std::ostream& operator<<(std::ostream& os, char const* str);
 
 // Include all operator<<'s before defining ones that use LIBCWD_USING_OSTREAM_PRELUDE.
 #include <cwds/debug_ostream_operators.h>
+#include "print_reference.h"
 #include "utils/print_pointer.h"
 #include "utils/to_string.h"
 
 namespace debug::ostream_operators {
 
+std::ostream& operator<<(std::ostream& os, std::same_as<std::ostream> auto const& out)
+{
+  return os << ::ava_utils::print_reference(out);
+}
+
+std::ostream& operator<<(std::ostream& os, std::same_as<std::istream> auto const& in)
+{
+  return os << ::ava_utils::print_reference(in);
+}
+
+template<typename T>
+std::ostream& operator<<(std::ostream& os, std::reference_wrapper<T> const& ref)
+{
+  return os << ::ava_utils::print_reference(ref);
+}
+
 template<ConceptIsNonIntrusiveNonArrayPointer T>
 std::ostream& operator<<(std::ostream& os, T const& obj)
 {
-  utils::operator<<(os, utils::print_pointer(obj));
+  ::utils::operator<<(os, ::utils::print_pointer(obj));
   return os;
 }
 
@@ -106,7 +146,7 @@ template<class E, class T, class Y>
 requires (sizeof(E) <= sizeof(char32_t)) // Expected to be always true, but it counts as a constrain.
 std::basic_ostream<E, T>& operator<<(std::basic_ostream<E, T>& os, boost::intrusive_ptr<Y> const& p)
 {
-  utils::operator<< <Y>(os, utils::print_pointer(p));
+  ::utils::operator<< <Y>(os, ::utils::print_pointer(p));
   return os;
 }
 
@@ -128,7 +168,7 @@ std::ostream& operator<<(std::ostream& os, T const& e)
 
 std::ostream& operator<<(std::ostream& os, char const* str)
 {
-  os << debug::print_string(str);
+  os << ::debug::print_string(str);
   return os;
 }
 
@@ -150,7 +190,7 @@ std::ostream& operator<<(std::ostream& os, std::optional<T> const& opt)
 template<typename T>
 std::ostream& operator<<(std::ostream& os, std::shared_ptr<T> const& ptr)
 {
-  return os << utils::print_pointer(ptr);
+  return os << ::utils::print_pointer(ptr);
 }
 
 } // namespace debug::ostream_operators

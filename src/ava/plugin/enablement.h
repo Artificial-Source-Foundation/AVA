@@ -15,6 +15,8 @@ struct PluginEnablementRecord
   std::string plugin_id;
   PluginScope scope = PluginScope::Project;
   bool enabled = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::filesystem::path default_plugin_enablement_file();

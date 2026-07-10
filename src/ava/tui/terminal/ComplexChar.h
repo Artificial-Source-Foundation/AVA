@@ -43,6 +43,8 @@ class ComplexChar
 
   // Manipulator.
   void set_rendition(Rendition rendition) { rendition_ = rendition; }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 } // namespace terminal

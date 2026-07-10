@@ -27,6 +27,9 @@ class MutationQueue
 
    private:
     std::vector<std::unique_lock<std::mutex>> locks_;
+
+    // We never print this class (so far).
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
   };
 
   [[nodiscard]] Lock lock_path(std::filesystem::path const& path);
@@ -38,6 +41,8 @@ class MutationQueue
   struct Entry
   {
     std::mutex mutex;
+
+    AVA_DEBUG_PRINT_MEMBERS_ON
   };
 
   [[nodiscard]] static std::filesystem::path normalized_key(std::filesystem::path const& path);

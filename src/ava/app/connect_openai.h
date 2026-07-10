@@ -21,6 +21,8 @@ struct ConnectProviderCredentialOptions
   std::string provider_id;
   ConnectCredentialType credential_type = ConnectCredentialType::ApiKey;
   std::optional<std::string> env_var = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ConnectProviderWizardOptions
@@ -28,6 +30,8 @@ struct ConnectProviderWizardOptions
   std::optional<std::string> provider_id = std::nullopt;
   std::optional<ConnectCredentialType> credential_type = std::nullopt;
   bool stdin_is_tty = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] int run_connect_openai(ava::config::XdgPaths const& paths);

@@ -14,6 +14,8 @@ struct AuthRecordMember
 {
   std::string key;
   std::string raw_value;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] bool is_valid_provider_id(std::string_view provider_id);

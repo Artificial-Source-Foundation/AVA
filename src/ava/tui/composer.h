@@ -47,6 +47,8 @@ struct ToolPermissionAuditItem
   std::string target = {};
   std::string command = {};
   std::string resolution_reason = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ToolTimelineItem
@@ -83,6 +85,8 @@ struct ToolTimelineItem
   std::optional<std::size_t> total_matches = std::nullopt;
   std::string spill_path = {};
   bool spill_truncated = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TranscriptItem
@@ -94,6 +98,8 @@ struct TranscriptItem
   std::string thinking = {};
   Text thinking_model = {};
   std::optional<ToolTimelineItem> tool = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SidebarActivityItem
@@ -102,6 +108,8 @@ struct SidebarActivityItem
   std::string label = {};
   std::string detail = {};
   ToolTimelineStatus status = ToolTimelineStatus::Running;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SidebarModifiedFile
@@ -109,6 +117,8 @@ struct SidebarModifiedFile
   std::string path = {};
   std::optional<int> added = std::nullopt;
   std::optional<int> removed = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct QueuedMessageItem
@@ -116,6 +126,8 @@ struct QueuedMessageItem
   std::string id = {};
   std::string kind = {};
   std::string text = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PendingAttachmentItem
@@ -128,8 +140,12 @@ struct PendingAttachmentItem
     std::shared_ptr<std::string const> base64_data = {};
     ImageDimensions dimensions = {};
     std::optional<std::size_t> image_id = std::nullopt;
+
+    AVA_DEBUG_PRINT_MEMBERS_ON
   };
   std::optional<Preview> preview = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TerminalGraphicOverlay
@@ -141,12 +157,16 @@ struct TerminalGraphicOverlay
   std::size_t columns = 1;
   std::optional<std::size_t> image_id = std::nullopt;
   std::string sequence = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ComposerFrame
 {
   std::vector<std::string> lines;
   std::vector<TerminalGraphicOverlay> graphics;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SlashCommandArgumentCompletion
@@ -159,6 +179,8 @@ struct SlashCommandArgumentCompletion
   bool append_space = true;
   bool enabled = true;
   std::string disabled_reason = "";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SidebarSnapshot
@@ -177,6 +199,8 @@ struct SidebarSnapshot
   std::optional<std::size_t> context_source_count = std::nullopt;
   std::string session_path = {};
   std::optional<std::size_t> session_entry_count = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SlashCommandItem
@@ -192,6 +216,8 @@ struct SlashCommandItem
   std::vector<SlashCommandArgumentCompletion> argument_completions = {};
   bool argument_completion = false;
   std::string completion_insert_text = "";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct FileReferenceItem
@@ -202,12 +228,16 @@ struct FileReferenceItem
   bool directory = false;
   bool enabled = true;
   std::string disabled_reason = "";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ThemeOptionItem
 {
   std::string name;
   std::string detail;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 enum class PermissionPromptChoice
@@ -232,6 +262,8 @@ struct PermissionPromptInputResult
 {
   PermissionPromptChoice selected_choice = PermissionPromptChoice::Deny;
   PermissionPromptInputAction action = PermissionPromptInputAction::None;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PermissionPromptView
@@ -246,6 +278,8 @@ struct PermissionPromptView
   bool diff_truncated = false;
   bool remember_available = false;
   PermissionPromptChoice selected_choice = PermissionPromptChoice::Deny;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct QuestionPromptOptionView
@@ -253,6 +287,8 @@ struct QuestionPromptOptionView
   std::string value;
   std::string label;
   bool selected = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 enum class QuestionPromptInputAction
@@ -271,6 +307,8 @@ struct QuestionPromptInputResult
   std::string custom_text;
   std::string copy_text;
   QuestionPromptInputAction action = QuestionPromptInputAction::None;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct QuestionPromptView
@@ -285,6 +323,8 @@ struct QuestionPromptView
   bool searchable = false;
   std::size_t selected_option_index = 0;
   std::string custom_text;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SelectListItemView
@@ -298,6 +338,8 @@ struct SelectListItemView
   bool current = false;
   bool enabled = true;
   std::string disabled_reason;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 enum class SelectListInputAction
@@ -330,6 +372,8 @@ struct SelectListInputResult
   std::size_t selected_item_index = 0;
   std::string query;
   SelectListInputAction action = SelectListInputAction::None;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SelectListView
@@ -342,6 +386,8 @@ struct SelectListView
   std::string placeholder = "Search";
   std::string empty_text = "No matches";
   std::string footer_hint;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ComposerSnapshot
@@ -379,6 +425,8 @@ struct ComposerSnapshot
   std::size_t draft_scroll_offset = 0;
   bool tool_details_visible = false;
   bool thinking_visible = true;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::vector<SlashCommandItem> filter_slash_commands(std::string_view input, std::vector<SlashCommandItem> const& commands);
@@ -399,6 +447,8 @@ struct SlashCommandSelectionText
 {
   std::string text;
   std::size_t cursor = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 [[nodiscard]] std::string slash_command_selection_text(std::string_view input, std::vector<SlashCommandItem> const& commands, std::size_t selected_index);
 [[nodiscard]] SlashCommandSelectionText slash_command_selection_text(std::string_view input, std::size_t cursor,
@@ -423,6 +473,8 @@ struct FileReferenceSelectionText
 {
   std::string text;
   std::size_t cursor = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 [[nodiscard]] FileReferenceSelectionText file_reference_selection_text(std::string_view input, std::size_t cursor,
                                                                        std::vector<FileReferenceItem> const& references,
@@ -447,6 +499,8 @@ struct PathCompletionSelectionText
 {
   std::string text;
   std::size_t cursor = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 [[nodiscard]] PathCompletionSelectionText path_completion_selection_text(std::string_view input, std::size_t cursor,
                                                                         std::vector<FileReferenceItem> const& references,

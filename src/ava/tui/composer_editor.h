@@ -18,6 +18,8 @@ struct ComposerPasteEntry
   std::size_t start = std::string::npos;
 
   friend bool operator==(ComposerPasteEntry const&, ComposerPasteEntry const&) = default;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ComposerDraftSnapshot
@@ -26,6 +28,8 @@ struct ComposerDraftSnapshot
   std::size_t cursor = 0;
   std::vector<ComposerPasteEntry> paste_entries;
   std::size_t next_paste_id = 1;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ComposerDraftState
@@ -42,6 +46,8 @@ struct ComposerDraftState
   std::vector<ComposerPasteEntry> paste_entries;
   std::size_t next_paste_id = 1;
   std::size_t vertical_column = std::string::npos;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::size_t clamp_composer_draft_cursor(std::string_view text, std::size_t cursor);

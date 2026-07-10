@@ -21,6 +21,8 @@ struct TextAnalysis
 {
   bool has_utf8_bom = false;
   LineEndingStyle line_endings = LineEndingStyle::None;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TextMatch
@@ -28,6 +30,8 @@ struct TextMatch
   std::size_t position = 0;
   std::size_t size = 0;
   TextAnalysis content_analysis;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] TextAnalysis analyze_text(std::string_view text);

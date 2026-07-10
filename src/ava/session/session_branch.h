@@ -24,6 +24,8 @@ struct SessionBranchOptions
   std::optional<std::vector<std::string>> labels;
   SessionBranchMode mode = SessionBranchMode::Fork;
   std::string actor = "rpc";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SessionBranchResult
@@ -33,6 +35,8 @@ struct SessionBranchResult
   std::string branch_from_entry_id;
   std::size_t copied_entry_count = 0;
   SessionMetadataView metadata;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct BranchSummaryOptions
@@ -47,12 +51,16 @@ struct BranchSummaryOptions
   std::string model;
   std::string reason;
   std::string actor = "rpc";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct BranchSummaryResult
 {
   std::string source_session_id;
   SessionEntry entry;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOptions options);

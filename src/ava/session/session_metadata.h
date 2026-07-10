@@ -26,6 +26,8 @@ struct SessionMetadataView
   std::string branch_from_entry_id = {};
   std::string branch_origin = {};
   std::string actor = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SessionMetadataUpdate
@@ -38,6 +40,8 @@ struct SessionMetadataUpdate
   std::string branch_from_entry_id = {};
   std::string branch_origin = {};
   std::string actor = "rpc";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<SessionMetadataView> session_metadata_from_entries(std::vector<SessionEntry> const& entries);

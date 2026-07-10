@@ -54,6 +54,8 @@ struct PermissionRequest
   std::filesystem::path workspace_dir;
   std::filesystem::path target_path;
   std::string command;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PermissionDecision
@@ -61,6 +63,8 @@ struct PermissionDecision
   PermissionAction action;
   std::string reason;
   PermissionRisk risk = PermissionRisk::Low;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 enum class PermissionResolution
@@ -81,6 +85,8 @@ struct PermissionResolutionDecision
   PermissionResolutionDecision() = default;
   PermissionResolutionDecision(PermissionResolution resolution_in);
   PermissionResolutionDecision(PermissionResolution resolution_in, std::string reason_in);
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PermissionPrompt
@@ -96,6 +102,8 @@ struct PermissionPrompt
   PermissionRisk risk = PermissionRisk::Low;
   std::string diff_preview = {};
   bool diff_truncated = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 using PermissionResolver = std::function<ava::core::Result<PermissionResolutionDecision>(PermissionPrompt const&)>;

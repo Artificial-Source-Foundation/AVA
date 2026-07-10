@@ -26,6 +26,8 @@ struct PendingToolItem
   std::string request_id;
   std::string correlation_id;
   ToolTimelineItem item;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiEventState
@@ -59,6 +61,8 @@ struct TuiEventState
   std::size_t tool_calls = 0;
 
   std::optional<std::size_t> stream_assistant_transcript_index = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 void apply_runtime_event(TuiEventState& state, ava::app::RuntimeEvent const& event);

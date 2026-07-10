@@ -26,6 +26,8 @@ struct CommandRequest
   std::mutex* session_mutex = nullptr;
   bool propagate_compaction_errors = false;
   std::vector<CommandHotkey> hotkeys = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct CommandResult
@@ -37,6 +39,8 @@ struct CommandResult
   std::optional<std::string> prompt_message = std::nullopt;
   std::string prompt_command = {};
   std::string prompt_source = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] bool is_backend_command(std::string_view line) noexcept;

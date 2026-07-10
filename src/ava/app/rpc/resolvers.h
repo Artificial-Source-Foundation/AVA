@@ -34,6 +34,8 @@ struct PendingPermissionRequest
   ava::permissions::PermissionRisk risk = ava::permissions::PermissionRisk::Low;
   std::optional<ava::permissions::PermissionResolutionDecision> resolution;
   std::optional<ava::core::Error> error;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PermissionSessionGrant
@@ -47,6 +49,8 @@ struct PermissionSessionGrant
   std::string command;
   std::string reason;
   ava::permissions::PermissionRisk risk = ava::permissions::PermissionRisk::Low;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PendingQuestionRequest
@@ -58,6 +62,8 @@ struct PendingQuestionRequest
   std::vector<ava::agent::QuestionOption> options;
   std::optional<ava::agent::QuestionAnswer> answer;
   std::optional<ava::core::Error> error;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PendingResolverState
@@ -67,6 +73,8 @@ struct PendingResolverState
   std::map<std::string, std::shared_ptr<PendingPermissionRequest>> permission_requests;
   std::map<std::string, std::shared_ptr<PendingQuestionRequest>> question_requests;
   std::vector<PermissionSessionGrant> permission_session_grants;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] bool cancel_pending_resolvers(PendingResolverState& pending_state);

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <optional>
 #include <string>
 #include <string_view>
@@ -16,6 +18,8 @@ struct CommandCatalogEntry
   std::string category = "";
   bool enabled = true;
   std::string disabled_reason = "";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct CommandHotkey
@@ -23,6 +27,8 @@ struct CommandHotkey
   std::string action;
   std::string description;
   std::string keys;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::vector<CommandCatalogEntry> const& command_catalog();

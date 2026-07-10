@@ -241,6 +241,8 @@ struct RetryOptions
     int status_code = 0;
     bool streaming = false;
     bool countdown_tick = false;
+
+    AVA_DEBUG_PRINT_MEMBERS_ON
   };
   std::function<ava::core::VoidResult(Event const&)> on_retry = nullptr;
   Transport::CancelCallback cancel_requested = nullptr;

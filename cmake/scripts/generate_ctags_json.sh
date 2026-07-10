@@ -49,4 +49,6 @@ cd "$repo_root"
   --fields=+KinSz \
   --kinds-C++=+p \
   -D 'AVA_DEBUG_PRINT_MEMBERS_ON=void print_members_opt_in() { }' \
+  -D 'AVA_DEBUG_PRINT_MEMBERS_OPT_OUT=void print_members_opt_out() { }' \
+  -D 'AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS=void print_members_opt_out() { }' \
   -L - -f "$out"

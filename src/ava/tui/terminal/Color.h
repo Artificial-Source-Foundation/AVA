@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <cstdint>
 #include <limits>
 #include "debug.h"
@@ -40,6 +42,8 @@ class Color
   }
 
   int as_int() const { return static_cast<int>(static_cast<int32_t>(rgb_)); }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 } // namespace terminal

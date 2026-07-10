@@ -22,12 +22,16 @@ struct PrintPromptInputs
 {
   std::optional<std::string> explicit_prompt;
   std::optional<std::string> stdin_prompt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PrintModeRunOptions
 {
   PrintOutputFormat output_format = PrintOutputFormat::Text;
   RuntimeRunOptions runtime_options;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PrintModeOptions
@@ -39,6 +43,8 @@ struct PrintModeOptions
   HeadlessPermissionPolicyOptions permission_policy;
   std::optional<std::reference_wrapper<ava::provider::Provider const>> provider_override;
   std::optional<std::reference_wrapper<ava::provider::Transport>> transport_override;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<std::string> merge_print_prompt(PrintPromptInputs const& inputs);

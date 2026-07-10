@@ -45,6 +45,8 @@ struct PermissionRuleStore
   std::filesystem::path global_rules_file;
   std::filesystem::path workspace_rules_file;
   std::filesystem::path workspace_dir;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PersistentPermissionRule
@@ -61,6 +63,8 @@ struct PersistentPermissionRule
   std::string reason;
   std::string actor;
   std::string created_at;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PermissionRuleDraft
@@ -74,6 +78,8 @@ struct PermissionRuleDraft
   std::string command;
   std::string reason;
   std::string actor = "rpc";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::optional<PermissionRuleScope> parse_permission_rule_scope(std::string_view value);

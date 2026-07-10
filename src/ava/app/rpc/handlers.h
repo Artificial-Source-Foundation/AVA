@@ -20,6 +20,8 @@ struct ProviderHandle {
   std::unique_ptr<ava::provider::Provider> owned;
 
   [[nodiscard]] ava::provider::Provider const& get() const { return owned ? *owned : *provider; }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<RuntimeRunOptions> ensure_prompt_runtime_options(

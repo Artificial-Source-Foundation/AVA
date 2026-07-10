@@ -34,6 +34,8 @@ struct PluginEventObserverOptions
   std::string provider_id;
   std::string model_id;
   std::filesystem::path current_dir;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] PluginEventObserverOptions plugin_event_observer_options(RuntimeSession& session,

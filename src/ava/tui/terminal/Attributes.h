@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <concepts>
 #include <cstdint>
 #include <type_traits>
@@ -47,6 +49,8 @@ class Attributes
   // Accessor.
   attr_t mask() const { return mask_; }
   attr_t& mask() { return mask_; }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 // clang-format off

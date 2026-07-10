@@ -20,6 +20,8 @@ struct CompactionConfig
   std::size_t keep_recent_messages = 6;
   std::string model_id = "gpt-5.5";
   std::size_t max_summary_bytes = 16 * 1024;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct CompactionDecision
@@ -27,6 +29,8 @@ struct CompactionDecision
   bool should_compact = false;
   std::size_t estimated_tokens = 0;
   std::size_t threshold_tokens = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ManualCompactionRequest
@@ -38,6 +42,8 @@ struct ManualCompactionRequest
   std::size_t threshold_tokens = 0;
   std::string trigger = "manual";
   std::string recent_context;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] CompactionConfig default_compaction_config();

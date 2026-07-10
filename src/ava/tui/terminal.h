@@ -135,6 +135,8 @@ struct InputEvent
   std::string text = {};
   std::size_t mouse_column = 0;
   std::size_t mouse_row = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 enum class KeyboardProtocolResponseAction
@@ -154,6 +156,8 @@ class CursesSession
   ~CursesSession();
 
   [[nodiscard]] static ava::core::Result<CursesSession> enter();
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   struct ScreenDeleter

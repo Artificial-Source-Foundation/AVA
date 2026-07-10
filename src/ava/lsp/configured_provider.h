@@ -15,6 +15,8 @@ struct ConfiguredLspProviderFiles {
   std::filesystem::path workspace_root;
   ava::agent::Mode mode = ava::agent::Mode::Build;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<std::shared_ptr<DiagnosticsProvider>> make_configured_lsp_provider(

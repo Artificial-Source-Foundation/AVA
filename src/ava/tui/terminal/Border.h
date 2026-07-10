@@ -48,6 +48,8 @@ class Border
     GraphemeCluster::Storage zero_terminated_character = { box_characters_[index_to_pos[i]], L'\0' };
     return {GraphemeCluster{zero_terminated_character}, rendition};
   }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 // clang-format on
 

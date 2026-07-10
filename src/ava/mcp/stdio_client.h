@@ -134,6 +134,8 @@ class McpStdioClient final {
   struct JsonRpcResponse {
     std::string result_json;
     std::string raw_json;
+
+    AVA_DEBUG_PRINT_MEMBERS_ON
   };
 
   [[nodiscard]] ava::core::VoidResult launch();

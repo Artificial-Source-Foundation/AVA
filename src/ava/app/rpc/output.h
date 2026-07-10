@@ -16,6 +16,8 @@ struct ResolverEventPayload
 {
   RuntimePayloadType payload_type = RuntimePayloadType::Queue;
   std::string json = "{}";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ResolverEventPayload resolver_permission_payload(std::string payload_json);

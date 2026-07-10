@@ -15,6 +15,8 @@ struct OpenAIOAuthSession
   std::string code_verifier;
   std::string state;
   std::string authorization_url;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct OpenAIOAuthDeviceAuthorization
@@ -23,6 +25,8 @@ struct OpenAIOAuthDeviceAuthorization
   std::string user_code;
   std::string verification_url;
   int interval_seconds = 5;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::string openai_oauth_code_challenge(std::string_view verifier);

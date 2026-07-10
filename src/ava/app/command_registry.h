@@ -55,6 +55,8 @@ struct CommandRegistryEntry
   std::vector<ava::mcp::McpPromptArgumentDescription> mcp_arguments = {};
   std::string plugin_id = {};
   std::string plugin_command_name = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct CommandRegistryDiagnostic
@@ -67,12 +69,16 @@ struct CommandRegistryDiagnostic
   std::string winner_source = {};
   std::string winner_source_id = {};
   std::filesystem::path winner_path = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct CommandRegistry
 {
   std::vector<CommandRegistryEntry> entries;
   std::vector<CommandRegistryDiagnostic> diagnostics;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PromptCommandSourceFile
@@ -82,6 +88,8 @@ struct PromptCommandSourceFile
   std::filesystem::path path = {};
   std::size_t byte_count = 0;
   std::uint64_t content_fingerprint = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct CommandRegistryOptions
@@ -93,6 +101,8 @@ struct CommandRegistryOptions
   bool include_mcp_prompts = false;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::string to_string(UnifiedCommandSource source);

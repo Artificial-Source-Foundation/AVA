@@ -13,6 +13,8 @@ namespace ava::config {
 struct CandidateRead
 {
   std::optional<std::string> content;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<CandidateRead> read_text_if_exists(std::filesystem::path const& path, bool explicit_ava_auth_file,

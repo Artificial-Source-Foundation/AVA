@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Margin.h"
+#include "ava/debug/print_members_on.h"
 
 #include <cstdint>
 
@@ -28,6 +29,8 @@ class Position
   uint32_t col() const { return col_; }
 
   friend Position operator+(Position pos, Margin margin) { return {pos.row_ + margin.top, pos.col_ + margin.left}; }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 } // namespace terminal

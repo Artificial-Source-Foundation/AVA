@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <array>
 #include <cstddef>
 #include <cwchar>
@@ -79,6 +81,8 @@ class GraphemeCluster
 
   // Return true iff data() is guaranteed to be zero terminated.
   bool is_zero_terminated() const { return length() < storage_.size(); }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 } // namespace terminal

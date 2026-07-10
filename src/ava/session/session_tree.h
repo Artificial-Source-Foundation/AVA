@@ -17,6 +17,8 @@ struct SessionTreeNode
   SessionMetadataView metadata;
   std::vector<std::string> children;
   bool current = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SessionTreeIndex
@@ -26,6 +28,8 @@ struct SessionTreeIndex
   std::vector<std::string> roots;
   std::vector<std::string> leaves;
   std::vector<std::string> current_path;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<SessionTreeIndex> build_session_tree(

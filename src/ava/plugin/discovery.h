@@ -12,6 +12,8 @@ struct PluginDiscoveryOptions
 {
   std::filesystem::path global_plugins_dir;
   std::filesystem::path project_plugins_dir;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] PluginDiscoveryOptions default_plugin_discovery_options(std::filesystem::path const& workspace_root);

@@ -17,6 +17,8 @@ struct RpcSessionCommandContext
   RpcOutput& output;
   RpcRunState& run_state;
   std::mutex& session_mutex;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext context);

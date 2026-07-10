@@ -21,6 +21,8 @@ struct LoadedContextFile
   ContextSourceType source_type = ContextSourceType::Workspace;
   std::size_t byte_count = 0;
   std::string content;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ContextLoadOptions
@@ -29,6 +31,8 @@ struct ContextLoadOptions
   std::filesystem::path current_dir;
   std::filesystem::path global_agents_file;
   std::size_t max_file_bytes = 256 * 1024;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::string to_string(ContextSourceType source_type);

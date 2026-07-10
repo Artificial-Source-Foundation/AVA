@@ -21,6 +21,8 @@ struct RpcOutput
   std::ostream& out;
   std::mutex mutex;
   std::function<void()> on_write_failure;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct QueuedRpcMessage
@@ -28,12 +30,16 @@ struct QueuedRpcMessage
   std::string request_id;
   std::string correlation_id;
   std::string message;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ClearedRpcQueues
 {
   std::vector<QueuedRpcMessage> steering_messages;
   std::vector<QueuedRpcMessage> follow_up_messages;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RpcRunState
@@ -46,6 +52,8 @@ struct RpcRunState
   std::deque<QueuedRpcMessage> steering_messages;
   std::deque<QueuedRpcMessage> follow_up_messages;
   std::optional<ava::core::Error> async_error;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Error canceled_error();

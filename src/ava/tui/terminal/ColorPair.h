@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <cstdint>
 
 namespace terminal {
@@ -28,6 +30,8 @@ class ColorPair
   // Accessor.
   uint32_t index() const { return index_; }
   uint32_t& index() { return index_; }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 } // namespace terminal

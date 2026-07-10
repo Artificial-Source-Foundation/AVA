@@ -30,6 +30,8 @@ struct RpcPromptWorkerOptions
   std::string request_id;
   std::string message;
   std::vector<ava::session::ImageAttachmentRef> image_attachments = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options);

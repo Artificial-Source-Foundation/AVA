@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -12,6 +14,8 @@ struct ProviderToolCall
   std::string id;
   std::string name;
   std::string arguments_json;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 enum class ToolResultStatus
@@ -51,6 +55,8 @@ struct ToolResultPayload
   std::optional<std::size_t> total_matches = std::nullopt;
   std::string spill_path;
   bool spill_truncated = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ToolDispatchResult
@@ -60,6 +66,8 @@ struct ToolDispatchResult
   bool success = false;
   std::string result_text;
   ToolResultPayload payload = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 }  // namespace ava::agent

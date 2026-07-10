@@ -30,6 +30,8 @@
     os << libcwd::type_info_of(*this).demangled_name() << '@' << (void*)this; \
   }
 
+#define AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
 #ifndef CWDEBUG
 // AVA_DEBUG_MEMBERS only declares print_on in Debug mode.
 #define AVA_DEBUG_PRINT_MEMBERS_ON

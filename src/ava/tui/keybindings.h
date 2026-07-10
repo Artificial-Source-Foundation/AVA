@@ -98,6 +98,8 @@ enum class TuiAction
 struct TuiKeyBindings
 {
   std::vector<std::pair<TuiAction, std::vector<Key>>> bindings;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiKeyBindingHelpItem
@@ -105,6 +107,8 @@ struct TuiKeyBindingHelpItem
   std::string action;
   std::string description;
   std::string keys;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] TuiKeyBindings default_key_bindings();

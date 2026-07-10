@@ -22,23 +22,31 @@ struct TuiSubmitResult
   bool quit = false;
   std::vector<std::string> output;
   std::vector<ToolTimelineItem> tool_timeline;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiQueuedFollowUp
 {
   std::string request_id;
   std::string message;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiRestoredQueuedMessage
 {
   std::string message;
   bool steering = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiRememberedPermissionRule
 {
   std::string rule_id;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiActiveRunQueues
@@ -52,6 +60,8 @@ struct TuiActiveRunQueues
   std::function<ava::core::VoidResult(TuiQueuedFollowUp const&)> mark_follow_up_started;
   std::function<ava::core::Result<TuiRestoredQueuedMessage>()> restore_latest;
   std::function<ava::core::VoidResult(bool)> finish;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiRuntimeStateSnapshot
@@ -68,12 +78,16 @@ struct TuiRuntimeStateSnapshot
   std::vector<SlashCommandItem> slash_commands = {};
   std::vector<FileReferenceItem> file_references = {};
   std::vector<ThemeOptionItem> custom_themes = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiKeyBindingReloadResult
 {
   TuiKeyBindings key_bindings = default_key_bindings();
   TuiRuntimeStateSnapshot state;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiSubmitContext
@@ -87,6 +101,8 @@ struct TuiSubmitContext
   std::function<std::optional<TuiQueuedFollowUp>()> take_next_follow_up;
   std::function<ava::core::VoidResult(TuiQueuedFollowUp const&)> mark_follow_up_started;
   std::vector<ava::session::ImageAttachmentRef> image_attachments;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiRuntimeOptions
@@ -149,6 +165,8 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<SelectListView>(SelectListView const&, std::string_view, bool)> on_scoped_model_reorder;
   std::function<ava::core::Result<std::string>()> on_scoped_model_save;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_session_selected;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] int run_interactive_composer(TuiRuntimeOptions options);

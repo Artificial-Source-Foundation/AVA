@@ -25,6 +25,8 @@ template<typename T>
 struct PrintReference
 {
   T const& m_ref;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 template<typename T>

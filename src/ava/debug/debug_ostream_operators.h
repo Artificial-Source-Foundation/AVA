@@ -35,41 +35,39 @@ struct AvaRawDebugString { char const* ptr; };
 NAMESPACE_DEBUG_END
 
 namespace debug::ostream_operators {
-namespace detail {
-  template<typename T>
-  struct is_std_function : std::false_type { };
 
-  template<typename Signature>
-  struct is_std_function<std::function<Signature>> : std::true_type { };
+//=============================================================================
+// Helper types.
+//
+namespace detail {
+
+template<typename T>
+struct is_std_function : std::false_type { };
+
+template<typename Signature>
+struct is_std_function<std::function<Signature>> : std::true_type { };
+
+template<typename T>
+using pointee_t = std::remove_cv_t<std::remove_pointer_t<T>>;
+
 } // namespace detail
 
+//=============================================================================
+// Concepts.
+//
 template<typename T>
 concept ConceptAnyStdFunction = detail::is_std_function<std::remove_cvref_t<T>>::value;
 
-template<ConceptAnyStdFunction T>
-inline std::ostream& operator<<(std::ostream& os, T const& UNUSED_ARG(fn))
-{
-  os.write("$std::function$", 15);
-  return os;
-}
-
-inline std::ostream& operator<<(std::ostream& os, std::same_as<std::mutex> auto const& UNUSED_ARG(mx))
-{
-  os.write("$mutex$", 7);
-  return os;
-}
-
-inline std::ostream& operator<<(std::ostream& os, std::same_as<std::condition_variable> auto const& UNUSED_ARG(cv))
-{
-  os.write("$condition_variable$", 20);
-  return os;
-}
-
-inline std::ostream& operator<<(std::ostream& os, std::same_as<std::ostream> auto const& out);
-inline std::ostream& operator<<(std::ostream& os, std::same_as<std::istream> auto const& in);
-
 template<typename T>
-inline std::ostream& operator<<(std::ostream& os, std::reference_wrapper<T> const& ref);
+concept ConceptCharacterPointer =
+    std::is_pointer_v<T> &&
+    (std::same_as<detail::pointee_t<T>, char>          ||
+     std::same_as<detail::pointee_t<T>, signed char>   ||
+     std::same_as<detail::pointee_t<T>, unsigned char> ||
+     std::same_as<detail::pointee_t<T>, wchar_t>       ||
+     std::same_as<detail::pointee_t<T>, char8_t>       ||
+     std::same_as<detail::pointee_t<T>, char16_t>      ||
+     std::same_as<detail::pointee_t<T>, char32_t>);
 
 template<typename T>
 concept ConceptHasToString = requires(T t)
@@ -80,17 +78,29 @@ concept ConceptHasToString = requires(T t)
 template<typename T>
 concept ConceptIsEnum = std::is_enum_v<T>;
 
-template<ConceptIsEnum T>
-inline std::ostream& operator<<(std::ostream& os, T const& e);
+template<typename T>
+concept ConceptIsNonIntrusiveNonArrayNonCharPointer =
+  (std::same_as<detail::pointee_t<T>, std::unique_ptr<T>> ||
+   std::same_as<detail::pointee_t<T>, std::shared_ptr<T>> ||
+   std::is_pointer_v<T>) && !ConceptCharacterPointer<T>;
+
+//=============================================================================
+// Forward declarations
+//
+
+inline std::ostream& operator<<(std::ostream& os, std::same_as<std::mutex> auto const& mx);
+inline std::ostream& operator<<(std::ostream& os, std::same_as<std::condition_variable> auto const& cv);
+inline std::ostream& operator<<(std::ostream& os, std::same_as<std::istream> auto const& in);
+inline std::ostream& operator<<(std::ostream& os, std::same_as<std::ostream> auto const& out);
 
 template<typename T>
-concept ConceptIsNonIntrusiveNonArrayPointer =
-    std::same_as<std::remove_cv_t<std::remove_pointer_t<T>>, std::unique_ptr<T>> ||
-    std::same_as<std::remove_cv_t<std::remove_pointer_t<T>>, std::shared_ptr<T>> ||
-    std::is_pointer_v<T>;
+inline std::ostream& operator<<(std::ostream& os, std::reference_wrapper<T> const& ref);
 
-template<ConceptIsNonIntrusiveNonArrayPointer T>
-inline std::ostream& operator<<(std::ostream& os, T const& obj);
+template<ConceptIsNonIntrusiveNonArrayNonCharPointer T>
+inline std::ostream& operator<<(std::ostream& os, T const& ptr);
+
+template<ConceptAnyStdFunction T>
+inline std::ostream& operator<<(std::ostream& os, T const& fn);
 
 // boost::intrusive_ptr defines its own operator<< as
 // template<class E, class T, class Y> std::basic_ostream<E, T> & operator<< (std::basic_ostream<E, T> & os, intrusive_ptr<Y> const & p)
@@ -102,9 +112,20 @@ inline std::basic_ostream<E, T>& operator<<(std::basic_ostream<E, T>& os, boost:
 template<typename T>
 inline std::ostream& operator<<(std::ostream& os, std::shared_ptr<T> const& ptr);
 
+inline std::ostream& operator<<(std::ostream& os, char const* str);
+
+// Non-inline, defined below.
+template<ConceptIsEnum T>
+std::ostream& operator<<(std::ostream& os, T const& e);
+
+// Non-inline, defined below.
+template<typename T>
+std::ostream& operator<<(std::ostream& os, std::optional<T> const& opt);
+
+// Non-inline, defined in debug_ostream_operators.cpp.
 std::ostream& operator<<(std::ostream& os, std::string const& str);
 
-inline std::ostream& operator<<(std::ostream& os, char const* str);
+//=============================================================================
 
 } // namespace debug::ostream_operators
 
@@ -116,14 +137,30 @@ inline std::ostream& operator<<(std::ostream& os, char const* str);
 
 namespace debug::ostream_operators {
 
-std::ostream& operator<<(std::ostream& os, std::same_as<std::ostream> auto const& out)
+//=============================================================================
+// Implementation of operator<<'s marked as inline.
+//
+
+std::ostream& operator<<(std::ostream& os, std::same_as<std::mutex> auto const& UNUSED_ARG(mx))
 {
-  return os << ::ava_utils::print_reference(out);
+  os.write("$mutex$", 7);
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, std::same_as<std::condition_variable> auto const& UNUSED_ARG(cv))
+{
+  os.write("$condition_variable$", 20);
+  return os;
 }
 
 std::ostream& operator<<(std::ostream& os, std::same_as<std::istream> auto const& in)
 {
   return os << ::ava_utils::print_reference(in);
+}
+
+std::ostream& operator<<(std::ostream& os, std::same_as<std::ostream> auto const& out)
+{
+  return os << ::ava_utils::print_reference(out);
 }
 
 template<typename T>
@@ -132,23 +169,43 @@ std::ostream& operator<<(std::ostream& os, std::reference_wrapper<T> const& ref)
   return os << ::ava_utils::print_reference(ref);
 }
 
-template<ConceptIsNonIntrusiveNonArrayPointer T>
-std::ostream& operator<<(std::ostream& os, T const& obj)
+template<ConceptIsNonIntrusiveNonArrayNonCharPointer T>
+std::ostream& operator<<(std::ostream& os, T const& ptr)
 {
-  ::utils::operator<<(os, ::utils::print_pointer(obj));
+  ::utils::operator<<(os, ::utils::print_pointer(ptr));
   return os;
 }
 
-// boost::intrusive_ptr defines its own operator<< as
-// template<class E, class T, class Y> std::basic_ostream<E, T> & operator<< (std::basic_ostream<E, T> & os, intrusive_ptr<Y> const & p)
-// In order to override that we use a constrained template to win over the unconstrained one:
+template<ConceptAnyStdFunction T>
+std::ostream& operator<<(std::ostream& os, T const& UNUSED_ARG(fn))
+{
+  os.write("$std::function$", 15);
+  return os;
+}
+
 template<class E, class T, class Y>
-requires (sizeof(E) <= sizeof(char32_t)) // Expected to be always true, but it counts as a constrain.
+requires (sizeof(E) <= sizeof(char32_t))
 std::basic_ostream<E, T>& operator<<(std::basic_ostream<E, T>& os, boost::intrusive_ptr<Y> const& p)
 {
   ::utils::operator<< <Y>(os, ::utils::print_pointer(p));
   return os;
 }
+
+template<typename T>
+std::ostream& operator<<(std::ostream& os, std::shared_ptr<T> const& ptr)
+{
+  return os << ::utils::print_pointer(ptr);
+}
+
+std::ostream& operator<<(std::ostream& os, char const* str)
+{
+  os << ::debug::print_string(str);
+  return os;
+}
+
+//=============================================================================
+// Implementation of operator<<'s that are not marked as inline.
+//
 
 template<ConceptIsEnum T>
 std::ostream& operator<<(std::ostream& os, T const& e)
@@ -163,12 +220,6 @@ std::ostream& operator<<(std::ostream& os, T const& e)
     std::string str(utils::to_string(e));
     os.write(str.data(), str.size());
   }
-  return os;
-}
-
-std::ostream& operator<<(std::ostream& os, char const* str)
-{
-  os << ::debug::print_string(str);
   return os;
 }
 
@@ -187,10 +238,6 @@ std::ostream& operator<<(std::ostream& os, std::optional<T> const& opt)
   return os;
 }
 
-template<typename T>
-std::ostream& operator<<(std::ostream& os, std::shared_ptr<T> const& ptr)
-{
-  return os << ::utils::print_pointer(ptr);
-}
+//=============================================================================
 
 } // namespace debug::ostream_operators

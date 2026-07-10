@@ -2,14 +2,15 @@
 
 #include <boost/intrusive_ptr.hpp>
 #include <concepts>
+#include <condition_variable>
 #include <cstring>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
-#include <condition_variable>
 #include <optional>
 #include <type_traits>
+#include <variant>
 #include "NAMESPACE_DEBUG.h"
 
 // Do NOT include "debug.h" here.
@@ -99,11 +100,13 @@ inline std::ostream& operator<<(std::ostream& os, std::same_as<std::ostream> aut
 template<typename T>
 inline std::ostream& operator<<(std::ostream& os, std::reference_wrapper<T> const& ref);
 
+template<typename... Args>
+inline std::ostream& operator<<(std::ostream& os, std::variant<Args...> const& var);
+
+//-----------------
+// Pointer types
 template<ConceptIsNonIntrusiveNonArrayNonCharPointer T>
 inline std::ostream& operator<<(std::ostream& os, T const& ptr);
-
-template<ConceptAnyStdFunction T>
-inline std::ostream& operator<<(std::ostream& os, T const& fn);
 
 // boost::intrusive_ptr defines its own operator<< as
 // template<class E, class T, class Y> std::basic_ostream<E, T> & operator<< (std::basic_ostream<E, T> & os, intrusive_ptr<Y> const & p)
@@ -115,7 +118,11 @@ inline std::basic_ostream<E, T>& operator<<(std::basic_ostream<E, T>& os, boost:
 template<typename T>
 inline std::ostream& operator<<(std::ostream& os, std::shared_ptr<T> const& ptr);
 
+template<ConceptAnyStdFunction T>
+inline std::ostream& operator<<(std::ostream& os, T const& fn);
+
 inline std::ostream& operator<<(std::ostream& os, char const* str);
+//-----------------
 
 // Non-inline, defined below.
 template<ConceptIsEnum T>
@@ -175,17 +182,17 @@ std::ostream& operator<<(std::ostream& os, std::reference_wrapper<T> const& ref)
   return os << ::ava_utils::print_reference(ref);
 }
 
+template<typename... Args>
+std::ostream& operator<<(std::ostream& os, std::variant<Args...> const& UNUSED_ARG(var))
+{
+  os.write("$variant$", 9);
+  return os;
+}
+
 template<ConceptIsNonIntrusiveNonArrayNonCharPointer T>
 std::ostream& operator<<(std::ostream& os, T const& ptr)
 {
   ::utils::operator<<(os, ::utils::print_pointer(ptr));
-  return os;
-}
-
-template<ConceptAnyStdFunction T>
-std::ostream& operator<<(std::ostream& os, T const& UNUSED_ARG(fn))
-{
-  os.write("$std::function$", 15);
   return os;
 }
 
@@ -201,6 +208,13 @@ template<typename T>
 std::ostream& operator<<(std::ostream& os, std::shared_ptr<T> const& ptr)
 {
   return os << ::utils::print_pointer(ptr);
+}
+
+template<ConceptAnyStdFunction T>
+std::ostream& operator<<(std::ostream& os, T const& UNUSED_ARG(fn))
+{
+  os.write("$std::function$", 15);
+  return os;
 }
 
 std::ostream& operator<<(std::ostream& os, char const* str)

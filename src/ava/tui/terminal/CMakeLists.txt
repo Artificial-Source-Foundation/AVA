@@ -34,8 +34,14 @@ target_link_libraries(ava_terminal
   PUBLIC
     ${CURSES_LIBRARIES}
     ${AICXX_OBJECTS_LIST}
-    ava_debug
 )
+
+if (OptionEnableLibcwd)
+  target_link_libraries(ava_terminal
+    PUBLIC
+      ava_debug
+  )
+endif ()
 
 # Create an ALIAS target.
 add_library(AVA::terminal ALIAS ava_terminal)

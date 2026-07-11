@@ -34,7 +34,8 @@ class DesktopController final : public QObject
   Q_INVOKABLE void showCommandPalette();
   Q_INVOKABLE void hideCommandPalette();
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // It's too bothersome at the moment to support printing Qt types.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  signals:
   void activeSessionChanged();

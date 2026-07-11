@@ -227,11 +227,17 @@ endif ()
 #------------------------------------------------------------------------------
 # Construct a list with all generated source files.
 #
+# Watch source_files for content changes so that when a build-time regeneration
+# adds or removes a print_members.cpp (because a class toggled opt-in/opt-out),
+# the next build re-runs cmake configure and _ava_generated_source_files is
+# adjusted accordingly. Without this, the configure-time list would go stale
+# whenever the set of generated files changes during a build.
 set(_ava_generated_source_files "")
 file(STRINGS "${_ava_source_list_file}" REL_FILES)
 foreach(REL_FILE IN LISTS REL_FILES)
   list(APPEND _ava_generated_source_files "${_ava_print_members_dir}/${REL_FILE}")
 endforeach()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_ava_source_list_file}")
 
 #------------------------------------------------------------------------------
 # Build-time generation rule for the print_members.cpp files.

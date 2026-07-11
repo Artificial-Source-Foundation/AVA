@@ -25,6 +25,8 @@ struct ProviderProfile
   std::vector<std::string> default_reasoning_levels = {};
   std::string default_reasoning_format = {};
   std::string reasoning_request_parameters = {};
+  std::string reasoning_request_field = "thinking";
+  bool reasoning_request_effort_string = false;
   bool reasoning_level_only = true;
   bool enabled_reasoning_requires_budget_tokens = false;
   bool adaptive_reasoning_rejects_budget_tokens = false;
@@ -44,6 +46,7 @@ struct ProviderProfile
 };
 
 [[nodiscard]] ProviderProfile const& anthropic_provider_profile();
+[[nodiscard]] ProviderProfile const& deepseek_provider_profile();
 [[nodiscard]] ProviderProfile const& kimi_provider_profile();
 [[nodiscard]] ProviderProfile const& moonshot_provider_profile();
 [[nodiscard]] ProviderProfile const& openai_provider_profile();

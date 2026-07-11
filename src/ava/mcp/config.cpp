@@ -2,6 +2,7 @@
 #include "ava/mcp/config.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/core/json.h"
+#include "ava/core/process_args.h"
 
 #include <algorithm>
 #include <array>
@@ -31,6 +32,16 @@ bool has_forbidden_byte(std::string_view value)
       return true;
   }
   return false;
+}
+
+std::optional<std::string> workspace_relative_process_arg(std::string const& command, std::vector<std::string> const& args)
+{
+  if (ava::core::is_workspace_relative_process_arg(command))
+    return command;
+  auto const match = std::ranges::find_if(args, [](std::string const& value) { return ava::core::is_workspace_relative_process_arg(value); });
+  if (match == args.end())
+    return std::nullopt;
+  return *match;
 }
 
 std::optional<bool> bool_field(std::string_view object, std::string_view key)
@@ -337,6 +348,19 @@ ava::core::Result<McpConfig> parse_mcp_config(std::string_view json, std::filesy
       if (arg.size() > kMaxMcpArgBytes || has_forbidden_byte(arg))
       {
         return std::unexpected(config_error("MCP server arg is unsafe").with_context("server", *id).with_context("config", config_path.string()));
+      }
+    }
+    if (scope == McpServerScope::Global)
+    {
+      auto relative_arg = workspace_relative_process_arg(*command, *args);
+      if (relative_arg)
+      {
+        return std::unexpected(
+            config_error("global MCP server command/args must not contain workspace-relative paths")
+                .with_context("server", *id)
+                .with_context("config", config_path.string())
+                .with_context("argument", *relative_arg)
+                .with_context("resolution", "move the server to project MCP config and trust the project, or use an absolute path/PATH command"));
       }
     }
     auto const enabled = bool_field(server_json, "enabled").value_or(scope == McpServerScope::Global);

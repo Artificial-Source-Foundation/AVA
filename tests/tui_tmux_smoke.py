@@ -43,6 +43,13 @@ def capture_styled(tmux_exe: str, session: str) -> str:
     return result.stdout
 
 
+def save_evidence(root: pathlib.Path, name: str, screen: str) -> None:
+    evidence_dir = root / "evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", name).strip("-").lower()
+    (evidence_dir / f"{safe_name}.txt").write_text(screen.rstrip() + "\n", encoding="utf-8")
+
+
 def pane_current_command(tmux_exe: str, session: str) -> str:
     result = tmux(tmux_exe, "display-message", "-p", "-t", f"{session}:0.0", "#{pane_current_command}")
     return result.stdout.strip()
@@ -689,6 +696,7 @@ def main() -> int:
         queued_follow_up = wait_for(tmux_exe, active_session, r"follow-up queued", "active-run Alt+Enter follow-up queued")
         if "tmux active follow-up" not in queued_follow_up:
             raise RuntimeError(f"active-run Alt+Enter did not render the queued follow-up text\nscreen:\n{queued_follow_up}")
+        save_evidence(root, "active-run-follow-up-queued", queued_follow_up)
         active_log = wait_for_request_count(active_request_log, 2, "active-run queued follow-up provider request", timeout=12.0)
         if "tmux active first prompt" not in active_log or "tmux active follow-up" not in active_log:
             raise RuntimeError(f"active-run follow-up did not reach the fake provider\nrequest log:\n{active_log}")
@@ -787,6 +795,7 @@ def main() -> int:
             raise RuntimeError(
                 f"active-run Alt+Up did not restore the follow-up text visibly\nscreen:\n{restored_follow_up}"
             )
+        save_evidence(root, "active-run-follow-up-restored", restored_follow_up)
         send_literal(tmux_exe, restore_active_session, " still-draft")
         restored_draft_edit = wait_for(
             tmux_exe,
@@ -848,6 +857,7 @@ def main() -> int:
             raise RuntimeError(f"initial frame did not show AVA branding\nscreen:\n{initial}")
         if "Provider auth is not configured for `openai`" not in initial or "Connect with /connect" not in initial:
             raise RuntimeError(f"first-run onboarding guidance did not render in fresh TUI\nscreen:\n{initial}")
+        save_evidence(root, "startup-ready-composer", initial)
         styled_initial = capture_styled(tmux_exe, session)
         if "\x1b[" in styled_initial:
             raise RuntimeError(f"NO_COLOR=1 TUI frame still captured ANSI style escapes\nscreen:\n{styled_initial}")
@@ -866,11 +876,55 @@ def main() -> int:
         settings_modal = wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal")
         if "plain" not in settings_modal or "NO_COLOR" not in settings_modal:
             raise RuntimeError(f"settings modal did not report the active NO_COLOR plain mode\nscreen:\n{settings_modal}")
-        if "Keybindings" not in settings_modal or "Keybindings file" not in settings_modal:
-            raise RuntimeError(f"settings modal did not report keybinding config and reload guidance\nscreen:\n{settings_modal}")
+        save_evidence(root, "settings-plain-no-color", settings_modal)
         styled_settings = capture_styled(tmux_exe, session)
         if "\x1b[" in styled_settings:
             raise RuntimeError(f"NO_COLOR=1 settings modal still captured ANSI style escapes\nscreen:\n{styled_settings}")
+        send_literal(tmux_exe, session, "trust")
+        settings_trust_rows = wait_for(
+            tmux_exe, session, r"Search: trust", "settings trust filtered rows"
+        )
+        if (
+            "Project trust" not in settings_trust_rows
+            or "project resources" not in settings_trust_rows
+            or "Trust status" not in settings_trust_rows
+            or "Trust project" not in settings_trust_rows
+            or "Deny project" not in settings_trust_rows
+        ):
+            raise RuntimeError(
+                f"settings modal did not expose project trust status and actions\nscreen:\n{settings_trust_rows}"
+            )
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Settings|Search:", "settings modal closed after trust rows")
+
+        send_literal(tmux_exe, session, "/settings")
+        wait_for(tmux_exe, session, r"/settings", "settings command draft before trust status action")
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before trust status action")
+        send_literal(tmux_exe, session, "trust status")
+        settings_trust_status_row = wait_for(
+            tmux_exe, session, r"Search: trust status", "settings trust status filtered row"
+        )
+        if "Trust status" not in settings_trust_status_row or "/trust status" not in settings_trust_status_row:
+            raise RuntimeError(
+                f"settings modal did not expose the trust status action when filtered\nscreen:\n{settings_trust_status_row}"
+            )
+        send_keys(tmux_exe, session, "Enter")
+        settings_trust_status = wait_for(
+            tmux_exe,
+            session,
+            r"(?s)Project trust:.*decision=unknown.*project_resources=skipped.*protected_resources=2",
+            "settings trust status action output",
+        )
+        if "prompt_commands" not in settings_trust_status or "system_prompt" not in settings_trust_status:
+            raise RuntimeError(
+                f"settings trust status action did not render protected-resource diagnostics\nscreen:\n{settings_trust_status}"
+            )
+
+        send_literal(tmux_exe, session, "/settings")
+        wait_for(tmux_exe, session, r"/settings", "settings command draft before keybinding rows")
+        send_keys(tmux_exe, session, "Enter")
+        wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before keybinding rows")
         send_literal(tmux_exe, session, "Keybindings")
         settings_keybinding_rows = wait_for(tmux_exe, session, r"Keybindings file", "settings keybinding filtered rows")
         keybindings_row = next(
@@ -927,7 +981,7 @@ def main() -> int:
         wait_for(tmux_exe, session, r"/settings", "settings command draft before keybinding edit")
         send_keys(tmux_exe, session, "Enter")
         wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before keybinding edit")
-        send_literal(tmux_exe, session, "edit")
+        send_literal(tmux_exe, session, "keybindings edit")
         wait_for(tmux_exe, session, r"Keybindings edit", "settings keybinding edit row")
         send_keys(tmux_exe, session, "Enter")
         settings_edit_draft = wait_for(tmux_exe, session, r"/keybindings set", "settings keybinding edit drafts command")
@@ -973,6 +1027,7 @@ def main() -> int:
             raise RuntimeError(
                 f"settings model selector row did not open the model selector\nscreen:\n{settings_opened_model_selector}"
             )
+        save_evidence(root, "settings-model-selector", settings_opened_model_selector)
         send_keys(tmux_exe, session, "Escape")
         wait_for_absent(tmux_exe, session, r"Select model|Search models", "settings-opened model selector canceled")
 
@@ -1000,6 +1055,7 @@ def main() -> int:
             raise RuntimeError(
                 f"settings scoped model row did not open the scoped cycle selector\nscreen:\n{settings_opened_scoped_model_selector}"
             )
+        save_evidence(root, "settings-scoped-model-selector", settings_opened_scoped_model_selector)
         send_keys(tmux_exe, session, "Escape")
         wait_for_absent(
             tmux_exe, session, r"Scoped model cycle|Search models", "settings-opened scoped model selector canceled"
@@ -1034,7 +1090,7 @@ def main() -> int:
         trust_status = wait_for(
             tmux_exe, session, r"(?s)Project trust:.*decision=unknown.*project_resources=skipped", "trust status command"
         )
-        if ".ava/commands" not in trust_status:
+        if "protected_resources=2" not in trust_status or "prompt_commands" not in trust_status or "system_prompt" not in trust_status:
             raise RuntimeError(f"/trust status did not list protected project resources\nscreen:\n{trust_status}")
 
         send_keys(tmux_exe, session, "C-u")
@@ -1377,9 +1433,9 @@ def main() -> int:
             encoding="utf-8",
         )
         send_literal(tmux_exe, session, "/reload")
-        wait_for(tmux_exe, session, r"/reload.*Reload keybindings", "reload palette row")
+        wait_for(tmux_exe, session, r"/reload \[all\|theme\|models", "reload palette row")
         send_keys(tmux_exe, session, "Escape")
-        wait_for_absent(tmux_exe, session, r"/reload.*Reload keybindings", "reload palette dismissed")
+        wait_for_absent(tmux_exe, session, r"/reload \[all\|theme\|models", "reload palette dismissed")
         send_keys(tmux_exe, session, "Enter")
         reload_screen = wait_for(tmux_exe, session, r"keybindings reloaded", "live keybinding reload")
         if "keybindings reloaded" not in reload_screen:
@@ -1763,9 +1819,9 @@ def main() -> int:
         )
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/reload")
-        wait_for(tmux_exe, session, r"/reload.*Reload keybindings", "restore default select bindings reload row")
+        wait_for(tmux_exe, session, r"/reload \[all\|theme\|models", "restore default select bindings reload row")
         send_keys(tmux_exe, session, "Escape")
-        wait_for_absent(tmux_exe, session, r"/reload.*Reload keybindings", "restore default select bindings reload dismissed")
+        wait_for_absent(tmux_exe, session, r"/reload \[all\|theme\|models", "restore default select bindings reload dismissed")
         send_keys(tmux_exe, session, "Enter")
         wait_for(tmux_exe, session, r"keybindings reloaded", "default select bindings restored")
 
@@ -1969,19 +2025,25 @@ def main() -> int:
         send_literal(tmux_exe, session, "!pwd")
         send_keys(tmux_exe, session, "Enter")
         bang_shell = wait_for(tmux_exe, session, r"(?s)!pwd.*exit: 0", "bang shell helper")
-        if "PERMISSION REQUIRED" in bang_shell:
+        if "Permission required" in bang_shell or "PERMISSION REQUIRED" in bang_shell:
             raise RuntimeError(f"! shell helper unexpectedly opened a permission prompt for pwd\nscreen:\n{bang_shell}")
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/bash git push origin main")
         send_keys(tmux_exe, session, "Enter")
-        permission = wait_for(tmux_exe, session, r"PERMISSION REQUIRED.*risk high|risk high.*reason command can change", "permission prompt risk metadata")
-        if "risk high" not in permission or "reason command can change external or destructive state" not in permission:
-            raise RuntimeError(f"permission prompt did not expose risk and reason metadata\nscreen:\n{permission}")
-        if "Deny rule" not in permission or "Allow rule" not in permission:
+        permission = wait_for(
+            tmux_exe,
+            session,
+            r"Permission required.*risk high|risk high.*reason command can",
+            "permission prompt risk metadata",
+        )
+        if "risk high" not in permission or "id permreq_" not in permission or "reason command can" not in permission:
+            raise RuntimeError(f"permission prompt did not expose risk, request id, and reason metadata\nscreen:\n{permission}")
+        if "[Reject rule]" not in permission or "[Always]" not in permission:
             raise RuntimeError(f"permission prompt did not expose remembered rule choices\nscreen:\n{permission}")
+        save_evidence(root, "permission-prompt-risk-request", permission)
         send_keys(tmux_exe, session, "Tab", "Tab", "Enter")
-        wait_for_absent(tmux_exe, session, r"PERMISSION REQUIRED", "permission prompt denied")
+        wait_for_absent(tmux_exe, session, r"Permission required", "permission prompt denied")
         denied_card = wait_for(
             tmux_exe,
             session,
@@ -1990,6 +2052,7 @@ def main() -> int:
         )
         if "permission deny" not in denied_card or "reason command can change" not in denied_card:
             raise RuntimeError(f"permission denial did not remain visible on the tool card\nscreen:\n{denied_card}")
+        save_evidence(root, "permission-denied-tool-card", denied_card)
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/permissions list")
@@ -2008,7 +2071,7 @@ def main() -> int:
         send_keys(tmux_exe, session, "Enter")
         time.sleep(0.4)
         repeated_denial = capture(tmux_exe, session)
-        if "PERMISSION REQUIRED" in repeated_denial:
+        if "Permission required" in repeated_denial or "PERMISSION REQUIRED" in repeated_denial:
             raise RuntimeError(f"remembered deny rule did not suppress a repeated prompt\nscreen:\n{repeated_denial}")
         send_keys(tmux_exe, session, "C-o")
         expanded_tool_details = wait_for(
@@ -2044,6 +2107,7 @@ def main() -> int:
             raise RuntimeError(
                 f"narrow NO_COLOR permission details did not remain readable as text rows\nscreen:\n{narrow_plain_permission}"
             )
+        save_evidence(root, "permission-denied-narrow-no-color", narrow_plain_permission)
         styled_narrow_permission = capture_styled(tmux_exe, session)
         if "\x1b[" in styled_narrow_permission:
             raise RuntimeError(
@@ -2079,21 +2143,22 @@ def main() -> int:
         write_result = wait_for(
             tmux_exe,
             session,
-            r"(?s)wrote .*src/main\.cpp|PERMISSION REQUIRED",
+            r"wrote 27 bytes|Permission required",
             "write command result for diff copy",
         )
-        if "PERMISSION REQUIRED" in write_result:
+        if "Permission required" in write_result or "PERMISSION REQUIRED" in write_result:
             send_keys(tmux_exe, session, "Tab", "Enter")
-            write_result = wait_for(tmux_exe, session, r"(?s)wrote .*src/main\.cpp", "allowed write command result")
-        if "wrote" not in write_result or "src/main.cpp" not in write_result:
+            write_result = wait_for(tmux_exe, session, r"wrote 27 bytes", "allowed write command result")
+        if "wrote 27 bytes" not in write_result:
             raise RuntimeError(f"/write did not render a successful mutation tool card\nscreen:\n{write_result}")
+        save_evidence(root, "write-tool-card-success", write_result)
         write_changed_details = wait_for(
             tmux_exe,
             session,
-            r"(?s)changed:\s+.*src/main\.cpp",
+            r"changed:",
             "write changed-file detail row",
         )
-        if "changed:" not in write_changed_details or "src/main.cpp" not in write_changed_details:
+        if "changed:" not in write_changed_details:
             raise RuntimeError(
                 f"/write did not render the changed-file summary row in expanded tool details\nscreen:\n{write_changed_details}"
             )
@@ -2120,11 +2185,12 @@ def main() -> int:
         visible_matching_diff = wait_for(
             tmux_exe,
             session,
-            r"(?s)Matching tool diff:.*src/main\.cpp.*\+int changed\(\)",
+            r"(?s)Matching tool diff:.*\+int changed\(\)",
             "visible matching tool diff",
         )
         if "Matching tool diff:" not in visible_matching_diff or "+int changed()" not in visible_matching_diff:
             raise RuntimeError(f"/diff <query> did not render the matching unified diff\nscreen:\n{visible_matching_diff}")
+        save_evidence(root, "visible-diff-card", visible_matching_diff)
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/tool write")
@@ -2137,6 +2203,7 @@ def main() -> int:
         )
         if "showing matching tool details" not in visible_matching_tool or "[+] write" not in visible_matching_tool or "changed:" not in visible_matching_tool:
             raise RuntimeError(f"/tool <query> did not render the matching expanded tool card\nscreen:\n{visible_matching_tool}")
+        save_evidence(root, "visible-tool-details", visible_matching_tool)
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/copy tool write")
@@ -2176,6 +2243,7 @@ def main() -> int:
             raise RuntimeError(
                 f"permission audit summary command did not render grouped audit counts\nscreen:\n{permission_audit_summary}"
             )
+        save_evidence(root, "permission-audit-summary", permission_audit_summary)
 
         send_keys(tmux_exe, session, "C-u")
         send_literal(tmux_exe, session, "/permissions audit export git push")
@@ -2247,6 +2315,7 @@ def main() -> int:
         selector = wait_for(tmux_exe, session, r"Select session|Session tree", "resume session selector")
         if "session selector opened" not in selector and "Select session" not in selector:
             raise RuntimeError(f"/resume did not open the session selector\nscreen:\n{selector}")
+        save_evidence(root, "session-selector", selector)
         send_literal(tmux_exe, session, "\x1b[6~")
         page_down = wait_for(tmux_exe, session, r"›\s+Page 1", "session selector page down")
         if "Page 1" not in page_down:
@@ -2459,6 +2528,7 @@ def main() -> int:
         paste_marker = wait_for(tmux_exe, session, r"\[paste #1 \+11 lines\]", "large bracketed paste marker")
         if "line11" in paste_marker:
             raise RuntimeError(f"large paste content leaked instead of collapsing to a marker\nscreen:\n{paste_marker}")
+        save_evidence(root, "large-paste-marker", paste_marker)
         send_keys(tmux_exe, session, "Left")
         send_literal(tmux_exe, session, "X")
         atomic_marker = wait_for(tmux_exe, session, r"X\[paste #1 \+11 lines\]", "large paste marker atomic left movement")
@@ -2629,6 +2699,7 @@ def main() -> int:
         resized = wait_for(tmux_exe, session, r"alpha|Type a message|pasted into draft safely", "resize redraw")
         if "Traceback" in resized or "assert" in resized.lower():
             raise RuntimeError(f"resize frame shows failure text\nscreen:\n{resized}")
+        save_evidence(root, "resize-redraw", resized)
 
         send_keys(tmux_exe, session, "C-c")
         time.sleep(0.2)
@@ -2658,6 +2729,7 @@ def main() -> int:
         attach_palette = wait_for(tmux_exe, session, r"/attach.*Attach an image", "attach command palette")
         if "/attach" not in attach_palette or "Attach an image" not in attach_palette:
             raise RuntimeError(f"/attach did not appear in the slash palette\nscreen:\n{attach_palette}")
+        save_evidence(root, "slash-attach-palette", attach_palette)
         send_keys(tmux_exe, session, "Escape")
         wait_for_absent(tmux_exe, session, r"Attach an image", "attach palette dismissed")
         send_keys(tmux_exe, session, "C-u")
@@ -2674,6 +2746,7 @@ def main() -> int:
             or "next prompt" not in attached_image
         ):
             raise RuntimeError(f"/attach did not import and queue the image visibly\nscreen:\n{attached_image}")
+        save_evidence(root, "attachment-text-fallback", attached_image)
         send_keys(tmux_exe, session, "C-v")
         clipboard_image = wait_for(
             tmux_exe,

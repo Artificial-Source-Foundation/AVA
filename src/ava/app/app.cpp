@@ -37,10 +37,11 @@ void print_help()
   std::cout << "  ava auth login [provider] [--api-key|--browser-oauth|--headless-oauth]\n";
   std::cout << "  ava connect [provider] [--api-key|--browser-oauth|--headless-oauth]\n";
   std::cout << "  ava connect <provider> --api-key-stdin|--api-key-env <env>\n";
+  std::cout << "  ava packages <list|install|remove|update|config>  # deferred\n";
   std::cout << "  ava --version\n";
   std::cout << "  ava --mode build|plan|text|json|rpc\n";
-  std::cout << "  ava --session <id>\n";
-  std::cout << "  ava --continue\n";
+  std::cout << "  ava --session <id> | --session-id <id>\n";
+  std::cout << "  ava --continue | --resume | -r\n";
   std::cout << "  ava --fork <id>\n";
   std::cout << "  ava --name <name>\n";
   std::cout << "  ava --session-dir <dir>\n";
@@ -66,11 +67,11 @@ bool stdout_is_tty()
 
 bool is_cli_option(std::string_view arg)
 {
-  return arg == "--help" || arg == "-h" || arg == "--version" || arg == "--mode" || arg == "--session" || arg == "--continue" || arg == "-c" ||
-         arg == "--fork" || arg == "--name" || arg == "-n" || arg == "--session-dir" || arg == "--no-session" || arg == "--system-prompt" ||
-         arg == "--append-system-prompt" || arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--json" || arg == "--output" ||
-         arg == "--allow" || arg == "--allow-tool" || arg == "--tools" || arg == "-t" || arg == "--exclude-tools" || arg == "-xt" ||
-         arg == "--no-builtin-tools" || arg == "-nbt" || arg == "--no-tools" || arg == "-nt";
+  return arg == "--help" || arg == "-h" || arg == "--version" || arg == "--mode" || arg == "--session" || arg == "--session-id" || arg == "--continue" ||
+         arg == "--resume" || arg == "-c" || arg == "-r" || arg == "--fork" || arg == "--name" || arg == "-n" || arg == "--session-dir" ||
+         arg == "--no-session" || arg == "--system-prompt" || arg == "--append-system-prompt" || arg == "--print" || arg == "-p" || arg == "--rpc" ||
+         arg == "--json" || arg == "--output" || arg == "--allow" || arg == "--allow-tool" || arg == "--tools" || arg == "-t" || arg == "--exclude-tools" ||
+         arg == "-xt" || arg == "--no-builtin-tools" || arg == "-nbt" || arg == "--no-tools" || arg == "-nt";
 }
 
 bool is_cli_file_argument(std::string_view arg)
@@ -356,6 +357,12 @@ int run(int argc, char** argv)
         provider = argv[++index];
       return parse_connect_like_command(index, provider);
     }
+    if (arg == "packages" || arg == "package")
+    {
+      std::cout << "AVA package manager is deferred pending local-source, provenance, trust, rollback, and compatibility policy.\n"
+                   "Install resources manually under $XDG_CONFIG_HOME/ava or trusted project .ava directories; see docs/CONFIG.md and docs/plugin-system.md.\n";
+      return 0;
+    }
     if (arg == "--help" || arg == "-h")
     {
       print_help();
@@ -513,11 +520,11 @@ int run(int argc, char** argv)
       tool_visibility.mode = ava::agent::ToolVisibilityMode::NoTools;
       continue;
     }
-    if (arg == "--session")
+    if (arg == "--session" || arg == "--session-id")
     {
       if (index + 1 >= argc)
       {
-        std::cerr << "--session requires a session id\n";
+        std::cerr << std::string(arg) << " requires a session id\n";
         return 2;
       }
       requested_session_id = std::string(argv[++index]);
@@ -553,7 +560,7 @@ int run(int argc, char** argv)
       session_dir = std::filesystem::path(argv[++index]);
       continue;
     }
-    if (arg == "--continue" || arg == "-c")
+    if (arg == "--continue" || arg == "--resume" || arg == "-c" || arg == "-r")
     {
       continue_last_session = true;
       continue;
@@ -623,7 +630,7 @@ int run(int argc, char** argv)
   auto const selected_persisted_session_mode = (requested_session_id ? 1 : 0) + (continue_last_session ? 1 : 0) + (fork_session_id ? 1 : 0);
   if (selected_persisted_session_mode > 1)
   {
-    std::cerr << "use only one of --session, --continue, or --fork\n";
+    std::cerr << "use only one of --session/--session-id, --continue/--resume, or --fork\n";
     return 2;
   }
   if (sessionless && selected_persisted_session_mode > 0)

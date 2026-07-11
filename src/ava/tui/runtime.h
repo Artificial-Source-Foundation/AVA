@@ -77,6 +77,7 @@ struct TuiRuntimeStateSnapshot
   std::vector<SlashCommandItem> slash_commands = {};
   std::vector<FileReferenceItem> file_references = {};
   std::vector<ThemeOptionItem> custom_themes = {};
+  std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -120,6 +121,7 @@ struct TuiRuntimeOptions
   std::vector<SlashCommandItem> slash_commands = {};
   std::vector<FileReferenceItem> file_references = {};
   std::vector<ThemeOptionItem> custom_themes = {};
+  std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
   TuiKeyBindings key_bindings = default_key_bindings();
   // Called on the TUI main thread at startup and after a submit worker completes; never from render/spinner loops.
   std::function<std::optional<std::string>()> token_status_provider;

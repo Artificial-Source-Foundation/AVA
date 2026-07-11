@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/app/display_settings.h"
 
+#include "ava/core/atomic_file.h"
 #include "ava/core/json.h"
 #include "ava/tui/theme.h"
 
@@ -497,37 +498,8 @@ ava::core::VoidResult store_tui_theme_setting(ava::config::XdgPaths const& paths
     theme = resolved->theme;
   }
 
-  std::error_code create_error;
-  std::filesystem::create_directories(paths.ava_config_dir, create_error);
-  if (create_error)
-    return std::unexpected(io_error("failed to create TUI display settings directory", paths.ava_config_dir, create_error));
-
   auto const path = tui_display_settings_file(paths);
-  auto const temp_path = path.string() + ".tmp";
-  {
-    std::ofstream output(temp_path, std::ios::binary | std::ios::trunc);
-    if (!output)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write TUI display settings")
-                                 .with_context("path", temp_path));
-    output << serialize_tui_display_settings(theme);
-    if (!output)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to finish TUI display settings write")
-                                 .with_context("path", temp_path));
-  }
-
-  std::error_code permission_error;
-  std::filesystem::permissions(temp_path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-                               std::filesystem::perm_options::replace, permission_error);
-
-  std::error_code rename_error;
-  std::filesystem::rename(temp_path, path, rename_error);
-  if (rename_error)
-  {
-    std::error_code remove_error;
-    std::filesystem::remove(temp_path, remove_error);
-    return std::unexpected(io_error("failed to replace TUI display settings", path, rename_error));
-  }
-  return {};
+  return ava::core::write_text_file_atomic(path, serialize_tui_display_settings(theme), "TUI display settings");
 }
 
 }  // namespace ava::app

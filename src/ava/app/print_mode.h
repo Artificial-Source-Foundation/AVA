@@ -30,6 +30,8 @@ struct PrintModeRunOptions
 {
   PrintOutputFormat output_format = PrintOutputFormat::Text;
   RuntimeRunOptions runtime_options;
+  bool sanitize_terminal_output = false;
+  bool sanitize_terminal_diagnostics = false;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

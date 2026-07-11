@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/app/command_palette.h"
+
 #include "ava/app/command_models.h"
 #include "ava/app/display_settings.h"
 #include "ava/app/runtime.h"
@@ -109,8 +110,7 @@ bool should_skip_path_completion_entry(RuntimeSession const& session, std::files
   return is_reference_code_path(session, entry.path());
 }
 
-std::optional<std::string> completion_relative_path(std::filesystem::path const& base, std::filesystem::path const& path, bool directory,
-                                                   bool allow_spaces)
+std::optional<std::string> completion_relative_path(std::filesystem::path const& base, std::filesystem::path const& path, bool directory, bool allow_spaces)
 {
   std::error_code error;
   auto relative = std::filesystem::relative(path, base, error);
@@ -148,8 +148,7 @@ std::vector<PathCompletionCandidate> workspace_path_completions(RuntimeSession c
     return candidates;
 
   std::size_t visited = 0;
-  for (std::filesystem::recursive_directory_iterator it(session.current_dir, error), end; it != end && visited < kMaxPathCompletionVisited;
-       it.increment(error))
+  for (std::filesystem::recursive_directory_iterator it(session.current_dir, error), end; it != end && visited < kMaxPathCompletionVisited; it.increment(error))
   {
     if (error)
     {
@@ -179,8 +178,8 @@ std::vector<PathCompletionCandidate> workspace_path_completions(RuntimeSession c
     auto value = completion_relative_path(session.current_dir, entry.path(), directory, allow_spaces);
     if (!value)
       continue;
-    candidates.push_back(PathCompletionCandidate{
-        .value = std::move(*value), .description = path_completion_description(entry, directory), .directory = directory});
+    candidates.push_back(
+        PathCompletionCandidate{.value = std::move(*value), .description = path_completion_description(entry, directory), .directory = directory});
   }
 
   std::ranges::sort(candidates, [](PathCompletionCandidate const& left, PathCompletionCandidate const& right) {
@@ -328,12 +327,11 @@ bool scoped_model_enabled(std::optional<std::vector<std::string>> const& scoped_
 {
   if (!scoped_model_cycle)
     return true;
-  return std::ranges::find_if(*scoped_model_cycle, [&](auto const& existing) { return existing == value; }) !=
-         scoped_model_cycle->end();
+  return std::ranges::find_if(*scoped_model_cycle, [&](auto const& existing) { return existing == value; }) != scoped_model_cycle->end();
 }
 
-std::vector<ava::config::ModelInfo> scoped_model_selector_models(
-    std::vector<ava::config::ModelInfo> models, std::optional<std::vector<std::string>> const& scoped_model_cycle)
+std::vector<ava::config::ModelInfo> scoped_model_selector_models(std::vector<ava::config::ModelInfo> models,
+                                                                 std::optional<std::vector<std::string>> const& scoped_model_cycle)
 {
   if (!scoped_model_cycle)
     return models;
@@ -349,19 +347,16 @@ std::vector<ava::config::ModelInfo> scoped_model_selector_models(
   for (auto const& model : models)
   {
     auto const value = model_selector_value(model);
-    auto const already_added = std::ranges::find_if(sorted, [&](auto const& existing) {
-      return existing.provider_id == model.provider_id && existing.model_id == model.model_id;
-    });
+    auto const already_added =
+        std::ranges::find_if(sorted, [&](auto const& existing) { return existing.provider_id == model.provider_id && existing.model_id == model.model_id; });
     if (already_added == sorted.end())
       sorted.push_back(model);
   }
   return sorted;
 }
 
-tui::SelectListItemView scoped_model_selector_item(ava::config::ModelInfo const& model,
-                                                   ava::config::ModelInfo const& current_model,
-                                                   std::optional<std::vector<std::string>> const& scoped_model_cycle,
-                                                   bool registered)
+tui::SelectListItemView scoped_model_selector_item(ava::config::ModelInfo const& model, ava::config::ModelInfo const& current_model,
+                                                   std::optional<std::vector<std::string>> const& scoped_model_cycle, bool registered)
 {
   auto item = model_selector_item(model, current_model, registered);
   auto const value = model_selector_value(model);
@@ -370,8 +365,7 @@ tui::SelectListItemView scoped_model_selector_item(ava::config::ModelInfo const&
   item.description = value + (enabled_for_cycle ? " · enabled" : " · disabled");
   if (!registered)
     item.description += " · provider unavailable";
-  item.badge = enabled_for_cycle ? (scoped_model_cycle ? std::string("enabled") : std::string("all-enabled"))
-                                 : std::string("disabled");
+  item.badge = enabled_for_cycle ? (scoped_model_cycle ? std::string("enabled") : std::string("all-enabled")) : std::string("disabled");
   item.detail += enabled_for_cycle ? " · scoped cycle enabled" : " · scoped cycle disabled";
   item.enabled = registered;
   item.disabled_reason = registered ? std::string{} : std::string("provider unavailable");
@@ -462,8 +456,7 @@ std::string session_node_detail(ava::session::SessionTreeNode const& node, bool 
   return detail;
 }
 
-tui::SelectListItemView session_selector_item(ava::session::SessionSummary const& summary, std::string_view current_session_id,
-                                              bool show_paths)
+tui::SelectListItemView session_selector_item(ava::session::SessionSummary const& summary, std::string_view current_session_id, bool show_paths)
 {
   auto const current = !current_session_id.empty() && summary.session_id == current_session_id;
   auto path = summary.path.empty() ? std::string("path unavailable") : summary.path.generic_string();
@@ -486,8 +479,7 @@ bool node_less(ava::session::SessionTreeNode const& left, ava::session::SessionT
       if (left.summary.last_updated != right.summary.last_updated)
         return left.summary.last_updated > right.summary.last_updated;
       return left.summary.session_id > right.summary.session_id;
-    case SessionSelectorSort::Name:
-    {
+    case SessionSelectorSort::Name: {
       auto const left_name = left.metadata.name.empty() ? left.summary.session_id : left.metadata.name;
       auto const right_name = right.metadata.name.empty() ? right.summary.session_id : right.metadata.name;
       if (left_name != right_name)
@@ -540,16 +532,15 @@ std::vector<std::string> sorted_tree_ids(std::vector<std::string> ids, std::vect
                                          std::unordered_map<std::string, std::size_t> const& index_by_id, SessionSelectorSort sort)
 {
   std::erase_if(ids, [&](std::string const& id) { return index_by_id.find(id) == index_by_id.end(); });
-  std::ranges::sort(ids, [&](std::string const& left, std::string const& right) {
-    return node_less(nodes[index_by_id.at(left)], nodes[index_by_id.at(right)], sort);
-  });
+  std::ranges::sort(
+      ids, [&](std::string const& left, std::string const& right) { return node_less(nodes[index_by_id.at(left)], nodes[index_by_id.at(right)], sort); });
   return ids;
 }
 
 void append_session_tree_items(tui::SelectListView& view, std::vector<ava::session::SessionTreeNode> const& nodes,
                                std::unordered_map<std::string, std::size_t> const& index_by_id, std::vector<std::string> ids,
-                               std::vector<std::string> const& current_path, SessionSelectorSort sort, std::size_t depth,
-                               bool named_only, bool show_paths, bool show_archived, bool show_label_time)
+                               std::vector<std::string> const& current_path, SessionSelectorSort sort, std::size_t depth, bool named_only, bool show_paths,
+                               bool show_archived, bool show_label_time)
 {
   ids = sorted_tree_ids(std::move(ids), nodes, index_by_id, sort);
   for (auto const& id : ids)
@@ -569,16 +560,16 @@ void append_session_tree_items(tui::SelectListView& view, std::vector<ava::sessi
                                                    .description = session_node_description(node, show_paths),
                                                    .group = depth == 0 ? std::string("Root sessions") : std::string("Branches"),
                                                    .detail = session_node_detail(node, current_path_node, show_label_time),
-                                                   .badge = node.current ? std::string("current")
-                                                                         : node.metadata.archived ? std::string("archived")
-                                                                         : !node.metadata.branch_origin.empty() ? node.metadata.branch_origin
-                                                                                                               : std::string("root"),
+                                                   .badge = node.current                           ? std::string("current")
+                                                            : node.metadata.archived               ? std::string("archived")
+                                                            : !node.metadata.branch_origin.empty() ? node.metadata.branch_origin
+                                                                                                   : std::string("root"),
                                                    .current = node.current,
                                                    .enabled = true,
                                                    .disabled_reason = {}});
     }
-    append_session_tree_items(view, nodes, index_by_id, node.children, current_path, sort, depth + (visible ? 1 : 0),
-                              named_only, show_paths, show_archived, show_label_time);
+    append_session_tree_items(view, nodes, index_by_id, node.children, current_path, sort, depth + (visible ? 1 : 0), named_only, show_paths, show_archived,
+                              show_label_time);
   }
 }
 
@@ -586,18 +577,15 @@ ava::mcp::McpConfigLoadOptions mcp_config_options(RuntimeSession const& session)
 {
   auto options = ava::mcp::default_mcp_config_options(session.workspace_dir);
   options.global_config_file = session.paths.ava_config_dir / "mcp.json";
-  options.project_config_file = project_resources_trusted(session.project_trust)
-                                    ? session.workspace_dir / ".ava" / "mcp.json"
-                                    : std::filesystem::path{};
+  options.project_config_file = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "mcp.json" : std::filesystem::path{};
   return options;
 }
 
 ava::plugin::PluginDiscoveryOptions plugin_discovery_options(RuntimeSession const& session)
 {
-  return ava::plugin::PluginDiscoveryOptions{.global_plugins_dir = session.paths.ava_config_dir / "plugins",
-                                             .project_plugins_dir = project_resources_trusted(session.project_trust)
-                                                                        ? session.workspace_dir / ".ava" / "plugins"
-                                                                        : std::filesystem::path{}};
+  return ava::plugin::PluginDiscoveryOptions{
+      .global_plugins_dir = session.paths.ava_config_dir / "plugins",
+      .project_plugins_dir = project_resources_trusted(session.project_trust) ? session.workspace_dir / ".ava" / "plugins" : std::filesystem::path{}};
 }
 
 std::filesystem::path plugin_enablement_file(RuntimeSession const& session)
@@ -605,8 +593,7 @@ std::filesystem::path plugin_enablement_file(RuntimeSession const& session)
   return session.paths.ava_state_dir / "plugin-enablement.json";
 }
 
-void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, RuntimeSession const& session,
-                                      std::vector<CommandHotkey> const& hotkeys)
+void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, RuntimeSession const& session, std::vector<CommandHotkey> const& hotkeys)
 {
   auto const path_completions = workspace_path_completions(session);
   if (!path_completions.empty())
@@ -625,6 +612,8 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
       add_path_completions(items[*index], path_completions, 0, false);
     if (auto index = find_item_index(items, "/grep"))
       add_glob_completions(items[*index], path_completions, 1);
+    if (auto index = find_item_index(items, "/import"))
+      add_path_completions(items[*index], path_completions, 0, false);
   }
 
   if (auto index = find_item_index(items, "/models"))
@@ -688,6 +677,13 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     auto& item = items[*index];
     add_completion(item, 0, "markdown", "Return or write a Markdown session export", "Sessions", {}, false);
     add_completion(item, 0, "html", "Return or write a self-contained HTML session export", "Sessions", {}, false);
+    add_completion(item, 0, "jsonl", "Return or write a raw AVA JSONL session archive", "Sessions", {}, false);
+  }
+
+  if (auto index = find_item_index(items, "/import"))
+  {
+    auto& item = items[*index];
+    add_completion(item, 1, "--confirm", "Create a new local session from the validated JSONL archive", "Sessions", {}, false);
   }
 
   auto add_session_completions_for = [&](std::string_view command) {
@@ -712,15 +708,11 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
         {
           add_completion(item, 1, node.summary.session_id, session_completion_description(node), "Sessions", {"rename"}, false);
           add_completion(item, 1, node.summary.session_id, session_completion_description(node), "Sessions", {"labels"}, false);
-          add_completion(item, 1, node.summary.session_id, session_completion_description(node), "Sessions", {"archive"}, false,
-                         true);
-          add_completion(item, 1, node.summary.session_id, session_completion_description(node), "Sessions", {"unarchive"},
-                         false, node.metadata.archived,
+          add_completion(item, 1, node.summary.session_id, session_completion_description(node), "Sessions", {"archive"}, false, true);
+          add_completion(item, 1, node.summary.session_id, session_completion_description(node), "Sessions", {"unarchive"}, false, node.metadata.archived,
                          node.metadata.archived ? "" : "session is not archived");
-          add_completion(item, 2, "--clear", "Clear labels without switching sessions", "Sessions",
-                         {"labels", node.summary.session_id}, false);
-          add_completion(item, 2, "--confirm", "Confirm archive without deleting session files", "Sessions",
-                         {"archive", node.summary.session_id}, false);
+          add_completion(item, 2, "--clear", "Clear labels without switching sessions", "Sessions", {"labels", node.summary.session_id}, false);
+          add_completion(item, 2, "--confirm", "Confirm archive without deleting session files", "Sessions", {"archive", node.summary.session_id}, false);
         }
       }
     }
@@ -736,17 +728,15 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     {
       add_completion(item, 0, subcommand, "Permission rule command", "Safety");
     }
-    add_completion(item, 1, "export", "Render matching permission decisions as a Markdown table", "Safety", {"audit"},
-                   false);
+    add_completion(item, 1, "export", "Render matching permission decisions as a Markdown table", "Safety", {"audit"}, false);
     add_completion(item, 1, "summary", "Summarize matching permission audit decisions", "Safety", {"audit"}, false);
     add_completion(item, 1, "show", "Inspect one permission audit entry or request", "Safety", {"audit"}, false);
     for (auto const& value : {"action=allow", "action=deny"})
     {
       add_completion(item, 1, value, "Persistent rule action", "Safety", {"add"});
     }
-    for (auto const& value : {"operation=read", "operation=search", "operation=edit", "operation=bash",
-                              "operation=network.fetch", "operation=network.search", "operation=skill",
-                              "operation=mcp.tool.call"})
+    for (auto const& value : {"operation=read", "operation=search", "operation=edit", "operation=bash", "operation=network.fetch", "operation=network.search",
+                              "operation=skill", "operation=mcp.tool.call"})
     {
       add_completion(item, 1, value, "Persistent rule operation", "Safety", {"add"});
     }
@@ -767,9 +757,8 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     {
       for (auto const& rule : *rules)
       {
-        auto description = ava::permissions::to_string(rule.action) + " " +
-                           ava::permissions::to_string(rule.operation) + " " +
-                           ava::permissions::to_string(rule.scope);
+        auto description =
+            ava::permissions::to_string(rule.action) + " " + ava::permissions::to_string(rule.operation) + " " + ava::permissions::to_string(rule.scope);
         add_completion(item, 1, rule.rule_id, description, "Safety", {"explain"}, false);
         add_completion(item, 1, rule.rule_id, description, "Safety", {"remove"}, false);
       }
@@ -998,10 +987,8 @@ tui::SelectListView model_selector_view(RuntimeSession const& session, std::stri
                              .footer_hint = std::move(footer_hint)};
 }
 
-tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const& registry,
-                                               ava::config::ModelInfo const& current_model,
-                                               std::optional<std::vector<std::string>> const& scoped_model_cycle,
-                                               std::string footer_hint)
+tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const& registry, ava::config::ModelInfo const& current_model,
+                                               std::optional<std::vector<std::string>> const& scoped_model_cycle, std::string footer_hint)
 {
   auto const providers = ava::provider::builtin_provider_registry();
   auto models = scoped_model_selector_models(effective_models(registry), scoped_model_cycle);
@@ -1009,9 +996,8 @@ tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const&
 
   tui::SelectListView view{
       .title = "Scoped model cycle",
-      .subtitle = "Current Ctrl+P cycle scope · " +
-                  (scoped_model_cycle ? std::to_string(enabled_count) + "/" + std::to_string(models.size()) + " enabled"
-                                      : std::string("all configured registered models enabled")),
+      .subtitle = "Current Ctrl+P cycle scope · " + (scoped_model_cycle ? std::to_string(enabled_count) + "/" + std::to_string(models.size()) + " enabled"
+                                                                        : std::string("all configured registered models enabled")),
       .items = {},
       .selected_item_index = 0,
       .query = {},
@@ -1033,8 +1019,7 @@ tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const&
   if (!current_in_catalog && !current_model.provider_id.empty() && !current_model.model_id.empty())
   {
     view.selected_item_index = view.items.size();
-    view.items.push_back(scoped_model_selector_item(current_model, current_model, scoped_model_cycle,
-                                                   providers.contains(current_model.provider_id)));
+    view.items.push_back(scoped_model_selector_item(current_model, current_model, scoped_model_cycle, providers.contains(current_model.provider_id)));
   }
 
   return view;
@@ -1141,8 +1126,7 @@ tui::SelectListView session_selector_view(ava::session::SessionTreeIndex tree, S
       .footer_hint = footer_hint.empty() ? std::string("Enter choose · PgUp/PgDn page · type to filter · Esc cancel") : std::move(footer_hint)};
   view.items.reserve(tree.sessions.size() + 1);
 
-  append_session_tree_items(view, tree.sessions, index_by_id, tree.roots, tree.current_path, sort, 0, named_only,
-                            show_paths, show_archived, show_label_time);
+  append_session_tree_items(view, tree.sessions, index_by_id, tree.roots, tree.current_path, sort, 0, named_only, show_paths, show_archived, show_label_time);
 
   if (!named_only && view.items.empty() && !tree.current_session_id.empty())
   {
@@ -1174,8 +1158,8 @@ tui::SelectListView session_selector_view(ava::session::SessionTreeIndex tree, S
   return view;
 }
 
-tui::SelectListView session_selector_view(RuntimeSession const& session, SessionSelectorSort sort, std::string footer_hint, bool named_only,
-                                          bool show_paths, bool show_archived, bool show_label_time)
+tui::SelectListView session_selector_view(RuntimeSession const& session, SessionSelectorSort sort, std::string footer_hint, bool named_only, bool show_paths,
+                                          bool show_archived, bool show_label_time)
 {
   auto tree = ava::session::build_session_tree(session.workspace_dir, session.paths.sessions_dir, session.store.session_id());
   if (tree)
@@ -1199,8 +1183,7 @@ tui::SelectListView session_selector_view(RuntimeSession const& session, Session
                              .footer_hint = std::move(footer_hint)};
 }
 
-std::optional<std::string> session_selector_parent_target(ava::session::SessionTreeIndex const& tree,
-                                                          std::string_view session_id)
+std::optional<std::string> session_selector_parent_target(ava::session::SessionTreeIndex const& tree, std::string_view session_id)
 {
   auto const index_by_id = session_tree_index_by_id(tree.sessions);
   auto const found = index_by_id.find(std::string(session_id));
@@ -1212,9 +1195,7 @@ std::optional<std::string> session_selector_parent_target(ava::session::SessionT
   return parent_id;
 }
 
-std::optional<std::string> session_selector_child_target(ava::session::SessionTreeIndex const& tree,
-                                                         std::string_view session_id,
-                                                         SessionSelectorSort sort,
+std::optional<std::string> session_selector_child_target(ava::session::SessionTreeIndex const& tree, std::string_view session_id, SessionSelectorSort sort,
                                                          bool include_archived)
 {
   auto const index_by_id = session_tree_index_by_id(tree.sessions);

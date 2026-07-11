@@ -190,6 +190,28 @@ void test_file_tools()
              edit_audits[1].operation == ava::permissions::Operation::EditFile,
          "edit_file audits read permission before edit permission");
 
+  auto const audit_write_path = workspace / "audit-write.txt";
+  std::vector<ava::tools::PermissionAuditEvent> write_audits;
+  ava::tools::ToolContext const audit_write_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        expect(prompt.tool_name == "write_file", "write_file permission prompt carries write_file tool metadata");
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .permission_audit_sink = [&write_audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+        write_audits.push_back(event);
+        return {};
+      },
+      .permission_tool_name = "write_file",
+      .current_tool_name = "write_file"};
+  auto audited_write = ava::tools::write_file(audit_write_context, audit_write_path, "written");
+  expect(audited_write && std::ranges::any_of(write_audits,
+                                              [](ava::tools::PermissionAuditEvent const& event) {
+                                                return event.operation == ava::permissions::Operation::EditFile && event.tool_name == "write_file";
+                                              }),
+         "write_file audits its file-mutation permission with write_file tool metadata");
+
   auto const rename_failure_path = workspace / "rename-failure-target";
   std::filesystem::create_directories(rename_failure_path);
   {
@@ -255,6 +277,9 @@ void test_file_tools()
   std::filesystem::create_symlink(source_path, source_link, symlink_error);
   if (!symlink_error)
   {
+    auto linked_source_read = ava::tools::read_file(build_context, source_link);
+    expect(!linked_source_read && linked_source_read.error().message().find("symlink") != std::string::npos,
+           "read_file rejects symlinks before opening file contents");
     auto linked_source_edit = ava::tools::write_file(plan_context, source_link, "bad");
     expect(!linked_source_edit, "plan mode denies symlink edit to source file");
   }
@@ -268,8 +293,8 @@ void test_file_tools()
     file << "old line\n";
   }
   auto diffed_write = ava::tools::write_file(build_context, diffed_write_path, "new line\n");
-  expect(diffed_write && diffed_write->diff.find("-old line") != std::string::npos &&
-             diffed_write->diff.find("+new line") != std::string::npos && !diffed_write->diff_truncated,
+  expect(diffed_write && diffed_write->diff.find("-old line") != std::string::npos && diffed_write->diff.find("+new line") != std::string::npos &&
+             !diffed_write->diff_truncated,
          "write_file returns the backend-generated unified diff after successful mutation");
 
   auto const large_path = workspace / "large.txt";
@@ -280,6 +305,16 @@ void test_file_tools()
   auto large_read = ava::tools::read_file(build_context, large_path, ava::tools::ReadOptions{.max_bytes = 16});
   expect(large_read && large_read->content.size() == 16 && large_read->total_bytes == 8192 && large_read->byte_limited && large_read->output_lines == 1,
          "read_file bounds output while counting bytes");
+
+  auto const oversized_path = workspace / "oversized.txt";
+  {
+    std::ofstream oversized(oversized_path, std::ios::binary | std::ios::trunc);
+    oversized.seekp(10 * 1024 * 1024);
+    oversized.put('x');
+  }
+  auto oversized_read = ava::tools::read_file(build_context, oversized_path, ava::tools::ReadOptions{.max_bytes = 16});
+  expect(!oversized_read && oversized_read.error().message().find("too large") != std::string::npos,
+         "read_file rejects oversized files instead of scanning unbounded input");
 
   auto const canceled_existing_path = workspace / "canceled-existing.txt";
   {

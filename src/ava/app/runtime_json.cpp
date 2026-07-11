@@ -135,11 +135,12 @@ void append_json_escaped_char(std::string& output, std::string_view object, std:
   }
 }
 
-std::string session_start_data_json(ava::agent::Mode mode, ava::config::ModelInfo const& model, ava::config::PromptSelection const& prompt,
+std::string session_start_data_json(ava::agent::Mode mode, ava::config::ModelInfo const& model, RuntimeBasePromptMetadata const& base_prompt,
                                     std::size_t context_source_count)
 {
   std::string json = "{\"mode\":\"" + ava::agent::to_string(mode) + "\",\"provider\":\"" + ava::core::json::escape(model.provider_id) + "\",\"model\":\"" +
-                     ava::core::json::escape(model.model_id) + "\",\"prompt_override\":" + (prompt.from_override ? std::string("true") : std::string("false")) +
+                     ava::core::json::escape(model.model_id) +
+                     "\",\"prompt_override\":" + (base_prompt.from_override ? std::string("true") : std::string("false")) +
                      ",\"context_sources\":" + std::to_string(context_source_count);
   json += ",\"input_modalities\":" + string_array_json(model.input_modalities);
   json += ",\"output_modalities\":" + string_array_json(model.output_modalities);
@@ -366,14 +367,14 @@ std::optional<bool> bool_json_field(std::string_view object, std::string_view ke
 }
 
 ava::core::VoidResult append_session_start(ava::session::SessionStore& store, ava::agent::Mode mode, ava::config::ModelInfo const& model,
-                                           ava::config::PromptSelection const& prompt, std::size_t context_source_count)
+                                           RuntimeBasePromptMetadata const& base_prompt, std::size_t context_source_count)
 {
   return store.append(ava::session::SessionEntry{
       .id = ava::core::make_id("entry"),
       .parent_id = "",
       .type = ava::session::EntryType::SessionStart,
       .timestamp = ava::session::now_timestamp(),
-      .data_json = session_start_data_json(mode, model, prompt, context_source_count),
+      .data_json = session_start_data_json(mode, model, base_prompt, context_source_count),
   });
 }
 

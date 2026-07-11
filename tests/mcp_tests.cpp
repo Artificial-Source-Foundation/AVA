@@ -1,21 +1,15 @@
 #include "sys.h"
-#include "ava/agent/tool_dispatcher.h"
-
+#include "tests/support/golden.h"
+#include "tests/support/test_harness.h"
 #include "ava/app/headless_policy.h"
-
+#include "ava/agent/tool_dispatcher.h"
 #include "ava/tools/file_tools.h"
-
 #include "ava/mcp/config.h"
 #include "ava/mcp/protocol.h"
 #include "ava/mcp/stdio_client.h"
 #include "ava/mcp/tool_broker.h"
-
 #include "ava/permissions/permission.h"
-
 #include "ava/core/json.h"
-
-#include "tests/support/golden.h"
-#include "tests/support/test_harness.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -23,10 +17,10 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
-
 #include <signal.h>
 #include <sys/types.h>
 
@@ -41,6 +35,17 @@ void write_text(std::filesystem::path const& path, std::string const& text)
   std::filesystem::create_directories(path.parent_path());
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file << text;
+}
+
+std::string read_text(std::filesystem::path const& path)
+{
+  std::ifstream file(path, std::ios::binary);
+  std::ostringstream buffer;
+  buffer << file.rdbuf();
+  auto value = buffer.str();
+  if (!value.empty() && value.back() == '\n')
+    value.pop_back();
+  return value;
 }
 
 std::optional<pid_t> read_pid_file_for_test(std::filesystem::path const& path)
@@ -138,6 +143,18 @@ void test_mcp_config_parsing()
 
   auto bad_id = ava::mcp::parse_mcp_config("{\"servers\":[{\"id\":\"bad id\",\"command\":\"demo\"}]}", "/tmp/bad-mcp.json", ava::mcp::McpServerScope::Global);
   expect(!bad_id && bad_id.error().message().find("valid id") != std::string::npos, "MCP config rejects invalid server ids");
+
+  auto global_relative = ava::mcp::parse_mcp_config("{\"servers\":[{\"id\":\"relative\",\"command\":\"node\",\"args\":[\".ava/mcp-server.js\"]}]}",
+                                                    "/tmp/global-mcp.json", ava::mcp::McpServerScope::Global);
+  expect(!global_relative && global_relative.error().message().find("workspace-relative") != std::string::npos,
+         "MCP global config rejects workspace-relative command arguments before project trust can be bypassed");
+
+  auto project_relative =
+      ava::mcp::parse_mcp_config("{\"servers\":[{\"id\":\"relative\",\"command\":\"node\",\"args\":[\".ava/mcp-server.js\"],\"enabled\":true}]}",
+                                 "/tmp/project-mcp.json", ava::mcp::McpServerScope::Project);
+  expect(project_relative && project_relative->servers.size() == 1,
+         project_relative ? "MCP project config may use workspace-relative commands after project trust"
+                          : "MCP project config may use workspace-relative commands after project trust: " + project_relative.error().format());
 
   auto const root = temp_root() / "mcp-config";
   std::error_code remove_error;
@@ -249,6 +266,24 @@ void test_mcp_stdio_client_lists_and_calls_tools()
              exit_start_format.find("status: exit 42") != std::string::npos && exit_start_format.find("fake MCP exited during initialize") != std::string::npos,
          "MCP stdio client reports early startup exit with status and stderr diagnostics: " + exit_start_format);
 
+  auto const global_config_dir = root / "global-config";
+  std::filesystem::create_directories(global_config_dir);
+  auto const global_cwd_file = root / "mcp-global-cwd.txt";
+  auto global_server = fake_server_config(root);
+  global_server.scope = ava::mcp::McpServerScope::Global;
+  global_server.source_path = global_config_dir / "mcp.json";
+  global_server.args = {"cwd-marker", global_cwd_file.generic_string()};
+  auto global_cwd_client = ava::mcp::McpStdioClient::start(global_server, fake_client_options(workspace));
+  expect(global_cwd_client.has_value(), global_cwd_client ? "MCP global server initializes from safe config cwd"
+                                                          : "MCP global server initializes from safe config cwd: " + global_cwd_client.error().format());
+  if (global_cwd_client)
+  {
+    expect(read_text(global_cwd_file) == std::filesystem::weakly_canonical(global_config_dir).string(),
+           "MCP global server process cwd is the global config directory, not the workspace");
+    auto global_shutdown = (*global_cwd_client)->shutdown(std::chrono::milliseconds(500));
+    expect(global_shutdown.has_value(), "MCP global cwd test server shuts down cleanly");
+  }
+
   auto client = ava::mcp::McpStdioClient::start(fake_server_config(root), fake_client_options(workspace));
   expect(client.has_value(), client ? "MCP stdio client initializes fake server" : "MCP stdio client initializes fake server: " + client.error().format());
   if (!client)
@@ -269,7 +304,7 @@ void test_mcp_stdio_client_lists_and_calls_tools()
          resources ? "MCP stdio client lists resources" : "MCP stdio client lists resources: " + resources.error().format());
   auto resource = (*client)->read_resource("file:///workspace/notes.md");
   expect(resource && resource->content == "MCP resource content" && resource->uri == "file:///workspace/notes.md" && resource->mime_type == "text/markdown",
-          resource ? "MCP stdio client reads resources" : "MCP stdio client reads resources: " + resource.error().format());
+         resource ? "MCP stdio client reads resources" : "MCP stdio client reads resources: " + resource.error().format());
   auto shutdown = (*client)->shutdown(std::chrono::milliseconds(500));
   expect(shutdown.has_value(), shutdown ? "MCP stdio client shuts down cleanly" : "MCP stdio client shuts down cleanly: " + shutdown.error().format());
 
@@ -434,12 +469,13 @@ void test_mcp_stdio_client_lists_and_calls_tools()
   auto slow_resource_server = fake_server_config(root);
   slow_resource_server.args = {"slow-resource-marker", slow_resource_pgid_file.generic_string()};
   auto slow_resource_client = ava::mcp::McpStdioClient::start(slow_resource_server, fake_client_options(workspace));
-  expect(slow_resource_client.has_value(), slow_resource_client ? "MCP stdio client initializes slow-resource fake server"
-                                                               : "MCP stdio client initializes slow-resource fake server: " + slow_resource_client.error().format());
+  expect(slow_resource_client.has_value(), slow_resource_client
+                                               ? "MCP stdio client initializes slow-resource fake server"
+                                               : "MCP stdio client initializes slow-resource fake server: " + slow_resource_client.error().format());
   if (slow_resource_client)
   {
-    auto canceled_resource = (*slow_resource_client)
-                                 ->read_resource("file:///workspace/notes.md", [&] { return read_pid_file_for_test(slow_resource_pgid_file).has_value(); });
+    auto canceled_resource =
+        (*slow_resource_client)->read_resource("file:///workspace/notes.md", [&] { return read_pid_file_for_test(slow_resource_pgid_file).has_value(); });
     auto const slow_resource_pgid = read_pid_file_for_test(slow_resource_pgid_file);
     expect(!canceled_resource && canceled_resource.error().message().find("canceled") != std::string::npos && slow_resource_pgid &&
                wait_for_process_group_exit(*slow_resource_pgid),
@@ -489,9 +525,8 @@ void test_mcp_tool_dispatcher()
     ava::test::expect_json_matches_golden(*mcp_schema, "mcp-tool-schema.json", "MCP tool provider schema matches AVA 0.80 golden fixture");
   }
   auto const resource_schema = std::find_if(schemas.begin(), schemas.end(), [&](std::string const& schema) {
-    return schema.find("\"name\":\"" + resource_tool_name + "\"") != std::string::npos &&
-           schema.find("\"additionalProperties\":false") != std::string::npos && schema.find("file:///workspace/notes.md") == std::string::npos &&
-           schema.find("Project notes resource") == std::string::npos;
+    return schema.find("\"name\":\"" + resource_tool_name + "\"") != std::string::npos && schema.find("\"additionalProperties\":false") != std::string::npos &&
+           schema.find("file:///workspace/notes.md") == std::string::npos && schema.find("Project notes resource") == std::string::npos;
   });
   expect(resource_schema != schemas.end(), "enabled MCP resource is exported as an opaque no-argument provider schema");
 
@@ -517,8 +552,7 @@ void test_mcp_tool_dispatcher()
   });
   expect(audited_tool_call, "MCP tool permission decisions are audited");
 
-  auto resource_dispatched = dispatcher.dispatch(
-      ava::agent::ProviderToolCall{.id = "call_mcp_resource", .name = resource_tool_name, .arguments_json = "{}"});
+  auto resource_dispatched = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_mcp_resource", .name = resource_tool_name, .arguments_json = "{}"});
   expect(resource_dispatched && resource_dispatched->success && resource_dispatched->result_text.find("MCP resource content") != std::string::npos,
          resource_dispatched ? "dispatcher reads enabled MCP resources through broker"
                              : "dispatcher reads enabled MCP resources through broker: " + resource_dispatched.error().format());
@@ -589,16 +623,16 @@ void test_mcp_tool_dispatcher_audits_permission_denials()
     };
 
     auto const model_tool_name = denied_operation == ava::permissions::Operation::McpResourceRead
-                                      ? ava::mcp::mcp_model_resource_tool_name("demo", "file:///workspace/notes.md")
-                                      : ava::mcp::mcp_model_tool_name("demo", "echo");
+                                     ? ava::mcp::mcp_model_resource_tool_name("demo", "file:///workspace/notes.md")
+                                     : ava::mcp::mcp_model_tool_name("demo", "echo");
     auto const arguments_json = denied_operation == ava::permissions::Operation::McpResourceRead ? "{}" : "{\"text\":\"hello\"}";
     ava::agent::ToolDispatcher dispatcher(context);
     prompts.clear();
     audits.clear();
     operation_to_deny = denied_operation;
 
-    auto dispatched = dispatcher.dispatch(
-        ava::agent::ProviderToolCall{.id = "call_mcp_denied_" + suffix, .name = model_tool_name, .arguments_json = arguments_json});
+    auto dispatched =
+        dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_mcp_denied_" + suffix, .name = model_tool_name, .arguments_json = arguments_json});
     expect(dispatched && !dispatched->success && dispatched->result_text.find(expected_error) != std::string::npos,
            dispatched ? "MCP dispatcher reports permission denial for " + suffix
                       : "MCP dispatcher reports permission denial for " + suffix + ": " + dispatched.error().format());
@@ -643,9 +677,9 @@ void test_mcp_headless_policy_allows_resource_reads()
   prompt.tool_name = ava::mcp::mcp_model_resource_tool_name("demo", "file:///workspace/notes.md");
   prompt.command = "demo:file:///workspace/notes.md";
   auto decision = resolver(prompt);
-  expect(decision && decision->resolution == ava::permissions::PermissionResolution::Allow,
-         decision ? "headless --allow-tool mcp permits MCP resource reads"
-                  : "headless --allow-tool mcp permits MCP resource reads: " + decision.error().format());
+  expect(
+      decision && decision->resolution == ava::permissions::PermissionResolution::Allow,
+      decision ? "headless --allow-tool mcp permits MCP resource reads" : "headless --allow-tool mcp permits MCP resource reads: " + decision.error().format());
 }
 
 void test_mcp_tool_dispatcher_contains_tool_errors()
@@ -699,9 +733,9 @@ void test_mcp_tool_dispatcher_contains_tool_errors()
       ava::agent::ProviderToolCall{.id = "call_mcp_canceled_text_error", .name = model_tool_name, .arguments_json = "{\"text\":\"hello\"}"});
   expect(text_dispatched && !text_dispatched->success && text_dispatched->payload.status == ava::agent::ToolResultStatus::Error &&
              text_dispatched->payload.error_message.find("canceled upstream") != std::string::npos,
-         text_dispatched ? "MCP tool dispatcher does not classify ordinary tool errors containing canceled as cancellation"
-                         : "MCP tool dispatcher does not classify ordinary tool errors containing canceled as cancellation: " +
-                               text_dispatched.error().format());
+         text_dispatched
+             ? "MCP tool dispatcher does not classify ordinary tool errors containing canceled as cancellation"
+             : "MCP tool dispatcher does not classify ordinary tool errors containing canceled as cancellation: " + text_dispatched.error().format());
 }
 
 }  // namespace

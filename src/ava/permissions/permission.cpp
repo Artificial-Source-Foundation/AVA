@@ -9,8 +9,7 @@
 
 namespace ava::permissions {
 
-PermissionResolutionDecision::PermissionResolutionDecision(PermissionResolution resolution_in)
-    : resolution(resolution_in)
+PermissionResolutionDecision::PermissionResolutionDecision(PermissionResolution resolution_in) : resolution(resolution_in)
 {
 }
 
@@ -31,37 +30,60 @@ bool operator==(PermissionResolution resolution, PermissionResolutionDecision co
 
 std::optional<PermissionAction> parse_permission_action(std::string_view value)
 {
-  if (value == "allow") return PermissionAction::Allow;
-  if (value == "ask") return PermissionAction::Ask;
-  if (value == "deny") return PermissionAction::Deny;
+  if (value == "allow")
+    return PermissionAction::Allow;
+  if (value == "ask")
+    return PermissionAction::Ask;
+  if (value == "deny")
+    return PermissionAction::Deny;
   return std::nullopt;
 }
 
 std::optional<Operation> parse_operation(std::string_view value)
 {
-  if (value == "read") return Operation::ReadFile;
-  if (value == "search") return Operation::SearchFiles;
-  if (value == "edit") return Operation::EditFile;
-  if (value == "bash") return Operation::RunCommand;
-  if (value == "network.fetch") return Operation::NetworkFetch;
-  if (value == "network.search") return Operation::NetworkSearch;
-  if (value == "lsp.server.launch") return Operation::LspServerLaunch;
-  if (value == "lsp.query") return Operation::LspQuery;
-  if (value == "skill") return Operation::SkillLoad;
-  if (value == "plugin.execute") return Operation::PluginExecute;
-  if (value == "plugin.tool.call") return Operation::PluginToolCall;
-  if (value == "plugin.command.run") return Operation::PluginCommandRun;
-  if (value == "plugin.event.observe") return Operation::PluginEventObserve;
-  if (value == "mcp.server.launch") return Operation::McpServerLaunch;
-  if (value == "mcp.server.connect") return Operation::McpServerConnect;
-  if (value == "mcp.tool.call") return Operation::McpToolCall;
-  if (value == "mcp.resource.read") return Operation::McpResourceRead;
+  if (value == "read")
+    return Operation::ReadFile;
+  if (value == "search")
+    return Operation::SearchFiles;
+  if (value == "edit")
+    return Operation::EditFile;
+  if (value == "bash")
+    return Operation::RunCommand;
+  if (value == "network.fetch")
+    return Operation::NetworkFetch;
+  if (value == "network.search")
+    return Operation::NetworkSearch;
+  if (value == "lsp.server.launch")
+    return Operation::LspServerLaunch;
+  if (value == "lsp.query")
+    return Operation::LspQuery;
+  if (value == "skill")
+    return Operation::SkillLoad;
+  if (value == "task")
+    return Operation::TaskRun;
+  if (value == "plugin.execute")
+    return Operation::PluginExecute;
+  if (value == "plugin.tool.call")
+    return Operation::PluginToolCall;
+  if (value == "plugin.command.run")
+    return Operation::PluginCommandRun;
+  if (value == "plugin.event.observe")
+    return Operation::PluginEventObserve;
+  if (value == "mcp.server.launch")
+    return Operation::McpServerLaunch;
+  if (value == "mcp.server.connect")
+    return Operation::McpServerConnect;
+  if (value == "mcp.tool.call")
+    return Operation::McpToolCall;
+  if (value == "mcp.resource.read")
+    return Operation::McpResourceRead;
   return std::nullopt;
 }
 
 namespace {
 
-struct ParsedCommand {
+struct ParsedCommand
+{
   bool ok = false;
   std::string reason;
   std::vector<std::string> argv;
@@ -76,8 +98,7 @@ std::string lowercase(std::string_view value)
 
 bool contains_any(std::string_view value, std::vector<std::string_view> const& needles)
 {
-  return std::ranges::any_of(needles,
-                             [value](std::string_view needle) { return value.find(needle) != std::string_view::npos; });
+  return std::ranges::any_of(needles, [value](std::string_view needle) { return value.find(needle) != std::string_view::npos; });
 }
 
 bool equals_any(std::string_view value, std::vector<std::string_view> const& candidates)
@@ -87,7 +108,8 @@ bool equals_any(std::string_view value, std::vector<std::string_view> const& can
 
 bool is_shell_metacharacter(char ch)
 {
-  switch (ch) {
+  switch (ch)
+  {
     case ';':
     case '&':
     case '|':
@@ -110,39 +132,51 @@ ParsedCommand parse_command_argv(std::string_view command)
   char quote = '\0';
   bool escaping = false;
 
-  for (char const ch : command) {
+  for (char const ch : command)
+  {
     auto const byte = static_cast<unsigned char>(ch);
-    if (byte < 0x20 || byte == 0x7F) {
+    if (byte < 0x20 || byte == 0x7F)
+    {
       parsed.reason = "command contains a forbidden control byte";
       return parsed;
     }
-    if (escaping) {
+    if (escaping)
+    {
       current.push_back(ch);
       escaping = false;
       continue;
     }
-    if (ch == '\\') {
+    if (ch == '\\')
+    {
       escaping = true;
       continue;
     }
-    if (quote != '\0') {
-      if (ch == quote) {
+    if (quote != '\0')
+    {
+      if (ch == quote)
+      {
         quote = '\0';
-      } else {
+      }
+      else
+      {
         current.push_back(ch);
       }
       continue;
     }
-    if (ch == '\'' || ch == '"') {
+    if (ch == '\'' || ch == '"')
+    {
       quote = ch;
       continue;
     }
-    if (is_shell_metacharacter(ch)) {
+    if (is_shell_metacharacter(ch))
+    {
       parsed.reason = "shell metacharacters are not supported by the command tool";
       return parsed;
     }
-    if (std::isspace(byte) != 0) {
-      if (!current.empty()) {
+    if (std::isspace(byte) != 0)
+    {
+      if (!current.empty())
+      {
         parsed.argv.push_back(current);
         current.clear();
       }
@@ -151,12 +185,15 @@ ParsedCommand parse_command_argv(std::string_view command)
     current.push_back(ch);
   }
 
-  if (escaping || quote != '\0') {
+  if (escaping || quote != '\0')
+  {
     parsed.reason = "unterminated command escape or quote";
     return parsed;
   }
-  if (!current.empty()) parsed.argv.push_back(current);
-  if (parsed.argv.empty()) {
+  if (!current.empty())
+    parsed.argv.push_back(current);
+  if (parsed.argv.empty())
+  {
     parsed.reason = "empty command";
     return parsed;
   }
@@ -174,7 +211,8 @@ std::vector<std::string> lowercase_argv(std::vector<std::string> const& argv)
 
 bool is_within_workspace(std::filesystem::path const& workspace_dir, std::filesystem::path const& target_path)
 {
-  if (target_path.empty()) {
+  if (target_path.empty())
+  {
     return true;
   }
 
@@ -184,13 +222,15 @@ bool is_within_workspace(std::filesystem::path const& workspace_dir, std::filesy
   auto const target_path_normalized = std::filesystem::weakly_canonical(target_path, target_error);
   auto const workspace = workspace_error ? std::filesystem::absolute(workspace_dir).lexically_normal() : workspace_path;
   auto const target = target_error ? std::filesystem::absolute(target_path).lexically_normal() : target_path_normalized;
-  if (target == workspace) {
+  if (target == workspace)
+  {
     return true;
   }
 
   std::error_code relative_error;
   auto const relative = std::filesystem::relative(target, workspace, relative_error);
-  if (relative_error || relative.empty()) {
+  if (relative_error || relative.empty())
+  {
     return false;
   }
   auto const first = *relative.begin();
@@ -201,7 +241,8 @@ std::filesystem::path policy_path(std::filesystem::path const& path)
 {
   std::error_code error;
   auto const normalized = std::filesystem::weakly_canonical(path, error);
-  if (!error) {
+  if (!error)
+  {
     return normalized;
   }
   return std::filesystem::absolute(path).lexically_normal();
@@ -209,26 +250,29 @@ std::filesystem::path policy_path(std::filesystem::path const& path)
 
 bool is_secret_path(std::filesystem::path const& path)
 {
-  for (auto const& part : path.lexically_normal()) {
+  for (auto const& part : path.lexically_normal())
+  {
     auto const component = lowercase(part.string());
-    if (equals_any(component, {".ssh", ".aws", ".gnupg", ".config/gcloud"})) {
+    if (equals_any(component, {".ssh", ".aws", ".gnupg", ".config/gcloud"}))
+    {
       return true;
     }
   }
 
   auto const filename = lowercase(path.filename().string());
-  if (filename == ".env" || filename.starts_with(".env.")) {
+  if (filename == ".env" || filename.starts_with(".env."))
+  {
     return filename != ".env.example";
   }
-  if (equals_any(filename, {".npmrc", ".netrc", ".pypirc", ".gem/credentials", ".dockerconfigjson", "credentials.json",
-                            "auth.json", "config.json"})) {
+  if (equals_any(filename, {".npmrc", ".netrc", ".pypirc", ".gem/credentials", ".dockerconfigjson", "credentials.json", "auth.json", "config.json"}))
+  {
     auto const full = lowercase(path.lexically_normal().string());
     return filename != "config.json" || contains_any(full, {"/.docker/", "\\.docker\\"});
   }
 
   auto const full = lowercase(path.string());
-  return contains_any(full, {"id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "/.ssh/", "\\.ssh\\", "/.aws/", "\\.aws\\",
-                             "/.gnupg/", "\\.gnupg\\", "credentials", "secret", "token"});
+  return contains_any(full, {"id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "/.ssh/", "\\.ssh\\", "/.aws/", "\\.aws\\", "/.gnupg/", "\\.gnupg\\", "credentials",
+                             "secret", "token"});
 }
 
 bool is_markdown_path(std::filesystem::path const& path)
@@ -240,17 +284,20 @@ bool is_planning_markdown(std::filesystem::path const& path)
 {
   auto const normalized = lowercase(path.lexically_normal().string());
   return is_markdown_path(path) &&
-         (normalized.find("docs/") != std::string::npos || normalized.find("plan") != std::string::npos ||
-          normalized.find("version") != std::string::npos);
+         (normalized.find("docs/") != std::string::npos || normalized.find("plan") != std::string::npos || normalized.find("version") != std::string::npos);
 }
 
 bool is_safe_relative_path_arg(std::string_view value)
 {
-  if (value.empty() || value.starts_with("-")) return true;
+  if (value.empty() || value.starts_with("-"))
+    return true;
   std::filesystem::path const path(value);
-  if (path.is_absolute()) return false;
-  for (auto const& part : path.lexically_normal()) {
-    if (part == "..") return false;
+  if (path.is_absolute())
+    return false;
+  for (auto const& part : path.lexically_normal())
+  {
+    if (part == "..")
+      return false;
   }
   return !is_secret_path(path);
 }
@@ -258,18 +305,22 @@ bool is_safe_relative_path_arg(std::string_view value)
 bool is_path_carrying_option(std::string_view value)
 {
   auto const lower = lowercase(value);
-  if (equals_any(lower, {"-o", "--output", "--git-dir", "--work-tree", "--exec-path", "--config-env"})) {
+  if (equals_any(lower, {"-o", "--output", "--git-dir", "--work-tree", "--exec-path", "--config-env"}))
+  {
     return true;
   }
-  return lower.starts_with("--output=") || lower.starts_with("--git-dir=") || lower.starts_with("--work-tree=") ||
-         lower.starts_with("--exec-path=") || lower.starts_with("--config-env=");
+  return lower.starts_with("--output=") || lower.starts_with("--git-dir=") || lower.starts_with("--work-tree=") || lower.starts_with("--exec-path=") ||
+         lower.starts_with("--config-env=");
 }
 
 bool has_unsafe_path_arg(std::vector<std::string> const& argv, std::size_t start)
 {
-  for (std::size_t index = start; index < argv.size(); ++index) {
-    if (is_path_carrying_option(argv[index])) return true;
-    if (!is_safe_relative_path_arg(argv[index])) return true;
+  for (std::size_t index = start; index < argv.size(); ++index)
+  {
+    if (is_path_carrying_option(argv[index]))
+      return true;
+    if (!is_safe_relative_path_arg(argv[index]))
+      return true;
   }
   return false;
 }
@@ -281,41 +332,56 @@ bool is_dangerous_cmake_arg(std::string_view value)
 
 bool is_safe_cmake_build(std::vector<std::string> const& argv, std::vector<std::string> const& lower)
 {
-  if (argv.size() < 3 || lower[1] != "--build") return false;
-  if (!is_safe_relative_path_arg(argv[2])) return false;
-  for (std::size_t index = 3; index < argv.size(); ++index) {
+  if (argv.size() < 3 || lower[1] != "--build")
+    return false;
+  if (!is_safe_relative_path_arg(argv[2]))
+    return false;
+  for (std::size_t index = 3; index < argv.size(); ++index)
+  {
     auto const& arg = lower[index];
-    if (is_dangerous_cmake_arg(arg) || arg == "--install" || arg == "--build-and-test") return false;
-    if (arg.starts_with("--") || arg.starts_with("-j") || arg == "-v") continue;
-    if (!is_safe_relative_path_arg(argv[index])) return false;
+    if (is_dangerous_cmake_arg(arg) || arg == "--install" || arg == "--build-and-test")
+      return false;
+    if (arg.starts_with("--") || arg.starts_with("-j") || arg == "-v")
+      continue;
+    if (!is_safe_relative_path_arg(argv[index]))
+      return false;
   }
   return true;
 }
 
 bool is_safe_ctest(std::vector<std::string> const& argv, std::vector<std::string> const& lower)
 {
-  for (std::size_t index = 1; index < argv.size(); ++index) {
+  for (std::size_t index = 1; index < argv.size(); ++index)
+  {
     auto const& arg = lower[index];
-    if (arg == "--build-and-test" || arg == "--test-command" || arg == "--build-generator" ||
-        arg == "--build-makeprogram") {
+    if (arg == "--build-and-test" || arg == "--test-command" || arg == "--build-generator" || arg == "--build-makeprogram")
+    {
       return false;
     }
-    if (!is_safe_relative_path_arg(argv[index])) return false;
+    if (!is_safe_relative_path_arg(argv[index]))
+      return false;
   }
   return true;
 }
 
 bool is_simple_number(std::string_view value)
 {
-  if (value.empty()) return false;
+  if (value.empty())
+    return false;
   bool saw_digit = false;
   bool saw_dot = false;
-  for (char const ch : value) {
-    if (std::isdigit(static_cast<unsigned char>(ch)) != 0) {
+  for (char const ch : value)
+  {
+    if (std::isdigit(static_cast<unsigned char>(ch)) != 0)
+    {
       saw_digit = true;
-    } else if (ch == '.' && !saw_dot) {
+    }
+    else if (ch == '.' && !saw_dot)
+    {
       saw_dot = true;
-    } else {
+    }
+    else
+    {
       return false;
     }
   }
@@ -329,13 +395,15 @@ PermissionDecision decision(PermissionAction action, std::string reason, Permiss
 
 PermissionRisk default_allow_risk(Operation operation)
 {
-  switch (operation) {
+  switch (operation)
+  {
     case Operation::EditFile:
     case Operation::RunCommand:
     case Operation::NetworkFetch:
     case Operation::NetworkSearch:
     case Operation::LspServerLaunch:
     case Operation::SkillLoad:
+    case Operation::TaskRun:
     case Operation::PluginExecute:
     case Operation::PluginToolCall:
     case Operation::PluginCommandRun:
@@ -359,141 +427,173 @@ PermissionDecision decide(PermissionRequest const& request)
 {
   auto const checked_path = policy_path(request.target_path);
 
-  if ((request.operation == Operation::ReadFile || request.operation == Operation::EditFile ||
-       request.operation == Operation::LspQuery) &&
-      is_secret_path(checked_path)) {
+  if ((request.operation == Operation::ReadFile || request.operation == Operation::EditFile || request.operation == Operation::LspQuery) &&
+      is_secret_path(checked_path))
+  {
     return decision(PermissionAction::Deny, "target looks like a secret file", PermissionRisk::Critical);
   }
 
-  if (!is_within_workspace(request.workspace_dir, request.target_path)) {
+  if (!is_within_workspace(request.workspace_dir, request.target_path))
+  {
     return decision(PermissionAction::Ask, "target is outside the workspace", PermissionRisk::High);
   }
 
-  if (request.operation == Operation::EditFile && request.mode == ava::agent::Mode::Plan &&
-      !is_planning_markdown(checked_path)) {
+  if (request.operation == Operation::EditFile && request.mode == ava::agent::Mode::Plan && !is_planning_markdown(checked_path))
+  {
     return decision(PermissionAction::Deny, "plan mode can only edit planning markdown", PermissionRisk::High);
   }
 
-  if (request.operation == Operation::RunCommand) {
+  if (request.operation == Operation::RunCommand)
+  {
     return classify_command(request.command);
   }
 
-  if (request.operation == Operation::NetworkFetch) {
+  if (request.operation == Operation::NetworkFetch)
+  {
     return decision(PermissionAction::Ask, "network fetch requires explicit approval", PermissionRisk::Medium);
   }
 
-  if (request.operation == Operation::NetworkSearch) {
+  if (request.operation == Operation::NetworkSearch)
+  {
     return decision(PermissionAction::Ask, "network search requires explicit approval", PermissionRisk::Medium);
   }
 
-  if (request.operation == Operation::LspServerLaunch) {
+  if (request.operation == Operation::LspServerLaunch)
+  {
     return decision(PermissionAction::Ask, "LSP server launch requires explicit approval", PermissionRisk::High);
   }
 
-  if (request.operation == Operation::SkillLoad) {
+  if (request.operation == Operation::SkillLoad)
+  {
     return decision(PermissionAction::Ask, "skill loading requires explicit approval", PermissionRisk::Medium);
   }
 
-  if (request.operation == Operation::PluginExecute) {
-    return decision(PermissionAction::Ask, "plugin subprocess execution requires explicit approval",
-                    PermissionRisk::High);
+  if (request.operation == Operation::TaskRun)
+  {
+    return decision(PermissionAction::Ask, "subagent task execution requires explicit approval", PermissionRisk::Medium);
   }
 
-  if (request.operation == Operation::PluginToolCall) {
+  if (request.operation == Operation::PluginExecute)
+  {
+    return decision(PermissionAction::Ask, "plugin subprocess execution requires explicit approval", PermissionRisk::High);
+  }
+
+  if (request.operation == Operation::PluginToolCall)
+  {
     return decision(PermissionAction::Ask, "plugin tool calls require explicit approval", PermissionRisk::High);
   }
 
-  if (request.operation == Operation::PluginCommandRun) {
+  if (request.operation == Operation::PluginCommandRun)
+  {
     return decision(PermissionAction::Ask, "plugin commands require explicit approval", PermissionRisk::High);
   }
 
-  if (request.operation == Operation::PluginEventObserve) {
-    return decision(PermissionAction::Ask, "plugin event observation requires explicit approval",
-                    PermissionRisk::Medium);
+  if (request.operation == Operation::PluginEventObserve)
+  {
+    return decision(PermissionAction::Ask, "plugin event observation requires explicit approval", PermissionRisk::Medium);
   }
 
-  if (request.operation == Operation::McpServerLaunch) {
+  if (request.operation == Operation::McpServerLaunch)
+  {
     return decision(PermissionAction::Ask, "MCP server launch requires explicit approval", PermissionRisk::High);
   }
 
-  if (request.operation == Operation::McpServerConnect) {
+  if (request.operation == Operation::McpServerConnect)
+  {
     return decision(PermissionAction::Ask, "MCP server connection requires explicit approval", PermissionRisk::High);
   }
 
-  if (request.operation == Operation::McpToolCall) {
+  if (request.operation == Operation::McpToolCall)
+  {
     return decision(PermissionAction::Ask, "MCP tool calls require explicit approval", PermissionRisk::High);
   }
 
-  if (request.operation == Operation::McpResourceRead) {
+  if (request.operation == Operation::McpResourceRead)
+  {
     return decision(PermissionAction::Ask, "MCP resource reads require explicit approval", PermissionRisk::Medium);
   }
 
-  return decision(PermissionAction::Allow, "allowed by default workspace policy",
-                  default_allow_risk(request.operation));
+  return decision(PermissionAction::Allow, "allowed by default workspace policy", default_allow_risk(request.operation));
 }
 
 PermissionDecision classify_command(std::string_view command)
 {
   auto const parsed = parse_command_argv(command);
-  if (!parsed.ok) {
+  if (!parsed.ok)
+  {
     return decision(PermissionAction::Deny, parsed.reason, PermissionRisk::High);
   }
   auto const argv = lowercase_argv(parsed.argv);
   auto const& executable = argv[0];
   auto const value = lowercase(command);
 
-  if (contains_any(value, {"rm -rf", "rm -fr", "mkfs", ":(){", "chmod -r 777 /", "chown -r ", "> /dev/"})) {
+  if (contains_any(value, {"rm -rf", "rm -fr", "mkfs", ":(){", "chmod -r 777 /", "chown -r ", "> /dev/"}))
+  {
     return decision(PermissionAction::Deny, "command matches a destructive pattern", PermissionRisk::Critical);
   }
 
-  if (equals_any(executable, {"bash", "sh", "zsh", "fish", "python", "python3", "node", "perl", "ruby", "php", "lua",
-                              "make", "ninja", "npm", "pnpm", "yarn", "bun", "cargo"})) {
+  if (equals_any(executable, {"bash", "sh", "zsh", "fish", "python", "python3", "node", "perl", "ruby", "php", "lua", "make", "ninja", "npm", "pnpm", "yarn",
+                              "bun", "cargo"}))
+  {
     return decision(PermissionAction::Deny, "command can execute arbitrary scripts", PermissionRisk::High);
   }
 
-  if (contains_any(value, {"git push", "git reset --hard", "git clean", "npm publish", "pnpm publish", "yarn publish",
-                           "deploy", "terraform apply", "kubectl delete", "sudo "})) {
+  if (contains_any(value, {"git push", "git reset --hard", "git clean", "npm publish", "pnpm publish", "yarn publish", "deploy", "terraform apply",
+                           "kubectl delete", "sudo "}))
+  {
     return decision(PermissionAction::Ask, "command can change external or destructive state", PermissionRisk::High);
   }
 
-  if (executable == "git" && argv.size() >= 2 && (argv[1] == "status" || argv[1] == "diff" || argv[1] == "log")) {
-    if (!has_unsafe_path_arg(parsed.argv, 2)) {
+  if (executable == "git" && argv.size() >= 2 && (argv[1] == "status" || argv[1] == "diff" || argv[1] == "log"))
+  {
+    if (!has_unsafe_path_arg(parsed.argv, 2))
+    {
       return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
     }
-    return decision(PermissionAction::Ask, "git command includes unsafe path or output options",
-                    PermissionRisk::Medium);
+    return decision(PermissionAction::Ask, "git command includes unsafe path or output options", PermissionRisk::Medium);
   }
-  if (executable == "cmake") {
-    for (auto const& arg : argv) {
-      if (is_dangerous_cmake_arg(arg)) {
+  if (executable == "cmake")
+  {
+    for (auto const& arg : argv)
+    {
+      if (is_dangerous_cmake_arg(arg))
+      {
         return decision(PermissionAction::Deny, "cmake script/file helpers are not allowed", PermissionRisk::High);
       }
     }
-    if (is_safe_cmake_build(parsed.argv, argv)) {
+    if (is_safe_cmake_build(parsed.argv, argv))
+    {
       return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
     }
   }
-  if (executable == "ctest" && is_safe_ctest(parsed.argv, argv)) {
+  if (executable == "ctest" && is_safe_ctest(parsed.argv, argv))
+  {
     return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
   }
-  if (executable == "rg") {
-    for (auto const& arg : argv) {
-      if (arg == "--pre" || arg.starts_with("--pre=")) {
-        return decision(PermissionAction::Deny, "rg preprocessors can execute arbitrary commands",
-                        PermissionRisk::High);
+  if (executable == "rg")
+  {
+    for (auto const& arg : argv)
+    {
+      if (arg == "--pre" || arg.starts_with("--pre="))
+      {
+        return decision(PermissionAction::Deny, "rg preprocessors can execute arbitrary commands", PermissionRisk::High);
       }
     }
-    if (!has_unsafe_path_arg(parsed.argv, 1)) {
+    if (!has_unsafe_path_arg(parsed.argv, 1))
+    {
       return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
     }
   }
-  if (executable == "ls" && !has_unsafe_path_arg(parsed.argv, 1)) {
+  if (executable == "ls" && !has_unsafe_path_arg(parsed.argv, 1))
+  {
     return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
   }
-  if (executable == "pwd" && (argv.size() == 1 || (argv.size() == 2 && (argv[1] == "-p" || argv[1] == "-l")))) {
+  if (executable == "pwd" && (argv.size() == 1 || (argv.size() == 2 && (argv[1] == "-p" || argv[1] == "-l"))))
+  {
     return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
   }
-  if (executable == "sleep" && argv.size() == 2 && is_simple_number(argv[1])) {
+  if (executable == "sleep" && argv.size() == 2 && is_simple_number(argv[1]))
+  {
     return decision(PermissionAction::Allow, "command is read-only or local verification", PermissionRisk::Low);
   }
 
@@ -502,7 +602,8 @@ PermissionDecision classify_command(std::string_view command)
 
 std::string to_string(PermissionAction action)
 {
-  switch (action) {
+  switch (action)
+  {
     case PermissionAction::Allow:
       return "allow";
     case PermissionAction::Ask:
@@ -515,7 +616,8 @@ std::string to_string(PermissionAction action)
 
 std::string to_string(PermissionResolution resolution)
 {
-  switch (resolution) {
+  switch (resolution)
+  {
     case PermissionResolution::Allow:
     case PermissionResolution::AllowSessionGrant:
       return "allow";
@@ -532,7 +634,8 @@ std::string to_string(PermissionResolutionDecision const& decision)
 
 std::string to_string(PermissionRisk risk)
 {
-  switch (risk) {
+  switch (risk)
+  {
     case PermissionRisk::Low:
       return "low";
     case PermissionRisk::Medium:
@@ -547,7 +650,8 @@ std::string to_string(PermissionRisk risk)
 
 std::string to_string(Operation operation)
 {
-  switch (operation) {
+  switch (operation)
+  {
     case Operation::ReadFile:
       return "read";
     case Operation::SearchFiles:
@@ -566,6 +670,8 @@ std::string to_string(Operation operation)
       return "lsp.query";
     case Operation::SkillLoad:
       return "skill";
+    case Operation::TaskRun:
+      return "task";
     case Operation::PluginExecute:
       return "plugin.execute";
     case Operation::PluginToolCall:

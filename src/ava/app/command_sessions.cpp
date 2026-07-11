@@ -3,16 +3,15 @@
 
 #include "ava/app/command_format.h"
 #include "ava/app/command_tools.h"
-
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
-#include "ava/session/stats.h"
+#include "ava/session/record.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 #include "ava/session/session_tree.h"
-
+#include "ava/session/stats.h"
+#include "ava/session/validation.h"
 #include "ava/context/context_loader.h"
-
 #include "ava/core/fingerprint.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -63,14 +62,14 @@ std::string trim_ascii(std::string_view text)
 std::string lower_ascii(std::string_view text)
 {
   std::string lowered(text);
-  std::ranges::transform(lowered, lowered.begin(),
-                         [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  std::ranges::transform(lowered, lowered.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   return lowered;
 }
 
 bool contains_ascii_case_insensitive(std::string_view text, std::string_view query)
 {
-  if (query.empty()) return true;
+  if (query.empty())
+    return true;
   return lower_ascii(text).find(lower_ascii(query)) != std::string::npos;
 }
 
@@ -78,6 +77,7 @@ enum class ExportFormat
 {
   Markdown,
   Html,
+  Jsonl,
 };
 
 struct ExportCommandArguments
@@ -94,6 +94,8 @@ std::string export_format_text(ExportFormat format)
       return "markdown";
     case ExportFormat::Html:
       return "html";
+    case ExportFormat::Jsonl:
+      return "jsonl";
   }
   return "markdown";
 }
@@ -116,7 +118,8 @@ std::string_view after_first_token(std::string_view text)
 {
   text = trim_ascii_view(text);
   auto const end = text.find_first_of(" \t\r\n");
-  if (end == std::string_view::npos) return {};
+  if (end == std::string_view::npos)
+    return {};
   return trim_ascii_view(text.substr(end + 1));
 }
 
@@ -126,11 +129,32 @@ bool path_looks_html(std::string_view path)
   return lowered.ends_with(".html") || lowered.ends_with(".htm");
 }
 
+bool path_looks_jsonl(std::string_view path)
+{
+  auto const lowered = lower_ascii(path);
+  return lowered.ends_with(".jsonl");
+}
+
+ava::core::Result<std::string> format_session_jsonl(std::vector<ava::session::SessionEntry> const& entries)
+{
+  std::string out;
+  for (auto const& entry : entries)
+  {
+    auto line = ava::session::serialize_session_entry_line(entry);
+    if (!line)
+      return std::unexpected(std::move(line.error()));
+    out += *line;
+    out += '\n';
+  }
+  return out;
+}
+
 ava::core::Result<ExportCommandArguments> parse_export_command_arguments(std::string_view argument)
 {
   argument = trim_ascii_view(argument);
   ExportCommandArguments parsed;
-  if (argument.empty()) return parsed;
+  if (argument.empty())
+    return parsed;
 
   auto const token = lower_ascii(first_token(argument));
   if (token == "markdown" || token == "md")
@@ -145,6 +169,12 @@ ava::core::Result<ExportCommandArguments> parse_export_command_arguments(std::st
     parsed.path = std::string(after_first_token(argument));
     return parsed;
   }
+  if (token == "jsonl" || token == "raw")
+  {
+    parsed.format = ExportFormat::Jsonl;
+    parsed.path = std::string(after_first_token(argument));
+    return parsed;
+  }
   if (token == "--format")
   {
     auto const format_token = lower_ascii(first_token(after_first_token(argument)));
@@ -156,11 +186,15 @@ ava::core::Result<ExportCommandArguments> parse_export_command_arguments(std::st
     {
       parsed.format = ExportFormat::Html;
     }
+    else if (format_token == "jsonl" || format_token == "raw")
+    {
+      parsed.format = ExportFormat::Jsonl;
+    }
     else
     {
       auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "unsupported export format");
       error.with_context("format", std::string(format_token));
-      error.with_context("supported", "markdown, html");
+      error.with_context("supported", "markdown, html, jsonl");
       return std::unexpected(std::move(error));
     }
     parsed.path = std::string(after_first_token(after_first_token(argument)));
@@ -168,14 +202,15 @@ ava::core::Result<ExportCommandArguments> parse_export_command_arguments(std::st
   }
 
   parsed.path = std::string(argument);
-  parsed.format = path_looks_html(argument) ? ExportFormat::Html : ExportFormat::Markdown;
+  parsed.format = path_looks_html(argument) ? ExportFormat::Html : (path_looks_jsonl(argument) ? ExportFormat::Jsonl : ExportFormat::Markdown);
   return parsed;
 }
 
 std::filesystem::path resolve_export_path(RuntimeSession const& session, std::string_view path)
 {
   auto resolved = std::filesystem::path(std::string(path));
-  if (resolved.is_relative()) resolved = session.current_dir / resolved;
+  if (resolved.is_relative())
+    resolved = session.current_dir / resolved;
   return resolved.lexically_normal();
 }
 
@@ -184,7 +219,8 @@ std::string labels_text(std::vector<std::string> const& labels)
   std::string text;
   for (std::size_t index = 0; index < labels.size(); ++index)
   {
-    if (index > 0) text += ",";
+    if (index > 0)
+      text += ",";
     text += labels[index];
   }
   return text;
@@ -192,23 +228,16 @@ std::string labels_text(std::vector<std::string> const& labels)
 
 bool metadata_labels_match(std::vector<std::string> const& labels, std::string_view query)
 {
-  return std::ranges::any_of(labels, [&](std::string const& label) {
-    return contains_ascii_case_insensitive(label, query);
-  });
+  return std::ranges::any_of(labels, [&](std::string const& label) { return contains_ascii_case_insensitive(label, query); });
 }
 
 bool session_matches_query(ava::session::SessionTreeNode const& node, std::string_view query)
 {
-  return contains_ascii_case_insensitive(node.summary.session_id, query) ||
-         contains_ascii_case_insensitive(node.summary.last_updated, query) ||
-         contains_ascii_case_insensitive(node.summary.path.generic_string(), query) ||
-         contains_ascii_case_insensitive(node.metadata.name, query) ||
-         contains_ascii_case_insensitive(node.metadata.parent_session_id, query) ||
-         contains_ascii_case_insensitive(node.metadata.source_session_id, query) ||
-         contains_ascii_case_insensitive(node.metadata.branch_from_entry_id, query) ||
-         contains_ascii_case_insensitive(node.metadata.branch_origin, query) ||
-         (node.metadata.archived && contains_ascii_case_insensitive("archived", query)) ||
-         contains_ascii_case_insensitive(node.metadata.actor, query) ||
+  return contains_ascii_case_insensitive(node.summary.session_id, query) || contains_ascii_case_insensitive(node.summary.last_updated, query) ||
+         contains_ascii_case_insensitive(node.summary.path.generic_string(), query) || contains_ascii_case_insensitive(node.metadata.name, query) ||
+         contains_ascii_case_insensitive(node.metadata.parent_session_id, query) || contains_ascii_case_insensitive(node.metadata.source_session_id, query) ||
+         contains_ascii_case_insensitive(node.metadata.branch_from_entry_id, query) || contains_ascii_case_insensitive(node.metadata.branch_origin, query) ||
+         (node.metadata.archived && contains_ascii_case_insensitive("archived", query)) || contains_ascii_case_insensitive(node.metadata.actor, query) ||
          metadata_labels_match(node.metadata.labels, query);
 }
 
@@ -218,8 +247,7 @@ bool context_source_matches_query(ContextSourceMetadata const& source, std::stri
          contains_ascii_case_insensitive(ava::context::to_string(source.source_type), query);
 }
 
-std::string context_file_status(std::filesystem::path const& path, std::size_t loaded_bytes,
-                                std::uint64_t loaded_fingerprint)
+std::string context_file_status(std::filesystem::path const& path, std::size_t loaded_bytes, std::uint64_t loaded_fingerprint)
 {
   std::error_code status_error;
   auto const status = std::filesystem::symlink_status(path, status_error);
@@ -246,7 +274,8 @@ std::string context_file_status(std::filesystem::path const& path, std::size_t l
   std::string content;
   content.reserve(loaded_bytes);
   std::array<char, 4096> buffer{};
-  while (file) {
+  while (file)
+  {
     file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
     if (file.gcount() > 0)
       content.append(buffer.data(), static_cast<std::size_t>(file.gcount()));
@@ -262,15 +291,16 @@ bool prompt_matches_query(RuntimeSession const& session, std::string_view query)
 {
   if (query.empty())
     return true;
-  if (contains_ascii_case_insensitive("prompt", query) || contains_ascii_case_insensitive("builtin", query) ||
-      contains_ascii_case_insensitive("override", query))
+  if (contains_ascii_case_insensitive("prompt", query) || contains_ascii_case_insensitive("base_prompt", query) ||
+      contains_ascii_case_insensitive("builtin", query) || contains_ascii_case_insensitive("override", query))
     return true;
-  return session.prompt.source_path && contains_ascii_case_insensitive(session.prompt.source_path->generic_string(), query);
+  return session.base_prompt.source_path && contains_ascii_case_insensitive(session.base_prompt.source_path->generic_string(), query);
 }
 
 std::string_view freshness_source_kind_text(RuntimeFreshnessSourceKind kind)
 {
-  switch (kind) {
+  switch (kind)
+  {
     case RuntimeFreshnessSourceKind::SystemPrompt:
       return "system_prompt";
     case RuntimeFreshnessSourceKind::AppendSystemPrompt:
@@ -293,19 +323,14 @@ bool freshness_source_matches_query(RuntimeFreshnessSourceMetadata const& source
 {
   if (query.empty())
     return true;
-  return contains_ascii_case_insensitive(freshness_source_kind_text(source.kind), query) ||
-         contains_ascii_case_insensitive(source.scope, query) ||
-         contains_ascii_case_insensitive(source.source_id, query) ||
-         contains_ascii_case_insensitive(source.name, query) ||
+  return contains_ascii_case_insensitive(freshness_source_kind_text(source.kind), query) || contains_ascii_case_insensitive(source.scope, query) ||
+         contains_ascii_case_insensitive(source.source_id, query) || contains_ascii_case_insensitive(source.name, query) ||
          contains_ascii_case_insensitive(source.path.generic_string(), query);
 }
 
-std::size_t freshness_source_count(std::vector<RuntimeFreshnessSourceMetadata> const& sources,
-                                   RuntimeFreshnessSourceKind kind)
+std::size_t freshness_source_count(std::vector<RuntimeFreshnessSourceMetadata> const& sources, RuntimeFreshnessSourceKind kind)
 {
-  return static_cast<std::size_t>(std::ranges::count_if(sources, [&](auto const& source) {
-    return source.kind == kind;
-  }));
+  return static_cast<std::size_t>(std::ranges::count_if(sources, [&](auto const& source) { return source.kind == kind; }));
 }
 
 std::string freshness_source_status_text(RuntimeFreshnessSourceMetadata const& source)
@@ -330,7 +355,8 @@ RuntimeEvent base_command_event(RuntimeSession const& session, RuntimeEventType 
 
 ava::core::VoidResult emit_command_event(CommandRequest const& request, RuntimeEvent event)
 {
-  if (!request.event_sink) return {};
+  if (!request.event_sink)
+    return {};
   return emit_event(request.event_sink, event);
 }
 
@@ -345,18 +371,20 @@ ava::core::Error command_canceled_error()
 }
 
 template <typename Value>
-void append_known_value(std::ostringstream& output, bool& wrote_any, std::string_view label,
-                        std::optional<Value> const& value)
+void append_known_value(std::ostringstream& output, bool& wrote_any, std::string_view label, std::optional<Value> const& value)
 {
-  if (!value) return;
-  if (wrote_any) output << ' ';
+  if (!value)
+    return;
+  if (wrote_any)
+    output << ' ';
   output << label << '=' << *value;
   wrote_any = true;
 }
 
 std::string shorten_middle(std::string text, std::size_t max_columns)
 {
-  if (text.size() <= max_columns || max_columns < 8) return text;
+  if (text.size() <= max_columns || max_columns < 8)
+    return text;
   auto const front = (max_columns - 3) / 2;
   auto const back = max_columns - 3 - front;
   return text.substr(0, front) + "..." + text.substr(text.size() - back);
@@ -365,14 +393,16 @@ std::string shorten_middle(std::string text, std::size_t max_columns)
 std::string compact_workspace_label(std::filesystem::path const& workspace)
 {
   auto const filename = workspace.filename().generic_string();
-  if (!filename.empty()) return shorten_middle(filename, 32);
+  if (!filename.empty())
+    return shorten_middle(filename, 32);
   return shorten_middle(workspace.generic_string(), 48);
 }
 
 std::string compact_cwd_label(std::filesystem::path const& cwd, std::filesystem::path const& workspace)
 {
   auto text = display_path(cwd, workspace);
-  if (text.empty()) text = ".";
+  if (text.empty())
+    text = ".";
   return shorten_middle(std::move(text), 48);
 }
 
@@ -444,8 +474,7 @@ ava::core::Result<RuntimeSession> create_fresh_session(RuntimeSession const& cur
   return open_runtime_session(options);
 }
 
-ava::core::Result<CommandResult> run_branch_command(RuntimeSession& session, std::string_view name,
-                                                    ava::session::SessionBranchMode mode)
+ava::core::Result<CommandResult> run_branch_command(RuntimeSession& session, std::string_view name, ava::session::SessionBranchMode mode)
 {
   CommandResult result;
   result.handled = true;
@@ -457,15 +486,15 @@ ava::core::Result<CommandResult> run_branch_command(RuntimeSession& session, std
     return result;
   }
   auto const trimmed_name = trim_ascii(name);
-  auto branched = ava::session::create_session_branch(ava::session::SessionBranchOptions{
-      .workspace_dir = session.workspace_dir,
-      .root_dir = session.paths.sessions_dir,
-      .source_session_id = source_session_id,
-      .branch_from_entry_id = {},
-      .name = trimmed_name.empty() ? std::nullopt : std::optional<std::string>(trimmed_name),
-      .labels = std::nullopt,
-      .mode = mode,
-      .actor = "tui"});
+  auto branched = ava::session::create_session_branch(
+      ava::session::SessionBranchOptions{.workspace_dir = session.workspace_dir,
+                                         .root_dir = session.paths.sessions_dir,
+                                         .source_session_id = source_session_id,
+                                         .branch_from_entry_id = {},
+                                         .name = trimmed_name.empty() ? std::nullopt : std::optional<std::string>(trimmed_name),
+                                         .labels = std::nullopt,
+                                         .mode = mode,
+                                         .actor = "tui"});
   if (!branched)
     return std::unexpected(std::move(branched.error()));
 
@@ -528,8 +557,7 @@ ava::core::Result<CommandResult> run_sessions_rename_command(RuntimeSession& ses
   if (clear_name)
     add_output(result, "session " + target->store.session_id() + " name cleared");
   else
-    add_output(result, "session " + target->store.session_id() + " name set: \"" +
-                           sanitize_inline_text(metadata->name) + "\"");
+    add_output(result, "session " + target->store.session_id() + " name set: \"" + sanitize_inline_text(metadata->name) + "\"");
   return result;
 }
 
@@ -586,13 +614,11 @@ ava::core::Result<CommandResult> run_sessions_labels_command(RuntimeSession& ses
   if (metadata->labels.empty())
     add_output(result, "session " + target->store.session_id() + " labels cleared");
   else
-    add_output(result, "session " + target->store.session_id() + " labels set: " +
-                           sanitize_inline_text(labels_text(metadata->labels)));
+    add_output(result, "session " + target->store.session_id() + " labels set: " + sanitize_inline_text(labels_text(metadata->labels)));
   return result;
 }
 
-ava::core::Result<CommandResult> run_sessions_archive_command(RuntimeSession& session, std::string_view arguments,
-                                                              bool archived)
+ava::core::Result<CommandResult> run_sessions_archive_command(RuntimeSession& session, std::string_view arguments, bool archived)
 {
   CommandResult result;
   result.handled = true;
@@ -647,9 +673,8 @@ ava::core::Result<CommandResult> run_sessions_archive_command(RuntimeSession& se
 }
 
 void append_session_tree_lines(std::string& output, std::vector<ava::session::SessionTreeNode> const& nodes,
-                               std::unordered_map<std::string, std::size_t> const& index_by_id,
-                               std::vector<std::string> const& ids, std::vector<std::string> const& current_path,
-                               std::string_view query, std::size_t depth, bool include_archived, bool& wrote_any)
+                               std::unordered_map<std::string, std::size_t> const& index_by_id, std::vector<std::string> const& ids,
+                               std::vector<std::string> const& current_path, std::string_view query, std::size_t depth, bool include_archived, bool& wrote_any)
 {
   for (auto const& id : ids)
   {
@@ -666,8 +691,7 @@ void append_session_tree_lines(std::string& output, std::vector<ava::session::Se
       output += '\n';
       wrote_any = true;
     }
-    append_session_tree_lines(output, nodes, index_by_id, node.children, current_path, query,
-                              depth + (visible ? 1 : 0), include_archived, wrote_any);
+    append_session_tree_lines(output, nodes, index_by_id, node.children, current_path, query, depth + (visible ? 1 : 0), include_archived, wrote_any);
   }
 }
 
@@ -696,10 +720,11 @@ std::string estimated_bytes_text(ava::session::SessionStats const& stats)
 
 std::string cost_text(ava::session::SessionStats const& stats)
 {
-  if (stats.cost_complete) return stats.total_cost_usd ? format_cost_usd(*stats.total_cost_usd) : "unavailable";
-  if (stats.known_cost_usd) {
-    return "at least " + format_cost_usd(*stats.known_cost_usd) + " (" + std::to_string(stats.unknown_cost_entries) +
-           " unknown)";
+  if (stats.cost_complete)
+    return stats.total_cost_usd ? format_cost_usd(*stats.total_cost_usd) : "unavailable";
+  if (stats.known_cost_usd)
+  {
+    return "at least " + format_cost_usd(*stats.known_cost_usd) + " (" + std::to_string(stats.unknown_cost_entries) + " unknown)";
   }
   return "incomplete (" + std::to_string(stats.unknown_cost_entries) + " unknown)";
 }
@@ -708,30 +733,26 @@ std::string format_session_stats_text(RuntimeSession const& session, ava::sessio
 {
   std::ostringstream output;
   output << "Session stats\n";
-  output << "  session: " << shorten_middle(session.store.session_id(), 32) << "   entries: " << stats.entry_count
+  output << "  session: " << shorten_middle(session.store.session_id(), 32) << "   entries: " << stats.entry_count << '\n';
+  output << "  model: " << session.model.provider_id << '/' << session.model.model_id << "   mode: " << ava::agent::to_string(session.mode) << '\n';
+  output << "  workspace: " << compact_workspace_label(session.workspace_dir) << "   cwd: " << compact_cwd_label(session.current_dir, session.workspace_dir)
          << '\n';
-  output << "  model: " << session.model.provider_id << '/' << session.model.model_id
-         << "   mode: " << ava::agent::to_string(session.mode) << '\n';
-  output << "  workspace: " << compact_workspace_label(session.workspace_dir)
-         << "   cwd: " << compact_cwd_label(session.current_dir, session.workspace_dir) << '\n';
-  if (!stats.first_timestamp.empty() || !stats.last_timestamp.empty()) {
+  if (!stats.first_timestamp.empty() || !stats.last_timestamp.empty())
+  {
     output << "  time: " << (stats.first_timestamp.empty() ? "unknown" : stats.first_timestamp) << " -> "
            << (stats.last_timestamp.empty() ? "unknown" : stats.last_timestamp) << '\n';
   }
 
   output << "\nMessages:\n";
-  output << "  user " << stats.counts.user_message << "   assistant " << stats.counts.assistant_message << "   tools "
-         << stats.counts.tool_call << '/' << stats.counts.tool_result << "   permissions "
-         << stats.counts.permission_decision << '\n';
-  output << "  compactions " << stats.counts.compaction << "   mode/model " << stats.counts.mode_change << '/'
-         << stats.counts.model_change << "   errors/cancels " << stats.counts.error << '/' << stats.counts.cancel
-         << '\n';
+  output << "  user " << stats.counts.user_message << "   assistant " << stats.counts.assistant_message << "   tools " << stats.counts.tool_call << '/'
+         << stats.counts.tool_result << "   permissions " << stats.counts.permission_decision << '\n';
+  output << "  compactions " << stats.counts.compaction << "   mode/model " << stats.counts.mode_change << '/' << stats.counts.model_change
+         << "   errors/cancels " << stats.counts.error << '/' << stats.counts.cancel << '\n';
 
   output << "\nUsage:\n";
   output << "  tokens: " << known_values_text(stats) << '\n';
   output << "  est bytes: " << estimated_bytes_text(stats) << '\n';
-  output << "  cost: " << cost_text(stats) << "   usage entries exact/estimated " << stats.exact_usage_entries << '/'
-         << stats.estimated_usage_entries << '\n';
+  output << "  cost: " << cost_text(stats) << "   usage entries exact/estimated " << stats.exact_usage_entries << '/' << stats.estimated_usage_entries << '\n';
 
   output << "\nHints:\n";
   output << "  export: /export   resume: ava --session " << session.store.session_id();
@@ -771,11 +792,13 @@ ava::core::Result<CommandResult> run_sessions_command(RuntimeSession& session, s
     list_query = trim_ascii(list_query);
   }
   auto tree = ava::session::build_session_tree(session.workspace_dir, session.paths.sessions_dir, session.store.session_id());
-  if (!tree) {
+  if (!tree)
+  {
     add_output(result, tree.error().format());
     return result;
   }
-  if (tree->sessions.empty()) {
+  if (tree->sessions.empty())
+  {
     add_output(result, "No sessions for this workspace.");
     return result;
   }
@@ -783,17 +806,19 @@ ava::core::Result<CommandResult> run_sessions_command(RuntimeSession& session, s
   output += include_archived ? "Sessions (including archived):\n" : "Sessions:\n";
   auto const index_by_id = tree_index_by_id(tree->sessions);
   bool wrote_any = false;
-  append_session_tree_lines(output, tree->sessions, index_by_id, tree->roots, tree->current_path, list_query, 0,
-                            include_archived, wrote_any);
-  if (output.empty() && !list_query.empty()) {
+  append_session_tree_lines(output, tree->sessions, index_by_id, tree->roots, tree->current_path, list_query, 0, include_archived, wrote_any);
+  if (output.empty() && !list_query.empty())
+  {
     add_output(result, "No sessions matching: " + sanitize_inline_text(list_query));
     return result;
   }
-  if (!wrote_any && !list_query.empty()) {
+  if (!wrote_any && !list_query.empty())
+  {
     add_output(result, "No sessions matching: " + sanitize_inline_text(list_query));
     return result;
   }
-  if (!wrote_any && !include_archived) {
+  if (!wrote_any && !include_archived)
+  {
     add_output(result, "No active sessions for this workspace. Use /sessions --archived to include archived sessions.");
     return result;
   }
@@ -826,8 +851,7 @@ ava::core::Result<CommandResult> run_new_session_command(RuntimeSession& session
   if (!trimmed_name.empty())
   {
     auto metadata = ava::session::append_session_metadata(
-        opened->store, ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(trimmed_name),
-                                                           .actor = "tui"});
+        opened->store, ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(trimmed_name), .actor = "tui"});
     if (!metadata)
       return std::unexpected(std::move(metadata.error()));
   }
@@ -935,8 +959,10 @@ ava::core::Result<CommandResult> run_mode_command(RuntimeSession& session)
   result.handled = true;
   auto const new_mode = ava::agent::toggle_mode(session.mode);
   auto prompt_state = select_runtime_prompt_state(session, new_mode);
-  if (!prompt_state) return std::unexpected(std::move(prompt_state.error()));
-  if (auto appended = append_mode_change(session.store, new_mode); !appended) {
+  if (!prompt_state)
+    return std::unexpected(std::move(prompt_state.error()));
+  if (auto appended = append_mode_change(session.store, new_mode); !appended)
+  {
     return std::unexpected(std::move(appended.error()));
   }
   apply_runtime_prompt_state(session, std::move(*prompt_state));
@@ -954,58 +980,65 @@ ava::core::Result<CommandResult> run_context_command(RuntimeSession& session, st
   output += "  model=" + session.model.provider_id + "/" + session.model.model_id + "\n";
   output += "  project_trust=" + std::string(to_string(session.project_trust.decision)) +
             " project_resources=" + (project_resources_trusted(session.project_trust) ? std::string("enabled") : std::string("skipped")) + "\n";
-  if (prompt_matches_query(session, trimmed_query)) {
-    output += "  prompt=";
-    if (session.prompt.from_override) {
+  if (prompt_matches_query(session, trimmed_query))
+  {
+    output += "  base_prompt=";
+    if (session.base_prompt.from_override)
+    {
       output += "override";
-      if (session.prompt.source_path)
-        output += " path=" + session.prompt.source_path->string() + " " +
-                  context_file_status(*session.prompt.source_path, session.prompt.text.size(),
-                                      ava::core::content_fingerprint(session.prompt.text));
-    } else {
+      if (session.base_prompt.source_path)
+        output += " path=" + session.base_prompt.source_path->string() + " " +
+                  context_file_status(*session.base_prompt.source_path, session.base_prompt.byte_count, session.base_prompt.content_fingerprint);
+    }
+    else
+    {
       output += "builtin";
     }
-    output += " bytes=" + std::to_string(session.prompt.text.size()) + "\n";
+    output += " bytes=" + std::to_string(session.base_prompt.byte_count) + "\n";
   }
   output += "  context_sources=" + std::to_string(session.context_sources.size()) + "\n";
-  auto const system_prompt_sources =
-      freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::SystemPrompt) +
-      freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::AppendSystemPrompt);
+  auto const system_prompt_sources = freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::SystemPrompt) +
+                                     freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::AppendSystemPrompt);
   output += "  system_prompt_sources=" + std::to_string(system_prompt_sources) + "\n";
   auto const prompt_command_sources = freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PromptCommand);
   output += "  prompt_commands=" + std::to_string(prompt_command_sources) + "\n";
   auto const skill_sources = freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::Skill);
   output += "  skills=" + std::to_string(skill_sources) + "\n";
-  auto const plugin_sources =
-      freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PluginManifest) +
-      freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PluginPrompt) +
-      freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PluginSkill);
+  auto const plugin_sources = freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PluginManifest) +
+                              freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PluginPrompt) +
+                              freshness_source_count(session.freshness_sources, RuntimeFreshnessSourceKind::PluginSkill);
   output += "  plugin_sources=" + std::to_string(plugin_sources) + "\n";
 
   bool matched_source = false;
-  for (auto const& source : session.context_sources) {
-    if (!context_source_matches_query(source, trimmed_query)) continue;
+  for (auto const& source : session.context_sources)
+  {
+    if (!context_source_matches_query(source, trimmed_query))
+      continue;
     matched_source = true;
-    output += "  " + ava::context::to_string(source.source_type) + "  " + source.path.string() +
-              "  loaded_bytes=" + std::to_string(source.byte_count) + "  " +
+    output += "  " + ava::context::to_string(source.source_type) + "  " + source.path.string() + "  loaded_bytes=" + std::to_string(source.byte_count) + "  " +
               context_file_status(source.path, source.byte_count, source.content_fingerprint) + '\n';
   }
   bool matched_freshness_source = false;
-  for (auto const& source : session.freshness_sources) {
-    if (!freshness_source_matches_query(source, trimmed_query)) continue;
+  for (auto const& source : session.freshness_sources)
+  {
+    if (!freshness_source_matches_query(source, trimmed_query))
+      continue;
     matched_freshness_source = true;
     output += "  " + std::string(freshness_source_kind_text(source.kind)) + "  " + source.scope + "  ";
-    if (!source.source_id.empty()) {
+    if (!source.source_id.empty())
+    {
       output += sanitize_inline_text(source.source_id);
       if (!source.name.empty() && source.name != source.source_id)
         output += "/" + sanitize_inline_text(source.name);
-    } else {
+    }
+    else
+    {
       output += sanitize_inline_text(source.name);
     }
     output += "  " + freshness_source_status_text(source) + '\n';
   }
-  if (!matched_source && !matched_freshness_source && !prompt_matches_query(session, trimmed_query) &&
-      !trimmed_query.empty()) {
+  if (!matched_source && !matched_freshness_source && !prompt_matches_query(session, trimmed_query) && !trimmed_query.empty())
+  {
     add_output(result, "No context sources matching: " + sanitize_inline_text(trimmed_query));
     return result;
   }
@@ -1018,7 +1051,8 @@ ava::core::Result<CommandResult> run_stats_command(RuntimeSession& session)
   CommandResult result;
   result.handled = true;
   auto entries = session.store.load();
-  if (!entries) {
+  if (!entries)
+  {
     add_output(result, entries.error().format());
     return result;
   }
@@ -1031,34 +1065,42 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, Co
   CommandResult result;
   result.handled = true;
   auto fail_compaction = [&](ava::core::Error error) -> ava::core::Result<CommandResult> {
-    if (request.propagate_compaction_errors) return std::unexpected(std::move(error));
+    if (request.propagate_compaction_errors)
+      return std::unexpected(std::move(error));
     add_output(result, error.format());
     return result;
   };
   auto const instructions = command_argument(request.command, "/compact");
-  if (!request.compaction_summary_generator) {
-    return fail_compaction(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                            "/compact requires provider-backed summary generation"));
+  if (!request.compaction_summary_generator)
+  {
+    return fail_compaction(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "/compact requires provider-backed summary generation"));
   }
   auto config = ava::session::load_compaction_config(session.paths);
-  if (!config) {
+  if (!config)
+  {
     return fail_compaction(std::move(config.error()));
   }
 
   constexpr std::size_t max_compaction_attempts = 2;
   std::size_t last_snapshot_entries = 0;
   std::size_t last_current_entries = 0;
-  for (std::size_t attempt = 0; attempt < max_compaction_attempts; ++attempt) {
-    if (command_canceled(request)) return fail_compaction(command_canceled_error());
+  for (std::size_t attempt = 0; attempt < max_compaction_attempts; ++attempt)
+  {
+    if (command_canceled(request))
+      return fail_compaction(command_canceled_error());
     ava::core::Result<std::vector<ava::session::SessionEntry>> entries =
         std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session entries were not loaded"));
-    if (request.session_mutex) {
+    if (request.session_mutex)
+    {
       std::lock_guard lock(*request.session_mutex);
       entries = session.store.load();
-    } else {
+    }
+    else
+    {
       entries = session.store.load();
     }
-    if (!entries) {
+    if (!entries)
+    {
       return fail_compaction(std::move(entries.error()));
     }
     auto const estimated_tokens = ava::session::estimate_session_tokens(*entries);
@@ -1068,21 +1110,24 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, Co
     start_event.attempt = attempt + 1;
     start_event.max_attempts = max_compaction_attempts;
     start_event.estimated_tokens = estimated_tokens;
-    if (auto emitted = emit_command_event(request, std::move(start_event)); !emitted) {
+    if (auto emitted = emit_command_event(request, std::move(start_event)); !emitted)
+    {
       return fail_compaction(std::move(emitted.error()));
     }
     auto summary = request.compaction_summary_generator(*entries, *config, instructions, estimated_tokens);
-    if (!summary) {
+    if (!summary)
+    {
       return fail_compaction(std::move(summary.error()));
     }
-    if (command_canceled(request)) return fail_compaction(command_canceled_error());
-    if (summary->empty()) {
-      return fail_compaction(ava::core::Error(ava::core::ErrorCategory::Provider,
-                                              "compaction summary generation returned an empty summary"));
+    if (command_canceled(request))
+      return fail_compaction(command_canceled_error());
+    if (summary->empty())
+    {
+      return fail_compaction(ava::core::Error(ava::core::ErrorCategory::Provider, "compaction summary generation returned an empty summary"));
     }
-    if (summary->size() > config->max_summary_bytes) {
-      auto error =
-          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "generated compaction summary is too large");
+    if (summary->size() > config->max_summary_bytes)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "generated compaction summary is too large");
       error.with_context("max_summary_bytes", std::to_string(config->max_summary_bytes));
       error.with_context("summary_bytes", std::to_string(summary->size()));
       return fail_compaction(std::move(error));
@@ -1091,34 +1136,41 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, Co
     bool snapshot_stale = false;
     auto validate_and_append = [&]() -> ava::core::VoidResult {
       auto current_entries = session.store.load();
-      if (!current_entries) return std::unexpected(std::move(current_entries.error()));
-      if (command_canceled(request)) return std::unexpected(command_canceled_error());
-      if (!same_session_snapshot(*entries, *current_entries)) {
+      if (!current_entries)
+        return std::unexpected(std::move(current_entries.error()));
+      if (command_canceled(request))
+        return std::unexpected(command_canceled_error());
+      if (!same_session_snapshot(*entries, *current_entries))
+      {
         snapshot_stale = true;
         last_snapshot_entries = entries->size();
         last_current_entries = current_entries->size();
         return {};
       }
-      return ava::session::append_manual_compaction(
-          session.store, ava::session::ManualCompactionRequest{.summary = *summary,
-                                                               .instructions = instructions,
-                                                               .config = *config,
-                                                               .estimated_tokens = estimated_tokens,
-                                                               .threshold_tokens = 0,
-                                                               .trigger = "manual",
-                                                               .recent_context = ""});
+      return ava::session::append_manual_compaction(session.store, ava::session::ManualCompactionRequest{.summary = *summary,
+                                                                                                         .instructions = instructions,
+                                                                                                         .config = *config,
+                                                                                                         .estimated_tokens = estimated_tokens,
+                                                                                                         .threshold_tokens = 0,
+                                                                                                         .trigger = "manual",
+                                                                                                         .recent_context = ""});
     };
     ava::core::VoidResult appended;
-    if (request.session_mutex) {
+    if (request.session_mutex)
+    {
       std::lock_guard lock(*request.session_mutex);
       appended = validate_and_append();
-    } else {
+    }
+    else
+    {
       appended = validate_and_append();
     }
-    if (!appended) {
+    if (!appended)
+    {
       return fail_compaction(std::move(appended.error()));
     }
-    if (!snapshot_stale) {
+    if (!snapshot_stale)
+    {
       auto end_event = base_command_event(session, RuntimeEventType::CompactionEnd);
       end_event.trigger = "manual";
       end_event.status = "completed";
@@ -1126,13 +1178,15 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, Co
       end_event.max_attempts = max_compaction_attempts;
       end_event.estimated_tokens = estimated_tokens;
       end_event.summary_bytes = summary->size();
-      if (auto emitted = emit_command_event(request, std::move(end_event)); !emitted) {
+      if (auto emitted = emit_command_event(request, std::move(end_event)); !emitted)
+      {
         return fail_compaction(std::move(emitted.error()));
       }
       add_output(result, "compaction summary recorded");
       return result;
     }
-    if (attempt + 1 < max_compaction_attempts) {
+    if (attempt + 1 < max_compaction_attempts)
+    {
       auto retry_event = base_command_event(session, RuntimeEventType::Retry);
       retry_event.trigger = "manual";
       retry_event.reason = "stale_compaction_snapshot";
@@ -1141,12 +1195,162 @@ ava::core::Result<CommandResult> run_compact_command(RuntimeSession& session, Co
       retry_event.max_attempts = max_compaction_attempts;
       retry_event.snapshot_entries = last_snapshot_entries;
       retry_event.current_entries = last_current_entries;
-      if (auto emitted = emit_command_event(request, std::move(retry_event)); !emitted) {
+      if (auto emitted = emit_command_event(request, std::move(retry_event)); !emitted)
+      {
         return fail_compaction(std::move(emitted.error()));
       }
     }
   }
   return fail_compaction(stale_compaction_snapshot_error("manual", last_snapshot_entries, last_current_entries));
+}
+
+ava::core::Result<std::vector<ava::session::SessionEntry>> load_import_session_entries(std::filesystem::path const& path)
+{
+  std::error_code status_error;
+  auto const status = std::filesystem::symlink_status(path, status_error);
+  if (status_error || !std::filesystem::exists(status))
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::NotFound, "session import file not found");
+    error.with_context("path", path.string());
+    if (status_error)
+      error.with_context("cause", status_error.message());
+    return std::unexpected(std::move(error));
+  }
+  if (std::filesystem::is_symlink(status) || !std::filesystem::is_regular_file(status))
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "session import path must be a regular file and not a symlink");
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
+  }
+
+  std::ifstream file(path, std::ios::binary);
+  if (!file)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to open session import file");
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
+  }
+
+  std::vector<ava::session::SessionEntry> entries;
+  std::string line;
+  while (true)
+  {
+    auto line_read = ava::session::read_limited_session_line(file, line);
+    if (!line_read)
+      return std::unexpected(std::move(line_read.error()));
+    if (!*line_read)
+      break;
+    auto entry = ava::session::parse_session_entry_line(line, path);
+    if (!entry)
+      return std::unexpected(std::move(entry.error()));
+    entries.push_back(std::move(*entry));
+  }
+
+  if (entries.empty())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session import file has no entries");
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
+  }
+
+  auto validation = ava::session::validate_session_replay(entries);
+  if (!validation.ok())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session import failed validation");
+    error.with_context("path", path.string());
+    error.with_context("errors", std::to_string(validation.error_count));
+    if (!validation.issues.empty())
+      error.with_context("first_issue", validation.issues.front().message);
+    return std::unexpected(std::move(error));
+  }
+  return entries;
+}
+
+ava::core::Result<CommandResult> run_import_command(RuntimeSession& session, std::string_view argument)
+{
+  CommandResult result;
+  result.handled = true;
+  auto const args = split_command_arguments(argument);
+  if (args.empty())
+  {
+    add_output(result, "usage: /import <path.jsonl> --confirm");
+    return result;
+  }
+
+  bool confirm = false;
+  std::optional<std::string> path_arg;
+  for (auto const& arg : args)
+  {
+    if (arg == "--confirm")
+    {
+      confirm = true;
+      continue;
+    }
+    if (!path_arg)
+    {
+      path_arg = arg;
+      continue;
+    }
+    add_output(result, "usage: /import <path.jsonl> --confirm");
+    return result;
+  }
+  if (!path_arg)
+  {
+    add_output(result, "usage: /import <path.jsonl> --confirm");
+    return result;
+  }
+
+  auto import_path = std::filesystem::path(*path_arg);
+  if (import_path.is_relative())
+    import_path = session.current_dir / import_path;
+  import_path = import_path.lexically_normal();
+
+  auto entries = load_import_session_entries(import_path);
+  if (!entries)
+  {
+    add_output(result, entries.error().format());
+    return result;
+  }
+  if (!confirm)
+  {
+    add_output(result, "session import is ready: " + import_path.string() + "\n  entries: " + std::to_string(entries->size()) +
+                           "\n  re-run with --confirm to create a new AVA session and switch to it");
+    return result;
+  }
+
+  auto imported_store = ava::session::SessionStore::create(session.workspace_dir, session.paths.sessions_dir);
+  if (!imported_store)
+  {
+    add_output(result, imported_store.error().format());
+    return result;
+  }
+  for (auto const& entry : *entries)
+  {
+    auto entry_to_append = entry;
+    if (entry_to_append.version == 0)
+      entry_to_append.version = ava::session::kCurrentSessionEntryVersion;
+    if (auto appended = imported_store->append(entry_to_append); !appended)
+    {
+      std::error_code remove_error;
+      std::filesystem::remove(imported_store->session_path(), remove_error);
+      add_output(result, appended.error().format());
+      return result;
+    }
+  }
+
+  auto imported_session_id = imported_store->session_id();
+  auto opened = reopen_session(session, imported_session_id);
+  if (!opened)
+  {
+    std::error_code remove_error;
+    std::filesystem::remove(imported_store->session_path(), remove_error);
+    add_output(result, opened.error().format());
+    return result;
+  }
+  session = std::move(*opened);
+  add_output(result, "imported session " + session.store.session_id() + " from " + import_path.string() + "\n  entries: " + std::to_string(entries->size()) +
+                         "\n  switched to " + session.store.session_id());
+  return result;
 }
 
 ava::core::Result<CommandResult> run_export_command(RuntimeSession& session, CommandRequest const& request)
@@ -1160,14 +1364,32 @@ ava::core::Result<CommandResult> run_export_command(RuntimeSession& session, Com
     return result;
   }
   auto entries = session.store.load();
-  if (!entries) {
+  if (!entries)
+  {
     add_output(result, entries.error().format());
     return result;
   }
 
   auto const format = parsed->format;
-  auto content = format == ExportFormat::Html ? ava::session::format_session_html(*entries)
-                                              : ava::session::format_session_markdown(*entries);
+  std::string content;
+  if (format == ExportFormat::Html)
+  {
+    content = ava::session::format_session_html(*entries);
+  }
+  else if (format == ExportFormat::Jsonl)
+  {
+    auto jsonl = format_session_jsonl(*entries);
+    if (!jsonl)
+    {
+      add_output(result, jsonl.error().format());
+      return result;
+    }
+    content = std::move(*jsonl);
+  }
+  else
+  {
+    content = ava::session::format_session_markdown(*entries);
+  }
   if (parsed->path.empty())
   {
     add_output(result, std::move(content));
@@ -1190,21 +1412,18 @@ ava::core::Result<CommandResult> run_export_command(RuntimeSession& session, Com
   if (!written)
   {
     auto const text = written.error().format();
-    if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "export",
-                                           ava::agent::ToolTimelineStatus::Error, text, {}, linked_permission_ids());
+    if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "export", ava::agent::ToolTimelineStatus::Error, text, {},
+                                           linked_permission_ids());
         !recorded)
       return std::unexpected(std::move(recorded.error()));
     add_output(result, text);
     return result;
   }
 
-  auto result_json = std::string("{\"tool\":\"export\",\"ok\":true,\"format\":\"") + export_format_text(format) +
-                     "\",\"path\":\"" + ava::core::json::escape(target_path.string()) +
-                     "\",\"bytes_written\":" + std::to_string(written->bytes_written) + "}";
-  if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "export",
-                                         ava::agent::ToolTimelineStatus::Success,
-                                         "wrote " + std::to_string(written->bytes_written) + " bytes", result_json,
-                                         linked_permission_ids());
+  auto result_json = std::string("{\"tool\":\"export\",\"ok\":true,\"format\":\"") + export_format_text(format) + "\",\"path\":\"" +
+                     ava::core::json::escape(target_path.string()) + "\",\"bytes_written\":" + std::to_string(written->bytes_written) + "}";
+  if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "export", ava::agent::ToolTimelineStatus::Success,
+                                         "wrote " + std::to_string(written->bytes_written) + " bytes", result_json, linked_permission_ids());
       !recorded)
     return std::unexpected(std::move(recorded.error()));
   add_output(result, "exported session:\n  format: " + export_format_text(format) + "\n  path: " + target_path.string() +

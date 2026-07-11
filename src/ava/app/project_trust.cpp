@@ -1,6 +1,6 @@
 #include "sys.h"
 #include "ava/app/project_trust.h"
-
+#include "ava/core/atomic_file.h"
 #include "ava/core/error.h"
 #include "ava/core/json.h"
 
@@ -38,8 +38,7 @@ bool path_exists(std::filesystem::path const& path)
   return std::filesystem::exists(path, error) && !error;
 }
 
-void add_resource_if_present(std::vector<ProjectTrustResource>& resources, std::string kind,
-                             std::filesystem::path const& path)
+void add_resource_if_present(std::vector<ProjectTrustResource>& resources, std::string kind, std::filesystem::path const& path)
 {
   if (!path_exists(path))
     return;
@@ -57,6 +56,12 @@ std::vector<ProjectTrustResource> discover_protected_resources(std::filesystem::
   add_resource_if_present(resources, "skills", workspace / ".ava" / "skills");
   add_resource_if_present(resources, "skills", workspace / ".agents" / "skills");
   add_resource_if_present(resources, "skills", workspace / ".claude" / "skills");
+  add_resource_if_present(resources, "agents", workspace / ".ava" / "agents");
+  add_resource_if_present(resources, "agents", workspace / ".ava" / "agent");
+  add_resource_if_present(resources, "agents", workspace / ".agents" / "agents");
+  add_resource_if_present(resources, "agents", workspace / ".agents" / "agent");
+  add_resource_if_present(resources, "agents", workspace / ".claude" / "agents");
+  add_resource_if_present(resources, "agents", workspace / ".claude" / "agent");
   add_resource_if_present(resources, "plugins", workspace / ".ava" / "plugins");
   add_resource_if_present(resources, "mcp_config", workspace / ".ava" / "mcp.json");
   add_resource_if_present(resources, "lsp_config", workspace / ".ava" / "lsp.json");
@@ -102,15 +107,13 @@ ava::core::Result<std::string> read_trust_file(std::filesystem::path const& path
   std::ifstream file(path, std::ios::binary);
   if (!file)
   {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to open project trust file")
-                               .with_context("path", path.string()));
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to open project trust file").with_context("path", path.string()));
   }
   std::ostringstream buffer;
   buffer << file.rdbuf();
   if (file.bad())
   {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read project trust file")
-                               .with_context("path", path.string()));
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read project trust file").with_context("path", path.string()));
   }
   return buffer.str();
 }
@@ -161,8 +164,7 @@ bool path_is_ancestor_or_same(std::filesystem::path const& ancestor, std::filesy
   return *relative.begin() != "..";
 }
 
-std::optional<TrustRecord> closest_matching_record(std::vector<TrustRecord> const& records,
-                                                   std::filesystem::path const& workspace_dir)
+std::optional<TrustRecord> closest_matching_record(std::vector<TrustRecord> const& records, std::filesystem::path const& workspace_dir)
 {
   std::optional<TrustRecord> best;
   auto const workspace = normalized_absolute(workspace_dir);
@@ -176,39 +178,9 @@ std::optional<TrustRecord> closest_matching_record(std::vector<TrustRecord> cons
   return best;
 }
 
-ava::core::VoidResult write_trust_records(std::filesystem::path const& path,
-                                          std::vector<TrustRecord> const& records)
+ava::core::VoidResult write_trust_records(std::filesystem::path const& path, std::vector<TrustRecord> const& records)
 {
-  std::error_code directory_error;
-  std::filesystem::create_directories(path.parent_path(), directory_error);
-  if (directory_error)
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to create project trust directory")
-                               .with_context("path", path.parent_path().string())
-                               .with_context("cause", directory_error.message()));
-  }
-  auto const temp_path = path.string() + ".tmp";
-  {
-    std::ofstream file(temp_path, std::ios::binary | std::ios::trunc);
-    if (!file)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write project trust file")
-                                 .with_context("path", temp_path));
-    file << trust_records_json(records);
-    if (!file)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to finish project trust file")
-                                 .with_context("path", temp_path));
-  }
-  std::error_code rename_error;
-  std::filesystem::rename(temp_path, path, rename_error);
-  if (rename_error)
-  {
-    std::error_code remove_error;
-    std::filesystem::remove(temp_path, remove_error);
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to replace project trust file")
-                               .with_context("path", path.string())
-                               .with_context("cause", rename_error.message()));
-  }
-  return {};
+  return ava::core::write_text_file_atomic(path, trust_records_json(records), "project trust file");
 }
 
 ava::core::Result<std::vector<TrustRecord>> load_records_for_write(std::filesystem::path const& path)
@@ -245,8 +217,7 @@ std::filesystem::path project_trust_file(ava::config::XdgPaths const& paths)
   return paths.ava_state_dir / "project-trust.json";
 }
 
-ProjectTrustState load_project_trust_state(ava::config::XdgPaths const& paths,
-                                           std::filesystem::path const& workspace_dir)
+ProjectTrustState load_project_trust_state(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir)
 {
   ProjectTrustState state;
   state.workspace_dir = normalized_absolute(workspace_dir);
@@ -268,9 +239,7 @@ ProjectTrustState load_project_trust_state(ava::config::XdgPaths const& paths,
   return state;
 }
 
-ava::core::VoidResult set_project_trust_decision(ava::config::XdgPaths const& paths,
-                                                 std::filesystem::path const& workspace_dir,
-                                                 bool trusted)
+ava::core::VoidResult set_project_trust_decision(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir, bool trusted)
 {
   auto const trust_path = project_trust_file(paths);
   auto records = load_records_for_write(trust_path);
@@ -282,14 +251,11 @@ ava::core::VoidResult set_project_trust_decision(ava::config::XdgPaths const& pa
     records->push_back(TrustRecord{.path = workspace, .trusted = trusted});
   else
     existing->trusted = trusted;
-  std::ranges::sort(*records, [](TrustRecord const& left, TrustRecord const& right) {
-    return left.path.string() < right.path.string();
-  });
+  std::ranges::sort(*records, [](TrustRecord const& left, TrustRecord const& right) { return left.path.string() < right.path.string(); });
   return write_trust_records(trust_path, *records);
 }
 
-ava::core::VoidResult clear_project_trust_decision(ava::config::XdgPaths const& paths,
-                                                   std::filesystem::path const& workspace_dir)
+ava::core::VoidResult clear_project_trust_decision(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir)
 {
   auto const trust_path = project_trust_file(paths);
   auto records = load_records_for_write(trust_path);
@@ -297,9 +263,7 @@ ava::core::VoidResult clear_project_trust_decision(ava::config::XdgPaths const& 
     return std::unexpected(std::move(records.error()));
   auto const workspace = normalized_absolute(workspace_dir);
   auto const old_size = records->size();
-  records->erase(std::remove_if(records->begin(), records->end(),
-                                [&](TrustRecord const& record) { return record.path == workspace; }),
-                 records->end());
+  records->erase(std::remove_if(records->begin(), records->end(), [&](TrustRecord const& record) { return record.path == workspace; }), records->end());
   if (records->size() == old_size)
     return {};
   return write_trust_records(trust_path, *records);

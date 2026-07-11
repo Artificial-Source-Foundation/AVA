@@ -55,6 +55,10 @@ constexpr std::string_view kSettingsEditKeybindings = "settings:keybindings.edit
 constexpr std::string_view kSettingsReloadKeybindings = "settings:keybindings.reload";
 constexpr std::string_view kSettingsOpenModels = "settings:models.open";
 constexpr std::string_view kSettingsOpenScopedModels = "settings:models.scoped";
+constexpr std::string_view kSettingsTrustStatus = "settings:trust.status";
+constexpr std::string_view kSettingsTrustProject = "settings:trust.project";
+constexpr std::string_view kSettingsTrustDeny = "settings:trust.deny";
+constexpr std::string_view kSettingsTrustClear = "settings:trust.clear";
 constexpr std::string_view kBase64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 class SignalBlockGuard {
  public:
@@ -1189,6 +1193,7 @@ PermissionPromptView permission_prompt_view(ava::permissions::PermissionPrompt c
   view.command = prompt.command;
   view.reason = prompt.reason;
   view.risk = ava::permissions::to_string(prompt.risk);
+  view.request_id = prompt.permission_request_id;
   view.diff_preview = prompt.diff_preview;
   view.diff_truncated = prompt.diff_truncated;
   return view;
@@ -1360,6 +1365,27 @@ SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, TuiKe
                    sidebar && !sidebar->workspace.empty() ? compact_path_leaf(sidebar->workspace) : std::string{});
   add_settings_row(view, "Workspace", "Git branch",
                    sidebar && !sidebar->git_branch.empty() ? sidebar->git_branch : std::string("not detected"));
+  if (snapshot.project_trust) {
+    auto const& trust = *snapshot.project_trust;
+    auto const resources = trust.protected_resource_count == 1
+                               ? std::string("1 protected project resource")
+                               : std::to_string(trust.protected_resource_count) + " protected project resources";
+    add_settings_row(view, "Workspace", "Project trust", value_or_unknown(trust.decision),
+                     "project resources " + value_or_unknown(trust.project_resources), value_or_unknown(trust.decision));
+    add_settings_row(view, "Workspace", "Protected resources", resources,
+                     trust.matched_path.empty() ? std::string("no saved decision matched this workspace")
+                                                : "matched " + trust.matched_path);
+    if (!trust.diagnostic.empty())
+      add_settings_row(view, "Workspace", "Trust diagnostic", trust.diagnostic);
+    add_settings_action_row(view, std::string(kSettingsTrustStatus), "Workspace", "Trust status",
+                            "/trust status", "Enter prints project trust diagnostics", "status");
+    add_settings_action_row(view, std::string(kSettingsTrustProject), "Workspace", "Trust project",
+                            "allow this workspace's project resources", "Enter runs /trust project", "trust");
+    add_settings_action_row(view, std::string(kSettingsTrustDeny), "Workspace", "Deny project",
+                            "keep this workspace's project resources skipped", "Enter runs /trust deny", "deny");
+    add_settings_action_row(view, std::string(kSettingsTrustClear), "Workspace", "Clear trust decision",
+                            "remove the saved decision for this workspace", "Enter runs /trust clear", "clear");
+  }
   if (sidebar && !sidebar->version.empty()) {
     add_settings_row(view, "About", "AVA version", sidebar->version);
   }
@@ -1390,7 +1416,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
                             .transcript = std::move(options.initial_transcript),
                             .slash_commands = std::move(options.slash_commands),
                             .file_references = std::move(options.file_references),
-                            .custom_themes = options.custom_themes};
+                            .custom_themes = options.custom_themes,
+                            .project_trust = options.project_trust};
   SidebarSnapshot sidebar{.session_id = options.session_id,
                           .mode = options.mode,
                           .provider = options.provider,
@@ -1423,6 +1450,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     snapshot.slash_commands = std::move(state.slash_commands);
     snapshot.file_references = std::move(state.file_references);
     snapshot.custom_themes = std::move(state.custom_themes);
+    snapshot.project_trust = std::move(state.project_trust);
 
     sidebar.mode = snapshot.mode;
     sidebar.provider = snapshot.provider;
@@ -1748,8 +1776,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
       snapshot.permission_prompt->selected_choice = PermissionPromptChoice::Deny;
       snapshot.permission_prompt->remember_available = static_cast<bool>(options.remember_permission_rule);
       snapshot.status = options.remember_permission_rule
-                            ? "permission required: A=allow once D=deny R=remember Tab/Left/Right choose Enter confirm Esc deny"
-                            : "permission required: A=allow D=deny Tab/Left/Right choose Enter/Space confirm Esc deny";
+                            ? "permission required: A=allow once D=reject R=remember Tab/Left/Right choose Enter confirm Esc reject"
+                            : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
     }
     static_cast<void>(beep());
     if (!render()) {
@@ -1902,8 +1930,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
       {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
         snapshot.status = options.remember_permission_rule
-                              ? "permission required: A=allow once D=deny R=remember Tab/Left/Right choose Enter confirm Esc deny"
-                              : "permission required: A=allow D=deny Tab/Left/Right choose Enter/Space confirm Esc deny";
+                              ? "permission required: A=allow once D=reject R=remember Tab/Left/Right choose Enter confirm Esc reject"
+                              : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
       }
       if (!render()) {
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render permission prompt"));

@@ -581,7 +581,14 @@ void append_permission_lines(std::vector<std::string>& lines, ToolTimelineItem c
   if (item.permissions.empty())
   {
     auto ids = permission_ids_summary(item.permission_request_ids);
-    if (!ids.empty()) append_tool_detail_lines(lines, "permission", ids, width);
+    if (ids.empty()) return;
+    if (width >= kWidePermissionDetailWidth)
+    {
+      append_tool_detail_lines(lines, "permission", ids, width);
+      return;
+    }
+    append_tool_detail_lines(lines, "permission", item.permission_request_ids.size() == 1 ? "checked" : std::to_string(item.permission_request_ids.size()) + " checked", width);
+    for (auto const& id : item.permission_request_ids) append_tool_detail_lines(lines, "id", id, width);
     return;
   }
   for (auto const& audit : item.permissions)

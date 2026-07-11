@@ -1,26 +1,23 @@
 #pragma once
 
+#include "ava/agent/background_job_registry.h"
 #include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/question.h"
+#include "ava/agent/subagent_config.h"
 #include "ava/agent/tool_visibility.h"
-
 #include "ava/config/model_config.h"
-
 #include "ava/session/attachments.h"
 #include "ava/session/session_store.h"
-
 #include "ava/permissions/permission.h"
-
 #include "ava/provider/provider.h"
-
 #include "ava/lsp/lsp_client.h"
-
 #include "ava/core/result.h"
 
 #include <cstddef>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -28,14 +25,16 @@
 
 namespace ava::agent {
 
-enum class ToolTimelineStatus {
+enum class ToolTimelineStatus
+{
   Running,
   Success,
   Canceled,
   Error,
 };
 
-struct ToolTimelineEntry {
+struct ToolTimelineEntry
+{
   ToolTimelineStatus status = ToolTimelineStatus::Running;
   std::string call_id = {};
   std::string name = {};
@@ -73,7 +72,8 @@ struct ToolTimelineEntry {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct ToolProgressEntry {
+struct ToolProgressEntry
+{
   std::string call_id = {};
   std::string name = {};
   std::string text = {};
@@ -84,7 +84,8 @@ struct ToolProgressEntry {
 
 [[nodiscard]] std::string to_string(ToolTimelineStatus status);
 
-struct AgentLoopOptions {
+struct AgentLoopOptions
+{
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir = {};
   Mode mode = Mode::Build;
@@ -104,6 +105,7 @@ struct AgentLoopOptions {
   bool model_supports_tools = true;
   bool model_supports_streaming = true;
   bool include_project_resources = true;
+  std::vector<SubagentDefinition> subagents = {};
   ToolVisibilityOptions tool_visibility = {};
   std::vector<std::string> model_input_modalities = {"text"};
   std::optional<long long> model_max_output_tokens = std::nullopt;
@@ -116,16 +118,19 @@ struct AgentLoopOptions {
   std::function<bool()> cancel_requested = nullptr;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
   std::shared_ptr<ava::lsp::DiagnosticsProvider> lsp_diagnostics_provider = nullptr;
-  std::function<ava::core::Result<bool>(ava::session::SessionStore&, std::string_view,
-                                        std::vector<std::string> const& replayed_user_messages)>
+  std::function<ava::core::Result<bool>(ava::session::SessionStore&, std::string_view, std::vector<std::string> const& replayed_user_messages)>
       compact_context = nullptr;
+  std::function<ava::core::Result<std::unique_ptr<ava::provider::Provider>>()> background_provider_factory = nullptr;
+  std::function<ava::core::Result<std::unique_ptr<ava::provider::Transport>>()> background_transport_factory = nullptr;
+  std::shared_ptr<BackgroundJobRegistry> background_jobs = nullptr;
   std::mutex* session_mutex = nullptr;
   std::optional<ava::config::ModelPricing> model_pricing = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-struct AgentLoopResult {
+struct AgentLoopResult
+{
   std::string final_text;
   std::optional<ava::provider::TokenUsage> usage = std::nullopt;
   std::optional<long double> cost_usd = std::nullopt;
@@ -140,18 +145,16 @@ struct AgentLoopResult {
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-class AgentLoop {
+class AgentLoop
+{
  public:
   explicit AgentLoop(AgentLoopOptions options);
 
-  [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn(std::string const& user_message,
-                                                            ava::session::SessionStore& store,
-                                                            ava::provider::Provider const& provider,
-                                                            ava::provider::Transport& transport);
+  [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn(std::string const& user_message, ava::session::SessionStore& store,
+                                                            ava::provider::Provider const& provider, ava::provider::Transport& transport);
   [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn(std::string const& user_message,
                                                             std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
-                                                            ava::session::SessionStore& store,
-                                                            ava::provider::Provider const& provider,
+                                                            ava::session::SessionStore& store, ava::provider::Provider const& provider,
                                                             ava::provider::Transport& transport);
   AVA_DEBUG_PRINT_MEMBERS_ON
 

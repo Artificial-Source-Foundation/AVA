@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cstdint>
 #include <fstream>
 #include <limits>
 #include <system_error>
@@ -13,6 +14,8 @@
 namespace ava::tools::detail {
 
 namespace {
+
+constexpr std::uintmax_t kMaxSafeReadBytes = 10 * 1024 * 1024;
 
 std::size_t logical_line_count(std::string_view text)
 {
@@ -28,6 +31,53 @@ void trim_partial_final_line(std::string& text)
   if (newline == std::string::npos || newline + 1 == text.size())
     return;
   text.resize(newline + 1);
+}
+
+ava::core::Result<std::uintmax_t> inspect_regular_read_file(std::filesystem::path const& path, std::string_view operation)
+{
+  std::error_code status_error;
+  auto const status = std::filesystem::symlink_status(path, status_error);
+  if (status_error)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect file for reading");
+    error.with_context("operation", std::string(operation));
+    error.with_context("path", path.string());
+    error.with_context("cause", status_error.message());
+    return std::unexpected(std::move(error));
+  }
+  if (std::filesystem::is_symlink(status))
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "file reads do not follow symlinks");
+    error.with_context("operation", std::string(operation));
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
+  }
+  if (!std::filesystem::is_regular_file(status))
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "path is not a regular file");
+    error.with_context("operation", std::string(operation));
+    error.with_context("path", path.string());
+    return std::unexpected(std::move(error));
+  }
+  std::error_code size_error;
+  auto const size = std::filesystem::file_size(path, size_error);
+  if (size_error)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect file size");
+    error.with_context("operation", std::string(operation));
+    error.with_context("path", path.string());
+    error.with_context("cause", size_error.message());
+    return std::unexpected(std::move(error));
+  }
+  if (size > kMaxSafeReadBytes)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "file is too large to read safely");
+    error.with_context("operation", std::string(operation));
+    error.with_context("path", path.string());
+    error.with_context("max_bytes", std::to_string(kMaxSafeReadBytes));
+    return std::unexpected(std::move(error));
+  }
+  return size;
 }
 
 }  // namespace
@@ -56,8 +106,10 @@ ava::core::VoidResult check_canceled(ToolContext const& context, std::string_vie
 
 bool is_canceled_error(ava::core::Error const& error)
 {
-  for (auto const& context : error.context()) {
-    if (context.key == "canceled" && context.value == "true") return true;
+  for (auto const& context : error.context())
+  {
+    if (context.key == "canceled" && context.value == "true")
+      return true;
   }
   return error.message() == "tool canceled";
 }
@@ -68,7 +120,10 @@ ava::core::Result<std::string> read_all_text(ToolContext const& context, std::fi
   {
     return std::unexpected(std::move(canceled.error()));
   }
-  constexpr std::size_t max_edit_file_bytes = 10 * 1024 * 1024;
+  auto inspected = inspect_regular_read_file(path, operation);
+  if (!inspected)
+    return std::unexpected(std::move(inspected.error()));
+  constexpr std::size_t max_edit_file_bytes = static_cast<std::size_t>(kMaxSafeReadBytes);
   std::ifstream file(path, std::ios::binary);
   if (!file)
   {
@@ -118,6 +173,9 @@ ava::core::Result<TextOutput> read_head_text(ToolContext const& context, std::fi
   {
     return std::unexpected(std::move(canceled.error()));
   }
+  auto inspected = inspect_regular_read_file(path, "read_file");
+  if (!inspected)
+    return std::unexpected(std::move(inspected.error()));
   std::ifstream file(path, std::ios::binary);
   if (!file)
   {

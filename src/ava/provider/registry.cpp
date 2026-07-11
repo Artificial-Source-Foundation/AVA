@@ -77,6 +77,17 @@ ProviderRegistry builtin_provider_registry()
 {
   ProviderRegistry registry;
   static_cast<void>(registry.register_provider(ava::config::anthropic_provider_profile().provider_id, [] { return std::make_unique<AnthropicProvider>(); }));
+  static_cast<void>(registry.register_provider(ava::config::deepseek_provider_profile().provider_id, [] {
+    auto const& profile = ava::config::deepseek_provider_profile();
+    return std::make_unique<OpenAICompatibleProvider>(
+        OpenAICompatibleProviderOptions{.base_url = env_or_default(profile.default_base_url_env.c_str(), profile.default_base_url),
+                                        .chat_completions_path = profile.chat_completions_path,
+                                        .provider_name = profile.display_name,
+                                        .reasoning_format = profile.default_reasoning_format,
+                                        .reasoning_request_field = profile.reasoning_request_field,
+                                        .reasoning_request_effort_string = profile.reasoning_request_effort_string,
+                                        .include_stream_usage = profile.include_stream_usage});
+  }));
   static_cast<void>(registry.register_provider(ava::config::kimi_provider_profile().provider_id, [] {
     auto const& profile = ava::config::kimi_provider_profile();
     return std::make_unique<OpenAICompatibleProvider>(
@@ -86,6 +97,8 @@ ProviderRegistry builtin_provider_registry()
                                         .reasoning_format = profile.default_reasoning_format,
                                         .user_agent = profile.user_agent,
                                         .default_temperature = profile.default_temperature,
+                                        .reasoning_request_field = profile.reasoning_request_field,
+                                        .reasoning_request_effort_string = profile.reasoning_request_effort_string,
                                         .preserve_reasoning_content = profile.preserve_reasoning_content,
                                         .include_stream_usage = profile.include_stream_usage});
   }));
@@ -96,6 +109,8 @@ ProviderRegistry builtin_provider_registry()
                                         .chat_completions_path = profile.chat_completions_path,
                                         .provider_name = profile.display_name,
                                         .reasoning_format = profile.default_reasoning_format,
+                                        .reasoning_request_field = profile.reasoning_request_field,
+                                        .reasoning_request_effort_string = profile.reasoning_request_effort_string,
                                         .include_stream_usage = profile.include_stream_usage});
   }));
   static_cast<void>(registry.register_provider(ava::config::openai_provider_profile().provider_id, [] { return std::make_unique<OpenAIProvider>(); }));
@@ -106,6 +121,8 @@ ProviderRegistry builtin_provider_registry()
                                         .chat_completions_path = profile.chat_completions_path,
                                         .provider_name = profile.display_name,
                                         .reasoning_format = profile.default_reasoning_format,
+                                        .reasoning_request_field = profile.reasoning_request_field,
+                                        .reasoning_request_effort_string = profile.reasoning_request_effort_string,
                                         .include_stream_usage = profile.include_stream_usage});
   }));
   return registry;

@@ -1,14 +1,15 @@
 #include "sys.h"
+#include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime_json.h"
 #include "ava/app/runtime_model.h"
 #include "ava/app/runtime_prompt.h"
 #include "ava/app/runtime_reasoning.h"
-#include "ava/app/project_trust.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 
 #include <filesystem>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -157,8 +158,7 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
 
   auto project_trust = load_project_trust_state(options.paths, workspace_dir);
   auto prompt_state = runtime::load_runtime_prompt_state(options.paths, model, options.mode, workspace_dir, current_dir,
-                                                         project_resources_trusted(project_trust),
-                                                         options.prompt_overrides);
+                                                         project_resources_trusted(project_trust), options.prompt_overrides);
   if (!prompt_state)
     return std::unexpected(prompt_state.error());
 
@@ -166,7 +166,7 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
   {
     if (append_session_start)
     {
-      auto appended = runtime::append_session_start(*store, options.mode, model, prompt_state->prompt, prompt_state->context_sources.size());
+      auto appended = runtime::append_session_start(*store, options.mode, model, prompt_state->base_prompt, prompt_state->context_sources.size());
       if (!appended)
         return std::unexpected(appended.error());
     }
@@ -182,7 +182,7 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
   return RuntimeSession{.store = std::move(*store),
                         .mode = options.mode,
                         .model = std::move(model),
-                        .prompt = std::move(prompt_state->prompt),
+                        .base_prompt = std::move(prompt_state->base_prompt),
                         .paths = options.paths,
                         .workspace_dir = workspace_dir,
                         .current_dir = current_dir,
@@ -195,7 +195,8 @@ ava::core::Result<RuntimeSession> open_runtime_session(RuntimeOpenOptions const&
                         .reasoning = std::move(reasoning),
                         .scoped_model_cycle = registry->scoped_model_cycle,
                         .created = created,
-                        .sessionless = options.sessionless};
+                        .sessionless = options.sessionless,
+                        .background_jobs = std::make_shared<ava::agent::BackgroundJobRegistry>()};
 }
 
 std::string to_string(RuntimeFreshnessSourceKind kind)

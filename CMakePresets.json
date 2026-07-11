@@ -35,6 +35,17 @@
         "EnableAvaBuildTests": "OFF",
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "desktop-qml",
+      "displayName": "Qt Quick desktop prototype",
+      "description": "Configure the optional Qt Quick/QML desktop prototype without tests.",
+      "binaryDir": "${sourceDir}/build-desktop-qml",
+      "cacheVariables": {
+        "AVA_BUILD_DESKTOP_QML": "ON",
+        "AVA_BUILD_TESTS": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -49,6 +60,10 @@
     {
       "name": "release",
       "configurePreset": "release"
+    },
+    {
+      "name": "desktop-qml",
+      "configurePreset": "desktop-qml"
     }
   ],
   "testPresets": [

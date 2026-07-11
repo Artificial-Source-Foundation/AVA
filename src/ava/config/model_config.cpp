@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/config/model_config.h"
 #include "ava/config/model_profiles.h"
+#include "ava/core/atomic_file.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
@@ -539,46 +540,6 @@ ava::core::Result<std::string> update_scoped_model_cycle_json(std::string conten
   return content;
 }
 
-ava::core::VoidResult write_text_atomic(std::filesystem::path const& path, std::string_view body)
-{
-  std::error_code create_error;
-  std::filesystem::create_directories(path.parent_path(), create_error);
-  if (create_error)
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to create model config directory")
-                               .with_context("path", path.parent_path().string())
-                               .with_context("cause", create_error.message()));
-  }
-
-  auto const temp_path = path.string() + ".tmp";
-  {
-    std::ofstream output(temp_path, std::ios::binary | std::ios::trunc);
-    if (!output)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write model config")
-                                 .with_context("path", temp_path));
-    output << body;
-    if (!output)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to finish model config write")
-                                 .with_context("path", temp_path));
-  }
-
-  std::error_code permission_error;
-  std::filesystem::permissions(temp_path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-                               std::filesystem::perm_options::replace, permission_error);
-
-  std::error_code rename_error;
-  std::filesystem::rename(temp_path, path, rename_error);
-  if (rename_error)
-  {
-    std::error_code remove_error;
-    std::filesystem::remove(temp_path, remove_error);
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to replace model config")
-                               .with_context("path", path.string())
-                               .with_context("cause", rename_error.message()));
-  }
-  return {};
-}
-
 long double millionths(long long tokens, long double price_per_million)
 {
   return (static_cast<long double>(tokens) * price_per_million) / 1'000'000.0L;
@@ -716,7 +677,7 @@ ava::core::VoidResult store_scoped_model_cycle(XdgPaths const& paths,
     error.with_context("path", paths.models_file.string());
     return std::unexpected(std::move(error));
   }
-  return write_text_atomic(paths.models_file, *updated);
+  return ava::core::write_text_file_atomic(paths.models_file, *updated, "model config");
 }
 
 std::optional<ModelInfo> find_model(ModelRegistry const& registry, std::string_view provider_id, std::string_view model_id)

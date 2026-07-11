@@ -12,6 +12,14 @@
 namespace ava::context {
 namespace {
 
+constexpr std::array<std::string_view, 4> kContextFileNames{"AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"};
+
+bool is_context_file_name(std::filesystem::path const& path)
+{
+  auto const filename = path.filename().string();
+  return std::ranges::any_of(kContextFileNames, [&](std::string_view candidate) { return filename == candidate; });
+}
+
 std::filesystem::path normalized_absolute(std::filesystem::path const& path)
 {
   std::error_code error;
@@ -114,6 +122,43 @@ ava::core::VoidResult append_if_present(std::vector<LoadedContextFile>& files, s
   return {};
 }
 
+ava::core::VoidResult append_first_context_file_from_dir(std::vector<LoadedContextFile>& files, std::set<std::string>& seen_paths,
+                                                         std::filesystem::path const& dir, ContextSourceType source_type, std::size_t max_file_bytes)
+{
+  auto const initial_size = files.size();
+  for (auto const name : kContextFileNames)
+  {
+    auto appended = append_if_present(files, seen_paths, dir / std::string(name), source_type, max_file_bytes);
+    if (!appended)
+      return appended;
+    if (files.size() != initial_size)
+      return {};
+  }
+  return {};
+}
+
+ava::core::VoidResult append_global_context_file(std::vector<LoadedContextFile>& files, std::set<std::string>& seen_paths,
+                                                 std::filesystem::path const& global_agents_file, std::size_t max_file_bytes)
+{
+  auto const initial_size = files.size();
+  auto appended = append_if_present(files, seen_paths, global_agents_file, ContextSourceType::Global, max_file_bytes);
+  if (!appended || files.size() != initial_size || !is_context_file_name(global_agents_file))
+    return appended;
+
+  for (auto const name : kContextFileNames)
+  {
+    auto const candidate = global_agents_file.parent_path() / std::string(name);
+    if (candidate == global_agents_file)
+      continue;
+    appended = append_if_present(files, seen_paths, candidate, ContextSourceType::Global, max_file_bytes);
+    if (!appended)
+      return appended;
+    if (files.size() != initial_size)
+      return {};
+  }
+  return {};
+}
+
 std::vector<std::filesystem::path> context_dirs_root_to_current(std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir)
 {
   std::vector<std::filesystem::path> dirs;
@@ -158,14 +203,14 @@ ava::core::Result<std::vector<LoadedContextFile>> load_context_files(ContextLoad
 
   for (auto const& dir : context_dirs_root_to_current(options.workspace_root, options.current_dir))
   {
-    auto appended = append_if_present(files, seen_paths, dir / "AGENTS.md", ContextSourceType::Workspace, options.max_file_bytes);
+    auto appended = append_first_context_file_from_dir(files, seen_paths, dir, ContextSourceType::Workspace, options.max_file_bytes);
     if (!appended)
       return std::unexpected(appended.error());
   }
 
   if (!options.global_agents_file.empty())
   {
-    auto appended = append_if_present(files, seen_paths, options.global_agents_file, ContextSourceType::Global, options.max_file_bytes);
+    auto appended = append_global_context_file(files, seen_paths, options.global_agents_file, options.max_file_bytes);
     if (!appended)
       return std::unexpected(appended.error());
   }

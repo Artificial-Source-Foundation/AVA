@@ -4,6 +4,8 @@
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 
+#include "ava/tui/composer.h"
+
 #include "ava/permissions/permission_rules.h"
 
 #include "ava/provider/curl_transport.h"
@@ -15,6 +17,8 @@
 #include <ostream>
 #include <string_view>
 #include <utility>
+
+#include <unistd.h>
 
 namespace ava::app {
 namespace {
@@ -39,29 +43,49 @@ ava::permissions::PermissionResolver deny_permission_resolver()
   };
 }
 
-void write_text_event_diagnostic(RuntimeEvent const& event, std::ostream& err)
+std::string sanitize_terminal_output_text(std::string_view text)
+{
+  std::string output;
+  output.reserve(text.size());
+  std::size_t start = 0;
+  for (std::size_t index = 0; index < text.size(); ++index) {
+    if (text[index] != '\n') continue;
+    output += ava::tui::sanitize_terminal_text(text.substr(start, index - start));
+    output.push_back('\n');
+    start = index + 1;
+  }
+  output += ava::tui::sanitize_terminal_text(text.substr(start));
+  return output;
+}
+
+std::string terminal_output_text(std::string_view text, bool sanitize)
+{
+  return sanitize ? sanitize_terminal_output_text(text) : std::string(text);
+}
+
+void write_text_event_diagnostic(RuntimeEvent const& event, std::ostream& err, bool sanitize)
 {
   if (event.type == RuntimeEventType::ToolStart) {
     err << "tool_start";
-    if (!event.tool_name.empty()) err << " " << event.tool_name;
-    if (!event.text.empty()) err << ": " << event.text;
+    if (!event.tool_name.empty()) err << " " << terminal_output_text(event.tool_name, sanitize);
+    if (!event.text.empty()) err << ": " << terminal_output_text(event.text, sanitize);
     err << '\n';
     return;
   }
   if (event.type == RuntimeEventType::ToolResult) {
     err << "tool_result";
-    if (!event.tool_name.empty()) err << " " << event.tool_name;
-    if (!event.status.empty()) err << " " << event.status;
-    if (!event.text.empty()) err << ": " << event.text;
+    if (!event.tool_name.empty()) err << " " << terminal_output_text(event.tool_name, sanitize);
+    if (!event.status.empty()) err << " " << terminal_output_text(event.status, sanitize);
+    if (!event.text.empty()) err << ": " << terminal_output_text(event.text, sanitize);
     err << '\n';
     if ((event.error_code == "permission_denied" || event.error_category == "permission_denied") &&
         !event.error_details.empty()) {
-      err << event.error_details << '\n';
+      err << terminal_output_text(event.error_details, sanitize) << '\n';
     }
     return;
   }
   if (event.type == RuntimeEventType::Error) {
-    err << (event.error_details.empty() ? event.error_message : event.error_details) << '\n';
+    err << terminal_output_text(event.error_details.empty() ? event.error_message : event.error_details, sanitize) << '\n';
   }
 }
 
@@ -134,9 +158,9 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& 
     });
     runtime_options.event_sink = make_runtime_event_bus_adapter(event_bus);
   } else {
-    runtime_options.event_sink = [&err, &emitted_error](RuntimeEvent const& event) {
+    runtime_options.event_sink = [&err, &emitted_error, sanitize = options.sanitize_terminal_diagnostics](RuntimeEvent const& event) {
       if (event.type == RuntimeEventType::Error) emitted_error = true;
-      write_text_event_diagnostic(event, err);
+      write_text_event_diagnostic(event, err, sanitize);
       if (!err) {
         return ava::core::VoidResult{
             std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write print diagnostic"))};
@@ -152,14 +176,14 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& 
         // Best-effort fallback: preserve the runtime/provider error that caused the failed turn.
         static_cast<void>(event_bus.publish(to_event_envelope(runtime_error_event(session, result.error()))));
       } else {
-        err << result.error().format() << '\n';
+        err << terminal_output_text(result.error().format(), options.sanitize_terminal_diagnostics) << '\n';
       }
     }
     return std::unexpected(result.error());
   }
 
   if (options.output_format == PrintOutputFormat::Text) {
-    out << result->final_text;
+    out << terminal_output_text(result->final_text, options.sanitize_terminal_output);
     if (!out) {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write print output"));
     }
@@ -169,19 +193,21 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(RuntimeSession& 
 
 int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err)
 {
+  bool const sanitize_stdout = ::isatty(STDOUT_FILENO) == 1;
+  bool const sanitize_stderr = ::isatty(STDERR_FILENO) == 1;
   std::optional<std::string> stdin_prompt;
   if (options.read_stdin) stdin_prompt = read_all(in);
 
   auto prompt = merge_print_prompt(
       PrintPromptInputs{.explicit_prompt = options.explicit_prompt, .stdin_prompt = std::move(stdin_prompt)});
   if (!prompt) {
-    err << prompt.error().format() << '\n';
+    err << terminal_output_text(prompt.error().format(), sanitize_stderr) << '\n';
     return 2;
   }
 
   auto session = open_runtime_session(options.open_options);
   if (!session) {
-    err << session.error().format() << '\n';
+    err << terminal_output_text(session.error().format(), sanitize_stderr) << '\n';
     return 1;
   }
 
@@ -195,19 +221,20 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
   auto request_credential =
       ava::config::provider_credential_for_request(session->paths, session->model.provider_id, auth_transport);
   if (!request_credential) {
-    err << request_credential.error().format() << '\n';
+    err << terminal_output_text(request_credential.error().format(), sanitize_stderr) << '\n';
     return 1;
   }
   if (!*request_credential) {
-    err << "print mode requires auth for provider `" << session->model.provider_id << "`. Configure a credential in "
-        << session->paths.auth_file.string() << " or the provider API key environment variable\n";
+    err << "print mode requires auth for provider `" << terminal_output_text(session->model.provider_id, sanitize_stderr)
+        << "`. Configure a credential in " << terminal_output_text(session->paths.auth_file.string(), sanitize_stderr)
+        << " or the provider API key environment variable\n";
     return 1;
   }
 
   auto registry = ava::provider::builtin_provider_registry();
   auto default_provider = registry.create(session->model.provider_id);
   if (!default_provider) {
-    err << default_provider.error().format() << '\n';
+    err << terminal_output_text(default_provider.error().format(), sanitize_stderr) << '\n';
     return 1;
   }
   ava::provider::Provider const& provider = options.provider_override
@@ -223,7 +250,9 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
   runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);
 
   PrintModeRunOptions const run_options{.output_format = options.output_format,
-                                        .runtime_options = std::move(runtime_options)};
+                                        .runtime_options = std::move(runtime_options),
+                                        .sanitize_terminal_output = sanitize_stdout,
+                                        .sanitize_terminal_diagnostics = sanitize_stderr};
   auto result = run_print_prompt(*session, *prompt, provider, transport, run_options, out, err);
   return result ? 0 : 1;
 }

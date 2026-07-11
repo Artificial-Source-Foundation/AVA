@@ -6,6 +6,7 @@
 #include "ava/app/interactive_run_queue.h"
 #include "ava/app/line_shell.h"
 #include "ava/app/onboarding.h"
+#include "ava/app/project_trust.h"
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/rpc/handlers.h"
 #include "ava/tui/composer.h"
@@ -96,6 +97,18 @@ std::string display_theme_status(std::string_view prefix)
 {
   auto const active = ava::tui::active_tui_theme();
   return std::string(prefix) + ": " + active.name + " (" + active.badge + ")";
+}
+
+ava::tui::ProjectTrustSnapshot project_trust_snapshot(ava::app::ProjectTrustState const& state)
+{
+  return ava::tui::ProjectTrustSnapshot{.decision = std::string(ava::app::to_string(state.decision)),
+                                        .project_resources = ava::app::project_resources_trusted(state) ? std::string("enabled")
+                                                                                                        : std::string("skipped"),
+                                        .workspace = state.workspace_dir.string(),
+                                        .matched_path = state.matched_path.string(),
+                                        .trust_file = state.trust_file.string(),
+                                        .protected_resource_count = state.protected_resources.size(),
+                                        .diagnostic = state.diagnostic};
 }
 
 ava::core::Error errno_line_shell_error(ava::core::ErrorCategory category, std::string message)
@@ -1010,7 +1023,8 @@ int run_tui(ShellState state)
         .status = std::move(status),
         .slash_commands = ava::app::command_catalog_slash_items(state.session, hotkeys),
         .file_references = ava::app::file_reference_items(state.session),
-        .custom_themes = custom_theme_options()};
+        .custom_themes = custom_theme_options(),
+        .project_trust = project_trust_snapshot(state.session.project_trust)};
   };
   auto session_selector_sort = std::make_shared<ava::app::SessionSelectorSort>(ava::app::SessionSelectorSort::Recent);
   auto session_selector_named_only = std::make_shared<bool>(false);
@@ -1077,6 +1091,7 @@ int run_tui(ShellState state)
       .slash_commands = ava::app::command_catalog_slash_items(state.session, hotkeys),
       .file_references = ava::app::file_reference_items(state.session),
       .custom_themes = custom_theme_options(),
+      .project_trust = project_trust_snapshot(state.session.project_trust),
       .key_bindings = key_bindings,
       .token_status_provider = [&state]() { return token_status_for_session(state.session); },
       .reasoning_status_provider = [&state]() { return ava::app::reasoning_status_for_session(state.session); },
@@ -1361,6 +1376,17 @@ int run_tui(ShellState state)
           if (!validated)
             return std::unexpected(std::move(validated.error()));
           auto status = validated->output.empty() ? std::string("keybindings validation complete") : validated->output.front();
+          return state_snapshot(std::move(status));
+        }
+        constexpr std::string_view trust_prefix = "settings:trust.";
+        if (value.starts_with(trust_prefix))
+        {
+          auto action = value.substr(trust_prefix.size());
+          auto command = std::string("/trust ") + std::string(action);
+          auto trusted = ava::app::run_command(state.session, ava::app::CommandRequest{.command = std::move(command)});
+          if (!trusted)
+            return std::unexpected(std::move(trusted.error()));
+          auto status = trusted->output.empty() ? std::string("trust action complete") : trusted->output.front();
           return state_snapshot(std::move(status));
         }
         constexpr std::string_view theme_prefix = "theme:";

@@ -56,6 +56,12 @@ cw_option(EnableAvaSanitizers
     "Build AVA with AddressSanitizer and UndefinedBehaviorSanitizer" OFF
     "" OFF)
 
+# AVA_BUILD_DESKTOP_QML gates the experimental Qt Quick/QML desktop prototype
+# under src/ava/desktop (added upstream). It is declared with plain option()
+# because src/CMakeLists.txt references the AVA_BUILD_DESKTOP_QML variable name
+# directly, unlike the cw_option-based toggles above.
+option(AVA_BUILD_DESKTOP_QML "Build the experimental Qt Quick/QML desktop prototype" OFF)
+
 # Default maximum string length for debug output truncation. When no maxlen()
 # IO manipulator is active on the debug stream, strings longer than this are
 # truncated in debug output. 0 means no limit. The value ends up in the
@@ -85,9 +91,9 @@ function(ava_apply_warnings target)
     target_compile_options(${target} PRIVATE /W4 /WX)
   else()
     target_compile_options(${target} PRIVATE -Wall -Werror -Wextra -Wpedantic -Wundef)
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 17)
       # Keep GCC's optimizer-driven maybe-uninitialized diagnostics visible, but
-      # do not promote them to errors for GCC 13.x. That release can report false
+      # do not promote them to errors for GCC 13.x through 16.x. Those releases can report false
       # positives through libstdc++ internals such as std::regex, std::optional,
       # and std::variant when Release optimization inlines those implementations.
       target_compile_options(${target} PRIVATE -Wno-error=maybe-uninitialized)

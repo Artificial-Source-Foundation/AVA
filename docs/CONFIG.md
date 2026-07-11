@@ -6,8 +6,26 @@ AVA uses XDG paths on Linux.
 | --- | --- |
 | Config directory | `$XDG_CONFIG_HOME/ava` or `~/.config/ava` |
 | Auth file | `$XDG_CONFIG_HOME/ava/auth.json` or `~/.config/ava/auth.json` |
+| Global permission rules | `$XDG_CONFIG_HOME/ava/permission-rules.json` or `~/.config/ava/permission-rules.json` |
+| Workspace-keyed permission rules | `$XDG_CONFIG_HOME/ava/workspace-permission-rules/<hash>/permission-rules.json` or `~/.config/ava/workspace-permission-rules/<hash>/permission-rules.json` |
 | Session state | `$XDG_STATE_HOME/ava/sessions` or `~/.local/state/ava/sessions` |
 | Project trust state | `$XDG_STATE_HOME/ava/project-trust.json` or `~/.local/state/ava/project-trust.json` |
+
+## Settings Architecture And Resource Packages
+
+AVA intentionally uses narrow domain-specific config files instead of a single Pi-style merged `settings.json`. Each file has one owner and validator: `auth.json` for provider credentials, `models.json` for model registry overrides and scoped cycling, `display.json` plus `themes/*.json` for TUI appearance, `keybinds.json` for TUI actions, prompt files under the config/project resource directories, plugin/MCP/LSP config files, compaction config, trust state, and permission rules. This keeps secret handling, model context, executable resources, and UI preferences behind separate safety boundaries and avoids silently granting authority through a model-writable project settings file.
+
+Config writes that AVA performs validate the candidate before committing where possible. Display theme writes and keybinding init/import/set/reset use owner-only atomic replacement and reject symlink targets; invalid hand-edited files surface path-specific diagnostics through `/reload`, startup alerts, or the relevant validation command while the previous active runtime state remains in use. Project-local resources that can influence execution or stronger model context remain gated by `/trust project`; plain context files (`AGENTS.md`/`CLAUDE.md`) can load without trust, but project prompt commands, skills, plugins, MCP/LSP config, and project system prompt files are skipped until trusted.
+
+Pi-style package/resource management (`packages list|install|remove|update|config` and `/packages`) is deferred. AVA does not install remote npm/git packages, self-update, or fetch marketplace resources because that needs source allowlists, provenance/signing, compatibility policy, rollback, and trust UX. Today users install resources manually by placing files in the documented global config directories or in a trusted project `.ava/` directory:
+
+- custom TUI themes: `$XDG_CONFIG_HOME/ava/themes/*.json`
+- global prompt resources: `$XDG_CONFIG_HOME/ava/SYSTEM.md` and `APPEND_SYSTEM.md`
+- global prompt commands and skills: `$XDG_CONFIG_HOME/ava/commands/` and `skills/`
+- global plugins/MCP/LSP config: `$XDG_CONFIG_HOME/ava/plugins/`, `mcp.json`, and `lsp.json`
+- trusted project resources: `.ava/commands/`, `.ava/skills/`, `.ava/plugins/`, `.ava/mcp.json`, `.ava/lsp.json`, `.ava/SYSTEM.md`, and `.ava/APPEND_SYSTEM.md`
+
+`ava packages ...` and `/packages ...` currently report this deferral instead of performing side effects or sending the request to the model. AVA also does not enable analytics/telemetry, version checks, package updates, or self-update behavior. A dedicated `--offline` flag is deferred; the current equivalent is to avoid starting provider turns and to leave network-capable tools disabled or unapproved in headless/TUI permission policy.
 
 ## TUI Display
 
@@ -91,9 +109,9 @@ ava auth login moonshot --api-key
 ava connect kimi --api-key
 ```
 
-When the provider is omitted, `ava auth login`, `ava login`, and interactive `ava connect` open a searchable terminal provider picker before asking for login method and secret. Secrets are read without terminal echo when stdin is a TTY. In the TUI, use `/connect` or `/login` to open the same provider flow as a modal; OpenAI shows browser OAuth, headless OAuth, and API key options.
+When the provider is omitted, `ava auth login`, `ava login`, and interactive `ava connect` open a searchable terminal provider picker before asking for login method and secret. Secrets are read without terminal echo when stdin is a TTY. In the TUI, use `/connect` or `/login` to open the same provider flow as a modal; OpenAI shows browser OAuth, headless OAuth, and API key options. Non-OpenAI providers use API-key setup unless their own documented auth flow is explicitly implemented.
 
-Headless API-key setup is available for OpenAI, Anthropic, Moonshot/Kimi, and other provider ids:
+Headless API-key setup is available for OpenAI, Anthropic, DeepSeek, Moonshot/Kimi, OpenRouter, and other provider ids:
 
 ```sh
 ava connect openai --headless-oauth
@@ -115,7 +133,7 @@ API key format:
 {"openai":{"type":"api_key","api_key":"sk-..."},"anthropic":{"type":"api_key","api_key":"sk-ant-..."}}
 ```
 
-Anthropic Claude OAuth bearer tokens can also be supplied with `ANTHROPIC_OAUTH_TOKEN` or the Anthropic SDK-compatible `ANTHROPIC_AUTH_TOKEN`. When no stored Anthropic credential is present, `ANTHROPIC_OAUTH_TOKEN` is preferred over `ANTHROPIC_AUTH_TOKEN`, and both are preferred over `ANTHROPIC_API_KEY`. Stored Anthropic OAuth entries use the provider-scoped auth shape below; `refresh_token`, `expires_at`, `account_id`, and `source` are optional, but expired or near-expiry OAuth entries require a refresh token to be used safely. AVA writes canonical `refresh_token` and `expires_at` fields; it also accepts `refresh` and `expires` aliases when reading manually-created files.
+Anthropic Claude OAuth bearer tokens can also be supplied with `ANTHROPIC_OAUTH_TOKEN` or the Anthropic SDK-compatible `ANTHROPIC_AUTH_TOKEN`. When no stored Anthropic credential is present, `ANTHROPIC_OAUTH_TOKEN` is preferred over `ANTHROPIC_AUTH_TOKEN`, and both are preferred over `ANTHROPIC_API_KEY`. Stored Anthropic OAuth entries use the provider-scoped auth shape below; `refresh_token`, `expires_at`, `account_id`, and `source` are optional, but expired or near-expiry OAuth entries require a refresh token to be used safely. AVA writes canonical `refresh_token` and `expires_at` fields; it also accepts `refresh` and `expires` aliases when reading manually-created files. AVA does not initiate Anthropic interactive OAuth because Anthropic does not document a third-party authorization or device flow for AVA-style clients.
 
 ```json
 {"anthropic":{"type":"oauth","access_token":"...","refresh_token":"...","expires_at":1893456000,"account_id":"acct_...","source":"claude"}}
@@ -124,6 +142,12 @@ Anthropic Claude OAuth bearer tokens can also be supplied with `ANTHROPIC_OAUTH_
 Auth files are written owner-only. Provider credential setup preserves existing provider entries in the same auth file. Explicit AVA auth entries take precedence; AVA also attempts to read legacy `~/.ava/credentials.json` and the legacy-compatible XDG auth file for OpenAI migration when no AVA OpenAI credential is stored.
 
 OAuth credentials refresh automatically before use when a refresh token is present. If OpenAI refresh fails or the credential has no refresh token, rerun `ava connect openai`; for stored Anthropic OAuth, update `auth.json` with a fresh OAuth credential or remove the stored Anthropic entry before relying on Anthropic environment credentials.
+
+## Permission Rules
+
+Persistent permission rules are stored owner-only outside model-writable workspace files. Global rules use `$XDG_CONFIG_HOME/ava/permission-rules.json`. Workspace-scoped rules are keyed by the normalized workspace path and written under `$XDG_CONFIG_HOME/ava/workspace-permission-rules/<workspace-hash>/permission-rules.json`; use `/permissions list` or RPC `permission_rules` as the authoritative way to inspect the exact path for a workspace. Legacy `$WORKSPACE/.ava/permission-rules.json` files are intentionally ignored for enforcement because normal file tools can edit workspace files. Rule storage rejects group/world-readable files, malformed JSON, unsupported schema versions, unsafe symlinks, broad path rules, and unsupported operations before prompting a fallback resolver.
+
+Use `/permissions list`, `/permissions explain <rule_id>`, `/permissions add ...`, `/permissions remove <rule_id>`, `/permissions audit ...`, and `/permissions diagnose ...` in interactive mode, or the matching RPC `permission_rules`, `permission_rule_add`, and `permission_rule_remove` requests for automation. Rules can match exact path-oriented operations such as `read`, `search`, `edit`, and `lsp.query`, or exact command-oriented operations such as `bash`, `network.fetch`, `network.search`, `lsp.server.launch`, MCP, and plugin prompts. Hard policy denies are never upgraded by persistent rules or headless flags.
 
 ## Models
 
@@ -154,11 +178,11 @@ Optional model override file: `$XDG_CONFIG_HOME/ava/models.json`.
 }
 ```
 
-Model entries are additive overrides. `provider` and `id` are required; omitted fields on built-in model overrides inherit the built-in metadata, including `context_window_tokens`. For brand-new custom models, set `context_window_tokens` so token percentage and context-aware compaction can work. Optional fields include `display_name`, `family`, `api_family`, `context_window_tokens`, `max_output_tokens`, `supports_tools`, `supports_streaming`, `supports_reasoning`, `reports_usage`, `input_modalities`, `output_modalities`, `reasoning_levels`, `reasoning_format`, `compatibility_quirks`, and `pricing`. `input_modalities` currently recognizes `text` and `image`; models that omit `image` reject replayed image attachments before provider requests. Built-in OpenAI Responses and Anthropic Messages image-capable profiles declare `text` plus `image`; custom compatible-provider image models should do the same only when their endpoint accepts chat-completions image URL blocks. `/models <query>` and the TUI model selector report advisory diagnostics for custom models that omit context windows, input modalities, API family, support flags, usage/pricing metadata, or reasoning levels. These diagnostics do not block switching when the provider is registered; rows for unregistered providers are disabled because backend model switching rejects them. Pricing values are USD per one million tokens and are local static metadata; AVA does not fetch live prices. Cost is reported only when the saved provider usage and configured pricing are complete for the billable token types in that assistant response.
+Model entries are additive overrides. `provider` and `id` are required; omitted fields on built-in model overrides inherit the built-in metadata, including `context_window_tokens`. For brand-new custom models, set `context_window_tokens` so token percentage and context-aware compaction can work. Optional fields include `display_name`, `family`, `api_family`, `context_window_tokens`, `max_output_tokens`, `supports_tools`, `supports_streaming`, `supports_reasoning`, `reports_usage`, `input_modalities`, `output_modalities`, `reasoning_levels`, `reasoning_format`, `compatibility_quirks`, and `pricing`. `input_modalities` currently recognizes `text` and `image`; models that omit `image` reject replayed image attachments before provider requests. Built-in OpenAI Responses and Anthropic Messages image-capable profiles declare `text` plus `image`; custom compatible-provider image models should do the same only when their endpoint accepts chat-completions image URL blocks. `/providers [query]` reports provider runtime availability, credential source status without secret values, OAuth disposition, endpoint environment knobs, and compatibility quirks. `/models <query>` and the TUI model selector report advisory diagnostics for custom models that omit context windows, input modalities, API family, support flags, usage/pricing metadata, or reasoning levels, plus provider/API-family mismatches, unknown API families, invalid provider ids, and unregistered providers. These diagnostics do not block switching when the provider is registered; rows for unregistered providers are disabled because backend model switching rejects them. Pricing values are USD per one million tokens and are local static metadata; AVA does not fetch live prices. Cost is reported only when the saved provider usage and configured pricing are complete for the billable token types in that assistant response.
 
 Accepted pricing aliases include `input_usd_per_1m`, `output_usd_per_1m`, `cache_read_usd_per_1m`, `cache_write_usd_per_1m`, and `reasoning_usd_per_1m`.
 
-Reasoning controls are model/API-family specific. OpenAI Responses models accept reasoning level/effort metadata. OpenAI chat-completions compatible routes accept level-only controls where supported. Anthropic Messages models accept `enabled` with a budget at least 1024 tokens and below the model output limit; `adaptive` is accepted only for profiles that explicitly list it and does not accept a manual budget. Kimi/Moonshot-style compatible routes can preserve `reasoning_content` when their model metadata declares the matching reasoning format and compatibility quirk.
+Reasoning controls are model/API-family specific. OpenAI Responses models accept reasoning level/effort metadata. OpenAI chat-completions compatible routes accept level-only controls where supported. Anthropic Messages models accept `enabled` with a budget at least 1024 tokens and below the model output limit; `adaptive` is accepted only for profiles that explicitly list it and does not accept a manual budget. Kimi/Moonshot-style compatible routes can preserve `reasoning_content` when their model metadata declares the matching reasoning format and compatibility quirk. DeepSeek uses the compatible chat endpoint, maps AVA `high`/`xhigh` reasoning levels to `reasoning_effort=high|max`, and parses `reasoning_content` from responses; AVA intentionally does not replay prior DeepSeek `reasoning_content` into future requests.
 
 Provider request metadata also supports prompt/cache-control hints where a provider API can use them. Anthropic content-part serialization preserves native tool use/results, thinking signatures or redacted thinking markers, cache usage, stop reasons, and provider-native reasoning blocks in session replay without exposing opaque signatures in exports.
 
@@ -171,7 +195,7 @@ $XDG_CONFIG_HOME/ava/lsp.json
 <workspace>/.ava/lsp.json
 ```
 
-Both files use the same explicit schema. Global servers are loaded before workspace servers. Missing files simply leave LSP tools unavailable; malformed present files disable the configured provider for that context.
+Both files use the same explicit schema. Global servers are loaded before workspace servers. Missing files simply leave LSP tools unavailable; malformed present files disable the configured provider for that context. Global LSP config must use absolute executable/script paths or trusted `PATH` command names; workspace-relative executables or script arguments such as `./server`, `.ava/server.js`, or `node_modules/.bin/server` are rejected unless they live in trusted project LSP config. Global LSP subprocesses launch from the global config directory, or `/` if that source would be workspace-contained, while the LSP protocol still receives the current workspace root; project LSP subprocesses launch from the trusted workspace.
 
 ```json
 {
@@ -190,7 +214,7 @@ Both files use the same explicit schema. Global servers are loaded before worksp
 
 `id` is a unique short identifier using letters, digits, `_`, `-`, or `.`. `argv` is a non-empty JSON string array executed directly without a shell. `file_extensions` is an optional JSON string array; when omitted or empty, the server can match any file. `language_id` defaults to `plaintext` and is sent in bounded `textDocument/didOpen` notifications for definition/reference queries. `timeout_ms` defaults to `3000` and must be a base-10 integer from `100` through `30000`. Known fields reject wrong JSON types, mixed arrays, duplicate server ids, control bytes, oversized values, symlinked config files, and configs over 64 KiB.
 
-Using an LSP tool first requests `lsp.query` for the target file or workspace. Starting the configured subprocess separately requests high-risk `lsp.server.launch`; persistent permission rules match the exact JSON-array encoded argv string, not a shell command line.
+Using an LSP tool first requests `lsp.query` for the target file or workspace. Starting the configured subprocess separately requests high-risk `lsp.server.launch`; persistent permission rules match the exact JSON-array encoded argv string, not a shell command line. Project-local LSP server code should be declared only in `$WORKSPACE/.ava/lsp.json` and becomes available only after `/trust project`.
 
 ## Compaction
 
@@ -224,6 +248,8 @@ Examples:
 ~/.config/ava/prompts/openai/gpt-5.5/build.txt
 ~/.config/ava/prompts/openai/gpt-5.5/plan.txt
 ```
+
+Context instruction files are discovered from the workspace root to the current directory. In each directory AVA loads the first present file by Pi-compatible priority: `AGENTS.md`, `AGENTS.MD`, `CLAUDE.md`, then `CLAUDE.MD`. The global context file path is `$XDG_CONFIG_HOME/ava/AGENTS.md` by default and uses the same sibling fallback names when `AGENTS.md` is absent. Context files are bounded, symlink-rejected, and loaded without requiring project trust, matching their role as visible user-authored instructions.
 
 System prompt resource paths:
 
@@ -272,7 +298,7 @@ The template body supports `$1`, `$2`, `$@`, `$ARGUMENTS`, `${1:-default}`,
 
 AVA stores project trust decisions outside the workspace in `$XDG_STATE_HOME/ava/project-trust.json`.
 The file records normalized workspace paths and whether project-local resources are trusted.
-Project `AGENTS.md` context files still load without a trust decision, but these project-local resources are skipped until the workspace is trusted:
+Project `AGENTS.md`/`CLAUDE.md` context files still load without a trust decision, but these project-local resources are skipped until the workspace is trusted:
 
 ```text
 $WORKSPACE/.ava/commands/
@@ -289,3 +315,4 @@ $WORKSPACE/.ava/APPEND_SYSTEM.md
 
 Use `/trust status` to inspect the current decision, `/trust project` to trust this workspace,
 `/trust deny` to keep project resources skipped, and `/trust clear` to remove the explicit decision.
+The TUI `/settings` view shows the same project trust state and routes trust actions through these backend commands.

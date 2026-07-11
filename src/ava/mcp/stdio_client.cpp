@@ -121,7 +121,7 @@ ava::core::VoidResult McpStdioClient::launch()
   for (auto& arg : argv_strings) argv.push_back(arg.data());
   argv.push_back(nullptr);
 
-  auto const cwd = child_working_dir(options_).string();
+  auto const cwd = child_working_dir(server_, options_).string();
   pid_t const pid = fork();
   if (pid < 0) return std::unexpected(errno_error("failed to fork MCP server process", server_));
 

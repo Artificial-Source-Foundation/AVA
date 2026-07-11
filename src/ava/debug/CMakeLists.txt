@@ -327,6 +327,18 @@ target_include_directories(ava_debug
     "${CMAKE_SOURCE_DIR}/src"
 )
 
+# The generated print_members.cpp files #include headers from ava_terminal
+# (e.g. ComplexChar.h, which pulls in GraphemeCluster.h). GraphemeCluster and
+# Border use AVA_PRINT_ON_MEMBERS — a hand-written print_members — so the
+# generated .o files reference but do not define their print_members.
+# Other dependencies might exist if, for example, a generated print_members
+# uses a `to_string`. These should be added when encountered.
+target_link_libraries(ava_debug
+  PUBLIC
+    AVA::terminal       # ava::tui::terminal::GraphemeCluster::print_members
+    ava_agent           # ava::agent::to_string
+)
+
 ava_apply_debugging(ava_debug)
 ava_apply_warnings(ava_debug)
 ava_apply_sanitizers(ava_debug)

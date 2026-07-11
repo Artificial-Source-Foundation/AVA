@@ -879,6 +879,7 @@ PermissionRuleDraft normalize_draft_defaults(PermissionRuleDraft draft)
   return draft;
 }
 
+bool is_repository_build_or_test_allow(PersistentPermissionRule const& rule);
 std::string now_timestamp();
 
 ava::core::Result<PersistentPermissionRule> rule_from_draft(PermissionRuleStore const& store, PermissionRuleDraft draft)
@@ -903,6 +904,10 @@ ava::core::Result<PersistentPermissionRule> rule_from_draft(PermissionRuleStore 
   auto const path = rules_file_path(store, rule.scope);
   if (auto valid = validate_rule(rule, path); !valid)
     return std::unexpected(std::move(valid.error()));
+  if (is_repository_build_or_test_allow(rule))
+  {
+    return std::unexpected(rule_parse_error("persistent allow rules cannot authorize repository build or test commands", path, "command"));
+  }
   return rule;
 }
 
@@ -954,6 +959,11 @@ bool rule_matches(PermissionRuleStore const& store, PersistentPermissionRule con
   return path_matches(store, rule, prompt);
 }
 
+bool is_repository_build_or_test_allow(PersistentPermissionRule const& rule)
+{
+  return rule.action == PermissionAction::Allow && rule.operation == Operation::RunCommand && is_repository_controlled_build_or_test_command(rule.command);
+}
+
 bool workspace_rule(PersistentPermissionRule const& rule)
 {
   return rule.scope == PermissionRuleScope::Workspace;
@@ -962,10 +972,14 @@ bool workspace_rule(PersistentPermissionRule const& rule)
 int rule_specificity(PersistentPermissionRule const& rule)
 {
   int specificity = 0;
-  if (!rule.target_path.empty()) ++specificity;
-  if (!rule.command.empty()) ++specificity;
-  if (!rule.tool_name.empty()) ++specificity;
-  if (rule.mode != PermissionRuleMode::Any) ++specificity;
+  if (!rule.target_path.empty())
+    ++specificity;
+  if (!rule.command.empty())
+    ++specificity;
+  if (!rule.tool_name.empty())
+    ++specificity;
+  if (rule.mode != PermissionRuleMode::Any)
+    ++specificity;
   return specificity;
 }
 
@@ -1179,6 +1193,8 @@ ava::core::Result<std::optional<PersistentPermissionRule>> match_persistent_perm
       matched_deny = matched_deny ? prefer_more_specific(*matched_deny, rule) : rule;
       continue;
     }
+    if (is_repository_build_or_test_allow(rule))
+      continue;
     matched_allow = matched_allow ? prefer_more_specific(*matched_allow, rule) : rule;
   }
   if (matched_deny)

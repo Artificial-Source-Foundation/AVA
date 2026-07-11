@@ -103,6 +103,7 @@ using PermissionResolver = std::function<ava::core::Result<PermissionResolutionD
 
 [[nodiscard]] PermissionDecision decide(PermissionRequest const& request);
 [[nodiscard]] PermissionDecision classify_command(std::string_view command);
+[[nodiscard]] bool is_repository_controlled_build_or_test_command(std::string_view command);
 [[nodiscard]] bool operator==(PermissionResolutionDecision const& decision, PermissionResolution resolution);
 [[nodiscard]] bool operator==(PermissionResolution resolution, PermissionResolutionDecision const& decision);
 [[nodiscard]] std::optional<PermissionAction> parse_permission_action(std::string_view value);

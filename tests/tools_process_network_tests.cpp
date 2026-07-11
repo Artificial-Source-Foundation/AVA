@@ -205,6 +205,23 @@ void test_bash_tool()
   expect(!ava::tools::run_bash(context, "cmake -P docs/plan.md"), "run_bash denies cmake script execution before execution");
   expect(!ava::tools::run_bash(context, "cmake -E copy docs/plan.md src/new.cpp"), "run_bash denies cmake copy helper before execution");
 
+  auto const repository_test_dir = temp_root() / "repository-test-fixture";
+  auto const repository_test_marker = repository_test_dir / "executed-marker";
+  std::filesystem::create_directories(repository_test_dir);
+  {
+    std::ofstream test_file(repository_test_dir / "CTestTestfile.cmake", std::ios::binary | std::ios::trunc);
+    test_file << "add_test(NAME repository_controlled_code COMMAND /usr/bin/touch " << repository_test_marker.generic_string() << ")\n";
+  }
+  auto repository_build = ava::tools::run_bash(context, "cmake --build " + repository_test_dir.generic_string());
+  expect(!repository_build && repository_build.error().format().find("resolution: no_resolver") != std::string::npos &&
+             !std::filesystem::exists(repository_test_marker),
+         "repository builds cannot execute automatically without an explicit resolver approval");
+
+  auto repository_test = ava::tools::run_bash(context, "ctest --test-dir " + repository_test_dir.generic_string());
+  expect(!repository_test && repository_test.error().format().find("resolution: no_resolver") != std::string::npos &&
+             !std::filesystem::exists(repository_test_marker),
+         "repository test code cannot execute automatically without an explicit resolver approval");
+
   auto timeout = ava::tools::run_bash(context, "sleep 2", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(50)});
   expect(timeout && timeout->timed_out, "run_bash times out long command");
 

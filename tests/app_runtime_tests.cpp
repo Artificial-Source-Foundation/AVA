@@ -179,10 +179,26 @@ void test_command_classification()
          "git diff output option is not auto-allowed");
   expect(ava::permissions::classify_command("git diff --no-index empty .ssh/work_key").action == ava::permissions::PermissionAction::Ask,
          "relative credential paths are not auto-allowed");
-  expect(ava::permissions::classify_command("cmake --build build").action == ava::permissions::PermissionAction::Allow,
-         "cmake build is allowed for non-TTY line shell verification");
-  expect(ava::permissions::classify_command("ctest --test-dir build").action == ava::permissions::PermissionAction::Allow,
-         "ctest is allowed for non-TTY line shell verification");
+  expect(ava::permissions::classify_command("cmake --build build").action == ava::permissions::PermissionAction::Ask,
+         "cmake build requires explicit approval because repository build rules can execute code");
+  expect(ava::permissions::classify_command("cmake --build build --target test").action == ava::permissions::PermissionAction::Ask,
+         "cmake build target variants cannot bypass explicit approval");
+  expect(ava::permissions::classify_command("cmake --build=build").action == ava::permissions::PermissionAction::Ask,
+         "cmake equals-form build variants cannot bypass explicit approval");
+  expect(ava::permissions::classify_command("/usr/bin/cmake --build build").action == ava::permissions::PermissionAction::Ask,
+         "path-qualified cmake builds cannot bypass explicit approval");
+  expect(ava::permissions::classify_command("cmake --build-and-test source build --build-generator Ninja").action == ava::permissions::PermissionAction::Ask,
+         "cmake build-and-test variants cannot bypass explicit approval");
+  expect(ava::permissions::classify_command("cmake --workflow --preset=ci").action == ava::permissions::PermissionAction::Ask,
+         "cmake workflow variants cannot bypass explicit approval");
+  expect(ava::permissions::classify_command("ctest --test-dir build").action == ava::permissions::PermissionAction::Ask,
+         "ctest requires explicit approval because repository tests can execute code");
+  expect(ava::permissions::classify_command("ctest -S dashboard.cmake").action == ava::permissions::PermissionAction::Ask,
+         "ctest script variants cannot bypass explicit approval");
+  expect(ava::permissions::classify_command("/usr/bin/ctest --test-dir build").action == ava::permissions::PermissionAction::Ask,
+         "path-qualified ctest cannot bypass explicit approval");
+  expect(ava::permissions::classify_command("cmake -S . -B build").action == ava::permissions::PermissionAction::Ask,
+         "cmake configure remains an explicit-approval command");
   expect(ava::permissions::classify_command("rg hello src").action == ava::permissions::PermissionAction::Allow,
          "rg is allowed for non-TTY line shell inspection");
   expect(ava::permissions::classify_command("rg --pre ./filter hello src").action == ava::permissions::PermissionAction::Deny,
@@ -197,10 +213,36 @@ void test_command_classification()
   expect(ava::permissions::classify_command("cmake -E cat ~/.config/ava/auth.json").action == ava::permissions::PermissionAction::Deny,
          "cmake -E helper access is denied");
   expect(ava::permissions::classify_command("cmake -P docs/plan.md").action == ava::permissions::PermissionAction::Deny, "cmake -P script execution is denied");
+  expect(ava::permissions::classify_command("cmake --workflow -P docs/plan.md").action == ava::permissions::PermissionAction::Deny,
+         "cmake workflow recognition does not override script execution denial");
   expect(ava::permissions::classify_command("cmake -E copy docs/plan.md src/new.cpp").action == ava::permissions::PermissionAction::Deny,
          "cmake -E copy mutation is denied");
   expect(ava::permissions::classify_command("python3 scripts/run.py").action == ava::permissions::PermissionAction::Deny, "interpreters are denied");
   expect(ava::permissions::classify_command("bash -lc ls").action == ava::permissions::PermissionAction::Deny, "shell interpreters remain denied");
+}
+
+void test_repository_build_test_headless_decision_matrix()
+{
+  ava::permissions::PermissionPrompt const prompt{.permission_request_id = "permreq_build_test",
+                                                  .operation = ava::permissions::Operation::RunCommand,
+                                                  .mode = ava::agent::Mode::Build,
+                                                  .workspace_dir = std::filesystem::current_path(),
+                                                  .target_path = {},
+                                                  .command = "ctest --test-dir build",
+                                                  .tool_name = "bash",
+                                                  .reason = "repository test execution requires explicit approval",
+                                                  .risk = ava::permissions::PermissionRisk::High};
+  auto headless = ava::app::build_headless_permission_resolver(ava::app::HeadlessPermissionPolicyOptions{});
+  auto const resolved = headless(prompt);
+  expect(resolved && *resolved == ava::permissions::PermissionResolution::Deny,
+         "headless mode fails closed for repository test execution that asks interactively");
+
+  auto build_prompt = prompt;
+  build_prompt.command = "cmake --build build";
+  build_prompt.reason = "repository build execution requires explicit approval";
+  auto const build_resolved = headless(build_prompt);
+  expect(build_resolved && *build_resolved == ava::permissions::PermissionResolution::Deny,
+         "headless mode fails closed for repository build execution that asks interactively");
 }
 
 void test_app_event_serialization()
@@ -3582,6 +3624,7 @@ void test_app_runtime_initial_reasoning_level_option()
 void run_app_command_classification_tests()
 {
   test_command_classification();
+  test_repository_build_test_headless_decision_matrix();
 }
 
 void run_app_event_serialization_tests()

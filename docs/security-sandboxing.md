@@ -135,15 +135,17 @@ Important limitations:
   `python`, `node`, `npm`, `pnpm`, `yarn`, `bun`, `make`, `ninja`, and `cargo`
   are denied by policy because they can execute arbitrary project code.
 - Read-only/local verification commands such as safe `git status`, `git diff`,
-  `git log`, `ctest`, safe `cmake --build`, `rg` without preprocessors, `ls`,
-  `pwd`, and bounded `sleep` may be allowed when their arguments stay within the
-  safe path rules.
+  `git log`, `rg` without preprocessors, `ls`, `pwd`, and bounded `sleep` may be
+  allowed when their arguments stay within the safe path rules.
+- Repository-controlled `ctest` and `cmake --build` invocations always require
+  an explicit one-shot approval or an exact in-memory grant for the active
+  session; AVA never persists an allow for them.
 - Unknown commands ask for approval instead of being silently run.
 
-Allowed verification commands can still execute repository-controlled code
-(`ctest`, build tools, compiler wrappers, test binaries, and hooks). For
-untrusted repositories, run those commands inside containment even when AVA's
-classifier would allow them.
+An approval is mediation, not containment: `ctest`, build tools, compiler
+wrappers, test binaries, and hooks can execute repository-controlled code. For
+untrusted repositories, run those commands inside OS/container/VM containment;
+an AVA approval does not sandbox the child process.
 
 If you need full shell semantics, run AVA inside a container/VM or execute the
 command yourself outside AVA after reviewing it. Do not treat an approved

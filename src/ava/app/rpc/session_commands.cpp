@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "output.h"
+#include "runtime_navigation.h"
 #include "serialization.h"
 #include "serialization_json.h"
 #include "session_commands.h"

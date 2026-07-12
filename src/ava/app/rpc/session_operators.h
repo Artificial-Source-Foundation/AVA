@@ -27,11 +27,7 @@ struct ProviderHandle
                                                                                  std::string_view purpose);
 
 [[nodiscard]] ava::core::Result<RuntimeSession> create_new_session(RuntimeSession const& current, RuntimeOpenOptions const& base_options);
-[[nodiscard]] ava::core::Result<RuntimeSession> open_requested_session(RuntimeSession const& current, RuntimeOpenOptions const& base_options,
-                                                                       std::string_view requested_session_id);
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_requested_model(RuntimeSession const& session, RpcCommand const& command);
-[[nodiscard]] ava::core::Result<ava::config::ModelInfo> next_runtime_model(RuntimeSession const& session);
-[[nodiscard]] ava::core::Result<ava::config::ModelInfo> previous_runtime_model(RuntimeSession const& session);
 [[nodiscard]] ava::core::Result<ProviderHandle> provider_for_session_model(RuntimeSession const& session, std::string_view injected_provider_id,
                                                                            ava::provider::Provider const& injected_provider);
 [[nodiscard]] ava::permissions::PermissionRuleStore permission_rule_store_for_session(RuntimeSession const& session);

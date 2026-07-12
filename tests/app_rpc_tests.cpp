@@ -4,8 +4,8 @@
 #include "tests/support/test_harness.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/project_trust.h"
+#include "ava/app/rpc/runtime_navigation.h"
 #include "ava/app/rpc/serialization.h"
-#include "ava/app/rpc/session_operators.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 

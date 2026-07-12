@@ -8,7 +8,7 @@
 #include "ava/app/onboarding.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/reasoning_controls.h"
-#include "ava/app/rpc/handlers.h"
+#include "ava/app/rpc/runtime_navigation.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"

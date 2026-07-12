@@ -20,54 +20,11 @@ else()
   set(CTAGS_FOUND FALSE)
 endif ()
 
-# Determine whether the available ctags supports JSON output.
-#
-# Probe `ctags --list-output-formats` and accept only a format literally named
-# "json" whose AVAILABLE column (the third whitespace-separated field) is "yes".
-#
 set(CTAGS_HAS_JSON FALSE)
 if (CTAGS_FOUND)
-  execute_process(
-    COMMAND "${CTAGS_EXECUTABLE}" --list-output-formats
-    RESULT_VARIABLE _ctags_formats_result
-    OUTPUT_VARIABLE _ctags_formats_output
-    ERROR_QUIET
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
-  if (_ctags_formats_result EQUAL 0)
-    # Turn the multi-line output into a CMake list of lines, escaping any
-    # literal semicolons first so they survive the newline-to-';' conversion.
-    string(REPLACE ";" "\\;" _ctags_formats_output "${_ctags_formats_output}")
-    string(REGEX REPLACE "\r?\n" ";" _ctags_format_lines "${_ctags_formats_output}")
-    foreach(_line ${_ctags_format_lines})
-      # Strip leading whitespace, then skip blank lines and the header line.
-      string(REGEX REPLACE "^[ \t]+" "" _line "${_line}")
-      if (_line STREQUAL "" OR _line MATCHES "^#")
-        continue()
-      endif ()
-      # Collapse runs of whitespace into list separators and drop empties.
-      string(REGEX REPLACE "[ \t]+" ";" _tokens "${_line}")
-      list(FILTER _tokens EXCLUDE REGEX "^$")
-      list(LENGTH _tokens _ntokens)
-      if (_ntokens GREATER_EQUAL 3)
-        list(GET _tokens 0 _fmt_name)
-        list(GET _tokens 2 _fmt_available)
-        if ("${_fmt_name}" STREQUAL "json" AND "${_fmt_available}" STREQUAL "yes")
-          set(CTAGS_HAS_JSON TRUE)
-          break()
-        endif ()
-      endif ()
-    endforeach()
-  endif ()
+  include("${CMAKE_SOURCE_DIR}/cmake/DetectCtagsJson.cmake")
+  ava_detect_ctags_json("${CTAGS_EXECUTABLE}" CTAGS_HAS_JSON)
 endif ()
-unset(_ctags_formats_result)
-unset(_ctags_formats_output)
-unset(_ctags_format_lines)
-unset(_line)
-unset(_tokens)
-unset(_ntokens)
-unset(_fmt_name)
-unset(_fmt_available)
 
 # Print find result(s).
 if (CTAGS_FOUND)

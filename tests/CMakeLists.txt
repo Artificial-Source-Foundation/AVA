@@ -338,6 +338,13 @@ add_test(
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-mcp-config-errors
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_mcp_config_errors.cmake)
 
+add_test(
+  NAME ava_build.ctags_json_detection
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+          -DAVA_TEST_ROOT=${CMAKE_BINARY_DIR}/ctags-json-detection
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/ctags_json_detection_test.cmake)
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(

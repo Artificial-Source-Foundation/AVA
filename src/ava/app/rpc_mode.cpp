@@ -4,7 +4,6 @@
 #include "ava/app/command_registry.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
-#include "ava/app/rpc/handlers.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/prompt_worker.h"
 #include "ava/app/rpc/protocol.h"
@@ -13,6 +12,7 @@
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/rpc/serialization_json.h"
 #include "ava/app/rpc/session_commands.h"
+#include "ava/app/rpc/session_operators.h"
 
 #include "ava/provider/curl_transport.h"
 #include "ava/provider/provider_utils.h"

@@ -1,7 +1,7 @@
 #include "sys.h"
-#include "handlers.h"
 #include "protocol.h"
 #include "serialization.h"
+#include "session_operators.h"
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/provider/registry.h"

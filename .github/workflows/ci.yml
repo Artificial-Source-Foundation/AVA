@@ -10,8 +10,14 @@ on:
 
 jobs:
   test:
-    name: Build and test
+    name: Build and test (${{ matrix.build_type }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type:
+          - Debug
+          - Release
     env:
       CC: gcc-16
       CXX: g++-16
@@ -34,14 +40,14 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ env.GITACHE_ROOT }}
-          key: gitache-${{ runner.os }}-${{ hashFiles('.gitmodules') }}
+          key: gitache-${{ runner.os }}-${{ matrix.build_type }}-${{ hashFiles('.gitmodules') }}
           restore-keys: |
-            gitache-${{ runner.os }}-
+            gitache-${{ runner.os }}-${{ matrix.build_type }}-
 
       - name: Configure
         run: |
           mkdir -p "$GITACHE_ROOT"
-          cmake -S . -B build -G Ninja -DAVA_BUILD_TESTS=ON
+          cmake -S . -B build -G Ninja -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
       - name: Build
         run: cmake --build build --parallel

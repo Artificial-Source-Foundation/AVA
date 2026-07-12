@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/observability/run_observer.h"
 #include "ava/agent/mode.h"
 #include "ava/core/result.h"
 
@@ -70,6 +71,20 @@ class SessionStore
   [[nodiscard]] std::filesystem::path session_path() const;
   [[nodiscard]] bool is_ephemeral() const noexcept;
 
+  // Observation is non-authoritative and never serialized into session JSONL.
+  // Copies of a store share this attachment. A generation lets a finished stale
+  // run clear only the attachment it installed, never a newer run's attachment.
+  // This is a no-throw best-effort transaction. It returns zero on a disabled
+  // observer or setup failure and leaves any existing attachment unchanged.
+  [[nodiscard]] std::uint64_t set_run_observation(std::shared_ptr<ava::observability::RunObservation> const& observation,
+                                                  ava::observability::TraceContext const& context = {}) noexcept;
+  void clear_run_observation(std::uint64_t generation) noexcept;
+  // Test-only deterministic fault injection for the no-throw attachment path.
+  void fail_next_run_observation_attachment_for_test() noexcept;
+  // A background persistence copy intentionally has no live trace attachment.
+  // It may write the same session, but cannot inherit or clear a newer run.
+  [[nodiscard]] SessionStore detached_copy_for_background_persistence() const;
+
   [[nodiscard]] ava::core::VoidResult append(SessionEntry const& entry);
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load() const;
 
@@ -86,11 +101,13 @@ class SessionStore
 
  private:
   struct EphemeralState;
+  struct ObservationAttachment;
 
   explicit SessionStore(SessionStoreOptions options, std::shared_ptr<EphemeralState> ephemeral_state);
 
   SessionStoreOptions options_;
   std::shared_ptr<EphemeralState> ephemeral_state_;
+  std::shared_ptr<ObservationAttachment> observation_attachment_;
 };
 
 [[nodiscard]] std::string to_string(EntryType type);

@@ -1,0 +1,1 @@
+{"schema_version":1,"milestone":"M1","immutable_pre_m1_baseline":{"registered":63,"passed":59,"skipped":4},"current_m1_measurement":{"registered":64,"passed":60,"skipped":4},"skips":["provider_live_smoke","tui_tmux_smoke","tui_kitty_image_smoke","tui_osc8_smoke"],"trace_egress":"disabled","live_provider":"not_run"}

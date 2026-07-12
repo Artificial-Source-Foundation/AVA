@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "milestone": "M1",
+  "fixture_revision": "m1-observer-golden-r2",
+  "pre_m1": {"registered": 63, "passed": 59, "skipped": 4},
+  "current": {"registered": 64, "passed": 60, "skipped": 4},
+  "validator": "monotonic_unique_sequence,start_before_terminal,no_after_terminal,terminal_outcome,fixture_required_boundaries",
+  "accounting": "callback_failures_and_drops_are_supplied_separately",
+  "timeouts": {"focused_ctest_seconds": 60, "full_ctest_seconds": 300, "sanitizer_focused_seconds": 180},
+  "evidence_source": "fixtures/eval/m1/normalized-trace.jsonl",
+  "fixtures": [
+    {"id": "text", "revision": "m1-observer-golden-r2", "applicable": true, "timeout_seconds": 60, "evidence_source": "normalized-trace.jsonl#text", "required_boundaries": ["run_lifecycle", "text_delta"], "weights": {"run_lifecycle": 40, "text_delta": 60}, "denominator": 100},
+    {"id": "tool", "revision": "m1-observer-golden-r2", "applicable": true, "timeout_seconds": 60, "evidence_source": "normalized-trace.jsonl#tool", "required_boundaries": ["run_lifecycle", "tool_dispatch"], "weights": {"run_lifecycle": 40, "tool_dispatch": 60}, "denominator": 100},
+    {"id": "error", "revision": "m1-observer-golden-r2", "applicable": true, "timeout_seconds": 60, "evidence_source": "normalized-trace.jsonl#error", "required_boundaries": ["run_lifecycle", "provider_error_terminal"], "weights": {"run_lifecycle": 40, "provider_error_terminal": 60}, "denominator": 100},
+    {"id": "cancel", "revision": "m1-observer-golden-r2", "applicable": true, "timeout_seconds": 60, "evidence_source": "normalized-trace.jsonl#cancel", "required_boundaries": ["run_lifecycle", "canceled_terminal"], "weights": {"run_lifecycle": 40, "canceled_terminal": 60}, "denominator": 100}
+  ],
+  "m14_harness": {"W1": "not_completed", "R1": "not_completed", "F1": "not_completed"}
+}

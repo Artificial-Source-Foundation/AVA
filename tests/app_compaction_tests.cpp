@@ -1,32 +1,37 @@
+#include "tests/support/app_runtime_support.h"
+#include "tests/support/fake_transport.h"
+#include "tests/support/test_harness.h"
+#include "ava/observability/run_observer.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
 #include "ava/app/runtime.h"
-
 #include "ava/session/compaction.h"
 #include "ava/session/export.h"
 #include "ava/session/session_store.h"
 #include "ava/session/stats.h"
-
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/provider_utils.h"
-
 #include "ava/core/json.h"
-
-#include "tests/support/app_runtime_support.h"
-#include "tests/support/fake_transport.h"
-#include "tests/support/test_harness.h"
 
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 namespace {
 
 using namespace ava::tests;
+
+class ThrowingRunObserver final : public ava::observability::RunObserver
+{
+ public:
+  void on_event(ava::observability::TraceEvent const&) override { throw std::runtime_error("observer failure"); }
+};
 
 class CancelAfterRequestTransport final : public ava::provider::Transport {
  public:
@@ -215,11 +220,66 @@ void test_app_compact_provider_failure_leaves_session_untouched()
              compact->output[0].find("compaction summary request failed with status 500") != std::string::npos &&
              compact->output[0].find("boom") != std::string::npos,
          "provider-backed /compact reports provider failure with status and body details");
-  expect(entries && std::ranges::none_of(*entries,
-                                          [](ava::session::SessionEntry const& entry) {
-                                            return entry.type == ava::session::EntryType::Compaction;
-                                          }),
+  expect(entries && std::ranges::none_of(*entries, [](ava::session::SessionEntry const& entry) { return entry.type == ava::session::EntryType::Compaction; }),
          "provider-backed /compact failure leaves session without compaction entry");
+}
+
+void test_compaction_observation_preserves_cancellation_callback_contract()
+{
+  auto const root = temp_root() / "app-compaction-observer-callback";
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "compaction callback-contract test opens runtime session");
+  if (!session)
+    return;
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  auto const config = ava::session::default_compaction_config();
+  auto const entries = session->store.load();
+  expect(entries.has_value(), "compaction callback-contract test loads session entries");
+  if (!entries)
+    return;
+
+  auto run_summary = [&](std::shared_ptr<ava::observability::RunObservation> observation, bool throwing_callback) {
+    ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"summary\"}"}});
+    unsigned callback_calls = 0;
+    ava::app::RuntimeRunOptions options;
+    options.access_token = "token";
+    options.observation = std::move(observation);
+    options.cancel_requested = [&callback_calls, throwing_callback]() -> bool {
+      ++callback_calls;
+      if (throwing_callback)
+        throw std::runtime_error("authoritative callback failure");
+      return false;
+    };
+    bool callback_threw = false;
+    ava::core::Result<std::string> result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "not run"));
+    try
+    {
+      result = ava::app::generate_compaction_summary(*session, *entries, config, "", 1, provider, transport, options);
+    }
+    catch (std::runtime_error const&)
+    {
+      callback_threw = true;
+    }
+    return std::tuple{std::move(result), callback_calls, callback_threw};
+  };
+
+  auto const [disabled_result, disabled_calls, disabled_threw] = run_summary(nullptr, false);
+  auto throwing_observer = std::make_shared<ThrowingRunObserver>();
+  auto enabled_observation = std::make_shared<ava::observability::RunObservation>(throwing_observer);
+  auto const [enabled_result, enabled_calls, enabled_threw] = run_summary(enabled_observation, false);
+  auto const [disabled_throw_result, disabled_throw_calls, disabled_throw_threw] = run_summary(nullptr, true);
+  auto const [enabled_throw_result, enabled_throw_calls, enabled_throw_threw] = run_summary(enabled_observation, true);
+  expect(disabled_result && enabled_result && *disabled_result == "summary" && *enabled_result == "summary" && disabled_calls == 3 && enabled_calls == 3 &&
+             !disabled_threw && !enabled_threw && enabled_observation->counters().callback_failures == 1 && !disabled_throw_result && !enabled_throw_result &&
+             disabled_throw_threw && enabled_throw_threw && disabled_throw_calls == 1 && enabled_throw_calls == 1,
+         "compaction observation isolates observer failures and preserves stateful and throwing cancellation callback behavior/counts");
 }
 
 void test_app_auto_compaction_provider_cancellation_leaves_session_untouched()
@@ -908,6 +968,7 @@ void run_app_compaction_tests()
   test_app_compact_provider_summary_success();
   test_app_compact_openai_oauth_streaming_summary_success();
   test_app_compact_provider_failure_leaves_session_untouched();
+  test_compaction_observation_preserves_cancellation_callback_contract();
   test_app_auto_compaction_provider_cancellation_leaves_session_untouched();
   test_app_compact_oversized_summary_leaves_session_untouched();
   test_app_compact_cancellation_before_append_leaves_session_untouched();

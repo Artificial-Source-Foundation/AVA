@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/observability/run_observer.h"
 #include "ava/agent/background_job_registry.h"
 #include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
@@ -126,6 +127,11 @@ struct AgentLoopOptions
   std::optional<ava::config::ModelPricing> model_pricing = std::nullopt;
   bool parallel_read_search_tools = false;
   std::size_t parallel_read_search_max_workers = 4;
+  // Disabled by default. This is independent from RuntimeEvent/RPC output.
+  std::shared_ptr<ava::observability::RunObservation> observation = nullptr;
+  // Runtime may pre-establish this so retries, compaction, and the agent share
+  // one run/turn identity.
+  ava::observability::TraceContext trace_context = {};
 };
 
 struct AgentLoopResult
@@ -155,6 +161,11 @@ class AgentLoop
                                                             ava::provider::Transport& transport);
 
  private:
+  [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn_impl(std::string const& user_message,
+                                                                 std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
+                                                                 ava::session::SessionStore& store, ava::provider::Provider const& provider,
+                                                                 ava::provider::Transport& transport, ava::observability::TraceContext const& trace_context);
+
   AgentLoopOptions options_;
 };
 

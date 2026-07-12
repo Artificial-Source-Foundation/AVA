@@ -6,6 +6,7 @@
 #include "ava/core/json.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -13,18 +14,30 @@
 #include <iomanip>
 #include <map>
 #include <mutex>
+#include <new>
+#include <optional>
 #include <sstream>
 #include <string_view>
 #include <utility>
 #include "debug.h"
 
 #ifdef CWDEBUG
+#include "cwds/debug_ostream_operators.h"
 #include "ava/debug/debug_ostream_operators.h"
 #include "ava/debug/print_pointer.h"
-#include "cwds/debug_ostream_operators.h"
 #endif
 
 namespace ava::session {
+
+struct SessionStore::ObservationAttachment
+{
+  mutable std::mutex mutex;
+  std::shared_ptr<ava::observability::RunObservation> observation;
+  std::shared_ptr<ava::observability::TraceContext const> context;
+  std::uint64_t generation = 0;
+  std::atomic_bool enabled = false;
+  std::atomic_bool fail_next_attachment_for_test = false;
+};
 
 struct SessionStore::EphemeralState
 {
@@ -77,14 +90,57 @@ std::mutex& append_mutex_for_path(std::filesystem::path const& path)
   return *mutex;
 }
 
+class SessionTraceScope
+{
+ public:
+  SessionTraceScope(std::shared_ptr<ava::observability::RunObservation> observation, std::shared_ptr<ava::observability::TraceContext const> context,
+                    ava::observability::TraceEventType attempt, ava::observability::TraceEventType result, std::optional<EntryType> entry_type,
+                    bool ephemeral) noexcept
+      : observation_(std::move(observation)), context_(std::move(context)), result_(result), entry_type_(entry_type), ephemeral_(ephemeral)
+  {
+    observation_->emit(attempt, *context_, [this](auto& event) {
+      event.phase = ava::observability::TracePhase::Session;
+      if (entry_type_)
+        event.fields = {{.key = "entry_type", .value = to_string(*entry_type_)}, {.key = "ephemeral", .value = ephemeral_ ? "true" : "false"}};
+      else
+        event.fields = {{.key = "ephemeral", .value = ephemeral_ ? "true" : "false"}};
+    });
+  }
+  ~SessionTraceScope() noexcept
+  {
+    observation_->emit(result_, *context_, [this](auto& event) {
+      event.phase = ava::observability::TracePhase::Session;
+      event.outcome = outcome_;
+      if (result_ == ava::observability::TraceEventType::SessionLoadResult)
+        event.fields = {{.key = "ephemeral", .value = ephemeral_ ? "true" : "false"}, {.key = "entry_count", .value = std::to_string(entry_count_)}};
+      else
+        event.fields = {{.key = "entry_type", .value = to_string(*entry_type_)}, {.key = "ephemeral", .value = ephemeral_ ? "true" : "false"}};
+    });
+  }
+  void succeed(std::size_t entry_count = 0) noexcept
+  {
+    outcome_ = ava::observability::TraceOutcome::Success;
+    entry_count_ = entry_count;
+  }
+
+ private:
+  std::shared_ptr<ava::observability::RunObservation> observation_;
+  std::shared_ptr<ava::observability::TraceContext const> context_;
+  ava::observability::TraceEventType result_;
+  std::optional<EntryType> entry_type_;
+  bool ephemeral_ = false;
+  std::size_t entry_count_ = 0;
+  ava::observability::TraceOutcome outcome_ = ava::observability::TraceOutcome::Error;
+};
+
 }  // namespace
 
-SessionStore::SessionStore(SessionStoreOptions options) : options_(std::move(options))
+SessionStore::SessionStore(SessionStoreOptions options) : options_(std::move(options)), observation_attachment_(std::make_shared<ObservationAttachment>())
 {
 }
 
 SessionStore::SessionStore(SessionStoreOptions options, std::shared_ptr<EphemeralState> ephemeral_state)
-    : options_(std::move(options)), ephemeral_state_(std::move(ephemeral_state))
+    : options_(std::move(options)), ephemeral_state_(std::move(ephemeral_state)), observation_attachment_(std::make_shared<ObservationAttachment>())
 {
 }
 
@@ -103,8 +159,99 @@ bool SessionStore::is_ephemeral() const noexcept
   return static_cast<bool>(ephemeral_state_);
 }
 
+std::uint64_t SessionStore::set_run_observation(std::shared_ptr<ava::observability::RunObservation> const& observation,
+                                                ava::observability::TraceContext const& context) noexcept
+{
+  // Disabled observation has no attachment state and does not take its lock.
+  if (!observation || !observation->enabled())
+    return 0;
+  try
+  {
+    if (observation_attachment_->fail_next_attachment_for_test.exchange(false, std::memory_order_relaxed))
+      throw std::bad_alloc();
+    // Finish every allocation before acquiring the lock so a failure leaves
+    // the live attachment untouched. Immutable shared context also makes the
+    // append/load snapshot and SessionTraceScope construction no-throw.
+    auto prepared_context = std::make_shared<ava::observability::TraceContext>(context);
+    if (prepared_context->session_id.empty())
+      prepared_context->session_id = session_id();
+    auto prepared_observation = observation;
+
+    std::lock_guard lock(observation_attachment_->mutex);
+    observation_attachment_->observation = std::move(prepared_observation);
+    observation_attachment_->context = std::move(prepared_context);
+    observation_attachment_->enabled.store(true, std::memory_order_release);
+    auto generation = observation_attachment_->generation + 1;
+    if (generation == 0)
+      generation = 1;
+    observation_attachment_->generation = generation;
+    return generation;
+  }
+  catch (...)
+  {
+    observation->account_external_failure();
+    return 0;
+  }
+}
+
+void SessionStore::fail_next_run_observation_attachment_for_test() noexcept
+{
+  observation_attachment_->fail_next_attachment_for_test.store(true, std::memory_order_relaxed);
+}
+
+void SessionStore::clear_run_observation(std::uint64_t generation) noexcept
+{
+  if (generation == 0)
+    return;
+  try
+  {
+    std::lock_guard lock(observation_attachment_->mutex);
+    if (observation_attachment_->generation == generation)
+    {
+      observation_attachment_->enabled.store(false, std::memory_order_release);
+      observation_attachment_->observation.reset();
+      observation_attachment_->context = {};
+    }
+  }
+  catch (...)
+  {
+    // A cleanup failure is observer-only and must never terminate a run.
+  }
+}
+
+SessionStore SessionStore::detached_copy_for_background_persistence() const
+{
+  return SessionStore(options_, ephemeral_state_);
+}
+
 ava::core::VoidResult SessionStore::append(SessionEntry const& entry)
 {
+  // The normal disabled path does not lock, copy, or allocate for observation.
+  // Enabled setup is best effort and is fully isolated from the append.
+  std::optional<SessionTraceScope> trace;
+  if (observation_attachment_->enabled.load(std::memory_order_acquire))
+  {
+    std::shared_ptr<ava::observability::RunObservation> observation;
+    try
+    {
+      std::shared_ptr<ava::observability::TraceContext const> context;
+      {
+        std::lock_guard lock(observation_attachment_->mutex);
+        observation = observation_attachment_->observation;
+        context = observation_attachment_->context;
+      }
+      if (observation && observation->enabled() && context)
+      {
+        trace.emplace(std::move(observation), std::move(context), ava::observability::TraceEventType::SessionAppendAttempt,
+                      ava::observability::TraceEventType::SessionAppendResult, entry.type, is_ephemeral());
+      }
+    }
+    catch (...)
+    {
+      if (observation)
+        observation->account_external_failure();
+    }
+  }
   if (auto valid_session_id = validate_session_id(options_.session_id); !valid_session_id)
   {
     return valid_session_id;
@@ -135,6 +282,8 @@ ava::core::VoidResult SessionStore::append(SessionEntry const& entry)
   {
     std::lock_guard lock(ephemeral_state_->mutex);
     ephemeral_state_->entries.push_back(entry);
+    if (trace)
+      trace->succeed();
     return {};
   }
 
@@ -221,11 +370,37 @@ ava::core::VoidResult SessionStore::append(SessionEntry const& entry)
     return std::unexpected(std::move(error));
   }
 
+  if (trace)
+    trace->succeed();
   return {};
 }
 
 ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const
 {
+  std::optional<SessionTraceScope> trace;
+  if (observation_attachment_->enabled.load(std::memory_order_acquire))
+  {
+    std::shared_ptr<ava::observability::RunObservation> observation;
+    try
+    {
+      std::shared_ptr<ava::observability::TraceContext const> context;
+      {
+        std::lock_guard lock(observation_attachment_->mutex);
+        observation = observation_attachment_->observation;
+        context = observation_attachment_->context;
+      }
+      if (observation && observation->enabled() && context)
+      {
+        trace.emplace(std::move(observation), std::move(context), ava::observability::TraceEventType::SessionLoadAttempt,
+                      ava::observability::TraceEventType::SessionLoadResult, std::nullopt, is_ephemeral());
+      }
+    }
+    catch (...)
+    {
+      if (observation)
+        observation->account_external_failure();
+    }
+  }
   if (auto valid_session_id = validate_session_id(options_.session_id); !valid_session_id)
   {
     return std::unexpected(std::move(valid_session_id.error()));
@@ -234,7 +409,10 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const
   if (ephemeral_state_)
   {
     std::lock_guard lock(ephemeral_state_->mutex);
-    return ephemeral_state_->entries;
+    auto entries = ephemeral_state_->entries;
+    if (trace)
+      trace->succeed(entries.size());
+    return entries;
   }
 
   auto const path = session_path();
@@ -245,6 +423,8 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const
   auto const status = std::filesystem::symlink_status(path, status_error);
   if (status_error || !std::filesystem::exists(status))
   {
+    if (trace)
+      trace->succeed();
     return std::vector<SessionEntry>{};
   }
   if (std::filesystem::is_symlink(status))
@@ -289,6 +469,8 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load() const
       return std::unexpected(std::move(entry.error()));
     entries.push_back(std::move(*entry));
   }
+  if (trace)
+    trace->succeed(entries.size());
   return entries;
 }
 

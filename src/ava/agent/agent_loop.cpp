@@ -251,6 +251,56 @@ struct BufferedToolCallbacks
   std::vector<ava::tools::ToolProgressEvent> progress_events;
 };
 
+struct AgentTraceScope
+{
+  ava::session::SessionStore& store;
+  std::shared_ptr<ava::observability::RunObservation> observation;
+  ava::observability::TraceContext const& context;
+  ava::observability::TraceOutcome outcome = ava::observability::TraceOutcome::Failed;
+
+  std::uint64_t attachment_generation = 0;
+
+  AgentTraceScope(ava::session::SessionStore& store_in, std::shared_ptr<ava::observability::RunObservation> observation_in,
+                  ava::observability::TraceContext const& context_in, std::uint64_t generation) noexcept
+      : store(store_in), observation(std::move(observation_in)), context(context_in), attachment_generation(generation)
+  {
+  }
+  ~AgentTraceScope() noexcept
+  {
+    if (observation)
+      observation->emit(ava::observability::TraceEventType::AgentRunTerminal, context, [this](auto& event) {
+        event.phase = ava::observability::TracePhase::Run;
+        event.outcome = outcome;
+      });
+    // Do not let stale background copies clear a newer attachment.
+    store.clear_run_observation(attachment_generation);
+  }
+};
+
+bool is_terminal_canceled_error(ava::core::Error const& error)
+{
+  return error.message() == "agent loop canceled" || error.message() == "transport retry canceled" || error.message() == "transport request canceled" ||
+         is_scheduler_canceled_error(error);
+}
+
+ava::observability::TraceOutcome terminal_outcome(ava::core::Error const& error)
+{
+  if (is_terminal_canceled_error(error))
+    return ava::observability::TraceOutcome::Canceled;
+  switch (error.category())
+  {
+    case ava::core::ErrorCategory::Provider:
+      return ava::observability::TraceOutcome::ProviderError;
+    case ava::core::ErrorCategory::Tool:
+      return ava::observability::TraceOutcome::ToolError;
+    case ava::core::ErrorCategory::Session:
+    case ava::core::ErrorCategory::Io:
+      return ava::observability::TraceOutcome::SessionError;
+    default:
+      return ava::observability::TraceOutcome::Failed;
+  }
+}
+
 void append_background_error_best_effort(ava::session::SessionStore& store, ava::core::Error const& error)
 {
   static_cast<void>(append_error(store, error));
@@ -305,6 +355,58 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
                                                        ava::session::SessionStore& store, ava::provider::Provider const& provider,
                                                        ava::provider::Transport& transport)
 {
+  ava::observability::TraceContext trace_context;
+  std::optional<AgentTraceScope> trace_scope;
+  if (options_.observation && options_.observation->enabled())
+  {
+    try
+    {
+      trace_context = options_.trace_context;
+      trace_context.session_id = trace_context.session_id.empty() ? store.session_id() : trace_context.session_id;
+      trace_context.provider_id = trace_context.provider_id.empty() ? options_.provider_id : trace_context.provider_id;
+      // Empty/failed IDs are still isolated at RunObservation; do not let them
+      // prevent the authoritative run.
+      if (trace_context.run_id.empty())
+        trace_context.run_id = options_.observation->next_id("run");
+      if (trace_context.turn_id.empty())
+        trace_context.turn_id = options_.observation->next_id("turn");
+      auto const attachment_generation = store.set_run_observation(options_.observation, trace_context);
+      // A failed observer attachment must not orphan the lifecycle: generation
+      // zero simply makes scope cleanup a no-op after it emits the terminal.
+      trace_scope.emplace(store, options_.observation, trace_context, attachment_generation);
+      options_.observation->emit(ava::observability::TraceEventType::AgentRunStart, trace_context,
+                                 [](auto& event) { event.phase = ava::observability::TracePhase::Run; });
+    }
+    catch (...)
+    {
+      options_.observation->account_external_failure();
+    }
+  }
+  auto result = run_turn_impl(user_message, image_attachments, store, provider, transport, trace_context);
+  if (trace_scope)
+    trace_scope->outcome = result ? ava::observability::TraceOutcome::Completed : terminal_outcome(result.error());
+  return result;
+}
+
+ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& user_message,
+                                                            std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
+                                                            ava::session::SessionStore& store, ava::provider::Provider const& provider,
+                                                            ava::provider::Transport& transport, ava::observability::TraceContext const& trace_context)
+{
+  ava::provider::Transport* effective_transport = &transport;
+  std::optional<ava::provider::ObservedTransport> observed_transport;
+  if (options_.observation && options_.observation->enabled())
+  {
+    try
+    {
+      observed_transport.emplace(transport, ava::provider::TransportObservation{.observation = options_.observation, .context = trace_context});
+      effective_transport = &*observed_transport;
+    }
+    catch (...)
+    {
+      options_.observation->account_external_failure();
+    }
+  }
   auto check_canceled_locked = [&](std::string_view boundary) -> ava::core::VoidResult {
     if (options_.session_mutex)
     {
@@ -538,6 +640,15 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
     child_options.background_provider_factory = nullptr;
     child_options.background_transport_factory = nullptr;
     child_options.background_jobs = nullptr;
+    // A child owns a fresh lifecycle/session identity. Parent IDs are typed
+    // correlation metadata only and never become child lifecycle IDs.
+    child_options.trace_context = {.run_id = {},
+                                   .turn_id = {},
+                                   .session_id = {},
+                                   .provider_id = options_.provider_id,
+                                   .parent_run_id = trace_context.run_id,
+                                   .parent_turn_id = trace_context.turn_id,
+                                   .parent_session_id = store.session_id()};
 
     if (request.background)
     {
@@ -551,7 +662,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
         return std::unexpected(std::move(background_transport.error()));
       auto provider_instance = std::move(*background_provider);
       auto transport_instance = std::move(*background_transport);
-      auto parent_store = store;
+      auto parent_store = store.detached_copy_for_background_persistence();
       child_options.permission_resolver = nullptr;
       child_options.question_resolver = nullptr;
       child_options.session_mutex = nullptr;
@@ -627,33 +738,63 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
                                           .tool_calls = child_result->tool_calls,
                                           .tool_iterations = child_result->tool_iterations};
   };
-  ava::tools::ToolContext const tool_context{
-      .workspace_dir = options_.workspace_dir,
-      .spill_dir = store.session_path().parent_path() / "spill",
-      .mode = options_.mode,
-      .permission_resolver = options_.permission_resolver,
-      .permission_audit_sink = append_permission_decision_locked,
-      .progress_sink = [this](ava::tools::ToolProgressEvent const& event) -> ava::core::VoidResult {
-        return publish_tool_progress(options_,
-                                     ToolProgressEntry{.call_id = event.call_id, .name = event.tool_name, .text = event.text, .status = event.status});
-      },
-      .cancel_requested = options_.cancel_requested,
-      .question_resolver = options_.question_resolver,
-      .task_subagent_runner = run_task_subagent,
-      .subagents = subagents,
-      .lsp_diagnostics_provider = options_.lsp_diagnostics_provider,
-      .plugin_global_plugins_dir = options_.plugin_global_plugins_dir,
-      .plugin_project_plugins_dir = options_.plugin_project_plugins_dir,
-      .plugin_enablement_file = options_.plugin_enablement_file,
-      .include_project_plugins = options_.include_project_resources,
-      .include_project_mcp_config = options_.include_project_resources,
-      .include_project_skills = options_.include_project_resources,
-      .session_id = store.session_id(),
-      .provider_id = options_.provider_id,
-      .model_id = options_.model_id,
-      .current_dir = options_.current_dir.empty() ? options_.workspace_dir : options_.current_dir,
-      .tool_visibility = options_.tool_visibility};
-  ToolDispatcher const dispatcher(tool_context);
+  ava::tools::ToolContext tool_context{.workspace_dir = options_.workspace_dir,
+                                       .spill_dir = store.session_path().parent_path() / "spill",
+                                       .mode = options_.mode,
+                                       .permission_resolver = options_.permission_resolver,
+                                       .permission_audit_sink = append_permission_decision_locked,
+                                       .progress_sink = [this](ava::tools::ToolProgressEvent const& event) -> ava::core::VoidResult {
+                                         return publish_tool_progress(
+                                             options_,
+                                             ToolProgressEntry{.call_id = event.call_id, .name = event.tool_name, .text = event.text, .status = event.status});
+                                       },
+                                       .cancel_requested = options_.cancel_requested,
+                                       .question_resolver = options_.question_resolver,
+                                       .task_subagent_runner = run_task_subagent,
+                                       .subagents = subagents,
+                                       .lsp_diagnostics_provider = options_.lsp_diagnostics_provider,
+                                       .plugin_global_plugins_dir = options_.plugin_global_plugins_dir,
+                                       .plugin_project_plugins_dir = options_.plugin_project_plugins_dir,
+                                       .plugin_enablement_file = options_.plugin_enablement_file,
+                                       .include_project_plugins = options_.include_project_resources,
+                                       .include_project_mcp_config = options_.include_project_resources,
+                                       .include_project_skills = options_.include_project_resources,
+                                       .session_id = store.session_id(),
+                                       .provider_id = options_.provider_id,
+                                       .model_id = options_.model_id,
+                                       .current_dir = options_.current_dir.empty() ? options_.workspace_dir : options_.current_dir,
+                                       .tool_visibility = options_.tool_visibility};
+  if (options_.observation && options_.observation->enabled())
+  {
+    try
+    {
+      tool_context.observation = options_.observation;
+      tool_context.trace_context = trace_context;
+    }
+    catch (...)
+    {
+      tool_context.observation.reset();
+      tool_context.trace_context = {};
+      options_.observation->account_external_failure();
+    }
+  }
+  std::optional<ToolDispatcher> dispatcher_storage;
+  try
+  {
+    dispatcher_storage.emplace(tool_context);
+  }
+  catch (...)
+  {
+    // ToolDispatcher owns a copy of ToolContext. If only that observation
+    // setup cannot be prepared, retry with the exact baseline context.
+    if (!tool_context.observation)
+      throw;
+    auto observation = std::move(tool_context.observation);
+    tool_context.trace_context = {};
+    observation->account_external_failure();
+    dispatcher_storage.emplace(tool_context);
+  }
+  ToolDispatcher const& dispatcher = *dispatcher_storage;
 
   std::size_t tool_iterations = 0;
   bool accumulated_cost_known = true;
@@ -798,6 +939,47 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
           }
           bytes += event.text.size();
         }
+        // Trace parser output before publishing the product event: an observer
+        // failure is isolated and cannot suppress or reorder product output.
+        if (options_.observation)
+        {
+          options_.observation->emit(ava::observability::TraceEventType::ProviderStreamEvent, trace_context, [&event](auto& trace) {
+            trace.phase = ava::observability::TracePhase::Provider;
+            switch (event.type)
+            {
+              case ava::provider::StreamEventType::TextDelta:
+                trace.outcome = ava::observability::TraceOutcome::TextDelta;
+                break;
+              case ava::provider::StreamEventType::ReasoningStart:
+                trace.outcome = ava::observability::TraceOutcome::ReasoningStart;
+                break;
+              case ava::provider::StreamEventType::ReasoningDelta:
+                trace.outcome = ava::observability::TraceOutcome::ReasoningDelta;
+                break;
+              case ava::provider::StreamEventType::ReasoningEnd:
+                trace.outcome = ava::observability::TraceOutcome::ReasoningEnd;
+                break;
+              case ava::provider::StreamEventType::ToolCallStart:
+                trace.outcome = ava::observability::TraceOutcome::ToolCallStart;
+                break;
+              case ava::provider::StreamEventType::ToolCallDelta:
+                trace.outcome = ava::observability::TraceOutcome::ToolCallDelta;
+                break;
+              case ava::provider::StreamEventType::ToolCallEnd:
+                trace.outcome = ava::observability::TraceOutcome::ToolCallEnd;
+                break;
+              case ava::provider::StreamEventType::Done:
+                trace.outcome = ava::observability::TraceOutcome::Done;
+                break;
+              case ava::provider::StreamEventType::Error:
+                trace.outcome = ava::observability::TraceOutcome::Error;
+                break;
+            }
+            trace.fields = {{.key = "text_bytes", .value = std::to_string(event.text.size())},
+                            {.key = "tool_name", .value = "[omitted]", .provenance = ava::observability::FieldProvenance::Content},
+                            {.key = "usage_present", .value = event.usage ? "true" : "false"}};
+          });
+        }
         bool const should_publish = publish_all_events || event.type == ava::provider::StreamEventType::ReasoningStart ||
                                     event.type == ava::provider::StreamEventType::ReasoningDelta || event.type == ava::provider::StreamEventType::ReasoningEnd;
         if (should_publish)
@@ -812,10 +994,10 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
       return {};
     };
 
-    if (provider_request.stream && transport.supports_streaming())
+    if (provider_request.stream && effective_transport->supports_streaming())
     {
       auto stream_parser = provider.create_stream_parser();
-      auto response = transport.send_streaming(
+      auto response = effective_transport->send_streaming(
           *request,
           [&](std::string_view chunk) -> ava::core::VoidResult {
             processed_stream_chunks = true;
@@ -960,7 +1142,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
     }
     else
     {
-      auto response = transport.send(*request, [&options = options_]() { return is_canceled(options); });
+      auto response = effective_transport->send(*request, [&options = options_]() { return is_canceled(options); });
       if (!response)
       {
         if (is_canceled(options_))

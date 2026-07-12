@@ -1,6 +1,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/observability/run_observer.h"
 #include "ava/app/clipboard_image.h"
 #include "ava/app/command_catalog.h"
 #include "ava/app/command_palette.h"
@@ -49,6 +50,7 @@
 #include "ava/core/json.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <climits>
 #include <condition_variable>
@@ -77,6 +79,28 @@
 namespace {
 
 using namespace ava::tests;
+
+class RuntimeTraceClock final : public ava::observability::Clock
+{
+ public:
+  [[nodiscard]] std::int64_t now_ms() override { return next_.fetch_add(1, std::memory_order_relaxed); }
+
+ private:
+  std::atomic<std::int64_t> next_ = 1;
+};
+
+class RuntimeTraceCollector final : public ava::observability::RunObserver
+{
+ public:
+  void on_event(ava::observability::TraceEvent const& event) override
+  {
+    std::lock_guard lock(mutex);
+    events.push_back(event);
+  }
+
+  std::mutex mutex;
+  std::vector<ava::observability::TraceEvent> events;
+};
 
 std::string app_tiny_png_bytes()
 {
@@ -1248,6 +1272,95 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
                events[0].trigger == "provider_transport" && events[0].remaining_ms == 500 && events[0].delay_ms == 1000 && events[0].status == "streaming",
            "runtime retry options map provider countdown ticks to explicit backend retry_tick events");
   }
+}
+
+void test_app_run_prompt_observation_shares_context_across_compaction_and_retry()
+{
+  auto const root = temp_root() / "app-runtime-observation-context";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::RuntimeOpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "observed runtime compaction test opens session");
+  if (!session)
+    return;
+  session->model.context_window_tokens = 100;
+  auto seeded = session->store.append({.id = "observed-old-context",
+                                       .parent_id = "",
+                                       .type = ava::session::EntryType::UserMessage,
+                                       .timestamp = ava::session::now_timestamp(),
+                                       .data_json = "{\"text\":\"" + std::string(420, 'x') + "\"}"});
+  expect(seeded.has_value(), "observed runtime compaction test seeds enough context to require a summary request");
+  if (!seeded)
+    return;
+
+  auto collector = std::make_shared<RuntimeTraceCollector>();
+  auto observation = std::make_shared<ava::observability::RunObservation>(collector, std::make_shared<RuntimeTraceClock>(),
+                                                                          std::make_shared<ava::observability::CounterIdGenerator>());
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {ava::provider::HttpResponse{.status_code = 429, .headers = {{"Retry-After", "0"}}, .body = "{\"error\":{\"message\":\"rate limited\"}}"},
+       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"OBSERVED SUMMARY\"}"},
+       sse_response(final_text_sse("observed answer"))});
+  ava::app::RuntimeRunOptions run_options;
+  run_options.access_token = "CANARY_RUNTIME_TOKEN";
+  run_options.enable_transport_retries = true;
+  run_options.observation = observation;
+
+  auto result = ava::app::run_prompt(*session, "continue observed run", provider, transport, run_options);
+  expect(result && result->final_text == "observed answer" && transport.requests().size() == 3,
+         "one scripted run_prompt performs a retried compaction summary then its agent request");
+  if (!result)
+    return;
+
+  std::vector<ava::observability::TraceEvent> trace_events;
+  {
+    std::lock_guard lock(collector->mutex);
+    trace_events = collector->events;
+  }
+  std::string run_id;
+  std::string turn_id;
+  unsigned logical_requests = 0;
+  unsigned attempt_results = 0;
+  bool retry = false;
+  bool terminal = false;
+  for (auto const& event : trace_events)
+  {
+    if (run_id.empty())
+    {
+      run_id = event.run_id;
+      turn_id = event.turn_id;
+    }
+    expect(!event.run_id.empty() && !event.turn_id.empty() && event.run_id == run_id && event.turn_id == turn_id,
+           "compaction, retries, attempts, and agent events share one runtime-generated run/turn context");
+    logical_requests += event.type == ava::observability::TraceEventType::TransportRequestResult;
+    attempt_results += event.type == ava::observability::TraceEventType::TransportAttemptResult;
+    retry = retry || event.type == ava::observability::TraceEventType::TransportRetry;
+    terminal = terminal || (event.type == ava::observability::TraceEventType::AgentRunTerminal && event.outcome == ava::observability::TraceOutcome::Completed);
+  }
+  expect(!run_id.empty() && logical_requests == 2 && attempt_results == 3 && retry && terminal,
+         "trace contains both logical requests, the summary retry attempts, retry record, and completed agent terminal");
+
+  std::ifstream session_file(session->store.session_path(), std::ios::binary);
+  std::string session_json((std::istreambuf_iterator<char>(session_file)), std::istreambuf_iterator<char>());
+  auto messages_json = ava::app::rpc::messages_result_json(*session);
+  auto prompt_json = ava::app::rpc::prompt_result_json(session->store.session_id(), *result);
+  auto state_json = ava::app::rpc::state_result_json(*session, false);
+  auto has_observer_fields = [](std::string_view json) {
+    return json.find("agent.run_start") != std::string_view::npos || json.find("transport.attempt_result") != std::string_view::npos ||
+           json.find("\"sequence\":") != std::string_view::npos || json.find("\"timestamp_ms\":") != std::string_view::npos ||
+           json.find("\"run_id\":") != std::string_view::npos || json.find("CANARY_RUNTIME_TOKEN") != std::string_view::npos;
+  };
+  expect(messages_json && !has_observer_fields(session_json) && !has_observer_fields(*messages_json) && !has_observer_fields(prompt_json) &&
+             !has_observer_fields(state_json),
+         "observer-only fields and canaries never enter authoritative session or RPC JSON");
 }
 
 void test_app_run_prompt_emits_tool_progress_and_session_spill()
@@ -3649,6 +3762,7 @@ void run_app_runtime_tests()
   test_app_run_prompt_sends_imported_image_attachment();
   test_app_clipboard_image_file_override_imports_attachment();
   test_app_run_prompt_emits_provider_retry_events_when_enabled();
+  test_app_run_prompt_observation_shares_context_across_compaction_and_retry();
   test_app_run_prompt_emits_tool_progress_and_session_spill();
   test_app_first_run_auth_onboarding();
   test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call();

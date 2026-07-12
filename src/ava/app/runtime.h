@@ -150,6 +150,9 @@ struct RuntimeRunOptions
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
   std::mutex* session_mutex = nullptr;
   std::vector<ava::session::ImageAttachmentRef> image_attachments;
+  // Disabled by default; trace data never enters RuntimeEvent/session/RPC.
+  std::shared_ptr<ava::observability::RunObservation> observation = nullptr;
+  ava::observability::TraceContext trace_context = {};
   bool offline = false;
 };
 

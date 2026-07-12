@@ -695,6 +695,17 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
   auto event_sink = make_plugin_event_observer_sink(std::move(plugin_observer_options), options.event_sink);
   auto runtime_options = options;
   runtime_options.event_sink = event_sink;
+  if (runtime_options.observation && runtime_options.observation->enabled())
+  {
+    if (runtime_options.trace_context.run_id.empty())
+      runtime_options.trace_context.run_id = runtime_options.observation->next_id("run");
+    if (runtime_options.trace_context.turn_id.empty())
+      runtime_options.trace_context.turn_id = runtime_options.observation->next_id("turn");
+    if (runtime_options.trace_context.session_id.empty())
+      runtime_options.trace_context.session_id = session.store.session_id();
+    if (runtime_options.trace_context.provider_id.empty())
+      runtime_options.trace_context.provider_id = session.model.provider_id;
+  }
   std::optional<ava::provider::RetryTransport> retry_transport;
   ava::provider::Transport* runtime_transport = &transport;
   if (runtime_options.enable_transport_retries)
@@ -877,7 +888,9 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(RuntimeSession& sessio
       },
       .background_jobs = session.background_jobs,
       .session_mutex = runtime_options.session_mutex,
-      .model_pricing = session.model.pricing});
+      .model_pricing = session.model.pricing,
+      .observation = runtime_options.observation,
+      .trace_context = runtime_options.trace_context});
 
   auto result = loop.run_turn(*expanded_user_message, runtime_options.image_attachments, session.store, provider, *runtime_transport);
   if (sink_error)

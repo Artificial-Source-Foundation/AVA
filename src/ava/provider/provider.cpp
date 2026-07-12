@@ -122,11 +122,14 @@ int exponential_delay_ms(RetryOptions const& options, int attempt) noexcept
   return static_cast<int>(delay);
 }
 
-ava::core::VoidResult publish_retry_event(RetryOptions const& options, std::size_t attempt, std::size_t max_attempts,
-                                          int delay_ms, std::size_t remaining_ms, std::string_view reason,
-                                          int status_code, bool streaming, bool countdown_tick = false)
+ava::core::VoidResult publish_retry_event(RetryOptions const& options, std::size_t attempt, std::size_t max_attempts, int delay_ms, std::size_t remaining_ms,
+                                          std::string_view reason, int status_code, bool streaming, bool countdown_tick = false)
 {
-  if (!options.on_retry) return {};
+  // Countdown ticks are UI progress only; one trace records the actual retry.
+  if (!countdown_tick)
+    observe_transport_retry(options.observation, attempt, max_attempts, static_cast<std::size_t>(std::max(0, delay_ms)), reason, status_code, streaming);
+  if (!options.on_retry)
+    return {};
   return options.on_retry(RetryOptions::Event{.attempt = attempt,
                                               .max_attempts = max_attempts,
                                               .delay_ms = static_cast<std::size_t>(std::max(0, delay_ms)),
@@ -347,7 +350,9 @@ ava::core::Result<HttpResponse> RetryTransport::send(HttpRequest const& request,
   auto combined_cancel_requested = [this, cancel_requested] { return retry_cancel_requested(options_, cancel_requested); };
   if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
   ava::core::Result<HttpResponse> response = inner_.send(request, combined_cancel_requested);
-  if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
+  bool canceled_after_attempt = combined_cancel_requested();
+  observe_transport_result(options_.observation, request, response, canceled_after_attempt, true);
+  if (canceled_after_attempt) return std::unexpected(retry_canceled_error());
   for (int attempt = 1; attempt < max_attempts; ++attempt) {
     if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
     if (response) {
@@ -385,7 +390,9 @@ ava::core::Result<HttpResponse> RetryTransport::send(HttpRequest const& request,
     }
     if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
     response = inner_.send(request, combined_cancel_requested);
-    if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
+    canceled_after_attempt = combined_cancel_requested();
+    observe_transport_result(options_.observation, request, response, canceled_after_attempt, true);
+    if (canceled_after_attempt) return std::unexpected(retry_canceled_error());
   }
   return response;
 }
@@ -417,7 +424,9 @@ ava::core::Result<HttpResponse> RetryTransport::send_streaming(HttpRequest const
           return on_body_chunk(chunk);
         },
         combined_cancel_requested);
-    if (combined_cancel_requested()) return std::unexpected(retry_canceled_error());
+    bool const canceled_after_attempt = combined_cancel_requested();
+    observe_transport_result(options_.observation, request, response, canceled_after_attempt, true);
+    if (canceled_after_attempt) return std::unexpected(retry_canceled_error());
 
     bool const last_attempt = attempt == max_attempts;
     if (response) {
@@ -464,6 +473,82 @@ ava::core::Result<HttpResponse> RetryTransport::send_streaming(HttpRequest const
     if (auto delivered = on_body_chunk(final_body); !delivered) return std::unexpected(std::move(delivered.error()));
   }
   return response;
+}
+
+ObservedTransport::ObservedTransport(Transport& inner, TransportObservation observation) : inner_(inner), observation_(std::move(observation))
+{
+}
+
+ava::core::Result<HttpResponse> ObservedTransport::send(HttpRequest const& request)
+{
+  return send(request, nullptr);
+}
+
+ava::core::Result<HttpResponse> ObservedTransport::send(HttpRequest const& request, CancelCallback cancel_requested)
+{
+  bool cancellation_observed = false;
+  auto forwarded_cancel_requested = cancel_requested
+                                        ? CancelCallback{[&cancel_requested, &cancellation_observed] {
+                                            bool const canceled = cancel_requested();
+                                            cancellation_observed = cancellation_observed || canceled;
+                                            return canceled;
+                                          }}
+                                        : CancelCallback{};
+  auto result = inner_.send(request, std::move(forwarded_cancel_requested));
+  observe_transport_result(observation_, request, result, cancellation_observed);
+  return result;
+}
+
+bool ObservedTransport::supports_streaming() const noexcept
+{
+  return inner_.supports_streaming();
+}
+
+ava::core::Result<HttpResponse> ObservedTransport::send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk, CancelCallback cancel_requested)
+{
+  bool cancellation_observed = false;
+  auto forwarded_cancel_requested = cancel_requested
+                                        ? CancelCallback{[&cancel_requested, &cancellation_observed] {
+                                            bool const canceled = cancel_requested();
+                                            cancellation_observed = cancellation_observed || canceled;
+                                            return canceled;
+                                          }}
+                                        : CancelCallback{};
+  auto result = inner_.send_streaming(request, std::move(on_body_chunk), std::move(forwarded_cancel_requested));
+  observe_transport_result(observation_, request, result, cancellation_observed);
+  return result;
+}
+
+void observe_transport_result(TransportObservation const& observation, HttpRequest const& request, ava::core::Result<HttpResponse> const& result, bool canceled,
+                              bool attempt) noexcept
+{
+  if (!observation.observation)
+    return;
+  observation.observation->emit(
+      attempt ? ava::observability::TraceEventType::TransportAttemptResult : ava::observability::TraceEventType::TransportRequestResult, observation.context,
+      [&](auto& event) {
+        event.phase = ava::observability::TracePhase::Transport;
+        event.outcome = canceled ? ava::observability::TraceOutcome::Canceled
+                        : result ? (result->status_code >= 200 && result->status_code < 300 ? ava::observability::TraceOutcome::Success
+                                                                                            : ava::observability::TraceOutcome::Error)
+                                 : ava::observability::TraceOutcome::Error;
+        event.fields = {{.key = "request_bytes", .value = std::to_string(request.body.size())},
+                        {.key = "status_code", .value = result ? std::to_string(result->status_code) : "0"}};
+      });
+}
+
+void observe_transport_retry(TransportObservation const& observation, std::size_t next_attempt, std::size_t max_attempts, std::size_t delay_ms,
+                             std::string_view reason, int status_code, bool streaming) noexcept
+{
+  if (!observation.observation)
+    return;
+  observation.observation->emit(ava::observability::TraceEventType::TransportRetry, observation.context, [&](auto& event) {
+    event.phase = ava::observability::TracePhase::Transport;
+    event.outcome = ava::observability::TraceOutcome::Retrying;
+    event.fields = {{.key = "next_attempt", .value = std::to_string(next_attempt)}, {.key = "max_attempts", .value = std::to_string(max_attempts)},
+                    {.key = "delay_ms", .value = std::to_string(delay_ms)},         {.key = "status_code", .value = std::to_string(status_code)},
+                    {.key = "streaming", .value = streaming ? "true" : "false"},    {.key = "reason", .value = std::string(reason)}};
+  });
 }
 
 std::string to_string(StreamEventType type)

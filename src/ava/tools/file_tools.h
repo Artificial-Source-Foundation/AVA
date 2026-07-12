@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/observability/run_observer.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/question.h"
 #include "ava/agent/subagent_config.h"
@@ -97,6 +98,9 @@ struct ToolContext
   std::string permission_actor = {};
   std::string current_tool_name = {};
   std::string current_call_id = {};
+  // An observer-only correlation ID. Provider call IDs remain product/session
+  // data and must not cross the trace boundary.
+  std::string trace_call_id = {};
   std::shared_ptr<std::vector<std::string>> permission_request_ids = nullptr;
   std::shared_ptr<MutationQueue> mutation_queue = nullptr;
   std::shared_ptr<ava::lsp::DiagnosticsProvider> lsp_diagnostics_provider = nullptr;
@@ -115,6 +119,8 @@ struct ToolContext
   std::string model_id = {};
   std::filesystem::path current_dir = {};
   ava::agent::ToolVisibilityOptions tool_visibility = {};
+  std::shared_ptr<ava::observability::RunObservation> observation = nullptr;
+  ava::observability::TraceContext trace_context = {};
 };
 
 struct TextOutput

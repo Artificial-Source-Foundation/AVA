@@ -1,5 +1,6 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/observability/run_observer.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
 #include "ava/config/model_config.h"
@@ -16,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -28,6 +30,18 @@
 #include <vector>
 
 namespace {
+
+class TraceCollector final : public ava::observability::RunObserver
+{
+ public:
+  void on_event(ava::observability::TraceEvent const& event) override
+  {
+    std::lock_guard lock(mutex);
+    events.push_back(event);
+  }
+  std::mutex mutex;
+  std::vector<ava::observability::TraceEvent> events;
+};
 
 ava::provider::HttpResponse sse_response(std::string const& body)
 {
@@ -460,6 +474,8 @@ void test_agent_loop_task_subagent_runs_child_session()
                                                     "data: [DONE]\n\n")});
   int prompts = 0;
   std::optional<ava::permissions::PermissionPrompt> captured_prompt;
+  auto trace_collector = std::make_shared<TraceCollector>();
+  auto observation = std::make_shared<ava::observability::RunObservation>(trace_collector);
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{.workspace_dir = workspace,
                                                           .mode = ava::agent::Mode::Build,
                                                           .provider_id = "openai",
@@ -471,7 +487,8 @@ void test_agent_loop_task_subagent_runs_child_session()
                                                             ++prompts;
                                                             captured_prompt = prompt;
                                                             return ava::permissions::PermissionResolution::Allow;
-                                                          }});
+                                                          },
+                                                          .observation = observation});
 
   auto result = loop.run_turn("delegate", store, provider, transport);
   expect(result && result->final_text == "parent saw task" && result->tool_calls == 1 && result->provider_iterations == 2 && prompts == 1,
@@ -538,6 +555,19 @@ void test_agent_loop_task_subagent_runs_child_session()
     }
   }
   expect(saw_child_metadata && saw_child_prompt && saw_child_answer, "task child session records parent linkage, delegated prompt, and child answer");
+  std::lock_guard trace_lock(trace_collector->mutex);
+  auto trace = ava::observability::validate_and_score_trace(trace_collector->events);
+  std::map<std::string, unsigned> starts, terminals;
+  bool child_parent_correlation = false;
+  for (auto const& event : trace_collector->events)
+  {
+    starts[event.run_id] += event.type == ava::observability::TraceEventType::AgentRunStart;
+    terminals[event.run_id] += event.type == ava::observability::TraceEventType::AgentRunTerminal;
+    child_parent_correlation =
+        child_parent_correlation || (!event.parent_run_id.empty() && event.parent_session_id == "parent" && event.session_id != event.parent_session_id);
+  }
+  expect(trace.valid && starts.size() == 2 && starts == terminals && child_parent_correlation,
+         "observed foreground task has separate parent/child lifecycles, fresh child session IDs, and typed parent correlation");
 }
 
 void test_subagent_config_loads_project_definitions()
@@ -643,6 +673,8 @@ void test_agent_loop_background_task_starts_child_session()
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   std::mutex session_mutex;
   auto registry = std::make_shared<ava::agent::BackgroundJobRegistry>();
+  auto trace_collector = std::make_shared<TraceCollector>();
+  auto observation = std::make_shared<ava::observability::RunObservation>(trace_collector);
   auto background_state = std::make_shared<BlockingBackgroundTransport::State>();
   ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"item_id\":\"call_task\",\"name\":\"task\"}\n\n"
                                                     "data: "
@@ -674,7 +706,8 @@ void test_agent_loop_background_task_starts_child_session()
         return transport;
       },
       .background_jobs = registry,
-      .session_mutex = &session_mutex});
+      .session_mutex = &session_mutex,
+      .observation = observation});
 
   auto result = loop.run_turn("delegate background", store, provider, transport);
   expect(result && result->final_text == "queued" && result->tool_calls == 1 && transport.requests().size() == 2,
@@ -717,7 +750,20 @@ void test_agent_loop_background_task_starts_child_session()
     }
   }
   expect(saw_background_request_without_lsp, "background subagents do not inherit the parent LSP provider");
-  expect(saw_background_answer, "background subagent writes completion to the child session");
+  expect(saw_background_answer, "background subagents write completion to the child session");
+  std::lock_guard trace_lock(trace_collector->mutex);
+  auto trace = ava::observability::validate_and_score_trace(trace_collector->events);
+  std::map<std::string, unsigned> starts, terminals;
+  bool child_parent_correlation = false;
+  for (auto const& event : trace_collector->events)
+  {
+    starts[event.run_id] += event.type == ava::observability::TraceEventType::AgentRunStart;
+    terminals[event.run_id] += event.type == ava::observability::TraceEventType::AgentRunTerminal;
+    child_parent_correlation =
+        child_parent_correlation || (!event.parent_run_id.empty() && event.parent_session_id == "parent-bg" && event.session_id != event.parent_session_id);
+  }
+  expect(trace.valid && starts.size() == 2 && starts == terminals && child_parent_correlation,
+         "observed background task has separate parent/child lifecycles and typed parent correlation");
 }
 
 void test_agent_loop_background_task_failure_records_parent_and_child_errors()

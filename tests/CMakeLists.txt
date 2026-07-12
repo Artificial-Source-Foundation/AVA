@@ -56,6 +56,7 @@ add_executable(ava_tests
   "tools_search_tests.cpp"
   "tools_tests.cpp"
   "tui_composer_tests.cpp"
+  "run_observer_tests.cpp"
 )
 target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_LIBRARIES} ava_test_support ${AICXX_OBJECTS_LIST})
 target_include_directories(ava_tests PRIVATE ${CURSES_INCLUDE_DIRS})
@@ -64,6 +65,7 @@ target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_FILE:ava_fake_mcp_server>")
 target_compile_definitions(ava_tests PRIVATE AVA_SAMPLE_TODO_PLUGIN_DIR="${CMAKE_SOURCE_DIR}/examples/plugins/todo")
 target_compile_definitions(ava_tests PRIVATE AVA_080_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden/ava-080")
+target_compile_definitions(ava_tests PRIVATE AVA_M1_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/fixtures/eval/m1")
 ava_apply_warnings(ava_tests)
 ava_apply_sanitizers(ava_tests)
 
@@ -96,11 +98,18 @@ set(AVA_TEST_SUITES
   mcp
   permission_rules
   tui_composer
+  run_observer
 )
 foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   add_test(NAME ava_tests.${AVA_TEST_SUITE} COMMAND ava_tests ${AVA_TEST_SUITE})
 endforeach()
 set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# The M1 fixture manifest is the source of its focused timeout as well as the
+# test-side required-boundary policy. Keep CTest and the scorer pinned to it.
+file(READ "${CMAKE_SOURCE_DIR}/fixtures/eval/m1/scoring-manifest.json" AVA_M1_SCORING_MANIFEST)
+string(JSON AVA_M1_FOCUSED_TIMEOUT GET "${AVA_M1_SCORING_MANIFEST}" timeouts focused_ctest_seconds)
+set_tests_properties(ava_tests.run_observer PROPERTIES TIMEOUT "${AVA_M1_FOCUSED_TIMEOUT}")
 
 add_test(
   NAME ava_cli.headless_rpc_validate_session

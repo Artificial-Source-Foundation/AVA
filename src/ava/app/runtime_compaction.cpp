@@ -300,6 +300,24 @@ ava::core::Result<std::string> generate_compaction_summary(RuntimeSession const&
     summary_transport = &*retry_transport;
     summary_options.enable_transport_retries = false;
   }
+  // Compaction is a provider request in the same runtime turn, so observe its
+  // logical request with the already-established run/turn context. Do not
+  // construct the decorator on the disabled path.
+  std::optional<ava::provider::ObservedTransport> observed_transport;
+  if (summary_options.observation && summary_options.observation->enabled())
+  {
+    try
+    {
+      observed_transport.emplace(*summary_transport,
+                                 ava::provider::TransportObservation{.observation = summary_options.observation,
+                                                                      .context = summary_options.trace_context});
+      summary_transport = &*observed_transport;
+    }
+    catch (...)
+    {
+      summary_options.observation->account_external_failure();
+    }
+  }
 
   constexpr std::string_view system_prompt =
       "You are AVA's deterministic session compaction summarizer. Create faithful continuation context from the "

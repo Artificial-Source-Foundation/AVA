@@ -1010,21 +1010,63 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch_with_context(ava:
     return std::unexpected(std::move(safe_id.error()));
   }
   auto const* tool = registry_.find(normalized.name);
-  if (tool != nullptr)
+  // Resolve before observing so only registry-owned canonical tool metadata can
+  // cross the trace boundary. Provider-supplied names and call IDs remain
+  // content/product data and are never used as trace correlation.
+  auto const trace_call_id = context.observation ? context.observation->next_id("tool") : std::string{};
+  auto emit_start = [&](std::string_view canonical_name, bool resolved) {
+    if (!context.observation)
+      return;
+    context.observation->emit(
+        ava::observability::TraceEventType::ToolDispatchStart, context.trace_context, [&normalized, &trace_call_id, canonical_name, resolved](auto& event) {
+          event.call_id = trace_call_id;
+          event.phase = ava::observability::TracePhase::Tool;
+          event.outcome = ava::observability::TraceOutcome::Started;
+          event.fields = {{.key = "tool_name",
+                           .value = resolved ? std::string(canonical_name) : "[omitted]",
+                           .provenance = resolved ? ava::observability::FieldProvenance::PublicMetadata : ava::observability::FieldProvenance::Content},
+                          {.key = "arguments_bytes", .value = std::to_string(normalized.arguments_json.size())}};
+        });
+  };
+  auto emit_result = [&](ToolDispatchResult const& result) {
+    if (!context.observation)
+      return;
+    context.observation->emit(ava::observability::TraceEventType::ToolDispatchResult, context.trace_context, [&result, &trace_call_id](auto& event) {
+      event.call_id = trace_call_id;
+      event.phase = ava::observability::TracePhase::Tool;
+      event.outcome = result.success ? ava::observability::TraceOutcome::Success
+                                     : (result.payload.status == ToolResultStatus::Canceled ? ava::observability::TraceOutcome::Canceled
+                                                                                            : ava::observability::TraceOutcome::Error);
+      event.fields = {{.key = "result_bytes", .value = std::to_string(result.result_text.size())}};
+    });
+  };
+  if (tool == nullptr)
   {
-    if (is_canceled(context))
-      return with_tool_result_payload(tool_error_result(normalized, canceled_error(normalized)));
-    context.permission_request_ids = std::make_shared<std::vector<std::string>>();
-    if (context.lsp_diagnostics_provider)
-      context.lsp_diagnostics_provider->set_permission_request_ids(context.permission_request_ids);
-    auto result = tool->executor(context, normalized);
-    if (context.permission_request_ids && !context.permission_request_ids->empty())
-    {
-      result.payload.permission_request_ids = *context.permission_request_ids;
-    }
-    return with_tool_result_payload(std::move(result));
+    emit_start({}, false);
+    auto result = with_tool_result_payload(simple_error_result(normalized, ava::core::ErrorCategory::Tool, "unknown tool"));
+    emit_result(result);
+    return result;
   }
-  return with_tool_result_payload(simple_error_result(normalized, ava::core::ErrorCategory::Tool, "unknown tool"));
+
+  emit_start(tool->metadata.name, true);
+  context.trace_call_id = trace_call_id;
+  if (is_canceled(context))
+  {
+    auto result = with_tool_result_payload(tool_error_result(normalized, canceled_error(normalized)));
+    emit_result(result);
+    return result;
+  }
+  context.permission_request_ids = std::make_shared<std::vector<std::string>>();
+  if (context.lsp_diagnostics_provider)
+    context.lsp_diagnostics_provider->set_permission_request_ids(context.permission_request_ids);
+  auto result = tool->executor(context, normalized);
+  if (context.permission_request_ids && !context.permission_request_ids->empty())
+  {
+    result.payload.permission_request_ids = *context.permission_request_ids;
+  }
+  result = with_tool_result_payload(std::move(result));
+  emit_result(result);
+  return result;
 }
 
 std::vector<ToolMetadata> ToolDispatcher::registered_tool_metadata() const

@@ -367,11 +367,48 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
   {
     return std::unexpected(permission.error());
   }
+  BashResult result;
+  std::string process_outcome = "error";
+  // Provider call IDs are product data. A direct process invocation receives
+  // its own observer-only correlation ID rather than leaking that raw value.
+  auto trace_process_call_id = context.trace_call_id;
+  if (context.observation && trace_process_call_id.empty())
+    trace_process_call_id = context.observation->next_id("process");
+  struct ProcessTraceScope
+  {
+    ava::tools::ToolContext const& context;
+    std::string const& call_id;
+    std::string& outcome;
+    BashResult const& result;
+    ~ProcessTraceScope() noexcept
+    {
+      if (context.observation)
+        context.observation->emit(ava::observability::TraceEventType::ProcessResult, context.trace_context, [this](auto& event) {
+          event.call_id = call_id;
+          event.phase = ava::observability::TracePhase::Process;
+          event.outcome = outcome == "canceled" ? ava::observability::TraceOutcome::Canceled
+                                                : (outcome == "success" ? ava::observability::TraceOutcome::Success : ava::observability::TraceOutcome::Error);
+          event.fields = {{.key = "tool", .value = "bash"}, {.key = "output_bytes", .value = std::to_string(result.total_bytes)}};
+        });
+    }
+  } trace{context, trace_process_call_id, process_outcome, result};
+  auto observe_process_start = [&] {
+    if (context.observation)
+      context.observation->emit(ava::observability::TraceEventType::ProcessStart, context.trace_context, [&trace_process_call_id](auto& event) {
+        event.call_id = trace_process_call_id;
+        event.phase = ava::observability::TracePhase::Process;
+        event.outcome = ava::observability::TraceOutcome::Started;
+        event.fields = {{.key = "tool", .value = "bash"}};
+      });
+  };
+  // Permission approval is the operation boundary: every subsequent cancel,
+  // parse, pipe, or fork failure receives this matching observer-only pair.
+  observe_process_start();
   if (is_canceled(context))
   {
-    BashResult result;
     result.exit_code = -1;
     result.canceled = true;
+    process_outcome = "canceled";
     return result;
   }
 
@@ -403,6 +440,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to fork process");
     error.with_context("cause", std::strerror(errno));
+    process_outcome = "spawn_error";
     return std::unexpected(std::move(error));
   }
 
@@ -449,7 +487,6 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
     return std::unexpected(std::move(error));
   }
 
-  BashResult result;
   SpillBuffer spill_buffer;
   bool running = true;
   bool saw_output = false;
@@ -587,6 +624,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
       return std::unexpected(std::move(progress.error()));
     }
   }
+  process_outcome = result.canceled ? "canceled" : (result.timed_out ? "timed_out" : (result.exit_code == 0 ? "success" : "error"));
   return result;
 }
 

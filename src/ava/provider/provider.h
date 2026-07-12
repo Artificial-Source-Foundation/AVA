@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/observability/run_observer.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -186,6 +187,12 @@ class Provider
   [[nodiscard]] virtual ava::core::Result<std::vector<StreamEvent>> parse_response(HttpResponse const& response, bool stream) const;
 };
 
+struct TransportObservation
+{
+  std::shared_ptr<ava::observability::RunObservation> observation;
+  ava::observability::TraceContext context;
+};
+
 class Transport
 {
  public:
@@ -202,6 +209,9 @@ class Transport
 
 struct RetryOptions
 {
+  // Deliberately separate from HttpRequest: this configuration observes retry
+  // composition, not provider protocol bytes.
+  TransportObservation observation = {};
   int max_attempts = 3;
   int base_delay_ms = 250;
   int max_retry_after_ms = 60'000;
@@ -235,6 +245,28 @@ class RetryTransport final : public Transport
   Transport& inner_;
   RetryOptions options_;
 };
+
+// The non-overridable observation boundary. New concrete transports only
+// implement Transport; callers compose this decorator when tracing is enabled.
+class ObservedTransport final : public Transport
+{
+ public:
+  ObservedTransport(Transport& inner, TransportObservation observation);
+  [[nodiscard]] ava::core::Result<HttpResponse> send(HttpRequest const& request) override;
+  [[nodiscard]] ava::core::Result<HttpResponse> send(HttpRequest const& request, CancelCallback cancel_requested) override;
+  [[nodiscard]] bool supports_streaming() const noexcept override;
+  [[nodiscard]] ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
+                                                               CancelCallback cancel_requested = nullptr) override;
+
+ private:
+  Transport& inner_;
+  TransportObservation observation_;
+};
+
+void observe_transport_result(TransportObservation const& observation, HttpRequest const& request, ava::core::Result<HttpResponse> const& result,
+                              bool canceled = false, bool attempt = false) noexcept;
+void observe_transport_retry(TransportObservation const& observation, std::size_t next_attempt, std::size_t max_attempts, std::size_t delay_ms,
+                             std::string_view reason, int status_code, bool streaming) noexcept;
 
 [[nodiscard]] std::string to_string(StreamEventType type);
 [[nodiscard]] std::string to_string(ProviderErrorKind kind);

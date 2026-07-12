@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ava/app/rpc/output.h"
-#include "ava/app/rpc/resolvers.h"
-#include "ava/app/rpc/run_state.h"
+#include "output.h"
+#include "resolvers.h"
+#include "run_state.h"
 #include "ava/app/runtime.h"
 #include "ava/session/attachments.h"
 #include "ava/provider/provider.h"

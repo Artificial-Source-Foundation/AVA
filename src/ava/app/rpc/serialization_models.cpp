@@ -1,6 +1,6 @@
 #include "sys.h"
-#include "ava/app/rpc/serialization_json.h"
-#include "ava/app/rpc/serialization_models.h"
+#include "serialization_json.h"
+#include "serialization_models.h"
 #include "ava/app/runtime.h"
 #include "ava/config/model_config.h"
 #include "ava/provider/registry.h"

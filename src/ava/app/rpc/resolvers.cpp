@@ -1,8 +1,8 @@
 #include "sys.h"
-#include "ava/app/rpc/protocol.h"
-#include "ava/app/rpc/resolvers.h"
-#include "ava/app/rpc/serialization.h"
-#include "ava/app/rpc/serialization_json.h"
+#include "protocol.h"
+#include "resolvers.h"
+#include "serialization.h"
+#include "serialization_json.h"
 #include "ava/core/ids.h"
 
 #include <utility>

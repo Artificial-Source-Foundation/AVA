@@ -1,5 +1,5 @@
 #include "sys.h"
-#include "ava/app/rpc/protocol.h"
+#include "protocol.h"
 #include "ava/session/session_store.h"
 #include "ava/core/json.h"
 

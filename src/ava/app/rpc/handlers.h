@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ava/app/rpc/protocol.h"
+#include "protocol.h"
 #include "ava/app/runtime.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/provider/provider.h"

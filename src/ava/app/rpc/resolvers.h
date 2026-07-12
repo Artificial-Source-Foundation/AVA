@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ava/app/rpc/output.h"
-#include "ava/app/rpc/run_state.h"
+#include "output.h"
+#include "run_state.h"
 #include "ava/app/runtime.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/question.h"

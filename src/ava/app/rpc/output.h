@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ava/app/events.h"
 #include "run_state.h"
+#include "ava/app/events.h"
 #include "ava/app/runtime.h"
 #include "ava/core/result.h"
 

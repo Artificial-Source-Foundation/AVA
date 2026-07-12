@@ -1,11 +1,11 @@
 #include "sys.h"
-#include "ava/app/events.h"
 #include "handlers.h"
 #include "output.h"
 #include "prompt_worker.h"
 #include "resolvers.h"
 #include "run_state.h"
 #include "serialization.h"
+#include "ava/app/events.h"
 #include "ava/app/runtime.h"
 
 #include <optional>

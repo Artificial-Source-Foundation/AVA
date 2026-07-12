@@ -4,8 +4,8 @@
 #include "ava/app/rpc/resolvers.h"
 #include "ava/app/rpc/run_state.h"
 #include "ava/app/runtime.h"
-#include "ava/provider/provider.h"
 #include "ava/session/attachments.h"
+#include "ava/provider/provider.h"
 
 #include <mutex>
 #include <string>

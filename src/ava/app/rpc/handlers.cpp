@@ -18,8 +18,7 @@ std::string model_cycle_key(std::string_view provider_id, std::string_view model
   return std::string(provider_id) + "/" + std::string(model_id);
 }
 
-std::vector<ava::config::ModelInfo> registered_cycle_models(RuntimeSession const& session,
-                                                            ava::config::ModelRegistry const& registry)
+std::vector<ava::config::ModelInfo> registered_cycle_models(RuntimeSession const& session, ava::config::ModelRegistry const& registry)
 {
   auto const providers = ava::provider::builtin_provider_registry();
   std::vector<ava::config::ModelInfo> registered;
@@ -36,9 +35,7 @@ std::vector<ava::config::ModelInfo> registered_cycle_models(RuntimeSession const
   scoped.reserve(session.scoped_model_cycle->size());
   for (auto const& id : *session.scoped_model_cycle)
   {
-    auto const found = std::ranges::find_if(registered, [&](auto const& model) {
-      return id == model_cycle_key(model.provider_id, model.model_id);
-    });
+    auto const found = std::ranges::find_if(registered, [&](auto const& model) { return id == model_cycle_key(model.provider_id, model.model_id); });
     if (found != registered.end())
       scoped.push_back(*found);
   }
@@ -52,8 +49,7 @@ ava::core::Result<std::vector<ava::config::ModelInfo>> cycle_model_candidates(Ru
     return std::unexpected(std::move(registry.error()));
   auto models = registered_cycle_models(session, *registry);
   if (models.empty())
-    return std::unexpected(
-        ava::core::Error(ava::core::ErrorCategory::NotFound, "no registered provider models are enabled for cycling"));
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "no registered provider models are enabled for cycling"));
   return models;
 }
 

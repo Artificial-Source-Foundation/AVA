@@ -1,11 +1,9 @@
 #include "sys.h"
-#include "ava/app/rpc/session_commands.h"
-
 #include "ava/app/rpc/handlers.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/rpc/serialization_json.h"
-
+#include "ava/app/rpc/session_commands.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 
@@ -472,15 +470,15 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!source_session_id)
       return handled(write_error(context.output, command.id, source_session_id.error()));
     auto summary = ava::session::append_branch_summary(ava::session::BranchSummaryOptions{.workspace_dir = context.session.workspace_dir,
-                                                                                         .root_dir = context.session.paths.sessions_dir,
-                                                                                         .source_session_id = *source_session_id,
-                                                                                         .branch_root_entry_id = *command.branch_root_entry_id,
-                                                                                         .branch_tip_entry_id = *command.branch_tip_entry_id,
-                                                                                         .summary = *command.summary,
-                                                                                         .provider = *command.provider,
-                                                                                         .model = *command.model,
-                                                                                         .reason = *command.reason,
-                                                                                         .actor = "rpc"});
+                                                                                          .root_dir = context.session.paths.sessions_dir,
+                                                                                          .source_session_id = *source_session_id,
+                                                                                          .branch_root_entry_id = *command.branch_root_entry_id,
+                                                                                          .branch_tip_entry_id = *command.branch_tip_entry_id,
+                                                                                          .summary = *command.summary,
+                                                                                          .provider = *command.provider,
+                                                                                          .model = *command.model,
+                                                                                          .reason = *command.reason,
+                                                                                          .actor = "rpc"});
     if (!summary)
       return handled(write_error(context.output, command.id, summary.error()));
     return handled(write_success(context.output, command.id, branch_summary_result_json(*summary)));

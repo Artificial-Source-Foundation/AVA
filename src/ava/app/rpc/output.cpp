@@ -1,9 +1,7 @@
 #include "sys.h"
 #include "ava/app/rpc/output.h"
-
 #include "ava/app/rpc/protocol.h"
 #include "ava/app/rpc/serialization.h"
-
 #include "ava/core/ids.h"
 
 #include <utility>

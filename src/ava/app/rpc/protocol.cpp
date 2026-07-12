@@ -1,8 +1,6 @@
 #include "sys.h"
 #include "ava/app/rpc/protocol.h"
-
 #include "ava/session/session_store.h"
-
 #include "ava/core/json.h"
 
 #include <algorithm>
@@ -254,9 +252,7 @@ ava::core::VoidResult validate_optional_rpc_text(std::optional<std::string> cons
   return {};
 }
 
-ava::core::VoidResult validate_optional_rpc_multiline_text(std::optional<std::string> const& value,
-                                                           std::string_view field_name,
-                                                           std::size_t max_bytes)
+ava::core::VoidResult validate_optional_rpc_multiline_text(std::optional<std::string> const& value, std::string_view field_name, std::size_t max_bytes)
 {
   if (!value)
     return {};
@@ -452,13 +448,10 @@ ava::core::Result<RpcImageUpload> parse_rpc_image_upload(std::string_view image_
   if (auto valid = validate_optional_rpc_text(optional_mime_type, "images.mimeType", kMaxRpcPromptImageMimeTypeBytes); !valid)
     return std::unexpected(std::move(valid.error()));
 
-  return RpcImageUpload{.type = std::move(**type),
-                        .data_base64 = std::move(**data),
-                        .mime_type = std::move(mime_type)};
+  return RpcImageUpload{.type = std::move(**type), .data_base64 = std::move(**data), .mime_type = std::move(mime_type)};
 }
 
-ava::core::Result<std::optional<std::vector<RpcImageUpload>>> optional_image_upload_array_field(std::string_view object,
-                                                                                                std::string_view key)
+ava::core::Result<std::optional<std::vector<RpcImageUpload>>> optional_image_upload_array_field(std::string_view object, std::string_view key)
 {
   auto const start = ava::core::json::field_value_start(object, key);
   if (!start)
@@ -920,15 +913,13 @@ ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line)
     auto parsed_attachments = rpc::optional_string_array_field(line, "attachments");
     if (!parsed_attachments)
       return std::unexpected(std::move(parsed_attachments.error()));
-    if (auto valid = rpc::validate_optional_rpc_text_array(*parsed_attachments, "attachments",
-                                                           rpc::kMaxRpcPromptAttachments,
-                                                           rpc::kMaxRpcPromptAttachmentPathBytes);
+    if (auto valid =
+            rpc::validate_optional_rpc_text_array(*parsed_attachments, "attachments", rpc::kMaxRpcPromptAttachments, rpc::kMaxRpcPromptAttachmentPathBytes);
         !valid)
     {
       return std::unexpected(std::move(valid.error()));
     }
-    if (*parsed_attachments &&
-        std::ranges::any_of(**parsed_attachments, [](std::string const& path) { return path.empty(); }))
+    if (*parsed_attachments && std::ranges::any_of(**parsed_attachments, [](std::string const& path) { return path.empty(); }))
     {
       return std::unexpected(rpc::invalid_rpc("RPC attachments entries must be non-empty"));
     }

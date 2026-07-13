@@ -13,3 +13,6 @@
 [submodule "enchantum"]
 	path = enchantum
 	url = https://github.com/ZXShady/enchantum.git
+[submodule "src/json"]
+	path = src/json
+	url = https://github.com/nlohmann/json.git

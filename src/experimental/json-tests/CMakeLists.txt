@@ -22,3 +22,7 @@ target_link_libraries(json02 PRIVATE ${AICXX_OBJECTS_LIST})
 add_executable(json03 json03-intrusive-conversions.cpp)
 target_include_directories(json03 PRIVATE ${CMAKE_SOURCE_DIR}/src/json/include)
 target_link_libraries(json03 PRIVATE ${AICXX_OBJECTS_LIST})
+
+add_executable(json04 json04-base-class.cpp)
+target_include_directories(json04 PRIVATE ${CMAKE_SOURCE_DIR}/src/json/include)
+target_link_libraries(json04 PRIVATE ${AICXX_OBJECTS_LIST})

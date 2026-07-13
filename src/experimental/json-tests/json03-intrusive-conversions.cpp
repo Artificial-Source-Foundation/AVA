@@ -15,6 +15,8 @@ using Json = nlohmann::json;
 
 // clang-format off
 
+namespace ava::app::rpc::json {
+
 struct Answer
 {
   int everything;
@@ -38,6 +40,29 @@ class Object
 struct Empty
 {
 };
+
+// Serialize an Empty value as an empty JSON object ({}) and read it back from one.
+// The NLOHMANN_DEFINE_TYPE_* macros cannot be used for a type with no members because
+// they generate per-member get_to()/assignment calls, so the conversion is provided
+// manually as free functions. Templated on BasicJsonType to interoperate with any
+// basic_json instantiation, matching the convention used by the library's own macros.
+template <typename BasicJsonType>
+void to_json(BasicJsonType& j, Empty const&)
+{
+  j = BasicJsonType::object();
+}
+
+// Read an Empty value from JSON.
+//
+// Any JSON object is accepted (Empty carries no data to populate); a non-object
+// value is rejected with a type error so that a mismatched representation is not
+// silently swallowed.
+template <typename BasicJsonType>
+void from_json(BasicJsonType const& j, Empty&)
+{
+  if (!j.is_object())
+    throw nlohmann::json::type_error::create(302, "expected JSON object for Empty", &j);
+}
 
 class Test
 {
@@ -64,6 +89,8 @@ class Test
   );
 };
 
+} // namespace ava::app::rpc::json
+
 int main()
 {
   Debug(NAMESPACE_DEBUG::init());
@@ -84,5 +111,11 @@ int main()
     {"emptyobject", Json::object()}
   };
 
-  Test test = j2.get<Test>();
+  // Initialize Test from JSON object.
+  auto test = j2.get<ava::app::rpc::json::Test>();
+
+  // Convert Test back to JSON object.
+  Json j3 = test;
+
+  Dout(dc::notice, "j3 = " << std::setw(4) << j3);
 }

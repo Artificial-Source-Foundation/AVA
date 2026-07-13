@@ -18,46 +18,77 @@ using Json = nlohmann::json;
 
 namespace ava::app::rpc::json {
 
-struct Response
+// Common response header shared by every RPC reply.
+// Members are private with trailing underscores; the NLOHMANN_DEFINE_*_WITH_NAMES
+// variants below map each member to an underscore-free JSON key so the trailing
+// underscore never leaks into the serialized representation.
+class Response
 {
-  std::string id;
-  std::string type;
-  bool success;
+ private:
+  std::string id_;
+  std::string type_;
+  bool success_{};
+
+ public:
+  Response() = default;
+  Response(Response&&) = default;
+  Response& operator=(Response&&) = default;
+
+  // Read accessors are provided for the fields main() needs; serialization is
+  // handled by the intrusive macro below.
+  std::string const& id() const { return id_; }
+  std::string const& type() const { return type_; }
+  bool success() const { return success_; }
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_NAMES(Response, "id", id_, "type", type_, "success", success_);
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Response, id, type, success);
-
-struct Result
+// Successful-result payload: a single integer, serialized under the JSON key "value".
+class Result
 {
-  int result_value{42};
+ private:
+  int result_value_{42};
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_NAMES(Result, "value", result_value);
+ public:
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_NAMES(Result, "value", result_value_);
 };
 
-struct Error
+// Failure payload: a single message, serialized under the JSON key "value".
+class Error
 {
-  std::string error_value{"noooo!"};
+ private:
+  std::string error_value_{"noooo!"};
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_NAMES(Error, "value", error_value);
+ public:
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_NAMES(Error, "value", error_value_);
 };
 
-struct SuccessResponse : public Response
+// A success response flattens the Response header together with a Result payload.
+// The base fields are serialized via Response's conversion; the derived member is
+// serialized under the JSON key "result".
+class SuccessResponse : public Response
 {
-  Result result;
+ private:
+  Result result_;
 
-  SuccessResponse(Response const& base, Result const& res) : Response(base), result(res) { }
+ public:
+  SuccessResponse(Response&& base, Result&& res) : Response(std::move(base)), result_(std::move(res)) { }
+
+  NLOHMANN_DEFINE_DERIVED_TYPE_INTRUSIVE_WITH_NAMES(SuccessResponse, Response, "result", result_);
 };
 
-NLOHMANN_DEFINE_DERIVED_TYPE_NON_INTRUSIVE(SuccessResponse, Response, result);
-
-struct FailureResponse : public Response
+// A failure response flattens the Response header together with an Error payload,
+// serialized under the JSON key "error".
+class FailureResponse : public Response
 {
-  Error error;
+ private:
+  Error error_;
 
-  FailureResponse(Response const& base, Error const& res) : Response(base), error(res) { }
+ public:
+  FailureResponse(Response&& base, Error&& res) : Response(std::move(base)), error_(std::move(res)) { }
+
+  NLOHMANN_DEFINE_DERIVED_TYPE_INTRUSIVE_WITH_NAMES(FailureResponse, Response, "error", error_);
 };
-
-NLOHMANN_DEFINE_DERIVED_TYPE_NON_INTRUSIVE(FailureResponse, Response, error);
 
 } // namespace ava::app::rpc::json
 
@@ -85,21 +116,27 @@ int main()
 
   for (int i = 0; i < 2; ++i)
   {
-    // Read common header.
-    r[i] = json_objects[i].get<json::Response>();
-
     std::unique_ptr<json::Response> base;
-    if (r[i].success)
-      base = std::make_unique<json::SuccessResponse>(r[i], json_objects[i].at("result").get<json::Result>());
-    else
-      base = std::make_unique<json::FailureResponse>(r[i], json_objects[i].at("error").get<json::Error>());
+    bool is_success_response{};
 
-    // Convert base back to JSON object.
+    {
+      // Read common header.
+      r[i] = std::move(json_objects[i].get<json::Response>());
+      is_success_response = r[i].success();
+
+      if (is_success_response)
+        base = std::make_unique<json::SuccessResponse>(std::move(r[i]), json_objects[i].at("result").get<json::Result>());
+      else
+        base = std::make_unique<json::FailureResponse>(std::move(r[i]), json_objects[i].at("error").get<json::Error>());
+    }
+
+    // Convert base back to JSON object for inspection.
     Json j;
-    if (r[i].success)
+    if (is_success_response)
       j = static_cast<json::SuccessResponse const&>(*base);
     else
       j = static_cast<json::FailureResponse const&>(*base);
+
     Dout(dc::notice, "r[" << i << "] = " << std::setw(4) << j);
   }
 }

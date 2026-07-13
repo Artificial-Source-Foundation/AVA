@@ -5,6 +5,10 @@
 #include "ava/core/ids.h"
 
 #include <utility>
+#include "debug.h"
+#ifdef CWDEBUG
+#include <libcwd/buf2str.h>
+#endif
 
 namespace ava::app::rpc {
 namespace {
@@ -51,6 +55,8 @@ ResolverEventPayload resolver_queue_payload(std::string payload_json)
 
 ava::core::VoidResult write_record(RpcOutput& output, std::string_view record)
 {
+  DoutEntering(dc::rpc, "write_record(" << output << ", JSON-record:[" << libcwd::buf2str(record.data(), record.length()) << "])");
+
   std::unique_lock lock(output.mutex);
   output.out << record;
   output.out.flush();

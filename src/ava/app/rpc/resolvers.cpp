@@ -223,7 +223,7 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolve
 
     auto envelope = resolver_event_envelope("permission_requested", prompt_request_id, prompt_request_id, session_id_snapshot(session, session_mutex),
                                             permission_request_payload_json(request_id, prompt));
-    if (auto written = write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
+    if (auto written = write_rpc_record(output, serialize_event_envelope_jsonl(envelope)); !written)
     {
       std::lock_guard lock(pending_state.mutex);
       pending_state.permission_requests.erase(request_id);
@@ -271,7 +271,7 @@ ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pe
 
     auto envelope = resolver_event_envelope("question_requested", prompt_request_id, prompt_request_id, session_id_snapshot(session, session_mutex),
                                             question_request_payload_json(request_id, prompt));
-    if (auto written = write_record(output, serialize_event_envelope_jsonl(envelope)); !written)
+    if (auto written = write_rpc_record(output, serialize_event_envelope_jsonl(envelope)); !written)
     {
       std::lock_guard lock(pending_state.mutex);
       pending_state.question_requests.erase(request_id);

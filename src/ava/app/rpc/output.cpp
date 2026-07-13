@@ -53,9 +53,9 @@ ResolverEventPayload resolver_queue_payload(std::string payload_json)
   return ResolverEventPayload{.payload_type = RuntimePayloadType::Queue, .json = std::move(payload_json)};
 }
 
-ava::core::VoidResult write_record(RpcOutput& output, std::string_view record)
+ava::core::VoidResult write_rpc_record(RpcOutput& output, std::string_view record)
 {
-  DoutEntering(dc::rpc, "write_record(" << output << ", JSON-record:[" << libcwd::buf2str(record.data(), record.length()) << "])");
+  DoutEntering(dc::rpc, "write_rpc_record(" << output << ", JSON-record:[" << libcwd::buf2str(record.data(), record.length()) << "])");
 
   std::unique_lock lock(output.mutex);
   output.out << record;
@@ -73,17 +73,17 @@ ava::core::VoidResult write_record(RpcOutput& output, std::string_view record)
 
 ava::core::VoidResult write_success(RpcOutput& output, std::string_view id, std::string_view result_json)
 {
-  return write_record(output, ava::app::serialize_rpc_success_jsonl(id, result_json));
+  return write_rpc_record(output, ava::app::serialize_rpc_success_jsonl(id, result_json));
 }
 
 ava::core::VoidResult write_error(RpcOutput& output, std::string_view id, ava::core::Error const& error)
 {
-  return write_record(output, ava::app::serialize_rpc_error_jsonl(id, error));
+  return write_rpc_record(output, ava::app::serialize_rpc_error_jsonl(id, error));
 }
 
 void subscribe_event_envelope_writer(EventBus& bus, RpcOutput& output)
 {
-  bus.subscribe([&output](EventEnvelope const& envelope) { return write_record(output, serialize_event_envelope_jsonl(envelope)); });
+  bus.subscribe([&output](EventEnvelope const& envelope) { return write_rpc_record(output, serialize_event_envelope_jsonl(envelope)); });
 }
 
 EventEnvelopeContext rpc_event_context(std::string_view request_id)
@@ -137,7 +137,7 @@ ava::core::VoidResult write_queue_event(RpcOutput& output, RuntimeSession const&
 {
   auto envelope = resolver_event_envelope(std::string(name), queued.request_id, queued.correlation_id, session_id_snapshot(session, session_mutex),
                                           queued_message_payload_json(queued.message, reason));
-  return write_record(output, serialize_event_envelope_jsonl(envelope));
+  return write_rpc_record(output, serialize_event_envelope_jsonl(envelope));
 }
 
 ava::core::VoidResult write_skipped_queue_events(RpcOutput& output, RuntimeSession const& session, std::mutex& session_mutex, ClearedRpcQueues const& cleared,

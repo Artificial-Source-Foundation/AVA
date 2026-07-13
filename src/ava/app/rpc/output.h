@@ -24,7 +24,7 @@ struct ResolverEventPayload
 [[nodiscard]] ResolverEventPayload resolver_question_payload(std::string payload_json);
 [[nodiscard]] ResolverEventPayload resolver_queue_payload(std::string payload_json);
 
-[[nodiscard]] ava::core::VoidResult write_record(RpcOutput& output, std::string_view record);
+[[nodiscard]] ava::core::VoidResult write_rpc_record(RpcOutput& output, std::string_view record);
 [[nodiscard]] ava::core::VoidResult write_success(RpcOutput& output, std::string_view id, std::string_view result_json);
 [[nodiscard]] ava::core::VoidResult write_error(RpcOutput& output, std::string_view id, ava::core::Error const& error);
 

@@ -25,6 +25,8 @@ struct McpStdioClientOptions
   std::chrono::milliseconds request_timeout{5000};
   std::size_t max_message_bytes = 64 * 1024;
   std::size_t max_stderr_bytes = 64 * 1024;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct McpInitialization
@@ -33,6 +35,8 @@ struct McpInitialization
   std::string server_version;
   std::string capabilities_json;
   std::string raw_json;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct McpToolDescription
@@ -40,6 +44,8 @@ struct McpToolDescription
   std::string name;
   std::string description;
   std::string input_schema_json;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct McpPromptArgumentDescription
@@ -47,6 +53,8 @@ struct McpPromptArgumentDescription
   std::string name;
   std::string description;
   bool required = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct McpPromptDescription
@@ -54,6 +62,8 @@ struct McpPromptDescription
   std::string name;
   std::string description;
   std::vector<McpPromptArgumentDescription> arguments;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct McpResourceDescription
@@ -62,6 +72,8 @@ struct McpResourceDescription
   std::string name;
   std::string description;
   std::string mime_type;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct McpToolCallResult
@@ -69,12 +81,16 @@ struct McpToolCallResult
   bool is_error = false;
   std::string content;
   std::string raw_json;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct McpPromptGetResult
 {
   std::string content;
   std::string raw_json;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct McpResourceReadResult
@@ -83,6 +99,8 @@ struct McpResourceReadResult
   std::string uri;
   std::string mime_type;
   std::string raw_json;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class McpStdioClient final
@@ -114,11 +132,15 @@ class McpStdioClient final
   [[nodiscard]] ava::core::Result<McpResourceReadResult> read_resource(std::string_view uri, CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult shutdown(std::chrono::milliseconds grace = std::chrono::milliseconds(250));
 
+  AVA_DEBUG_PRINT_MEMBERS_ON
+
  private:
   struct JsonRpcResponse
   {
     std::string result_json;
     std::string raw_json;
+
+    AVA_DEBUG_PRINT_MEMBERS_ON
   };
 
   [[nodiscard]] ava::core::VoidResult launch();

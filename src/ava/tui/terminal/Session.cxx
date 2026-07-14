@@ -7,7 +7,7 @@
 // This header must be included last.
 #include "private_convert.h"
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 Session::Session() : default_rendition_(ColorPair{0})
 {
@@ -89,4 +89,4 @@ ColorPair Session::create_color_pair(Color foreground, Color background)
   return color_pairs_.back();
 }
 
-} // namespace terminal
+} // namespace ava::tui::terminal

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/app/acp/protocol.h"
 
 #include <cstddef>
@@ -20,12 +21,14 @@ struct AcpPromptImage
 {
   std::string mime_type;
   std::string bytes;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct AcpPromptContent
 {
   std::string text;
   std::vector<AcpPromptImage> images;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 using PromptContentDecodeResult = std::expected<AcpPromptContent, JsonRpcError>;

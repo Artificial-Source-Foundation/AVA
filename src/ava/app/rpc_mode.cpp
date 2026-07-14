@@ -2,7 +2,6 @@
 #include "ava/app/command_registry.h"
 #include "ava/app/commands.h"
 #include "ava/app/events.h"
-#include "ava/app/rpc/handlers.h"
 #include "ava/app/rpc/input.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/prompt_worker.h"
@@ -12,6 +11,7 @@
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/rpc/serialization_json.h"
 #include "ava/app/rpc/session_commands.h"
+#include "ava/app/rpc/session_operators.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/session/attachments.h"
 #include "ava/provider/curl_transport.h"
@@ -36,6 +36,9 @@
 #include <signal.h>
 #include <unistd.h>
 #include "debug.h"
+#ifdef CWDEBUG
+#include "ava/debug/print_reference.h"
+#endif
 
 namespace ava::app {
 namespace {
@@ -309,6 +312,9 @@ ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions c
 {
   // This function is called first-thing after creating a thread.
   Debug(NAMESPACE_DEBUG::init_thread("run_rpc_loop"));
+
+  DoutEntering(dc::rpc, "run_rpc_loop(" << session << ", " << open_options << ", " << provider << ", " << auth_transport << ", runtime_options=<redacted>, "
+                                        << print_reference(input) << ", " << print_reference(out) << ")");
 
   rpc::RpcOutput output(out);
   rpc::RpcRunState run_state;

@@ -22,6 +22,8 @@ struct PrintPromptInputs
 {
   std::optional<std::string> explicit_prompt;
   std::optional<std::string> stdin_prompt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PrintModeRunOptions
@@ -30,6 +32,9 @@ struct PrintModeRunOptions
   RuntimeRunOptions runtime_options;
   bool sanitize_terminal_output = false;
   bool sanitize_terminal_diagnostics = false;
+
+  // runtime_options may hold provider credentials.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct PrintModeOptions
@@ -41,6 +46,8 @@ struct PrintModeOptions
   HeadlessPermissionPolicyOptions permission_policy;
   std::optional<std::reference_wrapper<ava::provider::Provider const>> provider_override;
   std::optional<std::reference_wrapper<ava::provider::Transport>> transport_override;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<std::string> merge_print_prompt(PrintPromptInputs const& inputs);

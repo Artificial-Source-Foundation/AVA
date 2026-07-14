@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -26,6 +27,7 @@ struct SecureWorkspacePath
   bool exists = false;
   bool regular_file = false;
   bool directory = false;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 class SecureWorkspaceHandle
@@ -50,6 +52,7 @@ class SecureWorkspaceHandle
   int fd_ = -1;
   std::uintmax_t size_ = 0;
   std::filesystem::path path_;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 enum class SecureWorkspaceNodeType
@@ -68,6 +71,7 @@ struct SecureWorkspaceDirectoryEntry
   SecureWorkspaceNodeType type = SecureWorkspaceNodeType::Other;
   std::uintmax_t size = 0;
   std::size_t depth = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 enum class SecureWorkspaceWalkAction
@@ -83,6 +87,7 @@ struct SecureWorkspaceWriteResult
 {
   std::filesystem::path path;
   std::size_t bytes_written = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // A descriptor-anchored workspace. Every lookup is relative to the canonical
@@ -121,6 +126,7 @@ class SecureWorkspace
     std::string target_name_;
     std::size_t bytes_written_ = 0;
     bool target_changed_ = false;
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
   };
 
   SecureWorkspace(SecureWorkspace const&) = delete;
@@ -147,6 +153,7 @@ class SecureWorkspace
 
   int root_fd_ = -1;
   std::filesystem::path root_;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 }  // namespace ava::tools

@@ -18,6 +18,8 @@ struct ParsedReasoningBlock
   std::string signature;
   std::string redacted_data;
   bool redacted = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ParsedAssistantTurn
@@ -27,6 +29,8 @@ struct ParsedAssistantTurn
   std::vector<ProviderToolCall> tool_calls;
   std::optional<ava::provider::TokenUsage> usage;
   std::optional<ava::provider::ProviderFinishReason> finish_reason;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ProviderOutputLimits
@@ -34,6 +38,8 @@ struct ProviderOutputLimits
   std::size_t max_events = 0;
   std::size_t max_assistant_text_bytes = 0;
   std::size_t max_tool_argument_bytes = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<ParsedAssistantTurn> parse_assistant_turn(std::vector<ava::provider::StreamEvent> const& events, ProviderOutputLimits limits);

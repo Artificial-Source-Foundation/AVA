@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <span>
 #include <string_view>
 
@@ -9,6 +11,7 @@ struct RpcProtocolVersions
 {
   long long protocol = 1;
   int event_schema = 1;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 inline constexpr RpcProtocolVersions kRpcProtocolVersions{};

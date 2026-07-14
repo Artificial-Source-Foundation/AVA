@@ -25,6 +25,8 @@ class OpenAIProvider final : public Provider
                                                              long long now_seconds) const;
   [[nodiscard]] ava::core::Result<HttpRequest> build_request(ProviderRequest const& request, ava::config::OpenAICredential const& credential) const;
 
+  AVA_DEBUG_PRINT_MEMBERS_ON
+
  private:
   std::string base_url_;
 };

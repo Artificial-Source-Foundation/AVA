@@ -40,7 +40,7 @@ target_compile_definitions(ava_rpc_broken_pipe_subprocess_test PRIVATE AVA_EXE_P
 ava_apply_warnings(ava_rpc_broken_pipe_subprocess_test)
 ava_apply_sanitizers(ava_rpc_broken_pipe_subprocess_test)
 
-add_executable(ava_tests
+set(AVA_TESTS_SOURCES
   "acp_tests.cpp"
   "agent_loop_resilience_tests.cpp"
   "agent_loop_tests.cpp"
@@ -74,6 +74,13 @@ add_executable(ava_tests
   "tui_composer_tests.cpp"
   "run_observer_tests.cpp"
 )
+# The debug suite relies on libcwd-backed machinery (ava_debug, CWDEBUG), so it is
+# only compiled in when libcwd is effectively enabled.
+if(OptionEnableLibcwd)
+  list(APPEND AVA_TESTS_SOURCES "debug_tests.cpp")
+endif()
+
+add_executable(ava_tests ${AVA_TESTS_SOURCES})
 target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_LIBRARIES} ava_test_support ${AICXX_OBJECTS_LIST})
 target_include_directories(ava_tests PRIVATE ${CURSES_INCLUDE_DIRS})
 add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_provider_server)
@@ -400,6 +407,13 @@ add_test(
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-mcp-config-errors
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_mcp_config_errors.cmake)
 
+add_test(
+  NAME ava_build.ctags_json_detection
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+          -DAVA_TEST_ROOT=${CMAKE_BINARY_DIR}/ctags-json-detection
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/ctags_json_detection_test.cmake)
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(AVA_ENABLE_ACPX_INTEROP AND NOT Python3_Interpreter_FOUND)
   message(FATAL_ERROR "AVA_ENABLE_ACPX_INTEROP requires Python 3 for the bounded launcher")
@@ -511,4 +525,26 @@ if(Python3_Interpreter_FOUND)
             --fake-provider $<TARGET_FILE:ava_fake_provider_server>
             --root ${CMAKE_BINARY_DIR}/tui-osc8-smoke)
   set_tests_properties(ava_tui.osc8_smoke PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 20)
+
+  if(OptionEnableLibcwd)
+    # The debug-printer coverage check requires the `ctags-json` target and the generated tags.json,
+    # both of which only exist when libcwd debug support is enabled (OptionEnableLibcwd).
+    # It rebuilds ctags-json to guarantee a fresh tags.json, then asserts that no src/ava/ header
+    # type is missing a print_members opt-in/opt-out marker, printing any offenders on failure.
+    add_test(
+      NAME ava_debug.print_members_coverage
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/print_members_coverage_test.py
+              --source-dir ${CMAKE_SOURCE_DIR}
+              --build-dir ${CMAKE_BINARY_DIR})
+    set_tests_properties(ava_debug.print_members_coverage PROPERTIES TIMEOUT 60)
+  endif()
+endif()
+
+if(OptionEnableLibcwd)
+  # The print_members_format suite relies on libcwd-backed machinery (ava_debug, CWDEBUG),
+  # so it is only registered when libcwd is effectively enabled.
+  add_test(
+    NAME ava_debug.print_members_format
+    COMMAND ava_tests debug)
 endif()

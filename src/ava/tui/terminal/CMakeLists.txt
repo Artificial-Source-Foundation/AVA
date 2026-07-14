@@ -1,8 +1,8 @@
 # Create the `terminal` object library.
-add_library(terminal_ObjLib OBJECT)
+add_library(ava_terminal)
 
 # Declare source files.
-target_sources(terminal_ObjLib
+target_sources(ava_terminal
   PRIVATE
     "Session.cxx"
     "ComplexChar.cxx"
@@ -10,11 +10,19 @@ target_sources(terminal_ObjLib
     "private_convert.cxx"
 )
 
+if (OptionEnableLibcwd)
+target_sources(ava_terminal
+  PRIVATE
+    "print_members.cpp"
+)
+endif ()
+
 # Set required include directories.
 get_target_property(CWDS_INTERFACE_INCLUDE_DIRECTORIES AICxx::cwds INTERFACE_INCLUDE_DIRECTORIES)
-target_include_directories(terminal_ObjLib
+target_include_directories(ava_terminal
   PUBLIC
-    "${CWDS_INTERFACE_INCLUDE_DIRECTORIES}" # For sys.h and debug.h.
+    "${CWDS_INTERFACE_INCLUDE_DIRECTORIES}"     # For sys.h and debug.h.
+    "${CMAKE_SOURCE_DIR}/src"                   # Because headers of terminal/ use #include "ava/...".
   INTERFACE
     "${CMAKE_SOURCE_DIR}/src/ava/tui"
   PRIVATE
@@ -22,11 +30,18 @@ target_include_directories(terminal_ObjLib
 )
 
 # Set link dependencies.
-target_link_libraries(terminal_ObjLib
+target_link_libraries(ava_terminal
   PUBLIC
     ${CURSES_LIBRARIES}
     ${AICXX_OBJECTS_LIST}
 )
 
+if (OptionEnableLibcwd)
+  target_link_libraries(ava_terminal
+    PUBLIC
+      ava_debug
+  )
+endif ()
+
 # Create an ALIAS target.
-add_library(AVA::terminal ALIAS terminal_ObjLib)
+add_library(AVA::terminal ALIAS ava_terminal)

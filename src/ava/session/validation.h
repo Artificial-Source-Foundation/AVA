@@ -46,6 +46,8 @@ struct SessionReplayIssue {
   std::string entry_id;
   std::string call_id;
   std::string message;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SessionReplayValidationOptions {
@@ -56,6 +58,8 @@ struct SessionReplayValidationOptions {
   bool require_compaction_integrity = true;
   bool require_model_reasoning_integrity = true;
   bool require_structured_tool_results = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SessionReplayValidation {
@@ -64,6 +68,8 @@ struct SessionReplayValidation {
   std::size_t warning_count = 0;
 
   [[nodiscard]] bool ok() const noexcept { return error_count == 0; }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::string_view to_string(SessionReplayIssueSeverity severity) noexcept;

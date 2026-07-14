@@ -45,7 +45,7 @@ jobs:
           sudo apt-get install -y software-properties-common
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
           sudo apt-get update
-          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev
+          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev universal-ctags
 
       - name: Restore gitache cache
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/core/result.h"
 
 #include <chrono>
@@ -34,6 +35,7 @@ inline constexpr int kShutdownEscalationExitCode = 70;
 struct NullJsonRpcId
 {
   friend bool operator==(NullJsonRpcId const&, NullJsonRpcId const&) = default;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 using JsonRpcId = std::variant<NullJsonRpcId, std::int64_t, std::string>;
@@ -54,6 +56,7 @@ struct JsonRpcError
   std::optional<JsonRpcId> id;
   EnvelopeIntent intent = EnvelopeIntent::Unknown;
   bool suppress_response = false;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct Request
@@ -61,24 +64,28 @@ struct Request
   JsonRpcId id;
   std::string method;
   std::optional<std::string> params_json;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct Notification
 {
   std::string method;
   std::optional<std::string> params_json;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct Response
 {
   JsonRpcId id;
   std::string result_json;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct ErrorResponse
 {
   JsonRpcId id;
   JsonRpcError error;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 using Message = std::variant<Request, Notification, Response, ErrorResponse>;
@@ -89,6 +96,7 @@ struct ImplementationInfo
   std::string version;
   std::optional<std::string> title;
   std::optional<std::string> meta_json;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct ClientCapabilities
@@ -102,6 +110,7 @@ struct ClientCapabilities
   std::optional<std::string> session_meta_json;
   std::optional<std::string> config_options_meta_json;
   std::optional<std::string> boolean_config_meta_json;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct InitializeRequest
@@ -110,6 +119,7 @@ struct InitializeRequest
   ClientCapabilities client_capabilities;
   std::optional<ImplementationInfo> client_info;
   std::optional<std::string> meta_json;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] bool ids_equal(JsonRpcId const& lhs, JsonRpcId const& rhs) noexcept;

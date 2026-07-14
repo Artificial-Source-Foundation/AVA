@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "ava/mcp/config.h"
 #include "ava/mcp/stdio_client.h"
 #include "ava/mcp/stdio_client_support.h"

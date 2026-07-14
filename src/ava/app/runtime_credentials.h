@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/app/runtime.h"
 
 #include <functional>
@@ -14,6 +15,7 @@ struct RuntimeProviderRunBundle
   std::unique_ptr<ava::provider::Transport> transport;
   std::unique_ptr<ava::provider::Transport> auth_transport;
   RuntimeRunOptions options;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 using RuntimeProviderRunBundleFactory = std::function<ava::core::Result<RuntimeProviderRunBundle>(RuntimeSession const&, RuntimeRunOptions, std::string_view)>;

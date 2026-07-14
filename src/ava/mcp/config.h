@@ -26,6 +26,8 @@ struct McpServerConfig
   bool enabled = true;
   McpServerScope scope = McpServerScope::Global;
   std::filesystem::path source_path;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct McpConfig
@@ -33,6 +35,8 @@ struct McpConfig
   std::vector<McpServerConfig> servers;
   std::filesystem::path global_config_file;
   std::filesystem::path project_config_file;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct McpConfigLoadOptions
@@ -40,6 +44,8 @@ struct McpConfigLoadOptions
   std::filesystem::path workspace_dir;
   std::filesystem::path global_config_file;
   std::filesystem::path project_config_file;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::string_view to_string(McpServerScope scope);

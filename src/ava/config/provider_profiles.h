@@ -41,6 +41,8 @@ struct ProviderProfile
   // model selection. Some profiles are intentionally connect/auth metadata only
   // until their runtime provider is implemented.
   bool runtime_selectable = true;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ProviderProfile const& anthropic_provider_profile();

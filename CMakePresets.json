@@ -12,7 +12,7 @@
       "description": "Configure a local developer build with tests and compile commands enabled.",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "AVA_BUILD_TESTS": "ON",
+        "EnableAvaBuildTests": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },
@@ -23,7 +23,7 @@
       "inherits": "dev",
       "binaryDir": "${sourceDir}/build-sanitize",
       "cacheVariables": {
-        "AVA_ENABLE_SANITIZERS": "ON"
+        "EnableAvaSanitizers": "ON"
       }
     },
     {
@@ -42,7 +42,7 @@
       "description": "Configure an optimized build with the release/RPC contract tests available.",
       "binaryDir": "${sourceDir}/build-release",
       "cacheVariables": {
-        "AVA_BUILD_TESTS": "ON",
+        "EnableAvaBuildTests": "ON",
         "CMAKE_BUILD_TYPE": "Release"
       }
     },
@@ -53,7 +53,7 @@
       "binaryDir": "${sourceDir}/build-desktop-qml",
       "cacheVariables": {
         "AVA_BUILD_DESKTOP_QML": "ON",
-        "AVA_BUILD_TESTS": "OFF",
+        "EnableAvaBuildTests": "OFF",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     }

@@ -13,6 +13,8 @@ struct QuestionOption
 {
   std::string value;
   std::string label;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct QuestionPrompt
@@ -26,12 +28,16 @@ struct QuestionPrompt
   bool modal = false;
   bool searchable = false;
   std::function<bool()> auto_resolve = nullptr;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct QuestionAnswer
 {
   std::vector<std::string> selected_options;
   std::string custom_text;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 using QuestionResolver = std::function<ava::core::Result<QuestionAnswer>(QuestionPrompt const&)>;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/session/session_store.h"
 
 #include <cstddef>
@@ -20,6 +21,7 @@ struct TranscriptItem
   std::string message_id;
   std::string timestamp;
   std::string text;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TranscriptLimits
@@ -27,6 +29,7 @@ struct TranscriptLimits
   std::size_t max_items = 128;
   std::size_t max_text_bytes = 512U * 1024U;
   std::size_t max_item_text_bytes = 128U * 1024U;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // Projects only user-visible message text. Internal replay records and all

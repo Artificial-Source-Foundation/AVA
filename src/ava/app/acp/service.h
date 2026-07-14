@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/app/acp/session.h"
 
 #include <filesystem>
@@ -23,6 +24,7 @@ struct AgentServiceOptions
   RuntimeProviderRunBundleFactory provider_bundle_factory;
   std::chrono::milliseconds permission_timeout = kDefaultCallTimeout;
   std::chrono::milliseconds close_grace = kSessionCloseGrace;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 class AgentService
@@ -58,6 +60,7 @@ class AgentService
   {
     std::shared_ptr<AcpSessionHost> host;
     std::uint64_t reservation = 0;
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
   };
 
   [[nodiscard]] std::shared_ptr<PromptAdmission> take_prompt_admission(JsonRpcId const& id);
@@ -77,6 +80,7 @@ class AgentService
   RequestTerminalCommitter request_terminal_committer_;
   std::mutex admissions_mutex_;
   std::unordered_map<std::string, std::shared_ptr<PromptAdmission>> prompt_admissions_;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] ava::core::Result<std::filesystem::path> canonical_launch_root();

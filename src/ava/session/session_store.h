@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/observability/run_observer.h"
 #include "ava/agent/mode.h"
 #include "ava/core/result.h"
@@ -62,6 +63,7 @@ struct SessionReadLimits
   std::size_t max_file_bytes = 8U * 1024U * 1024U;
   std::size_t max_line_bytes = 1024U * 1024U;
   std::size_t max_entries = 16384;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SessionListLimits
@@ -69,6 +71,7 @@ struct SessionListLimits
   SessionReadLimits per_session = {};
   std::size_t max_sessions = 4096;
   std::size_t max_total_file_bytes = 32U * 1024U * 1024U;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 using SessionCancelCallback = std::function<bool()>;
@@ -82,6 +85,8 @@ struct SessionSummary
   std::size_t entry_count = 0;
   std::filesystem::path original_cwd = {};
   std::string title = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 // Exclusive advisory lease for one canonical session file. The descriptor is
@@ -98,6 +103,8 @@ class SessionLease
 
   [[nodiscard]] static ava::core::Result<SessionLease> acquire(std::filesystem::path const& session_path);
   [[nodiscard]] std::filesystem::path const& canonical_path() const noexcept;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   SessionLease(int fd, std::filesystem::path canonical_path);

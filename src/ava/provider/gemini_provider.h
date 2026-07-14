@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/provider/provider.h"
 
 #include <memory>
@@ -25,6 +26,7 @@ class GeminiStreamParser final : public StreamParser
   bool saw_data_ = false;
   bool done_seen_ = false;
   bool error_seen_ = false;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 class GeminiProvider final : public Provider
@@ -39,6 +41,7 @@ class GeminiProvider final : public Provider
 
  private:
   std::string base_url_;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_gemini_sse(std::string_view sse);

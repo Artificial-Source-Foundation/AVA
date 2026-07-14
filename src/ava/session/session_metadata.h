@@ -30,6 +30,8 @@ struct SessionMetadataView
   // metadata, not an ACP binding; adapters may use it without rebasing the
   // session on client-selected state.
   std::filesystem::path original_cwd = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SessionMetadataUpdate
@@ -43,6 +45,8 @@ struct SessionMetadataUpdate
   std::string branch_origin = {};
   std::string actor = "rpc";
   std::optional<std::filesystem::path> original_cwd = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<SessionMetadataView> session_metadata_from_entries(std::vector<SessionEntry> const& entries);

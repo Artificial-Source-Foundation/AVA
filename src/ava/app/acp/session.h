@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/app/acp/content.h"
 #include "ava/app/acp/peer.h"
 #include "ava/app/acp/permission.h"
@@ -48,6 +49,7 @@ class SessionUpdateGateway
  private:
   mutable std::mutex mutex_;
   SessionUpdateSender sender_;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct AcpSessionOptions
@@ -64,6 +66,7 @@ struct AcpSessionOptions
   std::weak_ptr<ClientRequestGateway> client_requests;
   std::chrono::milliseconds permission_timeout = kDefaultCallTimeout;
   std::chrono::milliseconds close_grace = kSessionCloseGrace;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 class AcpSessionHost
@@ -95,12 +98,14 @@ class AcpSessionHost
     std::string tool_name;
 
     friend bool operator==(PermissionGrantKey const&, PermissionGrantKey const&) = default;
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
   };
 
   struct PermissionGrant
   {
     PermissionGrantKey key;
     bool allow = false;
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
   };
 
   [[nodiscard]] ava::core::VoidResult send_text_update(std::string_view kind, std::string_view text, std::string_view message_id = {}) const;
@@ -125,6 +130,7 @@ class AcpSessionHost
   std::uint64_t cancel_generation_ = 0;
   bool closing_ = false;
   std::vector<PermissionGrant> permission_grants_;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 class AcpSessionRegistry
@@ -161,6 +167,7 @@ class AcpSessionRegistry
     std::string cwd;
     std::string title;
     std::string updated_at;
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
   };
 
   struct ListSnapshot
@@ -169,6 +176,7 @@ class AcpSessionRegistry
     std::vector<ListRecord> records;
     std::size_t offset = 0;
     std::size_t retained_bytes = 0;
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
   };
 
   AcpSessionOptions options_;
@@ -179,6 +187,7 @@ class AcpSessionRegistry
   std::unordered_map<std::string, ListSnapshot> list_snapshots_;
   std::deque<std::string> list_snapshot_order_;
   std::size_t list_snapshot_bytes_ = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] ava::core::Result<std::filesystem::path> canonical_acp_cwd(std::filesystem::path const& launch_root, std::string_view requested);

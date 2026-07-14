@@ -81,6 +81,8 @@ struct ToolTimelineEntry
   std::optional<std::size_t> total_matches = std::nullopt;
   std::string spill_path = {};
   bool spill_truncated = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ToolProgressEntry
@@ -89,6 +91,8 @@ struct ToolProgressEntry
   std::string name = {};
   std::string text = {};
   std::string status = "running";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::string to_string(ToolTimelineStatus status);
@@ -160,6 +164,10 @@ struct AgentLoopOptions
   // Runtime may pre-establish this so retries, compaction, and the agent share
   // one run/turn identity.
   ava::observability::TraceContext trace_context = {};
+
+  // Includes provider credentials and callback/runtime ownership state; never
+  // stream this aggregate through generated debug output.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct AgentLoopResult
@@ -174,6 +182,8 @@ struct AgentLoopResult
   std::size_t tool_iterations = 0;
   ava::core::RuntimeTerminalOutcome outcome = ava::core::RuntimeTerminalOutcome::Error;
   std::vector<ToolTimelineEntry> tool_timeline;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class AgentLoop
@@ -187,6 +197,8 @@ class AgentLoop
                                                             std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
                                                             ava::session::SessionStore& store, ava::provider::Provider const& provider,
                                                             ava::provider::Transport& transport);
+  // Owns AgentLoopOptions, which contains provider credentials.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
   [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn_impl(std::string const& user_message,

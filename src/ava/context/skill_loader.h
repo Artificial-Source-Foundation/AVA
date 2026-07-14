@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -25,12 +26,16 @@ struct LoadedSkill
   SkillSourceType source_type = SkillSourceType::Project;
   std::size_t byte_count = 0;
   std::string content;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SkillDiagnostic
 {
   std::filesystem::path path;
   std::string message;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct DeclaredSkillFileOptions
@@ -40,6 +45,7 @@ struct DeclaredSkillFileOptions
   std::string description;
   SkillSourceType source_type = SkillSourceType::Project;
   std::size_t max_file_bytes = 64 * 1024;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SkillLoadOptions
@@ -50,12 +56,16 @@ struct SkillLoadOptions
   std::vector<DeclaredSkillFileOptions> declared_skill_files = {};
   std::size_t max_file_bytes = 64 * 1024;
   bool include_project_skills = true;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SkillLoadResult
 {
   std::vector<LoadedSkill> skills;
   std::vector<SkillDiagnostic> diagnostics;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::string to_string(SkillSourceType source_type);

@@ -44,6 +44,8 @@ struct ComposerInputLayout {
   std::size_t visible_input_lines = 1;
   std::size_t hidden_above = 0;
   std::size_t hidden_below = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ComposerInputRenderLine {
@@ -51,12 +53,16 @@ struct ComposerInputRenderLine {
   std::size_t start = 0;
   std::size_t end = 0;
   bool first_line = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TerminalTextCell {
   std::size_t bytes = 0;
   std::size_t columns = 0;
   bool valid = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] bool is_utf8_continuation(unsigned char byte);

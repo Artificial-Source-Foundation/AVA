@@ -13,11 +13,15 @@ struct BuiltProviderMessages
 {
   std::vector<ava::provider::ChatMessage> messages;
   bool used_compacted_context = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct MessageBuildOptions
 {
   std::size_t max_tool_result_context_bytes = 8 * 1024;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<BuiltProviderMessages> build_messages(ava::session::SessionStore const& store, std::size_t max_tool_result_context_bytes);

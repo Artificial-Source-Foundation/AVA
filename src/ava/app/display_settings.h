@@ -16,6 +16,8 @@ struct TuiCustomThemeSummary
 {
   std::string name;
   std::filesystem::path path;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiDisplaySettings
@@ -23,6 +25,8 @@ struct TuiDisplaySettings
   std::optional<std::string> theme;
   std::optional<ava::tui::TuiCustomTheme> custom_theme;
   std::filesystem::path path;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiDisplaySettingsWatchState
@@ -31,6 +35,8 @@ struct TuiDisplaySettingsWatchState
   std::optional<std::string> theme;
   std::optional<std::filesystem::path> custom_theme_path;
   std::optional<std::string> custom_theme_revision;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::filesystem::path tui_display_settings_file(ava::config::XdgPaths const& paths);

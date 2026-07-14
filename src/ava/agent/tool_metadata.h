@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <array>
 #include <optional>
 #include <span>
@@ -18,6 +20,8 @@ struct ToolMetadata
   std::string_view event_rendering_hint;
   // Reserved for future provider/model-specific description variants without changing the tool registry shape.
   std::optional<std::string_view> description_family;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 inline constexpr std::

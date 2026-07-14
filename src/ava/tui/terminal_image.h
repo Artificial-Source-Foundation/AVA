@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -21,6 +23,8 @@ struct TerminalImageCapabilities
   bool hyperlinks = false;
   std::string detail = "unknown terminal";
   std::string badge = "text-only";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TerminalEnvironment
@@ -38,24 +42,32 @@ struct TerminalEnvironment
   bool warp_terminal_session_uuid = false;
   bool iterm_session_id = false;
   bool wt_session = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TerminalCellDimensions
 {
   std::size_t width_px = 9;
   std::size_t height_px = 18;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ImageDimensions
 {
   std::size_t width_px = 0;
   std::size_t height_px = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ImageCellSize
 {
   std::size_t columns = 1;
   std::size_t rows = 1;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct KittyImageOptions
@@ -64,6 +76,8 @@ struct KittyImageOptions
   std::optional<std::size_t> rows = std::nullopt;
   std::optional<std::size_t> image_id = std::nullopt;
   bool move_cursor = true;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct Iterm2ImageOptions
@@ -73,6 +87,8 @@ struct Iterm2ImageOptions
   std::optional<std::string> name = std::nullopt;
   bool preserve_aspect_ratio = true;
   bool inline_image = true;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] TerminalEnvironment current_terminal_environment();

@@ -15,6 +15,8 @@ struct RpcModeOptions
 {
   RuntimeOpenOptions open_options;
   HeadlessPermissionPolicyOptions permission_policy;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::VoidResult run_rpc_loop(RuntimeSession& session, RuntimeOpenOptions const& open_options, ava::provider::Provider const& provider,

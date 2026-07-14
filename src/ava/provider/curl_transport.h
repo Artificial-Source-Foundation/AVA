@@ -12,6 +12,9 @@ class CurlCliTransport final : public Transport
   [[nodiscard]] bool supports_streaming() const noexcept override;
   [[nodiscard]] ava::core::Result<HttpResponse> send_streaming(HttpRequest const& request, BodyChunkSink on_body_chunk,
                                                                CancelCallback cancel_requested = nullptr) override;
+
+  // No members; use print_on of base class.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 }  // namespace ava::provider

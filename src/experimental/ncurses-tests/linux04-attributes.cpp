@@ -16,7 +16,7 @@ int main()
 {
   wint_t wch;
   {
-    terminal::Session terminal_session;
+    ava::tui::terminal::Session terminal_session;
 
     move(10, 0);
 

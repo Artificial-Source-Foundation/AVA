@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <array>
 #include <string_view>
 
@@ -28,6 +30,7 @@ struct ProviderFinishReasonMapping
   ProviderProtocol protocol;
   std::string_view raw_reason;
   ProviderFinishReason reason;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 // Closed catalog of provider values accepted as terminal outcomes. Unknown

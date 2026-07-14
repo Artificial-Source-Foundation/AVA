@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "tests/support/test_harness.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/tools/file_tools.h"

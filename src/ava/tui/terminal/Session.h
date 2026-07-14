@@ -7,7 +7,7 @@
 
 #include <vector>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 // Session
 //
@@ -40,6 +40,8 @@ class Session final
   int get_wch();                                                        // get_wch
   // Synchronize the virtual screen with the physical screen.
   void doupdate();                                                      // doupdate
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

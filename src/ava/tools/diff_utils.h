@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <cstddef>
 #include <filesystem>
 #include <string>
@@ -11,6 +13,8 @@ struct DiffPreview
 {
   std::string text;
   bool truncated = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] DiffPreview unified_diff(std::string_view old_content, std::string_view new_content, std::filesystem::path const& old_path,

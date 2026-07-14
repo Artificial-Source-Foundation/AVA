@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/app/acp/protocol.h"
 #include "ava/app/acp/transport.h"
 
@@ -35,6 +36,7 @@ struct PendingCall
 {
   JsonRpcId id;
   std::future<CallResult> completion;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 class ShutdownEscalation
@@ -42,6 +44,7 @@ class ShutdownEscalation
  public:
   virtual ~ShutdownEscalation() = default;
   [[noreturn]] virtual void escalate() noexcept = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] std::unique_ptr<ShutdownEscalation> make_process_shutdown_escalation();
@@ -52,6 +55,7 @@ struct PeerStats
   std::size_t duplicate_inbound_ids = 0;
   std::size_t canceled_inbound_requests = 0;
   std::size_t dropped_notifications = 0;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class JsonRpcPeer
@@ -90,6 +94,7 @@ class JsonRpcPeer
  private:
   class State;
   std::unique_ptr<State> state_;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 }  // namespace ava::app::acp

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/agent/run_phase.h"
 #include "ava/session/session_store.h"
 #include "ava/core/result.h"
@@ -36,6 +37,7 @@ enum class StopReason
 struct RunRequest
 {
   std::string request_id;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // Admission is intentionally bounded: callers with the active correlation may
@@ -62,6 +64,7 @@ struct RunCommand
   Kind kind = Kind::Wake;
   std::string correlation_id;
   std::string message;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct RunOutcome
@@ -69,6 +72,7 @@ struct RunOutcome
   std::string run_id;
   StopReason reason = StopReason::Completed;
   std::optional<ava::core::Error> error = std::nullopt;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct RunSnapshot
@@ -80,6 +84,7 @@ struct RunSnapshot
   std::size_t queued_commands = 0;
   std::size_t queued_appends = 0;
   std::optional<RunOutcome> outcome = std::nullopt;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 inline constexpr std::size_t kMaxSessionRunCommands = 64;
@@ -119,6 +124,7 @@ class ActiveRunGuard
   std::shared_ptr<State> state_;
   std::uint64_t generation_ = 0;
   friend class SessionRunController;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 class SessionRunController
@@ -158,6 +164,7 @@ class SessionRunController
                                                                    ava::session::SessionStore& store, ava::session::SessionEntry entry, bool owner_route);
   std::shared_ptr<ActiveRunGuard::State> state_;
   friend class ActiveRunGuard;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] std::string_view to_string(RunPhase phase);

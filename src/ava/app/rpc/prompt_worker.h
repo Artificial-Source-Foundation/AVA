@@ -1,11 +1,11 @@
 #pragma once
 
-#include "ava/app/rpc/output.h"
-#include "ava/app/rpc/resolvers.h"
-#include "ava/app/rpc/run_state.h"
+#include "output.h"
+#include "resolvers.h"
+#include "run_state.h"
 #include "ava/app/runtime.h"
-#include "ava/provider/provider.h"
 #include "ava/session/attachments.h"
+#include "ava/provider/provider.h"
 
 #include <mutex>
 #include <string>
@@ -30,6 +30,9 @@ struct RpcPromptWorkerOptions
   std::string request_id;
   std::string message;
   std::vector<ava::session::ImageAttachmentRef> image_attachments = {};
+
+  // Owns runtime credential-bearing options and non-owning process state.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options);

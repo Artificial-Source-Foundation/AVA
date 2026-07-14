@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/agent/tool_metadata.h"
 #include "ava/agent/tool_types.h"
 #include "ava/core/result.h"
@@ -34,6 +35,7 @@ struct ToolScheduleClassification
 {
   ToolScheduleEligibility eligibility = ToolScheduleEligibility::Deferred;
   std::string reason = "unknown_tool";
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ToolScheduleSlot
@@ -42,12 +44,14 @@ struct ToolScheduleSlot
   ProviderToolCall call;
   ToolScheduleClassification classification;
   ToolScheduleParallelReadiness parallel_readiness = ToolScheduleParallelReadiness::SequentialOnly;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct ToolScheduleOutcome
 {
   ToolScheduleSlot slot;
   ToolDispatchResult result;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 using ToolScheduleExecutor = std::function<ava::core::Result<ToolDispatchResult>(ToolScheduleSlot const& slot)>;
@@ -57,6 +61,7 @@ struct ToolParallelScheduleOptions
 {
   std::size_t max_workers = 4;
   std::stop_token stop_token = {};
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] ToolScheduleClassification classify_tool_for_scheduling(ProviderToolCall const& call, std::span<ToolMetadata const> tool_metadata);

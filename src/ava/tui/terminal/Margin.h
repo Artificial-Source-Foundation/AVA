@@ -1,8 +1,10 @@
 #pragma once
 
+#include "src/ava/debug/print_members_on.h"
+
 #include <cstdint>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 // Struct Margin
 //
@@ -30,6 +32,8 @@ struct Margin
   uint8_t bottom = 0;
   uint8_t left = 0;
   uint8_t right = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/app/acp/protocol.h"
 
 #include <array>
@@ -14,6 +15,7 @@ struct EnvelopeScanResult
   EnvelopeIntent intent = EnvelopeIntent::Unknown;
   bool top_level_object = false;
   bool ambiguous = false;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // Incrementally identifies only the top-level JSON-RPC envelope keys. The
@@ -104,6 +106,7 @@ class EnvelopeIntentScanner
   bool duplicate_envelope_key_ = false;
   bool key_is_id_ = false;
   bool key_is_method_ = false;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] EnvelopeScanResult scan_envelope_intent(std::string_view record) noexcept;

@@ -102,6 +102,8 @@ struct RuntimeOpenOptions
   // Strict adapters may pin the persisted cwd while retaining lease acquisition
   // inside the protocol-neutral runtime ownership boundary.
   std::optional<std::filesystem::path> expected_original_cwd = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeReasoningSelection
@@ -110,6 +112,8 @@ struct RuntimeReasoningSelection
   std::optional<std::string> provider_level = std::nullopt;
   std::optional<long long> budget_tokens = std::nullopt;
   std::string display;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeBasePromptMetadata
@@ -118,6 +122,8 @@ struct RuntimeBasePromptMetadata
   std::optional<std::filesystem::path> source_path = std::nullopt;
   std::size_t byte_count = 0;
   std::uint64_t content_fingerprint = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeSession
@@ -174,6 +180,8 @@ struct RuntimePromptState
   std::vector<ContextSourceMetadata> context_sources;
   std::vector<RuntimeFreshnessSourceMetadata> freshness_sources;
   std::string system_prompt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeRunOptions
@@ -221,6 +229,10 @@ struct RuntimeRunOptions
   std::function<ava::core::VoidResult(RunPhase)> on_phase = nullptr;
   bool offline = false;
   bool expand_prompt_file_references = true;
+
+  // Contains provider credentials and runtime callbacks; generated debug output
+  // must never serialize this aggregate.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 using CompactionSummaryGenerator =

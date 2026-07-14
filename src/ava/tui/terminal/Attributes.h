@@ -1,10 +1,12 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <concepts>
 #include <cstdint>
 #include <type_traits>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 enum class Attribute
 {
@@ -47,6 +49,8 @@ class Attributes
   // Accessor.
   attr_t mask() const { return mask_; }
   attr_t& mask() { return mask_; }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 // clang-format off
@@ -66,4 +70,4 @@ Attributes operator|=(AttributesConcept auto&& lhs, AttributesConcept auto&& rhs
   return result;
 }
 
-} // namespace terminal
+} // namespace ava::tui::terminal

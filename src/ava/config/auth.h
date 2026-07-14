@@ -27,6 +27,8 @@ struct OpenAICredential {
   long long expires_at = 0;
   std::string account_id = "";
   std::filesystem::path source_path;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ProviderCredential {
@@ -38,6 +40,8 @@ struct ProviderCredential {
   std::string refresh_token = {};
   long long expires_at = 0;
   std::string source_metadata = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::optional<OpenAICredential> parse_openai_credential(std::string_view content,

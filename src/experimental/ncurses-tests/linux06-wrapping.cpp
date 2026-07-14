@@ -3,6 +3,8 @@
 
 #include <iostream>
 
+namespace terminal = ava::tui::terminal;
+
 int main()
 {
   int wch;

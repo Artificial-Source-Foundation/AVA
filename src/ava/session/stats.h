@@ -26,6 +26,8 @@ struct SessionEntryCounts
   std::size_t branch_summary = 0;
   std::size_t error = 0;
   std::size_t cancel = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SessionStats
@@ -49,6 +51,8 @@ struct SessionStats
   std::size_t unknown_cost_entries = 0;
   std::size_t exact_usage_entries = 0;
   std::size_t estimated_usage_entries = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] SessionStats compute_session_stats(std::vector<SessionEntry> const& entries);

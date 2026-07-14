@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "debug.h"
 
 namespace ava::app {
 
@@ -109,6 +110,8 @@ struct RuntimeEvent
   std::size_t omitted_lines = 0;
   std::size_t visible_matches = 0;
   std::size_t total_matches = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeToolPayload
@@ -145,6 +148,8 @@ struct RuntimeToolPayload
   std::size_t omitted_lines = 0;
   std::size_t visible_matches = 0;
   std::size_t total_matches = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeRetryPayload
@@ -161,6 +166,8 @@ struct RuntimeRetryPayload
   std::size_t max_attempts = 0;
   std::size_t delay_ms = 0;
   std::size_t remaining_ms = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeCancellationPayload
@@ -173,6 +180,8 @@ struct RuntimeCancellationPayload
   std::string error_details;
   std::string trigger;
   std::string reason;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeErrorPayload
@@ -186,6 +195,8 @@ struct RuntimeErrorPayload
   std::string content_type;
   std::string trigger;
   std::string reason;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RuntimeCompletionPayload
@@ -195,6 +206,8 @@ struct RuntimeCompletionPayload
   std::string reason;
   std::size_t provider_iterations = 0;
   std::size_t tool_calls = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 using RuntimeEventSink = std::function<ava::core::VoidResult(RuntimeEvent const&)>;
@@ -213,6 +226,8 @@ struct EventEnvelope
   std::string name;
   std::string payload_json = "{}";
   std::string payload_type = "";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct EventEnvelopeContext
@@ -223,6 +238,8 @@ struct EventEnvelopeContext
   std::optional<std::string> message_id;
   std::optional<std::string> request_id;
   std::optional<std::string> correlation_id;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 using EventEnvelopeSink = std::function<ava::core::VoidResult(EventEnvelope const&)>;
@@ -233,6 +250,8 @@ class EventBus
   void subscribe(EventEnvelopeSink sink);
   // Subscribers are called synchronously in registration order. Publishing stops on the first failure.
   [[nodiscard]] ava::core::VoidResult publish(EventEnvelope const& envelope) const;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   std::vector<EventEnvelopeSink> sinks_;

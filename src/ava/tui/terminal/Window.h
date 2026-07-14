@@ -20,7 +20,7 @@
 //
 // grep '^extern.*WINDOW *\*.*implemented' /usr/include/curses.h | grep -v SCREEN | sed -re 's/^extern NCURSES_EXPORT\([^)]*\) ([^ (]*).*/\1/' | sort -u
 //
-namespace terminal {
+namespace ava::tui::terminal {
 
 // Forward declaration.
 class Session;
@@ -30,6 +30,8 @@ struct ScrollRegion
 {
   int top;
   int bottom;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class Window
@@ -377,6 +379,8 @@ class Window
 // std::optional<Window> getparent() const;                              // wgetparent
   //  Return this Window's inclusive scrolling-region row bounds.
   ScrollRegion getscrreg() const;                                      // wgetscrreg
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

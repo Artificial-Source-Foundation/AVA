@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "ava/agent/agent_loop.h"

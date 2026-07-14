@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -25,6 +27,8 @@ struct TuiThemePalette
   int accent = 6;
   int screen_bg = -1;
   int composer_bg = -1;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiCustomTheme
@@ -33,6 +37,8 @@ struct TuiCustomTheme
   std::filesystem::path path;
   TuiThemePalette palette;
   std::string revision;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiThemeInfo
@@ -43,6 +49,8 @@ struct TuiThemeInfo
   std::string badge = "built-in";
   std::optional<TuiThemePalette> palette = {};
   std::string revision = "built-in-dark";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 void set_tui_config_theme(std::optional<std::string> theme,

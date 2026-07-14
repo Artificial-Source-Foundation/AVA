@@ -7,6 +7,8 @@
 // This header must be included last.
 #include "private_convert.h"
 
+namespace terminal = ava::tui::terminal;
+
 attr_t convert_to_attr(Attributes attributes)
 {
   auto const mask = attributes.mask();

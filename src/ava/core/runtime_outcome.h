@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <array>
 #include <string_view>
 
@@ -22,6 +24,7 @@ struct RuntimeTerminalOutcomeCatalogEntry
 {
   RuntimeTerminalOutcome outcome;
   std::string_view name;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 inline constexpr std::array kRuntimeTerminalOutcomeCatalog{

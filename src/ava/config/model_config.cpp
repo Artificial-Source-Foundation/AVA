@@ -15,10 +15,6 @@
 #include <utility>
 #include <vector>
 
-#ifdef CWDEBUG
-#include "ava/debug/debug_ostream_operators.h"
-#endif // CWDEBUG
-
 namespace ava::config {
 namespace {
 

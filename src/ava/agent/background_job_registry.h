@@ -46,6 +46,8 @@ struct BackgroundJobSnapshot
   bool final_text_truncated = false;
   std::string stop_reason = {};
   std::optional<std::string> error = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct BackgroundJobStartOptions
@@ -55,12 +57,18 @@ struct BackgroundJobStartOptions
   std::string subagent_type = {};
   std::string child_session_id = {};
   std::filesystem::path child_session_path = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct BackgroundJobContext
 {
   std::string job_id = {};
   std::stop_token stop_token;
+
+  // BackgroundJobContext carries a std::stop_token, which has no debug
+  // ostream representation, so this type opts out of print_members.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct BackgroundJobCompletion
@@ -69,6 +77,8 @@ struct BackgroundJobCompletion
   std::string final_text;
   std::string stop_reason;
   std::optional<ava::core::Error> error = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 using BackgroundJobWorker = std::function<BackgroundJobCompletion(BackgroundJobContext const&)>;
@@ -79,6 +89,8 @@ struct BackgroundJobRegistryOptions
   std::size_t max_retained_finished_jobs = 64;
   std::size_t max_description_bytes = 8 * 1024;
   std::size_t max_final_text_bytes = 64 * 1024;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class BackgroundJobRegistry final
@@ -113,6 +125,11 @@ class BackgroundJobRegistry final
   std::condition_variable changed_;
   BackgroundJobRegistryOptions options_;
   std::unordered_map<std::string, std::shared_ptr<JobRecord>> jobs_;
+
+  // BackgroundJobRegistry owns synchronization primitives (mutex, condition
+  // variable) and an opaque JobRecord map that have no debug ostream form, so
+  // it opts out of print_members.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 }  // namespace ava::agent

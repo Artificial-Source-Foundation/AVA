@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/core/result.h"
 
 #include <algorithm>
@@ -22,6 +23,7 @@ struct ExactFileReadOptions
 {
   std::optional<std::size_t> line;
   std::optional<std::size_t> limit;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 // Optional exact-file routing for frontends that own the bytes. Implementations
@@ -84,6 +86,7 @@ class ExactFileAccess
   }
   [[nodiscard]] virtual ava::core::VoidResult write_text_file(std::filesystem::path const& absolute_path, std::string_view content,
                                                               ToolIoCancelCallback cancel_requested) const = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct CommandExecutionRequest
@@ -93,6 +96,7 @@ struct CommandExecutionRequest
   std::chrono::milliseconds timeout{0};
   std::size_t output_byte_limit = 0;
   ToolIoCancelCallback cancel_requested = nullptr;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct CommandExecutionResult
@@ -102,6 +106,7 @@ struct CommandExecutionResult
   bool canceled = false;
   bool truncated = false;
   std::string output;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // Optional argv-style execution route. The tool layer remains responsible for
@@ -112,6 +117,7 @@ class CommandExecutor
   virtual ~CommandExecutor() = default;
 
   [[nodiscard]] virtual ava::core::Result<CommandExecutionResult> execute(CommandExecutionRequest request) const = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 }  // namespace ava::tools

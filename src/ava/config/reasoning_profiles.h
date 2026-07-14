@@ -13,6 +13,8 @@ struct ReasoningProfile
   std::string format;
   std::vector<std::string> levels;
   std::string request_parameters;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ReasoningProfile const& openai_responses_reasoning_profile();

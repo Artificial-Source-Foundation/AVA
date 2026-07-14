@@ -1,7 +1,7 @@
 #pragma once
 
+#include "run_state.h"
 #include "ava/app/events.h"
-#include "ava/app/rpc/run_state.h"
 #include "ava/app/runtime.h"
 #include "ava/core/result.h"
 
@@ -16,6 +16,8 @@ struct ResolverEventPayload
 {
   RuntimePayloadType payload_type = RuntimePayloadType::Queue;
   std::string json = "{}";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ResolverEventPayload resolver_permission_payload(std::string payload_json);

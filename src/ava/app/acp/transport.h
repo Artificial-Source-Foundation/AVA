@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/app/acp/protocol.h"
 
 #include <memory>
@@ -23,6 +24,7 @@ struct ReadRecord
   std::string diagnostic;
   // Set for discarded oversized records from a constant-memory top-level scan.
   EnvelopeIntent intent = EnvelopeIntent::Unknown;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 class RecordTransport
@@ -32,6 +34,7 @@ class RecordTransport
   [[nodiscard]] virtual ReadRecord read_record() = 0;
   [[nodiscard]] virtual ava::core::VoidResult write_record(std::string const& record) = 0;
   virtual void cancel() noexcept = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // The returned transport borrows input_fd and output_fd. Its wake descriptors and

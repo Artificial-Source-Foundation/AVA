@@ -13,6 +13,8 @@ struct HeadlessPermissionPolicyOptions
 {
   bool allow_read_only = false;
   std::vector<std::string> allowed_tools;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::VoidResult add_headless_allow_policy(HeadlessPermissionPolicyOptions& options, std::string_view value);

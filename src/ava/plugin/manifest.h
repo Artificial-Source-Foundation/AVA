@@ -26,6 +26,8 @@ struct PluginEntrypoint
 {
   std::string command;
   std::vector<std::string> args;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PluginToolContribution
@@ -33,12 +35,16 @@ struct PluginToolContribution
   std::string name;
   std::string description;
   std::string input_schema_json;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PluginCommandContribution
 {
   std::string name;
   std::string description;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PluginResourceContribution
@@ -46,11 +52,15 @@ struct PluginResourceContribution
   std::string name;
   std::string description;
   std::string path;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PluginEventHookContribution
 {
   std::string event;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PluginContributions
@@ -60,6 +70,8 @@ struct PluginContributions
   std::vector<PluginResourceContribution> prompts;
   std::vector<PluginResourceContribution> skills;
   std::vector<PluginEventHookContribution> event_hooks;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct PluginManifest
@@ -75,12 +87,16 @@ struct PluginManifest
   PluginContributions contributes;
   std::filesystem::path path;
   std::filesystem::path directory;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct DiscoveredPlugin
 {
   PluginManifest manifest;
   PluginScope scope = PluginScope::Global;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<PluginManifest> parse_plugin_manifest(std::string_view json, std::filesystem::path manifest_path = {});

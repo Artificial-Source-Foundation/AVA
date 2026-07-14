@@ -16,16 +16,22 @@ class AnthropicStreamParser final : public StreamParser
   {
     std::string id;
     std::string name;
+
+    AVA_DEBUG_PRINT_MEMBERS_ON
   };
   struct ReasoningBlock
   {
     std::string signature;
     std::string redacted_data;
     bool redacted = false;
+
+    AVA_DEBUG_PRINT_MEMBERS_ON
   };
 
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> append(std::string_view chunk) override;
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> finish() override;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   std::string pending_line_;
@@ -50,6 +56,8 @@ class AnthropicProvider final : public Provider
   [[nodiscard]] ava::core::VoidResult apply_auth_options(HttpRequest& request, ProviderAuthContext const& auth) const override;
   [[nodiscard]] std::unique_ptr<StreamParser> create_stream_parser() const override;
   [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_response(HttpResponse const& response, bool stream) const override;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   std::string base_url_;

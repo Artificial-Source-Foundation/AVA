@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
@@ -88,6 +90,7 @@ struct TraceField
   std::string key;
   std::string value;
   FieldProvenance provenance = FieldProvenance::PublicMetadata;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 struct TraceEvent
 {
@@ -106,6 +109,7 @@ struct TraceEvent
   TracePhase phase = TracePhase::None;
   TraceOutcome outcome = TraceOutcome::None;
   std::vector<TraceField> fields;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 class Clock
@@ -113,17 +117,20 @@ class Clock
  public:
   virtual ~Clock() = default;
   [[nodiscard]] virtual std::int64_t now_ms() = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 class IdGenerator
 {
  public:
   virtual ~IdGenerator() = default;
   [[nodiscard]] virtual std::string next(std::string_view prefix) = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 class SystemClock final : public Clock
 {
  public:
   [[nodiscard]] std::int64_t now_ms() override;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 class CounterIdGenerator final : public IdGenerator
 {
@@ -133,6 +140,7 @@ class CounterIdGenerator final : public IdGenerator
 
  private:
   std::atomic<std::uint64_t> next_;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TraceContext
@@ -146,17 +154,20 @@ struct TraceContext
   std::string parent_run_id;
   std::string parent_turn_id;
   std::string parent_session_id;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 struct ObserverCounters
 {
   std::uint64_t emitted = 0;
   std::uint64_t callback_failures = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 class RunObserver
 {
  public:
   virtual void on_event(TraceEvent const& event) = 0;
   virtual ~RunObserver() = default;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // The sole production emission boundary. Factories, clocks, IDs, enrichment,
@@ -209,10 +220,12 @@ class RunObservation final
     std::atomic<std::uint64_t> sequence = 0;
     std::atomic<std::uint64_t> emitted = 0;
     std::atomic<std::uint64_t> callback_failures = 0;
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
   };
   [[nodiscard]] TraceEvent make_event(TraceEventType type, TraceContext const& context) const;
   void account_failure() const noexcept;
   std::shared_ptr<State> state_;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct JsonlObserverOptions
@@ -221,6 +234,7 @@ struct JsonlObserverOptions
   std::size_t max_events = 10'000;
   std::size_t max_bytes = 10 * 1024 * 1024;
   std::size_t max_event_bytes = 16 * 1024;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 struct JsonlObserverCounters
 {
@@ -228,6 +242,7 @@ struct JsonlObserverCounters
   std::uint64_t dropped = 0;
   std::uint64_t failures = 0;
   std::size_t bytes_written = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // Deterministic synchronous JSONL mode, retained for tests and small local runs.
@@ -253,12 +268,14 @@ class JsonlRunObserver final : public RunObserver
   int fd_ = -1;
   std::uint64_t written_ = 0, dropped_ = 0, failures_ = 0;
   std::size_t bytes_written_ = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct QueuedJsonlObserverOptions : JsonlObserverOptions
 {
   std::size_t max_queue_events = 1024;
   std::size_t max_queue_bytes = 1024 * 1024;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // Pure capacity check for the serialized-item queue. It deliberately does not
@@ -272,6 +289,7 @@ struct QueuedJsonlObserverCounters : JsonlObserverCounters
   std::size_t queue_bytes = 0;
   std::size_t queue_high_water_bytes = 0;
   std::size_t queue_high_water_events = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // Production writer. on_event only serializes one bounded record and takes a
@@ -304,12 +322,14 @@ class QueuedJsonlRunObserver final : public RunObserver
   std::atomic<std::uint64_t> queue_failures_ = 0;
   bool closing_ = false;
   std::jthread worker_;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TraceAccounting
 {
   std::uint64_t callback_failures = 0;
   std::uint64_t dropped_events = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 struct TraceValidationResult
 {
@@ -318,6 +338,7 @@ struct TraceValidationResult
   std::uint64_t accounted_failures = 0;
   std::uint64_t accounted_drops = 0;
   unsigned score = 100;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 enum class TraceRequiredBoundary
 {
@@ -334,6 +355,7 @@ struct TraceFixturePolicy
   unsigned lifecycle_weight = 0;
   unsigned required_boundary_weight = 0;
   std::vector<TraceRequiredBoundary> required_boundaries;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // Deterministic evaluation seam: product code supplies ordered trace records

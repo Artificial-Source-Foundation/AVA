@@ -1,10 +1,12 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <array>
 #include <cstddef>
 #include <cwchar>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 // class GraphemeCluster
 //
@@ -79,6 +81,11 @@ class GraphemeCluster
 
   // Return true iff data() is guaranteed to be zero terminated.
   bool is_zero_terminated() const { return length() < storage_.size(); }
+
+#ifdef CWDEBUG
+  // Custom print_members.
+  AVA_PRINT_ON_MEMBERS
+#endif
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

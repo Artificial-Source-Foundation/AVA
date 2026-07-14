@@ -23,6 +23,8 @@ class SpillBuffer
   [[nodiscard]] std::size_t total_bytes() const noexcept;
   [[nodiscard]] bool truncated() const noexcept;
 
+  AVA_DEBUG_PRINT_MEMBERS_ON
+
  private:
   std::size_t max_bytes_ = 0;
   std::size_t total_bytes_ = 0;
@@ -35,6 +37,8 @@ struct SpillFileResult
   std::filesystem::path path;
   bool truncated = false;
   std::size_t bytes_written = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<SpillFileResult> write_spill_file(ToolContext const& context, std::string_view tool_name, std::string_view extension,

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/provider/provider.h"
 #include "ava/core/result.h"
@@ -18,6 +19,8 @@ struct ModelPricing
   std::optional<long double> cache_read_per_million;
   std::optional<long double> cache_write_per_million;
   std::optional<long double> reasoning_per_million;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ModelReasoningLevelMapping
@@ -28,6 +31,7 @@ struct ModelReasoningLevelMapping
   std::string level;
   std::optional<std::string> provider_level = std::nullopt;
   bool supported = true;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ModelReasoningLevelResolution
@@ -36,6 +40,7 @@ struct ModelReasoningLevelResolution
   bool supported = false;
   std::optional<std::string> provider_level = std::nullopt;
   bool explicit_mapping = false;
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ModelInfo
@@ -68,6 +73,8 @@ struct ModelRegistry
   std::string default_model_id = "gpt-5.5";
   std::vector<ModelInfo> models;
   std::optional<std::vector<std::string>> scoped_model_cycle = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ModelRegistry builtin_model_registry();

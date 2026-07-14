@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/core/result.h"
 
@@ -16,6 +17,7 @@ struct PluginStaticSkillFile
   std::string name;
   std::string description;
   std::filesystem::path path;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] std::filesystem::path plugin_static_resource_display_path(PluginManifest const& manifest, PluginResourceContribution const& resource);

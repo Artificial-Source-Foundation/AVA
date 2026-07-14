@@ -1,7 +1,7 @@
 #include "sys.h"
-#include "ava/app/rpc/output.h"
-#include "ava/app/rpc/protocol.h"
-#include "ava/app/rpc/serialization.h"
+#include "output.h"
+#include "protocol.h"
+#include "serialization.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 

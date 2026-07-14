@@ -32,6 +32,8 @@ struct Rendition
   bool strikethrough = false;
   bool code = false;
   TextColorRole color = TextColorRole::Default;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct NewLine
@@ -41,6 +43,8 @@ struct NewLine
 struct String
 {
   std::string text;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TextSpan
@@ -48,6 +52,8 @@ struct TextSpan
   std::string text;
   Rendition rendition;
   std::string link_target = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 using TextRun = std::variant<NewLine, String, TextSpan>;
@@ -55,6 +61,8 @@ using TextRun = std::variant<NewLine, String, TextSpan>;
 struct Text
 {
   std::vector<TextRun> runs;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] bool text_run_has_embedded_newline(std::string_view text);

@@ -1,0 +1,18 @@
+#pragma once
+
+#include <cstddef>      // size_t
+
+namespace config {
+
+// ava_debug_maxlen_c
+//
+// Default maximum string length for debug output truncation. Used when no
+// maxlen() IO manipulator is active on the debug stream: strings longer than
+// this are cut in the middle and replaced with " ...(N chars)... " where N is
+// the number of removed characters. A value of 0 means no limit.
+//
+// Configurable at CMake configure time with -DAVA_DEBUG_MAXLEN=N (default 100).
+
+static constexpr size_t ava_debug_maxlen_c = @AVA_DEBUG_MAXLEN@;
+
+} // namespace config

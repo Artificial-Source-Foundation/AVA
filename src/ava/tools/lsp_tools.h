@@ -14,12 +14,16 @@ namespace ava::tools {
 struct LspDiagnosticsResult {
   std::filesystem::path path;
   std::vector<ava::lsp::Diagnostic> diagnostics;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct LspSymbolsResult {
   std::filesystem::path path;
   std::string query;
   std::vector<ava::lsp::Symbol> symbols;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct LspDefinitionResult {
@@ -27,6 +31,8 @@ struct LspDefinitionResult {
   int line = 0;
   int column = 0;
   std::vector<ava::lsp::Location> locations;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<LspDiagnosticsResult> lsp_diagnostics(ToolContext const& context,

@@ -22,6 +22,8 @@ struct Diagnostic {
   int line = 0;
   int column = 0;
   std::string code;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct Range {
@@ -29,6 +31,8 @@ struct Range {
   int start_column = 0;
   int end_line = 0;
   int end_column = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct Symbol {
@@ -37,11 +41,15 @@ struct Symbol {
   std::filesystem::path path;
   Range range;
   std::string container;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct Location {
   std::filesystem::path path;
   Range range;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct ServerConfig {
@@ -50,6 +58,8 @@ struct ServerConfig {
   std::filesystem::path process_cwd;
   std::chrono::milliseconds request_timeout{3000};
   std::string language_id = "plaintext";
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class DiagnosticsProvider {
@@ -72,6 +82,8 @@ class DiagnosticsProvider {
   [[nodiscard]] virtual ava::core::Result<std::vector<Location>> references(
       std::filesystem::path const& path, int line, int column, CancelCallback cancel_requested = nullptr);
   virtual void set_permission_request_ids(std::shared_ptr<std::vector<std::string>> ids);
+
+  AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS
 };
 
 class SubprocessLspClient final : public DiagnosticsProvider {
@@ -97,6 +109,8 @@ class SubprocessLspClient final : public DiagnosticsProvider {
   [[nodiscard]] ava::core::Result<std::vector<Location>> references(
       std::filesystem::path const& path, int line, int column, CancelCallback cancel_requested = nullptr) override;
   [[nodiscard]] bool is_alive();
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   [[nodiscard]] ava::core::VoidResult launch();

@@ -39,6 +39,8 @@ struct RegisteredToolMetadata
   std::optional<std::string> description_family;
 
   [[nodiscard]] ToolMetadata view() const noexcept;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] RegisteredToolMetadata own_tool_metadata(ToolMetadata const& metadata);
@@ -51,6 +53,8 @@ struct RegisteredTool
   std::string source_id = "builtin";
   bool brokered_external = false;
   bool requires_lsp_diagnostics = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class ToolRegistry
@@ -62,6 +66,8 @@ class ToolRegistry
   [[nodiscard]] std::span<RegisteredTool const> entries() const noexcept;
   [[nodiscard]] std::vector<ToolMetadata> metadata() const;
   [[nodiscard]] std::vector<std::string> tool_schemas_json(ava::tools::ToolContext const& context) const;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   std::vector<RegisteredTool> tools_;

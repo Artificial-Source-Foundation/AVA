@@ -32,6 +32,8 @@ class UniqueFd
   [[nodiscard]] int release() noexcept;
   void reset(int fd = -1) noexcept;
 
+  AVA_DEBUG_PRINT_MEMBERS_ON
+
  private:
   int fd_ = -1;
 };
@@ -45,6 +47,8 @@ class ScopedSignalIgnore
   ScopedSignalIgnore(ScopedSignalIgnore&&) = delete;
   ScopedSignalIgnore& operator=(ScopedSignalIgnore&&) = delete;
   ~ScopedSignalIgnore();
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   int signal_ = 0;

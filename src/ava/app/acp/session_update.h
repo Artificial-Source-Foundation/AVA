@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/app/events.h"
 #include "ava/core/result.h"
 
@@ -20,17 +21,20 @@ inline constexpr std::size_t kMaxToolUpdateContentBytes = 128U * 1024U;
 struct AcpTextContent
 {
   std::string text;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct AcpToolCallLocation
 {
   std::string path;
   std::optional<std::size_t> line = std::nullopt;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct AcpToolCallTextContent
 {
   AcpTextContent content;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 using AcpToolCallContent = std::variant<AcpToolCallTextContent>;
@@ -47,6 +51,7 @@ struct AcpContentChunkUpdate
   AcpContentChunkKind kind = AcpContentChunkKind::AgentMessage;
   AcpTextContent content;
   std::optional<std::string> message_id = std::nullopt;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct AcpToolCallUpdate
@@ -58,6 +63,7 @@ struct AcpToolCallUpdate
   std::optional<std::string> status = std::nullopt;
   std::optional<std::vector<AcpToolCallContent>> content = std::nullopt;
   std::optional<std::vector<AcpToolCallLocation>> locations = std::nullopt;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 using SessionUpdate = std::variant<AcpContentChunkUpdate, AcpToolCallUpdate>;
@@ -68,6 +74,7 @@ struct RuntimeSessionUpdateMapperOptions
   std::string message_id;
   std::size_t max_updates = kMaxPromptSessionUpdates;
   std::size_t max_encoded_bytes = kMaxPromptSessionUpdateBytes;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 class RuntimeSessionUpdateMapper
@@ -95,6 +102,7 @@ class RuntimeSessionUpdateMapper
   bool streamed_agent_text_ = false;
   std::size_t update_count_ = 0;
   std::size_t encoded_bytes_ = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] ava::core::Result<std::string> encode_session_update(SessionUpdate const& update);

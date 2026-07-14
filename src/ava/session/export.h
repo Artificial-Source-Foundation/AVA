@@ -12,6 +12,8 @@ struct ExportOptions
   bool include_tool_details = false;
   bool include_metadata = false;
   bool include_compactions = true;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] std::string format_session_markdown(std::vector<SessionEntry> const& entries, ExportOptions const& options = {});

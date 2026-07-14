@@ -24,6 +24,8 @@ struct WebFetchOptions
   int timeout_ms = 30000;
   WebFetchFormat format = WebFetchFormat::Markdown;
   ava::provider::Transport* transport = nullptr;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct WebFetchResult
@@ -42,6 +44,8 @@ struct WebFetchResult
   std::size_t end_line = 0;
   std::size_t total_lines = 0;
   std::size_t next_offset_line = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<WebFetchResult> webfetch(ToolContext const& context, std::string_view url, WebFetchOptions options = {});

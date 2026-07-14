@@ -1,10 +1,11 @@
 #pragma once
 
 #include "Margin.h"
+#include "ava/debug/print_members_on.h"
 
 #include <cstdint>
 
-namespace terminal {
+namespace ava::tui::terminal {
 
 // class Dimension
 //
@@ -43,6 +44,8 @@ class Dimension
   friend Dimension operator/(Dimension d, float n) { return d /= n; }
 
   friend Dimension operator-(Dimension d, Margin margin) { return {d.height_ - (margin.top + margin.bottom), d.width_ - (margin.left + margin.right)}; }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-} // namespace terminal
+} // namespace ava::tui::terminal

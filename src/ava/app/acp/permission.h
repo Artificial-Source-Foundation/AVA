@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/app/acp/peer.h"
 #include "ava/permissions/permission.h"
 
@@ -34,6 +35,7 @@ class ClientRequestGateway
   ClientRequestSender sender_;
   ClientRequestCanceler canceler_;
   ClientConnectionAborter aborter_;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 enum class AcpPermissionSelection

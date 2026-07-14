@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/config/xdg_paths.h"
+#include "ava/session/EphemeralState.h"
 #include "ava/session/record.h"
 #include "ava/session/session_store.h"
 #include "ava/core/ids.h"
@@ -29,12 +30,6 @@
 #include <unistd.h>
 #include "debug.h"
 
-#ifdef CWDEBUG
-#include "cwds/debug_ostream_operators.h"
-#include "ava/debug/debug_ostream_operators.h"
-#include "ava/debug/print_pointer.h"
-#endif
-
 namespace ava::session {
 
 struct SessionStore::ObservationAttachment
@@ -45,26 +40,6 @@ struct SessionStore::ObservationAttachment
   std::uint64_t generation = 0;
   std::atomic_bool enabled = false;
   std::atomic_bool fail_next_attachment_for_test = false;
-};
-
-struct SessionStore::EphemeralState
-{
-  explicit EphemeralState(std::filesystem::path root) : root_dir(std::move(root)) { }
-
-  EphemeralState(EphemeralState const&) = delete;
-  EphemeralState& operator=(EphemeralState const&) = delete;
-
-  ~EphemeralState()
-  {
-    std::error_code remove_error;
-    std::filesystem::remove_all(root_dir, remove_error);
-  }
-
-  std::filesystem::path root_dir;
-  mutable std::mutex mutex;
-  std::vector<SessionEntry> entries;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 namespace {

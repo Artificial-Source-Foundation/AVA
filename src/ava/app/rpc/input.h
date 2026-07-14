@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/core/result.h"
 
 #include <atomic>
@@ -17,6 +18,7 @@ class RpcLineReader
 
   [[nodiscard]] virtual ava::core::Result<bool> read_line(std::string& line) = 0;
   virtual void cancel() noexcept = 0;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 class StreamRpcLineReader final : public RpcLineReader
@@ -31,6 +33,7 @@ class StreamRpcLineReader final : public RpcLineReader
   std::istream& input_;
   std::function<void()> wake_;
   std::atomic_bool canceled_ = false;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] ava::core::Result<std::unique_ptr<RpcLineReader>> make_posix_rpc_line_reader(int input_fd);

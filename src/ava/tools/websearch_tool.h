@@ -17,6 +17,8 @@ struct WebSearchOptions
   std::size_t context_max_chars = 10000;
   int timeout_ms = 25000;
   ava::provider::Transport* transport = nullptr;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct WebSearchResultItem
@@ -24,6 +26,8 @@ struct WebSearchResultItem
   std::string title;
   std::string url;
   std::string snippet;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct WebSearchResult
@@ -34,6 +38,8 @@ struct WebSearchResult
   bool truncated = false;
   std::size_t total_results = 0;
   std::size_t output_chars = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<WebSearchResult> websearch(ToolContext const& context, std::string_view query, WebSearchOptions options = {});

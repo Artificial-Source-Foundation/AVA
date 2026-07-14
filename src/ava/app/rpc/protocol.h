@@ -17,6 +17,8 @@ struct RpcImageUpload
   std::string type;
   std::string data_base64;
   std::string mime_type;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct RpcCommand
@@ -63,6 +65,8 @@ struct RpcCommand
   std::optional<std::string> target_path;
   std::optional<std::string> command;
   std::optional<std::string> tool_name;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<RpcCommand> parse_rpc_command_line(std::string_view line);

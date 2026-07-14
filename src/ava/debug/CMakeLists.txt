@@ -7,9 +7,6 @@
 # capable ctags is then a hard requirement. Configure with -DEnableLibcwd=OFF
 # to skip this entirely.
 #
-if (OptionEnableLibcwd)
-# Below is deliberately no indentation used, because it concerns the whole file.
-
 
 # CTAGS_EXECUTABLE is the cache variable holding the path to the binary, or
 # CTAGS_EXECUTABLE-NOTFOUND when no ctags is on the PATH. CTAGS_FOUND is the
@@ -23,54 +20,11 @@ else()
   set(CTAGS_FOUND FALSE)
 endif ()
 
-# Determine whether the available ctags supports JSON output.
-#
-# Probe `ctags --list-output-formats` and accept only a format literally named
-# "json" whose AVAILABLE column (the third whitespace-separated field) is "yes".
-#
 set(CTAGS_HAS_JSON FALSE)
 if (CTAGS_FOUND)
-  execute_process(
-    COMMAND "${CTAGS_EXECUTABLE}" --list-output-formats
-    RESULT_VARIABLE _ctags_formats_result
-    OUTPUT_VARIABLE _ctags_formats_output
-    ERROR_QUIET
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
-  if (_ctags_formats_result EQUAL 0)
-    # Turn the multi-line output into a CMake list of lines, escaping any
-    # literal semicolons first so they survive the newline-to-';' conversion.
-    string(REPLACE ";" "\\;" _ctags_formats_output "${_ctags_formats_output}")
-    string(REGEX REPLACE "\r?\n" ";" _ctags_format_lines "${_ctags_formats_output}")
-    foreach(_line ${_ctags_format_lines})
-      # Strip leading whitespace, then skip blank lines and the header line.
-      string(REGEX REPLACE "^[ \t]+" "" _line "${_line}")
-      if (_line STREQUAL "" OR _line MATCHES "^#")
-        continue()
-      endif ()
-      # Collapse runs of whitespace into list separators and drop empties.
-      string(REGEX REPLACE "[ \t]+" ";" _tokens "${_line}")
-      list(FILTER _tokens EXCLUDE REGEX "^$")
-      list(LENGTH _tokens _ntokens)
-      if (_ntokens GREATER_EQUAL 3)
-        list(GET _tokens 0 _fmt_name)
-        list(GET _tokens 2 _fmt_available)
-        if ("${_fmt_name}" STREQUAL "json" AND "${_fmt_available}" STREQUAL "yes")
-          set(CTAGS_HAS_JSON TRUE)
-          break()
-        endif ()
-      endif ()
-    endforeach()
-  endif ()
+  include("${CMAKE_SOURCE_DIR}/cmake/DetectCtagsJson.cmake")
+  ava_detect_ctags_json("${CTAGS_EXECUTABLE}" CTAGS_HAS_JSON)
 endif ()
-unset(_ctags_formats_result)
-unset(_ctags_formats_output)
-unset(_ctags_format_lines)
-unset(_line)
-unset(_tokens)
-unset(_ntokens)
-unset(_fmt_name)
-unset(_fmt_available)
 
 # Print find result(s).
 if (CTAGS_FOUND)
@@ -230,11 +184,17 @@ endif ()
 #------------------------------------------------------------------------------
 # Construct a list with all generated source files.
 #
+# Watch source_files for content changes so that when a build-time regeneration
+# adds or removes a print_members.cpp (because a class toggled opt-in/opt-out),
+# the next build re-runs cmake configure and _ava_generated_source_files is
+# adjusted accordingly. Without this, the configure-time list would go stale
+# whenever the set of generated files changes during a build.
 set(_ava_generated_source_files "")
 file(STRINGS "${_ava_source_list_file}" REL_FILES)
 foreach(REL_FILE IN LISTS REL_FILES)
   list(APPEND _ava_generated_source_files "${_ava_print_members_dir}/${REL_FILE}")
 endforeach()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_ava_source_list_file}")
 
 #------------------------------------------------------------------------------
 # Build-time generation rule for the print_members.cpp files.
@@ -313,24 +273,29 @@ set_source_files_properties(${_ava_generated_source_files} PROPERTIES GENERATED 
 #
 add_library(ava_debug
   "print_members_on.cpp"
+  "maxlen.cpp"
+  "debug_ostream_operators.cpp"
   ${_ava_generated_source_files}
 )
 
-target_include_directories(ava_debug PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_include_directories(ava_debug
+  PUBLIC
+  "${CMAKE_BINARY_DIR}/src"   # Needed for ava/
+    "${CMAKE_SOURCE_DIR}/src"
+)
+
+# The generated print_members.cpp files #include headers from ava_terminal
+# (e.g. ComplexChar.h, which pulls in GraphemeCluster.h). GraphemeCluster and
+# Border use AVA_PRINT_ON_MEMBERS — a hand-written print_members — so the
+# generated .o files reference but do not define their print_members.
+# Other dependencies might exist if, for example, a generated print_members
+# uses a `to_string`. These should be added when encountered.
+target_link_libraries(ava_debug
+  PUBLIC
+    AVA::terminal       # ava::tui::terminal::GraphemeCluster::print_members
+    ava_agent           # ava::agent::to_string
+)
 
 ava_apply_debugging(ava_debug)
 ava_apply_warnings(ava_debug)
 ava_apply_sanitizers(ava_debug)
-
-
-else ()
-
-# Keep downstream target lists linkable when libcwd/debug print-member support is
-# disabled. The real ava_debug static library is only meaningful when generated
-# print_members sources exist.
-add_library(ava_debug INTERFACE)
-
-target_include_directories(ava_debug INTERFACE "${CMAKE_SOURCE_DIR}/src")
-
-
-endif (OptionEnableLibcwd)

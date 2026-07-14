@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <cstddef>
 #include <filesystem>
 #include <memory>
@@ -38,6 +40,9 @@ class MutationQueue
     std::shared_ptr<State> state_;
     std::vector<std::shared_ptr<Entry>> entries_;
     std::vector<std::unique_lock<std::mutex>> locks_;
+
+    // We never print this class (so far).
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
   };
 
   MutationQueue() = default;
@@ -50,16 +55,21 @@ class MutationQueue
   [[nodiscard]] Lock lock_paths(std::span<std::filesystem::path const> paths);
   [[nodiscard]] std::size_t tracked_path_count() const;
 
+  AVA_DEBUG_PRINT_MEMBERS_ON
+
  private:
   struct Entry
   {
     std::mutex mutex;
+
+    AVA_DEBUG_PRINT_MEMBERS_ON
   };
 
   struct State
   {
     std::mutex entries_mutex;
     std::vector<std::pair<std::filesystem::path, std::weak_ptr<Entry>>> entries;
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
   };
 
   [[nodiscard]] static std::filesystem::path normalized_key(std::filesystem::path const& path);

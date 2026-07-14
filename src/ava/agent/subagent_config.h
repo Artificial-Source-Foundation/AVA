@@ -26,12 +26,16 @@ struct SubagentDefinition
   bool hidden = false;
   bool builtin = false;
   std::filesystem::path path = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SubagentDiagnostic
 {
   std::filesystem::path path;
   std::string message;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SubagentLoadOptions
@@ -41,12 +45,16 @@ struct SubagentLoadOptions
   std::vector<std::filesystem::path> project_agent_dirs = {};
   bool include_project_agents = true;
   std::size_t max_file_bytes = 64 * 1024;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct SubagentLoadResult
 {
   std::vector<SubagentDefinition> subagents;
   std::vector<SubagentDiagnostic> diagnostics;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] bool valid_subagent_name(std::string_view name);

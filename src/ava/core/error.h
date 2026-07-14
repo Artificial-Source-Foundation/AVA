@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,6 +24,8 @@ struct ErrorContext
 {
   std::string key;
   std::string value;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class Error
@@ -35,6 +39,8 @@ class Error
   [[nodiscard]] std::string format() const;
 
   Error& with_context(std::string key, std::string value);
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
   ErrorCategory category_;

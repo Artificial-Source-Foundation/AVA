@@ -21,6 +21,8 @@ class ProviderRegistry
   [[nodiscard]] ava::core::Result<std::unique_ptr<Provider>> create(std::string_view provider_id) const;
   [[nodiscard]] std::vector<std::string> provider_ids() const;
 
+  AVA_DEBUG_PRINT_MEMBERS_ON
+
  private:
   std::vector<std::pair<std::string, Factory>> providers_;
 };
